@@ -39,6 +39,7 @@ pub struct RuntimeResources {
     pub memory: Arc<dyn memory::api::MemoryPort>,
     /// Memory-owned reflection history persistence/query boundary.
     pub reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
+    pub policy: Arc<dyn policy::PolicyPort>,
 
     // ── 配置（值类型，session 期间不变）──
     pub system_blocks: Vec<SystemBlock>,

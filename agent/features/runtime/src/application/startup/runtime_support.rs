@@ -38,6 +38,7 @@ pub fn build_agent_runner(
     reasoning: bool,
     timeout_secs: u64,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
+    policy: Arc<dyn policy::PolicyPort>,
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     tool_result_materializer: Arc<
@@ -63,6 +64,7 @@ pub fn build_agent_runner(
         workspace: crate::application::tool_execution_adapters::RuntimeWorkspaceAccess::new(
             workspace,
         ),
+        policy,
     })
 }
 

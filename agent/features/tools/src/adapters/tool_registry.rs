@@ -1,5 +1,5 @@
 use crate::domain::tool::TypedToolAdapter;
-use crate::domain::{Tool, TypedTool};
+use crate::domain::{Tool, ToolCapabilities, ToolName, TypedTool};
 use parking_lot::RwLock;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 pub struct ToolRegistry {
     tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
+    capabilities: RwLock<HashMap<ToolName, ToolCapabilities>>,
 }
 
 impl Default for ToolRegistry {
@@ -35,6 +36,7 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: RwLock::new(HashMap::new()),
+            capabilities: RwLock::new(HashMap::new()),
         }
     }
 
@@ -47,6 +49,24 @@ impl ToolRegistry {
         let adapter = TypedToolAdapter::new(tool);
         let key = normalize_key(adapter.name());
         self.tools.write().insert(key, Arc::new(adapter));
+    }
+
+    pub fn register_with_capabilities<T: TypedTool + 'static>(
+        &self,
+        tool: T,
+        capabilities: ToolCapabilities,
+    ) {
+        let name = ToolName::new(tool.name());
+        self.capabilities.write().insert(name, capabilities);
+        self.register(tool);
+    }
+
+    pub fn declare_capabilities_for_test(&self, name: &ToolName, capabilities: ToolCapabilities) {
+        self.capabilities.write().insert(name.clone(), capabilities);
+    }
+
+    pub fn required_capabilities(&self, name: &str) -> Option<ToolCapabilities> {
+        self.capabilities.read().get(&ToolName::new(name)).copied()
     }
 
     pub fn unregister(&self, name: &str) -> bool {

@@ -40,6 +40,30 @@ use crate::LOG_TARGET;
 use context::session::ChatChain;
 use workflow::api::{ReasoningPort, ReasoningSignal};
 
+/// Aborts a spawned request companion task even when the invocation future is dropped.
+struct AbortTaskOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortTaskOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+pub(crate) fn request_log_context(
+    parent: &logging::LogContext,
+    model: &str,
+    provider: &str,
+    role: &str,
+) -> logging::LogContext {
+    parent.patched(logging::LogContextPatch {
+        request_id: logging::FieldPatch::Set(uuid::Uuid::now_v7().to_string()),
+        model: logging::FieldPatch::Set(model.to_string()),
+        provider: logging::FieldPatch::Set(provider.to_string()),
+        role: logging::FieldPatch::Set(role.to_string()),
+        ..logging::LogContextPatch::default()
+    })
+}
+
 /// Main-chat adapter for the shared run loop.
 ///
 /// It owns no lifecycle state machine. `Run` is the only per-run state machine; this adapter
@@ -68,7 +92,7 @@ where
     pub(crate) agent_runner: &'a Option<Arc<dyn tools::AgentRunner>>,
     pub(crate) tool_result_materializer:
         &'a crate::application::tool_result_materialization::ToolResultMaterializer,
-    pub(crate) allow_all: bool,
+    pub(crate) policy: &'a dyn policy::PolicyPort,
     /// Runtime/Tool 日常状态唯一来源（#889 low-privilege 端口）。
     pub(crate) task_access: &'a Arc<dyn task::TaskAccess>,
     pub(crate) max_tool_concurrency: usize,
@@ -157,7 +181,6 @@ where
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory: &Arc<dyn memory::MemoryPort>,
         language: &str,
-        allow_all: bool,
         workspace: &project::WorkspaceViews,
         cancel: &CancellationToken,
         read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
@@ -187,7 +210,7 @@ where
                     memory.clone(),
                     Arc::new(tools::FixedGuidance {
                         language: language.to_string(),
-                        allow_all,
+                        allow_all: false,
                     }),
                 )
                 .with_memory_context(
@@ -334,21 +357,22 @@ where
             )
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
 
-        logging::set_current_model(self.client.model_name().to_string());
-        logging::set_current_provider(self.client.provider_name().to_string());
-        logging::set_current_role("default".to_string());
-        logging::set_current_request_id(uuid::Uuid::now_v7().to_string());
-
         let api_start = Instant::now();
         let mut coordinator =
             crate::application::model_invocation::ModelInvocationCoordinator::new();
         let resp = loop {
+            let request_context = request_log_context(
+                &logging::capture(),
+                invocation_scope.model(),
+                self.client.provider_name(),
+                "default",
+            );
             let mut reducer = InvocationEventReducer::with_tool_identity(
                 self.sink.clone(),
                 self.tool_identity.clone(),
                 self.turn_context.clone(),
             );
-            let response = {
+            let response = logging::instrument(request_context.clone(), async {
                 let progress_handle = reducer.progress_handle();
                 let stream_cancel = self.cancel.clone();
                 let invocation_fut = async {
@@ -370,23 +394,26 @@ where
                 let waiting_sink = self.sink.clone();
                 let waiting_context = self.turn_context.clone();
                 let request_started_at = tokio::time::Instant::now();
-                let waiting_task = tokio::spawn(async move {
-                    let mut next = request_started_at + Duration::from_secs(10);
-                    let mut last_version = None;
-                    loop {
-                        tokio::time::sleep_until(next).await;
-                        let snapshot = progress_handle.lock().unwrap().snapshot();
-                        if should_emit_model_stream_waiting(last_version, &snapshot) {
-                            waiting_sink.try_send_event(RuntimeStreamEvent::ModelStreamWaiting {
-                                context: waiting_context.clone(),
-                                elapsed_secs: request_started_at.elapsed().as_secs(),
-                                phase: snapshot.phase.to_string(),
-                            });
+                let waiting_task =
+                    AbortTaskOnDrop(logging::spawn_instrumented(request_context, async move {
+                        let mut next = request_started_at + Duration::from_secs(10);
+                        let mut last_version = None;
+                        loop {
+                            tokio::time::sleep_until(next).await;
+                            let snapshot = progress_handle.lock().unwrap().snapshot();
+                            if should_emit_model_stream_waiting(last_version, &snapshot) {
+                                waiting_sink.try_send_event(
+                                    RuntimeStreamEvent::ModelStreamWaiting {
+                                        context: waiting_context.clone(),
+                                        elapsed_secs: request_started_at.elapsed().as_secs(),
+                                        phase: snapshot.phase.to_string(),
+                                    },
+                                );
+                            }
+                            last_version = Some(snapshot.visible_progress_version);
+                            next += Duration::from_secs(10);
                         }
-                        last_version = Some(snapshot.visible_progress_version);
-                        next += Duration::from_secs(10);
-                    }
-                });
+                    }));
                 tokio::pin!(invocation_fut);
                 let result = loop {
                     tokio::select! {
@@ -398,9 +425,10 @@ where
                         }
                     }
                 };
-                waiting_task.abort();
+                drop(waiting_task);
                 result
-            };
+            })
+            .await;
             match response {
                 Ok((response, _)) => break response,
                 Err((error, _)) if error.is_cancelled() || self.cancel.is_cancelled() => {
@@ -614,6 +642,8 @@ where
 
     async fn execute_tools(
         &mut self,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
         calls: &[(ToolCall, ToolGuardDecision)],
         cancel: &CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
@@ -629,7 +659,6 @@ where
             self.agent_runner,
             self.memory,
             self.language,
-            self.allow_all,
             self.workspace,
             &self.cancel,
             self.read_files,
@@ -643,7 +672,9 @@ where
             &self.turn_context,
             &raw_calls,
             self.registry,
-            self.allow_all,
+            self.policy,
+            run_id,
+            step_id,
             &agent,
             self.sink,
             &HookUi::new(self.sink.clone()),

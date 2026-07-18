@@ -170,7 +170,8 @@ where
     let call_id = call.id.clone();
     let ui_sink = sink.clone();
     let progress_context = context.clone();
-    let forward_handle = tokio::spawn(async move {
+    let progress_log_context = logging::capture();
+    let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
         while let Some(event) = prog_rx.recv().await {
             let _ = ui_sink
                 .send_event(RuntimeStreamEvent::AgentProgress {

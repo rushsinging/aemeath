@@ -64,6 +64,8 @@ impl RunLoopPort for ScriptedPort {
 
     async fn execute_tools(
         &mut self,
+        _run_id: &sdk::RunId,
+        _step_id: &sdk::RunStepId,
         calls: &[(ToolCall, ToolGuardDecision)],
         _cancel: &CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
