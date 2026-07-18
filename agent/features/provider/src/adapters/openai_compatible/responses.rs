@@ -14,7 +14,6 @@ use crate::adapters::http_attempt::{
 };
 use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
 use crate::ports::{LegacyStreamSink, ReasoningLevel};
-use crate::LOG_TARGET;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -38,7 +37,7 @@ impl OpenAICompatibleProvider {
             .unwrap_or(0);
         let url = self.responses_url();
 
-        log::debug!(target: LOG_TARGET,
+        log::debug!(target: crate::LOG_TARGET,
             "[responses-stream] POST provider={} url={} body_bytes={}",
             self.config.source_key, url, request_body_bytes,
         );
@@ -123,7 +122,7 @@ impl OpenAICompatibleProvider {
                                 NetworkFailureKind::Decode => "response decode error",
                                 NetworkFailureKind::Unknown => "unknown",
                             };
-                            log::debug!(target: LOG_TARGET,
+                            log::debug!(target: crate::LOG_TARGET,
                                 "[responses-stream] HTTP send failed attempt={}/{} kind={}: {}",
                                 attempt + 1, self.max_retries, detail, source,
                             );
@@ -185,7 +184,7 @@ impl OpenAICompatibleProvider {
                 }
             };
 
-            log::debug!(target: LOG_TARGET,
+            log::debug!(target: crate::LOG_TARGET,
                 "[responses-stream] response received attempt={}/{}",
                 attempt + 1, self.max_retries,
             );

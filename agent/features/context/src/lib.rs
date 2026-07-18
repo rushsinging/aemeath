@@ -1,8 +1,8 @@
+pub(crate) const LOG_TARGET: &str = "aemeath:context";
+
 /// Context Management crate — 对话历史容器、上下文压缩、token 预算、提示组装、记忆注入。
 ///
 /// 设计文档：`docs/design/02-modules/context-management/README.md`
-pub const LOG_TARGET: &str = "aemeath:context";
-
 pub mod adapters;
 pub mod application;
 pub mod domain;

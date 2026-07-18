@@ -12,7 +12,6 @@ mod version;
 mod tests;
 
 use crate::contract::GitHubRelease;
-use crate::LOG_TARGET;
 use archive::extract_binary_from_tar_gz;
 use async_trait::async_trait;
 use checksum::{parse_checksums, sha256_hex};
@@ -127,7 +126,7 @@ impl UpdateService for UpdateGateway {
                 "SHA256 校验失败：期望 {expected_hash}，实际 {actual_hash}"
             )));
         }
-        log::info!(target: LOG_TARGET, "SHA256 校验通过");
+        log::info!(target: crate::LOG_TARGET, "SHA256 校验通过");
 
         // 6. 解压 tar.gz 提取二进制
         let new_binary = extract_binary_from_tar_gz(&archive_bytes)
@@ -151,7 +150,7 @@ impl UpdateService for UpdateGateway {
         })?;
 
         log::info!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "更新完成: {} → {version}（安装路径: {}）",
             check.current_version,
             current_exe.display()
@@ -170,7 +169,7 @@ impl UpdateService for UpdateGateway {
 impl UpdateGateway {
     /// 调用 GitHub Releases API 获取最新 release。
     async fn fetch_latest_release(&self) -> Result<GitHubRelease, SdkError> {
-        log::debug!(target: LOG_TARGET, "请求 GitHub API: {GITHUB_API_URL}");
+        log::debug!(target: crate::LOG_TARGET, "请求 GitHub API: {GITHUB_API_URL}");
 
         let resp = self
             .http
@@ -193,7 +192,7 @@ impl UpdateGateway {
             .map_err(|e| SdkError::Internal(format!("解析 GitHub API 响应失败: {e}")))?;
 
         log::info!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "最新版本: {} (prerelease={})",
             release.tag_name,
             release.prerelease
@@ -204,7 +203,7 @@ impl UpdateGateway {
 
     /// 下载文本内容（如 checksums.txt）。
     async fn download_text(&self, url: &str) -> Result<String, reqwest::Error> {
-        log::debug!(target: LOG_TARGET, "下载: {url}");
+        log::debug!(target: crate::LOG_TARGET, "下载: {url}");
         self.http
             .get(url)
             .send()
@@ -216,7 +215,7 @@ impl UpdateGateway {
 
     /// 下载二进制内容（如 tar.gz）。使用长超时 client（见 issue #350）。
     async fn download_bytes(&self, url: &str) -> Result<Vec<u8>, reqwest::Error> {
-        log::debug!(target: LOG_TARGET, "下载: {url}");
+        log::debug!(target: crate::LOG_TARGET, "下载: {url}");
         self.download
             .get(url)
             .send()

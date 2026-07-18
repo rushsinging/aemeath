@@ -10,12 +10,12 @@
 
 - 统一前缀 `aemeath:`，当前使用二级或三级结构，例如 `aemeath:context`、`aemeath:agent:runtime`。
 - 所有 `log::xxx!` 调用的 target 值 **MUST** 来自 `packages/global/logging/src/domain/routing.rs` 的 TargetCatalog，**NEVER** 使用旧前缀（如 `runtime::`、`cli::`、`tools::`）。
-- 各 crate **MUST** 在 `lib.rs` 定义 `pub const LOG_TARGET: &str = "aemeath:<target>"`，调用方 **MUST** import 此常量，**NEVER** 硬编码 target 字符串。
+- 每个存在生产日志调用的 crate **MUST** 在 crate root（library 为 `lib.rs`，binary 为 `main.rs`）唯一定义 crate-private `LOG_TARGET`，调用方 **MUST** 引用该 owner 常量，**NEVER** 硬编码 target 字符串或复制同值常量。
 - 守卫脚本 `.agents/hooks/check-log-target-prefix.sh` 强制检查。
 
 ### TargetCatalog
 
-合法 target、owner、sink ID 和日志文件名只在 `packages/global/logging/src/domain/routing.rs` 定义一次。当前 catalog 注册 TUI、Shared、Composition、LLM API Error、Provider、Runtime、Tools、Prompt、Hook、Storage、Project、Policy、Audit 诊断、Update、Workflow 与 Context。Config、Memory、Task 在出现独立生产 target 前 **NEVER** 预建空条目；其真实消费迁移由 #941 承接。
+合法 target、owner、sink ID 和日志文件名只在 `packages/global/logging/src/domain/routing.rs` 定义一次。当前 catalog 注册 TUI、Shared、Composition、LLM API Error、Provider、Runtime、Tools、Prompt、Hook、Storage、Project、Policy、Audit 诊断、Update、Workflow 与 Context。Config、Memory、Task 在出现独立生产 target 前 **NEVER** 预建空条目；#941 已将现有生产调用全部迁到 owner 常量并启用 owner-aware 全仓 Guard。
 
 下表是 TargetCatalog 的非规范性可读投影；代码 catalog 是唯一真相，测试负责校验 target、sink ID 与文件名唯一。
 

@@ -1,4 +1,3 @@
-use crate::LOG_TARGET;
 use memory::api::{
     MemoryLayer, MemoryPort, ReflectionApplyResult, ReflectionErrorCategory,
     ReflectionHistoryStore, ReflectionMessage, ReflectionOutput, ReflectionPromptPort,
@@ -733,6 +732,10 @@ pub async fn run_complete_reflection(
                 suggestions_added,
                 outdated_marked,
             }) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "Reflection auto apply partially failed"
+                );
                 apply_result = Some(ReflectionApplyResult {
                     attempted: result_attempted,
                     completed: result_completed,
@@ -741,7 +744,8 @@ pub async fn run_complete_reflection(
                 });
                 error_category = Some(ReflectionErrorCategory::Apply);
             }
-            Err(_) => {
+            Err(error) => {
+                log::warn!(target: crate::LOG_TARGET, "Reflection auto apply failed: {error}");
                 error_category = Some(ReflectionErrorCategory::Apply);
             }
         }

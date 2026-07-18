@@ -317,13 +317,13 @@ impl TaskScheduler {
             let timed_out = self.check_timeouts().await;
             for task_id in timed_out {
                 if let Err(e) = self.cancel_task(&task_id).await {
-                    log::warn!(target: LOG_TARGET, "Failed to cancel task {}: {}", task_id, e);
+                    log::warn!(target: crate::LOG_TARGET, "Failed to cancel task {}: {}", task_id, e);
                 }
             }
 
             // Persist state
             if let Err(e) = self.persist().await {
-                log::warn!(target: LOG_TARGET, "Failed to persist scheduler state: {}", e);
+                log::warn!(target: crate::LOG_TARGET, "Failed to persist scheduler state: {}", e);
             }
         }
     }
@@ -335,12 +335,11 @@ impl TaskScheduler {
 
         // Persist final state
         if let Err(e) = self.persist().await {
-            log::warn!(target: LOG_TARGET, "Failed to persist scheduler state on shutdown: {}", e);
+            log::warn!(target: crate::LOG_TARGET, "Failed to persist scheduler state on shutdown: {}", e);
         }
     }
 }
 
-use crate::LOG_TARGET;
 use types::current_timestamp;
 
 /// Shared task scheduler

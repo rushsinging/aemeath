@@ -1,6 +1,5 @@
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::{ChatEventSink, CompactStage, RuntimeStreamEvent};
-use crate::LOG_TARGET;
 use hook::api::{CompactHookData, HookData, HookRunner};
 use share::config::hooks::HookEvent;
 use share::message::Message;
@@ -113,7 +112,7 @@ where
     }
 
     if pre_compact_blocked {
-        log::warn!(target: LOG_TARGET, "PreCompact hook blocked compaction");
+        log::warn!(target: crate::LOG_TARGET, "PreCompact hook blocked compaction");
         return None;
     }
 
@@ -167,7 +166,7 @@ where
     let new_recent_tokens = estimate_tok(&result.recent_messages);
     let summary_tokens = result.summary.len() / 4;
     log::debug!(
-        target: LOG_TARGET,
+        target: crate::LOG_TARGET,
         "auto_compact 完成: {} → {} messages, 估算 token {} → {} (recent) + {} (summary)",
         old_len,
         new_len,
@@ -312,7 +311,7 @@ where
     }
 
     if pre_compact_blocked {
-        log::warn!(target: LOG_TARGET, "PreCompact hook blocked manual compaction");
+        log::warn!(target: crate::LOG_TARGET, "PreCompact hook blocked manual compaction");
         return None;
     }
 

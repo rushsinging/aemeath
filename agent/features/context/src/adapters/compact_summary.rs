@@ -23,7 +23,7 @@ fn placeholder_tool_results(messages: &mut [Message]) {
                 if !text.is_empty() {
                     *text = "[tool result omitted during compaction]".to_string();
                     log::debug!(
-                        target: "aemeath:agent:storage",
+                        target: crate::LOG_TARGET,
                         "compact placeholder ToolResult {tool_use_id}",
                     );
                 }
@@ -618,7 +618,7 @@ async fn compact_messages_map_reduce(
     let chunks = split_messages_into_chunks(early_messages, COMPACT_CHUNK_TARGET_TOKENS);
     let total_chunks = chunks.len();
     log::info!(
-        target: "aemeath:agent:runtime",
+        target: crate::LOG_TARGET,
         "map-reduce compact: {} chunks from {} messages ({} tokens)",
         total_chunks,
         early_messages.len(),
@@ -639,7 +639,7 @@ async fn compact_messages_map_reduce(
         .await?;
         sub_summaries.push(summary);
         log::info!(
-            target: "aemeath:agent:runtime",
+            target: crate::LOG_TARGET,
             "map-reduce compact: chunk {}/{} done",
             i + 1,
             total_chunks,

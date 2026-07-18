@@ -13,14 +13,6 @@ fn initial_tui_resume_id(args: &Args) -> Option<String> {
     args.resume.clone()
 }
 
-fn should_clear_stderr_log_env(quiet: bool, verbose: bool) -> bool {
-    quiet && !verbose
-}
-
-fn should_set_stderr_log_env(verbose: bool) -> bool {
-    verbose
-}
-
 fn should_emit_cli_frontend_started_log() -> bool {
     true
 }
@@ -31,11 +23,6 @@ fn should_emit_quiet_cli_diagnostic_log(quiet: bool) -> bool {
 
 /// 主聊天逻辑 — 瘦身入口（CLI 通过 composition 装配 runtime）。
 pub(crate) async fn run_chat(args: Args) {
-    if should_set_stderr_log_env(args.verbose) {
-        std::env::set_var("AEMEATH_LOG_STDERR", "1");
-    } else if should_clear_stderr_log_env(args.quiet, args.verbose) {
-        std::env::remove_var("AEMEATH_LOG_STDERR");
-    }
     let quiet = args.quiet;
     let initial_resume_id: Option<String> = initial_tui_resume_id(&args);
     let bootstrap = composition::app::build_agent_bootstrap(args.into())
@@ -45,64 +32,71 @@ pub(crate) async fn run_chat(args: Args) {
             std::process::exit(1);
         });
     let session_id = bootstrap.session_id.clone();
-    // #636 D3: session lock —— 防止两个 aemeath 实例同时操作同一 session。
-    let _session_lock = match crate::session_lock::try_acquire_or_prompt(&session_id, quiet) {
-        Ok(lock) => lock,
-        Err(crate::session_lock::AcquireError::Denied) => {
-            std::process::exit(4);
+    let frontend_context = composition::delivery_logging::create_session_scope(
+        composition::delivery_logging::capture(),
+        &session_id,
+    );
+    composition::delivery_logging::instrument(frontend_context, async move {
+        // #636 D3: session lock —— 防止两个 aemeath 实例同时操作同一 session。
+        let _session_lock = match crate::session_lock::try_acquire_or_prompt(&session_id, quiet) {
+            Ok(lock) => lock,
+            Err(crate::session_lock::AcquireError::Denied) => {
+                std::process::exit(4);
+            }
+            Err(e) => {
+                eprintln!("Error: session lock acquire failed: {e}");
+                std::process::exit(1);
+            }
+        };
+        if should_emit_cli_frontend_started_log() {
+            crate::tui::log_info!("chat frontend started: quiet={quiet} session={session_id}");
         }
-        Err(e) => {
-            eprintln!("Error: session lock acquire failed: {e}");
-            std::process::exit(1);
-        }
-    };
-    if should_emit_cli_frontend_started_log() {
-        crate::tui::log_info!("chat frontend started: quiet={quiet} session={session_id}");
-    }
 
-    if quiet {
-        if should_emit_quiet_cli_diagnostic_log(quiet) {
-            crate::tui::log_info!("quiet chat started: session={session_id}");
+        if quiet {
+            if should_emit_quiet_cli_diagnostic_log(quiet) {
+                crate::tui::log_info!("quiet chat started: session={session_id}");
+            }
+            crate::chat::no_tui::run_no_tui_chat(bootstrap.client, session_id)
+                .await
+                .unwrap_or_else(|e| {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                });
+            return;
         }
-        crate::chat::no_tui::run_no_tui_chat(bootstrap.client, session_id)
+
+        let mut app =
+            crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
+        app.agent_client = Some(bootstrap.client.clone());
+        app.session.memory_config = bootstrap.memory_config;
+        app.set_skills(bootstrap.skills_map);
+
+        // 在 run() 之前设置启动上下文（替代 18 参数注入）
+        app.status_bar.set_permission_mode(if bootstrap.allow_all {
+            "AllowAll"
+        } else {
+            "AskMe"
+        });
+        app.chat.context_size = bootstrap.context_size;
+        app.model
+            .conversation
+            .apply(crate::tui::model::conversation::intent::SetContextSize(
+                bootstrap.context_size as u64,
+            ));
+        app.model
+            .conversation
+            .apply(crate::tui::model::conversation::intent::SetThinking(
+                bootstrap.thinking,
+            ));
+        app.run(bootstrap.client, initial_resume_id)
             .await
             .unwrap_or_else(|e| {
-                eprintln!("Error: {e}");
+                crate::tui::log_error!("TUI error: {e}");
                 std::process::exit(1);
             });
-        return;
-    }
-
-    let mut app =
-        crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
-    app.agent_client = Some(bootstrap.client.clone());
-    app.session.memory_config = bootstrap.memory_config;
-    app.set_skills(bootstrap.skills_map);
-
-    // 在 run() 之前设置启动上下文（替代 18 参数注入）
-    app.status_bar.set_permission_mode(if bootstrap.allow_all {
-        "AllowAll"
-    } else {
-        "AskMe"
-    });
-    app.chat.context_size = bootstrap.context_size;
-    app.model
-        .conversation
-        .apply(crate::tui::model::conversation::intent::SetContextSize(
-            bootstrap.context_size as u64,
-        ));
-    app.model
-        .conversation
-        .apply(crate::tui::model::conversation::intent::SetThinking(
-            bootstrap.thinking,
-        ));
-    app.run(bootstrap.client, initial_resume_id)
-        .await
-        .unwrap_or_else(|e| {
-            crate::tui::log_error!("TUI error: {e}");
-            std::process::exit(1);
-        });
-    println!("aemeath --resume {}", session_id);
+        println!("aemeath --resume {}", session_id);
+    })
+    .await;
 }
 
 #[cfg(test)]
@@ -133,31 +127,6 @@ mod tests {
     }
 
     #[test]
-    fn test_should_clear_stderr_log_env_for_quiet_mode() {
-        assert!(should_clear_stderr_log_env(true, false));
-    }
-
-    #[test]
-    fn test_should_clear_stderr_log_env_keeps_user_choice_for_tui_mode() {
-        assert!(!should_clear_stderr_log_env(false, false));
-    }
-
-    #[test]
-    fn test_should_clear_stderr_log_env_verbose_overrides_quiet() {
-        assert!(!should_clear_stderr_log_env(true, true));
-    }
-
-    #[test]
-    fn test_should_set_stderr_log_env_for_verbose() {
-        assert!(should_set_stderr_log_env(true));
-    }
-
-    #[test]
-    fn test_should_set_stderr_log_env_skips_non_verbose() {
-        assert!(!should_set_stderr_log_env(false));
-    }
-
-    #[test]
     fn test_should_emit_cli_frontend_started_log() {
         assert!(should_emit_cli_frontend_started_log());
     }
@@ -170,5 +139,105 @@ mod tests {
     #[test]
     fn test_should_emit_quiet_cli_diagnostic_log_skips_tui_mode() {
         assert!(!should_emit_quiet_cli_diagnostic_log(false));
+    }
+
+    fn complete_context(session_id: &str) -> composition::delivery_logging::LogContext {
+        composition::delivery_logging::LogContext {
+            session_id: Some(session_id.to_string()),
+            chat_id: Some("runtime-chat".to_string()),
+            turn: Some(7),
+            request_id: Some("request-42".to_string()),
+            model: Some("model-1".to_string()),
+            provider: Some("provider-1".to_string()),
+            role: Some("worker".to_string()),
+        }
+    }
+
+    #[test]
+    fn tui_session_context_replaces_parent_with_session_only() {
+        let context = composition::delivery_logging::create_session_scope(
+            complete_context("parent-session"),
+            "bootstrap-session",
+        );
+
+        assert_eq!(
+            context,
+            composition::delivery_logging::LogContext {
+                session_id: Some("bootstrap-session".to_string()),
+                ..composition::delivery_logging::LogContext::default()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_tui_session_scopes_do_not_leak() {
+        composition::delivery_logging::instrument(complete_context("parent-session"), async {
+            let first = tokio::spawn(composition::delivery_logging::instrument(
+                composition::delivery_logging::create_session_scope(
+                    composition::delivery_logging::capture(),
+                    "session-a",
+                ),
+                async {
+                    tokio::task::yield_now().await;
+                    composition::delivery_logging::capture()
+                },
+            ));
+            let second = tokio::spawn(composition::delivery_logging::instrument(
+                composition::delivery_logging::create_session_scope(
+                    composition::delivery_logging::capture(),
+                    "session-b",
+                ),
+                async {
+                    tokio::task::yield_now().await;
+                    composition::delivery_logging::capture()
+                },
+            ));
+
+            assert_eq!(
+                first.await.unwrap(),
+                composition::delivery_logging::LogContext {
+                    session_id: Some("session-a".to_string()),
+                    ..composition::delivery_logging::LogContext::default()
+                }
+            );
+            assert_eq!(
+                second.await.unwrap(),
+                composition::delivery_logging::LogContext {
+                    session_id: Some("session-b".to_string()),
+                    ..composition::delivery_logging::LogContext::default()
+                }
+            );
+            assert_eq!(
+                composition::delivery_logging::capture(),
+                complete_context("parent-session")
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn tui_session_scope_exit_restores_complete_parent_scope() {
+        let parent = complete_context("parent-session");
+        composition::delivery_logging::instrument(parent.clone(), async {
+            composition::delivery_logging::instrument(
+                composition::delivery_logging::create_session_scope(
+                    composition::delivery_logging::capture(),
+                    "bootstrap-session",
+                ),
+                async {
+                    assert_eq!(
+                        composition::delivery_logging::capture(),
+                        composition::delivery_logging::LogContext {
+                            session_id: Some("bootstrap-session".to_string()),
+                            ..composition::delivery_logging::LogContext::default()
+                        }
+                    );
+                },
+            )
+            .await;
+
+            assert_eq!(composition::delivery_logging::capture(), parent);
+        })
+        .await;
     }
 }

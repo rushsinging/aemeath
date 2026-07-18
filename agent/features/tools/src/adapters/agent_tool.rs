@@ -1,6 +1,5 @@
 use crate::domain::types::agent::{AgentInput, AgentResult};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
-use crate::LOG_TARGET;
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -122,7 +121,7 @@ Instructions:- Complete the task described in the user message
             final_output.clone()
         };
         log::debug!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "agent final output: output_bytes={}, text_bytes={}, output_preview={:?}",
             final_output.len(),
             text.len(),

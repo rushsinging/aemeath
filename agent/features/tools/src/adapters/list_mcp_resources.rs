@@ -2,7 +2,6 @@
 
 use crate::adapters::mcp::McpClient;
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
-use crate::LOG_TARGET;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -123,7 +122,7 @@ impl TypedTool for ListMcpResourcesTool {
                 }
                 Err(e) => {
                     // Log error but continue with other servers
-                    log::warn!(target: LOG_TARGET, "Failed to list resources from {}: {}", server_name, e);
+                    log::warn!(target: crate::LOG_TARGET, "Failed to list resources from {}: {}", server_name, e);
                 }
             }
         }

@@ -36,7 +36,6 @@ use crate::application::loop_engine::{
     ToolStep,
 };
 use crate::domain::agent_run::RunDomainEvent;
-use crate::LOG_TARGET;
 use context::session::ChatChain;
 use workflow::api::{ReasoningPort, ReasoningSignal};
 
@@ -257,7 +256,7 @@ where
             })
             .await;
         if let Err(error) = (self.save_chain)(self.chain).await {
-            log::error!(target: LOG_TARGET, "cancel rollback save_chain failed: {error}");
+            log::error!(target: crate::LOG_TARGET, "cancel rollback save_chain failed: {error}");
         }
         self.sink
             .send_event(RuntimeStreamEvent::Cancelled {
@@ -783,7 +782,7 @@ where
             match event {
                 RunDomainEvent::Completed { .. } => {
                     if let Err(error) = (self.save_chain)(self.chain).await {
-                        log::error!(target: LOG_TARGET, "turn-level save_chain failed: {error}");
+                        log::error!(target: crate::LOG_TARGET, "turn-level save_chain failed: {error}");
                     }
                     self.project_done(AgentRunStatus::Completed).await;
                 }
@@ -795,7 +794,7 @@ where
                         })
                         .await;
                     if let Err(save_error) = (self.save_chain)(self.chain).await {
-                        log::error!(target: LOG_TARGET, "api-error save_chain failed: {save_error}");
+                        log::error!(target: crate::LOG_TARGET, "api-error save_chain failed: {save_error}");
                     }
                     self.project_done(AgentRunStatus::ApiError(error)).await;
                 }

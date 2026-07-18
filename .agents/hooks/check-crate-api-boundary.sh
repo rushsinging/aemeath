@@ -54,7 +54,7 @@ PROJECT_ROOT_ACCESS_ALLOW = {
     "WorktreeKind",
     "wire_production_workspace",
 }
-PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW | {"LOG_TARGET"}
+PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW
 # 已迁移 feature 的目标 façade 位于 crate 根；集合必须保持窄且由真实消费者证明。
 # Tools crate-root façade (#993): tools 已迁到 domain/adapters 六边形物理层，
 # 只经 crate 根发布 Published Language，禁止恢复 tools::api。
@@ -539,7 +539,6 @@ def run_sanity() -> None:
     if not project_import_violations("tools", "use project::{\n    WorkspaceRead,\n    WorkspaceService,\n};"):
         raise AssertionError("sanity block failed: removed Project concrete service import")
     valid_facade = '''
-pub const LOG_TARGET: &str = "aemeath:agent:project";
 pub use adapters::wiring::{wire_production_workspace, WorkspaceViews, WorkspaceWiring};
 pub use domain::state::PreparedWorkspaceRestore;
 pub use domain::types::{GitOperationError, GitProbeError, WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspaceInitError, WorkspacePersist, WorkspaceRead, WorkspaceRestoreError};
