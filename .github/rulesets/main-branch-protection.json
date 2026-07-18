@@ -27,7 +27,7 @@
       "parameters": {
         "required_status_checks": [
           {
-            "context": "Coverage"
+            "context": "Workspace coverage summary"
           }
         ],
         "strict_required_status_checks_policy": false
