@@ -408,6 +408,102 @@
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove when no source line uses the marker",
       "status": "active"
+    },
+    {
+      "id": "scope.logging.registered-process-statics",
+      "guard": "check-logging-scope-context.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "STATIC_ALLOW"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Registered process metadata statics are explicit owners",
+      "tracking_issue": 937,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.scope-context-tests",
+      "guard": "check-logging-scope-context.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "*test*.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Test fixtures are outside production scope context ownership",
+      "tracking_issue": 937,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.settings-tests",
+      "guard": "check-logging-settings-injection.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "*test*.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Logging settings env scan excludes test fixtures",
+      "tracking_issue": 938,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.runtime-comments-tests",
+      "guard": "check-logging-settings-injection.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "runtime comments and tests"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Runtime logging wiring scan excludes comments and tests",
+      "tracking_issue": 938,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.bootstrap-tests",
+      "guard": "check-logging-settings-injection.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "bootstrap tests"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Unique production bootstrap count excludes test consumers",
+      "tracking_issue": 938,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.init-import-tests",
+      "guard": "check-logging-settings-injection.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "init import tests"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Unique UnifiedLogger production import excludes tests",
+      "tracking_issue": 938,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
     }
   ]
 }
