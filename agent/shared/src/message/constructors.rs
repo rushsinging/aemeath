@@ -158,15 +158,12 @@ impl Message {
 
     /// Create tool results with optional image attachments.
     /// Each result is (tool_use_id, text_content, json_content, is_error, images).
-    pub fn tool_results_rich(
-        results: Vec<(
-            String,
-            String,
-            serde_json::Value,
-            bool,
-            Vec<crate::tool::ImageData>,
-        )>,
-    ) -> Self {
+    pub fn tool_results_rich<I>(
+        results: Vec<(String, String, serde_json::Value, bool, Vec<I>)>,
+    ) -> Self
+    where
+        I: Into<(String, String)>,
+    {
         Self {
             role: Role::User,
             content: results
@@ -178,12 +175,13 @@ impl Message {
                         let mut blocks: Vec<serde_json::Value> = images
                             .into_iter()
                             .map(|img| {
+                                let (base64, media_type) = img.into();
                                 serde_json::json!({
                                     "type": "image",
                                     "source": {
                                         "type": "base64",
-                                        "media_type": img.media_type,
-                                        "data": img.base64,
+                                        "media_type": media_type,
+                                        "data": base64,
                                     }
                                 })
                             })

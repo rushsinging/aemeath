@@ -115,12 +115,16 @@ pub(super) async fn chat_impl(
                         .requested_reasoning(),
                 ),
                 build_switched_client: {
-                    let cwd = inner.cwd.clone();
+                    let config_reader = inner.config_reader.clone();
                     std::sync::Arc::new(move |selection: &str| {
                         let selection = selection.to_string();
-                        let cwd = cwd.clone();
+                        let config_reader = config_reader.clone();
                         Box::pin(async move {
-                            super::trait_model::build_llm_client_for_switch(&selection, &cwd).await
+                            super::trait_model::build_llm_client_for_switch(
+                                &selection,
+                                config_reader.as_ref(),
+                            )
+                            .await
                         })
                     })
                 },

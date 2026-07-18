@@ -19,7 +19,3 @@ unicode-width = "0.2"
 logging = { path = "../../packages/global/logging" }
 utils = { path = "../../packages/global/utils" }
 
-[build-dependencies]
-syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
-proc-macro2 = "1"
-

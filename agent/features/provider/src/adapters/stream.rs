@@ -19,11 +19,81 @@ pub use crate::ports::LegacyStreamSink;
 
 const INVOCATION_STREAM_CAPACITY: usize = 1;
 
+#[derive(Clone, Copy)]
 pub(crate) enum LegacyStreamDecoder {
     Anthropic,
     OpenAiChat,
     OpenAiResponses,
     Ollama,
+}
+
+impl LegacyStreamDecoder {
+    fn raw_usage_from_line(self, line: &str) -> Option<RawUsageSnapshot> {
+        match self {
+            Self::Anthropic => anthropic_raw_usage_from_line(line),
+            Self::OpenAiChat => openai_chat_raw_usage_from_line(line),
+            Self::OpenAiResponses => openai_responses_raw_usage_from_line(line),
+            Self::Ollama => ollama_raw_usage_from_line(line),
+        }
+    }
+}
+
+fn json_payload(line: &str) -> Option<&str> {
+    line.strip_prefix("data: ")
+        .or_else(|| line.strip_prefix("data:"))
+        .or(Some(line))
+        .filter(|payload| !payload.is_empty() && *payload != "[DONE]")
+}
+
+fn anthropic_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshot> {
+    let value: serde_json::Value = serde_json::from_str(json_payload(line)?).ok()?;
+    let usage = match value.get("type").and_then(|kind| kind.as_str()) {
+        Some("message_start") => value.get("message")?.get("usage")?,
+        Some("message_delta") => value.get("usage")?,
+        _ => return None,
+    };
+    Some(RawUsageSnapshot {
+        input_tokens: optional_u32(usage, "input_tokens"),
+        output_tokens: optional_u32(usage, "output_tokens"),
+        cache_read_tokens: optional_u32(usage, "cache_read_input_tokens"),
+        cache_write_tokens: optional_u32(usage, "cache_creation_input_tokens"),
+        reasoning_tokens: optional_u32(usage, "reasoning_tokens"),
+    })
+}
+
+fn openai_chat_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshot> {
+    let value: serde_json::Value = serde_json::from_str(json_payload(line)?).ok()?;
+    value
+        .get("usage")
+        .filter(|usage| !usage.is_null())
+        .map(crate::adapters::openai_compatible::parse_chat_raw_usage)
+}
+
+fn openai_responses_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshot> {
+    let value: serde_json::Value = serde_json::from_str(json_payload(line)?).ok()?;
+    (value.get("type").and_then(|kind| kind.as_str()) == Some("response.completed"))
+        .then(|| value.get("response")?.get("usage"))
+        .flatten()
+        .map(crate::adapters::openai_compatible::parse_responses_raw_usage)
+}
+
+fn ollama_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshot> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    Some(RawUsageSnapshot {
+        input_tokens: optional_u32(&value, "prompt_eval_count"),
+        output_tokens: optional_u32(&value, "eval_count"),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        reasoning_tokens: None,
+    })
+    .filter(RawUsageSnapshot::was_reported)
+}
+
+fn optional_u32(value: &serde_json::Value, field: &str) -> Option<u32> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
 }
 
 pub(crate) fn parse_invocation_stream(
@@ -49,7 +119,13 @@ pub(crate) fn invocation_stream_from_legacy_decoder(
     let runtime = tokio::runtime::Handle::current();
     let producer_cancel = cancel.clone();
     tokio::task::spawn_blocking(move || {
-        let mut handler = InvocationEventHandler::new(sender.clone(), producer_cancel.clone());
+        let usage = std::sync::Arc::new(std::sync::Mutex::new(RawUsageSnapshot::default()));
+        let mut handler = InvocationEventHandler::new(
+            sender.clone(),
+            producer_cancel.clone(),
+            decoder,
+            usage.clone(),
+        );
         let terminal = runtime.block_on(async {
             let result = match decoder {
                 LegacyStreamDecoder::Anthropic => {
@@ -83,6 +159,11 @@ pub(crate) fn invocation_stream_from_legacy_decoder(
             match result {
                 Ok(response) => InvocationEvent::Completed(completion_from_legacy(
                     response,
+                    usage
+                        .lock()
+                        .expect("usage lock poisoned")
+                        .clone()
+                        .into_reported(),
                     effective_reasoning,
                 )),
                 Err(error) => InvocationEvent::Failed(provider_error_from_legacy(error)),
@@ -104,14 +185,23 @@ pub(crate) fn invocation_stream_from_legacy_decoder(
 struct InvocationEventHandler {
     sender: std::sync::mpsc::SyncSender<InvocationEvent>,
     cancel: CancellationToken,
+    decoder: LegacyStreamDecoder,
+    usage: std::sync::Arc<std::sync::Mutex<RawUsageSnapshot>>,
 }
 
 impl InvocationEventHandler {
     fn new(
         sender: std::sync::mpsc::SyncSender<InvocationEvent>,
         cancel: CancellationToken,
+        decoder: LegacyStreamDecoder,
+        usage: std::sync::Arc<std::sync::Mutex<RawUsageSnapshot>>,
     ) -> Self {
-        Self { sender, cancel }
+        Self {
+            sender,
+            cancel,
+            decoder,
+            usage,
+        }
     }
 
     fn send_delta(&self, delta: InvocationDelta) {
@@ -135,6 +225,15 @@ impl LegacyStreamSink for InvocationEventHandler {
     }
 
     fn on_error(&mut self, _error: &str) {}
+
+    fn on_raw_line(&mut self, line: &str) {
+        if let Some(latest) = self.decoder.raw_usage_from_line(line) {
+            self.usage
+                .lock()
+                .expect("usage lock poisoned")
+                .merge_reported(latest);
+        }
+    }
 
     fn on_thinking(&mut self, text: &str) {
         self.send_delta(InvocationDelta::Thinking {
@@ -160,6 +259,7 @@ impl LegacyStreamSink for InvocationEventHandler {
 
 fn completion_from_legacy(
     response: StreamResponse,
+    usage: Option<RawUsageSnapshot>,
     effective_reasoning: ReasoningLevel,
 ) -> ProviderCompletion {
     let output = response
@@ -192,13 +292,7 @@ fn completion_from_legacy(
             StopReason::ToolUse => ProviderStopReason::ToolUse,
             StopReason::MaxTokens => ProviderStopReason::MaxOutputTokens,
         },
-        usage: Some(RawUsageSnapshot {
-            input_tokens: Some(response.usage.input_tokens),
-            output_tokens: Some(response.usage.output_tokens),
-            cache_read_tokens: response.usage.cached_tokens,
-            cache_write_tokens: response.usage.cache_creation_tokens,
-            reasoning_tokens: response.usage.reasoning_tokens,
-        }),
+        usage,
         effective_reasoning,
     }
 }

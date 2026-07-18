@@ -140,6 +140,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::CurrentTurnChanged(_)
         | sdk::ChatEvent::HookEvent(_)
         | sdk::ChatEvent::WorkingDirectoryChanged { .. }
+        | sdk::ChatEvent::ConfigChanged { .. }
         | sdk::ChatEvent::ConfigReloaded { .. }
         | sdk::ChatEvent::SessionReset
         | sdk::ChatEvent::UserMessagesWithdrawn { .. }

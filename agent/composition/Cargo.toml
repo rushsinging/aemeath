@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 runtime = { path = "../features/runtime" }
+config = { path = "../features/config" }
 tools = { path = "../features/tools" }
 provider = { path = "../features/provider" }
 project = { path = "../features/project" }

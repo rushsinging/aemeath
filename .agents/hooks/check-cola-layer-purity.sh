@@ -4,7 +4,7 @@ set -euo pipefail
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
 # 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用
 #       domain/application/ports/adapters/shared；Workflow 使用 domain；Storage 使用 domain/ports/adapters；
-#       Audit 仅允许随真实 Usage 交付增量建立的 Hexagonal 层，禁止恢复空 COLA 占位。
+#       Project/Tools 使用 domain/adapters（domain 不得依赖 adapters）；Audit 仅允许随真实 Usage 交付增量建立的 Hexagonal 层。
 # 例外：少量已登记的迁移期层级倒置（见脚本内 narrow migration exceptions 列表）。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -21,15 +21,22 @@ FEATURE_LAYERS = {"contract", "gateway", "core", "business", "utils"}
 RUNTIME_HEX_LAYERS = {"domain", "application", "ports", "adapters", "shared"}
 WORKFLOW_HEX_LAYERS = {"domain"}
 PROVIDER_HEX_LAYERS = {"domain", "adapters"}
+MEMORY_HEX_LAYERS = {"domain", "ports", "adapters"}
 PROVIDER_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
+POLICY_HEX_LAYERS = {"domain"}
+POLICY_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs"}
+POLICY_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
 STORAGE_HEX_LAYERS = {"domain", "ports", "adapters"}
 STORAGE_TRANSITIONAL_MODULES = {"memory_store", "task_store"}
 STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway"}
 PROJECT_HEX_LAYERS = {"domain", "adapters"}
 PROJECT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
 PROJECT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
-AUDIT_HEX_LAYERS = {"domain", "ports"}
-AUDIT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "ports.rs"}
+TOOLS_HEX_LAYERS = {"domain", "adapters"}
+TOOLS_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
+TOOLS_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
+AUDIT_HEX_LAYERS = {"domain", "ports", "adapters"}
+AUDIT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "ports.rs", "adapters.rs"}
 AUDIT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
 # Dependency direction inside a feature: outer/application layers may depend inward;
 # domain/business must not depend on orchestration/gateway/contract, and utils must stay leaf-like.
@@ -52,9 +59,7 @@ RUNTIME_PROVIDER_TOOLS_OLD_PATHS = [
 # path + target-layer limited so new COLA violations still fail. Runtime
 # bootstrap/adapter still owns temporary wiring; tools MCP connection still
 # reaches the registry until the registry port is split.
-LAYER_MIGRATION_EXCEPTIONS = {
-    ("agent/features/tools/src/business/mcp_manager/connection.rs", "core"),
-}
+LAYER_MIGRATION_EXCEPTIONS = set()
 RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/runtime/src/application/client/accessors.rs", "adapters"),
     ("agent/features/runtime/src/application/client/from_args.rs", "adapters"),
@@ -88,11 +93,17 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
             return parts[0], normalized_layer
         if parts[0] == "provider" and normalized_layer in PROVIDER_HEX_LAYERS:
             return parts[0], normalized_layer
+        if parts[0] == "memory" and normalized_layer in MEMORY_HEX_LAYERS:
+            return parts[0], normalized_layer
         if parts[0] == "storage" and normalized_layer in STORAGE_HEX_LAYERS:
             return parts[0], normalized_layer
         if parts[0] == "context" and normalized_layer in CONTEXT_HEX_LAYERS:
             return parts[0], normalized_layer
+        if parts[0] == "policy" and normalized_layer in POLICY_HEX_LAYERS:
+            return parts[0], normalized_layer
         if parts[0] == "project" and normalized_layer in PROJECT_HEX_LAYERS:
+            return parts[0], normalized_layer
+        if parts[0] == "tools" and normalized_layer in TOOLS_HEX_LAYERS:
             return parts[0], normalized_layer
         if parts[0] == "audit" and normalized_layer in AUDIT_HEX_LAYERS:
             return parts[0], normalized_layer
@@ -187,6 +198,20 @@ for feature_src in sorted(features_root.glob("*/src")):
                 )
                 continue
             continue
+        if crate_name == "policy":
+            if child.stem in POLICY_LEGACY_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Policy legacy fixed layer is forbidden; use {sorted(POLICY_HEX_LAYERS)}"
+                )
+            elif child.is_dir() and child.name not in POLICY_HEX_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Policy source directories must be {sorted(POLICY_HEX_LAYERS)}"
+                )
+            elif child.is_file() and child.name not in POLICY_ALLOWED_TOP_LEVEL_FILES:
+                violations.append(
+                    f"{child.relative_to(root)}: Policy top-level source files must be {sorted(POLICY_ALLOWED_TOP_LEVEL_FILES)}"
+                )
+            continue
         if crate_name == "project":
             if child.stem in PROJECT_LEGACY_LAYERS:
                 violations.append(
@@ -215,6 +240,20 @@ for feature_src in sorted(features_root.glob("*/src")):
                     f"{child.relative_to(root)}: Audit top-level source files must be {sorted(AUDIT_ALLOWED_TOP_LEVEL_FILES)}"
                 )
             continue
+        if crate_name == "tools":
+            if child.stem in TOOLS_LEGACY_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: tools legacy fixed layer is forbidden; use {sorted(TOOLS_HEX_LAYERS)}"
+                )
+            elif child.is_dir() and child.name not in TOOLS_HEX_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: tools source directories must be {sorted(TOOLS_HEX_LAYERS)}"
+                )
+            elif child.is_file() and child.name not in TOOLS_ALLOWED_TOP_LEVEL_FILES:
+                violations.append(
+                    f"{child.relative_to(root)}: tools top-level source files must be {sorted(TOOLS_ALLOWED_TOP_LEVEL_FILES)}"
+                )
+            continue
         if crate_name == "storage":
             if child.stem in STORAGE_LEGACY_LAYERS:
                 violations.append(
@@ -224,6 +263,9 @@ for feature_src in sorted(features_root.glob("*/src")):
                 violations.append(
                     f"{child.relative_to(root)}: Storage directory must be a hexagonal layer {sorted(STORAGE_HEX_LAYERS)} or registered transitional module {sorted(STORAGE_TRANSITIONAL_MODULES)}"
                 )
+            continue
+        # Memory #895 建立 Hexagonal domain/ports/adapters 契约基线。
+        if crate_name == "memory" and child.is_dir() and child.name in MEMORY_HEX_LAYERS:
             continue
         if child.is_dir() and child.name not in FEATURE_LAYERS:
             # Runtime 已迁到单一 agent_execution 能力的六边形目标结构。

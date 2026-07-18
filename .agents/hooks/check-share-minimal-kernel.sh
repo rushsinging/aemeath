@@ -23,7 +23,7 @@ share_src = root / "agent" / "shared" / "src"
 share_manifest = root / "agent" / "shared" / "Cargo.toml"
 
 forbidden_patterns = [
-    (re.compile(r"\bToolRegistry\b"), "ToolRegistry belongs to tools::api, not share"),
+    (re.compile(r"\bToolRegistry\b"), "ToolRegistry belongs to the tools crate-root facade, not share"),
     (re.compile(r"\bTaskStore\b"), "TaskStore belongs to storage::api, not share"),
     (re.compile(r"\bTaskStoreStats\b"), "TaskStoreStats belongs to storage::api, not share"),
     (re.compile(r"\bstd::fs::|\btokio::fs::|\bFile::|\bread_to_string\b|\bwrite\(|\bcreate_dir"), "share must not perform fs IO"),
@@ -31,7 +31,7 @@ forbidden_patterns = [
     (re.compile(r"\breqwest::|\bhyper::|\bureq::|\bhttp::"), "share must not perform network/http IO"),
     (re.compile(r"\bparking_lot::|\bRwLock\b"), "stateful registries/stores do not belong in share"),
     (re.compile(r"#\[\s*async_trait\s*\]"), "async trait (behavior) belongs to a feature, not share kernel"),
-    (re.compile(r"\btrait\s+(Tool|AgentRunner)\b"), "Tool/AgentRunner behavior traits belong to tools::api, not share"),
+    (re.compile(r"\btrait\s+(Tool|AgentRunner)\b"), "Tool/AgentRunner behavior traits belong to the tools crate-root facade, not share"),
     (re.compile(r"Arc\s*<\s*Mutex\b"), "Arc<Mutex> runtime state belongs to a feature, not share kernel"),
     (re.compile(r"\btokio::sync::(?:(?:mpsc|Semaphore|oneshot)\b|\{[^}]*\b(?:mpsc|Semaphore|oneshot)\b[^}]*\})"), "concurrency primitives belong to a feature, not share kernel"),
     (re.compile(r"\bCancellationToken\b"), "CancellationToken belongs to a feature, not share kernel"),
@@ -50,6 +50,8 @@ forbidden_modules = {
     "task/display.rs": "task display behavior belongs to storage::api",
     "task/list.rs": "task list behavior belongs to storage::api",
     "task/store.rs": "task store behavior belongs to storage::api",
+    "tool.rs": "tool contracts and DTOs belong to the tools domain",
+    "tool": "tool type modules belong to the tools domain",
 }
 
 # Current target-state dependency budget for share per Cargo reality: data/schema

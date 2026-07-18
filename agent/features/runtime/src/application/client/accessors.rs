@@ -6,7 +6,7 @@ use crate::application::chat::ChatEventSinkHandle;
 use crate::ports::legacy::ChatRuntimeContext;
 use sdk::ChatEvent;
 use share::config::models::ResolvedModel;
-use tools::api::McpConnectionManager;
+use tools::McpConnectionManager;
 
 // ─── 结构体定义 ───
 
@@ -51,6 +51,9 @@ pub struct RuntimeHandle {
     ///
     /// loop-top idle 门据此在首次遇到 pending user turn 时强制 idle 等待，
     pub(crate) workspace: project::WorkspaceViews,
+    pub(crate) config_reader: Arc<dyn config::ConfigReader>,
+    pub(crate) config_query: Arc<dyn config::ConfigQuery>,
+    pub(crate) config_writer: Arc<dyn config::ConfigWriter>,
     pub(crate) event_sink_factory: Arc<
         dyn Fn(tokio::sync::mpsc::UnboundedSender<ChatEvent>) -> ChatEventSinkHandle + Send + Sync,
     >,
@@ -118,9 +121,7 @@ impl AgentClientImpl {
                 .map(|(name, skill)| (name, super::mapping::skill_to_sdk(skill)))
                 .collect(),
             hook_runner: ctx.resources.hook_runner,
-            session_reminders: Arc::new(
-                std::sync::Mutex::new(share::tool::SessionReminders::new()),
-            ),
+            session_reminders: Arc::new(std::sync::Mutex::new(tools::SessionReminders::new())),
             workspace_root: self.inner.cwd.clone(),
         }
     }

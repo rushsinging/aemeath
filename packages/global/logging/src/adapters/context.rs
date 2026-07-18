@@ -17,60 +17,88 @@
 //! | `CURRENT_REQUEST_ID` | 每次 LLM 调用前 | 可变，`RwLock` |
 //! | `CURRENT_ROLE` | 主 agent 为 `"default"`，sub-agent 为其 role 名 | 可变，`RwLock` |
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::domain::{LogContext, LogContextPatch};
+use std::future::Future;
 use std::sync::{OnceLock, RwLock};
 
-static SESSION_ID: OnceLock<String> = OnceLock::new();
-static CURRENT_CHAT_ID: RwLock<String> = RwLock::new(String::new());
-static CURRENT_TURN: AtomicUsize = AtomicUsize::new(0);
-static CURRENT_MODEL: RwLock<String> = RwLock::new(String::new());
+tokio::task_local! {
+    static SCOPED_CONTEXT: LogContext;
+}
+
+/// 捕获当前 task scope 的不可变上下文；scope 外返回空快照。
+pub fn capture() -> LogContext {
+    scoped_context().unwrap_or_default()
+}
+
+pub(super) fn scoped_context() -> Option<LogContext> {
+    SCOPED_CONTEXT.try_with(Clone::clone).ok()
+}
+
+/// 在由当前 context 和 patch 派生的 child scope 内执行 future。
+pub async fn within<T>(patch: LogContextPatch, future: impl Future<Output = T>) -> T {
+    let child = capture().patched(patch);
+    SCOPED_CONTEXT.scope(child, future).await
+}
+
+/// 将已捕获的 context 显式绑定到尚未 spawn 的 future。
+///
+/// 正确用法是 `tokio::spawn(instrument(context, future))`。不得用它包裹已经创建的
+/// `JoinHandle`；需要创建 task 时优先使用 [`spawn_instrumented`] 固定传播顺序。
+pub async fn instrument<T>(context: LogContext, future: impl Future<Output = T>) -> T {
+    SCOPED_CONTEXT.scope(context, future).await
+}
+
+/// 创建绑定了显式 context 的 Tokio task，避免先 spawn 后 instrument 的静默失效。
+pub fn spawn_instrumented<T>(
+    context: LogContext,
+    future: impl Future<Output = T> + Send + 'static,
+) -> tokio::task::JoinHandle<T>
+where
+    T: Send + 'static,
+{
+    tokio::spawn(instrument(context, future))
+}
+
+static LEGACY_EXECUTION_CONTEXT: RwLock<LogContext> = RwLock::new(LogContext {
+    session_id: None,
+    chat_id: None,
+    turn: None,
+    request_id: None,
+    model: None,
+    provider: None,
+    role: None,
+});
 static BOOT_TS: OnceLock<String> = OnceLock::new();
 static APP_VERSION: OnceLock<String> = OnceLock::new();
 static PID: OnceLock<u32> = OnceLock::new();
-static CURRENT_PROVIDER: RwLock<String> = RwLock::new(String::new());
-static CURRENT_REQUEST_ID: RwLock<String> = RwLock::new(String::new());
-static CURRENT_ROLE: RwLock<String> = RwLock::new(String::new());
 
-/// 设置全局 session ID。`OnceLock` 语义：重复调用仅首次生效。
+/// 设置 legacy session ID；仅供 #940 迁移前的现有调用点使用。
 pub fn set_session_id(id: String) {
-    let _ = SESSION_ID.set(id);
+    update_legacy(|context| context.session_id = non_empty(id));
 }
 
-/// 设置当前 chat ID。`loop_runner` 每轮 chat 开始时调用。
 pub fn set_current_chat_id(chat_id: String) {
-    if let Ok(mut current) = CURRENT_CHAT_ID.write() {
-        *current = chat_id;
-    }
+    update_legacy(|context| context.chat_id = non_empty(chat_id));
 }
 
-/// 设置当前 turn。`loop_runner` 每 turn 开始时调用。
 pub fn set_current_turn(turn: usize) {
-    CURRENT_TURN.store(turn, Ordering::Relaxed);
+    update_legacy(|context| context.turn = Some(turn));
 }
 
-/// 设置当前 model。`setup.rs` 中 model 解析后调用。
 pub fn set_current_model(model: String) {
-    if let Ok(mut current) = CURRENT_MODEL.write() {
-        *current = model;
-    }
+    update_legacy(|context| context.model = non_empty(model));
 }
 
-pub fn session_id() -> Option<&'static str> {
-    SESSION_ID.get().map(|s| s.as_str())
+pub fn session_id() -> Option<String> {
+    legacy_snapshot().session_id
 }
 
 pub fn current_chat_id() -> Option<String> {
-    CURRENT_CHAT_ID
-        .read()
-        .ok()
-        .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) })
+    legacy_snapshot().chat_id
 }
 
 pub fn current_turn() -> Option<usize> {
-    match CURRENT_TURN.load(Ordering::Relaxed) {
-        0 => None,
-        turn => Some(turn),
-    }
+    legacy_snapshot().turn
 }
 
 /// 设置进程启动时间戳（本地时间 RFC3339）。`init_logging` 时调用一次。
@@ -83,32 +111,20 @@ pub fn set_app_version(ver: String) {
     let _ = APP_VERSION.set(ver);
 }
 
-/// 设置当前 provider。
 pub fn set_current_provider(provider: String) {
-    if let Ok(mut current) = CURRENT_PROVIDER.write() {
-        *current = provider;
-    }
+    update_legacy(|context| context.provider = non_empty(provider));
 }
 
-/// 设置当前 request_id（每次 LLM 调用前）。
 pub fn set_current_request_id(id: String) {
-    if let Ok(mut current) = CURRENT_REQUEST_ID.write() {
-        *current = id;
-    }
+    update_legacy(|context| context.request_id = non_empty(id));
 }
 
-/// 设置当前 role（主 agent 为 "default"，sub-agent 为其 role 名）。
 pub fn set_current_role(role: String) {
-    if let Ok(mut current) = CURRENT_ROLE.write() {
-        *current = role;
-    }
+    update_legacy(|context| context.role = non_empty(role));
 }
 
 pub fn current_model() -> Option<String> {
-    CURRENT_MODEL
-        .read()
-        .ok()
-        .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) })
+    legacy_snapshot().model
 }
 
 pub fn boot_ts() -> Option<&'static str> {
@@ -125,25 +141,37 @@ pub fn app_version() -> Option<&'static str> {
 }
 
 pub fn current_provider() -> Option<String> {
-    CURRENT_PROVIDER
-        .read()
-        .ok()
-        .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) })
+    legacy_snapshot().provider
 }
 
 pub fn current_request_id() -> Option<String> {
-    CURRENT_REQUEST_ID
-        .read()
-        .ok()
-        .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) })
+    legacy_snapshot().request_id
 }
 
 pub fn current_role() -> Option<String> {
-    CURRENT_ROLE
-        .read()
-        .ok()
-        .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) })
+    legacy_snapshot().role
 }
+
+pub(super) fn legacy_snapshot() -> LogContext {
+    LEGACY_EXECUTION_CONTEXT
+        .read()
+        .map(|context| context.clone())
+        .unwrap_or_default()
+}
+
+fn update_legacy(update: impl FnOnce(&mut LogContext)) {
+    if let Ok(mut context) = LEGACY_EXECUTION_CONTEXT.write() {
+        update(&mut context);
+    }
+}
+
+fn non_empty(value: String) -> Option<String> {
+    (!value.is_empty()).then_some(value)
+}
+
+#[cfg(test)]
+#[path = "context_scope_tests.rs"]
+mod scope_tests;
 
 #[cfg(test)]
 mod tests {
@@ -174,10 +202,10 @@ mod tests {
     }
 
     #[test]
-    fn turn_zero_is_none() {
+    fn turn_zero_is_valid_value() {
         let _guard = TEST_LOCK.lock().unwrap();
         set_current_turn(0);
-        assert!(current_turn().is_none());
+        assert_eq!(current_turn(), Some(0));
     }
 
     #[test]

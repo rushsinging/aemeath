@@ -5,8 +5,9 @@
 //!
 //! 写入格式为 **compact JSON Lines**（一行一个 JSON 对象，无 pretty-print 缩进）。
 
-use super::context;
+use super::context as log_context;
 use super::lifecycle::timestamp_rfc3339;
+use crate::domain::LogContext;
 use log::Record;
 use serde_json::{json, Value};
 
@@ -33,23 +34,38 @@ pub fn format_diag_json_line(record: &Record) -> String {
 /// 拆分目的是让测试不必构造 `log::Record`（`Record::builder().args(format_args!(...))`
 /// 会产生借用临时值的错误）。
 pub fn format_diag_json_line_from_parts(level: &str, target: &str, msg: &str) -> String {
+    let resolved = log_context::scoped_context().unwrap_or_else(legacy_context_snapshot);
+    format_diag_json_line_with_context(level, target, msg, &resolved)
+}
+
+/// 使用调用方显式提供的不可变 context 格式化，供同步线程安全传播。
+pub(crate) fn format_diag_json_line_with_context(
+    level: &str,
+    target: &str,
+    msg: &str,
+    context_snapshot: &LogContext,
+) -> String {
     let line = json!({
         "ts": timestamp_local_rfc3339(),
-        "boot_ts": context::boot_ts(),
-        "pid": context::pid(),
-        "ver": context::app_version(),
-        "session": Value::String(context::session_id().unwrap_or("-").to_string()),
-        "chat": Value::String(context::current_chat_id().as_deref().unwrap_or("-").to_string()),
-        "turn": context::current_turn(),
-        "request_id": context::current_request_id(),
-        "model": Value::String(context::current_model().as_deref().unwrap_or("-").to_string()),
-        "provider": context::current_provider(),
-        "role": context::current_role(),
+        "boot_ts": log_context::boot_ts(),
+        "pid": log_context::pid(),
+        "ver": log_context::app_version(),
+        "session": Value::String(context_snapshot.session_id.as_deref().unwrap_or("-").to_string()),
+        "chat": Value::String(context_snapshot.chat_id.as_deref().unwrap_or("-").to_string()),
+        "turn": context_snapshot.turn,
+        "request_id": context_snapshot.request_id,
+        "model": Value::String(context_snapshot.model.as_deref().unwrap_or("-").to_string()),
+        "provider": context_snapshot.provider,
+        "role": context_snapshot.role,
         "level": level,
         "target": target,
         "msg": msg,
     });
     serde_json::to_string(&line).unwrap_or_default()
+}
+
+fn legacy_context_snapshot() -> LogContext {
+    log_context::legacy_snapshot()
 }
 
 #[cfg(test)]
@@ -84,6 +100,42 @@ mod tests {
         assert_eq!(obj["level"], "INFO");
         assert_eq!(obj["target"], "cli::render");
         assert_eq!(obj["msg"], "frame");
+    }
+
+    #[test]
+    fn explicit_context_formats_one_complete_snapshot() {
+        let context = crate::domain::LogContext {
+            session_id: Some("session-scope".to_string()),
+            chat_id: Some("chat-scope".to_string()),
+            turn: Some(0),
+            request_id: Some("request-scope".to_string()),
+            model: Some("model-scope".to_string()),
+            provider: Some("provider-scope".to_string()),
+            role: Some("role-scope".to_string()),
+        };
+
+        let line =
+            format_diag_json_line_with_context("INFO", "aemeath:shared", "snapshot", &context);
+        let value: Value = serde_json::from_str(&line).expect("valid json");
+        assert_eq!(value["session"], "session-scope");
+        assert_eq!(value["chat"], "chat-scope");
+        assert_eq!(value["turn"], 0);
+        assert_eq!(value["request_id"], "request-scope");
+        assert_eq!(value["model"], "model-scope");
+        assert_eq!(value["provider"], "provider-scope");
+        assert_eq!(value["role"], "role-scope");
+    }
+
+    #[tokio::test]
+    async fn empty_scoped_context_does_not_fall_back_to_legacy_values() {
+        log_context::set_current_role("legacy-role".to_string());
+
+        let line = log_context::instrument(crate::domain::LogContext::default(), async {
+            format_diag_json_line_from_parts("INFO", "aemeath:shared", "empty-scope")
+        })
+        .await;
+        let value: Value = serde_json::from_str(&line).expect("valid json");
+        assert_eq!(value["role"], Value::Null);
     }
 
     #[test]

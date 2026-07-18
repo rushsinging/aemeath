@@ -520,10 +520,10 @@ pub(crate) fn project_hook_event(event: RuntimeHookEvent) -> HookEventView {
 }
 
 pub(crate) fn project_agent_progress_event(
-    event: share::tool::AgentProgressEvent,
+    event: tools::AgentProgressEvent,
 ) -> AgentProgressEventView {
     let kind = match event.kind {
-        share::tool::AgentProgressKind::ToolCalls { calls } => AgentProgressKindView::ToolCalls {
+        tools::AgentProgressKind::ToolCalls { calls } => AgentProgressKindView::ToolCalls {
             calls: calls
                 .into_iter()
                 .map(|call| AgentToolCallProgressView {
@@ -533,11 +533,11 @@ pub(crate) fn project_agent_progress_event(
                 })
                 .collect(),
         },
-        share::tool::AgentProgressKind::ToolOutput { tool_name, text } => {
+        tools::AgentProgressKind::ToolOutput { tool_name, text } => {
             AgentProgressKindView::ToolOutput { tool_name, text }
         }
-        share::tool::AgentProgressKind::Message { text } => AgentProgressKindView::Message { text },
-        share::tool::AgentProgressKind::Started { role, model } => {
+        tools::AgentProgressKind::Message { text } => AgentProgressKindView::Message { text },
+        tools::AgentProgressKind::Started { role, model } => {
             AgentProgressKindView::Started { role, model }
         }
     };

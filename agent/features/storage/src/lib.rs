@@ -16,12 +16,16 @@ pub mod api {
         DatasetCommitVisibility, DatasetKey, DatasetManifest, DatasetMember, DatasetRead,
         DatasetReadOutcome, DatasetRevision, DeleteOptions, DeleteOutcome, Durability, Generation,
         PreviousPolicy, PromoteOutcome, QuarantineOutcome, QuarantineReason, QuarantineReceipt,
-        ReadOutcome, SafePathSegment, StorageError, StorageErrorKind, StorageKey, StorageNamespace,
-        TransactionScope, WriteOptions, WriteReceipt,
+        ReadOutcome, SafeOpenOptions, SafePathSegment, SafeStorageDir, SafeStorageEntry,
+        SafeStorageFileType, SafeStorageRoot, StorageError, StorageErrorKind, StorageKey,
+        StorageNamespace, TransactionScope, WriteOptions, WriteReceipt,
     };
 }
 
-pub use adapters::{FileSystemBlobAdapter, FileSystemDatasetAdapter};
+pub use adapters::{
+    FileSystemBlobAdapter, FileSystemDatasetAdapter, SafeOpenOptions, SafeStorageDir,
+    SafeStorageEntry, SafeStorageFileType, SafeStorageRoot,
+};
 pub use domain::{
     decide_blob_recovery, decide_orphan_previous, BlobRead, CommitWarning, CorruptTransactionError,
     CorruptionReason, DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey, DatasetManifest,

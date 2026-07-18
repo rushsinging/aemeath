@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 use sdk::SdkError;
 
 use crate::adapters::runtime::LlmClientAdapter;
-use crate::application::config_app_service::ConfigAppService;
 use crate::application::prompt::build::{build_system_prompt_parts, PromptContext};
 use crate::application::startup::{
     self as bootstrap, apply_config_permission_mode, build_agent_runner, build_hook_runner,
@@ -11,14 +10,13 @@ use crate::application::startup::{
     resolve_model_runtime_settings, spawn_mcp_connect,
 };
 use crate::application::startup::{set_session_id, start_session, ChatBootstrapArgs};
-use crate::ports::config::ConfigReader;
 use crate::ports::legacy::ChatRuntimeContext;
 use crate::ports::legacy::ProviderInfoPort;
 use context::skill::{load_all_skills, Skill};
 use provider::SystemBlock;
 use storage::TaskStore;
-use tools::api as tools_crate;
-use tools::api::ToolRegistry;
+use tools as tools_crate;
+use tools::ToolRegistry;
 
 use super::{AgentClientImpl, RuntimeHandle};
 use crate::LOG_TARGET;
@@ -32,6 +30,9 @@ use crate::LOG_TARGET;
 pub async fn from_args_with_workspace(
     mut args: ChatBootstrapArgs,
     workspace: project::WorkspaceViews,
+    config_reader: Arc<dyn config::ConfigReader>,
+    config_query: Arc<dyn config::ConfigQuery>,
+    config_writer: Arc<dyn config::ConfigWriter>,
     task_access: Arc<dyn task::TaskAccess>,
     session_tasks: Arc<dyn context::LegacyTaskCapture>,
 ) -> Result<AgentClientImpl, SdkError> {
@@ -45,10 +46,8 @@ pub async fn from_args_with_workspace(
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    // 3. 加载配置
-    let svc = ConfigAppService::new(Some(&cwd));
-    svc.load().await.ok();
-    let snapshot = svc.snapshot().await;
+    // 3. 使用 Composition 已加载的唯一 committed 配置。
+    let snapshot = config_reader.committed_snapshot();
 
     // 4. 日志初始化
     init_logging(snapshot.logging());
@@ -250,6 +249,9 @@ pub async fn from_args_with_workspace(
         frozen_chats: Arc::new(Mutex::new(Vec::new())),
         active_summary: Arc::new(Mutex::new(None)),
         workspace,
+        config_reader,
+        config_query,
+        config_writer,
         event_sink_factory: Arc::new(|tx| {
             crate::application::chat::ChatEventSinkHandle::new(
                 crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
@@ -376,9 +378,15 @@ mod tests {
             context_size: 8192,
             ..Default::default()
         };
+        let config = config::wire_project_config(&root)
+            .await
+            .expect("wire config");
         let client = from_args_with_workspace(
             args,
             workspace,
+            config.reader(),
+            config.query(),
+            config.writer(),
             Arc::new(task::TaskStore::new()),
             Arc::new(NoOpTaskCapture),
         )
