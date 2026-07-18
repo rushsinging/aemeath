@@ -1,0 +1,509 @@
+{
+  "version": 1,
+  "budgets": {
+    "repository_migration_debt": 7,
+    "modules": {
+      "runtime": 5,
+      "storage": 1,
+      "tui": 1
+    }
+  },
+  "entries": [
+    {
+      "id": "policy.cargo.capability-dependency-matrix",
+      "guard": "check-cargo-dependency-graph.sh",
+      "module": "repository",
+      "scope": {
+        "kind": "symbol",
+        "value": "business_allow"
+      },
+      "classification": "target_capability_policy",
+      "owner": "architecture",
+      "reason": "Cargo workspace edges are the machine-enforced capability dependency policy",
+      "tracking_issue": 1022,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent capability dependency policy",
+      "status": "active"
+    },
+    {
+      "id": "policy.composition.unique-adapter-root",
+      "guard": "check-forbidden-imports.sh",
+      "module": "composition",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/composition/src"
+      },
+      "classification": "target_capability_policy",
+      "owner": "composition",
+      "reason": "Composition is the unique production location allowed to assemble shared adapters",
+      "tracking_issue": 1002,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only if the deployable production root changes",
+      "status": "active"
+    },
+    {
+      "id": "policy.hexagonal.current-layer-matrix",
+      "guard": "check-cola-layer-purity.sh",
+      "module": "repository",
+      "scope": {
+        "kind": "symbol",
+        "value": "FORBIDDEN_LAYER_DEPS"
+      },
+      "classification": "target_hexagonal_policy",
+      "owner": "architecture",
+      "reason": "Current Hexagonal dependency directions remain enforced until the capability-first guard replaces legacy COLA rules",
+      "tracking_issue": 1022,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retire together with check-cola-layer-purity.sh after #1022 replacement evidence",
+      "status": "active"
+    },
+    {
+      "id": "migration.runtime.application-accessors-to-adapters",
+      "guard": "check-cola-layer-purity.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path",
+        "value": "agent/features/runtime/src/application/client/accessors.rs"
+      },
+      "classification": "migration_exception",
+      "owner": "runtime",
+      "reason": "Runtime application still reaches adapter-owned client accessors during production cutover",
+      "tracking_issue": 879,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove when RuntimeResources and old MainRunPort production paths are cut",
+      "status": "active"
+    },
+    {
+      "id": "migration.runtime.application-from-args-to-adapters",
+      "guard": "check-cola-layer-purity.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path",
+        "value": "agent/features/runtime/src/application/client/from_args.rs"
+      },
+      "classification": "migration_exception",
+      "owner": "runtime",
+      "reason": "Runtime bootstrap remains in application while adapter wiring is moved to Composition",
+      "tracking_issue": 879,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove when production bootstrap is available only through Composition",
+      "status": "active"
+    },
+    {
+      "id": "migration.runtime.input-buffer-port-to-application",
+      "guard": "check-cola-layer-purity.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path",
+        "value": "agent/features/runtime/src/ports/input_buffer.rs"
+      },
+      "classification": "migration_exception",
+      "owner": "runtime",
+      "reason": "The transitional input buffer port still references application types",
+      "tracking_issue": 879,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove when the old MainRunPort and transitional input path are retired",
+      "status": "active"
+    },
+    {
+      "id": "migration.runtime.legacy-port-to-application",
+      "guard": "check-cola-layer-purity.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path",
+        "value": "agent/features/runtime/src/ports/legacy.rs"
+      },
+      "classification": "migration_exception",
+      "owner": "runtime",
+      "reason": "Legacy Runtime ports still reference application types during cutover",
+      "tracking_issue": 879,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "delete the legacy port module after production consumers switch",
+      "status": "active"
+    },
+    {
+      "id": "migration.runtime.shared-adapter-bridge",
+      "guard": "check-forbidden-imports.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path",
+        "value": "agent/features/runtime/src/adapters/runtime.rs"
+      },
+      "classification": "migration_exception",
+      "owner": "runtime",
+      "reason": "Runtime temporarily owns impl blocks adapting shared adapter newtypes to Runtime-local ports",
+      "tracking_issue": 879,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove after supplier adapters implement consumer-owned ports and Composition wires them",
+      "status": "active"
+    },
+    {
+      "id": "migration.storage.transitional-business-modules",
+      "guard": "check-cola-layer-purity.sh",
+      "module": "storage",
+      "scope": {
+        "kind": "symbol",
+        "value": "STORAGE_TRANSITIONAL_MODULES"
+      },
+      "classification": "migration_exception",
+      "owner": "storage",
+      "reason": "memory_store and task_store are transitional business modules and are not Storage Target structure",
+      "tracking_issue": 883,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove after Task and Memory business models migrate out of Storage",
+      "status": "active"
+    },
+    {
+      "id": "migration.tui.tea-slash-dispatch",
+      "guard": "check-tui-tea-purity.sh",
+      "module": "tui",
+      "scope": {
+        "kind": "path",
+        "value": "apps/cli/src/tui/app/slash.rs"
+      },
+      "classification": "migration_exception",
+      "owner": "tui",
+      "reason": "Slash dispatch still performs asynchronous request-response work instead of Effect round-trips",
+      "tracking_issue": 947,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove when slash I/O is driven through Effect and authoritative events",
+      "status": "active"
+    },
+    {
+      "id": "scope.tui.arch.inline-exclusions",
+      "guard": "check-architecture-guards.sh",
+      "module": "tui",
+      "scope": {
+        "kind": "pattern",
+        "value": "inline grep exclusions in run_tui_single_source_structure_guard"
+      },
+      "classification": "scope_exclusion",
+      "owner": "tui",
+      "reason": "Tests, projection owners and comments are outside each narrowly stated TUI invariant",
+      "tracking_issue": 1021,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "split into narrower registered scopes when the inline TUI guard is decomposed",
+      "status": "active"
+    },
+    {
+      "id": "scope.config.comments",
+      "guard": "check-config-env-guard.sh",
+      "module": "config",
+      "scope": {
+        "kind": "pattern",
+        "value": "comment lines"
+      },
+      "classification": "scope_exclusion",
+      "owner": "config",
+      "reason": "Comment examples are not runtime environment reads",
+      "tracking_issue": 1021,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "permanent while the textual scanner reads source lines",
+      "status": "active"
+    },
+    {
+      "id": "scope.config.reader-tests-only",
+      "guard": "check-config-reader-injection.sh",
+      "module": "config",
+      "scope": {
+        "kind": "pattern",
+        "value": "test paths and file-tail cfg(test) inline modules"
+      },
+      "classification": "scope_exclusion",
+      "owner": "config",
+      "reason": "Test-only ConfigAppService construction is outside the production construction rule",
+      "tracking_issue": 949,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "permanent while tests require direct fixture construction",
+      "status": "active"
+    },
+    {
+      "id": "scope.config.workflow-comments-and-compat-test",
+      "guard": "check-config-workflow-boundary.sh",
+      "module": "config",
+      "scope": {
+        "kind": "pattern",
+        "value": "comments and retired compatibility test"
+      },
+      "classification": "scope_exclusion",
+      "owner": "config",
+      "reason": "Comments and the explicit retired-field compatibility test are not active Config ownership",
+      "tracking_issue": 1021,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove compatibility suppression with the retired compatibility fixture",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.owned-targets",
+      "guard": "check-log-target-prefix.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "registered aemeath targets"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "The guard reports only log targets outside the registered aemeath namespace",
+      "tracking_issue": 936,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace when the shell guard directly consumes TargetCatalog",
+      "status": "active"
+    },
+    {
+      "id": "scope.provider.error-log-self-reference",
+      "guard": "check-provider-http-attempt.sh",
+      "module": "provider",
+      "scope": {
+        "kind": "path",
+        "value": "agent/features/provider/src/adapters/error_log.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "provider",
+      "reason": "The error logging owner is removed only for the no-self-reference sub-check",
+      "tracking_issue": 1033,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "permanent while the dedicated no-self-reference check exists",
+      "status": "active"
+    },
+    {
+      "id": "scope.provider.invocation-tests",
+      "guard": "check-provider-invocation-scope.sh",
+      "module": "provider",
+      "scope": {
+        "kind": "pattern",
+        "value": "tests directory"
+      },
+      "classification": "scope_exclusion",
+      "owner": "provider",
+      "reason": "The invocation production ownership check excludes test fixtures",
+      "tracking_issue": 1021,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "permanent while tests use local fixtures",
+      "status": "active"
+    },
+    {
+      "id": "scope.tui.render-tests-and-display-bridge",
+      "guard": "check-render-pure.sh",
+      "module": "tui",
+      "scope": {
+        "kind": "pattern",
+        "value": "render tests and display/render.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "tui",
+      "reason": "Test files and the registered display projection owner are outside the direct-model-read rule",
+      "tracking_issue": 947,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove display bridge exclusion when Render bypass retirement completes",
+      "status": "active"
+    },
+    {
+      "id": "scope.runtime.shared-loop-tests",
+      "guard": "check-shared-run-loop.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "pattern",
+        "value": "*_tests.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "runtime",
+      "reason": "The production shared-run-loop ownership rule excludes test fixtures",
+      "tracking_issue": 1021,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "permanent while test fixtures model run-loop symbols",
+      "status": "active"
+    },
+    {
+      "id": "false-positive.tui.running-indicator-condition",
+      "guard": "check-tui-output-legacy-guards.sh",
+      "module": "tui",
+      "scope": {
+        "kind": "pattern",
+        "value": "LineStyle::ToolCallRunning"
+      },
+      "classification": "false_positive_suppression",
+      "owner": "tui",
+      "reason": "The single running-indicator write is the guarded intended rendering site",
+      "tracking_issue": 1021,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove with the legacy running indicator rule",
+      "status": "active"
+    },
+    {
+      "id": "scope.tui.tea-runtime-files",
+      "guard": "check-tui-tea-purity.sh",
+      "module": "tui",
+      "scope": {
+        "kind": "pattern",
+        "value": "mod.rs,run_loop.rs,runtime.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "tui",
+      "reason": "TEA purity scans update/model projections, not the registered runtime and Effect executor owners",
+      "tracking_issue": 947,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove entries when the runtime owners move or the guard scope changes",
+      "status": "active"
+    },
+    {
+      "id": "scope.tui.tea-test-files",
+      "guard": "check-tui-tea-purity.sh",
+      "module": "tui",
+      "scope": {
+        "kind": "pattern",
+        "value": "slash_tests.rs,slash_effect_tests.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "tui",
+      "reason": "Test mocks are outside production TEA purity",
+      "tracking_issue": 1021,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while these files are test-only",
+      "status": "active"
+    },
+    {
+      "id": "false-positive.tui.tea-inline-allow",
+      "guard": "check-tui-tea-purity.sh",
+      "module": "tui",
+      "scope": {
+        "kind": "pattern",
+        "value": "allow tea_side_effect"
+      },
+      "classification": "false_positive_suppression",
+      "owner": "tui",
+      "reason": "Line-local escape for a proven scanner false positive",
+      "tracking_issue": 1021,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove when no source line uses the marker",
+      "status": "active"
+    },
+    {
+      "id": "scope.tui.safe-text-owners",
+      "guard": "check-unsafe-text-ops.sh",
+      "module": "tui",
+      "scope": {
+        "kind": "pattern",
+        "value": "safe_text.rs,text.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "tui",
+      "reason": "Safe text helper implementations are the owner of the operations prohibited to consumers",
+      "tracking_issue": 1021,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace if helper ownership changes",
+      "status": "active"
+    },
+    {
+      "id": "false-positive.tui.unsafe-text-inline-allow",
+      "guard": "check-unsafe-text-ops.sh",
+      "module": "tui",
+      "scope": {
+        "kind": "pattern",
+        "value": "allow unsafe_text_op"
+      },
+      "classification": "false_positive_suppression",
+      "owner": "tui",
+      "reason": "Line-local escape only for a proven non-string slice false positive",
+      "tracking_issue": 1021,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove when no source line uses the marker",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.registered-process-statics",
+      "guard": "check-logging-scope-context.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "STATIC_ALLOW"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Registered process metadata statics are explicit owners",
+      "tracking_issue": 937,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.scope-context-tests",
+      "guard": "check-logging-scope-context.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "*test*.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Test fixtures are outside production scope context ownership",
+      "tracking_issue": 937,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.settings-tests",
+      "guard": "check-logging-settings-injection.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "*test*.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Logging settings env scan excludes test fixtures",
+      "tracking_issue": 938,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.runtime-comments-tests",
+      "guard": "check-logging-settings-injection.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "runtime comments and tests"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Runtime logging wiring scan excludes comments and tests",
+      "tracking_issue": 938,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.bootstrap-tests",
+      "guard": "check-logging-settings-injection.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "bootstrap tests"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Unique production bootstrap count excludes test consumers",
+      "tracking_issue": 938,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
+    },
+    {
+      "id": "scope.logging.init-import-tests",
+      "guard": "check-logging-settings-injection.sh",
+      "module": "logging",
+      "scope": {
+        "kind": "pattern",
+        "value": "init import tests"
+      },
+      "classification": "scope_exclusion",
+      "owner": "logging",
+      "reason": "Unique UnifiedLogger production import excludes tests",
+      "tracking_issue": 938,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "status": "active"
+    }
+  ]
+}

@@ -12,11 +12,12 @@ pub mod domain;
 
 pub use adapters::paths;
 pub use domain::{
-    file_snapshot, hooks, legacy, logging, memory, models, permissions, skills, storage, tools, ui,
-    update,
+    audit, file_snapshot, hooks, legacy, logging, memory, models, permissions, skills, storage,
+    tools, ui, update,
 };
 
 // Re-exports for backward compatibility
+pub use audit::AuditConfig;
 pub use domain::config::{Config, GuidanceConfig, GuidanceReloadPolicy};
 pub use file_snapshot::{FileChange, FileChangeKind, FileSnapshot};
 pub use hooks::HooksConfig;

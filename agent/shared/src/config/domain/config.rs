@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::audit::AuditConfig;
 use crate::config::hooks::HooksConfig;
 use crate::config::legacy::{ApiConfig, ModelConfig};
 use crate::config::logging::LoggingConfig;
@@ -96,6 +97,10 @@ pub struct Config {
     #[serde(default)]
     pub skills: SkillsConfig,
 
+    /// Audit Usage pipeline configuration
+    #[serde(default)]
+    pub audit: AuditConfig,
+
     /// Storage configuration
     #[serde(default)]
     pub storage: StorageConfig,
@@ -138,6 +143,7 @@ impl Default for Config {
             ui: UiConfig::default(),
             permissions: PermissionConfig::default(),
             skills: SkillsConfig::default(),
+            audit: AuditConfig::default(),
             storage: StorageConfig::default(),
             hooks: HooksConfig::default(),
             memory: MemoryConfig::default(),

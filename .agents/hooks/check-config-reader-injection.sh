@@ -1,3 +1,4 @@
+# guard-registry:scope.config.reader-tests-only
 #!/usr/bin/env bash
 # Guard: ConfigAppService 只能由 Config crate 内部与 Composition 构造；Runtime/TUI/CLI 禁止 new。
 # 同时禁止 TUI/CLI 持有 Config-owned reader/query/writer/participant/watch 类型。

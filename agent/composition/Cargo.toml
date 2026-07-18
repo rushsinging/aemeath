@@ -10,6 +10,8 @@ tools = { path = "../features/tools" }
 provider = { path = "../features/provider" }
 project = { path = "../features/project" }
 update = { path = "../features/update" }
+audit = { path = "../features/audit" }
+storage = { path = "../features/storage" }
 context = { path = "../features/context" }
 task = { path = "../features/task" }
 share = { path = "../shared" }

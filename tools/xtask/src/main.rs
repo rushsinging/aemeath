@@ -59,6 +59,25 @@ fn main() -> Result<()> {
             if !report.passed { anyhow::bail!("首次测试失败，分类={}", report.classification); }
             Ok(())
         }
+        Some("guard-registry") => {
+            let action = args.next().unwrap_or_else(|| "check".to_owned());
+            let root = PathBuf::from(args.next().unwrap_or_else(|| ".".to_owned()));
+            match action.as_str() {
+                "check" => {
+                    let report = xtask::guard_registry::check_workspace(&root, None)?;
+                    print!("{}", report.render());
+                    Ok(())
+                }
+                "report" => {
+                    let output = args.next().map(PathBuf::from);
+                    let report =
+                        xtask::guard_registry::check_workspace(&root, output.as_deref())?;
+                    print!("{}", report.render());
+                    Ok(())
+                }
+                _ => anyhow::bail!("guard-registry 仅支持 check 或 report"),
+            }
+        }
         Some("source-guard") => {
             let root = PathBuf::from(args.next().unwrap_or_else(|| ".".to_owned()));
             let output = args.next().map(PathBuf::from);
@@ -73,7 +92,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         _ => anyhow::bail!(
-            "用法: cargo run -p xtask -- <coverage-summary <report.json> <root>|production-reachability [root]|source-guard [root] [public-surface-output]>"
+            "用法: cargo run -p xtask -- <coverage-summary <report.json> <root>|production-reachability [root]|guard-registry <check|report> [root] [output]|source-guard [root] [public-surface-output]>"
         ),
     }
 }
