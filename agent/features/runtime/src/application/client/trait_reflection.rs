@@ -279,6 +279,7 @@ mod tests {
             verbose: false,
             resume: None,
         };
+        let config = Arc::new(config::ConfigAppService::new(Some(&cwd)));
         let handle = super::super::accessors::RuntimeHandle {
             context,
             cwd,
@@ -302,6 +303,9 @@ mod tests {
             workspace: project::wire_production_workspace(std::env::temp_dir())
                 .expect("workspace 初始化成功")
                 .into_views(),
+            config_reader: config.clone(),
+            config_query: config.clone(),
+            config_writer: config,
             event_sink_factory: Arc::new(|_| panic!("测试不应构造 SDK event sink")),
             session_reminders: Arc::new(std::sync::RwLock::new(
                 share::memory::SessionReminders::new(),

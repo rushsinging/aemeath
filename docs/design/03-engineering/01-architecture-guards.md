@@ -58,7 +58,7 @@
 | 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` + 同步 `cancel_run(run_id)`；禁止恢复 `ChatInputEvent::Cancel` |
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
-| 24 | `check-config-reader-injection.sh` | 配置架构 | runtime 消费方不得直接 `ConfigAppService::new`（例外：from_args / trait_model / composition） |
+| 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
@@ -503,9 +503,9 @@
 
 | # | 规则 | 理由 |
 |---|---|---|
-| 21.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 与同步 `cancel_run(run_id)` | #567 后内容输入与结果回传走 `ChatInputEvent` + `ChatEvent`；#700 为即时打断增加唯一 out-of-band 例外，必须按 `RunId` 定位并同步触发 per-Run cancellation scope，禁止新增其它 RPC 或无标识会话级取消 |
+| 21.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只允许 `chat()`、同步 `cancel_run(run_id)` 与 Config control-plane 的 `config_view()` / `update_config()` | Chat data plane 仍走事件流；Config 查询/更新只交换 SDK 纯值 DTO，禁止把 Config service/reader/watch 暴露给交付层 |
 
-> 这是迁移期 **Current** 守卫事实，不是 Target API 上限。[#874](https://github.com/rushsinging/aemeath/issues/874) / [#878](https://github.com/rushsinging/aemeath/issues/878) 落地 Runtime-owned interaction identity 后，`AgentClient` **MUST** 增加 typed `reply_interaction` / `cancel_interaction` 命令；[#982](https://github.com/rushsinging/aemeath/issues/982) **MUST** 同步替换本守卫并用故意违规证明新的窄命令集合，旧守卫在替代证据齐备前 **MUST** 保持运行。
+> 该 allow set 仍是窄 façade；后续 interaction/run-control 扩容按对应 leaf 同步更新并提供故意违规证据。
 
 - **白名单**：各 check 内联有具体保留名单（如 19.3 允许 `pub(super) text:&...`、`pub(super) cursor:&...`，允许 `pub(super) focused` / `pending_images` / `content_width` 等投影字段）。
 
@@ -530,19 +530,11 @@
 ## 24. check-config-reader-injection.sh
 
 - **位置**：`.agents/hooks/check-config-reader-injection.sh`。
-- **功能**：runtime 消费方（`agent/features/runtime/src/`）不得直接调用 `ConfigAppService::new()`。配置应通过注入的 `Arc<dyn ConfigReader>` port 获取 `ConfigSnapshot`。
-- **守护**：DDD 依赖注入原则——`ConfigAppService` 是 Application Service，其构造（`new`）只应在 composition 装配根完成。runtime 消费方直接 new 会绕过依赖注入，导致配置来源不可追踪、测试不可 mock。
-- **检查方式**：`grep -rn "ConfigAppService::new" agent/features/runtime/src/ --include="*.rs"`，排除例外文件。
-- **例外**：
-
-| 路径 | 理由 |
-|---|---|
-| `agent/features/runtime/src/core/client/from_args.rs` | CLI 启动路径，暂未改造为注入模式 |
-| `agent/features/runtime/src/core/client/trait_model.rs` | CLI 启动路径（`AgentClientImpl` wiring），暂未改造为注入模式 |
-| `*_test*` / `tests/` | 测试代码豁免 |
-
-- **注**：`agent/composition/src/`（装配根）不在扫描范围内（守卫只扫 `runtime/src/`），天然放行。
-- **失败模式**：`❌ Config reader injection guard FAILED: runtime consumer directly new-ing ConfigAppService`
+- **功能**：禁止 Runtime/TUI/CLI 直接构造 `ConfigAppService`，并禁止 TUI/CLI 持有 ConfigReader/Query/Writer/participant/subscription/watch。
+- **守护**：Composition 构造唯一 Config wiring；Runtime 只持注入视图与 Main Run snapshot；交付层只见 SDK DTO。
+- **检查方式**：扫描 Runtime/TUI 的 `ConfigAppService::new` 及 TUI Config 契约符号。
+- **例外**：仅 `trait_reflection.rs` 的测试 fixture；生产路径零例外。
+- **失败模式**：`Config reader injection guard FAILED`，exit 2。
 
 ## 25. check-production-reachability.sh
 

@@ -15,7 +15,7 @@ import json
 import subprocess
 import sys
 
-FEATURE_CRATES = {"runtime", "project", "policy", "context", "memory", "provider", "tools", "storage", "task", "hook", "audit", "update", "workflow"}
+FEATURE_CRATES = {"runtime", "config", "project", "policy", "context", "memory", "provider", "tools", "storage", "task", "hook", "audit", "update", "workflow"}
 TOOLS_DEPENDENCY_BUDGET = {"share", "project", "storage", "task"}
 
 business_allow = {
@@ -23,7 +23,8 @@ business_allow = {
     "cli": {"composition", "sdk"},
     # Composition root may assemble runtime, shared adapters/ports, sdk, and feature gateways.
     "composition": FEATURE_CRATES | {"share", "sdk", "logging", "update"},
-    "runtime": {"project", "policy", "context", "provider", "tools", "storage", "task", "hook", "audit", "workflow", "share", "sdk", "logging"},
+    "runtime": {"config", "project", "policy", "context", "provider", "tools", "storage", "task", "hook", "audit", "workflow", "share", "sdk", "logging"},
+    "config": {"share"},
     # packages/global/* are shared infrastructure and may be consumed by share/sdk.
     "share": {"logging", "utils"},
     "project": {"share"},

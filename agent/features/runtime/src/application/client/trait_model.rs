@@ -1,8 +1,7 @@
 use sdk::{ModelSummary, SdkError};
 
 use super::accessors::AgentClientImpl;
-use crate::application::config_app_service::ConfigAppService;
-use crate::ports::config::ConfigReader;
+use config::ConfigReader;
 
 type Result<T> = std::result::Result<T, SdkError>;
 
@@ -13,14 +12,12 @@ type Result<T> = std::result::Result<T, SdkError>;
 /// 再构建 `LlmClient`。解析失败返回 `String` 错误信息。
 pub(crate) async fn build_llm_client_for_switch(
     selection: &str,
-    cwd: &std::path::Path,
+    reader: &dyn ConfigReader,
 ) -> std::result::Result<(provider::LlmClient, sdk::ModelSwitchResult), String> {
     use crate::application::startup::{
         build_llm_client, resolve_api_key, resolve_base_url, resolve_model_runtime_settings,
     };
-    let svc = ConfigAppService::new(Some(cwd));
-    svc.load().await?;
-    let snapshot = svc.snapshot().await;
+    let snapshot = reader.committed_snapshot();
 
     let runtime_model = snapshot
         .resolve_runtime_model(Some(selection), None)
@@ -71,9 +68,7 @@ pub(crate) async fn build_llm_client_for_switch(
 }
 
 pub(super) async fn list_models_impl(me: &AgentClientImpl) -> Result<Vec<ModelSummary>> {
-    let svc = ConfigAppService::new(Some(&me.inner.cwd));
-    svc.load().await.map_err(SdkError::Init)?;
-    let snapshot = svc.snapshot().await;
+    let snapshot = me.inner.config_reader.committed_snapshot();
     Ok(snapshot
         .list_models()
         .into_iter()
@@ -85,4 +80,63 @@ pub(super) async fn list_models_impl(me: &AgentClientImpl) -> Result<Vec<ModelSu
             max_tokens: model.max_tokens,
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use share::config::domain::snapshot::ConfigSnapshot;
+    use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
+    use share::config::Config;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingReader {
+        reads: AtomicUsize,
+        snapshot: ConfigSnapshot,
+    }
+
+    impl ConfigReader for CountingReader {
+        fn committed_snapshot(&self) -> ConfigSnapshot {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            self.snapshot.clone()
+        }
+
+        fn subscribe_committed(&self) -> tokio::sync::watch::Receiver<ConfigSnapshot> {
+            tokio::sync::watch::channel(self.snapshot.clone()).1
+        }
+    }
+
+    fn reader() -> CountingReader {
+        let mut config = Config::default();
+        config.models.default = "local/test-model".into();
+        config.models.providers.insert(
+            "local".into(),
+            ProviderModelsConfig {
+                driver: "openai".into(),
+                api_key: "test-key".into(),
+                models: vec![ModelEntryConfig {
+                    id: "test-model".into(),
+                    name: "Test Model".into(),
+                    context_window: 8192,
+                    max_tokens: 1024,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        );
+        CountingReader {
+            reads: AtomicUsize::new(0),
+            snapshot: ConfigSnapshot::new(config),
+        }
+    }
+
+    #[tokio::test]
+    async fn model_switch_reads_injected_committed_snapshot_once() {
+        let reader = reader();
+        let (_, result) = build_llm_client_for_switch("local/test-model", &reader)
+            .await
+            .unwrap();
+        assert_eq!(result.display_name, "local/Test Model");
+        assert_eq!(reader.reads.load(Ordering::SeqCst), 1);
+    }
 }

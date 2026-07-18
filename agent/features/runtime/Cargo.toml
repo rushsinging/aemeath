@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 share = { path = "../../shared" }
+config = { path = "../config" }
 provider = { path = "../provider" }
 tools = { path = "../tools" }
 project = { path = "../project" }

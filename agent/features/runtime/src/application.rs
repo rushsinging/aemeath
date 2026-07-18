@@ -3,7 +3,6 @@ pub(crate) mod active_run;
 pub mod agent;
 pub mod chat;
 pub mod client;
-pub mod config_app_service;
 pub mod context_coordination;
 pub mod cost;
 pub mod interaction;

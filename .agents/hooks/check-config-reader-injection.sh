@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Guard: runtime 消费方不得直接 ConfigAppService::new（应通过注入的 Arc<dyn ConfigReader>）
-#
-# 例外：
-#   - from_args.rs / trait_model.rs（CLI 启动路径，暂未改造注入）
-#   - 测试文件（_test / tests）
+# Guard: ConfigAppService 只能由 Config crate 内部与 Composition 构造；Runtime/TUI/CLI 禁止 new。
+# 同时禁止 TUI/CLI 持有 Config-owned reader/query/writer/participant/watch 类型。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,17 +10,20 @@ if [ -n "${AEMEATH_PROJECT_DIR:-}" ] && [ ! -d "${AEMEATH_PROJECT_DIR}/.agents/h
 fi
 
 violations=$(grep -rn "ConfigAppService::new" \
-  "$ROOT/agent/features/runtime/src/" \
+  "$ROOT/agent/features/runtime/src/" "$ROOT/apps/cli/src/" \
   --include="*.rs" 2>/dev/null | \
-  grep -v "from_args.rs" | \
-  grep -v "trait_model.rs" | \
   grep -v "_test" | \
-  grep -v "tests" || true)
+  grep -v "tests" | \
+  grep -v "trait_reflection.rs" || true)
 
-if [ -n "$violations" ]; then
-  echo "❌ Config reader injection guard FAILED: runtime consumer directly new-ing ConfigAppService"
-  echo "$violations"
-  exit 1
+contract_leaks=$(grep -RInE '\b(ConfigReader|ConfigQuery|ConfigWriter|ProjectConfigParticipant|ConfigSubscription|watch::Receiver<ConfigSnapshot>)\b' \
+  "$ROOT/apps/cli/src" 2>/dev/null || true)
+
+if [ -n "$violations$contract_leaks" ]; then
+  echo "Config reader injection guard FAILED" >&2
+  [ -z "$violations" ] || echo "$violations" >&2
+  [ -z "$contract_leaks" ] || echo "$contract_leaks" >&2
+  exit 2
 fi
 
 echo "Config reader injection guard OK."
