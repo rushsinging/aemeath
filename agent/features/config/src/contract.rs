@@ -123,6 +123,7 @@ fn utils_key(stable_identity: &[u8]) -> String {
 #[derive(Debug, Clone)]
 pub struct PreparedProjectConfig {
     pub(crate) location: ProjectConfigLocation,
+    pub(crate) config: share::config::Config,
     pub(crate) snapshot: ConfigSnapshot,
 }
 
@@ -143,8 +144,9 @@ impl PreparedProjectConfig {
 #[derive(Debug, Clone)]
 pub struct PreparedConfigUpdate {
     pub(crate) project_key: String,
+    pub(crate) config: share::config::Config,
+    pub(crate) override_patch: share::config::domain::merge::ConfigPatch,
     pub(crate) snapshot: ConfigSnapshot,
-    pub(crate) bytes: Vec<u8>,
     pub(crate) fields: Vec<ConfigField>,
 }
 
@@ -175,6 +177,7 @@ pub enum ConfigCommitWarning {
 
 #[derive(Debug, Clone)]
 pub struct ReadyConfigCommit {
+    pub(crate) config: share::config::Config,
     pub(crate) snapshot: ConfigSnapshot,
     pub(crate) fields: Vec<ConfigField>,
     pub(crate) warning: Option<ConfigCommitWarning>,
@@ -193,7 +196,7 @@ impl ReadyConfigCommit {
 #[derive(Debug, Clone)]
 pub enum ConfigPersistOutcome {
     NotCommitted(ConfigPersistError),
-    Committed(ReadyConfigCommit),
+    Committed(Box<ReadyConfigCommit>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,7 +212,7 @@ pub trait ProjectConfigParticipant: Send + Sync {
         location: &ProjectConfigLocation,
     ) -> Result<PreparedProjectConfig, ConfigError>;
     fn snapshot(&self) -> ConfigSnapshot;
-    fn commit_project(&self, prepared: PreparedProjectConfig);
+    async fn commit_project(&self, prepared: PreparedProjectConfig);
     async fn prepare_update(
         &self,
         command: ConfigUpdate,
@@ -227,6 +230,12 @@ mod tests {
         assert_eq!(
             ProjectConfigLocation::try_from_project_identity(PathBuf::from("relative"), b"id"),
             Err(ProjectConfigLocationError::NotAbsolute)
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        assert_eq!(
+            ProjectConfigLocation::try_from_project_identity(root, b""),
+            Err(ProjectConfigLocationError::EmptyIdentity)
         );
     }
 
