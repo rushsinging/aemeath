@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use provider::LlmProviderGateway;
 use sdk::{AgentClient, MemoryConfigView, SdkError, SkillView};
 use tools::ToolCatalogGateway;
 
 use crate::runtime::{AgentArgs, AgentClientImpl};
+use logging::{LoggingOutputMode, LoggingSettings, UnifiedLogger};
+use share::config::domain::snapshot::ConfigSnapshot;
+use std::path::Path;
 
 pub type AgentClientHandle = Arc<dyn AgentClient>;
 
@@ -41,6 +44,61 @@ impl FeatureGateways {
     }
 }
 
+fn logging_settings_from_snapshot(
+    snapshot: &ConfigSnapshot,
+    default_logs_dir: &Path,
+    output_mode: LoggingOutputMode,
+) -> LoggingSettings {
+    LoggingSettings::new(
+        snapshot.logging_level().to_string(),
+        output_mode,
+        snapshot
+            .logs_dir()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| default_logs_dir.to_path_buf()),
+        snapshot.logging_max_bytes(),
+        snapshot.logging_max_backups(),
+        snapshot.logging_retention_days(),
+    )
+}
+
+static LOGGING_INIT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn init_logging(snapshot: &ConfigSnapshot) -> Result<(), String> {
+    let _guard = LOGGING_INIT_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| "日志初始化锁已损坏".to_string())?;
+    if UnifiedLogger::current().is_some() {
+        return Ok(());
+    }
+    let output_mode = if std::env::var("AEMEATH_LOG_STDERR")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        LoggingOutputMode::Stderr
+    } else {
+        LoggingOutputMode::File
+    };
+    let settings = logging_settings_from_snapshot(
+        snapshot,
+        &share::config::paths::global_logs_dir(),
+        output_mode,
+    );
+    UnifiedLogger::init(settings.clone()).map_err(|error| error.to_string())?;
+    logging::set_boot_ts(logging::timestamp_local_rfc3339());
+    logging::set_app_version(share::version().to_string());
+    log::info!(
+        target: crate::LOG_TARGET,
+        "logging initialized: filter={} mode={:?} logs_dir={} retention_policy_days={} (pending #939)",
+        settings.filter_directive(),
+        settings.output_mode(),
+        settings.logs_dir().display(),
+        settings.retention_days(),
+    );
+    Ok(())
+}
+
 pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, SdkError> {
     let gateways = FeatureGateways::wire_default();
     build_agent_client_with_gateways(args, gateways).await
@@ -61,6 +119,8 @@ async fn build_agent_client_with_gateways(
     let config = config::wire_project_config(&cwd)
         .await
         .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    init_logging(&config.reader().committed_snapshot())
+        .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config).await?;
     Ok(agent_client_from_runtime(runtime_client))
@@ -79,6 +139,8 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let config = config::wire_project_config(&cwd)
         .await
         .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    init_logging(&config.reader().committed_snapshot())
+        .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config).await?;
     let launch = runtime_client.tui_launch_context();
@@ -110,7 +172,7 @@ mod tests {
         InvocationScope, InvocationStream, LlmClient, LlmClientPool, LlmConfigOptions, LlmError,
         LlmProvider, LlmProviderGateway, ProviderError, SystemBlock,
     };
-    use share::config::ModelsConfig;
+    use share::config::{Config, ModelsConfig};
     use share::message::Message;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use task::TaskAccess;
@@ -264,5 +326,36 @@ mod tests {
         assert_eq!(provider.client_from_config_calls.load(Ordering::SeqCst), 1);
         assert_eq!(tools.new_registry_calls.load(Ordering::SeqCst), 1);
         assert_eq!(tools.register_all_tools_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn snapshot_mapping_preserves_all_logging_settings() {
+        let mut config = Config::default();
+        config.logging.level = "aemeath:tui=debug,aemeath:agent:runtime=trace".to_string();
+        config.logging.max_bytes = 42;
+        config.logging.max_backups = 3;
+        config.logging.retention_days = 14;
+        config.logging.logs_dir = Some("custom/logs".to_string());
+        let settings = logging_settings_from_snapshot(
+            &ConfigSnapshot::new(config),
+            Path::new("/fallback/logs"),
+            LoggingOutputMode::Stderr,
+        );
+
+        assert_eq!(settings.logs_dir(), PathBuf::from("custom/logs"));
+        assert_eq!(settings.max_bytes(), 42);
+        assert_eq!(settings.max_backups(), 3);
+        assert_eq!(settings.retention_days(), 14);
+        assert_eq!(settings.output_mode(), LoggingOutputMode::Stderr);
+    }
+
+    #[test]
+    fn snapshot_mapping_uses_default_logs_dir_when_config_is_absent() {
+        let settings = logging_settings_from_snapshot(
+            &ConfigSnapshot::new(Config::default()),
+            Path::new("/fallback/logs"),
+            LoggingOutputMode::File,
+        );
+        assert_eq!(settings.logs_dir(), PathBuf::from("/fallback/logs"));
     }
 }
