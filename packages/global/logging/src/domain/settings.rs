@@ -35,7 +35,7 @@ impl LoggingSettings {
             max_level,
             output_mode,
             logs_dir,
-            max_bytes,
+            max_bytes: max_bytes.max(1),
             max_backups,
             retention_days,
         }

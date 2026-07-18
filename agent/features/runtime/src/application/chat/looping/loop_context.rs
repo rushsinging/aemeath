@@ -76,6 +76,8 @@ where
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub hook_runner: hook::api::HookRunner,
     pub memory_config: share::config::MemoryConfig,
+    /// Memory domain port（MemoryTool 使用）。
+    pub memory: Arc<dyn memory::MemoryPort>,
     pub language: String,
     /// Workflow-owned Main adaptive reasoning capability。
     pub reasoning: Arc<dyn ReasoningPort>,

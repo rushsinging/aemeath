@@ -103,6 +103,7 @@ pub(super) async fn chat_impl(
                 agent_semaphore: inner.context.resources.agent_semaphore.clone(),
                 hook_runner: inner.context.resources.hook_runner.clone(),
                 memory_config: inner.context.resources.memory_config.clone(),
+                memory: inner.context.resources.memory.clone(),
                 language: inner.context.resources.language.clone(),
                 frozen_chats: inner.frozen_chats.clone(),
                 active_summary: inner.active_summary.clone(),

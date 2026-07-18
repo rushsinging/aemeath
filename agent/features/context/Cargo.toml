@@ -9,6 +9,7 @@ storage = { path = "../storage" }
 task = { path = "../task" }
 sdk = { path = "../../../packages/sdk" }
 provider = { path = "../provider" }
+memory = { path = "../memory" }
 log = "0.4"
 dirs = "6"
 serde = { workspace = true }

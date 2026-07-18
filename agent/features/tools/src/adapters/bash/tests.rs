@@ -24,6 +24,7 @@ async fn bash_allow_all_does_not_bypass_shell_injection_guard() {
             agent_runner: None,
             registry: None,
             memory_config: share::config::MemoryConfig::default(),
+            memory: std::sync::Arc::new(memory::NoOpMemory),
             lang: "en".to_string(),
             allow_all: true,
         },
@@ -60,6 +61,7 @@ async fn test_bash_persists_cd_for_subsequent_write_path_base() {
         resources: ToolResources {
             agent_runner: None,
             registry: None,
+            memory: std::sync::Arc::new(memory::NoOpMemory),
             memory_config: share::config::MemoryConfig::default(),
             lang: "en".to_string(),
             allow_all: true,
@@ -108,6 +110,7 @@ async fn test_bash_display_field_contains_stdout_not_message() {
         resources: ToolResources {
             agent_runner: None,
             registry: None,
+            memory: std::sync::Arc::new(memory::NoOpMemory),
             memory_config: share::config::MemoryConfig::default(),
             lang: "en".to_string(),
             allow_all: true,
@@ -165,6 +168,7 @@ async fn test_bash_result_cwd_reflects_cd() {
         resources: ToolResources {
             agent_runner: None,
             registry: None,
+            memory: std::sync::Arc::new(memory::NoOpMemory),
             memory_config: share::config::MemoryConfig::default(),
             lang: "en".to_string(),
             allow_all: true,
@@ -208,6 +212,7 @@ async fn test_bash_result_cwd_on_failed_command() {
         resources: ToolResources {
             agent_runner: None,
             registry: None,
+            memory: std::sync::Arc::new(memory::NoOpMemory),
             memory_config: share::config::MemoryConfig::default(),
             lang: "en".to_string(),
             allow_all: true,
@@ -246,6 +251,7 @@ async fn test_bash_result_cwd_on_empty_output() {
         resources: ToolResources {
             agent_runner: None,
             registry: None,
+            memory: std::sync::Arc::new(memory::NoOpMemory),
             memory_config: share::config::MemoryConfig::default(),
             lang: "en".to_string(),
             allow_all: true,
@@ -291,6 +297,7 @@ async fn test_bash_streams_stdout_via_progress_tx() {
         resources: ToolResources {
             agent_runner: None,
             registry: None,
+            memory: std::sync::Arc::new(memory::NoOpMemory),
             memory_config: share::config::MemoryConfig::default(),
             lang: "en".to_string(),
             allow_all: true,
@@ -382,6 +389,7 @@ async fn test_bash_no_progress_tx_still_works() {
         resources: ToolResources {
             agent_runner: None,
             registry: None,
+            memory: std::sync::Arc::new(memory::NoOpMemory),
             memory_config: share::config::MemoryConfig::default(),
             lang: "en".to_string(),
             allow_all: true,
@@ -530,6 +538,7 @@ async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
         resources: ToolResources {
             agent_runner: None,
             registry: None,
+            memory: std::sync::Arc::new(memory::NoOpMemory),
             memory_config: share::config::MemoryConfig::default(),
             lang: "en".to_string(),
             allow_all: true,

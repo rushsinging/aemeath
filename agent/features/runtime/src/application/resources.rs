@@ -34,6 +34,9 @@ pub struct RuntimeResources {
     pub tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Memory domain port（MemoryTool 使用）。
+    /// TODO(#897 active wiring): 当前默认 NoOpMemory，待 Composition 提供真实实现。
+    pub memory: Arc<dyn memory::MemoryPort>,
 
     // ── 配置（值类型，session 期间不变）──
     pub system_blocks: Vec<SystemBlock>,

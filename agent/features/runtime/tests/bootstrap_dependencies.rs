@@ -17,6 +17,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let dependencies = RuntimeBootstrapDependencies::new(
         workspace,
         RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
+        Arc::new(memory::NoOpMemory),
         provider::wire_provider(),
         tools::wire_tools(),
         Arc::new(policy::AllowAllPolicy),

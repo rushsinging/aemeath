@@ -180,5 +180,6 @@ Reflection 产出 → MemoryPort.write → 下轮 build_window → retrieve_for_
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-18 | #897 提供只读 MemoryRetrieveAdapter：验证 InjectionPriority、保持 hit 顺序、仅渲染 entry 允许字段并处理 Disabled；生产自动注入切线仍由 #984 完成 | #897 |
 | 2026-07-12 | 初稿：MemoryPort trait、注入管线、评分算法、top_for_inject 退役、semantic retrieval 演进、Reflection 集成 | #786 |
 | 2026-07-14 | 将 Memory project root 统一为 Project-owned ProjectIdentity，避免恢复后继续使用旧 cwd | [#972](https://github.com/rushsinging/aemeath/issues/972) |

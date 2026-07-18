@@ -20,6 +20,8 @@ pub struct ToolResources {
     /// Tool list provider（ToolSearch 动态查询用）。
     /// 主 chat loop 设置；子 agent context 为 `None`。
     pub registry: Option<Arc<dyn ToolListProvider>>,
+    /// Memory domain port（MemoryTool 使用）。
+    pub memory: Arc<dyn memory::MemoryPort>,
     /// Memory system configuration（MemoryTool 使用）。
     pub memory_config: MemoryConfig,
     /// Current language code (`"en"` / `"zh"`)，用于选择 i18n 文案。
