@@ -5,8 +5,8 @@ use crate::application::chat::looping::{ChatEventSink, RuntimeStreamEvent, Runti
 use hook::api::HookData;
 use sdk::{AskUserQuestionItem, OptionItem};
 use share::config::hooks::HookEvent;
-use share::tool::ToolOutcome;
 use std::path::Path;
+use tools::ToolOutcome;
 
 pub(crate) async fn ask_user<S>(
     context: &RuntimeTurnContext,

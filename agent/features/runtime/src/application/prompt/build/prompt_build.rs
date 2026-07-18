@@ -243,24 +243,19 @@ async fn load_agents_md_from_paths(
     scan_user_guidance(render_user_guidance(&files))
 }
 
-fn scan_user_guidance(mut user_guidance: String) -> String {
-    let warnings = policy::api::scan_content("AGENTS.md", &user_guidance);
-    if !warnings.is_empty() {
-        for w in &warnings {
-            log::warn!(target: LOG_TARGET,
-                "[Security] {} in {} line {}: {}",
-                w.threat_type,
-                w.filename,
-                w.line_number,
-                w.matched_text
-            );
-        }
-        if let Some(prefix) = policy::api::format_warnings(&warnings) {
-            user_guidance = format!("{}\n\n{}", prefix, user_guidance);
-        }
+fn scan_user_guidance(user_guidance: String) -> String {
+    let assessment = context::guidance::assess_guidance("AGENTS.md", &user_guidance);
+    for warning in &assessment.warnings {
+        log::warn!(target: LOG_TARGET,
+            "[Security] {} in {} line {}: {}",
+            warning.threat_type,
+            warning.filename,
+            warning.line_number,
+            warning.matched_text
+        );
     }
 
-    user_guidance
+    assessment.content
 }
 
 pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner, workspace_root: &Path) -> String {

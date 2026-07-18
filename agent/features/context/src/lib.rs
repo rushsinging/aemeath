@@ -24,8 +24,8 @@ pub mod compact {
 
 pub mod guidance {
     pub use crate::adapters::prompt::{
-        init_guidance_dir, resolve_guidance, resolve_guidance_async,
-        universal_execution_discipline, InstructionsLoadedHook,
+        assess_guidance, init_guidance_dir, resolve_guidance, resolve_guidance_async,
+        universal_execution_discipline, GuidanceAssessment, InstructionsLoadedHook,
     };
 }
 

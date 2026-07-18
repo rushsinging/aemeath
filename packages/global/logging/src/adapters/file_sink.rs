@@ -2,28 +2,13 @@
 //!
 //! ## 路由
 //!
-//! 唯一 logger 实现 `log::Log` trait，`log::log!` 宏按 `record.target()` 精确匹配 `aemeath:` 前缀路由：
-//!
-//! | target（最长前缀匹配）| 路由目标            |
-//! |------------------------|---------------------|
-//! | `aemeath:tui`          | `tui.log`           |
-//! | `aemeath:shared`       | `shared.log`        |
-//! | `aemeath:composition`  | `composition.log`   |
-//! | `aemeath:llm-api-error` | `llm-api-error.log` |
-//! | `aemeath:agent:provider` | `agent-provider.log` |
-//! | `aemeath:agent:runtime` | `agent-runtime.log` |
-//! | `aemeath:agent:tools`  | `agent-tools.log`   |
-//! | `aemeath:agent:prompt` | `agent-prompt.log`  |
-//! | `aemeath:agent:hook`   | `agent-hook.log`    |
-//! | `aemeath:agent:storage` | `agent-storage.log` |
-//! | `aemeath:agent:project` | `agent-project.log` |
-//! | `aemeath:agent:policy` | `agent-policy.log`  |
-//! | `aemeath:agent:audit`  | `agent-audit.log`   |
-//! | 其他                    | `aemeath.log`（硬兜底）|
+//! 唯一 logger 实现 `log::Log` trait，并只消费 domain TargetCatalog 执行最长合法前缀路由；
+//! target、owner、sink ID 与文件名不在 adapter 重复定义。未知 target 写入 `aemeath.log`
+//! 并通过 direct stderr 限频报告。
 //!
 //! ## 输出模式
 //!
-//! - `File`（默认）：按 target 路由到 14 个日志文件。
+//! - `File`（默认）：按 TargetCatalog 路由到独立日志文件。
 //! - `Stderr`：所有日志统一输出到 stderr（JSON Lines 格式，`-q` 调试模式）。
 //!
 //! ## 过滤
@@ -37,122 +22,31 @@
 
 use super::formatter::format_diag_json_line;
 use super::lifecycle::rotate_if_needed;
+use crate::domain::{DiagnosticSinkId, TargetCatalog};
 use log::{LevelFilter, Log, Metadata, Record};
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, stderr, BufWriter, Stderr, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+const UNKNOWN_TARGET_REPORT_LIMIT: usize = 3;
+static UNKNOWN_TARGET_REPORTS: AtomicUsize = AtomicUsize::new(0);
 
 /// 输出模式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
-    /// 按 target 路由到 14 个日志文件。
+    /// 按 catalog 路由到 17 个日志文件（含兜底）。
     File,
     /// 所有日志统一输出到 stderr（JSON Lines 格式）。
     Stderr,
 }
 
-/// 合法日志 target 白名单（13 个）。
-/// 所有 `log::xxx!` 调用的 target 值必须 ∈ 此列表或以此为前缀。
-pub const ALLOWED_TARGETS: &[&str] = &[
-    "aemeath:tui",
-    "aemeath:shared",
-    "aemeath:composition",
-    "aemeath:llm-api-error",
-    "aemeath:agent:provider",
-    "aemeath:agent:runtime",
-    "aemeath:agent:tools",
-    "aemeath:agent:prompt",
-    "aemeath:agent:hook",
-    "aemeath:agent:storage",
-    "aemeath:agent:project",
-    "aemeath:agent:policy",
-    "aemeath:agent:audit",
-];
-
-/// target → 日志文件名映射。最长前缀匹配。
-fn target_to_file(target: &str) -> &str {
-    for allowed in ALLOWED_TARGETS {
-        if target == *allowed || target.starts_with(&format!("{}:", allowed)) {
-            return match *allowed {
-                "aemeath:tui" => "tui.log",
-                "aemeath:shared" => "shared.log",
-                "aemeath:composition" => "composition.log",
-                "aemeath:llm-api-error" => "llm-api-error.log",
-                "aemeath:agent:provider" => "agent-provider.log",
-                "aemeath:agent:runtime" => "agent-runtime.log",
-                "aemeath:agent:tools" => "agent-tools.log",
-                "aemeath:agent:prompt" => "agent-prompt.log",
-                "aemeath:agent:hook" => "agent-hook.log",
-                "aemeath:agent:storage" => "agent-storage.log",
-                "aemeath:agent:project" => "agent-project.log",
-                "aemeath:agent:policy" => "agent-policy.log",
-                "aemeath:agent:audit" => "agent-audit.log",
-                _ => "aemeath.log",
-            };
-        }
-    }
-    "aemeath.log" // 硬兜底（守卫会拦截，不应到达）
-}
-
-/// 14 个 sink 的文件路径（含兜底，用于轮转时重开）
-#[derive(Debug, Clone)]
-struct SinkPaths {
-    aemeath: PathBuf,
-    tui: PathBuf,
-    shared: PathBuf,
-    composition: PathBuf,
-    llm_api_error: PathBuf,
-    provider: PathBuf,
-    runtime: PathBuf,
-    tools: PathBuf,
-    prompt: PathBuf,
-    hook: PathBuf,
-    storage: PathBuf,
-    project: PathBuf,
-    policy: PathBuf,
-    audit: PathBuf,
-}
-
-impl SinkPaths {
-    fn from_logs_dir(logs_dir: &Path) -> Self {
-        Self {
-            aemeath: logs_dir.join("aemeath.log"),
-            tui: logs_dir.join("tui.log"),
-            shared: logs_dir.join("shared.log"),
-            composition: logs_dir.join("composition.log"),
-            llm_api_error: logs_dir.join("llm-api-error.log"),
-            provider: logs_dir.join("agent-provider.log"),
-            runtime: logs_dir.join("agent-runtime.log"),
-            tools: logs_dir.join("agent-tools.log"),
-            prompt: logs_dir.join("agent-prompt.log"),
-            hook: logs_dir.join("agent-hook.log"),
-            storage: logs_dir.join("agent-storage.log"),
-            project: logs_dir.join("agent-project.log"),
-            policy: logs_dir.join("agent-policy.log"),
-            audit: logs_dir.join("agent-audit.log"),
-        }
-    }
-
-    /// 按文件名返回对应 sink 的路径引用。
-    fn path_for_file(&self, file_name: &str) -> &Path {
-        match file_name {
-            "tui.log" => &self.tui,
-            "shared.log" => &self.shared,
-            "composition.log" => &self.composition,
-            "llm-api-error.log" => &self.llm_api_error,
-            "agent-provider.log" => &self.provider,
-            "agent-runtime.log" => &self.runtime,
-            "agent-tools.log" => &self.tools,
-            "agent-prompt.log" => &self.prompt,
-            "agent-hook.log" => &self.hook,
-            "agent-storage.log" => &self.storage,
-            "agent-project.log" => &self.project,
-            "agent-policy.log" => &self.policy,
-            "agent-audit.log" => &self.audit,
-            _ => &self.aemeath,
-        }
-    }
+/// 按 catalog 建立的 sink 路径与 writer。
+struct SinkEntry {
+    path: PathBuf,
+    writer: Mutex<Option<BufWriter<File>>>,
 }
 
 /// 统一 logger。
@@ -160,23 +54,9 @@ impl SinkPaths {
 /// 通过 `Box::leak` 获得 `'static` 引用并 `log::set_logger`，
 /// `log::log!` 宏调用均能命中同一实例。
 pub struct UnifiedLogger {
-    aemeath: Mutex<Option<BufWriter<File>>>,
-    tui: Mutex<Option<BufWriter<File>>>,
-    shared: Mutex<Option<BufWriter<File>>>,
-    composition: Mutex<Option<BufWriter<File>>>,
-    llm_api_error: Mutex<Option<BufWriter<File>>>,
-    provider: Mutex<Option<BufWriter<File>>>,
-    runtime: Mutex<Option<BufWriter<File>>>,
-    tools: Mutex<Option<BufWriter<File>>>,
-    prompt: Mutex<Option<BufWriter<File>>>,
-    hook: Mutex<Option<BufWriter<File>>>,
-    storage: Mutex<Option<BufWriter<File>>>,
-    project: Mutex<Option<BufWriter<File>>>,
-    policy: Mutex<Option<BufWriter<File>>>,
-    audit: Mutex<Option<BufWriter<File>>>,
+    sinks: HashMap<DiagnosticSinkId, SinkEntry>,
     stderr: Mutex<BufWriter<Stderr>>,
     output_mode: OutputMode,
-    paths: SinkPaths,
     max_bytes: u64,
     max_backups: usize,
     filter: env_logger::Logger,
@@ -184,24 +64,6 @@ pub struct UnifiedLogger {
 
 /// 全局 logger 引用（`init` 后填充）。
 static LOGGER: OnceLock<&'static UnifiedLogger> = OnceLock::new();
-
-/// 所有 sink 的名称列表，用于迭代。
-const ALL_SINK_FILENAMES: &[&str] = &[
-    "aemeath.log",
-    "tui.log",
-    "shared.log",
-    "composition.log",
-    "llm-api-error.log",
-    "agent-provider.log",
-    "agent-runtime.log",
-    "agent-tools.log",
-    "agent-prompt.log",
-    "agent-hook.log",
-    "agent-storage.log",
-    "agent-project.log",
-    "agent-policy.log",
-    "agent-audit.log",
-];
 
 impl UnifiedLogger {
     /// 初始化全局 logger。该函数只能调用一次（`log::set_logger` 限制）。
@@ -220,37 +82,32 @@ impl UnifiedLogger {
         if output_mode == OutputMode::File {
             fs::create_dir_all(logs_dir)?;
         }
-        let paths = SinkPaths::from_logs_dir(logs_dir);
-        if output_mode == OutputMode::File {
-            for file_name in ALL_SINK_FILENAMES {
-                rotate_if_needed(paths.path_for_file(file_name), max_bytes, max_backups)?;
-            }
-        }
-        let open = |p: &Path| -> io::Result<Mutex<Option<BufWriter<File>>>> {
-            if output_mode == OutputMode::File {
-                Ok(Mutex::new(Some(open_buf(p)?)))
+        let open = |path: PathBuf| -> io::Result<SinkEntry> {
+            let writer = if output_mode == OutputMode::File {
+                rotate_if_needed(&path, max_bytes, max_backups)?;
+                Some(open_buf(&path)?)
             } else {
-                Ok(Mutex::new(None))
-            }
+                None
+            };
+            Ok(SinkEntry {
+                path,
+                writer: Mutex::new(writer),
+            })
         };
+        let mut sinks = HashMap::new();
+        let fallback = TargetCatalog::fallback();
+        insert_sink(
+            &mut sinks,
+            fallback.sink,
+            open(logs_dir.join(fallback.file_name))?,
+        )?;
+        for spec in TargetCatalog::specs() {
+            insert_sink(&mut sinks, spec.sink, open(logs_dir.join(spec.file_name))?)?;
+        }
         let logger = UnifiedLogger {
-            aemeath: open(&paths.aemeath)?,
-            tui: open(&paths.tui)?,
-            shared: open(&paths.shared)?,
-            composition: open(&paths.composition)?,
-            llm_api_error: open(&paths.llm_api_error)?,
-            provider: open(&paths.provider)?,
-            runtime: open(&paths.runtime)?,
-            tools: open(&paths.tools)?,
-            prompt: open(&paths.prompt)?,
-            hook: open(&paths.hook)?,
-            storage: open(&paths.storage)?,
-            project: open(&paths.project)?,
-            policy: open(&paths.policy)?,
-            audit: open(&paths.audit)?,
+            sinks,
             stderr: Mutex::new(BufWriter::new(stderr())),
             output_mode,
-            paths,
             max_bytes,
             max_backups,
             filter: build_filter(max_level),
@@ -271,22 +128,24 @@ impl UnifiedLogger {
     /// 按 target 查找对应的诊断 sink。
     /// 返回 `(sink, path)` 元组。
     fn route(&self, target: &str) -> (&Mutex<Option<BufWriter<File>>>, &Path) {
-        let file_name = target_to_file(target);
-        match file_name {
-            "tui.log" => (&self.tui, &self.paths.tui),
-            "shared.log" => (&self.shared, &self.paths.shared),
-            "composition.log" => (&self.composition, &self.paths.composition),
-            "llm-api-error.log" => (&self.llm_api_error, &self.paths.llm_api_error),
-            "agent-provider.log" => (&self.provider, &self.paths.provider),
-            "agent-runtime.log" => (&self.runtime, &self.paths.runtime),
-            "agent-tools.log" => (&self.tools, &self.paths.tools),
-            "agent-prompt.log" => (&self.prompt, &self.paths.prompt),
-            "agent-hook.log" => (&self.hook, &self.paths.hook),
-            "agent-storage.log" => (&self.storage, &self.paths.storage),
-            "agent-project.log" => (&self.project, &self.paths.project),
-            "agent-policy.log" => (&self.policy, &self.paths.policy),
-            "agent-audit.log" => (&self.audit, &self.paths.audit),
-            _ => (&self.aemeath, &self.paths.aemeath),
+        let spec = TargetCatalog::route(target).unwrap_or_else(|| {
+            self.report_unknown_target(target);
+            TargetCatalog::fallback()
+        });
+        let entry = self
+            .sinks
+            .get(&spec.sink)
+            .expect("catalog sink must be installed");
+        (&entry.writer, &entry.path)
+    }
+
+    fn report_unknown_target(&self, target: &str) {
+        if !should_report_unknown(&UNKNOWN_TARGET_REPORTS) {
+            return;
+        }
+        if let Ok(mut stderr) = self.stderr.lock() {
+            let _ = write_unknown_target_report(&mut *stderr, target);
+            let _ = stderr.flush();
         }
     }
 
@@ -348,9 +207,8 @@ impl Log for UnifiedLogger {
                 let _ = w.flush();
             }
         } else {
-            for file_name in ALL_SINK_FILENAMES {
-                let (sink, _) = self.route_sink_by_file(file_name);
-                if let Ok(mut guard) = sink.lock() {
+            for entry in self.sinks.values() {
+                if let Ok(mut guard) = entry.writer.lock() {
                     if let Some(w) = guard.as_mut() {
                         let _ = w.flush();
                     }
@@ -359,27 +217,29 @@ impl Log for UnifiedLogger {
         }
     }
 }
-
-impl UnifiedLogger {
-    /// 按文件名返回对应 sink（用于 flush 遍历）。
-    fn route_sink_by_file(&self, file_name: &str) -> (&Mutex<Option<BufWriter<File>>>, &Path) {
-        match file_name {
-            "tui.log" => (&self.tui, &self.paths.tui),
-            "shared.log" => (&self.shared, &self.paths.shared),
-            "composition.log" => (&self.composition, &self.paths.composition),
-            "llm-api-error.log" => (&self.llm_api_error, &self.paths.llm_api_error),
-            "agent-provider.log" => (&self.provider, &self.paths.provider),
-            "agent-runtime.log" => (&self.runtime, &self.paths.runtime),
-            "agent-tools.log" => (&self.tools, &self.paths.tools),
-            "agent-prompt.log" => (&self.prompt, &self.paths.prompt),
-            "agent-hook.log" => (&self.hook, &self.paths.hook),
-            "agent-storage.log" => (&self.storage, &self.paths.storage),
-            "agent-project.log" => (&self.project, &self.paths.project),
-            "agent-policy.log" => (&self.policy, &self.paths.policy),
-            "agent-audit.log" => (&self.audit, &self.paths.audit),
-            _ => (&self.aemeath, &self.paths.aemeath),
-        }
+fn insert_sink(
+    sinks: &mut HashMap<DiagnosticSinkId, SinkEntry>,
+    sink: DiagnosticSinkId,
+    entry: SinkEntry,
+) -> io::Result<()> {
+    if sinks.insert(sink, entry).is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("duplicate diagnostic sink id: {sink:?}"),
+        ));
     }
+    Ok(())
+}
+
+fn should_report_unknown(counter: &AtomicUsize) -> bool {
+    counter.fetch_add(1, Ordering::Relaxed) < UNKNOWN_TARGET_REPORT_LIMIT
+}
+
+fn write_unknown_target_report(writer: &mut dyn Write, target: &str) -> io::Result<()> {
+    writeln!(
+        writer,
+        "aemeath logging fallback: unknown target {target:?}; using aemeath.log"
+    )
 }
 
 fn build_filter(config_level: LevelFilter) -> env_logger::Logger {

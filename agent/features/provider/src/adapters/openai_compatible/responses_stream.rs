@@ -73,6 +73,7 @@ pub(crate) async fn parse_responses_stream(
 
         let line = buf.trim().to_string();
         buf.clear();
+        handler.on_raw_line(&line);
 
         if line.is_empty() {
             continue;

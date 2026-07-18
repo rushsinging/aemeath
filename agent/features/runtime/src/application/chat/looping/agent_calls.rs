@@ -8,11 +8,11 @@ use crate::application::chat::looping::{
 };
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
-use share::tool::ToolOutcome;
 use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tools::api::{ToolExecutionContext, ToolRegistry};
+use tools::ToolOutcome;
+use tools::{ToolExecutionContext, ToolRegistry};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_agent_calls<S>(
@@ -155,7 +155,7 @@ where
         call.provider_id,
     );
 
-    let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<share::tool::AgentProgressEvent>(32);
+    let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
     ag_ctx.progress_tx = Some(prog_tx);
     let call_id = call.id.clone();
     let ui_sink = sink.clone();
@@ -213,7 +213,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
     use tokio::sync::{mpsc, Notify};
-    use tools::api::{ToolResources, TypedTool, TypedToolResult};
+    use tools::{ToolResources, TypedTool, TypedToolResult};
 
     #[derive(Clone)]
     struct NoopSink;

@@ -40,7 +40,7 @@ if ! grep -q 'shared_run_loop(&mut run, &cancel, &mut self).await' "$SUB"; then
 fi
 
 if grep -RInE 'Arc<Mutex<CancellationToken>>|Mutex<CancellationToken>|max_turns' \
-  agent/features/runtime/src agent/features/tools/src/business/agent_tool.rs agent/shared/src/tool/types/agent.rs \
+  agent/features/runtime/src agent/features/tools/src/adapters/agent_tool.rs agent/features/tools/src/domain/types/agent.rs \
   --include='*.rs' --exclude='*_tests.rs'; then
   echo '{"decision":"block","reason":"禁止恢复 Session token 槽或 max_turns；使用 per-Run scope + timeout + StuckGuard。"}'
   exit 2

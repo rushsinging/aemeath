@@ -175,6 +175,10 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             raw_workspace_root: std::path::PathBuf::from(workspace_root),
             workspace,
         }),
+        sdk::ChatEvent::ConfigChanged { event } => UiEvent::SystemMessage(format!(
+            "[config changed] fields: {:?}",
+            event.changed_fields
+        )),
         sdk::ChatEvent::ConfigReloaded { changed_keys } => {
             let keys_str = changed_keys.join(", ");
             UiEvent::SystemMessage(format!("[config reloaded] changed: {}", keys_str))

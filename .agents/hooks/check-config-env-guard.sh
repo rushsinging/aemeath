@@ -22,7 +22,7 @@ WHITELIST_PATTERNS=(
   'agent/shared/src/config/adapters/env'
   'agent/shared/src/config/adapters/paths'
   'agent/shared/src/config/domain/driver_env'
-  'agent/features/runtime/src/application/config_app_service.rs'
+  'agent/features/config/src/application.rs'
   'packages/global/logging/'
   'build.rs'
 )

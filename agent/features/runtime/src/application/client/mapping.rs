@@ -1,10 +1,46 @@
 use sdk::{
-    MemoryConfigView, ReflectionConfigView, ReflectionMemorySuggestionView, ReflectionOutputView,
-    SessionSummary, SkillView, WorkspaceContextView, WorkspaceStackEntryView,
+    ConfigField, ConfigUpdateResult, ConfigView, MemoryConfigView, ReflectionConfigView,
+    ReflectionMemorySuggestionView, ReflectionOutputView, SessionSummary, SkillView,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
 
 use context::skill::Skill;
 use share::memory::{MemoryCategory, MemoryLayer};
+
+pub(crate) fn config_snapshot_to_sdk(
+    snapshot: &share::config::domain::snapshot::ConfigSnapshot,
+) -> ConfigView {
+    ConfigView {
+        model_name: snapshot.model_name().to_string(),
+        provider: snapshot.provider().map(str::to_string),
+        has_api_key: snapshot.api_key().is_some(),
+        permission_mode: match snapshot.permission_mode() {
+            share::config::PermissionModeConfig::Ask => "ask",
+            share::config::PermissionModeConfig::AutoRead => "auto_read",
+            share::config::PermissionModeConfig::AllowAll => "allow_all",
+        }
+        .to_string(),
+        markdown: snapshot.markdown(),
+        verbose: snapshot.verbose(),
+        context_size: snapshot.context_size(),
+        logging_level: snapshot.logging_level().to_string(),
+    }
+}
+
+pub(crate) fn config_change_to_sdk(change: config::ConfigChangeSet) -> ConfigUpdateResult {
+    ConfigUpdateResult {
+        changed_fields: change
+            .fields
+            .into_iter()
+            .map(|field| match field {
+                config::ConfigField::Model => ConfigField::Model,
+                config::ConfigField::PermissionMode => ConfigField::PermissionMode,
+                config::ConfigField::Memory => ConfigField::Memory,
+            })
+            .collect(),
+        view: config_snapshot_to_sdk(&change.snapshot),
+    }
+}
 
 pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> MemoryConfigView {
     MemoryConfigView {

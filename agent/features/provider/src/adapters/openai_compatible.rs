@@ -24,3 +24,4 @@ pub use provider::OpenAICompatibleProvider;
 pub use reasoning::ReasoningConfig;
 pub(crate) use responses_stream::parse_responses_stream;
 pub(crate) use stream::parse_openai_stream;
+pub(crate) use usage::{parse_chat_raw_usage, parse_responses_raw_usage};

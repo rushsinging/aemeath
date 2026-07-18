@@ -265,6 +265,9 @@ pub enum ChatEvent {
         workspace_root: String,
         workspace: WorkspaceContextView,
     },
+    ConfigChanged {
+        event: crate::ConfigChangedEvent,
+    },
     ConfigReloaded {
         changed_keys: Vec<String>,
     },

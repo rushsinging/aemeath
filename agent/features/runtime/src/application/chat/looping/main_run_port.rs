@@ -54,7 +54,7 @@ where
     pub(crate) queue: &'a Q,
     pub(crate) input_events: &'a I,
     pub(crate) client: &'a Arc<provider::LlmClient>,
-    pub(crate) registry: &'a Arc<tools::api::ToolRegistry>,
+    pub(crate) registry: &'a Arc<tools::ToolRegistry>,
     pub(crate) system_blocks: &'a [provider::SystemBlock],
     pub(crate) system_prompt_text: &'a str,
     pub(crate) user_context: &'a str,
@@ -63,8 +63,8 @@ where
     pub(crate) workspace: &'a project::WorkspaceViews,
     pub(crate) session_id: &'a str,
     pub(crate) read_files: &'a Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub(crate) session_reminders: &'a Arc<std::sync::Mutex<share::tool::SessionReminders>>,
-    pub(crate) agent_runner: &'a Option<Arc<dyn tools::api::AgentRunner>>,
+    pub(crate) session_reminders: &'a Arc<std::sync::Mutex<tools::SessionReminders>>,
+    pub(crate) agent_runner: &'a Option<Arc<dyn tools::AgentRunner>>,
     pub(crate) tool_result_materializer:
         &'a crate::application::tool_result_materialization::ToolResultMaterializer,
     pub(crate) allow_all: bool,
@@ -150,15 +150,15 @@ where
 
     #[allow(clippy::too_many_arguments)]
     fn make_agent<'b>(
-        registry: &'b Arc<tools::api::ToolRegistry>,
-        agent_runner: &Option<Arc<dyn tools::api::AgentRunner>>,
+        registry: &'b Arc<tools::ToolRegistry>,
+        agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory_config: &share::config::MemoryConfig,
         language: &str,
         allow_all: bool,
         workspace: &project::WorkspaceViews,
         cancel: &CancellationToken,
         read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-        session_reminders: &Arc<std::sync::Mutex<share::tool::SessionReminders>>,
+        session_reminders: &Arc<std::sync::Mutex<tools::SessionReminders>>,
         max_tool_concurrency: usize,
         max_agent_concurrency: usize,
         agent_semaphore: &Arc<tokio::sync::Semaphore>,
@@ -167,10 +167,10 @@ where
     ) -> Agent<'b> {
         Agent {
             registry,
-            ctx: tools::api::ToolExecutionContext {
-                resources: tools::api::ToolResources {
+            ctx: tools::ToolExecutionContext {
+                resources: tools::ToolResources {
                     agent_runner: agent_runner.clone(),
-                    registry: Some(registry.clone() as Arc<dyn tools::api::ToolListProvider>),
+                    registry: Some(registry.clone() as Arc<dyn tools::ToolListProvider>),
                     memory_config: memory_config.clone(),
                     lang: language.to_string(),
                     allow_all,

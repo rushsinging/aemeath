@@ -4,6 +4,7 @@ members = [
     "apps/cli",
     "agent/composition",
     "agent/features/audit",
+    "agent/features/config",
     "agent/features/hook",
     "agent/features/memory",
     "agent/features/policy",

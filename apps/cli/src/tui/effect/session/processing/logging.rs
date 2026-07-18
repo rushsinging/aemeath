@@ -249,6 +249,11 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::TasksSnapshot { tasks } => {
             crate::tui::log_trace!("{} tasks_snapshot lines={}", stage, tasks.lines.len())
         }
+        sdk::ChatEvent::ConfigChanged { event } => crate::tui::log_trace!(
+            "{} config_changed fields={:?}",
+            stage,
+            event.changed_fields
+        ),
         sdk::ChatEvent::ConfigReloaded { changed_keys } => crate::tui::log_trace!(
             "{} config_reloaded changed_keys={:?}",
             stage,

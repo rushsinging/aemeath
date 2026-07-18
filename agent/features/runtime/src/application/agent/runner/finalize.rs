@@ -1,8 +1,8 @@
 use crate::LOG_TARGET;
 use hook::api::HookRunner;
-use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::path::Path;
 use std::time::Duration;
+use tools::{AgentProgressEvent, AgentProgressKind};
 
 /// Agent 循环退出状态
 #[derive(Debug, Clone, PartialEq)]
