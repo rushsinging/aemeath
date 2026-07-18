@@ -1,0 +1,421 @@
+use share::config::domain::merge::{
+    AgentsConfigPatch, ApiConfigPatch, ConfigPatch, ModelConfigPatch, ModelsConfigPatch,
+    PermissionConfigPatch, ToolsConfigPatch, UiConfigPatch,
+};
+use share::config::hooks::{default_timeout_secs, ClaudeSettingsConfig, HookEntry, HooksConfig};
+use share::config::PermissionModeConfig;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::sync::Arc;
+use storage::api::{
+    AtomicBlobPort, CommitWarning, Durability, Generation, ReadOutcome, SafePathSegment,
+    StorageErrorKind, StorageKey, StorageNamespace, WriteOptions,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigAdapterError {
+    PermissionDenied,
+    Io,
+    Parse,
+    Invalid,
+    CorruptTransaction,
+    UnsupportedDurability,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CliConfigInput {
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
+    pub model: Option<String>,
+    pub max_tokens: Option<u32>,
+    pub context_size: Option<usize>,
+    pub allow_all: bool,
+    pub verbose: bool,
+    pub no_markdown: bool,
+    pub max_tool_concurrency: Option<usize>,
+    pub max_agent_concurrency: Option<usize>,
+}
+
+pub struct CliArgsAdapter;
+
+impl CliArgsAdapter {
+    pub fn read(input: &CliConfigInput) -> ConfigPatch {
+        let api = (input.api_key.is_some() || input.base_url.is_some()).then(|| ApiConfigPatch {
+            key: input.api_key.clone(),
+            base_url: input.base_url.clone(),
+            ..Default::default()
+        });
+        let model =
+            (input.model.is_some() || input.max_tokens.is_some() || input.context_size.is_some())
+                .then(|| ModelConfigPatch {
+                    name: input.model.clone(),
+                    max_tokens: input.max_tokens,
+                    context_size: input.context_size.filter(|value| *value > 0),
+                    ..Default::default()
+                });
+        let models = input.model.as_ref().map(|selection| ModelsConfigPatch {
+            default: Some(selection.clone()),
+            ..Default::default()
+        });
+        let permissions = input.allow_all.then_some(PermissionConfigPatch {
+            mode: Some(PermissionModeConfig::AllowAll),
+            ..Default::default()
+        });
+        let tools = input.max_tool_concurrency.map(|value| ToolsConfigPatch {
+            max_concurrency: (value > 0).then_some(value),
+            ..Default::default()
+        });
+        let agents = input.max_agent_concurrency.map(|value| AgentsConfigPatch {
+            max_concurrency: (value > 0).then_some(value),
+            ..Default::default()
+        });
+        let ui = (input.verbose || input.no_markdown).then_some(UiConfigPatch {
+            verbose: input.verbose.then_some(true),
+            markdown: input.no_markdown.then_some(false),
+            ..Default::default()
+        });
+        ConfigPatch {
+            api,
+            model,
+            models,
+            permissions,
+            tools,
+            agents,
+            ui,
+            ..Default::default()
+        }
+    }
+}
+
+pub struct FileAdapter;
+
+impl FileAdapter {
+    pub async fn read(path: &Path) -> Result<Option<ConfigPatch>, ConfigAdapterError> {
+        let content = match tokio::fs::read_to_string(path).await {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                return Err(ConfigAdapterError::PermissionDenied)
+            }
+            Err(_) => return Err(ConfigAdapterError::Io),
+        };
+        serde_json::from_str(&content)
+            .map(Some)
+            .map_err(|_| ConfigAdapterError::Parse)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigFormat {
+    ClaudeCode,
+    Unknown,
+}
+
+pub struct ClaudeTranslator;
+
+impl ClaudeTranslator {
+    pub fn looks_like(content: &str) -> bool {
+        serde_json::from_str::<serde_json::Value>(content)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .is_some_and(|object| {
+                object.contains_key("hooks")
+                    || object.contains_key("permissions")
+                    || object.contains_key("model")
+            })
+    }
+
+    pub fn translate(content: &str) -> Result<ConfigPatch, ConfigAdapterError> {
+        let value: serde_json::Value =
+            serde_json::from_str(content).map_err(|_| ConfigAdapterError::Parse)?;
+        let settings: ClaudeSettingsConfig =
+            serde_json::from_value(value.clone()).map_err(|_| ConfigAdapterError::Parse)?;
+        let hooks = translate_hooks(settings);
+        let model_name = value
+            .get("model")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let permissions = value.get("permissions").map(|permissions| {
+            let allow = permissions
+                .get("allow")
+                .and_then(serde_json::Value::as_array);
+            let deny = permissions
+                .get("deny")
+                .and_then(serde_json::Value::as_array);
+            PermissionConfigPatch {
+                mode: match (allow, deny) {
+                    (_, Some(deny)) if !deny.is_empty() => Some(PermissionModeConfig::Ask),
+                    (Some(allow), _) if !allow.is_empty() => Some(PermissionModeConfig::AutoRead),
+                    _ => None,
+                },
+                ..Default::default()
+            }
+        });
+        Ok(ConfigPatch {
+            models: model_name.map(|default| ModelsConfigPatch {
+                default: Some(default),
+                ..Default::default()
+            }),
+            permissions,
+            hooks: (!hooks.events.is_empty()).then_some(hooks),
+            ..Default::default()
+        })
+    }
+}
+
+fn translate_hooks(settings: ClaudeSettingsConfig) -> HooksConfig {
+    let mut events = HashMap::new();
+    for (event, groups) in settings.hooks {
+        let mut entries = Vec::new();
+        for group in groups {
+            for hook in group.hooks {
+                if !hook.command.trim().is_empty() {
+                    entries.push(HookEntry {
+                        matcher: group.matcher.clone(),
+                        command: hook.command,
+                        timeout: hook.timeout.unwrap_or_else(default_timeout_secs),
+                    });
+                }
+            }
+        }
+        if !entries.is_empty() {
+            events.insert(event, entries);
+        }
+    }
+    HooksConfig { events }
+}
+
+pub struct CompatibilityAdapter;
+
+impl CompatibilityAdapter {
+    pub fn detect_format(path: &Path, content: &str) -> ConfigFormat {
+        if path.file_name().and_then(|name| name.to_str()) == Some("settings.json")
+            && (path.to_string_lossy().contains(".claude") || ClaudeTranslator::looks_like(content))
+        {
+            ConfigFormat::ClaudeCode
+        } else {
+            ConfigFormat::Unknown
+        }
+    }
+
+    pub async fn read_one(path: &Path) -> Result<Option<ConfigPatch>, ConfigAdapterError> {
+        let content = match tokio::fs::read_to_string(path).await {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                return Err(ConfigAdapterError::PermissionDenied)
+            }
+            Err(_) => return Err(ConfigAdapterError::Io),
+        };
+        match Self::detect_format(path, &content) {
+            ConfigFormat::ClaudeCode => ClaudeTranslator::translate(&content).map(Some),
+            ConfigFormat::Unknown => Ok(None),
+        }
+    }
+
+    pub async fn read_paths(
+        mut paths: Vec<PathBuf>,
+    ) -> Result<Vec<ConfigPatch>, ConfigAdapterError> {
+        paths.sort();
+        let mut patches = Vec::new();
+        for path in paths {
+            if let Some(patch) = Self::read_one(&path).await? {
+                patches.push(patch);
+            }
+        }
+        Ok(patches)
+    }
+}
+
+pub struct ConfigValidator;
+
+impl ConfigValidator {
+    pub fn validate(config: &share::config::Config) -> Result<(), ConfigAdapterError> {
+        if config.tools.max_concurrency == 0 || config.agents.max_concurrency == 0 {
+            return Err(ConfigAdapterError::Invalid);
+        }
+        if !config.models.default.is_empty()
+            && !config.models.providers.is_empty()
+            && config
+                .models
+                .resolve_model_selection(&config.models.default)
+                .is_err()
+        {
+            return Err(ConfigAdapterError::Invalid);
+        }
+        Ok(())
+    }
+}
+
+pub fn encode_native_config(config: &share::config::Config) -> Result<Vec<u8>, ConfigAdapterError> {
+    serde_json::to_vec(config).map_err(|_| ConfigAdapterError::Parse)
+}
+
+#[derive(Clone)]
+pub struct NativeConfigStore {
+    storage: Arc<dyn AtomicBlobPort>,
+}
+
+impl NativeConfigStore {
+    pub fn new(storage: Arc<dyn AtomicBlobPort>) -> Self {
+        Self { storage }
+    }
+
+    fn key(project_key: &str) -> Result<StorageKey, ConfigAdapterError> {
+        let segment =
+            SafePathSegment::from_str(project_key).map_err(|_| ConfigAdapterError::Invalid)?;
+        StorageKey::new(StorageNamespace::Config, vec![segment])
+            .map_err(|_| ConfigAdapterError::Invalid)
+    }
+
+    pub async fn read_override(
+        &self,
+        project_key: &str,
+    ) -> Result<Option<ConfigPatch>, ConfigAdapterError> {
+        match self
+            .storage
+            .read(&Self::key(project_key)?, Generation::Primary)
+            .await
+            .map_err(map_storage_error)?
+        {
+            ReadOutcome::NotFound => Ok(None),
+            ReadOutcome::Found(blob) => serde_json::from_slice(blob.bytes())
+                .map(Some)
+                .map_err(|_| ConfigAdapterError::Parse),
+        }
+    }
+
+    pub async fn write_override(
+        &self,
+        project_key: &str,
+        bytes: &[u8],
+    ) -> Result<Option<CommitWarning>, ConfigAdapterError> {
+        let receipt = self
+            .storage
+            .write_atomic(
+                &Self::key(project_key)?,
+                bytes,
+                WriteOptions::new(Durability::ProcessCrashSafe),
+            )
+            .await
+            .map_err(map_storage_error)?;
+        Ok(receipt.warning())
+    }
+}
+
+fn map_storage_error(error: storage::api::StorageError) -> ConfigAdapterError {
+    match error.kind() {
+        StorageErrorKind::PermissionDenied => ConfigAdapterError::PermissionDenied,
+        StorageErrorKind::UnsupportedDurability => ConfigAdapterError::UnsupportedDurability,
+        StorageErrorKind::CorruptTransaction(_) => ConfigAdapterError::CorruptTransaction,
+        StorageErrorKind::InvalidKey => ConfigAdapterError::Invalid,
+        StorageErrorKind::Io | StorageErrorKind::ConcurrentWrite => ConfigAdapterError::Io,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_adapter_only_maps_explicit_values() {
+        let empty = CliArgsAdapter::read(&CliConfigInput::default());
+        assert!(empty.is_empty());
+        let patch = CliArgsAdapter::read(&CliConfigInput {
+            model: Some("local/model".into()),
+            max_tool_concurrency: Some(7),
+            ..Default::default()
+        });
+        assert_eq!(
+            patch.models.unwrap().default.as_deref(),
+            Some("local/model")
+        );
+        assert_eq!(patch.tools.unwrap().max_concurrency, Some(7));
+    }
+
+    #[test]
+    fn claude_translator_maps_hooks_model_and_permissions() {
+        let patch = ClaudeTranslator::translate(
+            r#"{"model":"local/model","permissions":{"allow":["Read"]},"hooks":{"Stop":[{"matcher":"","hooks":[{"command":"echo ok"}]}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            patch.models.unwrap().default.as_deref(),
+            Some("local/model")
+        );
+        assert_eq!(
+            patch.permissions.unwrap().mode,
+            Some(PermissionModeConfig::AutoRead)
+        );
+        assert_eq!(patch.hooks.unwrap().events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn file_adapter_distinguishes_absent_and_parse_error() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(FileAdapter::read(&dir.path().join("missing.json"))
+            .await
+            .unwrap()
+            .is_none());
+        let invalid = dir.path().join("invalid.json");
+        tokio::fs::write(&invalid, "not-json").await.unwrap();
+        assert!(matches!(
+            FileAdapter::read(&invalid).await,
+            Err(ConfigAdapterError::Parse)
+        ));
+    }
+
+    #[tokio::test]
+    async fn compatibility_paths_are_applied_in_stable_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join(".claude-a/settings.json");
+        let second = dir.path().join(".claude-z/settings.json");
+        tokio::fs::create_dir_all(first.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(second.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&first, r#"{"model":"first/model"}"#)
+            .await
+            .unwrap();
+        tokio::fs::write(&second, r#"{"model":"second/model"}"#)
+            .await
+            .unwrap();
+        let patches = CompatibilityAdapter::read_paths(vec![second, first])
+            .await
+            .unwrap();
+        assert_eq!(patches.len(), 2);
+        assert_eq!(
+            patches[0].models.as_ref().unwrap().default.as_deref(),
+            Some("first/model")
+        );
+        assert_eq!(
+            patches[1].models.as_ref().unwrap().default.as_deref(),
+            Some("second/model")
+        );
+    }
+
+    #[tokio::test]
+    async fn native_store_round_trips_patch_and_maps_commit_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let store = NativeConfigStore::new(storage);
+        let bytes = br#"{"models":{"default":"local/model"}}"#;
+        assert_eq!(store.write_override("project", bytes).await.unwrap(), None);
+        let patch = store.read_override("project").await.unwrap().unwrap();
+        assert_eq!(
+            patch.models.unwrap().default.as_deref(),
+            Some("local/model")
+        );
+    }
+
+    #[test]
+    fn format_detection_rejects_unknown_settings() {
+        assert_eq!(
+            CompatibilityAdapter::detect_format(Path::new("settings.json"), "{}"),
+            ConfigFormat::Unknown
+        );
+    }
+}

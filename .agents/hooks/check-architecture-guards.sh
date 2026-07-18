@@ -116,6 +116,7 @@ run_tui_single_source_structure_guard
 "$HOOKS_DIR/check-logging-scope-context.sh"
 "$HOOKS_DIR/no_mod_rs.sh"
 "$HOOKS_DIR/check-config-env-guard.sh"
+"$HOOKS_DIR/check-config-adapter-boundary.sh"
 "$HOOKS_DIR/check-agent-client-trait-minimal.sh"
 "$HOOKS_DIR/check-shared-run-loop.sh"
 "$HOOKS_DIR/check-run-control-boundary.sh"

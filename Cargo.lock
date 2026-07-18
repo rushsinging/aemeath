@@ -427,6 +427,7 @@ dependencies = [
  "async-trait",
  "serde_json",
  "share",
+ "storage",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

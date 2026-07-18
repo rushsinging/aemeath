@@ -41,6 +41,21 @@ impl FeatureGateways {
     }
 }
 
+fn cli_config_input(args: &AgentArgs) -> config::CliConfigInput {
+    config::CliConfigInput {
+        api_key: args.api_key.clone(),
+        base_url: args.base_url.clone(),
+        model: args.model.clone(),
+        max_tokens: args.max_tokens,
+        context_size: (args.context_size > 0).then_some(args.context_size),
+        allow_all: args.allow_all,
+        verbose: args.verbose,
+        no_markdown: args.no_markdown,
+        max_tool_concurrency: args.max_tool_concurrency,
+        max_agent_concurrency: args.max_agent_concurrency,
+    }
+}
+
 pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, SdkError> {
     let gateways = FeatureGateways::wire_default();
     build_agent_client_with_gateways(args, gateways).await
@@ -58,7 +73,7 @@ async fn build_agent_client_with_gateways(
     let workspace = project::wire_production_workspace(cwd.clone())
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
-    let config = config::wire_project_config(&cwd)
+    let config = config::wire_project_config_with_cli(&cwd, cli_config_input(&args))
         .await
         .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
     let runtime_client =
@@ -76,7 +91,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let workspace = project::wire_production_workspace(cwd.clone())
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
-    let config = config::wire_project_config(&cwd)
+    let config = config::wire_project_config_with_cli(&cwd, cli_config_input(&args))
         .await
         .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
     let runtime_client =

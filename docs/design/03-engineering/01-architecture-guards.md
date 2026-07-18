@@ -57,6 +57,7 @@
 | 17a | `check-logging-scope-context.sh` | 日志架构 | 禁止在 legacy 精确基线外新增进程级 `CURRENT_*` / `SESSION_ID` 执行上下文状态；新路径必须使用 `LogContext` task-local scope |
 | 18 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |
 | 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
+| 19a | `check-config-adapter-boundary.sh` | 配置架构 | Config application 禁止直接 fs/JSON 解析；adapter stub/TODO 禁止回流 |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
 | 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` + 同步 `cancel_run(run_id)`；禁止恢复 `ChatInputEvent::Cancel` |
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
