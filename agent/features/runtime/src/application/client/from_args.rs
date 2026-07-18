@@ -28,6 +28,7 @@ pub struct RuntimeBootstrapDependencies {
     memory: Arc<dyn memory::MemoryPort>,
     provider_gateway: Arc<dyn provider::LlmProviderGateway>,
     tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+    policy: Arc<dyn policy::PolicyPort>,
     task_access: Arc<dyn task::TaskAccess>,
     session_tasks: Arc<dyn context::LegacyTaskCapture>,
 }
@@ -39,6 +40,7 @@ impl RuntimeBootstrapDependencies {
         memory: Arc<dyn memory::MemoryPort>,
         provider_gateway: Arc<dyn provider::LlmProviderGateway>,
         tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+        policy: Arc<dyn policy::PolicyPort>,
         task_access: Arc<dyn task::TaskAccess>,
         session_tasks: Arc<dyn context::LegacyTaskCapture>,
     ) -> Self {
@@ -50,6 +52,7 @@ impl RuntimeBootstrapDependencies {
             memory,
             provider_gateway,
             tool_gateway,
+            policy,
             task_access,
             session_tasks,
         }
@@ -102,9 +105,13 @@ pub async fn from_args_with_workspace(
         memory,
         provider_gateway,
         tool_gateway,
+        policy,
         task_access,
         session_tasks,
     } = dependencies;
+    // #917: Policy adapter 由 Composition 构造；#918 接入统一 tool coordination。
+    let _policy = policy;
+
     // 1. Guidance 目录初始化
     context::guidance::init_guidance_dir();
 
@@ -457,6 +464,7 @@ mod tests {
             Arc::new(memory::NoOpMemory),
             provider::wire_provider(),
             tools::wire_tools(),
+            Arc::new(policy::AllowAllPolicy),
             Arc::new(task::TaskStore::new()),
             Arc::new(NoOpTaskCapture),
         );

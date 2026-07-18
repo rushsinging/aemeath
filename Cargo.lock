@@ -415,6 +415,7 @@ dependencies = [
  "log",
  "logging",
  "memory",
+ "policy",
  "project",
  "provider",
  "runtime",
@@ -2453,10 +2454,12 @@ name = "policy"
 version = "0.0.0"
 dependencies = [
  "log",
+ "sdk",
  "serde",
  "serde_json",
  "share",
  "tempfile",
+ "tools",
 ]
 
 [[package]]

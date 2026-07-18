@@ -68,6 +68,7 @@ else:
         required_patterns = {
             "provider gateway forwarding": r"gateways\.provider",
             "tool gateway forwarding": r"gateways\.tools",
+            "policy gateway forwarding": r"gateways\.policy",
         }
         for label, pattern in required_patterns.items():
             if not re.search(pattern, text):
@@ -85,6 +86,7 @@ else:
         required_patterns = {
             "injected provider gateway parameter": r"provider_gateway\s*:\s*Arc<dyn provider::LlmProviderGateway>",
             "injected tool gateway parameter": r"tool_gateway\s*:\s*Arc<dyn tools::ToolCatalogGateway>",
+            "injected policy parameter": r"policy\s*:\s*Arc<dyn policy::PolicyPort>",
             "provider gateway client construction": r"build_llm_client_with_gateway\s*\(\s*provider_gateway\.as_ref\(\)",
             "tool gateway registry construction": r"tool_gateway\.new_registry\s*\(\)",
             "tool gateway registration": r"tool_gateway\.register_all_tools\s*\(",

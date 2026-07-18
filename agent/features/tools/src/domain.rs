@@ -21,7 +21,7 @@ pub use context::ToolExecutionContext;
 pub use ports::{ToolCatalogPort, ToolExecutionPort};
 pub use published_language::{
     RegistryScopeName, ToolCapabilities, ToolCapability, ToolCatalogSnapshot, ToolInvocation,
-    ToolOutcome as ToolExecutionOutcome, ToolProfileName,
+    ToolName, ToolOutcome as ToolExecutionOutcome, ToolProfileName,
 };
 pub use resources::ToolResources;
 pub use scope_profile::{ProfileExpansionError, ToolProfile};

@@ -20,6 +20,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         Arc::new(memory::NoOpMemory),
         provider::wire_provider(),
         tools::wire_tools(),
+        Arc::new(policy::AllowAllPolicy),
         access.clone(),
         capture.clone(),
     );

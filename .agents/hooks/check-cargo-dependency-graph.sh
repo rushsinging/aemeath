@@ -31,7 +31,7 @@ business_allow = {
     # packages/global/* are shared infrastructure and may be consumed by share/sdk.
     "share": {"logging", "utils"},
     "project": {"share"},
-    "policy": {"share"},
+    "policy": {"share", "sdk", "tools"},
     "context": {"share", "provider", "storage", "task", "memory", "sdk"},
     "memory": {"storage", "utils"},
     "provider": {"share"},
