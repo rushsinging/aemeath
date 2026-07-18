@@ -34,7 +34,7 @@
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
 | 4a | `check-composition-layout.sh` | Composition Root | Composition 只使用扁平 capability-first wiring modules，禁止 Hexagonal/COLA 层与未登记顶层源码 |
-| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime、Context、Provider 与 Storage 锁定各自 Hexagonal 目录，Storage 暂留登记过渡模块 |
+| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级与 Tools scope/profile 边界 | 未迁移 Feature 继续受 COLA 依赖方向约束；已迁移 Feature 锁定各自目标目录；Tools 额外锁定 capability-only 授权、`ToolProfile` shrink-only API 与 registry/domain/façade 边界 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime、Context、Storage 仅开放登记的 crate-root 窄 façade |
 | 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费 `TaskAccess`；Task persistence/restore authority 仅限 Context/Composition |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
@@ -175,7 +175,8 @@
 ## 5. check-cola-layer-purity.sh
 
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
-- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 限制为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Context 限制为 `CONTEXT_HEX_LAYERS = {domain, application, ports, adapters}`；Policy 在 #916 后暂时只允许 `lib.rs`，#917 以真实 Policy PL/AllowAll 恢复 `domain.rs/adapters.rs`；Storage 限制为 `STORAGE_HEX_LAYERS = {domain, ports, adapters}` 并暂时允许过渡目录；Audit 在 #928 后允许真实 `domain + ports + adapters`，继续禁止空 COLA 占位。
+- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 限制为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Context 限制为 `CONTEXT_HEX_LAYERS = {domain, application, ports, adapters}`；Policy 在 #916 后暂时只允许 `lib.rs`，#917 以真实 Policy PL/AllowAll 恢复 `domain.rs/adapters.rs`；Storage 限制为 `STORAGE_HEX_LAYERS = {domain, ports, adapters}` 并暂时允许过渡目录；Audit 在 #928 后允许真实 `domain + ports + adapters`，继续禁止空 COLA 占位；Tools 同时锁定 #909 scope/profile 授权边界。
+- **Tools scope/profile 机械约束**：生产代码不得恢复 `ToolProfile::excludes` 或按 `ToolName` / `tool_name` match 的授权黑名单；`ToolProfile::allowed_capabilities` 必须是唯一私有字段，只允许 `baseline`、`derive_restricted` 与只读 accessor，不得新增 setter/insert/union、`&mut self` 或字段赋值式扩大 API；`RegistryScopeBuilder` / `RegistryScope` 不得由 crate root façade 导出，`ToolRegistry` 不得进入 domain。扫描不设路径白名单、exception、exclude 或 skip，脚本内含 capability 正例及各类违规反例 sanity。
 - **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制；Runtime、Context、Policy、Storage 与 Audit 使用各自目标规则。Policy 由 `POLICY_HEX_LAYERS = ∅`、`POLICY_ALLOWED_TOP_LEVEL_FILES = {lib.rs}` 和 legacy 层禁单锁定 #916 后过渡基线；`domain.rs/adapters.rs` 只有 #917 提供真实实现时才能恢复，禁止空层占位；Audit 由 `AUDIT_HEX_LAYERS = {domain, ports, adapters}`、`AUDIT_ALLOWED_TOP_LEVEL_FILES = {lib.rs, domain.rs, ports.rs, adapters.rs}` 和 legacy 禁单锁定 #928 基线；Storage domain 额外禁止物理 fs API、`PathBuf` 与 `crate::adapters`。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](03-migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
 - **结构定义**：未迁移 feature 使用 `FEATURE_LAYERS`；Runtime/Context/Storage 使用各自登记目标层；Policy 在 #916 后无内部层，#917 随真实实现恢复 `domain/adapters`；Audit 使用 `domain/ports/adapters` 与精确顶层文件集合，后续 #929/#930 只能随真实实现同步增量扩展；Storage 过渡集合有 #883 退出条件，**NEVER** 扩张。
