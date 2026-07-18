@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::ProviderDriverKind;
-use crate::LOG_TARGET;
 use share::config::models::{RuntimeModelRequest, RuntimeModelResolver};
 use share::config::ModelsConfig;
 
@@ -73,11 +72,11 @@ impl LlmClientPool {
                     .lock()
                     .await
                     .insert(spec.to_string(), client.clone());
-                log::info!(target: LOG_TARGET, "[LlmClientPool] created new client for {:?}", spec);
+                log::info!(target: crate::LOG_TARGET, "[LlmClientPool] created new client for {:?}", spec);
                 client
             }
             Err(e) => {
-                log::warn!(target: LOG_TARGET,
+                log::warn!(target: crate::LOG_TARGET,
                     "[LlmClientPool] failed to create client for {:?}: {}. Falling back to default.",
                     spec,
                     e

@@ -11,7 +11,6 @@ use super::STREAM_IDLE_TIMEOUT;
 use crate::adapters::openai_compatible::reasoning_normalizer::ReasoningDeltaNormalizer;
 use crate::domain::invoke::StreamResponse;
 use crate::ports::LegacyStreamSink;
-use crate::LOG_TARGET;
 
 /// Parse ollama's native `/api/chat` NDJSON stream.
 ///
@@ -64,14 +63,14 @@ pub(crate) async fn parse_ollama_stream(
         if line.trim().is_empty() {
             continue;
         }
-        log::trace!(target: LOG_TARGET, "[ollama stream] <- {}", line);
+        log::trace!(target: crate::LOG_TARGET, "[ollama stream] <- {}", line);
         handler.on_raw_line(&line);
 
         // Native NDJSON: parse each non-empty line as a JSON object
         let chunk: serde_json::Value = match serde_json::from_str(&line) {
             Ok(v) => v,
             Err(e) => {
-                log::debug!(target: LOG_TARGET, "[ollama stream] unparseable line ({}): {}", e, line);
+                log::debug!(target: crate::LOG_TARGET, "[ollama stream] unparseable line ({}): {}", e, line);
                 continue;
             }
         };
@@ -93,7 +92,7 @@ pub(crate) async fn parse_ollama_stream(
                     if !result.delta.is_empty() {
                         handler.on_thinking(result.delta);
                     }
-                    log::trace!(target: LOG_TARGET,
+                    log::trace!(target: crate::LOG_TARGET,
                         "[ollama stream] reasoning dedup_action={:?} \
                          raw_chars={} emitted_chars={} acc_chars={}",
                         result.action,
@@ -168,7 +167,7 @@ pub(crate) async fn parse_ollama_stream(
     // Thinking 块必须在 Text 之前（与 openai_compatible 一致）
     if !reasoning_normalizer.accumulated().is_empty() {
         let stats = &reasoning_normalizer.stats;
-        log::debug!(target: LOG_TARGET,
+        log::debug!(target: crate::LOG_TARGET,
             "[ollama stream] reasoning summary: thinking_chars={} thinking_bytes={} \
              dedup={{none:{},snapshot_suffix:{},duplicate_drop:{},overlap_trim:{}}}",
             reasoning_normalizer.accumulated_char_count(),
@@ -190,7 +189,7 @@ pub(crate) async fn parse_ollama_stream(
         content_blocks.push(ContentBlock::ToolUse { id, name, input });
     }
 
-    log::debug!(target: LOG_TARGET,
+    log::debug!(target: crate::LOG_TARGET,
         "[ollama stream] done text_bytes={} tool_calls={} stop={:?} in_tok={} out_tok={}",
         text_len,
         tool_count,

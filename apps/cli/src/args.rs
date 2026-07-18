@@ -175,6 +175,11 @@ impl From<Args> for sdk::ChatBootstrapArgs {
             max_agent_concurrency: args.max_agent_concurrency,
             no_think: args.no_think,
             max_reasoning: args.max_reasoning,
+            logging_output: if args.verbose {
+                sdk::LoggingOutputMode::Stderr
+            } else {
+                sdk::LoggingOutputMode::File
+            },
         }
     }
 }
@@ -234,6 +239,38 @@ mod tests {
         let cli = Cli::try_parse_from(["aemeath", "-v"]).unwrap();
 
         assert!(cli.run_args.verbose);
+    }
+
+    #[test]
+    fn default_cli_maps_to_file_logging_output() {
+        let cli = Cli::try_parse_from(["aemeath"]).unwrap();
+        let bootstrap = sdk::ChatBootstrapArgs::from(Args::from(cli.run_args));
+
+        assert_eq!(bootstrap.logging_output, sdk::LoggingOutputMode::File);
+    }
+
+    #[test]
+    fn verbose_cli_maps_to_stderr_logging_output() {
+        let cli = Cli::try_parse_from(["aemeath", "--verbose"]).unwrap();
+        let bootstrap = sdk::ChatBootstrapArgs::from(Args::from(cli.run_args));
+
+        assert_eq!(bootstrap.logging_output, sdk::LoggingOutputMode::Stderr);
+    }
+
+    #[test]
+    fn quiet_cli_maps_to_file_logging_output() {
+        let cli = Cli::try_parse_from(["aemeath", "--quiet"]).unwrap();
+        let bootstrap = sdk::ChatBootstrapArgs::from(Args::from(cli.run_args));
+
+        assert_eq!(bootstrap.logging_output, sdk::LoggingOutputMode::File);
+    }
+
+    #[test]
+    fn verbose_logging_output_takes_precedence_over_quiet() {
+        let cli = Cli::try_parse_from(["aemeath", "--quiet", "--verbose"]).unwrap();
+        let bootstrap = sdk::ChatBootstrapArgs::from(Args::from(cli.run_args));
+
+        assert_eq!(bootstrap.logging_output, sdk::LoggingOutputMode::Stderr);
     }
 
     #[test]

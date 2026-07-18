@@ -53,7 +53,7 @@
 | 14 | `check-tui-block-nesting.sh` | TUI 组件 | gutter 仅由 document_renderer 注入 |
 | 15 | `check-render-isolation.sh` | TUI 渲染 | render/output 纯函数边界 |
 | 16 | `check-unsafe-text-ops.sh` | 安全/IO | 禁非 char 边界 str 切片 |
-| 17 | `check-log-target-prefix.sh` | 日志架构 | log target 字符串字面量必须以 `aemeath:` 开头 |
+| 17 | `check-log-target-prefix.sh` | 日志架构 | 全仓生产 `log::xxx!` 必须显式引用所属 crate root 的唯一 `LOG_TARGET`，拒绝裸宏、target 字符串、未注册常量值、跨 owner 冒用与 macro alias；Provider 仅 `error_log.rs` 可使用已注册 `LLM_API_ERROR_TARGET` |
 | 17a | `check-logging-scope-context.sh` | 日志架构 | 禁止在 legacy 精确基线外新增进程级执行上下文状态；新路径必须使用 `LogContext` task-local scope |
 | 17b | `check-logging-settings-injection.sh` | 日志架构 | Logging 禁止读取 env；Runtime 禁止装配或初始化 Logging；`UnifiedLogger::init` 只能由 Composition 单一入口调用 |
 | 18 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |

@@ -16,7 +16,6 @@ use provider::SystemBlock;
 use storage::TaskStore;
 
 use super::{AgentClientImpl, RuntimeHandle};
-use crate::LOG_TARGET;
 
 /// Runtime bootstrap 所需的活依赖；由 Composition 一次性构造并注入。
 pub struct RuntimeBootstrapDependencies {
@@ -156,7 +155,7 @@ pub async fn from_args_with_workspace(
         !args.no_think,
     );
 
-    log::info!(target: LOG_TARGET,
+    log::info!(target: crate::LOG_TARGET,
         "[main] source={} api={} model={} reasoning={} args.no_think={}",
         resolved_model.source_key,
         driver,
@@ -186,7 +185,7 @@ pub async fn from_args_with_workspace(
     let task_store = Arc::new(TaskStore::new());
     let skills_map = load_configured_skills(&cwd, Some(snapshot.skills()));
     if !skills_map.is_empty() {
-        log::info!(target: LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
+        log::info!(target: crate::LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
     }
     let skills = Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
     let registry = {
@@ -285,7 +284,7 @@ pub async fn from_args_with_workspace(
         .join("\n\n");
 
     // 16. Concurrency
-    log::info!(target: LOG_TARGET,
+    log::info!(target: crate::LOG_TARGET,
         "concurrency limits: max_tool={}, max_agent={}",
         max_tool_concurrency,
         max_agent_concurrency

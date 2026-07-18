@@ -248,6 +248,7 @@ src/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-18 | CLI 通过 typed bootstrap input 选择 File/Stderr，Composition 保持 Runtime 前唯一初始化；TUI 使用 session-only delivery scope；全仓生产日志迁到 owner 常量并启用 owner-aware Target Guard | [#941](https://github.com/rushsinging/aemeath/issues/941) |
 | 2026-07-18 | Main/Sub 生产链按 session→chat/sub-run→turn→physical request 建立不可变 scope；Runtime task 与 Provider blocking stream bridge 显式传播 opaque `LogContext`，legacy 全局状态最终退役仍由 #942 承接 | [#940](https://github.com/rushsinging/aemeath/issues/940) |
 | 2026-07-18 | 实现可恢复 FileSinkLifecycle：per-sink lock、5 秒惰性 reopen、direct emergency stderr、完整 I/O fault seam、rotation/retention 与 max-bytes 边界语义 | [#939](https://github.com/rushsinging/aemeath/issues/939) |
 | 2026-07-12 | 摘要初稿：14 字段 schema、TargetCatalog、scope-local context、sink 降级及 Audit 分离 | #793 |

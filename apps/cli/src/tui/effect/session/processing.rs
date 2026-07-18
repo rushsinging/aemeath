@@ -20,72 +20,75 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
     let run_cancel_state_for_task = run_cancel_state.clone();
     let agent_client = ctx.agent_client.clone();
     let agent_client_for_task = agent_client.clone();
-    let join = tokio::spawn(async move {
-        let mut stream = match ctx
-            .agent_client
-            .chat(sdk::ChatRequest {
-                user_input: None,
-                // 文本队列已断开（#390 A3）：统一走 input_events 事件通道。
-                queue_drain: None,
-                input_events: Some(Arc::new(ctx.input_event_port.clone())),
-            })
-            .await
-        {
-            Ok(stream) => stream,
-            Err(e) => {
-                let _ = ctx.tx.send(UiEvent::Error(e.to_string())).await;
-                let _ = ctx
-                    .tx
-                    .send(UiEvent::Done {
-                        context: ctx.fallback_context.clone(),
-                    })
-                    .await;
-                return;
-            }
-        };
-        while let Some(event) = stream.recv().await {
-            match &event {
-                sdk::ChatEvent::RunStarted { run_id, .. } => {
-                    let cancel_requested = {
+    let join = composition::delivery_logging::spawn_instrumented(
+        composition::delivery_logging::capture(),
+        async move {
+            let mut stream = match ctx
+                .agent_client
+                .chat(sdk::ChatRequest {
+                    user_input: None,
+                    // 文本队列已断开（#390 A3）：统一走 input_events 事件通道。
+                    queue_drain: None,
+                    input_events: Some(Arc::new(ctx.input_event_port.clone())),
+                })
+                .await
+            {
+                Ok(stream) => stream,
+                Err(e) => {
+                    let _ = ctx.tx.send(UiEvent::Error(e.to_string())).await;
+                    let _ = ctx
+                        .tx
+                        .send(UiEvent::Done {
+                            context: ctx.fallback_context.clone(),
+                        })
+                        .await;
+                    return;
+                }
+            };
+            while let Some(event) = stream.recv().await {
+                match &event {
+                    sdk::ChatEvent::RunStarted { run_id, .. } => {
+                        let cancel_requested = {
+                            let mut state = run_cancel_state_for_task
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner());
+                            let requested = matches!(
+                                &*state,
+                                RunCancelState::AwaitingStart {
+                                    cancel_requested: true
+                                }
+                            );
+                            *state = RunCancelState::Active(run_id.clone());
+                            requested
+                        };
+                        if cancel_requested {
+                            let _ = agent_client_for_task.cancel_run(run_id);
+                        }
+                    }
+                    sdk::ChatEvent::RunCancelled { run_id } => {
                         let mut state = run_cancel_state_for_task
                             .lock()
                             .unwrap_or_else(|error| error.into_inner());
-                        let requested = matches!(
-                            &*state,
-                            RunCancelState::AwaitingStart {
-                                cancel_requested: true
-                            }
-                        );
-                        *state = RunCancelState::Active(run_id.clone());
-                        requested
-                    };
-                    if cancel_requested {
-                        let _ = agent_client_for_task.cancel_run(run_id);
+                        if matches!(&*state, RunCancelState::Active(active) if active == run_id) {
+                            *state = RunCancelState::Idle;
+                        }
                     }
-                }
-                sdk::ChatEvent::RunCancelled { run_id } => {
-                    let mut state = run_cancel_state_for_task
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    if matches!(&*state, RunCancelState::Active(active) if active == run_id) {
-                        *state = RunCancelState::Idle;
+                    sdk::ChatEvent::Done { .. } | sdk::ChatEvent::DoneWithDurationMs { .. } => {
+                        *run_cancel_state_for_task
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner()) = RunCancelState::Idle;
                     }
+                    _ => {}
                 }
-                sdk::ChatEvent::Done { .. } | sdk::ChatEvent::DoneWithDurationMs { .. } => {
-                    *run_cancel_state_for_task
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner()) = RunCancelState::Idle;
+                log_sdk_event(&event, "sdk->ui.recv");
+                let ui_event = sdk_event_to_ui_event(event);
+                log_ui_tool_event(&ui_event, "sdk->ui.mapped");
+                if ctx.tx.send(ui_event).await.is_err() {
+                    return;
                 }
-                _ => {}
             }
-            log_sdk_event(&event, "sdk->ui.recv");
-            let ui_event = sdk_event_to_ui_event(event);
-            log_ui_tool_event(&ui_event, "sdk->ui.mapped");
-            if ctx.tx.send(ui_event).await.is_err() {
-                return;
-            }
-        }
-    });
+        },
+    );
     ProcessingHandle {
         join,
         agent_client,
@@ -106,6 +109,15 @@ mod tests {
             sdk::ids::ChatId::new("chat-test"),
             sdk::ids::ChatTurnId::new("turn-test"),
         )
+    }
+
+    #[test]
+    fn production_processing_spawn_is_instrumented_at_creation() {
+        let source = include_str!("processing.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        assert!(production.contains("composition::delivery_logging::spawn_instrumented("));
+        assert!(production.contains("composition::delivery_logging::capture(),"));
+        assert!(!production.contains("tokio::spawn("));
     }
 
     #[tokio::test]
@@ -300,6 +312,64 @@ mod tests {
                 cancel_requested: true
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn spawn_processing_propagates_captured_context() {
+        let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel(16);
+        let (observed_tx, observed_rx) = tokio::sync::oneshot::channel();
+        let client = Arc::new(ContextCapturingAgentClient::new(observed_tx));
+        let (_input_tx, input_port) = TuiInputEventPort::channel();
+        let expected = composition::delivery_logging::LogContext {
+            session_id: Some("processing-session".to_string()),
+            ..composition::delivery_logging::LogContext::default()
+        };
+
+        composition::delivery_logging::instrument(expected.clone(), async move {
+            spawn_processing(SpawnContext {
+                tx: ui_tx,
+                input_event_port: input_port,
+                agent_client: client,
+                fallback_context: UiTurnContext {
+                    chat_id: crate::tui::model::conversation::ids::ChatId::new("fallback-chat"),
+                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("fallback-turn"),
+                },
+            });
+        })
+        .await;
+
+        assert_eq!(observed_rx.await.unwrap(), expected);
+    }
+
+    struct ContextCapturingAgentClient {
+        observed: std::sync::Mutex<
+            Option<tokio::sync::oneshot::Sender<composition::delivery_logging::LogContext>>,
+        >,
+    }
+
+    impl ContextCapturingAgentClient {
+        fn new(
+            observed: tokio::sync::oneshot::Sender<composition::delivery_logging::LogContext>,
+        ) -> Self {
+            Self {
+                observed: std::sync::Mutex::new(Some(observed)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl sdk::AgentClient for ContextCapturingAgentClient {
+        fn cancel_run(&self, _run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
+            sdk::CancelRunOutcome::NotFound
+        }
+
+        async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
+            if let Some(tx) = self.observed.lock().unwrap().take() {
+                let _ = tx.send(composition::delivery_logging::capture());
+            }
+            let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            Ok(sdk::ChatStream::new(rx))
+        }
     }
 
     #[tokio::test]

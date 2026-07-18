@@ -20,7 +20,6 @@ use crate::application::chat::looping::{
 };
 use crate::application::loop_engine::run_loop;
 use crate::domain::agent_run::{Run, RunSpec};
-use crate::LOG_TARGET;
 use workflow::api::ReasoningSignal;
 
 use super::loop_context::ChatLoopContext;
@@ -228,7 +227,7 @@ where
                                 context::session::SessionRestore::from_session(&snapshot);
                             if restore.trimmed > 0 || restore.repaired > 0 {
                                 log::info!(
-                                    target: "aemeath:agent:runtime",
+                                    target: crate::LOG_TARGET,
                                     "resume {}: trimmed={} repaired={}",
                                     id,
                                     restore.trimmed,
@@ -256,7 +255,7 @@ where
                                 .await;
                             if restore.trimmed > 0 || restore.repaired > 0 {
                                 log::info!(
-                                    target: "aemeath:agent:runtime",
+                                    target: crate::LOG_TARGET,
                                     "resume {}: trimmed={} repaired={}",
                                     id,
                                     restore.trimmed,
@@ -519,7 +518,7 @@ where
                 )
                 .await;
                 if let Err(error) = run_result {
-                    log::error!(target: LOG_TARGET, "main shared run loop failed: {error}");
+                    log::error!(target: crate::LOG_TARGET, "main shared run loop failed: {error}");
                 }
                 active_run.clear(&run_id);
             }

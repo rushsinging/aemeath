@@ -2,9 +2,6 @@
 //!
 //! 跟踪连续压缩失败次数，超过阈值后停止尝试。
 
-/// 自动压缩的日志 target。
-const LOG_TARGET: &str = "aemeath:agent:runtime";
-
 /// 连续自动压缩失败次数上限，超过后断路器跳闸。
 pub const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES: u8 = 3;
 
@@ -33,7 +30,7 @@ impl AutoCompactState {
         self.consecutive_failures += 1;
         if self.consecutive_failures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES {
             self.circuit_broken = true;
-            log::warn!(target: LOG_TARGET,
+            log::warn!(target: crate::LOG_TARGET,
                 "[autocompact] circuit breaker tripped after {} consecutive failures — skipping future attempts",
                 self.consecutive_failures
             );

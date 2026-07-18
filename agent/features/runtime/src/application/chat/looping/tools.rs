@@ -12,7 +12,6 @@ use crate::application::chat::looping::{
 use hook::api::{HookData, ToolHookData};
 
 use crate::application::chat::looping::engine::DeniedCall;
-use crate::LOG_TARGET;
 use sdk::ids::ToolCallId;
 use share::config::hooks::HookEvent;
 use std::path::Path;
@@ -134,7 +133,7 @@ where
     let mut denied_results = Vec::new();
     for call in denied {
         log::warn!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "tool call denied by policy: name={}, reason={}, runtime_id={}, provider_id={}",
             call.name, call.reason, call.id, call.provider_id,
         );
@@ -318,7 +317,7 @@ pub(crate) async fn tool_results_for_api(
 ) -> share::message::Message {
     let error_count = results.iter().filter(|ex| ex.outcome.is_error).count();
     log::debug!(
-        target: LOG_TARGET,
+        target: crate::LOG_TARGET,
         "tool_results_for_api: {} typed ToolExecution(s) → wire ({} error)",
         results.len(),
         error_count
@@ -348,7 +347,7 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
         "output": output,
     });
     log::debug!(
-        target: LOG_TARGET,
+        target: crate::LOG_TARGET,
         "tool_result: {}",
         serde_json::to_string(&tr_data).unwrap_or_default()
     );

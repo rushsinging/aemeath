@@ -585,6 +585,20 @@ mod tests {
     }
 
     #[test]
+    fn env_adapter_does_not_read_retired_logging_output_env() {
+        struct RejectRetiredLoggingEnv;
+
+        impl EnvSource for RejectRetiredLoggingEnv {
+            fn get(&self, name: &str) -> Option<String> {
+                assert_ne!(name, "AEMEATH_LOG_STDERR");
+                None
+            }
+        }
+
+        assert!(EnvAdapter::read(&RejectRetiredLoggingEnv).is_empty());
+    }
+
+    #[test]
     fn cli_adapter_only_maps_explicit_values() {
         let empty = CliArgsAdapter::read(&CliConfigInput::default());
         assert!(empty.is_empty());

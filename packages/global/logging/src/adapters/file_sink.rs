@@ -109,6 +109,11 @@ impl UnifiedLogger {
         LOGGER.get().copied()
     }
 
+    /// Returns the immutable process-wide output mode selected at initialization.
+    pub fn output_mode(&self) -> LoggingOutputMode {
+        self.output_mode
+    }
+
     fn route(&self, target: &str) -> &SinkEntry {
         let spec = TargetCatalog::route(target).unwrap_or_else(|| {
             self.report_unknown_target(target);

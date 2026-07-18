@@ -193,7 +193,7 @@ pub(super) async fn chat_impl(
         // auto-save：loop 退出后自动保存当前 session。TUI 退出时只需 drop input_event_tx →
         // loop shutdown → runtime 自动 save，不再调 session RPC。
         if let Err(e) = super::trait_session::save_session_from_handle(&inner).await {
-            log::warn!(target: "aemeath:agent:runtime", "auto-save failed on loop exit: {e}");
+            log::warn!(target: crate::LOG_TARGET, "auto-save failed on loop exit: {e}");
         }
     });
 

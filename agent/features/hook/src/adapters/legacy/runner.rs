@@ -52,7 +52,7 @@ impl HookRunner {
             })
             .unwrap_or_default();
         log::debug!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "hook match: event={:?} tool_name={:?} matched={} configured_events={}",
             event,
             tool_name,
@@ -99,7 +99,7 @@ impl HookRunner {
         let workspace_root_str = workspace_root.display().to_string();
         let command = Self::expand_command_placeholders_static(&hook.command, &workspace_root_str);
         log::debug!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "hook start: event={:?} matcher={} command={} workspace_root={}",
             input.event,
             hook.matcher,
@@ -147,7 +147,7 @@ impl HookRunner {
 
                 for line in hook_env_lines(&stdout) {
                     log::debug!(
-                        target: LOG_TARGET,
+                        target: crate::LOG_TARGET,
                         "hook env: event={:?} command={} stream=stdout line={}",
                         input.event,
                         command,
@@ -156,7 +156,7 @@ impl HookRunner {
                 }
                 for line in hook_env_lines(&stderr) {
                     log::debug!(
-                        target: LOG_TARGET,
+                        target: crate::LOG_TARGET,
                         "hook env: event={:?} command={} stream=stderr line={}",
                         input.event,
                         command,
@@ -169,7 +169,7 @@ impl HookRunner {
 
                 if code != 0 && !stderr.is_empty() {
                     log::warn!(
-                        target: LOG_TARGET,
+                        target: crate::LOG_TARGET,
                         "hook '{}' exited with code {}: {}",
                         command,
                         code,
@@ -177,7 +177,7 @@ impl HookRunner {
                     );
                 }
                 log::debug!(
-                    target: LOG_TARGET,
+                    target: crate::LOG_TARGET,
                     "hook end: event={:?} command={} code={} blocked={} stdout_bytes={} stderr_bytes={} stdout_truncated={} stderr_truncated={}",
                     input.event,
                     command,
@@ -224,7 +224,7 @@ impl HookRunner {
                     ProcessFailureKind::Unsupported => "unsupported",
                 };
                 log::warn!(
-                    target: LOG_TARGET,
+                    target: crate::LOG_TARGET,
                     "hook execution failed: event={:?} command={} reason={} error={}",
                     input.event,
                     command,
@@ -266,7 +266,7 @@ impl HookRunner {
         let mut results = Vec::with_capacity(hooks.len());
         for hook in hooks {
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "running hook: event={:?} matcher={} cmd={}",
                 event,
                 hook.matcher,
@@ -274,7 +274,7 @@ impl HookRunner {
             );
             let result = self.execute_hook(hook, &input, workspace_root).await;
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "hook result: blocked={} error={:?}",
                 result.blocked,
                 result.error
@@ -309,7 +309,7 @@ impl HookRunner {
         let mut results = Vec::with_capacity(hooks.len());
         for hook in hooks {
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "running hook (with json): event={:?} matcher={} cmd={}",
                 event,
                 hook.matcher,
@@ -320,7 +320,7 @@ impl HookRunner {
             let should_break =
                 result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "hook result (json): blocked={} continue={:?} error={:?}",
                 result.blocked,
                 json_output.as_ref().map(|j| j.r#continue),

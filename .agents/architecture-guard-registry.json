@@ -250,19 +250,19 @@
       "status": "active"
     },
     {
-      "id": "scope.logging.owned-targets",
+      "id": "scope.logging.production-test-sources",
       "guard": "check-log-target-prefix.sh",
       "module": "logging",
       "scope": {
         "kind": "pattern",
-        "value": "registered aemeath targets"
+        "value": "tests directories, *_test.rs, *_tests.rs, tests.rs, and cfg(test) modules"
       },
       "classification": "scope_exclusion",
       "owner": "logging",
-      "reason": "The guard reports only log targets outside the registered aemeath namespace",
-      "tracking_issue": 936,
+      "reason": "Test fixtures and guard probes are not production log calls or production owner constants",
+      "tracking_issue": 941,
       "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace when the shell guard directly consumes TargetCatalog",
+      "exit_condition": "permanent while production ownership applies only to compiled production source",
       "status": "active"
     },
     {

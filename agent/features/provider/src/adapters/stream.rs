@@ -509,7 +509,7 @@ pub async fn parse_stream(
                                     )
                                 {
                                     log::warn!(
-                                        target: "aemeath:agent:provider",
+                                        target: crate::LOG_TARGET,
                                         "Anthropic 流式 tool_call JSON 解析失败但启发式恢复成功（{} bytes → {} bytes）",
                                         current_tool_json.len(),
                                         serde_json::to_string(&recovered).map(|s| s.len()).unwrap_or(0),

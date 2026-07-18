@@ -1,6 +1,6 @@
-/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
-pub const LOG_TARGET: &str = "aemeath:agent:hook";
+pub(crate) const LOG_TARGET: &str = "aemeath:agent:hook";
 
+/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 mod adapters;
 mod domain;
 mod ports;
