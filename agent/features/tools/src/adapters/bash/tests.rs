@@ -24,6 +24,7 @@ async fn bash_allow_all_does_not_bypass_shell_injection_guard() {
             agent_runner: None,
             registry: None,
             memory_config: share::config::MemoryConfig::default(),
+            memory: std::sync::Arc::new(memory::NoOpMemory),
             lang: "en".to_string(),
             allow_all: true,
         },
