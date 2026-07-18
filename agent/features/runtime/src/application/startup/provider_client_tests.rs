@@ -46,102 +46,16 @@ fn runtime_settings_with_effort(reasoning: bool, effort: &str) -> ModelRuntimeSe
     }
 }
 
-fn env_reader<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
-    move |name| {
-        pairs
-            .iter()
-            .find(|(key, _)| *key == name)
-            .map(|(_, value)| (*value).to_string())
-    }
-}
-
 #[test]
-fn test_resolve_api_key_prefers_cli_key() {
+fn test_resolve_api_key_uses_resolved_config_only() {
     let resolved = resolved_model(ProviderDriverKind::OpenAI, "config-key", "", "openai");
-    let read_env = env_reader(&[("AEMEATH_API_KEY", "env-key")]);
-
-    let result = resolve_api_key(Some("cli-key".to_string()), &resolved, Some(&read_env));
-
-    assert_eq!(result, Some("cli-key".to_string()));
+    assert_eq!(resolve_api_key(&resolved), Some("config-key".to_string()));
 }
 
 #[test]
-fn test_resolve_api_key_uses_aemeath_env_before_provider_env() {
-    let resolved = resolved_model(ProviderDriverKind::OpenAI, "config-key", "", "openai");
-    let read_env = env_reader(&[
-        ("AEMEATH_API_KEY", "aemeath-key"),
-        ("OPENAI_API_KEY", "openai-key"),
-    ]);
-
-    let result = resolve_api_key(None, &resolved, Some(&read_env));
-
-    assert_eq!(result, Some("aemeath-key".to_string()));
-}
-
-#[test]
-fn test_resolve_api_key_uses_provider_env_before_llm_env() {
-    let resolved = resolved_model(ProviderDriverKind::Anthropic, "config-key", "", "anthropic");
-    let read_env = env_reader(&[
-        ("ANTHROPIC_API_KEY", "anthropic-key"),
-        ("LLM_API_KEY", "llm-key"),
-    ]);
-
-    let result = resolve_api_key(None, &resolved, Some(&read_env));
-
-    assert_eq!(result, Some("anthropic-key".to_string()));
-}
-
-#[test]
-fn test_resolve_api_key_uses_llm_env_for_litellm_without_provider_env() {
-    let resolved = resolved_model(ProviderDriverKind::LiteLLM, "config-key", "", "litellm");
-    let read_env = env_reader(&[("LLM_API_KEY", "llm-key")]);
-
-    let result = resolve_api_key(None, &resolved, Some(&read_env));
-
-    assert_eq!(result, Some("llm-key".to_string()));
-}
-
-#[test]
-fn test_resolve_api_key_uses_minimax_provider_env_before_llm_env() {
-    let resolved = resolved_model(ProviderDriverKind::Minimax, "config-key", "", "minimax");
-    let read_env = env_reader(&[
-        ("MINIMAX_API_KEY", "minimax-key"),
-        ("LLM_API_KEY", "llm-key"),
-    ]);
-
-    let result = resolve_api_key(None, &resolved, Some(&read_env));
-
-    assert_eq!(result, Some("minimax-key".to_string()));
-}
-
-#[test]
-fn test_resolve_api_key_uses_mimo_provider_env_before_llm_env() {
-    let resolved = resolved_model(ProviderDriverKind::Mimo, "config-key", "", "mimo");
-    let read_env = env_reader(&[("MIMO_API_KEY", "mimo-key"), ("LLM_API_KEY", "llm-key")]);
-
-    let result = resolve_api_key(None, &resolved, Some(&read_env));
-
-    assert_eq!(result, Some("mimo-key".to_string()));
-}
-
-#[test]
-fn test_resolve_api_key_uses_config_key_when_env_missing() {
-    let resolved = resolved_model(ProviderDriverKind::Zhipu, "config-key", "", "zhipu");
-    let read_env = env_reader(&[]);
-
-    let result = resolve_api_key(None, &resolved, Some(&read_env));
-
-    assert_eq!(result, Some("config-key".to_string()));
-}
-
-#[test]
-fn test_resolve_api_key_returns_none_when_all_sources_missing() {
+fn test_resolve_api_key_returns_none_when_config_missing() {
     let resolved = resolved_model(ProviderDriverKind::Zhipu, "", "", "zhipu");
-    let read_env = env_reader(&[]);
-
-    let result = resolve_api_key(None, &resolved, Some(&read_env));
-
-    assert_eq!(result, None);
+    assert_eq!(resolve_api_key(&resolved), None);
 }
 
 #[test]
@@ -199,30 +113,6 @@ fn test_build_llm_client_ollama_constructs_ollama_provider() {
     .expect("valid provider client config");
 
     assert_eq!(client.provider_name(), "ollama");
-}
-
-#[test]
-fn test_provider_driver_api_key_env_name_ollama() {
-    assert_eq!(
-        share::config::domain::driver_env::driver_api_key_env_name("ollama"),
-        Some("OLLAMA_API_KEY")
-    );
-}
-
-#[test]
-fn test_provider_driver_api_key_env_name_minimax() {
-    assert_eq!(
-        share::config::domain::driver_env::driver_api_key_env_name("minimax"),
-        Some("MINIMAX_API_KEY")
-    );
-}
-
-#[test]
-fn test_provider_driver_api_key_env_name_mimo() {
-    assert_eq!(
-        share::config::domain::driver_env::driver_api_key_env_name("mimo"),
-        Some("MIMO_API_KEY")
-    );
 }
 
 #[test]

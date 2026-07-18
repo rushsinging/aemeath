@@ -1,10 +1,9 @@
 use crate::adapters::{
-    encode_native_config, CompatibilityAdapter, ConfigAdapterError, ConfigValidator, FileAdapter,
-    NativeConfigStore,
+    encode_native_config, CompatibilityAdapter, ConfigAdapterError, ConfigValidator, EnvAdapter,
+    EnvSource, FileAdapter, NativeConfigStore,
 };
 use crate::contract::*;
 use async_trait::async_trait;
-use share::config::adapters::env as env_adapter;
 use share::config::domain::merge::{ConfigPatch, PriorityChain};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
@@ -17,6 +16,7 @@ pub struct ConfigAppService {
     inner: AsyncRwLock<Inner>,
     active_location: RwLock<Option<ProjectConfigLocation>>,
     native_store: Option<NativeConfigStore>,
+    env_source: std::sync::Arc<dyn EnvSource>,
 }
 
 struct Inner {
@@ -93,7 +93,13 @@ impl ConfigAppService {
             }),
             active_location: RwLock::new(None),
             native_store: None,
+            env_source: std::sync::Arc::new(crate::adapters::ProcessEnv),
         }
+    }
+
+    pub fn with_env_source(mut self, env_source: std::sync::Arc<dyn EnvSource>) -> Self {
+        self.env_source = env_source;
+        self
     }
 
     pub fn with_native_store(mut self, native_store: NativeConfigStore) -> Self {
@@ -112,6 +118,7 @@ impl ConfigAppService {
             inner.project_path.as_deref(),
             inner.claude_project_settings_path.as_deref(),
             &inner.cli_patch,
+            self.env_source.as_ref(),
         )
         .await
         .map_err(|error| format!("配置加载失败：{error:?}"))?;
@@ -128,6 +135,7 @@ async fn load_config(
     project_path: Option<&Path>,
     claude_project_settings_path: Option<&Path>,
     cli_patch: &ConfigPatch,
+    env_source: &dyn EnvSource,
 ) -> Result<Config, ConfigAdapterError> {
     let mut chain = PriorityChain::new();
     if let Some(patch) = FileAdapter::read(global_path).await? {
@@ -143,15 +151,14 @@ async fn load_config(
             chain.push(patch);
         }
     }
-    let env_patch = env_adapter::read();
+    let env_patch = EnvAdapter::read(env_source);
     if !env_patch.is_empty() {
         chain.push(env_patch);
     }
     if !cli_patch.is_empty() {
         chain.push(cli_patch.clone());
     }
-    let mut config = chain.merge(Config::default());
-    resolve_provider_api_keys(&mut config);
+    let config = chain.merge(Config::default());
     ConfigValidator::validate(&config)?;
     Ok(config)
 }
@@ -198,27 +205,6 @@ fn map_adapter_persist_error(error: ConfigAdapterError) -> ConfigPersistError {
         ConfigAdapterError::CorruptTransaction => ConfigPersistError::CorruptTransaction,
         ConfigAdapterError::Parse => ConfigPersistError::Serialization,
         ConfigAdapterError::Io | ConfigAdapterError::Invalid => ConfigPersistError::Io,
-    }
-}
-
-fn resolve_provider_api_keys(config: &mut Config) {
-    for provider in config.models.providers.values_mut() {
-        if !provider.api_key.is_empty() {
-            continue;
-        }
-        if let Some(env_name) =
-            share::config::domain::driver_env::driver_api_key_env_name(&provider.driver)
-        {
-            if let Ok(value) = std::env::var(env_name) {
-                provider.api_key = value;
-                continue;
-            }
-        }
-        if let Ok(value) = std::env::var("LLM_API_KEY") {
-            provider.api_key = value;
-        } else if let Ok(value) = std::env::var("OPENAI_API_KEY") {
-            provider.api_key = value;
-        }
     }
 }
 
@@ -272,6 +258,7 @@ impl ProjectConfigParticipant for ConfigAppService {
             Some(&project_path),
             Some(&claude),
             &inner.cli_patch,
+            self.env_source.as_ref(),
         )
         .await
         .map_err(|error| ConfigError::Load(format!("配置加载失败：{error:?}")))?;
@@ -346,6 +333,43 @@ impl ProjectConfigParticipant for ConfigAppService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FakeEnv(std::collections::HashMap<String, String>);
+
+    impl EnvSource for FakeEnv {
+        fn get(&self, name: &str) -> Option<String> {
+            self.0.get(name).cloned()
+        }
+    }
+
+    #[tokio::test]
+    async fn cli_layer_overrides_env_and_env_overrides_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("config.json");
+        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let store = NativeConfigStore::new(storage);
+        let mut file_config = Config::default();
+        file_config.model.name = "file-model".into();
+        store
+            .write_override("global", &encode_native_config(&file_config).unwrap())
+            .await
+            .unwrap();
+        let service = ConfigAppService::with_global_path(Some(dir.path()), global)
+            .with_native_store(store)
+            .with_env_source(std::sync::Arc::new(FakeEnv(
+                std::collections::HashMap::from([("AEMEATH_MODEL".into(), "env-model".into())]),
+            )));
+        service
+            .set_cli_patch(crate::CliArgsAdapter::read(&crate::CliConfigInput {
+                api_key: Some("cli-key".into()),
+                model: Some("cli-model".into()),
+                ..Default::default()
+            }))
+            .await;
+        service.load().await.unwrap();
+        assert_eq!(service.committed_snapshot().model_name(), "cli-model");
+        assert_eq!(service.committed_snapshot().api_key(), Some("cli-key"));
+    }
 
     #[tokio::test]
     async fn update_replaces_committed_snapshot_even_without_receiver() {

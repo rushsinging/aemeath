@@ -84,7 +84,7 @@ AEMEATH_LOG_LEVEL=aemeath:tui=debug,aemeath:agent:runtime=trace  # per-target
 
 ### Driver-specific API key env
 
-Per-provider 的 driver-specific API key env 在 `ConfigAppService::load()` 的 `resolve_provider_api_keys` 后处理中注入：
+全部 provider-specific key 与 `AEMEATH_API_KEY` / `LLM_API_KEY` 均由 Config BC `EnvAdapter` 一次读取并进入 `ConfigPatch`；Config application 与 Runtime **NEVER** 再读 env：
 
 | driver | env |
 |---|---|
@@ -96,7 +96,7 @@ Per-provider 的 driver-specific API key env 在 `ConfigAppService::load()` 的 
 | volcengine | `VOLCENGINE_CODING_PLAN_API_KEY` |
 | zhipu / litellm | 无 driver-specific env |
 
-fallback 链：driver-specific → `LLM_API_KEY` → `OPENAI_API_KEY`。
+优先级：driver-specific → `AEMEATH_API_KEY` → `LLM_API_KEY`。`OPENAI_API_KEY` 只作为 openai driver-specific key，不再作为其他 driver 的全局 fallback。
 
 ### 系统级 env（白名单）
 

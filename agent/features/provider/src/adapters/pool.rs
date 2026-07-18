@@ -138,8 +138,7 @@ impl LlmClientPool {
             .unwrap_or(ProviderDriverKind::OpenAI);
 
         let api_style = model_entry.api_style.clone();
-        // API key — 由 ConfigAppService::load() 的 resolve_provider_api_keys
-        // 在 config 加载时从 env 注入，pool 只读 provider_config.api_key。
+        // API key 已由 Config EnvAdapter 写入 ConfigSnapshot；pool 只消费解析后的配置。
         let api_key = if provider_config.api_key.is_empty() {
             return Err(format!(
                 "no API key for provider '{}'. Set it in config.json or provider-specific env var",

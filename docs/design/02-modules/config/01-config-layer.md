@@ -669,27 +669,15 @@ impl ConfigTranslator for ClaudeTranslator {
 - 是否保留 Workflow ReasoningGraph 能力本身、以及是否接线到生产链路，同样由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策
 - `ConfigPatch` / `ConfigSnapshot` 均不再包含 `reasoning_graph` 字段
 
-## 8. driver_env — 环境变量后处理
+## 8. EnvAdapter — 业务环境变量唯一入口
 
-### 8.1 职责
+全部 business env 在 Config BC `EnvAdapter` 的单次读取中进入 `ConfigPatch`，application/Runtime **NEVER** 后处理或回读进程 env。
 
-`driver_env` 是 config 合并后的后处理步骤：
-
-```rust
-fn resolve_provider_api_keys(config: &mut Config) -> Result<(), ProjectConfigError> {
-    // 对每个 provider，如果 API key 未在 config 中设置，
-    // 从环境变量查找（AEMEATH_<PROVIDER>_API_KEY / <PROVIDER>_API_KEY）
-    for provider in &mut config.providers {
-        if provider.api_key.is_none() {
-            provider.api_key = driver_env::lookup_api_key(&provider.name);
-        }
-    }
-    Ok(())
-}
-```
-
-- **不进 patch 层**——跨 adapter/domain 边界的后处理
-- 逻辑与 Config 的 layer merge 用例共置；只在它已被多个用例共同消费时才抽为私有 `driver_env.rs`，**NEVER** 为此预建通用 `domain/` 层
+- provider key 优先级：driver-specific → `AEMEATH_API_KEY` → `LLM_API_KEY`
+- `OPENAI_API_KEY` 只属于 openai driver，不是其他 driver 的全局 fallback
+- `AEMEATH_MAX_REASONING` 已随 #921 退役，任何读取由 Guard 拦截
+- driver→env name 映射是 EnvAdapter 私有常量，不再作为 shared domain helper 发布
+- 业务 env 唯一 owner 由 `policy.config.business-env-owner` 注册表 policy 锁定；migration exception=0
 
 ## 9. 相关文档
 

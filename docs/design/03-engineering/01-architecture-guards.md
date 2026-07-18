@@ -524,16 +524,13 @@
 ## 19. check-config-env-guard.sh
   
 - **位置**：`.agents/hooks/check-config-env-guard.sh`。
-- **功能**：禁止 config 包外读取业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`）。业务 env 只允许在白名单路径读取。
+- **功能**：禁止 Config EnvAdapter 唯一实现点之外读取业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`）。
 - **扫描路径**：`agent/features/**`、`apps/cli/src/**`。
-- **业务 env 列表**：`AEMEATH_CONTEXT_SIZE`、`AEMEATH_PROVIDER`、`AEMEATH_API_KEY`、`AEMEATH_BASE_URL`、`AEMEATH_MODEL`、`AEMEATH_MAX_TOKENS`、`AEMEATH_PERMISSION_MODE`、`AEMEATH_MAX_TOOL_CONCURRENCY`、`AEMEATH_MAX_AGENT_CONCURRENCY`、`AEMEATH_VERBOSE`、`AEMEATH_LOG_LEVEL`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`CLAUDE_API_KEY`、`LLM_API_KEY`、`LLM_BASE_URL`、`DEEPSEEK_API_KEY`、`MINIMAX_API_KEY`、`MIMO_API_KEY`、`VOLCENGINE_CODING_PLAN_API_KEY`、`AGNES_API_KEY`、`OLLAMA_API_KEY`。
-- **白名单路径**：
-  - `agent/shared/src/config/adapters/env` — EnvAdapter，唯一业务 env 读取点
-  - `agent/shared/src/config/adapters/paths` — `AEMEATH_AGENTS_DIR`，路径根
-  - `agent/shared/src/config/domain/driver_env` — driver→env name 映射
-  - `agent/features/runtime/src/core/config_app_service.rs` — `resolve_provider_api_keys` 在 config 加载时从 env 注入 per-provider API key
-  - `packages/global/logging/` — `AEMEATH_LOG_LEVEL` 在 logging 层处理
-  - `build.rs` — 编译期
+- **业务 env 列表**：原列表加 `AEMEATH_MAX_REASONING`（该配置已退役，任何读取均违规）。
+- **唯一 Target policy**：`agent/features/config/src/adapters.rs`，注册表 id `policy.config.business-env-owner`。
+- **scope exclusion**：测试路径与整行注释，注册表 id `scope.config.comments`；不计 migration debt。
+- **系统/技术 env**：`HOME`、`AEMEATH_AGENTS_DIR`、`AEMEATH_LOG_STDERR`、`AEMEATH_VERSION`、Storage fault env、`HOSTNAME`/`USER` 不在 business pattern，归各自 owner。
+- **migration exception**：0。
   
 ## 20. run_tui_single_source_structure_guard（内联）
 
