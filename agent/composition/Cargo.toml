@@ -13,3 +13,10 @@ update = { path = "../features/update" }
 share = { path = "../shared" }
 sdk = { path = "../../packages/sdk" }
 async-trait = { workspace = true }
+
+[dev-dependencies]
+task = { path = "../features/task" }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde_json = { workspace = true }
+tempfile = "3"

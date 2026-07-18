@@ -15,8 +15,6 @@ use crate::ports::legacy::ProviderInfoPort;
 use context::skill::{load_all_skills, Skill};
 use provider::SystemBlock;
 use storage::TaskStore;
-use tools as tools_crate;
-use tools::ToolRegistry;
 
 use super::{AgentClientImpl, RuntimeHandle};
 use crate::LOG_TARGET;
@@ -30,6 +28,8 @@ pub async fn from_args_with_workspace(
     config_reader: Arc<dyn config::ConfigReader>,
     config_query: Arc<dyn config::ConfigQuery>,
     config_writer: Arc<dyn config::ConfigWriter>,
+    provider_gateway: Arc<dyn provider::LlmProviderGateway>,
+    tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
 ) -> Result<AgentClientImpl, SdkError> {
     // 1. Guidance 目录初始化
     context::guidance::init_guidance_dir();
@@ -83,7 +83,8 @@ pub async fn from_args_with_workspace(
 
     // 9. LLM client
     let client = Arc::new(
-        bootstrap::build_llm_client(
+        bootstrap::build_llm_client_with_gateway(
+            provider_gateway.as_ref(),
             driver,
             api_key,
             base_url,
@@ -107,8 +108,8 @@ pub async fn from_args_with_workspace(
     }
     let skills = Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
     let registry = {
-        let reg = ToolRegistry::new();
-        tools_crate::register_all_tools(&reg, task_access.clone(), skills.clone());
+        let reg = tool_gateway.new_registry();
+        tool_gateway.register_all_tools(&reg, task_access.clone(), skills.clone());
         Arc::new(reg)
     };
     let mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
@@ -281,6 +282,8 @@ pub async fn from_args(args: ChatBootstrapArgs) -> Result<AgentClientImpl, SdkEr
         config.reader(),
         config.query(),
         config.writer(),
+        provider::wire_provider(),
+        tools::wire_tools(),
     )
     .await
 }
@@ -394,6 +397,8 @@ mod tests {
             config.reader(),
             config.query(),
             config.writer(),
+            provider::wire_provider(),
+            tools::wire_tools(),
         )
         .await
         .expect("build client with workspace");
