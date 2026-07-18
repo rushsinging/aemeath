@@ -8,8 +8,6 @@
 //! `UnifiedLogger` 只消费 catalog。未知 target 写入 `aemeath.log` 并限频报告到 stderr。
 //! `panic.log` 由 panic hook 直写，不纳入 UnifiedLogger。
 
-pub(crate) const LOG_TARGET: &str = "aemeath:logging";
-const _: &str = LOG_TARGET;
 mod adapters;
 mod domain;
 

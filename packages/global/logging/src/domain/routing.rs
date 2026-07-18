@@ -31,10 +31,6 @@ pub(crate) enum ModuleOwner {
     Config,
     Memory,
     Task,
-    Sdk,
-    Logging,
-    Utils,
-    Xtask,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -59,10 +55,6 @@ pub(crate) enum DiagnosticSinkId {
     Config,
     Memory,
     Task,
-    Sdk,
-    Logging,
-    Utils,
-    Xtask,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,10 +138,6 @@ const TARGETS: &[TargetSpec] = &[
         "agent-workflow.log"
     ),
     target!("aemeath:context", Context, Context, "context.log"),
-    target!("aemeath:sdk", Sdk, Sdk, "sdk.log"),
-    target!("aemeath:logging", Logging, Logging, "logging.log"),
-    target!("aemeath:utils", Utils, Utils, "utils.log"),
-    target!("aemeath:xtask", Xtask, Xtask, "xtask.log"),
 ];
 
 pub(crate) struct TargetCatalog;

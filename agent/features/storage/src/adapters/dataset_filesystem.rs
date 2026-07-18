@@ -86,10 +86,18 @@ pub struct FileSystemDatasetAdapter {
 
 impl FileSystemDatasetAdapter {
     pub fn new(root: impl AsRef<Path>) -> Result<Self, StorageError> {
-        std::fs::create_dir_all(root.as_ref()).map_err(proto::map_io)?;
-        let root =
-            Dir::open_ambient_dir(root.as_ref(), ambient_authority()).map_err(proto::map_io)?;
-        Ok(Self { root })
+        log::debug!(target: crate::LOG_TARGET, "dataset_adapter init enter");
+        let result = (|| {
+            std::fs::create_dir_all(root.as_ref()).map_err(proto::map_io)?;
+            let root =
+                Dir::open_ambient_dir(root.as_ref(), ambient_authority()).map_err(proto::map_io)?;
+            Ok::<Self, StorageError>(Self { root })
+        })();
+        match &result {
+            Ok(_) => log::info!(target: crate::LOG_TARGET, "dataset_adapter init ok"),
+            Err(_) => log::error!(target: crate::LOG_TARGET, "dataset_adapter init failed"),
+        }
+        result
     }
 
     fn dataset_rel(key: &DatasetKey) -> PathBuf {
@@ -851,6 +859,10 @@ impl FileSystemDatasetAdapter {
                 if crossed_commit {
                     // 越过 Prepared 逻辑提交点：任何普通 post-Prepared I/O 都返回
                     // committed 收据，交由后续锁内恢复机械前滚。不清理证据。
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "dataset_commit recovery_pending"
+                    );
                     Ok(DatasetCommitReceipt::committed(
                         new_revision,
                         DatasetCommitVisibility::RecoveryPending,
@@ -986,6 +998,10 @@ impl FileSystemDatasetAdapter {
                 if crossed_commit {
                     // 越过 Prepared：普通 post-Prepared 故障返回 committed 收据，
                     // 交由后续锁内恢复机械前滚，绝不上抛 Err。
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "dataset_promote recovery_pending"
+                    );
                     Ok(DatasetCommitReceipt::committed(
                         new_revision,
                         DatasetCommitVisibility::RecoveryPending,
@@ -1230,5 +1246,153 @@ impl AtomicDatasetPort for FileSystemDatasetAdapter {
     ) -> Result<QuarantineOutcome, StorageError> {
         let (dir, _lock) = self.locked(dataset)?;
         self.quarantine_sync(&dir, generation, scope, reason)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// #[cfg(test)] dataset 构造 & RecoveryPending 终态日志 TDD
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod logging_tests {
+    use std::str::FromStr;
+
+    use super::FileSystemDatasetAdapter;
+    use crate::domain::{
+        DatasetCommitVisibility, DatasetKey, DatasetMember, DatasetRevision, Durability,
+        SafePathSegment, StorageNamespace, WriteOptions,
+    };
+    use crate::test_log;
+    use crate::AtomicDatasetPort;
+
+    fn root() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "aemeath-storage-dataset-log-{}",
+            uuid::Uuid::new_v4()
+        ))
+    }
+
+    fn key() -> DatasetKey {
+        DatasetKey::new(
+            StorageNamespace::Memory,
+            vec![SafePathSegment::from_str("conv-log").unwrap()],
+        )
+        .unwrap()
+    }
+
+    fn member(name: &str, bytes: &[u8]) -> DatasetMember {
+        DatasetMember::new(SafePathSegment::from_str(name).unwrap(), bytes.to_vec())
+    }
+
+    // ---- 构造 enter / exit ----
+
+    /// 成功路径：dataset_adapter 构造 emit "enter" → "ok"。
+    #[test]
+    fn init_success_emits_enter_then_ok() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        test_log::begin();
+        let result = FileSystemDatasetAdapter::new(dir.path());
+        test_log::end();
+
+        assert!(result.is_ok(), "construction should succeed");
+        let logs = test_log::drain();
+        let has_enter = logs.iter().any(|(_, m)| m.contains("enter"));
+        let has_ok = logs
+            .iter()
+            .any(|(level, m)| *level <= log::Level::Info && m.contains("ok"));
+        assert!(has_enter, "expected an 'enter' log line, got {logs:?}");
+        assert!(
+            has_ok,
+            "expected an 'ok' log line at Info-or-lower, got {logs:?}"
+        );
+    }
+
+    /// 失败路径：dataset_adapter 构造 emit "enter" → Error 级 "failed"。
+    #[test]
+    fn init_failure_emits_enter_then_failed_at_error() {
+        let file = tempfile::NamedTempFile::new().expect("temp file");
+        test_log::begin();
+        let result = FileSystemDatasetAdapter::new(file.path().join("subdir"));
+        test_log::end();
+
+        assert!(result.is_err(), "construction should fail");
+        let logs = test_log::drain();
+        let has_enter = logs.iter().any(|(_, m)| m.contains("enter"));
+        let has_failed = logs
+            .iter()
+            .any(|(level, m)| *level == log::Level::Error && m.contains("failed"));
+        assert!(has_enter, "expected an 'enter' log line, got {logs:?}");
+        assert!(
+            has_failed,
+            "expected a 'failed' log line at Error level, got {logs:?}"
+        );
+    }
+
+    // ---- RecoveryPending 终态 ----
+
+    /// commit_atomic 越过 Prepared 后在 post-Prepared 阶段故障，返回
+    /// committed RecoveryPending 收据——必须同时 emit Warn 级日志。
+    #[tokio::test]
+    async fn commit_recovery_pending_emits_warn() {
+        let root = root();
+        let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+        let key = key();
+
+        // 第一次 commit：建立初始代。
+        let expected: DatasetRevision = adapter
+            .read_manifest(&key)
+            .await
+            .expect("read_manifest")
+            .revision()
+            .clone();
+        adapter
+            .commit_atomic(
+                &key,
+                &expected,
+                &[member("active", b"a1")],
+                WriteOptions::new(Durability::BestEffort),
+            )
+            .await
+            .expect("first commit");
+
+        let expected2: DatasetRevision = adapter
+            .read_manifest(&key)
+            .await
+            .expect("read_manifest")
+            .revision()
+            .clone();
+
+        // 在 after_prepared（post-Prepared）注入故障：crossed_commit 已为 true。
+        std::env::set_var("AEMEATH_STORAGE_DATASET_FAULT_POINT", "after_prepared");
+        test_log::begin();
+        let receipt = adapter
+            .commit_atomic(
+                &key,
+                &expected2,
+                &[member("active", b"a2")],
+                WriteOptions::new(Durability::BestEffort),
+            )
+            .await;
+        test_log::end();
+        std::env::remove_var("AEMEATH_STORAGE_DATASET_FAULT_POINT");
+
+        let receipt = receipt.expect("post-Prepared fault returns committed receipt");
+        assert_eq!(
+            receipt.visibility(),
+            DatasetCommitVisibility::RecoveryPending,
+            "expected RecoveryPending visibility"
+        );
+
+        let logs = test_log::drain();
+        let has_recovery = logs
+            .iter()
+            .any(|(level, m)| *level == log::Level::Warn && m.contains("recovery_pending"));
+        assert!(
+            has_recovery,
+            "expected a recovery_pending Warn log, got {logs:?}"
+        );
+
+        drop(adapter);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

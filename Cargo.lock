@@ -436,6 +436,7 @@ name = "config"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "log",
  "serde_json",
  "share",
  "storage",
@@ -1998,6 +1999,7 @@ name = "memory"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "log",
  "serde",
  "serde_json",
  "share",
@@ -2547,6 +2549,7 @@ name = "project"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "log",
  "serde",
  "serde_json",
  "share",
@@ -3525,6 +3528,7 @@ dependencies = [
 name = "task"
 version = "0.0.0"
 dependencies = [
+ "log",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

@@ -35,6 +35,12 @@ enum ViolationKind {
     DuplicateOwnerConstant,
     MissingOwnerConstant,
     LogMacroAlias,
+    /// A non-runtime member defines LOG_TARGET, an anonymous keepalive, or
+    /// depends directly on logging/log.
+    ForbiddenNonRuntimeTarget,
+    /// A workspace member that is neither a runtime owner nor a known
+    /// non-runtime member.
+    UnknownWorkspaceMember,
 }
 #[derive(Debug)]
 struct Violation {
@@ -122,22 +128,17 @@ const OWNERS: &[(&str, OwnerRule)] = &[
         "agent/shared",
         OwnerRule::new("share", "aemeath:shared", "crate::LOG_TARGET"),
     ),
-    (
-        "packages/sdk",
-        OwnerRule::new("sdk", "aemeath:sdk", "crate::LOG_TARGET"),
-    ),
-    (
-        "packages/global/logging",
-        OwnerRule::new("logging", "aemeath:logging", "crate::LOG_TARGET"),
-    ),
-    (
-        "packages/global/utils",
-        OwnerRule::new("utils", "aemeath:utils", "crate::LOG_TARGET"),
-    ),
-    (
-        "tools/xtask",
-        OwnerRule::new("xtask", "aemeath:xtask", "crate::LOG_TARGET"),
-    ),
+];
+
+/// Workspace members that are intentionally NOT runtime owners: they must not
+/// define LOG_TARGET, register a Catalog entry, or directly depend on
+/// logging/log. xtask may emit ordinary CLI output but must not apply the
+/// logging target architecture.
+const NON_RUNTIME_MEMBERS: &[&str] = &[
+    "packages/sdk",
+    "packages/global/logging",
+    "packages/global/utils",
+    "tools/xtask",
 ];
 
 fn workspace_root() -> PathBuf {
@@ -511,16 +512,98 @@ fn inspect_source(raw: &str, owner: &OwnerRule, relative: &str) -> Vec<Violation
     violations
 }
 
+/// Path of the guard source file itself; excluded from scans because it
+/// legitimately references LOG_TARGET as part of the checking logic.
+const GUARD_SELF_PATH: &str = "packages/global/logging/src/domain/routing_guard.rs";
+const GUARD_TEST_PATH: &str = "packages/global/logging/src/domain/routing_guard_tests.rs";
+
+/// Check a non-runtime member for forbidden logging-target usage.
+fn inspect_non_runtime_member(raw_source: &str, relative: &str) -> Vec<Violation> {
+    let mut violations = Vec::new();
+    // The guard source files legitimately contain LOG_TARGET references.
+    if relative == GUARD_SELF_PATH || relative == GUARD_TEST_PATH {
+        return violations;
+    }
+    // Any LOG_TARGET constant declaration is forbidden.
+    for (index, line) in raw_source.lines().enumerate() {
+        if line.contains("const LOG_TARGET") && line.contains('=') {
+            violations.push(Violation {
+                path: relative.into(),
+                line: index + 1,
+                kind: ViolationKind::ForbiddenNonRuntimeTarget,
+                detail: "non-runtime member must not define LOG_TARGET".into(),
+            });
+        }
+        // Anonymous keepalive referencing LOG_TARGET.
+        if line.contains("const _") && line.contains("LOG_TARGET") {
+            violations.push(Violation {
+                path: relative.into(),
+                line: index + 1,
+                kind: ViolationKind::ForbiddenNonRuntimeTarget,
+                detail: "non-runtime member must not keepalive LOG_TARGET".into(),
+            });
+        }
+    }
+    violations
+}
+
+/// Check a non-runtime member's Cargo.toml for a direct logging/log dependency.
+///
+/// The Logging implementation itself necessarily depends on the `log` facade;
+/// the restriction applies to pure contract/function crates and xtask only.
+fn inspect_non_runtime_cargo_toml(root: &Path, member: &str) -> Vec<Violation> {
+    let mut violations = Vec::new();
+    if member == "packages/global/logging" {
+        return violations;
+    }
+    let manifest_path = root.join(member).join("Cargo.toml");
+    let Ok(manifest) = fs::read_to_string(&manifest_path) else {
+        return violations;
+    };
+    // Parse the [dependencies] table lines for a direct `log` or `logging` dependency.
+    // A workspace-inherited dependency line looks like `log.workspace = true`.
+    let in_deps = |section: &str| section.trim() == "[dependencies]";
+    let mut section = String::new();
+    for line in manifest.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            section = trimmed.to_string();
+            continue;
+        }
+        if !in_deps(&section) {
+            continue;
+        }
+        // Dependency lines look like `name = ...` or `name.workspace = true`.
+        let dep_name = trimmed
+            .split_once('=')
+            .map(|(lhs, _)| lhs.trim())
+            .unwrap_or("");
+        if dep_name == "log" || dep_name == "logging" {
+            violations.push(Violation {
+                path: format!("{member}/Cargo.toml"),
+                line: 1,
+                kind: ViolationKind::ForbiddenNonRuntimeTarget,
+                detail: format!("non-runtime member must not directly depend on {dep_name}"),
+            });
+        }
+    }
+    violations
+}
+
 fn inspect_workspace(root: &Path) -> std::io::Result<Vec<Violation>> {
     let mut violations = Vec::new();
     let members = workspace_members(root)?;
     for member in &members {
-        if !OWNERS.iter().any(|(registered, _)| registered == member) {
+        let is_owner = OWNERS.iter().any(|(registered, _)| registered == member);
+        let is_non_runtime = NON_RUNTIME_MEMBERS.iter().any(|nr| *nr == member);
+        if !is_owner && !is_non_runtime {
             violations.push(Violation {
                 path: member.clone(),
                 line: 1,
-                kind: ViolationKind::MissingOwnerConstant,
-                detail: "workspace member has no log target owner rule".into(),
+                kind: ViolationKind::UnknownWorkspaceMember,
+                detail:
+                    "workspace member is neither a runtime owner nor a known non-runtime member"
+                        .into(),
             });
         }
     }
@@ -584,6 +667,31 @@ fn inspect_workspace(root: &Path) -> std::io::Result<Vec<Violation>> {
                 ),
             });
         }
+    }
+    // Inspect non-runtime members for forbidden logging usage.
+    for member in NON_RUNTIME_MEMBERS {
+        if !members.is_empty()
+            && !members
+                .iter()
+                .any(|workspace_member| workspace_member == member)
+        {
+            // Non-runtime member absent from this workspace — nothing to check.
+            continue;
+        }
+        let scope = format!("{member}/src");
+        for file in rust_files_under(&root.join(&scope)) {
+            let relative = file
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if is_test_path(&relative) {
+                continue;
+            }
+            let raw = fs::read_to_string(file)?;
+            violations.extend(inspect_non_runtime_member(&raw, &relative));
+        }
+        violations.extend(inspect_non_runtime_cargo_toml(root, member));
     }
     Ok(violations)
 }

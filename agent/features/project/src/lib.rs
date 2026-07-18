@@ -1,5 +1,4 @@
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:project";
-const _: &str = LOG_TARGET;
 mod adapters;
 mod domain;
 
@@ -184,5 +183,125 @@ mod tests {
             "NonGit 目录不应记录 git common dir"
         );
         assert!(!read.in_worktree(), "NonGit 目录 in_worktree 恒为 false");
+    }
+
+    // ---- #941: wire_production_workspace 日志契约 ----
+    // 真实入口必须在进入时记录 enter、在成功/失败退出时记录 exit；
+    // 日志只携带安全的结果类别 / worktree kind，绝不包含完整路径。
+
+    thread_local! {
+        static CAPTURED_PROJECT_LOGS: std::cell::RefCell<Vec<(log::Level, String)>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    struct ProjectCapturingLogger;
+
+    impl log::Log for ProjectCapturingLogger {
+        fn enabled(&self, _metadata: &log::Metadata) -> bool {
+            true
+        }
+
+        fn log(&self, record: &log::Record) {
+            if record.target() == LOG_TARGET {
+                let level = record.level();
+                let payload = format!("{}", record.args());
+                CAPTURED_PROJECT_LOGS.with(|cell| cell.borrow_mut().push((level, payload)));
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    /// 进程内仅安装一次捕获 logger（`log::set_boxed_logger` 只能成功一次）。
+    /// 捕获存储为 thread-local，因此并行测试互不可见。
+    fn install_project_capturing_logger() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            log::set_boxed_logger(Box::new(ProjectCapturingLogger))
+                .expect("capturing logger must install exactly once per process");
+            log::set_max_level(log::LevelFilter::Trace);
+        });
+    }
+
+    /// 取走并清空本线程已捕获的日志，避免 OS 线程复用带来的残留。
+    fn drain_project_logs() -> Vec<(log::Level, String)> {
+        CAPTURED_PROJECT_LOGS.with(|cell| std::mem::take(&mut *cell.borrow_mut()))
+    }
+
+    /// #941: 成功路径必须记录 enter 与 success exit；success 日志携带安全的
+    /// worktree kind（NonGit/Primary/Linked），且完整路径绝不出现。
+    #[test]
+    fn wire_production_workspace_logs_enter_and_success_without_paths() {
+        install_project_capturing_logger();
+        let _ = drain_project_logs();
+        let tmp = TempDir::new("log-success");
+        let wiring = wire_production_workspace(tmp.path().to_path_buf());
+        assert!(wiring.is_ok(), "普通目录应初始化成功");
+        drop(wiring);
+
+        let logs = drain_project_logs();
+        let joined = logs
+            .iter()
+            .map(|(_, m)| m.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            logs.iter().any(|(_, m)| m.contains("enter")),
+            "应记录 enter：{joined}"
+        );
+        assert!(
+            logs.iter().any(|(_, m)| m.contains("success")),
+            "应记录 success exit：{joined}"
+        );
+        assert!(
+            logs.iter().any(|(_, m)| {
+                m.contains("NonGit") || m.contains("Primary") || m.contains("Linked")
+            }),
+            "success 日志应包含安全的 worktree kind：{joined}"
+        );
+
+        let path_str = tmp.path().display().to_string();
+        assert!(
+            !joined.contains(&path_str),
+            "日志不得包含完整路径 {path_str}：{joined}"
+        );
+    }
+
+    /// #941: 失败路径必须记录 enter 与 failure exit；failure 日志携带安全的
+    /// 错误类别（如 PathNotFound），且完整路径绝不出现。
+    #[test]
+    fn wire_production_workspace_logs_enter_and_failure_without_paths() {
+        install_project_capturing_logger();
+        let _ = drain_project_logs();
+        let missing = PathBuf::from("/definitely/not/here/aemeath-941-log-fail");
+        let result = wire_production_workspace(missing.clone());
+        assert!(result.is_err());
+
+        let logs = drain_project_logs();
+        let joined = logs
+            .iter()
+            .map(|(_, m)| m.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            logs.iter().any(|(_, m)| m.contains("enter")),
+            "应记录 enter：{joined}"
+        );
+        assert!(
+            logs.iter().any(|(_, m)| m.contains("failure")),
+            "应记录 failure exit：{joined}"
+        );
+        assert!(
+            logs.iter().any(|(_, m)| m.contains("PathNotFound")),
+            "failure 日志应包含安全的错误类别：{joined}"
+        );
+
+        let path_str = missing.display().to_string();
+        assert!(
+            !joined.contains(&path_str),
+            "日志不得包含完整路径 {path_str}：{joined}"
+        );
     }
 }

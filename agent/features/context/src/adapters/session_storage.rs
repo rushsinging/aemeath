@@ -215,7 +215,7 @@ pub async fn load_canonical_session(id: &str) -> Result<CanonicalSession, Sessio
         Ok(decoded) => Ok(decoded.session),
         Err(codec_err) => {
             log::warn!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "session {} canonical decode failed ({}), attempting .bak fallback",
                 id,
                 codec_err
@@ -224,7 +224,7 @@ pub async fn load_canonical_session(id: &str) -> Result<CanonicalSession, Sessio
                 if let Ok(bak_bytes) = tokio::fs::read(&bak_path).await {
                     if let Ok(decoded) = crate::adapters::decode_session(&bak_bytes) {
                         log::info!(
-                            target: LOG_TARGET,
+                            target: crate::LOG_TARGET,
                             "session {} recovered canonical from .bak backup",
                             id
                         );

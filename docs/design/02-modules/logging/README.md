@@ -99,7 +99,7 @@ struct TargetSpec {
 }
 ```
 
-目标 catalog 覆盖每个 Cargo workspace crate，每个 crate 都拥有独立 target、owner、sink ID 与日志文件；Provider 另保留 LLM API Error 专用 target，Runtime 的 Prompt target 作为专用子能力路由。crate 即使暂时没有生产日志，也必须预先声明自己的 crate-private `LOG_TARGET`，避免首次加日志时临时选择或借用其他 owner。Audit 不作为诊断 target 模拟审计存储；Audit Event 仍走独立 `AuditSink`。
+目标 catalog 覆盖具有独立运行时边界的 owner：CLI、Composition、Shared 及各业务 feature crate；每个 owner 都有独立 target、sink ID 与日志文件，并在真实架构入口和终态记录低频、脱敏日志。Provider 另保留 LLM API Error 专用 target，Runtime 的 Prompt target 作为专用子能力路由。纯契约 SDK、纯函数 Utils、Logging 自身和未接入 UnifiedLogger 的 xtask 不制造应用 target；其边界分别由执行 owner、direct emergency diagnostics 或 CLI 输出负责。Audit Event 仍走独立 `AuditSink`。
 
 路由规则：
 
@@ -108,7 +108,7 @@ struct TargetSpec {
 3. target 与 sink 文件映射来自同一 catalog；
 4. 未注册 target 写 `aemeath.log`，同时向 stderr 产生限频告警；
 5. sink 文件名必须唯一；
-6. catalog guard 从根 `Cargo.toml` 的 workspace members 反向校验：每个 crate root 恰有一个 crate-private `LOG_TARGET`，且 target、owner、sink ID 与文件名唯一并在 Catalog 注册；同时扫描全部生产 `log::xxx!` 调用。
+6. catalog guard 从根 `Cargo.toml` 的 workspace members 反向校验 runtime owner 与已登记的非 runtime member：runtime owner 的 crate root 恰有一个 crate-private `LOG_TARGET`，target、sink ID 与文件名唯一；非 runtime member 禁止 target、匿名保活及不必要的 Logging 依赖；同时扫描全部生产 `log::xxx!` 调用。
 
 ## 5. 级别、preview 与脱敏
 

@@ -10,12 +10,13 @@
 
 - 统一前缀 `aemeath:`，当前使用二级或三级结构，例如 `aemeath:context`、`aemeath:agent:runtime`。
 - 所有 `log::xxx!` 调用的 target 值 **MUST** 来自 `packages/global/logging/src/domain/routing.rs` 的 TargetCatalog，**NEVER** 使用旧前缀（如 `runtime::`、`cli::`、`tools::`）。
-- 每个 workspace crate **MUST** 在 crate root（library 为 `lib.rs`，binary 为 `main.rs`）唯一定义 crate-private `LOG_TARGET`，无论当前是否存在生产日志调用；调用方 **MUST** 引用该 owner 常量，**NEVER** 硬编码 target 字符串或复制同值常量。
+- 具有独立运行时边界的 crate **MUST** 在 crate root（library 为 `lib.rs`，binary 为 `main.rs`）唯一定义 crate-private `LOG_TARGET`，并在真实入口与成功/失败/降级终态消费该 owner 常量；调用方 **NEVER** 硬编码 target 字符串或复制同值常量。
+- 纯契约 `packages/sdk`、纯函数 `packages/global/utils`、Logging 实现自身与未接入 UnifiedLogger 的 `tools/xtask` **MUST NOT** 定义应用 target 或匿名常量保活；其边界分别由执行 owner、direct emergency diagnostics 或 CLI stdout/stderr 负责。
 - 守卫脚本 `.agents/hooks/check-log-target-prefix.sh` 强制检查。
 
 ### TargetCatalog
 
-合法 target、owner、sink ID 和日志文件名只在 `packages/global/logging/src/domain/routing.rs` 定义一次。Catalog 为每个 workspace crate 注册独立 target；Provider 另有专用的 LLM API Error target，Runtime 的 Prompt target 保留为专用子能力路由。#941 已将现有生产调用全部迁到 owner 常量，并启用从 workspace members 反向校验 crate root、Catalog 与 owner 映射的全仓 Guard。
+合法 target、owner、sink ID 和日志文件名只在 `packages/global/logging/src/domain/routing.rs` 定义一次。Catalog 覆盖具有独立运行时边界的 owner；Provider 另有专用的 LLM API Error target，Runtime 的 Prompt target保留为专用子能力路由。#941 已将生产调用迁到 owner 常量，并启用从 workspace members 反向校验 runtime owner 与非 runtime member 分类的全仓 Guard。
 
 下表是 TargetCatalog 的非规范性可读投影；代码 catalog 是唯一真相，测试负责校验 target、sink ID 与文件名唯一。
 
@@ -43,11 +44,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 16 | `aemeath:agent:config` | `agent-config.log` | `agent/features/config` | 配置诊断 |
 | 17 | `aemeath:agent:memory` | `agent-memory.log` | `agent/features/memory` | Memory 诊断 |
 | 18 | `aemeath:agent:task` | `agent-task.log` | `agent/features/task` | Task 诊断 |
-| 19 | `aemeath:sdk` | `sdk.log` | `packages/sdk` | SDK 诊断 |
-| 20 | `aemeath:logging` | `logging.log` | `packages/global/logging` | Logging 自身诊断 |
-| 21 | `aemeath:utils` | `utils.log` | `packages/global/utils` | Utils 诊断 |
-| 22 | `aemeath:xtask` | `xtask.log` | `tools/xtask` | xtask 诊断 |
-| 23 | `aemeath:llm-api-error` | `llm-api-error.log` | `agent/features/provider` | 脱敏后的 LLM API 失败诊断 |
+| 19 | `aemeath:llm-api-error` | `llm-api-error.log` | `agent/features/provider` | 脱敏后的 LLM API 失败诊断 |
 | — | 兜底 | `aemeath.log` | 未注册 target | 硬兜底并限频 direct stderr 报告 |
 | — | `panic.log` | `panic.log` | panic_hook.rs 直写 | panic 信息（不纳入 UnifiedLogger） |
 

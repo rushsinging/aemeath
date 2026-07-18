@@ -3,8 +3,6 @@
 //! `packages/sdk` 只放 trait + 公共类型，零业务依赖。
 //! 实现在 `agent/runtime`。
 
-pub(crate) const LOG_TARGET: &str = "aemeath:sdk";
-const _: &str = LOG_TARGET;
 pub mod bootstrap;
 pub mod change_set;
 pub mod chat;

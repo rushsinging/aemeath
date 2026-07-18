@@ -188,7 +188,7 @@ pub async fn from_args_with_workspace(
         .await
         {
             Ok((_restore, sid)) => {
-                log::info!(target: LOG_TARGET, "startup resume: {}", sid);
+                log::info!(target: crate::LOG_TARGET, "startup resume: {}", sid);
                 sid
             }
             Err(error) => {
@@ -201,7 +201,7 @@ pub async fn from_args_with_workspace(
         // Non-resume: use the wiring's committed session id so Runtime
         // and the Context coordinator share the same canonical session.
         let session_id = wiring.committed_session().id.clone();
-        log::info!(target: LOG_TARGET, "session started");
+        log::info!(target: crate::LOG_TARGET, "session started");
         session_id
     };
     // Session id determined above; committed_config read below reflects
@@ -334,7 +334,7 @@ pub async fn from_args_with_workspace(
         &snapshot,
     );
     let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
-    log::info!(target: LOG_TARGET,
+    log::info!(target: crate::LOG_TARGET,
         "concurrency limits: max_tool={}, max_agent={}",
         max_tool_concurrency,
         max_agent_concurrency

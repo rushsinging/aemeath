@@ -5,8 +5,8 @@ fn scanner_rejects_bare_literal_unregistered_and_wrong_owner_targets() {
     let owner = OwnerRule::new("runtime", "aemeath:agent:runtime", "crate::LOG_TARGET");
     let violations = inspect_source(
         r#"log::info!("bare");
-           log::warn!(target: "aemeath:agent:runtime", "literal");
-           const LOG_TARGET: &str = "aemeath:not-registered";"#,
+            log::warn!(target: "aemeath:agent:runtime", "literal");
+            const LOG_TARGET: &str = "aemeath:not-registered";"#,
         &owner,
         "src/lib.rs",
     );
@@ -219,28 +219,6 @@ fn workspace_scan_flags_duplicate_owner_constant() {
 }
 
 #[test]
-fn workspace_scan_accepts_anonymous_reference_to_owner_constant() {
-    let root = scratch_workspace(
-        "agent/features/config",
-        &[(
-            "src/lib.rs",
-            concat!(
-                "pub(crate) const LOG_TARGET: &str = \"aemeath:agent:config\";\n",
-                "const _: &str = LOG_TARGET;\n",
-            ),
-        )],
-    );
-    let violations = inspect_workspace(&root).expect("scan scratch");
-    assert!(!violations.iter().any(|violation| {
-        violation.path.starts_with("agent/features/config")
-            && matches!(
-                violation.kind,
-                ViolationKind::MissingOwnerConstant | ViolationKind::DuplicateOwnerConstant
-            )
-    }));
-}
-
-#[test]
 fn workspace_scan_requires_a_constant_even_without_log_calls() {
     let root = scratch_workspace(
         "agent/features/config",
@@ -260,20 +238,174 @@ fn workspace_scan_requires_a_constant_even_without_log_calls() {
         .any(|v| v.kind == ViolationKind::MissingOwnerConstant));
 }
 
+// ---------------------------------------------------------------------------
+// NON_RUNTIME_MEMBERS policy tests
+// ---------------------------------------------------------------------------
+
+/// Non-runtime members are allowed to *not* define LOG_TARGET; a scratch
+/// workspace whose only member is a non-runtime member must report no
+/// violations for lacking a constant.
 #[test]
-fn workspace_manifest_and_guard_cover_the_same_members() {
-    let root = workspace_root();
-    let manifest_members = workspace_members(&root).expect("parse workspace members");
-    let guarded_members = OWNERS
-        .iter()
-        .map(|(member, _)| (*member).to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(manifest_members, guarded_members);
-    assert_eq!(manifest_members.len(), 21);
+fn non_runtime_member_without_log_target_is_allowed() {
+    let root = scratch_workspace(
+        "packages/global/utils",
+        &[("src/lib.rs", "pub fn helper() {}\n")],
+    );
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"packages/global/utils\"]\n",
+    )
+    .unwrap();
+    let violations = inspect_workspace(&root).expect("scan scratch");
+    assert!(
+        !violations.iter().any(|v| {
+            v.path.starts_with("packages/global/utils")
+                && matches!(v.kind, ViolationKind::MissingOwnerConstant)
+        }),
+        "non-runtime member must not be flagged for missing LOG_TARGET: {violations:?}"
+    );
+}
+
+/// A non-runtime member that *defines* LOG_TARGET violates the policy.
+#[test]
+fn non_runtime_member_with_log_target_is_a_violation() {
+    let root = scratch_workspace(
+        "packages/global/utils",
+        &[(
+            "src/lib.rs",
+            "pub(crate) const LOG_TARGET: &str = \"aemeath:utils\";\n",
+        )],
+    );
+    let violations = inspect_workspace(&root).expect("scan scratch");
+    assert!(
+        violations
+            .iter()
+            .any(|v| { matches!(v.kind, ViolationKind::ForbiddenNonRuntimeTarget) }),
+        "non-runtime member defining LOG_TARGET must be flagged: {violations:?}"
+    );
+}
+
+/// A non-runtime member that contains an anonymous `const _: &str = LOG_TARGET`
+/// keepalive must be flagged.
+#[test]
+fn non_runtime_member_with_anonymous_keepalive_is_a_violation() {
+    let root = scratch_workspace(
+        "packages/sdk",
+        &[("src/lib.rs", "const _: &str = LOG_TARGET;\n")],
+    );
+    let violations = inspect_workspace(&root).expect("scan scratch");
+    assert!(
+        violations
+            .iter()
+            .any(|v| { matches!(v.kind, ViolationKind::ForbiddenNonRuntimeTarget) }),
+        "non-runtime member anonymous keepalive must be flagged: {violations:?}"
+    );
+}
+
+/// A pure non-runtime member whose Cargo.toml directly depends on logging or
+/// log must be flagged. Logging itself necessarily implements the log facade.
+#[test]
+fn pure_non_runtime_member_with_logging_dependency_is_a_violation() {
+    let root = scratch_workspace(
+        "packages/sdk",
+        &[
+            ("src/lib.rs", "pub fn sdk() {}\n"),
+            (
+                "Cargo.toml",
+                "[package]\nname = \"sdk\"\n\n[dependencies]\nlog = \"0.4\"\n",
+            ),
+        ],
+    );
+    let violations = inspect_workspace(&root).expect("scan scratch");
+    assert!(
+        violations
+            .iter()
+            .any(|v| { matches!(v.kind, ViolationKind::ForbiddenNonRuntimeTarget) }),
+        "non-runtime member depending on log must be flagged: {violations:?}"
+    );
 }
 
 #[test]
-fn every_workspace_member_root_has_exactly_one_crate_private_target() {
+fn logging_implementation_may_depend_on_log_without_defining_a_target() {
+    let root = scratch_workspace(
+        "packages/global/logging",
+        &[
+            ("src/lib.rs", "pub struct UnifiedLogger;\n"),
+            (
+                "Cargo.toml",
+                "[package]\nname = \"logging\"\n\n[dependencies]\nlog = \"0.4\"\n",
+            ),
+        ],
+    );
+    let violations = inspect_workspace(&root).expect("scan scratch");
+    assert!(
+        !violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::ForbiddenNonRuntimeTarget),
+        "logging implementation dependency is structural, not an owner target: {violations:?}"
+    );
+}
+
+/// The xtask crate may use ordinary CLI output (eprintln!) but must not apply
+/// the logging target architecture.
+#[test]
+fn xtask_cli_output_without_target_is_allowed() {
+    let root = scratch_workspace(
+        "tools/xtask",
+        &[("src/main.rs", "fn main() { eprintln!(\"building\"); }\n")],
+    );
+    let violations = inspect_workspace(&root).expect("scan scratch");
+    assert!(
+        !violations
+            .iter()
+            .any(|v| { matches!(v.kind, ViolationKind::ForbiddenNonRuntimeTarget) }),
+        "xtask ordinary CLI output must not be flagged: {violations:?}"
+    );
+}
+
+/// The guard must treat a member that appears in the workspace manifest but is
+/// neither a runtime owner nor a known non-runtime member as a violation.
+#[test]
+fn workspace_member_outside_owners_and_non_runtime_is_a_violation() {
+    let root = scratch_workspace("mystery/crate", &[("src/lib.rs", "pub fn mystery() {}\n")]);
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"mystery/crate\"]\n",
+    )
+    .unwrap();
+    let violations = inspect_workspace(&root).expect("scan scratch");
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::UnknownWorkspaceMember),
+        "workspace member that is neither owner nor non-runtime must be flagged: {violations:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Workspace coverage test (kept; will fail until crate roots are migrated)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn workspace_manifest_members_equal_owners_plus_non_runtime() {
+    let root = workspace_root();
+    let manifest_members = workspace_members(&root).expect("parse workspace members");
+    let mut expected: Vec<String> = OWNERS
+        .iter()
+        .map(|(m, _)| (*m).to_owned())
+        .chain(NON_RUNTIME_MEMBERS.iter().map(|m| (*m).to_owned()))
+        .collect();
+    expected.sort();
+    let mut actual = manifest_members.clone();
+    actual.sort();
+    assert_eq!(
+        actual, expected,
+        "workspace members must exactly equal OWNERS + NON_RUNTIME_MEMBERS"
+    );
+}
+
+#[test]
+fn every_runtime_owner_has_exactly_one_crate_private_target() {
     let root = workspace_root();
     for (member, owner) in OWNERS {
         let crate_root = crate_root(&root.join(member)).expect("workspace member crate root");
@@ -290,7 +422,34 @@ fn every_workspace_member_root_has_exactly_one_crate_private_target() {
 }
 
 #[test]
-fn every_workspace_member_has_an_independent_catalog_route() {
+fn current_workspace_obeys_owner_aware_log_target_policy() {
+    let violations = inspect_workspace(&workspace_root()).expect("scan workspace");
+    assert!(
+        violations.is_empty(),
+        "owner-aware log target violations:\n{}",
+        violations
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn catalog_targets_are_valid_and_unique() {
+    let mut seen = std::collections::HashSet::new();
+    for TargetSpec { target, .. } in TargetCatalog::specs() {
+        let target = target.as_str();
+        assert!(target.starts_with("aemeath:"));
+        assert!(target.split(':').count() <= 3);
+        assert!(seen.insert(target));
+    }
+}
+
+/// Each runtime owner must have a registered catalog route. Non-runtime
+/// members must NOT appear in the catalog.
+#[test]
+fn catalog_covers_exactly_runtime_owners() {
     use super::super::routing::{DiagnosticSinkId as Sink, ModuleOwner as Owner};
 
     let expected = [
@@ -407,34 +566,6 @@ fn every_workspace_member_has_an_independent_catalog_route() {
             Sink::Shared,
             "shared.log",
         ),
-        (
-            "packages/sdk",
-            "aemeath:sdk",
-            Owner::Sdk,
-            Sink::Sdk,
-            "sdk.log",
-        ),
-        (
-            "packages/global/logging",
-            "aemeath:logging",
-            Owner::Logging,
-            Sink::Logging,
-            "logging.log",
-        ),
-        (
-            "packages/global/utils",
-            "aemeath:utils",
-            Owner::Utils,
-            Sink::Utils,
-            "utils.log",
-        ),
-        (
-            "tools/xtask",
-            "aemeath:xtask",
-            Owner::Xtask,
-            Sink::Xtask,
-            "xtask.log",
-        ),
     ];
     assert_eq!(expected.len(), OWNERS.len());
     for (member, target, owner, sink, file) in expected {
@@ -443,29 +574,18 @@ fn every_workspace_member_has_an_independent_catalog_route() {
         let spec = TargetCatalog::exact(target).expect("member target registered");
         assert_eq!((spec.owner, spec.sink, spec.file_name), (owner, sink, file));
     }
-}
-
-#[test]
-fn current_workspace_obeys_owner_aware_log_target_policy() {
-    let violations = inspect_workspace(&workspace_root()).expect("scan workspace");
-    assert!(
-        violations.is_empty(),
-        "owner-aware log target violations:\n{}",
-        violations
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-}
-
-#[test]
-fn catalog_targets_are_valid_and_unique() {
-    let mut seen = std::collections::HashSet::new();
-    for TargetSpec { target, .. } in TargetCatalog::specs() {
-        let target = target.as_str();
-        assert!(target.starts_with("aemeath:"));
-        assert!(target.split(':').count() <= 3);
-        assert!(seen.insert(target));
+    // Non-runtime members must NOT have catalog routes.
+    for nr in NON_RUNTIME_MEMBERS {
+        let nr_target = match *nr {
+            "packages/sdk" => "aemeath:sdk",
+            "packages/global/logging" => "aemeath:logging",
+            "packages/global/utils" => "aemeath:utils",
+            "tools/xtask" => "aemeath:xtask",
+            _ => continue,
+        };
+        assert!(
+            TargetCatalog::exact(nr_target).is_none(),
+            "non-runtime member {nr} must not be in catalog"
+        );
     }
 }

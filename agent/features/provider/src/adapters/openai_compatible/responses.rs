@@ -453,13 +453,7 @@ mod tests {
             crate::ports::ReasoningLevel::Off,
         )
         .expect("valid scope");
-        let body = provider.build_responses_request_body(
-            &scope,
-            &[],
-            &[],
-            &flat_schemas,
-            false,
-        );
+        let body = provider.build_responses_request_body(&scope, &[], &[], &flat_schemas, false);
 
         // tools 必须被注入（修复前 schema.get("function") = None 导致 tools 丢失）
         let tools = body.get("tools").expect("tools should be injected");
@@ -467,6 +461,9 @@ mod tests {
         assert_eq!(tools[0]["type"], "function");
         assert_eq!(tools[0]["name"], "get_weather");
         assert_eq!(tools[0]["description"], "Get weather");
-        assert_eq!(tools[0]["parameters"]["properties"]["city"]["type"], "string");
+        assert_eq!(
+            tools[0]["parameters"]["properties"]["city"]["type"],
+            "string"
+        );
     }
 }
