@@ -7,8 +7,6 @@ use memory::api as memory_api;
 
 use crate::app::FeatureGateways;
 
-/// Production reader for the pre-atomic Memory files. Paths stay inside the
-/// legacy Memory directory and only bytes/classification cross the Memory BC.
 struct FileLegacyMemorySource {
     base_dir: PathBuf,
     project_file_name: String,
@@ -16,11 +14,11 @@ struct FileLegacyMemorySource {
 
 impl FileLegacyMemorySource {
     fn new(base_dir: PathBuf, initial_cwd: &str) -> Self {
-        let project_file_name =
-            storage::project_file_name_from_path(std::path::Path::new(initial_cwd));
         Self {
+            project_file_name: storage::project_file_name_from_path(std::path::Path::new(
+                initial_cwd,
+            )),
             base_dir,
-            project_file_name,
         }
     }
 
@@ -77,8 +75,6 @@ pub(crate) async fn from_args_with_gateways(
     workspace: project::WorkspaceViews,
     config: config::ConfigWiring,
 ) -> Result<AgentClientImpl, sdk::SdkError> {
-    // Main Memory wiring is owned here: stable project identity comes from the
-    // already-wired Workspace, while policy comes from the committed Config.
     let identity = workspace.read().project_identity();
     let memory_config = config.reader().committed_snapshot().memory().clone();
     let legacy_base_dir = storage::memory_base_dir();
@@ -104,22 +100,15 @@ pub(crate) async fn from_args_with_gateways(
             .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
     );
 
-    // Task BC wiring: Composition owns the single backing and its persistence envelope.
     let task_wiring = task::wire_task();
-    let task_access = task_wiring.access();
-    let session_tasks = context::compose_session_task_capture(task_wiring.persist());
-
-    runtime::from_args_with_workspace(
-        args,
+    let dependencies = runtime::RuntimeBootstrapDependencies::new(
         workspace,
-        config.reader(),
-        config.query(),
-        config.writer(),
+        runtime::RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
         main_memory,
         gateways.provider,
         gateways.tools,
-        task_access,
-        session_tasks,
-    )
-    .await
+        task_wiring.access(),
+        context::compose_session_task_capture(task_wiring.persist()),
+    );
+    runtime::from_args_with_workspace(args, dependencies).await
 }

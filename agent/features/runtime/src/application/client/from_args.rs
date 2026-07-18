@@ -19,15 +19,8 @@ use storage::TaskStore;
 use super::{AgentClientImpl, RuntimeHandle};
 use crate::LOG_TARGET;
 
-/// 从 Args 初始化 AgentClient。
-///
-/// 模型选择直接使用 `Config.models.select_for_run()`，无需外部注入。
-///
-/// `task_access` 和 `session_tasks` 由 Composition 层注入：Runtime 不得自行创建
-/// Task BC 的 backing 或持久化封套（跨域越权，#890）。
-#[allow(clippy::too_many_arguments)]
-pub async fn from_args_with_workspace(
-    mut args: ChatBootstrapArgs,
+/// Runtime bootstrap 所需的活依赖；由 Composition 一次性构造并注入。
+pub struct RuntimeBootstrapDependencies {
     workspace: project::WorkspaceViews,
     config_reader: Arc<dyn config::ConfigReader>,
     config_query: Arc<dyn config::ConfigQuery>,
@@ -37,7 +30,81 @@ pub async fn from_args_with_workspace(
     tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
     task_access: Arc<dyn task::TaskAccess>,
     session_tasks: Arc<dyn context::LegacyTaskCapture>,
+}
+
+impl RuntimeBootstrapDependencies {
+    pub fn new(
+        workspace: project::WorkspaceViews,
+        config: RuntimeConfigDependencies,
+        memory: Arc<dyn memory::MemoryPort>,
+        provider_gateway: Arc<dyn provider::LlmProviderGateway>,
+        tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+        task_access: Arc<dyn task::TaskAccess>,
+        session_tasks: Arc<dyn context::LegacyTaskCapture>,
+    ) -> Self {
+        Self {
+            workspace,
+            config_reader: config.reader,
+            config_query: config.query,
+            config_writer: config.writer,
+            memory,
+            provider_gateway,
+            tool_gateway,
+            task_access,
+            session_tasks,
+        }
+    }
+
+    pub fn task_access(&self) -> Arc<dyn task::TaskAccess> {
+        self.task_access.clone()
+    }
+
+    pub fn session_tasks(&self) -> Arc<dyn context::LegacyTaskCapture> {
+        self.session_tasks.clone()
+    }
+}
+
+pub struct RuntimeConfigDependencies {
+    reader: Arc<dyn config::ConfigReader>,
+    query: Arc<dyn config::ConfigQuery>,
+    writer: Arc<dyn config::ConfigWriter>,
+}
+
+impl RuntimeConfigDependencies {
+    pub fn new(
+        reader: Arc<dyn config::ConfigReader>,
+        query: Arc<dyn config::ConfigQuery>,
+        writer: Arc<dyn config::ConfigWriter>,
+    ) -> Self {
+        Self {
+            reader,
+            query,
+            writer,
+        }
+    }
+}
+
+/// 从 Args 初始化 AgentClient。
+///
+/// 模型选择直接使用 `Config.models.select_for_run()`，无需外部注入。
+///
+/// `task_access` 和 `session_tasks` 由 Composition 层注入：Runtime 不得自行创建
+/// Task BC 的 backing 或持久化封套（跨域越权，#890）。
+pub async fn from_args_with_workspace(
+    mut args: ChatBootstrapArgs,
+    dependencies: RuntimeBootstrapDependencies,
 ) -> Result<AgentClientImpl, SdkError> {
+    let RuntimeBootstrapDependencies {
+        workspace,
+        config_reader,
+        config_query,
+        config_writer,
+        memory,
+        provider_gateway,
+        tool_gateway,
+        task_access,
+        session_tasks,
+    } = dependencies;
     // 1. Guidance 目录初始化
     context::guidance::init_guidance_dir();
 
@@ -225,8 +292,8 @@ pub async fn from_args_with_workspace(
             skills_map,
             hook_runner,
             memory_config,
-            agent_semaphore,
             memory,
+            agent_semaphore,
             allow_all: args.allow_all,
             context_size,
             language: snapshot.language().to_string(),
@@ -384,20 +451,18 @@ mod tests {
         let config = config::wire_project_config(&root)
             .await
             .expect("wire config");
-        let client = from_args_with_workspace(
-            args,
+        let dependencies = RuntimeBootstrapDependencies::new(
             workspace,
-            config.reader(),
-            config.query(),
-            config.writer(),
+            RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
             Arc::new(memory::NoOpMemory),
             provider::wire_provider(),
             tools::wire_tools(),
             Arc::new(task::TaskStore::new()),
             Arc::new(NoOpTaskCapture),
-        )
-        .await
-        .expect("build client with workspace");
+        );
+        let client = from_args_with_workspace(args, dependencies)
+            .await
+            .expect("build client with workspace");
 
         assert_eq!(
             client.inner.workspace.read().current_path_base(),
