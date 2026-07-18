@@ -28,17 +28,20 @@ pub struct RuntimeBootstrapDependencies {
     memory: Arc<dyn memory::MemoryPort>,
     provider_gateway: Arc<dyn provider::LlmProviderGateway>,
     tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+    policy: Arc<dyn policy::PolicyPort>,
     task_access: Arc<dyn task::TaskAccess>,
     session_tasks: Arc<dyn context::LegacyTaskCapture>,
 }
 
 impl RuntimeBootstrapDependencies {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace: project::WorkspaceViews,
         config: RuntimeConfigDependencies,
         memory: Arc<dyn memory::MemoryPort>,
         provider_gateway: Arc<dyn provider::LlmProviderGateway>,
         tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+        policy: Arc<dyn policy::PolicyPort>,
         task_access: Arc<dyn task::TaskAccess>,
         session_tasks: Arc<dyn context::LegacyTaskCapture>,
     ) -> Self {
@@ -50,6 +53,7 @@ impl RuntimeBootstrapDependencies {
             memory,
             provider_gateway,
             tool_gateway,
+            policy,
             task_access,
             session_tasks,
         }
@@ -102,9 +106,13 @@ pub async fn from_args_with_workspace(
         memory,
         provider_gateway,
         tool_gateway,
+        policy,
         task_access,
         session_tasks,
     } = dependencies;
+    // #917: Policy adapter 由 Composition 构造；#918 接入统一 tool coordination。
+    let _policy = policy;
+
     // 1. Guidance 目录初始化
     context::guidance::init_guidance_dir();
 
@@ -180,7 +188,12 @@ pub async fn from_args_with_workspace(
     let skills = Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
     let registry = {
         let reg = tool_gateway.new_registry();
-        tool_gateway.register_all_tools(&reg, task_access.clone(), skills.clone());
+        tool_gateway.register_all_tools(
+            &reg,
+            task_access.clone(),
+            skills.clone(),
+            workspace.control(),
+        );
         Arc::new(reg)
     };
     let mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
@@ -216,7 +229,13 @@ pub async fn from_args_with_workspace(
         ),
     );
 
-    // 14. Agent runner 与 Main/Sub 共享同一个 per-Run registry 和 materializer。
+    // 14. Runtime owns concurrency and shares the same agent semaphore across Main/Sub runs.
+    let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
+        args.max_tool_concurrency,
+        args.max_agent_concurrency,
+        &snapshot,
+    );
+    let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
     let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
     let agent_runner = build_agent_runner(
         Some(snapshot.models()),
@@ -226,7 +245,10 @@ pub async fn from_args_with_workspace(
         runtime_settings.reasoning,
         snapshot.api_timeout_secs(),
         active_run.clone(),
+        max_tool_concurrency,
+        agent_semaphore.clone(),
         tool_result_materializer.clone(),
+        workspace.clone(),
     );
 
     // 15. Prompt bundle
@@ -260,12 +282,6 @@ pub async fn from_args_with_workspace(
         .join("\n\n");
 
     // 16. Concurrency
-    let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
-        args.max_tool_concurrency,
-        args.max_agent_concurrency,
-        &snapshot,
-    );
-    let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
     log::info!(target: LOG_TARGET,
         "concurrency limits: max_tool={}, max_agent={}",
         max_tool_concurrency,
@@ -457,6 +473,7 @@ mod tests {
             Arc::new(memory::NoOpMemory),
             provider::wire_provider(),
             tools::wire_tools(),
+            Arc::new(policy::AllowAllPolicy),
             Arc::new(task::TaskStore::new()),
             Arc::new(NoOpTaskCapture),
         );

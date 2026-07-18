@@ -8,13 +8,10 @@ fn has_read_evidence(
     requested_path: &str,
     resolved_path: &std::path::Path,
 ) -> bool {
-    ctx.read_files
-        .lock()
-        .map(|read_files| {
-            read_files.contains(requested_path)
-                || read_files.contains(resolved_path.to_string_lossy().as_ref())
-        })
-        .unwrap_or(false)
+    ctx.read_set().contains(requested_path)
+        || ctx
+            .read_set()
+            .contains(resolved_path.to_string_lossy().as_ref())
 }
 
 pub struct FileWriteTool;

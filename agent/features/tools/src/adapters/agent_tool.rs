@@ -64,8 +64,8 @@ impl TypedTool for AgentTool {
             .unwrap_or(SUB_AGENT_DEFAULT_TIMEOUT_SECS)
             .min(SUB_AGENT_TIMEOUT_CAP_SECS);
         let timeout = std::time::Duration::from_secs(timeout_secs);
-        let runner = match &ctx.resources.agent_runner {
-            Some(r) => r.clone(),
+        let runner = match ctx.agent_dispatch() {
+            Some(r) => r,
             None => return TypedToolResult::error("agent runner not available"),
         };
 
@@ -100,10 +100,16 @@ Instructions:- Complete the task described in the user message
             .run_agent(crate::domain::AgentRunRequest {
                 prompt,
                 system: &system,
-                ctx,
+                identity: ctx.scope(),
+                cancellation: ctx.cancellation(),
+                progress: ctx.progress_sink(),
+                memory: ctx.memory(),
+                catalog: ctx.catalog_query(),
+                read_set: ctx.read_set(),
+                plan_mode: ctx.plan_mode_state(),
+                guidance: ctx.guidance(),
                 timeout,
                 model_spec,
-                progress_tx: ctx.progress_tx.clone(),
             })
             .await;
 

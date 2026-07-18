@@ -19,7 +19,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::ToolOutcome;
-use tools::{ToolExecutionContext, ToolRegistry};
+use tools::ToolRegistry;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
@@ -94,6 +94,8 @@ where
         &agent_approved,
         registry,
         &agent.ctx,
+        &agent.agent_semaphore,
+        &agent.workspace_persist,
         sink,
         hook_ui,
         hook_runner,
@@ -185,7 +187,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
     call: &ToolCall,
     execution: &ToolExecution,
     workspace_root: &Path,
-    ctx: &ToolExecutionContext,
+    cancel: &CancellationToken,
 ) where
     S: ChatEventSink,
 {
@@ -205,7 +207,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
                     is_error: Some(is_error),
                 }),
                 workspace_root,
-                &ctx.cancel,
+                cancel,
             )
             .await,
     )
@@ -225,7 +227,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
                         is_error: Some(is_error),
                     }),
                     workspace_root,
-                    &ctx.cancel,
+                    cancel,
                 )
                 .await,
         )
@@ -358,7 +360,6 @@ mod tests {
     use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
     use serde_json::Value;
     use share::message::ContentBlock;
-    use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
     use tools::ToolOutcome;
     use tools::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
@@ -434,30 +435,10 @@ mod tests {
     }
 
     fn test_tool_context() -> ToolExecutionContext {
-        let cwd = std::env::current_dir().unwrap();
-        ToolExecutionContext {
-            resources: tools::ToolResources {
-                agent_runner: None,
-                registry: None,
-                memory: Arc::new(memory::NoOpMemory),
-                memory_config: share::config::MemoryConfig::default(),
-                lang: "en".to_string(),
-                allow_all: true,
-            },
-            workspace: project::wire_production_workspace(cwd)
-                .expect("workspace 初始化成功")
-                .into_views(),
-            run_id: sdk::RunId::new_v7().to_string(),
-            cancel: tokio_util::sync::CancellationToken::new(),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            session_reminders: None,
-            plan_mode: None,
-            max_tool_concurrency: 10,
-            max_agent_concurrency: 4,
-            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-            progress_tx: None,
-            parent_session_id: None,
-        }
+        crate::application::testing::test_tool_execution_context(
+            std::env::current_dir().unwrap(),
+            tokio_util::sync::CancellationToken::new(),
+        )
     }
 
     fn lifecycle_call(index: usize) -> ToolCall {
@@ -475,10 +456,7 @@ mod tests {
         let registry = Arc::new(ToolRegistry::new());
         registry.register(UnsafeLifecycleTool);
         let ctx = test_tool_context();
-        let agent = Agent {
-            registry: registry.as_ref(),
-            ctx,
-        };
+        let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
         let hook_ui = HookUi::new(sink.clone());
         let hook_runner = hook::api::HookRunner::new(Default::default());

@@ -1,33 +1,8 @@
 use super::*;
 use crate::domain::{ToolExecutionContext, TypedTool};
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
 
 fn test_ctx(root: std::path::PathBuf) -> ToolExecutionContext {
-    let read_files = HashSet::new();
-    ToolExecutionContext {
-        workspace: project::wire_production_workspace(root)
-            .expect("workspace 初始化成功")
-            .into_views(),
-        run_id: "test-run".to_string(),
-        cancel: tokio_util::sync::CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(read_files)),
-        resources: crate::domain::ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory: std::sync::Arc::new(memory::NoOpMemory),
-            memory_config: share::config::MemoryConfig::default(),
-            lang: "en".to_string(),
-            allow_all: false,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    }
+    crate::domain::test_support::TestToolExecutionContextBuilder::new(root).build()
 }
 
 /// 创建包含 N 个匹配行的临时目录，每个文件一行 `match_me_{i}`。

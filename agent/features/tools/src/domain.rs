@@ -9,6 +9,8 @@ pub mod ports;
 pub mod published_language;
 pub mod resources;
 pub mod scope_profile;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod tool;
 pub mod tool_types;
 pub mod types;
@@ -16,14 +18,18 @@ pub mod types;
 #[cfg(test)]
 mod scope_profile_tests;
 
-pub use agent_port::{AgentRunRequest, AgentRunTerminal, AgentRunner};
-pub use context::ToolExecutionContext;
+pub use agent_port::{AgentDispatch, AgentRunRequest, AgentRunTerminal, AgentRunner};
+pub use context::{
+    CancellationSignal, ExecutionScope, ExecutionScopeBuilder, FixedGuidance, FixedPlanMode,
+    Guidance, InvocationSource, MutexReadSet, PlanModeState, ProgressSink, ReadSet,
+    ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
+};
 pub use ports::{ToolCatalogPort, ToolExecutionPort};
 pub use published_language::{
     RegistryScopeName, ToolCapabilities, ToolCapability, ToolCatalogSnapshot, ToolInvocation,
-    ToolOutcome as ToolExecutionOutcome, ToolProfileName,
+    ToolName, ToolOutcome as ToolExecutionOutcome, ToolProfileName,
 };
-pub use resources::ToolResources;
+pub use resources::CatalogQuery;
 pub use scope_profile::{ProfileExpansionError, ToolProfile};
 pub use tool::{Tool, ToolListProvider, TypedTool, TypedToolAdapter, TypedToolResult};
 pub use tool_types::{

@@ -14,7 +14,12 @@ set -euo pipefail
 #   R5 project 内非测试 Command::new("git") 仅限 adapters/git.rs。
 #   R6 WorkspacePersist 仅可出现在 project（def/impl）与 runtime；tools 禁用（与 R2 重叠）。
 #   R7 ToolExecutionContext / ChatLoopContext 定义不得含 cwd 字段（从 workspace 读取）。
-#   R8 Policy/Runtime 不得恢复路径 containment 或 read-before-write；Tool safety 不得读取 allow_all。# 例外：测试文件 / #[cfg(test)] 区域对 R4 / R5 / R6 放行。
+#   R8 Policy/Runtime 不得恢复路径 containment 或 read-before-write；Tool safety 不得读取 allow_all。
+#   R9 ExecutionScope 固定为八个纯值字段；ToolExecutionContext 固定为私有 scope + ports。
+#   R10 Tools domain 禁止 WorkspaceViews、Tokio/channel/token/semaphore 与其他活资源。
+#   R11 ToolExecutionPorts/context 不得广播 control；Control 必须按 Tool constructor 注入。
+#   R12 Runtime semaphore/token/channel 不得进入 Tools published language；本守卫不得新增 allowlist。
+# 例外：测试文件 / #[cfg(test)] 区域对 R4 / R5 / R6 放行。
 # 说明（narrowing）：R3 的 triple-bundle 检测限定 agent/features（project 除外），不扫
 #   agent/shared（持久化 DTO PersistedWorkspaceContext）与 packages/sdk（WorkspaceContextView 视图），
 #   这两者是设计允许的序列化/投影形态，不是运行期可变三元组。
@@ -223,7 +228,7 @@ def check_r4(rel: Path, lineno: int, code: str, is_test: bool, violations: list[
     if workspace_control_call_re.search(code) and rel not in WORKSPACE_CONTROL_ALLOWED:
         violations.append(
             f"{rel.as_posix()}:{lineno}: [R4] production .workspace_control() calls are restricted to "
-            f"tools/src/adapters/bash.rs and worktree.rs."
+            f"BashTool, EnterWorktreeTool and ExitWorktreeTool (bash.rs + worktree.rs)."
         )
 
 
@@ -310,11 +315,51 @@ def run_sanity() -> None:
     assert 3 in tr and 5 not in tr, "sanity test-region"
 
 
+def check_r9_r12(violations: list[str]) -> None:
+    path = root / TOOL_CTX_FILE
+    text = path.read_text()
+    blocks = {name: body for name, body in iter_struct_blocks(text)}
+    expected_scope = {"run_id", "parent_run_id", "workspace_id", "workspace_root", "invocation_source", "registry_scope", "profile", "deadline"}
+    actual_scope = struct_field_names(blocks.get("ExecutionScope", []))
+    if actual_scope != expected_scope:
+        violations.append(f"{TOOL_CTX_FILE}: [R9] ExecutionScope fields are frozen; expected {sorted(expected_scope)}, got {sorted(actual_scope)}.")
+    actual_ctx = struct_field_names(blocks.get("ToolExecutionContext", []))
+    if actual_ctx != {"scope", "ports"}:
+        violations.append(f"{TOOL_CTX_FILE}: [R9] ToolExecutionContext must contain exactly private scope + ports.")
+    ctx_block = "\n".join(blocks.get("ToolExecutionContext", []))
+    if re.search(r"\bpub(?:\([^)]*\))?\s+(?:scope|ports)\s*:", ctx_block):
+        violations.append(f"{TOOL_CTX_FILE}: [R9] context fields must remain private.")
+
+    retired_resource_bag = "Tool" + "Resources"
+    forbidden = re.compile(
+        rf"\b(?:WorkspaceViews|WorkspacePorts|WorkspacePersist|{retired_resource_bag}|Semaphore|CancellationToken)\b|"
+        r"tokio(?:::|\s*=)|(?:Sender|Receiver)\s*<"
+    )
+    for source in sorted((root / "agent/features/tools/src/domain").rglob("*.rs")):
+        source_text = source.read_text()
+        test_lines = in_test_region(source_text)
+        for lineno, raw in enumerate(source_text.splitlines(), 1):
+            if lineno not in test_lines and forbidden.search(strip_comment(raw)):
+                violations.append(f"{source.relative_to(root)}:{lineno}: [R10/R12] Tools domain must not contain Project wiring/persistence or Tokio/channel/token/semaphore resources.")
+    ports_body = "\n".join(blocks.get("ToolExecutionPorts", []))
+    if re.search(r"\bcontrol\s*:", ports_body):
+        violations.append(f"{TOOL_CTX_FILE}: [R11] ToolExecutionPorts must not expose a control field.")
+    if re.search(r"fn\s+workspace_control\s*\(", text):
+        violations.append(f"{TOOL_CTX_FILE}: [R11] workspace_control accessor is retired; inject Control per Tool.")
+    for source in sorted((root / "agent/features/tools/src").rglob("*.rs")):
+        if "WorkspaceViews" in source.read_text():
+            violations.append(f"{source.relative_to(root)}: [R10] WorkspaceViews conversion belongs to Runtime adapter.")
+    runtime_text = "\n".join(p.read_text() for p in (root / RUNTIME_DIR / "src").rglob("*.rs"))
+    if re.search(r"ToolExecution(?:Context|Ports)::new\([^;]*Semaphore", runtime_text, re.S):
+        violations.append("agent/features/runtime: [R12] Runtime Semaphore must not flow into Tools execution context.")
+
+
 run_sanity()
 
 violations: list[str] = []
 check_r1(violations)
 check_r7(violations)
+check_r9_r12(violations)
 
 for path in sorted((root / "agent" / "features").rglob("*.rs")):
     if is_generated(path):

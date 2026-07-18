@@ -12,7 +12,6 @@ use crate::application::loop_engine::{
 use crate::domain::agent_run::{Run, RunDomainEvent, RunSpec};
 use crate::LOG_TARGET;
 use async_trait::async_trait;
-use futures::StreamExt;
 use provider::LlmClient;
 use provider::{StopReason, SystemBlock};
 use share::message::Message;
@@ -61,11 +60,29 @@ pub(super) fn messages_for_llm(messages: &[Message]) -> Vec<Message> {
     messages.iter().map(Message::to_llm_view).collect()
 }
 
+pub(super) struct CancellationPropagationGuard(tokio::task::JoinHandle<()>);
+impl CancellationPropagationGuard {
+    pub(super) fn new(
+        signal: Arc<dyn tools::CancellationSignal>,
+        token: tokio_util::sync::CancellationToken,
+    ) -> Self {
+        Self(tokio::spawn(async move {
+            signal.cancelled().await;
+            token.cancel();
+        }))
+    }
+}
+impl Drop for CancellationPropagationGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 #[allow(clippy::type_complexity)]
 pub(super) struct SubAgentRun<'a> {
     pub prompt: &'a str,
     pub system: String,
-    pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
+    pub progress_sink: Option<Arc<dyn tools::ProgressSink>>,
     pub client: Arc<LlmClient>,
     pub invocation_scope: provider::InvocationScope,
     pub hook_runner: hook::api::HookRunner,
@@ -74,6 +91,7 @@ pub(super) struct SubAgentRun<'a> {
     pub system_blocks: Vec<SystemBlock>,
     pub log_request_messages: Box<dyn Fn(usize, &[Message]) + Send + Sync + 'a>,
     pub agent: Agent<'a>,
+    pub runtime_cancellation: tokio_util::sync::CancellationToken,
     pub timeout: std::time::Duration,
     pub turn_count: usize,
     pub last_total_tokens: Option<u64>,
@@ -100,7 +118,9 @@ impl<'a> SubAgentRun<'a> {
             RunSpec::sub(self.role_name_for_log.clone(), self.timeout),
             self.parent_run_id.clone(),
         );
-        let cancel = self.agent.ctx.cancel.clone();
+        let cancel = self.runtime_cancellation.clone();
+        let _signal_propagation =
+            CancellationPropagationGuard::new(self.agent.ctx.cancellation(), cancel.clone());
         let _registration = ActiveRunRegistration::new(
             self.active_run.clone(),
             self.run_id.clone(),
@@ -156,7 +176,7 @@ impl<'a> SubAgentRun<'a> {
             &self.system,
             self.resolved_spec.as_deref(),
             &output,
-            self.progress_tx.as_ref(),
+            self.progress_sink.as_ref(),
             &workspace_root,
         )
         .await;
@@ -228,7 +248,7 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn send_text_progress(&self, turn: usize, resp: &provider::StreamResponse) {
-        if let Some(ref tx) = self.progress_tx {
+        if let Some(ref sink) = self.progress_sink {
             let text = resp.assistant_message.text_content();
             let trimmed = text.trim();
             if !trimmed.is_empty() {
@@ -237,7 +257,7 @@ impl<'a> SubAgentRun<'a> {
                 } else {
                     trimmed.to_string()
                 };
-                let _ = tx.try_send(AgentProgressEvent {
+                sink.emit(AgentProgressEvent {
                     sequence: turn,
                     kind: AgentProgressKind::Message { text: short },
                 });
@@ -332,7 +352,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(), LoopEngineError> {
         self.compact_now(self.turn_count).await;
-        if !self.agent.ctx.cancel.is_cancelled() {
+        if !self.agent.ctx.cancellation().is_cancelled() {
             self.last_total_tokens = None;
         }
         // The engine owns cancellation transitions. Returning success lets its
@@ -351,20 +371,8 @@ impl RunLoopPort for SubAgentRun<'_> {
         (self.log_request_messages)(turn_number, &self.messages);
         self.log_input(turn_number);
 
-        // Memory is queried dynamically on every turn, matching the main loop.
-        let mut effective_blocks = self.system_blocks.clone();
-        let memory_root = self.agent.ctx.workspace_read().initial_cwd();
-        let mc = &self.agent.ctx.resources.memory_config;
-        if mc.enabled && mc.inject_count > 0 {
-            if let Some(block) =
-                crate::application::chat::looping::memory_inject::build_memory_block(
-                    &memory_root,
-                    mc.inject_count,
-                )
-            {
-                effective_blocks.push(block);
-            }
-        }
+        // Sub-runs receive the formal NoOp MemoryPort and do not inherit memory injection.
+        let effective_blocks = self.system_blocks.clone();
 
         let messages_for_api = messages_for_llm(&self.messages);
         let mut coordinator =
@@ -372,48 +380,37 @@ impl RunLoopPort for SubAgentRun<'_> {
         let resp = loop {
             let mut reducer =
                 crate::application::chat::looping::InvocationEventReducer::new(SubAgentEventSink);
-            let response = self
+            let response = match self
                 .client
                 .invocation_stream(
                     &self.invocation_scope,
                     &effective_blocks,
                     &messages_for_api,
                     &self.sub_schemas,
-                    &self.agent.ctx.cancel,
+                    &self.runtime_cancellation,
                 )
-                .await;
-
-            let response = match response {
-                Ok(mut stream) => {
-                    let mut terminal = None;
-                    while let Some(event) = stream.next().await {
-                        match reducer.apply(event) {
-                            Ok(Some(response)) => terminal = Some(Ok(response)),
-                            Ok(None) => {}
-                            Err(error) => terminal = Some(Err(error)),
-                        }
-                        if terminal.is_some() {
-                            break;
-                        }
-                    }
-                    terminal.unwrap_or_else(|| {
-                        Err(provider::ProviderError::fatal(
-                            provider::ProviderErrorKind::Protocol,
-                            "provider stream ended without terminal event",
-                        ))
-                    })
+                .await
+            {
+                Ok(stream) => {
+                    coordinator
+                        .pull_stream(stream, &self.runtime_cancellation, false, |event| {
+                            reducer.apply(event)
+                        })
+                        .await
                 }
-                Err(error) => Err(error),
+                Err(error) => Err((error, false)),
             };
 
             match response {
-                Ok(resp) => break resp,
-                Err(error) if error.is_cancelled() || self.agent.ctx.cancel.is_cancelled() => {
-                    self.agent.ctx.cancel.cancel();
+                Ok((resp, _)) => break resp,
+                Err((error, _))
+                    if error.is_cancelled() || self.agent.ctx.cancellation().is_cancelled() =>
+                {
+                    self.runtime_cancellation.cancel();
                     return Err(LoopEngineError::Cancelled);
                 }
-                Err(error) => match coordinator
-                    .handle_failure(&error, reducer.saw_visible_delta(), &self.agent.ctx.cancel)
+                Err((error, visible_delta)) => match coordinator
+                    .handle_failure(&error, visible_delta, &self.runtime_cancellation)
                     .await
                 {
                     crate::application::model_invocation::RetryStep::Retry { attempt, delay } => {
@@ -425,7 +422,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                         );
                     }
                     crate::application::model_invocation::RetryStep::Cancelled => {
-                        self.agent.ctx.cancel.cancel();
+                        self.runtime_cancellation.cancel();
                         return Err(LoopEngineError::Cancelled);
                     }
                     crate::application::model_invocation::RetryStep::Compact
@@ -541,12 +538,13 @@ impl RunLoopPort for SubAgentRun<'_> {
         let all_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
         self.log_tool_calls(turn_number, &all_calls);
         let call_info = self.build_call_info(&all_calls);
-        if let Some(ref tx) = self.progress_tx {
-            let _ = tx.try_send(build_tool_calls_progress_event(turn_number, &allowed));
+        if let Some(ref sink) = self.progress_sink {
+            sink.emit(build_tool_calls_progress_event(turn_number, &allowed));
         }
 
+        let cancellation = self.agent.ctx.cancellation();
         let mut executed = tokio::select! {
-            _ = self.agent.ctx.cancel.cancelled() => {
+            _ = cancellation.cancelled() => {
                 return Err(LoopEngineError::Cancelled);
             }
             executed = self.agent.execute_tools(&allowed) => executed,

@@ -65,6 +65,7 @@
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
+| 26 | `check-no-inline-tests.sh` | 测试治理 | 源码文件禁止内嵌 `#[cfg(test)] mod tests { ... }`；测试 MUST 分离到 `*_tests.rs`，让 `cargo build` 天然暴露 dead code |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
 
@@ -169,19 +170,20 @@
 - **允许的顶层源码**：`lib.rs`, `app.rs`, `memory.rs`, `provider.rs`, `runtime.rs`, `tools.rs`, `update.rs`；`lib.rs` 必须且只能公开声明 `app/memory/provider/runtime/tools/update` 六个 wiring module。
 - **禁止结构**：`domain/application/ports/adapters`、`api/business/contract/core/gateway/capabilities` 文件或目录，以及任意未登记顶层源码或子目录。
 - **白名单预算**：路径例外、整文件豁免、行级 allow、`grep -v` / exclude / skip 均为 0；允许文件集合是 Target 结构化 policy，不计 migration debt。
-- **范围边界**：本守卫证明 Composition 物理结构、façade 模块声明，以及 `FeatureGateways` 的 Provider/Tool gateway 被 Runtime 主 bootstrap 实际消费；全部 Adapter 构造上移由 #950 承接，正式跨 capability 边界替换由 #1022 承接。
+- **范围边界**：本守卫证明 Composition 物理结构、façade 模块声明，以及 `FeatureGateways` 的 Provider/Tool/Policy gateway 被 Runtime 主 bootstrap 实际消费；#917 Policy adapter 仅注入 bootstrap seam，统一消费与 allow_all 退役由 #918；全部 Adapter 构造上移由 #950。
 - **#1002 故意违规证据**：临时创建 `agent/composition/src/domain.rs` 时，单 Guard 与总编排均以 exit 2 命中 `forbidden Hexagonal/COLA layer`；删除探针后两者 clean pass。
 - **#948 注入规则**：`composition/src/runtime.rs` 必须把 `gateways.provider` / `gateways.tools` 传给 Runtime；Runtime 主 bootstrap 必须声明两个 trait-object 参数，并分别经 `build_llm_client_with_gateway`、`new_registry`、`register_all_tools` 消费。规则使用结构化正向断言，白名单仍为 0。
 - **#948 故意违规证据**：临时把 `gateways.provider` 改为默认 `provider::wire_provider()` 后，单 Guard 与总编排均以 exit 2 命中 `missing provider gateway forwarding`；恢复后 clean pass。
+- **#917 Policy 注入规则**：`FeatureGateways` 持有 `Arc<dyn policy::PolicyPort>`，默认构造唯一 `AllowAllPolicy`，并将 `gateways.policy` 转发给 Runtime bootstrap；生产消费切换归 #918。
 
 ## 5. check-cola-layer-purity.sh
 
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
-- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 限制为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Context 限制为 `CONTEXT_HEX_LAYERS = {domain, application, ports, adapters}`；Policy 在 #916 后暂时只允许 `lib.rs`，#917 以真实 Policy PL/AllowAll 恢复 `domain.rs/adapters.rs`；Storage 限制为 `STORAGE_HEX_LAYERS = {domain, ports, adapters}` 并暂时允许过渡目录；Audit 在 #928 后允许真实 `domain + ports + adapters`，继续禁止空 COLA 占位；Tools 同时锁定 #909 scope/profile 授权边界。
-- **Tools scope/profile 机械约束**：生产代码不得恢复 `ToolProfile::excludes` 或按 `ToolName` / `tool_name` match 的授权黑名单；`ToolProfile::allowed_capabilities` 必须是唯一私有字段，只允许 `baseline`、`derive_restricted` 与只读 accessor，不得新增 setter/insert/union、`&mut self` 或字段赋值式扩大 API；`RegistryScopeBuilder` / `RegistryScope` 不得由 crate root façade 导出，`ToolRegistry` 不得进入 domain。扫描不设路径白名单、exception、exclude 或 skip，脚本内含 capability 正例及各类违规反例 sanity。
-- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制；Runtime、Context、Policy、Storage 与 Audit 使用各自目标规则。Policy 由 `POLICY_HEX_LAYERS = ∅`、`POLICY_ALLOWED_TOP_LEVEL_FILES = {lib.rs}` 和 legacy 层禁单锁定 #916 后过渡基线；`domain.rs/adapters.rs` 只有 #917 提供真实实现时才能恢复，禁止空层占位；Audit 由 `AUDIT_HEX_LAYERS = {domain, ports, adapters}`、`AUDIT_ALLOWED_TOP_LEVEL_FILES = {lib.rs, domain.rs, ports.rs, adapters.rs}` 和 legacy 禁单锁定 #928 基线；Storage domain 额外禁止物理 fs API、`PathBuf` 与 `crate::adapters`。
-- **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](03-migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
-- **结构定义**：未迁移 feature 使用 `FEATURE_LAYERS`；Runtime/Context/Storage 使用各自登记目标层；Policy 在 #916 后无内部层，#917 随真实实现恢复 `domain/adapters`；Audit 使用 `domain/ports/adapters` 与精确顶层文件集合，后续 #929/#930 只能随真实实现同步增量扩展；Storage 过渡集合有 #883 退出条件，**NEVER** 扩张。
+- **功能**：检查未迁移 feature 与已迁移 feature的层级方向；Policy #917 锁定真实 `domain + adapters`；Audit 保留 release 最新层级；Tools 锁定 scope/profile 授权边界。
+- **Tools scope/profile 机械约束**：生产代码不得恢复 ToolProfile 黑名单；allowed_capabilities 是唯一授权真相，RegistryScope 内部不从 crate root 导出。
+- **实际检查语义**：Policy 由 `domain/adapters` 与精确 `lib.rs/domain.rs/adapters.rs` 锁定 #917 基线，生产 adapter 只允许 AllowAll；Audit/Storage 使用各自已登记规则。
+- **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据只在 Migration Governance 维护。
+- **结构定义**：Policy 使用真实 `domain/adapters` 最简结构；其他过渡集合禁止无证据扩张。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
 
 | 当前层 | 禁止依赖 |
@@ -193,7 +195,7 @@
 
 - **检查方式**：
   - 扫描 `agent/features/*/src/*`：普通 feature 的目录名必须在 `FEATURE_LAYERS`；Runtime、Context、Provider、Policy、Storage 与 Audit 使用各自目标规则。
-  - Policy 顶层在 #916 后只允许 `lib.rs`；重新出现 path helper、`api/business/contract/core/gateway/capabilities` 或空 `domain/adapters` 时直接失败，#917 随真实实现恢复。
+  - Policy 顶层只允许 `lib.rs/domain.rs/adapters.rs`；domain 发布 PL/Port，adapter 只实现 AllowAll；legacy/其他层直接失败。
   - Audit 的 `domain.rs` / `ports.rs` 顶层文件与同名目录均参与层级依赖扫描；跨 crate wildcard `use audit::*` 被拒绝，消费者必须显式导入登记的 root façade 符号。
   - Audit 顶层只允许 #927 已证明的 `lib.rs/domain.rs/ports.rs` 与 `domain/ports` 层；重新出现 `api` / `business` / `contract` / `core` / `gateway` / `capabilities` 文件或目录时直接失败，其他层必须由对应后续实现 Issue 同步更新 Guard。
   - Provider 顶层重新出现 `api` / `business` / `contract` / `core` / `gateway` 文件或目录时直接失败。
@@ -216,16 +218,16 @@
 
 ## 6. check-crate-api-boundary.sh
 
-- **功能**：检查跨 feature 访问经稳定 façade。未迁移 feature 继续使用 `::<feature>::api`；Provider、Runtime、Context、Policy、Storage、Project 与 Audit 使用登记的 crate-root 窄 façade；Workflow 只允许 `workflow::api` 与 composition-only wiring。#916 后 Policy root allowlist 为空；Project `WorkspaceRead` 独占安全路径解析，Tool 直接消费；Context 继续通过既有 `guidance` 模块发布 purpose-specific assessment；Audit 的公开面按真实消费者登记。
+- **功能**：检查跨 feature 访问经稳定 façade。Policy #917 只发布精确 PL/Port/AllowAll root façade，内部 domain/adapters 私有；其余已迁移 feature 使用各自登记 root façade。
 - **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透 Current 内部层或 capability 私有模块；禁止 Current `api.rs` 暴露内部层；锁定已迁移 feature 的精确根公开面。
 - **常量**：
   - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
-  - `ROOT_ACCESS_ALLOW.policy = ∅`：#916 已删除全部 path façade；#917 只可随真实 Policy PL/AllowAll 消费增量登记。
-  - `ROOT_ACCESS_ALLOW.context` 继续只登记 `guidance` 模块；`assess_guidance` / `GuidanceAssessment` 经该目的性 façade发布，Context 的 `adapters::prompt::security` 保持私有。
-   - `ROOT_ACCESS_ALLOW.audit`：#927 Usage PL/query contract 加 #928 AppendLog PL、File adapter type/factory；后续公开面必须由真实消费者证明。
+   - `ROOT_ACCESS_ALLOW.policy = {AllowAllPolicy, ApprovalSubject, PolicyDecision, PolicyMode, PolicyPort, PolicyReason, PolicyRequest, PolicyRequestError}`：#917 真实 façade；#918 按生产消费收敛。
+   - `ROOT_ACCESS_ALLOW.context` 继续只登记 `guidance` 模块；purpose-specific assessment façade保持稳定。
+   - `ROOT_ACCESS_ALLOW.audit`：保留 release 最新 Usage PL/worker/query 公开面；Runtime trait bridge仍归后续接线。
    - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade 加 #928 `SafeStorageRoot` / `SafeStorageDir` / typed entry/open options 路径安全 PL；不包含任何 AppendLog/Usage 类型。
   - `ROOT_ACCESS_ALLOW.project`：Project 发布 `ProjectIdentity` / `WorkspaceId` / `WorktreeKind`、三类 workspace port、opaque restore token、结构化 init/control/restore/git 错误与 composition-only wiring；`WorkspaceService`、Git adapter/port 和内部 state **NEVER** 跨 crate 暴露。
   - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
@@ -298,15 +300,19 @@
 | CTX-R1 | `ToolExecutionContext` 定义不得含 `workspace_root` / `path_base` / `context_stack` 字段 | 防上下文三元组爬回 tools |
 | CTX-R2 | `tools/` 不得引用 `PersistedWorkspaceContext` / `WorkspacePersist` | 持久化是 session 边界，tools 不得直接触达 |
 | CTX-R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `workspace_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
-| CTX-R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/business/bash.rs` 与 `worktree.rs` | 控能力集中收口 |
+| CTX-R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/adapters/bash.rs` 与 `worktree.rs`（语义上恰为 Bash、EnterWorktree、ExitWorktree 三工具） | 控能力集中收口 |
 | CTX-R5 | `project/` 内非测试 `Command::new("git")` 仅限 `business/git_ops.rs` | git 收敛在 `GitCli` 适配器 |
 | CTX-R6 | `WorkspacePersist` 仅可出现在 `project/`（def/impl）与 `runtime/` | 与 CTX-R2 重叠的兜底 |
+| CTX-R9 | `ExecutionScope` 精确冻结八个纯值字段；`ToolExecutionContext` 精确冻结私有 `scope + ports` | 防结构与活资源膨胀 |
+| CTX-R10 | Tools domain 禁止 `WorkspaceViews` / 聚合 WorkspacePorts / Persist 与 Tokio channel/token/semaphore；整个 Tools 禁止 `WorkspaceViews` | 技术资源在 Runtime adapter 转换 |
+| CTX-R11 | `ToolExecutionPorts` 与 context 不得定义/暴露 control；Control 必须按 Bash / EnterWorktree / ExitWorktree constructor 注入 | 防 Control 全域公开 |
+| CTX-R12 | Runtime semaphore 不得流入 Tools context/ports；守卫不设置新增 allowlist | Runtime 并发所有权 |
 
 - **白名单**（路径级 allowlist）：
 
 | 规则 | 允许 | 说明 |
 |---|---|---|
-| CTX-R4 | `agent/features/tools/src/business/bash.rs`, `agent/features/tools/src/business/worktree.rs` | 唯一允许调 `.workspace_control()` 的生产文件 |
+| CTX-R4 | `agent/features/tools/src/adapters/bash.rs`, `agent/features/tools/src/adapters/worktree.rs` | 唯一允许调 `.workspace_control()` 的生产文件；对应三个 Tool |
 | CTX-R5 | `agent/features/project/src/business/git_ops.rs` | 唯一允许在 `project/` 调 `Command::new("git")` 的生产文件 |
 | 测试放行 | `*_test.rs`, `*_tests.rs`, `tests/` 目录, `#[cfg(test)]` 区域 | R4 / R5 / R6 对测试代码放行 |
 
@@ -600,6 +606,14 @@
 - **时机**：sub-issue 创建/调整后、叶子 PR 创建前、叶子 PR 合入后、#677 关闭前。
 - **检查**：gate marker、开发前差异、无待对齐、实施结果与 PR/commit 证据、延期承接 Issue，以及原生 parent/sub-issue/blocked-by 状态。
 - **方式**：使用 `gh issue view` 与 GitHub 原生关系人工核验；该规则只服务 #677 有限生命周期，不沉淀为长期 xtask 或通用 pre-commit。
+
+## 26. check-no-inline-tests.sh
+
+- **位置**：`.agents/hooks/check-no-inline-tests.sh`，注册于 `check-architecture-guards.sh` 末尾。
+- **检查**：`agent/` / `apps/` / `packages/` 下所有 `.rs` 源码文件，查找 `#[cfg(test)] mod xxx { ... }`（内嵌测试块）。
+- **允许**：`#[cfg(test)] #[path = "xxx_tests.rs"] mod tests;`（分离文件引入）。
+- **违规**：`#[cfg(test)] mod tests { ... }`（内嵌测试块）。
+- **目的**：测试与源码分离后，`cargo build`（不带 `--cfg test`）天然暴露 dead code——任何只被测试引用的 pub 项会变 unused warning。移除 `*_tests.rs` 后 `cargo build` 即可发现仅在测试中使用的代码。详见 `specs/rust-coding.md` 测试规范。
 
 ## 附：钩子体系（非架构守卫）
 

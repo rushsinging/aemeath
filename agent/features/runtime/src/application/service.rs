@@ -53,7 +53,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use storage::TaskStore;
-    use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
+    use tools::{AgentRunRequest, AgentRunner, ToolRegistry};
 
     #[derive(Default)]
     struct RecordingRuntimePort {
@@ -75,7 +75,7 @@ mod tests {
             &self,
             _prompt: &str,
             _system: &str,
-            _ctx: &ToolExecutionContext,
+            _cancellation: std::sync::Arc<dyn tools::CancellationSignal>,
         ) -> String {
             String::new()
         }
@@ -130,9 +130,9 @@ mod tests {
     fn valid_tui_launch() -> TuiChatLaunch {
         TuiChatLaunch {
             options: base_options(),
-            max_agent_concurrency: 4,
             session_id: "session-1".to_string(),
             model_display: "provider/model".to_string(),
+            max_agent_concurrency: 4,
         }
     }
     fn invalid_tui_launch() -> TuiChatLaunch {

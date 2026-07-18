@@ -72,7 +72,6 @@ where
     /// Runtime/Tool 日常状态唯一来源（#889 low-privilege 端口）。
     pub task_access: Arc<dyn task::TaskAccess>,
     pub max_tool_concurrency: usize,
-    pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub hook_runner: hook::api::HookRunner,
     pub memory_config: share::config::MemoryConfig,

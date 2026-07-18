@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -71,11 +70,9 @@ where
     /// Runtime/Tool 日常状态唯一来源（#889 low-privilege 端口）。
     pub(crate) task_access: &'a Arc<dyn task::TaskAccess>,
     pub(crate) max_tool_concurrency: usize,
-    pub(crate) max_agent_concurrency: usize,
     pub(crate) agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
     pub(crate) hook_runner: &'a hook::api::HookRunner,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
-    /// Memory domain port（MemoryTool 使用）。
     pub(crate) memory: &'a Arc<dyn memory::MemoryPort>,
     pub(crate) language: &'a str,
     pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
@@ -155,7 +152,6 @@ where
         registry: &'b Arc<tools::ToolRegistry>,
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory: &Arc<dyn memory::MemoryPort>,
-        memory_config: &share::config::MemoryConfig,
         language: &str,
         allow_all: bool,
         workspace: &project::WorkspaceViews,
@@ -163,34 +159,44 @@ where
         read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
         session_reminders: &Arc<std::sync::Mutex<tools::SessionReminders>>,
         max_tool_concurrency: usize,
-        max_agent_concurrency: usize,
         agent_semaphore: &Arc<tokio::sync::Semaphore>,
         session_id: &str,
         run_id: &sdk::RunId,
     ) -> Agent<'b> {
         Agent {
             registry,
-            ctx: tools::ToolExecutionContext {
-                resources: tools::ToolResources {
-                    agent_runner: agent_runner.clone(),
-                    registry: Some(registry.clone() as Arc<dyn tools::ToolListProvider>),
-                    memory: memory.clone(),
-                    memory_config: memory_config.clone(),
-                    lang: language.to_string(),
-                    allow_all,
-                },
-                workspace: workspace.clone(),
-                run_id: run_id.to_string(),
-                cancel: cancel.clone(),
-                read_files: read_files.clone(),
-                session_reminders: Some(session_reminders.clone()),
-                plan_mode: None,
-                max_tool_concurrency,
-                max_agent_concurrency,
-                agent_semaphore: agent_semaphore.clone(),
-                progress_tx: None,
-                parent_session_id: Some(session_id.to_string()),
-            },
+            ctx: tools::ToolExecutionContext::new(
+                tools::ExecutionScope::builder(
+                    run_id.to_string(),
+                    workspace.read().workspace_id(),
+                    workspace.read().current_workspace_root(),
+                )
+                .build(),
+                tools::ToolExecutionPorts::new(
+                    crate::application::tool_execution_adapters::cancellation(cancel.clone()),
+                    crate::application::tool_execution_adapters::RuntimeWorkspaceAccess::new(
+                        workspace.clone(),
+                    )
+                    .read_access(),
+                    Arc::new(tools::MutexReadSet(read_files.clone())),
+                    Arc::new(tools::FixedPlanMode(None)),
+                    memory.clone(),
+                    Arc::new(tools::FixedGuidance {
+                        language: language.to_string(),
+                        allow_all,
+                    }),
+                )
+                .with_memory_context(
+                    Some(session_id.to_string()),
+                    Some(session_reminders.clone()),
+                )
+                .with_agent(agent_runner.clone())
+                .with_catalog(Some(registry.clone() as Arc<dyn tools::CatalogQuery>)),
+            ),
+            max_tool_concurrency,
+            agent_semaphore: agent_semaphore.clone(),
+            workspace_persist: workspace.persist(),
+            runtime_cancellation: cancel.clone(),
         }
     }
 
@@ -340,13 +346,22 @@ where
             let response = {
                 let progress_handle = reducer.progress_handle();
                 let stream_cancel = self.cancel.clone();
-                let stream_fut = self.client.invocation_stream(
-                    &invocation_scope,
-                    &effective_system_blocks,
-                    &messages_for_api,
-                    &tool_schemas,
-                    &stream_cancel,
-                );
+                let invocation_fut = async {
+                    let stream = self
+                        .client
+                        .invocation_stream(
+                            &invocation_scope,
+                            &effective_system_blocks,
+                            &messages_for_api,
+                            &tool_schemas,
+                            &stream_cancel,
+                        )
+                        .await
+                        .map_err(|error| (error, false))?;
+                    coordinator
+                        .pull_stream(stream, &stream_cancel, true, |event| reducer.apply(event))
+                        .await
+                };
                 let waiting_sink = self.sink.clone();
                 let waiting_context = self.turn_context.clone();
                 let request_started_at = tokio::time::Instant::now();
@@ -367,30 +382,10 @@ where
                         next += Duration::from_secs(10);
                     }
                 });
-                tokio::pin!(stream_fut);
+                tokio::pin!(invocation_fut);
                 let result = loop {
                     tokio::select! {
-                        stream = &mut stream_fut => {
-                            let mut stream = match stream {
-                                Ok(stream) => stream,
-                                Err(error) => break Err(error),
-                            };
-                            let mut terminal = None;
-                            while let Some(event) = stream.next().await {
-                                match reducer.apply(event) {
-                                    Ok(Some(response)) => terminal = Some(Ok(response)),
-                                    Ok(None) => {}
-                                    Err(error) => terminal = Some(Err(error)),
-                                }
-                                if terminal.is_some() {
-                                    break;
-                                }
-                            }
-                            break terminal.unwrap_or_else(|| Err(provider::ProviderError::fatal(
-                                provider::ProviderErrorKind::Protocol,
-                                "provider stream ended without terminal event",
-                            )));
-                        }
+                        response = &mut invocation_fut => break response,
                         event = self.input_events.recv_next_input() => {
                             if let Some(event) = event {
                                 self.queue_busy_event(event).await;
@@ -402,12 +397,12 @@ where
                 result
             };
             match response {
-                Ok(response) => break response,
-                Err(error) if error.is_cancelled() || self.cancel.is_cancelled() => {
+                Ok((response, _)) => break response,
+                Err((error, _)) if error.is_cancelled() || self.cancel.is_cancelled() => {
                     return Err(LoopEngineError::Cancelled);
                 }
-                Err(error) => match coordinator
-                    .handle_failure(&error, reducer.saw_visible_delta(), &self.cancel)
+                Err((error, visible_delta)) => match coordinator
+                    .handle_failure(&error, visible_delta, &self.cancel)
                     .await
                 {
                     crate::application::model_invocation::RetryStep::Retry { attempt, delay } => {
@@ -633,7 +628,6 @@ where
             self.registry,
             self.agent_runner,
             self.memory,
-            self.memory_config,
             self.language,
             self.allow_all,
             self.workspace,
@@ -641,7 +635,6 @@ where
             self.read_files,
             self.session_reminders,
             self.max_tool_concurrency,
-            self.max_agent_concurrency,
             self.agent_semaphore,
             self.session_id,
             &self.run_id,
@@ -722,7 +715,7 @@ where
             self.sink,
             &HookUi::new(self.sink.clone()),
             self.hook_runner,
-            &agent.ctx,
+            &agent.runtime_cancellation,
             self.turn_count,
             &self.current_cwd(),
         )

@@ -107,6 +107,7 @@ pub(crate) async fn from_args_with_gateways(
         main_memory,
         gateways.provider,
         gateways.tools,
+        gateways.policy,
         task_wiring.access(),
         context::compose_session_task_capture(task_wiring.persist()),
     );
