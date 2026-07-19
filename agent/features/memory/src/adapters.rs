@@ -1,6 +1,7 @@
 use crate::*;
 use async_trait::async_trait;
 use std::{
+    path::{Path, PathBuf},
     str::FromStr,
     sync::{Arc, RwLock},
 };
@@ -13,6 +14,9 @@ const ARCHIVE_MEMBER: &str = "archive";
 const MEMORY_MEMBER_NAMES: [&str; 2] = [ACTIVE_MEMBER, ARCHIVE_MEMBER];
 /// Fixed, project-independent segment for the shared global layer generation.
 const GLOBAL_DATASET_SEGMENT: &str = "global";
+const REFLECTION_HISTORY_SEGMENT: &str = "reflection-history";
+const REFLECTION_RECORDS_MEMBER: &str = "records";
+const REFLECTION_HISTORY_CAS_ATTEMPTS: usize = 8;
 
 /// Memory-owned translation from the per-layer persistence contract to Storage
 /// atomic datasets. Each `MemoryLayer` maps to its own dataset key with exactly
@@ -266,6 +270,151 @@ impl MemoryDatasetStore for AtomicDatasetMemoryStore {
     }
 }
 
+/// Memory-owned Reflection history adapter. A project gets one independent
+/// atomic dataset containing a single JSON member whose schema is exactly
+/// `Vec<ReflectionRecord>`.
+pub struct AtomicDatasetReflectionHistoryStore {
+    storage: Arc<dyn storage_api::AtomicDatasetPort>,
+    dataset: storage_api::DatasetKey,
+}
+
+impl AtomicDatasetReflectionHistoryStore {
+    pub fn new(
+        storage: Arc<dyn storage_api::AtomicDatasetPort>,
+        project: ProjectMemoryKey,
+    ) -> Self {
+        let project = storage_api::SafePathSegment::from_str(project.as_str())
+            .expect("derived project Memory key is a safe Storage path segment");
+        let history = member_name(REFLECTION_HISTORY_SEGMENT);
+        let dataset = storage_api::DatasetKey::new(
+            storage_api::StorageNamespace::Memory,
+            vec![project, history],
+        )
+        .expect("Reflection history segments form a valid dataset key");
+        Self { storage, dataset }
+    }
+
+    async fn load_records(
+        &self,
+    ) -> Result<(Vec<ReflectionRecord>, storage_api::DatasetRevision), MemoryError> {
+        let manifest = self
+            .storage
+            .read_manifest(&self.dataset)
+            .await
+            .map_err(storage_error)?;
+        let revision = manifest.revision().clone();
+        if manifest.members().is_empty() {
+            return Ok((Vec::new(), revision));
+        }
+        let records_member = member_name(REFLECTION_RECORDS_MEMBER);
+        if manifest.members() != std::slice::from_ref(&records_member) {
+            return Err(invalid_dataset(MemoryStorageErrorKind::CorruptTransaction));
+        }
+        let read = self
+            .storage
+            .read_consistent(&self.dataset, std::slice::from_ref(&records_member))
+            .await
+            .map_err(storage_error)?;
+        let storage_api::DatasetReadOutcome::Found(read) = read else {
+            return Err(invalid_dataset(MemoryStorageErrorKind::CorruptTransaction));
+        };
+        if read.revision() != &revision {
+            return Err(invalid_dataset(MemoryStorageErrorKind::ConcurrentWrite));
+        }
+        let bytes = read
+            .members()
+            .first()
+            .filter(|member| member.name() == &records_member)
+            .map(storage_api::DatasetMember::bytes)
+            .ok_or_else(|| invalid_dataset(MemoryStorageErrorKind::CorruptTransaction))?;
+        let records = serde_json::from_slice(bytes)
+            .map_err(|_| invalid_dataset(MemoryStorageErrorKind::Serialization))?;
+        Ok((records, revision))
+    }
+
+    async fn mutate_records(
+        &self,
+        mut mutation: impl FnMut(&mut Vec<ReflectionRecord>),
+    ) -> Result<(), MemoryError> {
+        for attempt in 0..REFLECTION_HISTORY_CAS_ATTEMPTS {
+            let (mut records, revision) = match self.load_records().await {
+                Ok(loaded) => loaded,
+                Err(MemoryError::Storage {
+                    kind: MemoryStorageErrorKind::ConcurrentWrite,
+                }) if attempt + 1 < REFLECTION_HISTORY_CAS_ATTEMPTS => {
+                    tokio::task::yield_now().await;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            mutation(&mut records);
+            let bytes = serde_json::to_vec(&records)
+                .map_err(|_| invalid_dataset(MemoryStorageErrorKind::Serialization))?;
+            let members = [storage_api::DatasetMember::new(
+                member_name(REFLECTION_RECORDS_MEMBER),
+                bytes,
+            )];
+            match self
+                .storage
+                .commit_atomic(
+                    &self.dataset,
+                    &revision,
+                    &members,
+                    storage_api::WriteOptions::new(storage_api::Durability::ProcessCrashSafe),
+                )
+                .await
+            {
+                Ok(_) => return Ok(()),
+                Err(error)
+                    if map_storage_error(&error) == MemoryStorageErrorKind::ConcurrentWrite
+                        && attempt + 1 < REFLECTION_HISTORY_CAS_ATTEMPTS =>
+                {
+                    tokio::task::yield_now().await;
+                }
+                Err(error) => return Err(storage_error(error)),
+            }
+        }
+        Err(invalid_dataset(MemoryStorageErrorKind::ConcurrentWrite))
+    }
+}
+
+#[async_trait]
+impl ReflectionHistoryQuery for AtomicDatasetReflectionHistoryStore {
+    async fn list(&self, limit: usize) -> Result<Vec<ReflectionRecord>, MemoryError> {
+        for attempt in 0..REFLECTION_HISTORY_CAS_ATTEMPTS {
+            match self.load_records().await {
+                Ok((records, _)) => return Ok(records.into_iter().rev().take(limit).collect()),
+                Err(MemoryError::Storage {
+                    kind: MemoryStorageErrorKind::ConcurrentWrite,
+                }) if attempt + 1 < REFLECTION_HISTORY_CAS_ATTEMPTS => {
+                    tokio::task::yield_now().await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(invalid_dataset(MemoryStorageErrorKind::ConcurrentWrite))
+    }
+}
+
+#[async_trait]
+impl ReflectionHistoryStore for AtomicDatasetReflectionHistoryStore {
+    async fn append(&self, record: &ReflectionRecord) -> Result<(), MemoryError> {
+        self.mutate_records(|records| records.push(record.clone()))
+            .await
+    }
+
+    async fn upsert(&self, record: &ReflectionRecord) -> Result<(), MemoryError> {
+        self.mutate_records(|records| {
+            if let Some(stored) = records.iter_mut().find(|stored| stored.id == record.id) {
+                *stored = record.clone();
+            } else {
+                records.push(record.clone());
+            }
+        })
+        .await
+    }
+}
+
 pub struct ProjectMemoryOpener {
     store: AtomicDatasetMemoryStore,
     legacy: Arc<dyn LegacyMemorySource>,
@@ -318,6 +467,164 @@ impl ProjectMemoryOpener {
         MemoryService::open(self.store, policy)
             .await
             .map_err(map_memory_open_error)
+    }
+}
+
+/// Concrete [`MemoryOpener`] backed by atomic-dataset Storage. Cloning shares
+/// the same Storage port and legacy source factory, so each clone can
+/// independently open Memory for any project identity.
+///
+/// The opener holds a [`LegacyMemorySourceFactory`] rather than a single
+/// [`LegacyMemorySource`] because legacy file positions are project-specific
+/// (the project layer's legacy file stem is derived from the caller's cwd).
+/// For each `open_memory` call the factory creates a fresh source pre-bound
+/// to the correct project positions; `probe(layer)` then only needs the
+/// layer argument.
+///
+/// This reuses [`ProjectMemoryOpener`] for the actual eager-open and legacy
+/// migration logic; the seam only adds the project-key-scoped store
+/// construction and the `MemoryConfig` → [`MemoryPolicy`] mapping so that
+/// callers obtain `Arc<dyn MemoryPort>` without depending on concrete Memory
+/// types.
+#[derive(Clone)]
+pub struct DatasetMemoryOpener {
+    storage: Arc<dyn storage_api::AtomicDatasetPort>,
+    legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
+}
+
+impl DatasetMemoryOpener {
+    pub fn new(
+        storage: Arc<dyn storage_api::AtomicDatasetPort>,
+        legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
+    ) -> Self {
+        Self {
+            storage,
+            legacy_factory,
+        }
+    }
+}
+
+#[async_trait]
+impl MemoryOpener for DatasetMemoryOpener {
+    async fn open_memory(
+        &self,
+        key: &ProjectMemoryKey,
+        config: &share::config::MemoryConfig,
+    ) -> Result<Arc<dyn MemoryPort>, MemoryOpenerError> {
+        let store = AtomicDatasetMemoryStore::new(Arc::clone(&self.storage), key.clone());
+        let policy = MemoryPolicy {
+            max_entries: config.max_entries,
+            similarity_threshold: config.similarity_threshold,
+        };
+        let legacy = self.legacy_factory.create_for(key);
+        let service = ProjectMemoryOpener::new(store, legacy).open(policy).await?;
+        Ok(Arc::new(service))
+    }
+
+    fn boxed_clone(&self) -> Box<dyn MemoryOpener> {
+        Box::new(self.clone())
+    }
+}
+
+/// Fixed segments used by the predecessor `MemoryStore` file layout.
+const LEGACY_GLOBAL_STEM: &str = "_global";
+const LEGACY_ARCHIVE_SUFFIX: &str = "_archive";
+const LEGACY_FILE_EXT: &str = ".json";
+
+/// Production [`LegacyMemorySource`] backed by the predecessor memory file
+/// layout (`~/.agents/memory/`).
+///
+/// A single instance is **pre-bound** at construction to the four file
+/// positions (global active/archive, project active/archive) for exactly one
+/// project. [`LegacyMemorySource::probe`] then only needs the `layer` argument
+/// to select which pair to read — it never sees a filesystem path. Files are
+/// plain JSON arrays of entries; a missing file maps to [`LegacyMemoryMember::Missing`].
+struct FileLegacyMemorySource {
+    global_active: PathBuf,
+    global_archive: PathBuf,
+    project_active: PathBuf,
+    project_archive: PathBuf,
+}
+
+impl FileLegacyMemorySource {
+    fn new(base_dir: &Path, key: &ProjectMemoryKey) -> Self {
+        let project_stem = key.legacy_project_name();
+        Self {
+            global_active: base_dir.join(format!("{LEGACY_GLOBAL_STEM}{LEGACY_FILE_EXT}")),
+            global_archive: base_dir.join(format!(
+                "{LEGACY_GLOBAL_STEM}{LEGACY_ARCHIVE_SUFFIX}{LEGACY_FILE_EXT}"
+            )),
+            project_active: base_dir.join(format!("{project_stem}{LEGACY_FILE_EXT}")),
+            project_archive: base_dir.join(format!(
+                "{project_stem}{LEGACY_ARCHIVE_SUFFIX}{LEGACY_FILE_EXT}"
+            )),
+        }
+    }
+
+    fn paths_for(&self, layer: MemoryLayer) -> (&Path, &Path) {
+        match layer {
+            MemoryLayer::Global => (&self.global_active, &self.global_archive),
+            MemoryLayer::Project => (&self.project_active, &self.project_archive),
+        }
+    }
+}
+
+#[async_trait]
+impl LegacyMemorySource for FileLegacyMemorySource {
+    async fn probe(
+        &self,
+        layer: MemoryLayer,
+    ) -> Result<LegacyMemoryLayer, LegacyMemorySourceError> {
+        let (active_path, archive_path) = self.paths_for(layer);
+        let active = read_legacy_member(active_path)?;
+        let archive = read_legacy_member(archive_path)?;
+        Ok(LegacyMemoryLayer { active, archive })
+    }
+}
+
+fn read_legacy_member(path: &Path) -> Result<LegacyMemoryMember, LegacyMemorySourceError> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(LegacyMemoryMember::Present(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(LegacyMemoryMember::Missing)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            Err(LegacyMemorySourceError::PermissionDenied)
+        }
+        Err(_) => Err(LegacyMemorySourceError::Io),
+    }
+}
+
+/// Production [`LegacyMemorySourceFactory`]. Reads old-format JSON files from
+/// the legacy memory directory layout.
+///
+/// The factory holds only the legacy base directory. When [`create_for`] is
+/// called with a [`ProjectMemoryKey`], it resolves the project-specific file
+/// stems (from the key's cwd-derived name) and returns a [`FileLegacyMemorySource`]
+/// pre-bound to those positions. No path ever crosses the port boundary — the
+/// created source exposes only bytes through `probe`.
+///
+/// [`create_for`]: LegacyMemorySourceFactory::create_for
+#[derive(Clone)]
+pub struct FileLegacyMemorySourceFactory {
+    base_dir: PathBuf,
+}
+
+impl FileLegacyMemorySourceFactory {
+    pub fn new(base_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+        }
+    }
+}
+
+impl LegacyMemorySourceFactory for FileLegacyMemorySourceFactory {
+    fn create_for(&self, key: &ProjectMemoryKey) -> Arc<dyn LegacyMemorySource> {
+        Arc::new(FileLegacyMemorySource::new(&self.base_dir, key))
+    }
+
+    fn boxed_clone(&self) -> Box<dyn LegacyMemorySourceFactory> {
+        Box::new(self.clone())
     }
 }
 
@@ -526,7 +833,10 @@ impl MemoryPort for InMemoryMemory {
         &self,
         output: &ReflectionOutput,
     ) -> Result<ReflectionApplyResult, MemoryError> {
-        let mut result = ReflectionApplyResult::default();
+        let mut result = ReflectionApplyResult {
+            attempted: output.suggested_memories.len() + output.outdated_memories.len(),
+            ..ReflectionApplyResult::default()
+        };
         for suggestion in &output.suggested_memories {
             let now = (self.clock)();
             let id = reflection_memory_id(now)?;
@@ -544,6 +854,7 @@ impl MemoryPort for InMemoryMemory {
             apply_reflection_entry(&mut state, entry, self.policy)?;
             state.revision = state.revision.saturating_add(1);
             result.suggestions_added += 1;
+            result.completed += 1;
         }
 
         for raw_id in &output.outdated_memories {
@@ -554,6 +865,7 @@ impl MemoryPort for InMemoryMemory {
                 state.revision = state.revision.saturating_add(1);
                 result.outdated_marked += 1;
             }
+            result.completed += 1;
         }
         Ok(result)
     }

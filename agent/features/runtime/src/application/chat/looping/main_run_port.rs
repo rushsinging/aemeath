@@ -17,9 +17,11 @@ use crate::application::chat::looping::finalize::{
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::application::chat::looping::loop_phases::build_api_messages;
-use crate::application::chat::looping::memory_inject::build_memory_block;
+use crate::application::chat::looping::memory_inject::build_memory_block_from_port;
 use crate::application::chat::looping::post_batch::run_post_tool_batch;
-use crate::application::chat::looping::reflection::{run_reflection, should_run_turn_reflection};
+use crate::application::chat::looping::reflection::{
+    should_run_turn_reflection, submit_interval_reflection,
+};
 use crate::application::chat::looping::stream_handler::{
     should_emit_model_stream_waiting, InvocationEventReducer,
 };
@@ -34,7 +36,6 @@ use crate::application::loop_engine::{
     ToolStep,
 };
 use crate::domain::agent_run::RunDomainEvent;
-use crate::LOG_TARGET;
 use context::session::ChatChain;
 use workflow::api::{ReasoningPort, ReasoningSignal};
 
@@ -100,6 +101,8 @@ where
     pub(crate) hook_runner: &'a hook::api::HookRunner,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
     pub(crate) memory: &'a Arc<dyn memory::MemoryPort>,
+    pub(crate) reflection_history: &'a Arc<dyn memory::api::ReflectionHistoryStore>,
+    pub(crate) reflection_tasks: &'a crate::application::reflection::ReflectionTaskAdapter,
     pub(crate) language: &'a str,
     pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
     pub(crate) active_summary: &'a mut Option<String>,
@@ -117,7 +120,6 @@ where
     pub(crate) rollback_chain: ChatChain,
     pub(crate) rollback_frozen_chats: Vec<context::session::ChatSegment>,
     pub(crate) rollback_active_summary: Option<String>,
-    pub(crate) memory_cwd: PathBuf,
     pub(crate) last_total_tokens: &'a mut Option<u64>,
     pub(crate) task_reminder_state: &'a mut TaskReminderState,
     pub(crate) tool_identity:
@@ -263,7 +265,7 @@ where
             })
             .await;
         if let Err(error) = (self.save_chain)(self.chain).await {
-            log::error!(target: LOG_TARGET, "cancel rollback save_chain failed: {error}");
+            log::error!(target: crate::LOG_TARGET, "cancel rollback save_chain failed: {error}");
         }
         self.sink
             .send_event(RuntimeStreamEvent::Cancelled {
@@ -292,8 +294,9 @@ where
             self.system_prompt_text,
             self.context_size,
             self.memory_config,
-            self.memory.as_ref(),
-            &crate::application::chat::looping::reflection::REFLECTION_ENGINE,
+            self.memory,
+            self.reflection_history,
+            self.reflection_tasks,
             self.client,
             self.language,
             &self.current_cwd(),
@@ -338,10 +341,17 @@ where
             .map(|snapshot| snapshot.model_schemas())
             .unwrap_or_default();
         let mut effective_system_blocks = self.system_blocks.to_vec();
+        // #871: Main 注入走 MemoryPort（不再读旧 storage::MemoryStore 文件）。
         if self.memory_config.enabled && self.memory_config.inject_count > 0 {
-            if let Some(block) =
-                build_memory_block(&self.memory_cwd, self.memory_config.inject_count)
-            {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if let Some(block) = build_memory_block_from_port(
+                self.memory.as_ref(),
+                now,
+                self.memory_config.inject_count,
+            ) {
                 effective_system_blocks.push(block);
             }
         }
@@ -546,22 +556,17 @@ where
             &resp.stop_reason,
             false,
         ) {
-            if let Some(text) = run_reflection(
+            let _ = submit_interval_reflection(
+                self.reflection_tasks,
                 self.memory_config,
                 self.turn_count,
                 &self.chain.messages_flat(),
                 self.client,
                 self.system_prompt_text,
                 self.language,
-                self.memory.as_ref(),
-                &crate::application::chat::looping::reflection::REFLECTION_ENGINE,
-            )
-            .await
-            {
-                self.sink
-                    .send_event(RuntimeStreamEvent::SystemMessage(text))
-                    .await;
-            }
+                self.memory,
+                self.reflection_history,
+            );
         }
 
         let outcome = self.outcome(AgentRunStatus::Completed);
@@ -800,7 +805,7 @@ where
             match event {
                 RunDomainEvent::Completed { .. } => {
                     if let Err(error) = (self.save_chain)(self.chain).await {
-                        log::error!(target: LOG_TARGET, "turn-level save_chain failed: {error}");
+                        log::error!(target: crate::LOG_TARGET, "turn-level save_chain failed: {error}");
                     }
                     self.project_done(AgentRunStatus::Completed).await;
                 }
@@ -812,7 +817,7 @@ where
                         })
                         .await;
                     if let Err(save_error) = (self.save_chain)(self.chain).await {
-                        log::error!(target: LOG_TARGET, "api-error save_chain failed: {save_error}");
+                        log::error!(target: crate::LOG_TARGET, "api-error save_chain failed: {save_error}");
                     }
                     self.project_done(AgentRunStatus::ApiError(error)).await;
                 }

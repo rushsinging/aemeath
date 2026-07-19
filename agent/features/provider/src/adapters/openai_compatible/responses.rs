@@ -14,7 +14,6 @@ use crate::adapters::http_attempt::{
 };
 use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
 use crate::ports::{LegacyStreamSink, ReasoningLevel};
-use crate::LOG_TARGET;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -38,7 +37,7 @@ impl OpenAICompatibleProvider {
             .unwrap_or(0);
         let url = self.responses_url();
 
-        log::debug!(target: LOG_TARGET,
+        log::debug!(target: crate::LOG_TARGET,
             "[responses-stream] POST provider={} url={} body_bytes={}",
             self.config.source_key, url, request_body_bytes,
         );
@@ -123,7 +122,7 @@ impl OpenAICompatibleProvider {
                                 NetworkFailureKind::Decode => "response decode error",
                                 NetworkFailureKind::Unknown => "unknown",
                             };
-                            log::debug!(target: LOG_TARGET,
+                            log::debug!(target: crate::LOG_TARGET,
                                 "[responses-stream] HTTP send failed attempt={}/{} kind={}: {}",
                                 attempt + 1, self.max_retries, detail, source,
                             );
@@ -185,7 +184,7 @@ impl OpenAICompatibleProvider {
                 }
             };
 
-            log::debug!(target: LOG_TARGET,
+            log::debug!(target: crate::LOG_TARGET,
                 "[responses-stream] response received attempt={}/{}",
                 attempt + 1, self.max_retries,
             );
@@ -239,17 +238,27 @@ impl OpenAICompatibleProvider {
             });
         }
 
-        // tools（Responses API 扁平格式）
+        // tools（Responses API 扁平格式：{type:"function", name, description, parameters}）
+        // ToolRegistry::schemas_for 产出 Anthropic 扁平格式 {name, description, input_schema}，
+        // 这里直接取字段构建 Responses 格式（不要假设嵌套的 function 包装）。
         if !tool_schemas.is_empty() {
             let tools: Vec<serde_json::Value> = tool_schemas
                 .iter()
                 .filter_map(|schema| {
-                    let function = schema.get("function")?;
+                    let name = schema.get("name")?.as_str()?;
+                    let description = schema
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("");
+                    let parameters = schema
+                        .get("input_schema")
+                        .cloned()
+                        .unwrap_or(serde_json::json!({}));
                     Some(serde_json::json!({
                         "type": "function",
-                        "name": function.get("name").cloned().unwrap_or_default(),
-                        "description": function.get("description").cloned().unwrap_or_default(),
-                        "parameters": function.get("parameters").cloned().unwrap_or(serde_json::json!({})),
+                        "name": name,
+                        "description": description,
+                        "parameters": parameters,
                     }))
                 })
                 .collect();
@@ -412,5 +421,49 @@ mod tests {
         assert_eq!(input[0]["type"], "function_call_output");
         assert_eq!(input[0]["call_id"], "call_123");
         assert_eq!(input[0]["output"], "12:00");
+    }
+
+    #[test]
+    fn test_build_responses_request_body_injects_tools_from_flat_schema() {
+        use crate::adapters::client::OpenAIProviderConfig;
+        use crate::ProviderDriverKind;
+
+        // ToolRegistry::schemas_for 产出 Anthropic 扁平格式（非 function 嵌套）
+        let flat_schemas = vec![serde_json::json!({
+            "name": "get_weather",
+            "description": "Get weather",
+            "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}},
+        })];
+
+        let config = OpenAIProviderConfig::from_driver(ProviderDriverKind::OpenAI, "test");
+        let provider = super::super::OpenAICompatibleProvider::new(
+            config,
+            "test-key".to_string(),
+            Some("https://example.com".to_string()),
+            Some("test-model".to_string()),
+            8192,
+            false,
+            None,
+            60,
+        );
+        let scope = InvocationScope::new(
+            "test-model",
+            8192,
+            crate::ports::ReasoningLevel::Off,
+            crate::ports::ReasoningLevel::Off,
+        )
+        .expect("valid scope");
+        let body = provider.build_responses_request_body(&scope, &[], &[], &flat_schemas, false);
+
+        // tools 必须被注入（修复前 schema.get("function") = None 导致 tools 丢失）
+        let tools = body.get("tools").expect("tools should be injected");
+        assert_eq!(tools.as_array().unwrap().len(), 1);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["name"], "get_weather");
+        assert_eq!(tools[0]["description"], "Get weather");
+        assert_eq!(
+            tools[0]["parameters"]["properties"]["city"]["type"],
+            "string"
+        );
     }
 }

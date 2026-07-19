@@ -209,7 +209,7 @@ Session 采用 **per finalized RunStep** 提交：一个 RunStep 无论普通完
 
 1. resume coordinator **MUST** 先请求活动 Run 取消并 join Tool / Reflection / Sub 等全部 shared lease holder；发起 resume 的调用栈自身 **NEVER** 持有 shared lease，也 **NEVER** 尝试 shared → exclusive 原地升级。全部 holder 收口后 acquire owned exclusive `session-switch` lease，并从读取 / 升级 Session 开始一直持有到第 5 步发布完成；gate 释放前 **NEVER** 开始新 Run。Main Run admission 以及 Task / Workspace / Session 的外部 query、control、snapshot **MUST** 共享该 gate；恢复协调器持 exclusive permit 调用全部 participant，其他观察者因此无法看见 prepare token 与 commit 之间的状态变化。
 2. 读取 Session 并在兼容 ACL 中升级旧 wire DTO。旧 Workspace snapshot 缺 identity / id 时以 canonical `LegacySessionDto.cwd` 推导；`workspace: None + cwd` 升级为 identity/root/path 均以 cwd 为基准、空 stack、派生 WorkspaceId 的完整 snapshot，**NEVER** 保留 active slot 的旧 Workspace。新格式若仍携带 legacy cwd，reader **MUST** 校验它与 `workspace.project_identity.initial_cwd` 一致，不一致则 prepare 失败。Target writer **MUST** 始终写 Workspace 与 Task snapshot；Task raw field 的 ID 格式与 legacy counter 升级只委托 Task-owned codec。legacy `tasks: None` **MUST** 调用 `TaskSnapshot::empty()` 得到 `tasks=[] / next_task_id=TaskId(1) / next_batch_id=BatchId(1) / current_batch=None / batches=[]` 并记录兼容诊断，**NEVER** 保留当前 active Session 的 Task。captured empty 保留其 wire 值，两者来源可诊断但 live 恢复结果同为显式空状态。
-3. 在第 1 步取得的同一 exclusive lease 内，先调用 Project `prepare_restore`，只使用 `PreparedWorkspaceRestore::project_identity()` 返回的已验证 canonical identity，**NEVER** 直接信任 raw Session DTO identity。协调 ACL 把该 identity 映射为 Config-owned `ProjectConfigLocation`，再 await `ProjectConfigParticipant::prepare_for_project`；Config candidate **MUST** 加载目标项目层配置并验证 provider / tool / hook 所需输入。随后以同一 identity 与 `prepared_config.memory_config()` 调 `ProjectMemoryOpener::open_for_project`，最后调用 Task `prepare_restore`。prepare 完成全部可能失败的解析、I/O 与不变量校验，且 **NEVER** 修改 Session、Task、Workspace、Memory binding、Config active state 或 active identity；任一失败即丢弃全部 token / candidate resources并释放 gate。
+3. 在第 1 步取得的同一 exclusive lease 内，先调用 Project `prepare_restore`，只使用 `PreparedWorkspaceRestore::project_identity()` 返回的已验证 canonical identity，**NEVER** 直接信任 raw Session DTO identity。协调 ACL 把该 identity 映射为 Config-owned `ProjectConfigLocation`，再 await `ProjectConfigParticipant::prepare_for_project`；Config candidate **MUST** 加载目标项目层配置并验证 provider / tool / hook 所需输入。随后以同一 identity 先派生 `ProjectMemoryKey`，再以 `prepared_config.memory_config()` 调 `MemoryOpener::open_memory`——open 自身在 prepare 阶段完成其 durable legacy migration（见 [Memory §6](../memory/04-ports-and-adapters.md#6-持久化格式) legacy project key 迁移），返回 candidate `Arc<dyn MemoryPort>`；open 失败即丢弃全部 token / candidate resources 并释放 gate，**NEVER** 安装半完成 service。最后调用 Task `prepare_restore`。prepare 完成全部可能失败的解析、I/O 与不变量校验，且 **NEVER** 修改 Session、Task、Workspace、Memory binding、Config active state 或 active identity；任一失败即丢弃全部 token / candidate resources并释放 gate。
 4. 全部 participant 成功后进入无失败提交段：同步消费 `PreparedTaskRestore` 与 `PreparedWorkspaceRestore`，期间 **NEVER** await、执行 I/O 或响应取消。gate 阻止任何观察者读取多个 commit 之间的中间态。
 5. Task / Workspace participant commit 后才发布 Session id / metadata / ChatChain，并把第 3 步准备的 Memory Arc 安装到 active Main session wiring；最后调用 Config participant 的无失败 `commit_project`，一次替换 Config-owned active `{location, snapshot}` 并发布 watch snapshot。随后释放 gate。下一 Main Run 从同一 shared lease 取得 Context、Task、Memory，并从同一 Config participant 读取 project-aware ConfigSnapshot；Provider / Tool / Hook factory **NEVER** 读取旧全局 snapshot。所有 fallible 工作 **MUST** 在第 3 步完成，**NEVER** 在提交段引入失败点。
 
@@ -217,35 +217,41 @@ Session 采用 **per finalized RunStep** 提交：一个 RunStep 无论普通完
 
 ### 7.1 Context-owned MainSessionWiring
 
-Context Management **MUST** 从 crate-root 窄 façade 发布仅供 Composition 调用的 opaque factory；这是 active Main session slot 的所有权真相，不意味着建立固定 `api/` 目录，Runtime 文档只展示接线：
+Context Management **MUST** 从 crate-root 窄 façade 发布仅供 Composition 调用的 opaque factory；这是 active Main session slot 的所有权真相。#871 已落地如下实际签名（返回 `Arc`，字段为已实现类型）：
 
 ```rust
 context::wire_main_session(MainSessionDependencies {
-    workspace_read: Arc<dyn WorkspaceRead>,
-    workspace_persist: Arc<dyn WorkspacePersist>,
+    workspace: project::WorkspaceViews,       // 封装 WorkspaceRead + WorkspacePersist
     task_persist: Arc<dyn TaskPersist>,
-    memory_opener: Arc<dyn ProjectMemoryOpener>,
-    initial_memory: Arc<dyn MemoryPort>,
-    config: Arc<dyn ProjectConfigParticipant>,
-    guidance_source: Arc<dyn GuidanceSourcePort>,
-    skill_materialization: Arc<dyn SkillMaterializationPort>,
-    // Session repository / config 省略
-}) -> Result<MainSessionWiring, SessionOpenError>
+    config_reader: Arc<dyn ConfigReader>,
+    config_participant: Arc<dyn ProjectConfigParticipant>,
+    memory_opener: Box<dyn MemoryOpener>,     // 对象安全、Box<dyn> 可 Clone
+}) -> Result<Arc<MainSessionWiring>, MainSessionError>
 
 MainSessionWiring::bind_main_run(&self).await
-    -> Result<BoundMainRun, SessionSwitchInProgress>
+    -> Result<BoundMainRun, SessionSwitchClosed>
 
 struct BoundMainRun {
-    context: Arc<dyn ContextPort>,
+    _permit: OwnedSessionSharedPermit,        // 持有 shared lease 直到 drop
+    session: Arc<CanonicalSession>,           // 已提交对话历史 backing
     memory: Arc<dyn MemoryPort>,
     config: ConfigSnapshot,
-    lease: MainRunLease,
 }
 ```
 
-`MainSessionWiring` 字段私有，拥有稳定 Session backing、唯一 `SessionSwitchCoordinator`、async shared / exclusive gate、`TaskPersist`、active Memory slot、Config participant view，以及构造私有 PromptPipeline 所需的稳定 Guidance / Skill seam；它 **NEVER** 保存第二份 active Config slot。Guidance / Skill adapter 每次按 request 的 project/config materialize，因而 resume 后 **NEVER** 静态捕获旧项目内容。`bind_main_run` **MUST** 是 async admission：await 一个 owned shared lease 后，才从 Memory slot 与 Config participant 的同一已提交版本读取资源并构造 run-bound `ContextPort` view；它 **NEVER** 用同步 read lock 跨越 resume 的 await。该 ContextPort 复用稳定 Session / ChatChain backing，但只捕获本 lease 对应的 Memory Arc 与 ConfigSnapshot，**NEVER** 静态捕获启动时实例。`BoundMainRun` 的资源不能越过 lease 存活。
+`wire_main_session` 自身 eager-open 初始 Memory：从 `workspace.read().project_identity()` 派生 `ProjectMemoryKey`，以 `config_reader.committed_snapshot().memory()` 调 `memory_opener.open_memory()`，失败返回 `MainSessionError`；生产路径 **NEVER** 使用跳过真实 opener 的兼容 stub。`MainSessionWiring` 字段私有，拥有 `SessionSwitchGate`（async shared / exclusive `TokioRwLock`）、`CanonicalSession` 与 `MemoryPort` 的 `Arc<RwLock<Arc<_>>>` committed holder、`TaskRestoreAdapter`、`ConfigReader` + `ProjectConfigParticipant` view 与 `MemoryOpener`；它 **NEVER** 保存第二份 active Config slot。Target 还规划构造私有 PromptPipeline 所需的稳定 Guidance / Skill seam（每次按 request 的 project/config materialize），但当前实现尚未接线——Guidance / Skill 仍由 Runtime 在 bootstrap 阶段一次性加载，见 [迁移治理](../../03-engineering/03-migration-governance.md)。
 
-`MainSessionWiring::resume` 是唯一 exclusive project-switch 入口，执行 §7 的 prepare / commit 协议；可能改变 active project-scoped resource 的 Config command 也 **MUST** 经 wiring 使用同一 gate 与 candidate protocol。ordinary ContextPort、Runtime 与 Tool **NEVER** 获得 coordinator、active slot setter、`TaskPersist`、Config participant commit authority 或 exclusive lease。无 Run 的 Session / Memory / Workspace / Config query 或 mutation 也必须经 gate-aware async façade await 同一 owned shared lease；因此同一 gate 同时证明 Run admission、资源读取与 resume 的原子边界。
+`bind_main_run` **MUST** 是 async admission：await 一个 owned shared permit 后，才从 committed holder 读取 `CanonicalSession`、Memory Arc 与 `ConfigSnapshot` 并构造 `BoundMainRun`；它 **NEVER** 用同步 read lock 跨越 resume 的 await。`BoundMainRun.session()` 暴露的是 `CanonicalSession`——Runtime 在其上自行重建可变 `ChatChain` / `frozen_chats` / `active_summary` 租借投影（见 §7.2），而非直接获得 `ContextPort`。`BoundMainRun` 的资源不能越过 permit 存活。
+
+`MainSessionWiring::resume_prepared` 是唯一 exclusive project-switch 入口，执行 §7 的 prepare / commit 协议；可能改变 active project-scoped resource 的 Config command 也 **MUST** 经 wiring 的 `config_writer()` gate-aware façade 使用同一 gate 与 candidate protocol。ordinary ContextPort、Runtime 与 Tool **NEVER** 获得 coordinator、active slot setter、`TaskPersist`、Config participant commit authority 或 exclusive lease。无 Run 的 Session / Memory / Workspace / Config query 或 mutation 也必须经 gate-aware async façade（`config_query()` / `with_shared()`）await 同一 owned shared lease；因此同一 gate 同时证明 Run admission、资源读取与 resume 的原子边界。
+
+### 7.2 Runtime 租借投影兼容差距
+
+`BoundMainRun.session()` 暴露的是 `Arc<CanonicalSession>`——Context Management 的唯一权威对话历史。Runtime 在 `RuntimeHandle` 中维护 **独立的可变租借投影**：`current_chain: Arc<Mutex<ChatChain>>`、`frozen_chats`、`active_summary`。这些是 Runtime 对活跃 Run 的可变写入面，不是跨 BC 的唯一真相。
+
+**#871 已闭合可观察性窗口**：`MainSessionWiring` 新增 `SessionProjectionParticipant` trait（`prepare` 纯函数从 `CanonicalSession` 构造 `SessionRestore`；`commit` 同步、无失败、无 await）。`resume_prepared` 在 exclusive gate 内、Project/Task/Session/Memory commit 后、Config watch 前，同步调用 `participant.prepare` + `participant.commit`，使 leased backing 在释放 gate 前已是新值。`from_args` 在 resume 前构造 backing Arc 并注册 participant；运行期 `resume_session_to_backing` 不再在 gate 外重建/写投影，loop runner 不再 double-write backing。因此释放 exclusive 后 shared observer 第一次读即看到新 session + 新 projection。
+
+**迁移债**：Runtime 仍持有第二份可变 backing（尚未经 `ContextPort::build_window` 直接从 Context 读取），但该 backing 已在 gate 内原子发布。Target 要求 Runtime 每个 Run 经 `ContextPort::build_window` 直接从 Context 读取，**NEVER** 维护第二份可变对话 backing；完全退役该租借投影的责任与退出条件见 [迁移治理](../../03-engineering/03-migration-governance.md)。
 
 Config update 还有 durable state：在 Config / Memory candidate 均 prepare 后，wiring **MUST** 把 owned exclusive permit 与全部 candidate 一次性交给 cancellation-shielded owned task。handoff 是最后一个取消点；一旦开始 durable publish，即使调用方 future 被丢弃，owned task 仍必须跑完 fallible persist，并在成功后无 await 地依次安装 Memory、提交 Config active state、最后发布 Config watch。逐 await / rename / fsync / commit 点的故障注入与二选一不变量见 [Config §5.3](../config/01-config-layer.md#53-config-update-的联合协议)。
 
@@ -276,3 +282,5 @@ Context Management 还负责会话 identity：session 列表、元数据、`/res
 | 2026-07-14 | Session 快照组装改为直接消费 Project-owned WorkspacePersist；以联合 prepare / gate 内无失败 commit 原子切换 Task、Workspace、Memory 与 Session identity，并复用 active Main session slot scope | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | 明确 per finalized RunStep 的落盘/不落盘矩阵、幂等提交与恢复语义；普通 mixed outcomes 与控制收口都必须保留同批成功 Agent Tool 结果，并以 deterministic receipt 表达 cancelled/unconfirmed 工作 | [#868](https://github.com/rushsinging/aemeath/issues/868) / [#700](https://github.com/rushsinging/aemeath/issues/700) |
 | 2026-07-17 | ChatChain backing 保留 Run → finalized RunStep → Message 结构；compact recent tail 按 Step，扁平化延后到 ContextWindow / Provider 出站 | compact token reset design |
+| 2026-07-18 | #871 回写实际实现签名：`wire_main_session` 返回 `Arc<MainSessionWiring>`、`MainSessionDependencies` 使用已实现类型（`WorkspaceViews`/`ConfigReader`/`MemoryOpener`/`Box`）、`BoundMainRun` 暴露 `CanonicalSession` 而非 `ContextPort`、resume 步骤改用 `MemoryOpener::open_memory`；新增 §7.2 Runtime 租借投影兼容差距 | [#871](https://github.com/rushsinging/aemeath/issues/871) |
+| 2026-07-18 | #871 闭合 CM5 可观察性窗口：`MainSessionWiring` 新增 `SessionProjectionParticipant` trait（prepare 纯构造 / commit 同步无失败无 await），`resume_prepared` 在 exclusive gate 内同步更新 leased projection；§7.2 更新为"可观察性已闭合、第二 backing 仍为迁移债" | [#871](https://github.com/rushsinging/aemeath/issues/871) |

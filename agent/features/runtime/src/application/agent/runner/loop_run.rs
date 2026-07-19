@@ -10,7 +10,6 @@ use crate::application::loop_engine::{
     ToolStep,
 };
 use crate::domain::agent_run::{Run, RunDomainEvent, RunSpec};
-use crate::LOG_TARGET;
 use async_trait::async_trait;
 use provider::LlmClient;
 use provider::{StopReason, SystemBlock};
@@ -256,7 +255,7 @@ impl<'a> SubAgentRun<'a> {
                 serde_json::Value::String(self.role_name_for_log.clone()),
             );
         }
-        log::debug!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
+        log::debug!(target: crate::LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
     }
 
     fn progress_api_ok(&self, turn_number: usize, resp: &provider::StreamResponse) {
@@ -285,7 +284,7 @@ impl<'a> SubAgentRun<'a> {
                 serde_json::Value::String(self.role_name_for_log.clone()),
             );
         }
-        log::debug!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
+        log::debug!(target: crate::LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
     }
 
     fn send_text_progress(&self, turn: usize, resp: &provider::StreamResponse) {
@@ -310,7 +309,7 @@ impl<'a> SubAgentRun<'a> {
         for tool_call in tool_calls {
             let data = build_json_logger_tool_call_data(tool_call);
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "tool_call: {}",
                 serde_json::to_string(&data).unwrap_or_default()
             );

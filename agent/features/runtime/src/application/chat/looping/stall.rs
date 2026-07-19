@@ -1,5 +1,3 @@
-use crate::LOG_TARGET;
-
 pub(crate) struct StallDetector {
     recent_fingerprints: Vec<String>,
     max_fingerprint_repeat: usize,
@@ -40,14 +38,14 @@ impl StallDetector {
             .count();
         if repeat_count > self.max_fingerprint_repeat {
             self.max_fingerprint_repeat = repeat_count;
-            log::debug!(target: LOG_TARGET,
+            log::debug!(target: crate::LOG_TARGET,
                 "[stall] fingerprint repeat count: {} (max so far: {})",
                 repeat_count,
                 self.max_fingerprint_repeat
             );
         }
         if repeat_count >= Self::FINGERPRINT_MAX_REPEAT {
-            log::warn!(target: LOG_TARGET,
+            log::warn!(target: crate::LOG_TARGET,
                 "[stall] assistant text repeated {} times in recent {} turns (max: {})",
                 repeat_count,
                 self.recent_fingerprints.len(),

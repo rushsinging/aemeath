@@ -1,8 +1,8 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
-/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
-pub const LOG_TARGET: &str = "aemeath:agent:tools";
+pub(crate) const LOG_TARGET: &str = "aemeath:agent:tools";
 
+/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 mod adapters;
 mod domain;
 
@@ -26,8 +26,8 @@ pub use domain::{
     AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal,
     AgentRunner, AgentToolCallProgress, CancellationDeclaration, CancellationSignal, CatalogQuery,
     ConcurrencyDeclaration, ExecutionScope, ExecutionScopeBuilder, FixedGuidance, FixedPlanMode,
-    Guidance, ImageData, InputSafetyDeclaration, InvocationSource, MutexReadSet, PlanModeState,
-    PolicyDecision, ProfileExpansionError, ProgressSink, ReadSet, RegistryScopeName,
+    Guidance, ImageData, InputSafetyDeclaration, InvocationSource, MemoryPortSource, MutexReadSet,
+    PlanModeState, PolicyDecision, ProfileExpansionError, ProgressSink, ReadSet, RegistryScopeName,
     SessionReminder, SessionReminders, Tool, ToolCapabilities, ToolCapability, ToolCatalogPort,
     ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind, ToolExecutionContext,
     ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort, ToolExecutionOutcome,

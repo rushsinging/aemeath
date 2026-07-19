@@ -1,7 +1,6 @@
 use crate::application::agent::runner::AgentRunOutcome;
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
-use crate::LOG_TARGET;
 use hook::api::{is_blocking, HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use share::config::hooks::HookEvent;
 use std::path::{Path, PathBuf};
@@ -62,11 +61,11 @@ pub(crate) async fn finish_completed_loop<S>(
     // stale 阈值无关，此处传入 `0` 仅为满足 lifecycle_snapshot 签名。
     if let Some(batch_id) = access.lifecycle_snapshot(0).all_completed {
         if let Err(error) = access.archive_batch(batch_id) {
-            log::warn!(target: LOG_TARGET,
+            log::warn!(target: crate::LOG_TARGET,
                 "[task_list_archive_failed] batch_id={batch_id}, error={error}"
             );
         } else {
-            log::info!(target: LOG_TARGET,
+            log::info!(target: crate::LOG_TARGET,
                 "[task_list_archived] batch_id={batch_id}, status=archived, reason=all_tasks_completed"
             );
         }
@@ -82,7 +81,7 @@ async fn stop_hook_feedback(
     session_id: &str,
     language: &str,
 ) -> Option<String> {
-    log::debug!(target: LOG_TARGET,
+    log::debug!(target: crate::LOG_TARGET,
         "[stop_hook_debug] session={} evaluating {} hook result(s): {:?}",
         session_id,
         hook_results.len(),
@@ -91,7 +90,7 @@ async fn stop_hook_feedback(
         }).collect::<Vec<_>>()
     );
     let (entry, result, json) = stop_hook_blocking_result(hook_results)?;
-    log::debug!(target: LOG_TARGET,
+    log::debug!(target: crate::LOG_TARGET,
         "[stop_hook_debug] session={} BLOCKING hook cmd={} error={:?} output_len={}",
         session_id, entry.command, result.error, result.output.len()
     );

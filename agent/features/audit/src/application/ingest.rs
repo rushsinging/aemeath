@@ -6,7 +6,7 @@ use tokio::task::JoinHandle;
 
 use crate::{
     AppendLogStream, UsageAppendStorePort, UsageDropReason, UsageEmitOutcome, UsageEnvelopeV1,
-    UsageRecord, LOG_TARGET,
+    UsageRecord,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -185,7 +185,7 @@ impl UsageWorkerHandle {
                     let unconfirmed = state.accepted_total.saturating_sub(state.completed_total);
                     state.drain_abandoned_total += unconfirmed;
                     log::warn!(
-                        target: LOG_TARGET,
+                        target: crate::LOG_TARGET,
                         "usage_pipeline kind=drain_timeout cumulative_total={} unconfirmed={unconfirmed}",
                         state.drain_abandoned_total
                     );
@@ -268,6 +268,6 @@ fn encode(record: &UsageRecord) -> Result<Vec<u8>, serde_json::Error> {
 
 fn warn_at_threshold(kind: &str, total: u64) {
     if total == 1 || total.is_multiple_of(64) {
-        log::warn!(target: LOG_TARGET, "usage_pipeline kind={kind} cumulative_total={total}");
+        log::warn!(target: crate::LOG_TARGET, "usage_pipeline kind={kind} cumulative_total={total}");
     }
 }

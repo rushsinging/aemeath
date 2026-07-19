@@ -1,5 +1,4 @@
 use crate::adapters::mcp::sse::SseEvent;
-use crate::LOG_TARGET;
 use futures_util::StreamExt;
 use serde_json::Value;
 
@@ -17,18 +16,18 @@ impl SseReadStream {
             Some(Ok(chunk)) => {
                 let len = chunk.len();
                 self.buffer.push_str(&String::from_utf8_lossy(&chunk));
-                log::debug!(target: LOG_TARGET,
+                log::debug!(target: crate::LOG_TARGET,
                     "[MCP:SSE] read_chunk: {len} bytes, buffer now {} bytes",
                     self.buffer.len()
                 );
                 Ok(true)
             }
             Some(Err(e)) => {
-                log::warn!(target: LOG_TARGET, "[MCP:SSE] read_chunk error: {e}");
+                log::warn!(target: crate::LOG_TARGET, "[MCP:SSE] read_chunk error: {e}");
                 Err(format!("SSE read error: {e}"))
             }
             None => {
-                log::info!(target: LOG_TARGET, "[MCP:SSE] read_chunk: stream EOF");
+                log::info!(target: crate::LOG_TARGET, "[MCP:SSE] read_chunk: stream EOF");
                 Ok(false)
             }
         }
@@ -52,7 +51,7 @@ impl SseReadStream {
         // Handles servers (e.g. z.ai) that omit the trailing \n\n.
         if !self.buffer.is_empty() && self.buffer.contains("data:") {
             if let Some(event) = try_parse_incomplete_event(&self.buffer) {
-                log::info!(target: LOG_TARGET,
+                log::info!(target: crate::LOG_TARGET,
                     "[MCP:SSE] parsed incomplete event (no trailing \\n\\n), data_len={}",
                     event.data.len()
                 );
@@ -123,7 +122,7 @@ pub(super) fn try_parse_incomplete_event(buffer: &str) -> Option<SseEvent> {
         .unwrap_or_else(|| "message".to_string());
 
     let data = data_content.to_string();
-    log::info!(target: LOG_TARGET,
+    log::info!(target: crate::LOG_TARGET,
         "[MCP:SSE] incomplete-fallback: event={event_type} data_len={}",
         data.len()
     );

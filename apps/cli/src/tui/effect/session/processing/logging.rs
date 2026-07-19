@@ -328,9 +328,13 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             result.text.len(),
             result.tokens_used
         ),
-        // #567: 新增变体暂不记录日志。
-        sdk::ChatEvent::ReflectionResult { .. }
-         | sdk::ChatEvent::ModelList { .. }
+        sdk::ChatEvent::ReflectionHistory { records } => crate::tui::log_trace!(
+            "{} reflection_history count={}",
+            stage,
+            records.len()
+        ),
+        // These metadata/list events are intentionally omitted from trace logging.
+        sdk::ChatEvent::ModelList { .. }
          | sdk::ChatEvent::ReminderList { .. }
          | sdk::ChatEvent::SessionList { .. }
          | sdk::ChatEvent::ProjectInfo { .. }

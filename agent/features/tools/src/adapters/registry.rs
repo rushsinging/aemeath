@@ -5,6 +5,7 @@ use crate::adapters::{
     memory_tool, plan_mode, skill_tool, task_create, task_get, task_list, task_list_complete,
     task_list_create, task_stop, task_update, tool_search, web_fetch, web_search, worktree,
 };
+use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::published_language::ToolCapabilities as Caps;
 use crate::domain::scope_profile::{
     is_authorized, RegistryScope, RegistryScopeBuilder, ToolProfile, ToolRegistrationSpec,
@@ -68,6 +69,7 @@ pub(crate) fn register_named_scope(
     registry: &ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
+    memory_source: Arc<dyn MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     selected_scope: BuiltinRegistryScope,
 ) -> RegistryScope {
@@ -221,7 +223,9 @@ pub(crate) fn register_named_scope(
         "Memory",
         Caps::empty(),
         [true, true, true],
-        memory_tool::MemoryTool
+        memory_tool::MemoryTool {
+            source: memory_source.clone(),
+        }
     );
     builtin!(
         "AskUserQuestion",
@@ -278,12 +282,14 @@ pub fn register_all_tools(
     registry: &ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
+    memory_source: Arc<dyn MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
 ) {
     register_named_scope(
         registry,
         task_access,
         skills,
+        memory_source,
         workspace_control,
         BuiltinRegistryScope::Main,
     );
@@ -293,12 +299,14 @@ pub fn register_subagent_tools(
     registry: &mut ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
+    memory_source: Arc<dyn MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
 ) {
     register_named_scope(
         registry,
         task_access,
         skills,
+        memory_source,
         workspace_control,
         BuiltinRegistryScope::SubAgent,
     );
@@ -309,12 +317,14 @@ pub fn register_all_tools_except_agent(
     registry: &ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
+    memory_source: Arc<dyn MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
 ) {
     register_named_scope(
         registry,
         task_access,
         skills,
+        memory_source,
         workspace_control,
         BuiltinRegistryScope::LegacyNoAgent,
     );
@@ -323,8 +333,24 @@ pub fn register_all_tools_except_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::memory_source::MemoryPortSource;
     use std::collections::BTreeSet;
+    use std::sync::Arc;
     use task::TaskStore;
+
+    /// Test-only source that returns a fresh empty in-memory port.
+    fn test_memory_source() -> Arc<dyn MemoryPortSource> {
+        struct TestSource;
+        impl MemoryPortSource for TestSource {
+            fn current(&self) -> Arc<dyn memory::MemoryPort> {
+                Arc::new(
+                    memory::InMemoryMemory::new(memory::MemoryPolicy::default())
+                        .expect("valid default policy"),
+                )
+            }
+        }
+        Arc::new(TestSource)
+    }
 
     fn assembled_scope(scope: BuiltinRegistryScope) -> RegistryScope {
         let registry = ToolRegistry::new();
@@ -338,6 +364,7 @@ mod tests {
             &registry,
             task_access,
             Arc::new(Mutex::new(HashMap::new())),
+            test_memory_source(),
             control,
             scope,
         )

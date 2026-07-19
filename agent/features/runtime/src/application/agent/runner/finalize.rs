@@ -1,4 +1,3 @@
-use crate::LOG_TARGET;
 use hook::api::HookRunner;
 use std::path::Path;
 use std::time::Duration;
@@ -26,7 +25,7 @@ pub struct AgentRunOutcome {
 
 /// 主 loop 和子 agent 共用的结构化日志摘要
 pub fn log_agent_outcome(outcome: &AgentRunOutcome, session_id: &str) {
-    log::info!(target: LOG_TARGET,
+    log::info!(target: crate::LOG_TARGET,
         "[agent_loop_finished] session={}, status={:?}, turns={}, duration_ms={}, role={}, model={}",
         session_id,
         outcome.status,

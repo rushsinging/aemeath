@@ -61,6 +61,10 @@ where
     pub chain: context::session::ChatChain,
     pub context_size: usize,
     pub workspace: project::WorkspaceViews,
+    /// Context-owned Main Session coordinator. Used for:
+    /// - `bind_main_run` before each Run (admission gate)
+    /// - `resume_session_to_backing` for runtime ResumeSession commands
+    pub wiring: Arc<context::MainSessionWiring>,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,
@@ -79,6 +83,8 @@ where
     pub memory_config: share::config::MemoryConfig,
     /// Memory domain port（MemoryTool 使用）。
     pub memory: Arc<dyn memory::MemoryPort>,
+    /// Memory-owned reflection history write boundary used by background tasks.
+    pub reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
     pub language: String,
     /// Workflow-owned Main adaptive reasoning capability。
     pub reasoning: Arc<dyn ReasoningPort>,
@@ -92,23 +98,16 @@ where
     pub build_switched_client: SwitchClientFn,
     /// 会话保存闭包（#688）。由 core 层注入，直接接受 chain 引用保存。
     pub save_chain: SaveChainFn,
-    /// 运行 reflection（#567）。由 core 层注入。
-    pub run_reflection_on_demand: Arc<
-        dyn Fn() -> std::pin::Pin<
+    /// 查询 reflection 历史（#899）。返回安全视图，不含正文。
+    pub list_reflection_history: Arc<
+        dyn Fn(
+                usize,
+            ) -> std::pin::Pin<
                 Box<
                     dyn std::future::Future<
-                            Output = Result<sdk::ReflectionOutputView, sdk::SdkError>,
+                            Output = Result<Vec<sdk::ReflectionHistoryView>, sdk::SdkError>,
                         > + Send,
                 >,
-            > + Send
-            + Sync,
-    >,
-    /// 应用 reflection 结果（#567）。由 core 层注入。
-    pub apply_reflection_on_demand: Arc<
-        dyn Fn(
-                sdk::ReflectionOutputView,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<String, sdk::SdkError>> + Send>,
             > + Send
             + Sync,
     >,

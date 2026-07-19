@@ -19,9 +19,9 @@ task = { path = "../features/task" }
 share = { path = "../shared" }
 sdk = { path = "../../packages/sdk" }
 logging = { path = "../../packages/global/logging" }
+tokio = { workspace = true }
 log = "0.4"
 async-trait = { workspace = true }
-tokio = { workspace = true }
 
 [dev-dependencies]
 tools = { path = "../features/tools", features = ["test-harness"] }

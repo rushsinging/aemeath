@@ -5,7 +5,6 @@ use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::spinner::SpinnerPhase;
-use crate::tui::model::runtime::status_notice::StatusNotice;
 use tokio::sync::mpsc;
 
 impl App {
@@ -189,49 +188,13 @@ impl App {
             UiEvent::SessionSaved { id } => {
                 self.append_system_notice(format!("[session saved: {id}]"));
             }
-            UiEvent::ReflectionDone { output } => {
-                // ...
-                self.append_system_notice(output.content.clone());
-                if output.auto_applied {
-                    self.chat.pending_reflection = None;
-                    self.append_system_notice(
-                        "[reflection: memory 建议已自动应用，无需重复 /reflect apply]",
-                    );
+            UiEvent::ReflectionHistory { records } => {
+                if records.is_empty() {
+                    self.append_system_notice("No reflection history.");
                 } else {
-                    let suggestion_count = output.suggested_memories.len();
-                    let outdated_count = output.outdated_memories.len();
-                    self.chat.pending_reflection = Some(output);
-                    if suggestion_count > 0 || outdated_count > 0 {
-                        self.append_system_notice("可运行 /reflect apply 应用这些 memory 建议");
-                    }
+                    self.append_system_notice(format_reflection_history(&records));
                 }
-                crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::ReflectionDone → spinner_stop");
-                self.spinner_stop();
-                self.chat.stop_processing();
-                self.chat.clear_processing_handle();
-                self.model
-                    .conversation
-                    .apply(SetStatusNotice(StatusNotice::success("Ready")));
             }
-            UiEvent::ReflectionApplyDone { output, result } => match result {
-                Ok(message) => {
-                    if reflection_outputs_same(self.chat.applying_reflection.as_ref(), &output) {
-                        self.chat.applying_reflection = None;
-                    }
-                    self.append_system_notice(format!("[reflection apply 成功: {message}]"));
-                }
-                Err(message) => {
-                    if reflection_outputs_same(self.chat.applying_reflection.as_ref(), &output) {
-                        self.chat.applying_reflection = None;
-                        if self.chat.pending_reflection.is_none() {
-                            self.chat.pending_reflection = Some(output);
-                        }
-                    }
-                    self.append_error_notice(format!(
-                        "Reflection apply 失败: {message}。已保留待应用建议，可重试 /reflect apply"
-                    ));
-                }
-            },
             UiEvent::AskUserBatch { items, reply_tx } => {
                 // 完成每个 item 关联的 tool_call
                 for item in &items {
@@ -404,7 +367,7 @@ impl App {
                 };
                 self.append_system_notice(format!("{prefix}: {message}"));
                 log::warn!(
-                    target: "aemeath:tui",
+                    target: crate::LOG_TARGET,
                     "session resume failed: id={} kind={:?} msg={}",
                     id, kind, message
                 );
@@ -428,11 +391,31 @@ impl App {
     }
 }
 
-fn reflection_outputs_same(
-    left: Option<&sdk::ReflectionOutputView>,
-    right: &sdk::ReflectionOutputView,
-) -> bool {
-    left.is_some_and(|left| format!("{left:?}") == format!("{right:?}"))
+fn format_reflection_history(records: &[sdk::ReflectionHistoryView]) -> String {
+    let mut lines = vec![format!("Reflection history ({}):", records.len())];
+    for record in records {
+        let tokens = record.token_usage.map_or_else(
+            || "n/a".to_string(),
+            |usage| format!("{}/{}", usage.input_tokens, usage.output_tokens),
+        );
+        let error = record
+            .error_category
+            .map_or_else(|| "none".to_string(), |category| format!("{category:?}"));
+        lines.push(format!(
+            "- timestamp={} trigger={:?} status={:?} counts(deviations/suggestions/outdated)={}/{}/{} apply={:?} error={} tokens(in/out)={} duration={}ms",
+            record.timestamp,
+            record.trigger,
+            record.status,
+            record.deviations,
+            record.suggestions,
+            record.outdated,
+            record.apply_status,
+            error,
+            tokens,
+            record.duration_ms,
+        ));
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]

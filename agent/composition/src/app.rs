@@ -90,25 +90,57 @@ fn logging_settings_from_snapshot(
     )
 }
 
+fn logging_settings_from_bootstrap(
+    snapshot: &ConfigSnapshot,
+    default_logs_dir: &Path,
+    output_mode: sdk::LoggingOutputMode,
+) -> LoggingSettings {
+    let output_mode = match output_mode {
+        sdk::LoggingOutputMode::File => LoggingOutputMode::File,
+        sdk::LoggingOutputMode::Stderr => LoggingOutputMode::Stderr,
+    };
+    logging_settings_from_snapshot(snapshot, default_logs_dir, output_mode)
+}
+
 static LOGGING_INIT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
-fn init_logging(snapshot: &ConfigSnapshot) -> Result<(), String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoggingInitDecision {
+    Initialize,
+    AlreadyInitialized,
+}
+
+fn logging_init_decision(
+    current: Option<LoggingOutputMode>,
+    requested: LoggingOutputMode,
+) -> Result<LoggingInitDecision, String> {
+    match current {
+        None => Ok(LoggingInitDecision::Initialize),
+        Some(existing) if existing == requested => Ok(LoggingInitDecision::AlreadyInitialized),
+        Some(existing) => Err(format!(
+            "logging already initialized with output mode {existing:?}; requested {requested:?} conflicts"
+        )),
+    }
+}
+
+fn init_logging(
+    snapshot: &ConfigSnapshot,
+    output_mode: sdk::LoggingOutputMode,
+) -> Result<(), String> {
     let _guard = LOGGING_INIT_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
         .map_err(|_| "日志初始化锁已损坏".to_string())?;
-    if UnifiedLogger::current().is_some() {
-        return Ok(());
-    }
-    let output_mode = if std::env::var("AEMEATH_LOG_STDERR")
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-    {
-        LoggingOutputMode::Stderr
-    } else {
-        LoggingOutputMode::File
+    let requested_output_mode = match output_mode {
+        sdk::LoggingOutputMode::File => LoggingOutputMode::File,
+        sdk::LoggingOutputMode::Stderr => LoggingOutputMode::Stderr,
     };
-    let settings = logging_settings_from_snapshot(
+    let current_output_mode = UnifiedLogger::current().map(UnifiedLogger::output_mode);
+    match logging_init_decision(current_output_mode, requested_output_mode)? {
+        LoggingInitDecision::AlreadyInitialized => return Ok(()),
+        LoggingInitDecision::Initialize => {}
+    }
+    let settings = logging_settings_from_bootstrap(
         snapshot,
         &share::config::paths::global_logs_dir(),
         output_mode,
@@ -118,7 +150,7 @@ fn init_logging(snapshot: &ConfigSnapshot) -> Result<(), String> {
     logging::set_app_version(share::version().to_string());
     log::info!(
         target: crate::LOG_TARGET,
-        "logging initialized: filter={} mode={:?} logs_dir={} retention_policy_days={} (pending #939)",
+        "logging initialized: filter={} mode={:?} logs_dir={} retention_policy_days={}",
         settings.filter_directive(),
         settings.output_mode(),
         settings.logs_dir().display(),
@@ -144,10 +176,11 @@ async fn build_agent_client_with_gateways(
     let workspace = project::wire_production_workspace(cwd.clone())
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
+    let logging_output = args.logging_output;
     let config = config::wire_project_config_with_cli(&cwd, cli_config_input(&args))
         .await
         .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
-    init_logging(&config.reader().committed_snapshot())
+    init_logging(&config.reader().committed_snapshot(), logging_output)
         .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config).await?;
@@ -164,10 +197,11 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let workspace = project::wire_production_workspace(cwd.clone())
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
+    let logging_output = args.logging_output;
     let config = config::wire_project_config_with_cli(&cwd, cli_config_input(&args))
         .await
         .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
-    init_logging(&config.reader().committed_snapshot())
+    init_logging(&config.reader().committed_snapshot(), logging_output)
         .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config).await?;
@@ -205,6 +239,72 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio_util::sync::CancellationToken;
     use tools::composition::CountingToolCatalogGateway;
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        previous_agents_dir: Option<std::ffi::OsString>,
+        previous_home: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(agents_dir: &std::path::Path, home: &std::path::Path) -> Self {
+            let lock = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+            let previous_agents_dir = std::env::var_os("AEMEATH_AGENTS_DIR");
+            let previous_home = std::env::var_os("HOME");
+            unsafe {
+                std::env::set_var("AEMEATH_AGENTS_DIR", agents_dir);
+                std::env::set_var("HOME", home);
+            }
+            Self {
+                _lock: lock,
+                previous_agents_dir,
+                previous_home,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match self.previous_agents_dir.take() {
+                    Some(value) => std::env::set_var("AEMEATH_AGENTS_DIR", value),
+                    None => std::env::remove_var("AEMEATH_AGENTS_DIR"),
+                }
+                match self.previous_home.take() {
+                    Some(value) => std::env::set_var("HOME", value),
+                    None => std::env::remove_var("HOME"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn logging_init_decision_initializes_when_no_logger_exists() {
+        assert_eq!(
+            logging_init_decision(None, LoggingOutputMode::File).unwrap(),
+            LoggingInitDecision::Initialize
+        );
+    }
+
+    #[test]
+    fn logging_init_decision_is_idempotent_for_same_output_mode() {
+        assert_eq!(
+            logging_init_decision(Some(LoggingOutputMode::Stderr), LoggingOutputMode::Stderr)
+                .unwrap(),
+            LoggingInitDecision::AlreadyInitialized
+        );
+    }
+
+    #[test]
+    fn logging_init_decision_rejects_conflicting_output_mode() {
+        let error = logging_init_decision(Some(LoggingOutputMode::File), LoggingOutputMode::Stderr)
+            .unwrap_err();
+        assert!(error.contains("already initialized"));
+        assert!(error.contains("File"));
+        assert!(error.contains("Stderr"));
+    }
 
     #[derive(Default)]
     struct CountingProviderGateway {
@@ -280,12 +380,7 @@ mod tests {
         std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#)
             .expect("write MCP config");
 
-        let previous_agents_dir = std::env::var_os("AEMEATH_AGENTS_DIR");
-        let previous_home = std::env::var_os("HOME");
-        unsafe {
-            std::env::set_var("AEMEATH_AGENTS_DIR", &agents_dir);
-            std::env::set_var("HOME", temp.path());
-        }
+        let _env = EnvGuard::set(&agents_dir, temp.path());
 
         let provider = Arc::new(CountingProviderGateway::default());
         let tools = Arc::new(CountingToolCatalogGateway::default());
@@ -305,20 +400,29 @@ mod tests {
 
         let result = build_agent_client_with_gateways(args, gateways).await;
 
-        unsafe {
-            match previous_agents_dir {
-                Some(value) => std::env::set_var("AEMEATH_AGENTS_DIR", value),
-                None => std::env::remove_var("AEMEATH_AGENTS_DIR"),
-            }
-            match previous_home {
-                Some(value) => std::env::set_var("HOME", value),
-                None => std::env::remove_var("HOME"),
-            }
-        }
         result.expect("build client with injected gateways");
         assert_eq!(provider.client_from_config_calls.load(Ordering::SeqCst), 1);
         assert_eq!(tools.new_registry_calls(), 1);
         assert_eq!(tools.register_all_tools_calls(), 1);
+    }
+
+    #[test]
+    fn typed_bootstrap_output_mode_constructs_logging_settings() {
+        let snapshot = ConfigSnapshot::new(Config::default());
+
+        let file = logging_settings_from_bootstrap(
+            &snapshot,
+            Path::new("/fallback/logs"),
+            sdk::LoggingOutputMode::File,
+        );
+        let stderr = logging_settings_from_bootstrap(
+            &snapshot,
+            Path::new("/fallback/logs"),
+            sdk::LoggingOutputMode::Stderr,
+        );
+
+        assert_eq!(file.output_mode(), LoggingOutputMode::File);
+        assert_eq!(stderr.output_mode(), LoggingOutputMode::Stderr);
     }
 
     #[test]

@@ -170,6 +170,7 @@ impl crate::adapters::wiring::ToolCatalogGateway for CountingToolCatalogGateway 
         registry: &ToolRegistry,
         task_access: Arc<dyn task::TaskAccess>,
         skills: Arc<tokio::sync::Mutex<HashMap<String, share::skill_ops::Skill>>>,
+        memory_source: Arc<dyn crate::domain::MemoryPortSource>,
         workspace_control: Arc<dyn project::WorkspaceControl>,
     ) {
         self.register_all_tools_calls.fetch_add(1, Ordering::SeqCst);
@@ -177,6 +178,7 @@ impl crate::adapters::wiring::ToolCatalogGateway for CountingToolCatalogGateway 
             registry,
             task_access,
             skills,
+            memory_source,
             workspace_control,
         );
     }
@@ -186,12 +188,14 @@ impl crate::adapters::wiring::ToolCatalogGateway for CountingToolCatalogGateway 
         registry: &ToolRegistry,
         task_access: Arc<dyn task::TaskAccess>,
         skills: Arc<tokio::sync::Mutex<HashMap<String, share::skill_ops::Skill>>>,
+        memory_source: Arc<dyn crate::domain::MemoryPortSource>,
         workspace_control: Arc<dyn project::WorkspaceControl>,
     ) {
         crate::adapters::registry::register_all_tools_except_agent(
             registry,
             task_access,
             skills,
+            memory_source,
             workspace_control,
         );
     }
@@ -201,12 +205,14 @@ impl crate::adapters::wiring::ToolCatalogGateway for CountingToolCatalogGateway 
         registry: &mut ToolRegistry,
         task_access: Arc<dyn task::TaskAccess>,
         skills: Arc<tokio::sync::Mutex<HashMap<String, share::skill_ops::Skill>>>,
+        memory_source: Arc<dyn crate::domain::MemoryPortSource>,
         workspace_control: Arc<dyn project::WorkspaceControl>,
     ) {
         crate::adapters::registry::register_subagent_tools(
             registry,
             task_access,
             skills,
+            memory_source,
             workspace_control,
         );
     }

@@ -86,15 +86,145 @@ pub struct ReflectionTokenUsage {
     pub output_tokens: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReflectionTrigger {
+    Interval,
+    PreCompact,
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReflectionStatus {
+    Running,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReflectionErrorCategory {
+    LlmCall,
+    EmptyResponse,
+    Parse,
+    InvalidSuggestion,
+    Apply,
+    History,
+    Cancelled,
+    TimedOut,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReflectionApplyStatus {
+    NotApplied,
+    Applied,
+    PartiallyApplied,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReflectionSafeSummary {
+    pub id: String,
+    pub timestamp: u64,
+    pub trigger: ReflectionTrigger,
+    pub status: ReflectionStatus,
+    pub deviations: usize,
+    pub suggestions: usize,
+    pub outdated: usize,
+    pub apply_status: ReflectionApplyStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_category: Option<ReflectionErrorCategory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_usage: Option<ReflectionTokenUsage>,
+    pub duration_ms: u64,
+}
+
 /// One completed Reflection result. Persistence is supplied by a separate adapter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReflectionRecord {
     pub id: String,
     pub timestamp: u64,
-    pub output: ReflectionOutput,
+    pub trigger: ReflectionTrigger,
+    pub status: ReflectionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<ReflectionOutput>,
     pub apply_result: Option<ReflectionApplyResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_category: Option<ReflectionErrorCategory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<ReflectionTokenUsage>,
+    pub duration_ms: u64,
+}
+
+impl ReflectionRecord {
+    pub fn running(id: impl Into<String>, timestamp: u64, trigger: ReflectionTrigger) -> Self {
+        Self {
+            id: id.into(),
+            timestamp,
+            trigger,
+            status: ReflectionStatus::Running,
+            output: None,
+            apply_result: None,
+            error_category: None,
+            token_usage: None,
+            duration_ms: 0,
+        }
+    }
+
+    pub fn failed(
+        id: impl Into<String>,
+        timestamp: u64,
+        trigger: ReflectionTrigger,
+        error_category: ReflectionErrorCategory,
+        duration_ms: u64,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            timestamp,
+            trigger,
+            status: ReflectionStatus::Failed,
+            output: None,
+            apply_result: None,
+            error_category: Some(error_category),
+            token_usage: None,
+            duration_ms,
+        }
+    }
+
+    pub fn safe_summary(&self) -> ReflectionSafeSummary {
+        let (deviations, suggestions, outdated) = self
+            .output
+            .as_ref()
+            .map(|output| {
+                (
+                    output.deviations.len(),
+                    output.suggested_memories.len(),
+                    output.outdated_memories.len(),
+                )
+            })
+            .unwrap_or_default();
+        let apply_status = match &self.apply_result {
+            None => ReflectionApplyStatus::NotApplied,
+            Some(result) if result.completed < result.attempted => {
+                ReflectionApplyStatus::PartiallyApplied
+            }
+            Some(_) => ReflectionApplyStatus::Applied,
+        };
+        ReflectionSafeSummary {
+            id: self.id.clone(),
+            timestamp: self.timestamp,
+            trigger: self.trigger,
+            status: self.status,
+            deviations,
+            suggestions,
+            outdated,
+            apply_status,
+            error_category: self.error_category,
+            token_usage: self.token_usage,
+            duration_ms: self.duration_ms,
+        }
+    }
 }
 
 /// Stateless implementation of the Memory Reflection domain service.
@@ -348,6 +478,74 @@ mod tests {
 
     fn engine() -> ReflectionEngine {
         ReflectionEngine
+    }
+
+    #[test]
+    fn reflection_record_summary_is_safe_and_deterministic() {
+        let record = ReflectionRecord {
+            id: "reflection-1".into(),
+            timestamp: 42,
+            trigger: ReflectionTrigger::PreCompact,
+            status: ReflectionStatus::Succeeded,
+            output: Some(ReflectionOutput {
+                deviations: vec!["secret deviation".into()],
+                suggested_memories: vec![MemorySuggestion {
+                    layer: MemoryLayer::Project,
+                    category: MemoryCategory::Decision,
+                    content: "secret memory".into(),
+                    tags: vec![],
+                    reason: "secret reason".into(),
+                }],
+                outdated_memories: vec!["secret-id".into()],
+                user_alert: None,
+            }),
+            apply_result: None,
+            error_category: None,
+            token_usage: Some(ReflectionTokenUsage {
+                input_tokens: 10,
+                output_tokens: 5,
+            }),
+            duration_ms: 12,
+        };
+
+        assert_eq!(
+            record.safe_summary(),
+            ReflectionSafeSummary {
+                id: "reflection-1".into(),
+                timestamp: 42,
+                trigger: ReflectionTrigger::PreCompact,
+                status: ReflectionStatus::Succeeded,
+                deviations: 1,
+                suggestions: 1,
+                outdated: 1,
+                apply_status: ReflectionApplyStatus::NotApplied,
+                error_category: None,
+                token_usage: Some(ReflectionTokenUsage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                }),
+                duration_ms: 12,
+            }
+        );
+        let json = serde_json::to_string(&record.safe_summary()).unwrap();
+        assert!(!json.contains("secret"));
+    }
+
+    #[test]
+    fn failed_reflection_record_has_typed_error_and_no_output() {
+        let record = ReflectionRecord::failed(
+            "reflection-2",
+            43,
+            ReflectionTrigger::Interval,
+            ReflectionErrorCategory::LlmCall,
+            9,
+        );
+        assert_eq!(record.status, ReflectionStatus::Failed);
+        assert!(record.output.is_none());
+        assert_eq!(
+            record.safe_summary().error_category,
+            Some(ReflectionErrorCategory::LlmCall)
+        );
     }
 
     #[test]

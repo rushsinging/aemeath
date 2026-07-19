@@ -99,7 +99,7 @@ struct TargetSpec {
 }
 ```
 
-目标 catalog 至少覆盖：TUI、Shared、Composition、Provider、Runtime（含 Agent Execution / Loop Engine 子 target）、Tools、Prompt、Hook、Storage、Project、Policy、Update、Audit（诊断）、Config、Memory、Context、Task。Audit 不作为诊断 target 模拟审计存储；若 Audit BC 需要自身诊断日志，应注册诊断 target，但 Audit Event 仍走独立 `AuditSink`。
+目标 catalog 覆盖具有独立运行时边界的 owner：CLI、Composition、Shared 及各业务 feature crate；每个 owner 都有独立 target、sink ID 与日志文件，并在真实架构入口和终态记录低频、脱敏日志。Provider 另保留 LLM API Error 专用 target，Runtime 的 Prompt target 作为专用子能力路由。纯契约 SDK、纯函数 Utils、Logging 自身和未接入 UnifiedLogger 的 xtask 不制造应用 target；其边界分别由执行 owner、direct emergency diagnostics 或 CLI 输出负责。Audit Event 仍走独立 `AuditSink`。
 
 路由规则：
 
@@ -108,7 +108,7 @@ struct TargetSpec {
 3. target 与 sink 文件映射来自同一 catalog；
 4. 未注册 target 写 `aemeath.log`，同时向 stderr 产生限频告警；
 5. sink 文件名必须唯一；
-6. catalog guard 扫描全部生产 `log::xxx!` 调用和 target 常量。
+6. catalog guard 从根 `Cargo.toml` 的 workspace members 反向校验 runtime owner 与已登记的非 runtime member：runtime owner 的 crate root 恰有一个 crate-private `LOG_TARGET`，target、sink ID 与文件名唯一；非 runtime member 禁止 target、匿名保活及不必要的 Logging 依赖；同时扫描全部生产 `log::xxx!` 调用。
 
 ## 5. 级别、preview 与脱敏
 
@@ -248,6 +248,7 @@ src/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-18 | CLI 通过 typed bootstrap input 选择 File/Stderr，Composition 保持 Runtime 前唯一初始化；TUI 使用 session-only delivery scope；全仓生产日志迁到 owner 常量并启用 owner-aware Target Guard | [#941](https://github.com/rushsinging/aemeath/issues/941) |
 | 2026-07-18 | Main/Sub 生产链按 session→chat/sub-run→turn→physical request 建立不可变 scope；Runtime task 与 Provider blocking stream bridge 显式传播 opaque `LogContext`，legacy 全局状态最终退役仍由 #942 承接 | [#940](https://github.com/rushsinging/aemeath/issues/940) |
 | 2026-07-18 | 实现可恢复 FileSinkLifecycle：per-sink lock、5 秒惰性 reopen、direct emergency stderr、完整 I/O fault seam、rotation/retention 与 max-bytes 边界语义 | [#939](https://github.com/rushsinging/aemeath/issues/939) |
 | 2026-07-12 | 摘要初稿：14 字段 schema、TargetCatalog、scope-local context、sink 降级及 Audit 分离 | #793 |

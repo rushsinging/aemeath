@@ -2,8 +2,11 @@
 
 use crate::adapters::legacy::data::{HookData, HookInput};
 use crate::adapters::legacy::result::{HookJsonOutput, HookResult};
-use crate::LOG_TARGET;
+use crate::adapters::process::{
+    ProcessDriver, ProcessFailureKind, ProcessRequest, DEFAULT_OUTPUT_LIMIT,
+};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -48,7 +51,7 @@ impl HookRunner {
             })
             .unwrap_or_default();
         log::debug!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "hook match: event={:?} tool_name={:?} matched={} configured_events={}",
             event,
             tool_name,
@@ -95,7 +98,7 @@ impl HookRunner {
         let workspace_root_str = workspace_root.display().to_string();
         let command = Self::expand_command_placeholders_static(&hook.command, &workspace_root_str);
         log::debug!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "hook start: event={:?} matcher={} command={} workspace_root={}",
             input.event,
             hook.matcher,
@@ -103,76 +106,47 @@ impl HookRunner {
             workspace_root_str
         );
 
-        let mut command_builder = tokio::process::Command::new("sh");
-        command_builder.kill_on_drop(true);
-        let mut child = match command_builder
-            .arg("-c")
-            .arg(&command)
-            .current_dir(workspace_root)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .env(
-                "AEMEATH_HOOK_EVENT",
+        let mut env = HashMap::from([
+            (
+                "AEMEATH_HOOK_EVENT".to_string(),
                 serde_json::to_string(&input.event).unwrap_or_default(),
+            ),
+            (
+                "AEMEATH_PROJECT_DIR".to_string(),
+                workspace_root_str.clone(),
+            ),
+            ("CLAUDE_PROJECT_DIR".to_string(), workspace_root_str.clone()),
+        ]);
+        env.extend(
+            input
+                .data
+                .to_env_vars()
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value)),
+        );
+        let result = ProcessDriver
+            .execute(
+                ProcessRequest {
+                    command: command.clone(),
+                    cwd: workspace_root.to_path_buf(),
+                    env,
+                    stdin: input_json.into_bytes(),
+                    timeout,
+                    output_limit: DEFAULT_OUTPUT_LIMIT,
+                },
+                cancel,
             )
-            .env("AEMEATH_PROJECT_DIR", &workspace_root_str)
-            .env("CLAUDE_PROJECT_DIR", &workspace_root_str)
-            .envs(input.data.to_env_vars())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                log::warn!(
-                    target: LOG_TARGET,
-                    "hook spawn failed: event={:?} command={} error={}",
-                    input.event,
-                    command,
-                    e
-                );
-                return HookResult::with_error(format!("启动 hook 命令失败: {e}"));
-            }
-        };
-
-        // 写入 stdin 并关闭
-        use tokio::io::AsyncWriteExt;
-        if let Some(stdin) = child.stdin.take() {
-            let mut writer = tokio::io::BufWriter::new(stdin);
-            // stdin 写入或关闭失败不中断执行 — 快速 hook（如 echo）可能在
-            // 我们写入前就退出关闭了读端（EPIPE），但 stdout 仍可读取。
-            if let Err(e) = writer.write_all(input_json.as_bytes()).await {
-                log::warn!(
-                    target: LOG_TARGET,
-                    "hook stdin write failed (process may have exited early): event={:?} command={} error={}",
-                    input.event, command, e
-                );
-            }
-            if let Err(e) = writer.shutdown().await {
-                log::debug!(
-                    target: LOG_TARGET,
-                    "hook stdin shutdown: event={:?} command={} error={}",
-                    input.event, command, e
-                );
-            }
-            // stdin 在此处被关闭，进程看到 EOF
-        }
-
-        let result = tokio::select! {
-            _ = cancel.cancelled() => {
-                return HookResult::with_error(format!("hook '{}' 已取消", command));
-            }
-            result = tokio::time::timeout(timeout, child.wait_with_output()) => result,
-        };
+            .await;
 
         match result {
-            Ok(Ok(output)) => {
+            Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let code = output.status.code().unwrap_or(-1);
+                let code = output.exit_code.unwrap_or(-1);
 
                 for line in hook_env_lines(&stdout) {
                     log::debug!(
-                        target: LOG_TARGET,
+                        target: crate::LOG_TARGET,
                         "hook env: event={:?} command={} stream=stdout line={}",
                         input.event,
                         command,
@@ -181,7 +155,7 @@ impl HookRunner {
                 }
                 for line in hook_env_lines(&stderr) {
                     log::debug!(
-                        target: LOG_TARGET,
+                        target: crate::LOG_TARGET,
                         "hook env: event={:?} command={} stream=stderr line={}",
                         input.event,
                         command,
@@ -194,7 +168,7 @@ impl HookRunner {
 
                 if code != 0 && !stderr.is_empty() {
                     log::warn!(
-                        target: LOG_TARGET,
+                        target: crate::LOG_TARGET,
                         "hook '{}' exited with code {}: {}",
                         command,
                         code,
@@ -202,20 +176,32 @@ impl HookRunner {
                     );
                 }
                 log::debug!(
-                    target: LOG_TARGET,
-                    "hook end: event={:?} command={} code={} blocked={} stdout_bytes={} stderr_bytes={}",
+                    target: crate::LOG_TARGET,
+                    "hook end: event={:?} command={} code={} blocked={} stdout_bytes={} stderr_bytes={} stdout_truncated={} stderr_truncated={}",
                     input.event,
                     command,
                     code,
                     blocked,
                     stdout.len(),
-                    stderr.len()
+                    stderr.len(),
+                    output.stdout_truncated,
+                    output.stderr_truncated
                 );
 
+                let output_truncated = output.stdout_truncated || output.stderr_truncated;
                 HookResult {
                     blocked,
-                    output: stdout,
-                    error: if code != 0 {
+                    output: if output_truncated {
+                        String::new()
+                    } else {
+                        stdout
+                    },
+                    error: if output_truncated {
+                        Some(format!(
+                            "hook 输出超过 {} 字节上限，结果已截断",
+                            DEFAULT_OUTPUT_LIMIT
+                        ))
+                    } else if code != 0 {
                         Some(format!(
                             "exit code {code}: {}",
                             non_empty_text(&stderr).unwrap_or_else(|| "无错误输出".to_string())
@@ -226,25 +212,25 @@ impl HookRunner {
                     exit_code: Some(code),
                 }
             }
-            Ok(Err(e)) => {
+            Err(failure) => {
+                let reason = match failure.kind {
+                    ProcessFailureKind::Timeout => "timeout",
+                    ProcessFailureKind::Cancelled => "cancelled",
+                    ProcessFailureKind::Spawn => "spawn_failed",
+                    ProcessFailureKind::Io => "io_failed",
+                    ProcessFailureKind::Wait => "wait_failed",
+                    #[cfg(not(unix))]
+                    ProcessFailureKind::Unsupported => "unsupported",
+                };
                 log::warn!(
-                    target: LOG_TARGET,
-                    "hook wait failed: event={:?} command={} error={}",
+                    target: crate::LOG_TARGET,
+                    "hook execution failed: event={:?} command={} reason={} error={}",
                     input.event,
                     command,
-                    e
+                    reason,
+                    failure.message
                 );
-                HookResult::with_error(format!("等待 hook 进程失败: {e}"))
-            }
-            Err(_) => {
-                log::warn!(
-                    target: LOG_TARGET,
-                    "hook timeout: event={:?} command={} timeout={}s",
-                    input.event,
-                    command,
-                    hook.timeout
-                );
-                HookResult::with_error(format!("hook '{}' 超时（{}秒）", command, hook.timeout))
+                HookResult::with_error(failure.message)
             }
         }
     }
@@ -279,7 +265,7 @@ impl HookRunner {
         let mut results = Vec::with_capacity(hooks.len());
         for hook in hooks {
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "running hook: event={:?} matcher={} cmd={}",
                 event,
                 hook.matcher,
@@ -287,7 +273,7 @@ impl HookRunner {
             );
             let result = self.execute_hook(hook, &input, workspace_root).await;
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "hook result: blocked={} error={:?}",
                 result.blocked,
                 result.error
@@ -322,7 +308,7 @@ impl HookRunner {
         let mut results = Vec::with_capacity(hooks.len());
         for hook in hooks {
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "running hook (with json): event={:?} matcher={} cmd={}",
                 event,
                 hook.matcher,
@@ -333,7 +319,7 @@ impl HookRunner {
             let should_break =
                 result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "hook result (json): blocked={} continue={:?} error={:?}",
                 result.blocked,
                 json_output.as_ref().map(|j| j.r#continue),
@@ -377,37 +363,5 @@ fn non_empty_text(text: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_execute_hook_with_cancel_interrupts_running_process() {
-        let runner = HookRunner::empty();
-        let hook = HookEntry {
-            matcher: String::new(),
-            command: "sleep 30".to_string(),
-            timeout: 60,
-        };
-        let input = HookInput {
-            event: HookEvent::Stop,
-            data: HookData::Stop(crate::adapters::legacy::data::StopHookData { turns: 1 }),
-        };
-        let cancel = tokio_util::sync::CancellationToken::new();
-        let cancel_task = cancel.clone();
-        let canceller = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-            cancel_task.cancel();
-        });
-
-        let result = tokio::time::timeout(
-            Duration::from_secs(1),
-            runner.execute_hook_with_cancel(&hook, &input, Path::new("."), &cancel),
-        )
-        .await
-        .expect("取消必须中断在途 Hook 进程");
-
-        canceller.await.unwrap();
-        assert!(result.error.is_some_and(|error| error.contains("已取消")));
-        assert_eq!(result.exit_code, None);
-    }
-}
+#[path = "runner_tests.rs"]
+mod tests;

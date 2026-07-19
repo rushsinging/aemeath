@@ -1,14 +1,14 @@
-/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量.
-pub const LOG_TARGET: &str = "aemeath:agent:runtime";
+pub(crate) const LOG_TARGET: &str = "aemeath:agent:runtime";
 
+/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量.
 pub mod adapters;
 pub mod application;
 pub mod domain;
 pub mod ports;
 
 pub use application::client::{
-    from_args_with_workspace, AgentClientImpl, RuntimeBootstrapDependencies,
-    RuntimeConfigDependencies,
+    from_args_with_workspace, resume_session_to_backing, AgentClientImpl, ResumeError,
+    RuntimeBootstrapDependencies,
 };
 pub use ports::UsageSink;
 pub use sdk::{

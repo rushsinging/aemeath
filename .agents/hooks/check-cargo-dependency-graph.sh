@@ -6,8 +6,10 @@ set -euo pipefail
 # 作用：固化 feature 依赖方向（cli→{composition,sdk}；runtime→全部 supporting；
 #       supporting→share；share/sdk→∅），默认拒绝未声明的业务依赖，防双向/横向乱依赖。
 # 例外（白名单内已批准）：runtime/tools→task（Task-owned OHS/PL）；
-#       context→task（#890 Session persistence adapter 消费 Task TaskPersist capability）；
-#       tools→project（§6.4.7 横向依赖登记；#897 后 Memory 仅经正式 port）；composition→全部 feature（唯一装配根）。
+#       context→{project,config,memory,task}（#871 Main Session 联合协调消费供应方 façade/PL）；
+#       runtime/tools→memory（#871 消费 Memory-owned OHS/PL）；
+#       memory→share（消费 ConfigSnapshot 发布的 MemoryConfig PL）；
+#       tools→{project,storage}（§6.4.7 横向依赖登记）；composition→全部 feature（唯一装配根）。
 #       task 反向依赖任一消费者（runtime/tools/context）仍被拒绝。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -32,13 +34,11 @@ business_allow = {
     "share": {"logging", "utils"},
     "project": {"share"},
     "policy": {"share", "sdk", "tools"},
-    "context": {"share", "provider", "storage", "task", "memory", "sdk"},
-    "memory": {"storage", "utils"},
-    # Provider may consume Logging only as shared diagnostic infrastructure and opaque
-    # LogContext propagation; it must not interpret Runtime session/run semantics.
+    "context": {"share", "provider", "storage", "project", "config", "memory", "task", "sdk"},
+    "memory": {"share", "storage", "utils"},
     "provider": {"share", "logging"},
-    # Approved horizontal dependencies: tools -> project/memory and Task-owned OHS/PL.
-    "tools": {"share", "project", "task", "memory"},
+    # Approved horizontal dependencies: tools -> project/storage, Memory/Task-owned OHS/PL.
+    "tools": {"share", "project", "memory", "task"},
     "storage": {"share"},
     # Task owns its Published Language and OHS; it must not depend back on consumers.
     "task": set(),
@@ -78,8 +78,16 @@ def run_sanity() -> None:
         raise AssertionError("sanity allow failed: composition assembling runtime/share/sdk/provider")
     if validate_edges({"cli": {"composition", "sdk"}}, workspace):
         raise AssertionError("sanity allow failed: CLI composition + sdk")
-    if validate_edges({"runtime": {"task"}, "tools": {"task"}, "context": {"task"}}, workspace):
-        raise AssertionError("sanity allow failed: Runtime/Tools consuming TaskAccess and Context consuming Task persistence")
+    if validate_edges(
+        {
+            "runtime": {"task", "memory"},
+            "tools": {"task", "memory"},
+            "context": {"project", "config", "memory", "task"},
+            "memory": {"share"},
+        },
+        workspace,
+    ):
+        raise AssertionError("sanity allow failed: approved #871/#890 supplier façade and PL edges")
     if not validate_edges({"task": {"runtime"}}, workspace):
         raise AssertionError("sanity block failed: Task must not depend on Runtime consumer")
     if not validate_edges({"cli": {"runtime"}}, workspace):

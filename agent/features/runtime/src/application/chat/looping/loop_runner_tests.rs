@@ -6,6 +6,57 @@ use super::*;
 
 use context::session::ChatChain;
 
+#[derive(Clone)]
+struct TestMemoryOpener;
+
+#[async_trait::async_trait]
+impl memory::api::MemoryOpener for TestMemoryOpener {
+    async fn open_memory(
+        &self,
+        _key: &memory::api::ProjectMemoryKey,
+        _config: &share::config::MemoryConfig,
+    ) -> Result<Arc<dyn memory::api::MemoryPort>, memory::api::MemoryOpenerError> {
+        Ok(Arc::new(memory::api::NoOpMemory))
+    }
+
+    fn boxed_clone(&self) -> Box<dyn memory::api::MemoryOpener> {
+        Box::new(self.clone())
+    }
+}
+
+fn test_wiring() -> Arc<context::MainSessionWiring> {
+    let workspace = project::wire_production_workspace(std::env::current_dir().unwrap())
+        .expect("workspace 初始化成功")
+        .into_views();
+    let persist = workspace.persist();
+    let config = Arc::new(config::ConfigAppService::new(Some(
+        &workspace.read().initial_cwd(),
+    )));
+    let now = context::session::now_iso();
+    Arc::new(context::MainSessionWiring::build(
+        context::MainSessionWiringBuilder {
+            workspace_read: workspace.read(),
+            workspace_persist: persist.clone(),
+            task_persist: Arc::new(task::TaskStore::new()),
+            config_reader: config.clone(),
+            config_participant: config,
+            memory_opener: Box::new(TestMemoryOpener),
+            initial_session: context::session::CanonicalSession {
+                id: context::session::new_session_id(),
+                chats: Vec::new(),
+                created_at: now.clone(),
+                updated_at: now,
+                metadata: Default::default(),
+                tasks: context::session::SnapshotState::Missing,
+                workspace: context::session::SnapshotState::Captured(persist.snapshot()),
+                revision: 0,
+                committed_steps: Vec::new(),
+            },
+            initial_memory: Arc::new(memory::api::NoOpMemory),
+        },
+    ))
+}
+
 fn test_save_chain() -> Arc<
     dyn Fn(
             &context::session::ChatChain,
@@ -17,29 +68,20 @@ fn test_save_chain() -> Arc<
     Arc::new(|_chain| Box::pin(async { Ok(()) }))
 }
 
-/// 测试用 reflection 闭包（#567）。测试中不会被真正触发，仅满足字段约束。
-fn test_run_reflection() -> Arc<
-    dyn Fn() -> std::pin::Pin<
+/// 测试用 reflection history 查询闭包（#899）。
+fn test_reflection_history() -> Arc<
+    dyn Fn(
+            usize,
+        ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = Result<sdk::ReflectionOutputView, sdk::SdkError>>
-                    + Send,
+                dyn std::future::Future<
+                        Output = Result<Vec<sdk::ReflectionHistoryView>, sdk::SdkError>,
+                    > + Send,
             >,
         > + Send
         + Sync,
 > {
-    Arc::new(|| Box::pin(async { Ok(sdk::ReflectionOutputView::default()) }))
-}
-
-/// 测试用 apply-reflection 闭包（#567）。
-fn test_apply_reflection() -> Arc<
-    dyn Fn(
-            sdk::ReflectionOutputView,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<String, sdk::SdkError>> + Send>,
-        > + Send
-        + Sync,
-> {
-    Arc::new(|_output| Box::pin(async { Ok(String::new()) }))
+    Arc::new(|_limit| Box::pin(async { Ok(Vec::new()) }))
 }
 
 /// 测试用 list-models 闭包（#567）。
@@ -91,6 +133,40 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+
+#[derive(Default)]
+struct TestReflectionHistory;
+
+#[async_trait]
+impl memory::api::ReflectionHistoryQuery for TestReflectionHistory {
+    async fn list(
+        &self,
+        _limit: usize,
+    ) -> Result<Vec<memory::api::ReflectionRecord>, memory::api::MemoryError> {
+        Ok(Vec::new())
+    }
+}
+
+#[async_trait]
+impl memory::api::ReflectionHistoryStore for TestReflectionHistory {
+    async fn append(
+        &self,
+        _record: &memory::api::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        Ok(())
+    }
+
+    async fn upsert(
+        &self,
+        _record: &memory::api::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        Ok(())
+    }
+}
+
+fn test_reflection_history_store() -> Arc<dyn memory::api::ReflectionHistoryStore> {
+    Arc::new(TestReflectionHistory)
+}
 
 /// 测试用模型切换构建器（#567）。返回 dummy LlmClient + result，
 /// 测试中模型切换不会被真正触发，此处仅满足 ChatLoopContext 字段约束。
@@ -315,6 +391,9 @@ impl RecordingSink {
             RuntimeStreamEvent::ThinkingChanged { .. } => "ThinkingChanged".to_string(),
             RuntimeStreamEvent::ContextEstimated { .. } => "ContextEstimated".to_string(),
             RuntimeStreamEvent::CommandResultText { .. } => "CommandResultText".to_string(),
+            RuntimeStreamEvent::ReflectionHistory { records } => {
+                format!("ReflectionHistory:{}", records.len())
+            }
             RuntimeStreamEvent::SessionResumed { .. } => "SessionResumed".to_string(),
             _ => "Other".to_string(),
         };
@@ -497,6 +576,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -518,9 +598,9 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -617,6 +697,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -638,9 +719,9 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -810,6 +891,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace,
         session_id: "test-worktree-stop-hook-env".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -829,9 +911,9 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -907,6 +989,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -928,9 +1011,9 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -1080,6 +1163,7 @@ async fn test_continue_false_json_treated_as_block() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1101,9 +1185,9 @@ async fn test_continue_false_json_treated_as_block() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -1206,6 +1290,7 @@ async fn test_stall_triggers_stop_hook_check() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1227,9 +1312,9 @@ async fn test_stall_triggers_stop_hook_check() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -1371,6 +1456,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1392,9 +1478,9 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -1538,6 +1624,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1559,9 +1646,9 @@ async fn test_stall_detector_resets_across_user_turns() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -1739,6 +1826,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1760,9 +1848,9 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -1865,6 +1953,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1886,9 +1975,9 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -1971,6 +2060,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1992,9 +2082,9 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -2054,6 +2144,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2075,9 +2166,9 @@ async fn test_stop_hook_block_limit_stops_loop() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -2243,6 +2334,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2264,9 +2356,9 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -2481,6 +2573,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2502,9 +2595,9 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -2709,6 +2802,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2730,9 +2824,9 @@ async fn test_chat_impl_idle_until_first_input_event() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -2837,6 +2931,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2858,9 +2953,9 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -2936,6 +3031,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         user_context: String::new(),
         chain: messages, // 末条为 User，模拟 resume
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2957,9 +3053,9 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(), // 正常场景
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -3015,6 +3111,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         user_context: String::new(),
         chain: messages,
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -3036,9 +3133,9 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
@@ -3164,6 +3261,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -3185,9 +3283,9 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
+        reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
+        list_reflection_history: test_reflection_history(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),

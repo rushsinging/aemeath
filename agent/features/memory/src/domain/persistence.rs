@@ -1,11 +1,43 @@
 use super::{MemoryEntry, MemoryLayer};
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    hash::{Hash, Hasher},
+};
 use thiserror::Error;
 
 const PROJECT_KEY_DOMAIN: &[u8] = b"aemeath.memory.project-key.v2\0";
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ProjectMemoryKey(String);
+/// Opaque project identity for Memory layers.
+///
+/// Carries the versioned hash key (used as the Storage dataset segment) and the
+/// cwd-derived file stem used to locate legacy memory files. Neither field is a
+/// filesystem path: the hash is a fixed-length digest and the legacy stem is a
+/// sanitized, opaque identifier (leading `/` stripped, remaining `/` replaced
+/// by `-`) so no raw path crosses the Memory boundary.
+///
+/// **Identity** is defined solely by the hash key — two git worktrees sharing
+/// the same `.git` directory derive the same key and are therefore equal, even
+/// though their legacy file stems differ. The legacy stem is auxiliary data for
+/// resolving predecessor files, not part of the identity.
+#[derive(Debug, Clone)]
+pub struct ProjectMemoryKey {
+    key: String,
+    legacy_project_name: String,
+}
+
+impl PartialEq for ProjectMemoryKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+impl Eq for ProjectMemoryKey {}
+
+impl Hash for ProjectMemoryKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.key.hash(state);
+    }
+}
 
 impl ProjectMemoryKey {
     pub fn derive(
@@ -21,12 +53,28 @@ impl ProjectMemoryKey {
             None => (b"non-git".as_slice(), initial_cwd.as_bytes()),
         };
         let digest = utils::stable_sha256_hex(PROJECT_KEY_DOMAIN, &[kind, identity]);
-        Ok(Self(format!("v2_{digest}")))
+        Ok(Self {
+            key: format!("v2_{digest}"),
+            legacy_project_name: legacy_project_file_name(initial_cwd),
+        })
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.key
     }
+
+    /// Returns the cwd-derived file stem used by the legacy memory file layout
+    /// (e.g. `Users-guoyuqi-work-aemeath`). This is **not** a filesystem path —
+    /// it is a sanitized, opaque identifier derived from the original cwd at
+    /// key-derivation time, matching the naming used by the predecessor
+    /// `MemoryStore` (`_global.json` / `{stem}.json` / `{stem}_archive.json`).
+    pub(crate) fn legacy_project_name(&self) -> &str {
+        &self.legacy_project_name
+    }
+}
+
+fn legacy_project_file_name(cwd: &str) -> String {
+    cwd.trim_start_matches('/').replace('/', "-")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +178,24 @@ mod tests {
         );
         assert!(ProjectMemoryKey::derive("", None).is_err());
         assert!(ProjectMemoryKey::derive("/project", Some("")).is_err());
+    }
+
+    #[test]
+    fn legacy_project_name_matches_predecessor_file_stem() {
+        let key = ProjectMemoryKey::derive("/Users/guoyuqi/work/aemeath", None).unwrap();
+        assert_eq!(key.legacy_project_name(), "Users-guoyuqi-work-aemeath");
+
+        // Git projects share the key but use their *own* cwd for the legacy stem.
+        let main = ProjectMemoryKey::derive("/repo", Some("/repo/.git")).unwrap();
+        let worktree =
+            ProjectMemoryKey::derive("/repo/.worktrees/feat", Some("/repo/.git")).unwrap();
+        assert_eq!(main, worktree, "keys are equal (shared git identity)");
+        assert_eq!(main.legacy_project_name(), "repo");
+        assert_eq!(
+            worktree.legacy_project_name(),
+            "repo-.worktrees-feat",
+            "legacy stem uses the *caller* cwd, not the shared git dir"
+        );
     }
 
     #[test]

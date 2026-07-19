@@ -93,6 +93,7 @@ pub(crate) fn wire_catalog_execution(
 pub fn wire_builtin_catalog_execution(
     task_access: Arc<dyn task::TaskAccess>,
     skills: Arc<tokio::sync::Mutex<HashMap<String, share::skill_ops::Skill>>>,
+    memory_source: Arc<dyn crate::domain::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
 ) -> Result<CatalogExecutionWiring, ToolBackingError> {
     let registry = Arc::new(ToolRegistry::new());
@@ -104,6 +105,7 @@ pub fn wire_builtin_catalog_execution(
             &registry,
             task_access.clone(),
             skills.clone(),
+            memory_source.clone(),
             workspace_control.clone(),
             scope_kind,
         );

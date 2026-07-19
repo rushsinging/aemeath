@@ -6,7 +6,6 @@ use crate::adapters::openai_compatible::ReasoningConfig;
 use crate::domain::invoke::SystemBlock;
 use crate::ports::LlmProvider;
 use crate::ProviderDriverKind;
-use crate::LOG_TARGET;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -339,11 +338,11 @@ impl LlmClient {
                 share::message::ContentBlock::Image { .. } => 0,
             })
             .sum();
-        log::debug!(target: LOG_TARGET,
+        log::debug!(target: crate::LOG_TARGET,
             "[LLM REQUEST] provider={} model={} system_blocks={} messages={}({} chars) tools={}",
             self.provider_name(), self.model_name(), system.len(), messages.len(), total_chars, tool_schemas.len(),
         );
-        log::trace!(target: LOG_TARGET,
+        log::trace!(target: crate::LOG_TARGET,
             "[LLM REQUEST] system: {:?}\n  messages: {}",
             system_preview, serde_json::to_string_pretty(&msg_summary).unwrap_or_default(),
         );

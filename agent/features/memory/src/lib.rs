@@ -2,6 +2,7 @@
 
 //! Memory 支撑域。
 
+pub(crate) const LOG_TARGET: &str = "aemeath:agent:memory";
 mod adapters;
 mod codec;
 mod domain;
@@ -11,20 +12,24 @@ mod service;
 
 pub mod api {
     pub use crate::{
-        AtomicDatasetMemoryStore, CompactResult, InMemoryMemory, LegacyMemoryLayer,
-        LegacyMemoryMember, LegacyMemorySource, LegacyMemorySourceError, MemoryCategory,
-        MemoryEntry, MemoryError, MemoryId, MemoryLayer, MemoryLocation, MemoryOpenerError,
-        MemoryPolicy, MemoryPort, MemoryQuery, MemoryRetrievalMode, MemorySearchHit,
-        MemorySearchQuery, MemorySearchResult, MemorySource, MemoryStats, MemorySuggestion,
-        NoOpMemory, ProjectMemoryKey, ProjectMemoryOpener, ReflectionApplyResult, ReflectionEngine,
-        ReflectionError, ReflectionHistoryQuery, ReflectionMessage, ReflectionOutput,
-        ReflectionPromptPort, ReflectionRecord, ReflectionResult, ReflectionTokenUsage,
-        WriteResult,
+        AtomicDatasetMemoryStore, AtomicDatasetReflectionHistoryStore, CompactResult,
+        InMemoryMemory, LegacyMemoryLayer, LegacyMemoryMember, LegacyMemorySource,
+        LegacyMemorySourceError, MemoryCategory, MemoryEntry, MemoryError, MemoryId, MemoryLayer,
+        MemoryLocation, MemoryOpenError, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort,
+        MemoryQuery, MemoryRetrievalMode, MemorySearchHit, MemorySearchQuery, MemorySearchResult,
+        MemorySource, MemoryStats, MemorySuggestion, NoOpMemory, ProjectMemoryKey,
+        ProjectMemoryOpener, ReflectionApplyResult, ReflectionApplyStatus, ReflectionEngine,
+        ReflectionError, ReflectionErrorCategory, ReflectionHistoryQuery, ReflectionHistoryStore,
+        ReflectionMessage, ReflectionOutput, ReflectionPromptPort, ReflectionRecord,
+        ReflectionResult, ReflectionSafeSummary, ReflectionStatus, ReflectionTokenUsage,
+        ReflectionTrigger, WriteResult,
     };
 }
 
 pub use adapters::{
-    map_storage_error, AtomicDatasetMemoryStore, InMemoryMemory, MemoryPolicy, ProjectMemoryOpener,
+    map_storage_error, AtomicDatasetMemoryStore, AtomicDatasetReflectionHistoryStore,
+    DatasetMemoryOpener, FileLegacyMemorySourceFactory, InMemoryMemory, MemoryPolicy,
+    ProjectMemoryOpener,
 };
 pub use domain::*;
 pub use noop::NoOpMemory;

@@ -434,3 +434,29 @@ fn system_notice_texts(app: &App) -> Vec<&str> {
         })
         .collect()
 }
+
+#[test]
+fn format_reflection_history_accepts_empty_records() {
+    assert_eq!(format_reflection_history(&[]), "Reflection history (0):");
+}
+
+#[test]
+fn format_reflection_history_renders_optional_metadata_as_absent() {
+    let record = sdk::ReflectionHistoryView {
+        id: "safe-id".to_string(),
+        timestamp: 1,
+        trigger: sdk::ReflectionTriggerView::Manual,
+        status: sdk::ReflectionStatusView::Running,
+        deviations: 0,
+        suggestions: 0,
+        outdated: 0,
+        apply_status: sdk::ReflectionApplyStatusView::NotApplied,
+        error_category: None,
+        token_usage: None,
+        duration_ms: 0,
+    };
+
+    let rendered = format_reflection_history(&[record]);
+    assert!(rendered.contains("error=none"));
+    assert!(rendered.contains("tokens(in/out)=n/a"));
+}

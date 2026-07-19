@@ -1,7 +1,6 @@
 use super::loop_run::SubAgentRun;
 use super::CliAgentRunner;
 use crate::application::agent::Agent;
-use crate::LOG_TARGET;
 use async_trait::async_trait;
 use provider::SystemBlock;
 use share::message::Message;
@@ -23,6 +22,7 @@ impl AgentRunner for CliAgentRunner {
         let timeout = request.timeout;
         let parent_run_id = Some(sdk::RunId::from_legacy_or_new(identity.run_id()));
         let model_spec = request.model_spec;
+        let memory = request.memory;
         let progress_sink = request_progress.clone();
         // Resolve role and model
         let role = self.resolve_role(model_spec);
@@ -121,7 +121,7 @@ impl AgentRunner for CliAgentRunner {
         );
 
         logging::instrument(sub_run_context, async move {
-        log::info!(target: LOG_TARGET,
+        log::info!(target: crate::LOG_TARGET,
             "[SubAgent] reasoning={} level={} max_tokens={:?} (role={:?}, model={:?}, effort={:?}, default={})",
             reasoning,
             level,
@@ -171,7 +171,7 @@ impl AgentRunner for CliAgentRunner {
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| "-".to_string());
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "[role:{} model:{} turn:{}] {}",
                 role_name,
                 model_name,
@@ -216,7 +216,7 @@ impl AgentRunner for CliAgentRunner {
                     })
                 })
                 .collect();
-            log::info!(target: LOG_TARGET,
+            log::info!(target: crate::LOG_TARGET,
                 "[subagent_llm_request] session={}, turn={}, provider={}, model={}, role={}, model_spec={}, messages={}, tools={}, latest_roles={}",
                 session_id_for_log,
                 turn,
@@ -250,7 +250,7 @@ impl AgentRunner for CliAgentRunner {
                     std::sync::Mutex::new(std::collections::HashSet::new()),
                 ))),
                 plan_mode,
-                std::sync::Arc::new(memory::NoOpMemory),
+                memory.clone(),
                 guidance,
             )
             .with_catalog(catalog)

@@ -2,7 +2,6 @@ use crate::adapters::mcp::McpClient;
 use crate::adapters::mcp_manager::McpConnectionManager;
 use crate::domain::types::mcp_manager::McpManagerResult;
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
-use crate::LOG_TARGET;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -97,7 +96,7 @@ impl TypedTool for McpToolWrapper {
     ) -> TypedToolResult<Self::Output> {
         // Validate input against schema before calling MCP tool
         if let Err(e) = validate_mcp_input(&input, &self.schema) {
-            log::warn!(target: LOG_TARGET, "MCP tool {} input validation failed: {}", self.tool_name, e);
+            log::warn!(target: crate::LOG_TARGET, "MCP tool {} input validation failed: {}", self.tool_name, e);
             return TypedToolResult::error(format!("Invalid input for {}: {}", self.tool_name, e));
         }
 

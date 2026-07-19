@@ -1,7 +1,6 @@
 use crate::application::agent::runner as agent_runner;
 #[cfg(test)]
 use crate::application::startup::config_paths;
-use crate::LOG_TARGET;
 use hook::api::HookRunner;
 use provider::LlmClient;
 use share::config::hooks::HooksConfig;
@@ -16,7 +15,7 @@ pub fn build_hook_runner(hooks: Option<&HooksConfig>, _cwd: &Path) -> HookRunner
         Some(h) => HookRunner::new(h.clone()),
         None => HookRunner::empty(),
     };
-    log::info!(target: LOG_TARGET,
+    log::info!(target: crate::LOG_TARGET,
         "hook runner built: configured_events={}",
         runner.hook_count()
     );
@@ -25,7 +24,7 @@ pub fn build_hook_runner(hooks: Option<&HooksConfig>, _cwd: &Path) -> HookRunner
 
 pub fn start_session(resume_session_id: Option<String>) -> String {
     let session_id = resume_session_id.unwrap_or_else(context::session::new_session_id);
-    log::info!(target: LOG_TARGET, "session started");
+    log::info!(target: crate::LOG_TARGET, "session started");
     session_id
 }
 

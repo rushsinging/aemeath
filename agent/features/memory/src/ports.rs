@@ -1,5 +1,6 @@
 use crate::*;
 use async_trait::async_trait;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// One legacy member as observed by composition. Memory owns this classification
@@ -40,6 +41,36 @@ pub enum LegacyMemorySourceError {
 pub trait LegacyMemorySource: Send + Sync {
     async fn probe(&self, layer: MemoryLayer)
         -> Result<LegacyMemoryLayer, LegacyMemorySourceError>;
+}
+
+/// Cloneable factory that creates a project-specific [`LegacyMemorySource`]
+/// pre-bound to the legacy file positions for the given project identity.
+///
+/// `LegacyMemorySource::probe` deliberately accepts only a [`MemoryLayer`] —
+/// it has no project parameter. A factory call is therefore the *only* seam at
+/// which a project identity ([`ProjectMemoryKey`]) is translated into the
+/// concrete legacy positions that a source instance will read from. The
+/// created source exposes bytes through `probe`, never filesystem paths.
+///
+/// The trait is object-safe so it can be used as `dyn LegacyMemorySourceFactory`,
+/// and cloneable via [`LegacyMemorySourceFactory::boxed_clone`]; `Box<dyn
+/// LegacyMemorySourceFactory>` implements [`Clone`].
+pub trait LegacyMemorySourceFactory: Send + Sync {
+    /// Creates a [`LegacyMemorySource`] pre-bound to the legacy positions for
+    /// `key`. This is infallible: it merely resolves positions; all I/O (and
+    /// potential errors) happen lazily inside [`LegacyMemorySource::probe`].
+    fn create_for(&self, key: &ProjectMemoryKey) -> Arc<dyn LegacyMemorySource>;
+
+    /// Object-safe clone — returns a boxed duplicate with identical wiring.
+    fn boxed_clone(&self) -> Box<dyn LegacyMemorySourceFactory>;
+}
+
+/// Makes `Box<dyn LegacyMemorySourceFactory>` cloneable by delegating to
+/// [`LegacyMemorySourceFactory::boxed_clone`].
+impl Clone for Box<dyn LegacyMemorySourceFactory> {
+    fn clone(&self) -> Self {
+        self.boxed_clone()
+    }
 }
 
 /// Fail-closed errors from opening and, when necessary, migrating Memory.
@@ -198,6 +229,11 @@ pub struct MemoryStats {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ReflectionApplyResult {
+    /// Number of requested operations (suggestions plus outdated-memory marks).
+    pub attempted: usize,
+    /// Number of operations durably completed. This can be smaller than
+    /// `attempted` when a cross-layer apply returns `MemoryError::PartialApply`.
+    pub completed: usize,
     pub suggestions_added: usize,
     pub outdated_marked: usize,
 }
@@ -212,7 +248,19 @@ pub trait ReflectionPromptPort: Send + Sync {
 
 #[async_trait]
 pub trait ReflectionHistoryQuery: Send + Sync {
+    /// Returns at most `limit` records, newest append first. A zero limit
+    /// returns an empty result without weakening dataset validation.
     async fn list(&self, limit: usize) -> Result<Vec<ReflectionRecord>, MemoryError>;
+}
+
+/// Memory-owned write boundary for completed Reflection facts. Implementations
+/// persist `ReflectionRecord` only; provider prompts and raw responses cannot
+/// cross this typed boundary.
+#[async_trait]
+pub trait ReflectionHistoryStore: ReflectionHistoryQuery {
+    async fn append(&self, record: &ReflectionRecord) -> Result<(), MemoryError>;
+    /// Inserts a new record or replaces the record with the same stable id.
+    async fn upsert(&self, record: &ReflectionRecord) -> Result<(), MemoryError>;
 }
 
 #[async_trait]
@@ -232,6 +280,43 @@ pub trait MemoryPort: Send + Sync {
     async fn compact(&self) -> Result<CompactResult, MemoryError>;
     fn list(&self, layer: Option<MemoryLayer>) -> Vec<MemoryEntry>;
     fn stats(&self) -> MemoryStats;
+}
+
+/// Object-safe, cloneable project-aware Memory opener seam.
+///
+/// Composition supplies a Project-owned identity ([`ProjectMemoryKey`]) and a
+/// candidate [`share::config::MemoryConfig`]; the opener eagerly opens both
+/// layers and returns `Arc<dyn MemoryPort>`.
+///
+/// Memory never imports the Config *service* or reads the *current* config —
+/// the candidate `MemoryConfig` is passed by value by the caller, decoupling
+/// Memory from Config's lifecycle. Memory only depends on the plain config
+/// *types* in `share::config`.
+///
+/// The trait is object-safe so it can be used as `dyn MemoryOpener`, and
+/// cloneable via [`MemoryOpener::boxed_clone`]; `Box<dyn MemoryOpener>`
+/// implements [`Clone`].
+#[async_trait]
+pub trait MemoryOpener: Send + Sync {
+    /// Eagerly opens the global and project layers for the given project
+    /// identity, using `config` to derive the [`MemoryPolicy`], and returns
+    /// a fully initialized Memory port.
+    async fn open_memory(
+        &self,
+        key: &ProjectMemoryKey,
+        config: &share::config::MemoryConfig,
+    ) -> Result<Arc<dyn MemoryPort>, MemoryOpenerError>;
+
+    /// Object-safe clone — returns a boxed duplicate with identical wiring.
+    fn boxed_clone(&self) -> Box<dyn MemoryOpener>;
+}
+
+/// Makes `Box<dyn MemoryOpener>` cloneable by delegating to
+/// [`MemoryOpener::boxed_clone`].
+impl Clone for Box<dyn MemoryOpener> {
+    fn clone(&self) -> Self {
+        self.boxed_clone()
+    }
 }
 
 #[cfg(test)]

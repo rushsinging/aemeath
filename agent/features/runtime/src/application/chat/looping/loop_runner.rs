@@ -20,7 +20,6 @@ use crate::application::chat::looping::{
 };
 use crate::application::loop_engine::run_loop;
 use crate::domain::agent_run::{Run, RunSpec};
-use crate::LOG_TARGET;
 use workflow::api::ReasoningSignal;
 
 use super::loop_context::ChatLoopContext;
@@ -63,6 +62,7 @@ where
                 mut chain,
                 mut context_size,
                 workspace,
+                wiring,
                 session_id,
                 read_files,
                 session_reminders,
@@ -77,22 +77,26 @@ where
                 hook_runner,
                 memory_config,
                 memory,
+                reflection_history,
                 language,
                 frozen_chats,
                 active_summary: active_summary_arc,
                 reasoning,
                 build_switched_client,
                 save_chain,
-                run_reflection_on_demand,
-                apply_reflection_on_demand,
+                list_reflection_history,
                 list_models,
                 list_reminders,
                 list_sessions,
             } = ctx;
             let mut client = client;
+            // Interval and PreCompact share this single session-scoped slot.
+            let reflection_tasks =
+                crate::application::reflection::ReflectionTaskAdapter::production(
+                    std::time::Duration::from_secs(120),
+                );
             let hook_ui = HookUi::new(sink.clone());
             let mut cwd = workspace.read().current_workspace_root();
-            let memory_cwd = workspace.read().initial_cwd();
             let mut active_summary = active_summary_arc
                 .lock()
                 .map(|value| value.clone())
@@ -120,8 +124,9 @@ where
                         &system_prompt_text,
                         context_size,
                         &memory_config,
-                        memory.as_ref(),
-                        &super::reflection::REFLECTION_ENGINE,
+                        &memory,
+                        &reflection_history,
+                        &reflection_tasks,
                         &client,
                         &language,
                         &cwd,
@@ -206,12 +211,18 @@ where
                     continue;
                 }
                 PendingCommand::ManageMemory { args } => {
-                    let (text, is_error) = super::idle_commands::execute_memory(
-                        &args,
-                        &memory_cwd.display().to_string(),
-                        &memory_config,
-                    )
-                    .await;
+                    let wiring_for_memory = wiring.clone();
+                    let config = memory_config.clone();
+                    let result = wiring
+                        .with_shared(async move {
+                            let memory = wiring_for_memory.committed_memory();
+                            super::idle_commands::execute_memory(&args, memory.as_ref(), &config)
+                                .await
+                        })
+                        .await;
+                    let (text, is_error) = result.unwrap_or_else(|_| {
+                        ("Session is being switched, please retry.".to_string(), true)
+                    });
                     let _ = sink
                         .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
                         .await;
@@ -224,7 +235,7 @@ where
                                 context::session::SessionRestore::from_session(&snapshot);
                             if restore.trimmed > 0 || restore.repaired > 0 {
                                 log::info!(
-                                    target: "aemeath:agent:runtime",
+                                    target: crate::LOG_TARGET,
                                     "resume {}: trimmed={} repaired={}",
                                     id,
                                     restore.trimmed,
@@ -252,7 +263,7 @@ where
                                 .await;
                             if restore.trimmed > 0 || restore.repaired > 0 {
                                 log::info!(
-                                    target: "aemeath:agent:runtime",
+                                    target: crate::LOG_TARGET,
                                     "resume {}: trimmed={} repaired={}",
                                     id,
                                     restore.trimmed,
@@ -295,46 +306,23 @@ where
                     }
                     continue;
                 }
-                PendingCommand::RunReflection => match run_reflection_on_demand().await {
-                    Ok(view) => {
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::ReflectionResult {
-                                output: Box::new(view),
-                            })
-                            .await;
-                        continue;
-                    }
-                    Err(e) => {
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText {
-                                text: format!("Reflection failed: {e}"),
-                                is_error: true,
-                            })
-                            .await;
-                        continue;
-                    }
-                },
-                PendingCommand::ApplyReflection { output } => {
-                    match apply_reflection_on_demand(output).await {
-                        Ok(msg) => {
+                PendingCommand::QueryReflectionHistory { limit } => {
+                    match list_reflection_history(limit).await {
+                        Ok(records) => {
                             let _ = sink
-                                .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text: msg,
-                                    is_error: false,
-                                })
+                                .send_event(RuntimeStreamEvent::ReflectionHistory { records })
                                 .await;
-                            continue;
                         }
                         Err(e) => {
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text: format!("Apply reflection failed: {e}"),
+                                    text: format!("List reflection history failed: {e}"),
                                     is_error: true,
                                 })
                                 .await;
-                            continue;
                         }
                     }
+                    continue;
                 }
                 PendingCommand::ListModels => match list_models().await {
                     Ok(models) => {
@@ -506,6 +494,8 @@ where
                     hook_runner: &hook_runner,
                     memory_config: &memory_config,
                     memory: &memory,
+                    reflection_history: &reflection_history,
+                    reflection_tasks: &reflection_tasks,
                     language: &language,
                     frozen_chats: &frozen_chats,
                     active_summary: &mut active_summary,
@@ -523,7 +513,6 @@ where
                     rollback_chain,
                     rollback_frozen_chats,
                     rollback_active_summary,
-                    memory_cwd: memory_cwd.clone(),
                     last_total_tokens: &mut last_total_tokens,
                     task_reminder_state: &mut task_reminder_state,
                     tool_identity: &tool_identity,
@@ -538,10 +527,13 @@ where
                 )
                 .await;
                 if let Err(error) = run_result {
-                    log::error!(target: LOG_TARGET, "main shared run loop failed: {error}");
+                    log::error!(target: crate::LOG_TARGET, "main shared run loop failed: {error}");
                 }
                 active_run.clear(&run_id);
             }
+            // Session shutdown joins any accepted background reflection before resources
+            // (notably history persistence) are released.
+            let _ = reflection_tasks.drain().await;
             chain
         },
     )

@@ -436,6 +436,7 @@ name = "config"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "log",
  "serde_json",
  "share",
  "storage",
@@ -474,11 +475,13 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "config",
  "dirs",
  "futures-util",
  "inventory",
  "log",
  "memory",
+ "project",
  "provider",
  "regex",
  "sdk",
@@ -1327,10 +1330,12 @@ name = "hook"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "libc",
  "log",
  "serde",
  "serde_json",
  "share",
+ "tempfile",
  "tokio",
  "tokio-util",
  "uuid",
@@ -1994,8 +1999,10 @@ name = "memory"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "log",
  "serde",
  "serde_json",
+ "share",
  "storage",
  "thiserror 2.0.18",
  "tokio",
@@ -2542,6 +2549,7 @@ name = "project"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "log",
  "serde",
  "serde_json",
  "share",
@@ -3520,6 +3528,7 @@ dependencies = [
 name = "task"
 version = "0.0.0"
 dependencies = [
+ "log",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

@@ -8,7 +8,6 @@ mod tests;
 use crate::domain::shell_safety::{check_command_safety, check_shell_injection};
 use crate::domain::types::bash::{BashInput, BashResult};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
-use crate::LOG_TARGET;
 use async_trait::async_trait;
 use bash_result::{exit_status_description, preview};
 use cwd::{split_stdout_and_cwd, CWD_MARKER};
@@ -89,7 +88,7 @@ impl TypedTool for BashTool {
 
         let path_base = ctx.workspace_read().current_path_base();
         log::debug!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "executing command: path_base={:?} timeout_ms={} command={:?}",
             path_base, timeout_ms, command
         );
@@ -171,7 +170,7 @@ impl TypedTool for BashTool {
                 let elapsed_ms = start.elapsed().as_millis();
                 if failure_detail.starts_with("signal") {
                     log::warn!(
-                        target: LOG_TARGET,
+                        target: crate::LOG_TARGET,
                         "command terminated by signal: {}, command: {:?}, pid={:?} path_base={:?} elapsed_ms={} stdout_len={} stderr_len={} stdout_preview={:?} stderr_preview={:?}",
                         failure_detail,
                         command,
@@ -185,7 +184,7 @@ impl TypedTool for BashTool {
                     );
                 } else {
                     log::debug!(
-                        target: LOG_TARGET,
+                        target: crate::LOG_TARGET,
                         "command finished: exit_code={}, command: {:?}, pid={:?} path_base={:?} elapsed_ms={} stdout_len={} stderr_len={} stdout_preview={:?} stderr_preview={:?}",
                         exit_code,
                         command,
@@ -256,7 +255,7 @@ impl TypedTool for BashTool {
                 let stdout_lossy = String::from_utf8_lossy(&stdout);
                 let stderr_lossy = String::from_utf8_lossy(&stderr);
                 log::warn!(
-                    target: LOG_TARGET,
+                    target: crate::LOG_TARGET,
                     "wait_result failed: error={}, command: {:?}, pid={:?} path_base={:?} elapsed_ms={} stdout_len={} stderr_len={} stdout_preview={:?} stderr_preview={:?}",
                     e,
                     command,

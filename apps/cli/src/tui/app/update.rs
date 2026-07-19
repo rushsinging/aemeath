@@ -54,8 +54,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::SystemMessage(_) => "SystemMessage",
         UiEvent::ModelStreamWaiting { .. } => "ModelStreamWaiting",
         UiEvent::SessionSaved { .. } => "SessionSaved",
-        UiEvent::ReflectionDone { .. } => "ReflectionDone",
-        UiEvent::ReflectionApplyDone { .. } => "ReflectionApplyDone",
+        UiEvent::ReflectionHistory { .. } => "ReflectionHistory",
         UiEvent::AskUserBatch { .. } => "AskUserBatch",
         UiEvent::HookEvent(_) => "HookEvent",
         UiEvent::AgentProgress { .. } => "AgentProgress",
@@ -131,7 +130,13 @@ impl App {
             TuiMsg::AgentEvent(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::Key(key) => self.update_key(key, spawn_refs),
             TuiMsg::Mouse(mouse) => {
+                let expanded_before = self.view_state.output.expanded;
                 let effects = self.handle_mouse_event(mouse, self.layout.output_area_rect);
+                // 懒加载：滚轮到顶触发 expand（在 mouse_handler 内设置 expanded=true），
+                // 需 mark_output_dirty 触发 document 重建跳过 MAX_RENDER_LINES 裁剪。
+                if !expanded_before && self.view_state.output.expanded {
+                    self.mark_output_dirty();
+                }
                 UpdateResult {
                     effects,
                     spawn_effect: None,
@@ -217,7 +222,11 @@ impl App {
             }
             TuiMsg::TerminalKey(key) => self.update_key(key, spawn_refs),
             TuiMsg::TerminalMouse(mouse) => {
+                let expanded_before = self.view_state.output.expanded;
                 let effects = self.handle_mouse_event(mouse, self.layout.output_area_rect);
+                if !expanded_before && self.view_state.output.expanded {
+                    self.mark_output_dirty();
+                }
                 UpdateResult {
                     effects,
                     spawn_effect: None,

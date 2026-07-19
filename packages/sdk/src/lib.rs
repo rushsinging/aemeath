@@ -31,13 +31,15 @@ pub mod update;
 pub mod ids;
 pub mod interaction;
 
-pub use bootstrap::ChatBootstrapArgs;
+pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode};
 pub use change_set::ChangeSet;
 pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserQuestionItem,
     ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage, ChatRequest,
     ChatResult, ChatStream, HookEventStatus, HookEventView, HookExecutionResultView, OptionItem,
-    ToolCallStatusView, ToolResultImage, UserInput, WorkspaceContextView, WorkspaceStackEntryView,
+    ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
+    ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ToolCallStatusView,
+    ToolResultImage, UserInput, WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
 pub use commands::builtin_commands;
@@ -69,8 +71,8 @@ pub use session::{
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,
     ClipboardImageView, InputEventFuture, InputEventOptFuture, MemoryConfigView, PasteKind,
-    QueueDrainPort, QueueFuture, ReflectionConfigView, ReflectionMemorySuggestionView,
-    ReflectionOutputView, ReminderView, SkillView, TaskStatusView, TuiLaunchContext,
+    QueueDrainPort, QueueFuture, ReflectionConfigView, ReminderView, SkillView, TaskStatusView,
+    TuiLaunchContext,
 };
 pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,

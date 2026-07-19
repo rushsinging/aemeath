@@ -39,3 +39,6 @@ sdk = { path = "../../../packages/sdk" }
 logging = { path = "../../../packages/global/logging" }
 
 tempfile = "3"
+
+[dev-dependencies]
+context = { path = "../context", features = ["dev"] }

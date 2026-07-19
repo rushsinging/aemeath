@@ -380,8 +380,30 @@ impl ConfigValidator {
     }
 }
 
-pub fn encode_native_config(config: &share::config::Config) -> Result<Vec<u8>, ConfigAdapterError> {
-    serde_json::to_vec(config).map_err(|_| ConfigAdapterError::Parse)
+pub fn merge_native_patches(
+    base: ConfigPatch,
+    overlay: ConfigPatch,
+) -> Result<ConfigPatch, ConfigAdapterError> {
+    fn merge_value(base: &mut serde_json::Value, overlay: serde_json::Value) {
+        match (base, overlay) {
+            (_, serde_json::Value::Null) => {}
+            (serde_json::Value::Object(base), serde_json::Value::Object(overlay)) => {
+                for (key, value) in overlay {
+                    merge_value(base.entry(key).or_insert(serde_json::Value::Null), value);
+                }
+            }
+            (base, overlay) => *base = overlay,
+        }
+    }
+
+    let mut value = serde_json::to_value(base).map_err(|_| ConfigAdapterError::Parse)?;
+    let overlay = serde_json::to_value(overlay).map_err(|_| ConfigAdapterError::Parse)?;
+    merge_value(&mut value, overlay);
+    serde_json::from_value(value).map_err(|_| ConfigAdapterError::Parse)
+}
+
+pub fn encode_native_patch(patch: &ConfigPatch) -> Result<Vec<u8>, ConfigAdapterError> {
+    serde_json::to_vec(patch).map_err(|_| ConfigAdapterError::Parse)
 }
 
 #[derive(Clone)]
@@ -489,6 +511,94 @@ mod tests {
     }
 
     #[test]
+    fn env_adapter_maps_supported_scalar_values() {
+        let source = FakeEnv(HashMap::from([
+            ("AEMEATH_BASE_URL".into(), "https://example.test".into()),
+            ("AEMEATH_MAX_TOKENS".into(), "4096".into()),
+            ("AEMEATH_CONTEXT_SIZE".into(), "128000".into()),
+            ("AEMEATH_PERMISSION_MODE".into(), "allow_all".into()),
+            ("AEMEATH_MAX_TOOL_CONCURRENCY".into(), "7".into()),
+            ("AEMEATH_MAX_AGENT_CONCURRENCY".into(), "3".into()),
+            ("AEMEATH_VERBOSE".into(), "1".into()),
+            ("NO_COLOR".into(), "1".into()),
+            ("AEMEATH_LOG_LEVEL".into(), "debug".into()),
+        ]));
+        let patch = EnvAdapter::read(&source);
+        assert_eq!(
+            patch.api.unwrap().base_url.as_deref(),
+            Some("https://example.test")
+        );
+        let model = patch.model.unwrap();
+        assert_eq!(model.max_tokens, Some(4096));
+        assert_eq!(model.context_size, Some(128000));
+        assert_eq!(
+            patch.permissions.unwrap().mode,
+            Some(PermissionModeConfig::AllowAll)
+        );
+        assert_eq!(patch.tools.unwrap().max_concurrency, Some(7));
+        assert_eq!(patch.agents.unwrap().max_concurrency, Some(3));
+        let ui = patch.ui.unwrap();
+        assert_eq!(ui.verbose, Some(true));
+        assert_eq!(ui.color, Some(false));
+        assert_eq!(patch.logging.unwrap().level.as_deref(), Some("debug"));
+    }
+
+    #[test]
+    fn config_validator_rejects_zero_concurrency_and_unknown_model() {
+        let mut config = share::config::Config::default();
+        config.tools.max_concurrency = 0;
+        assert_eq!(
+            ConfigValidator::validate(&config),
+            Err(ConfigAdapterError::Invalid)
+        );
+
+        let mut config = share::config::Config::default();
+        config.models.default = "missing/model".into();
+        config.models.providers.insert(
+            "known".into(),
+            share::config::models::ProviderModelsConfig {
+                driver: "openai".into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            ConfigValidator::validate(&config),
+            Err(ConfigAdapterError::Invalid)
+        );
+    }
+
+    #[test]
+    fn claude_translator_prefers_deny_and_filters_blank_hooks() {
+        let patch = ClaudeTranslator::translate(
+            r#"{"permissions":{"allow":["Read"],"deny":["Bash"]},"hooks":{"Stop":[{"matcher":"*","hooks":[{"command":"   "},{"command":"echo ok","timeout":9}]}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            patch.permissions.unwrap().mode,
+            Some(PermissionModeConfig::Ask)
+        );
+        let hooks = patch.hooks.unwrap();
+        let entries = &hooks.events[&share::config::hooks::HookEvent::Stop];
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, "echo ok");
+        assert_eq!(entries[0].timeout, 9);
+    }
+
+    #[test]
+    fn env_adapter_does_not_read_retired_logging_output_env() {
+        struct RejectRetiredLoggingEnv;
+
+        impl EnvSource for RejectRetiredLoggingEnv {
+            fn get(&self, name: &str) -> Option<String> {
+                assert_ne!(name, "AEMEATH_LOG_STDERR");
+                None
+            }
+        }
+
+        assert!(EnvAdapter::read(&RejectRetiredLoggingEnv).is_empty());
+    }
+
+    #[test]
     fn cli_adapter_only_maps_explicit_values() {
         let empty = CliArgsAdapter::read(&CliConfigInput::default());
         assert!(empty.is_empty());
@@ -579,6 +689,23 @@ mod tests {
             patch.models.unwrap().default.as_deref(),
             Some("local/model")
         );
+    }
+
+    #[tokio::test]
+    async fn native_store_contract_reports_missing_and_invalid_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let store = NativeConfigStore::new(storage);
+        assert!(store.read_override("missing").await.unwrap().is_none());
+        store.write_override("invalid", b"not-json").await.unwrap();
+        assert!(matches!(
+            store.read_override("invalid").await,
+            Err(ConfigAdapterError::Parse)
+        ));
+        assert!(matches!(
+            store.read_override("bad/key").await,
+            Err(ConfigAdapterError::Invalid)
+        ));
     }
 
     #[test]

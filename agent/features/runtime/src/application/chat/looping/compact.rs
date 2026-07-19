@@ -1,6 +1,5 @@
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::{ChatEventSink, CompactStage, RuntimeStreamEvent};
-use crate::LOG_TARGET;
 use hook::api::{CompactHookData, HookData, HookRunner};
 use share::config::hooks::HookEvent;
 use share::message::Message;
@@ -64,8 +63,9 @@ pub(crate) async fn auto_compact<S>(
     system_prompt_text: &str,
     context_size: usize,
     memory_config: &share::config::MemoryConfig,
-    memory: &dyn memory::api::MemoryPort,
-    reflection: &dyn memory::api::ReflectionPromptPort,
+    memory: &Arc<dyn memory::api::MemoryPort>,
+    reflection_history: &Arc<dyn memory::api::ReflectionHistoryStore>,
+    reflection_tasks: &crate::application::reflection::ReflectionTaskAdapter,
     llm_client: &Arc<provider::LlmClient>,
     language: &str,
     workspace_root: &std::path::Path,
@@ -112,7 +112,7 @@ where
     }
 
     if pre_compact_blocked {
-        log::warn!(target: LOG_TARGET, "PreCompact hook blocked compaction");
+        log::warn!(target: crate::LOG_TARGET, "PreCompact hook blocked compaction");
         return None;
     }
 
@@ -123,23 +123,9 @@ where
     }
 
     let old_len = messages.len();
-
-    // precompact reflection（记忆系统在 compact 前抢救信息）
-    if let Some(text) = crate::application::chat::looping::reflection::run_precompact_reflection(
-        memory_config,
-        messages,
-        llm_client.as_ref(),
-        system_prompt_text,
-        language,
-        memory,
-        reflection,
-    )
-    .await
-    {
-        let _ = sink
-            .send_event(RuntimeStreamEvent::SystemMessage(text))
-            .await;
-    }
+    // Freeze the exact pre-compact window before compaction mutates the active history,
+    // but do not consume the reflection slot unless compaction succeeds.
+    let discarded_snapshot = context::compact::messages_selected_for_precompact_memory(messages);
 
     // full compact：summary + recent tail
     let progress = make_progress_sink(sink);
@@ -153,6 +139,17 @@ where
         cancel,
     )
     .await?;
+
+    crate::application::chat::looping::reflection::submit_precompact_reflection_snapshot(
+        reflection_tasks,
+        memory_config,
+        discarded_snapshot,
+        llm_client,
+        system_prompt_text,
+        language,
+        memory,
+        reflection_history,
+    );
 
     let new_len = result.recent_messages.len();
 
@@ -169,7 +166,7 @@ where
     let new_recent_tokens = estimate_tok(&result.recent_messages);
     let summary_tokens = result.summary.len() / 4;
     log::debug!(
-        target: LOG_TARGET,
+        target: crate::LOG_TARGET,
         "auto_compact 完成: {} → {} messages, 估算 token {} → {} (recent) + {} (summary)",
         old_len,
         new_len,
@@ -255,8 +252,9 @@ pub(crate) async fn manual_compact<S>(
     system_prompt_text: &str,
     context_size: usize,
     memory_config: &share::config::MemoryConfig,
-    memory: &dyn memory::api::MemoryPort,
-    reflection: &dyn memory::api::ReflectionPromptPort,
+    memory: &Arc<dyn memory::api::MemoryPort>,
+    reflection_history: &Arc<dyn memory::api::ReflectionHistoryStore>,
+    reflection_tasks: &crate::application::reflection::ReflectionTaskAdapter,
     llm_client: &Arc<provider::LlmClient>,
     language: &str,
     workspace_root: &std::path::Path,
@@ -313,28 +311,13 @@ where
     }
 
     if pre_compact_blocked {
-        log::warn!(target: LOG_TARGET, "PreCompact hook blocked manual compaction");
+        log::warn!(target: crate::LOG_TARGET, "PreCompact hook blocked manual compaction");
         return None;
     }
 
     let old_len = messages.len();
-
-    // precompact reflection
-    if let Some(text) = crate::application::chat::looping::reflection::run_precompact_reflection(
-        memory_config,
-        messages,
-        llm_client.as_ref(),
-        system_prompt_text,
-        language,
-        memory,
-        reflection,
-    )
-    .await
-    {
-        let _ = sink
-            .send_event(RuntimeStreamEvent::SystemMessage(text))
-            .await;
-    }
+    // Freeze the would-be-discarded messages now; submit only after a successful compact.
+    let discarded_snapshot = context::compact::messages_selected_for_precompact_memory(messages);
 
     // full compact：summary + recent tail。手动场景由用户明确触发，绕过 token 阈值；
     // 消息太少时 compact_messages_with_llm 返回 None。
@@ -350,6 +333,17 @@ where
         &manual_cancel,
     )
     .await?;
+
+    crate::application::chat::looping::reflection::submit_precompact_reflection_snapshot(
+        reflection_tasks,
+        memory_config,
+        discarded_snapshot,
+        llm_client,
+        system_prompt_text,
+        language,
+        memory,
+        reflection_history,
+    );
 
     let new_len = result.recent_messages.len();
     let _ = sink

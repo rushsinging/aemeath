@@ -7,7 +7,14 @@ ADAPTERS="$ROOT/agent/features/config/src/adapters.rs"
 
 violations=""
 if [ -f "$APPLICATION" ]; then
-  violations=$(grep -nE 'tokio::fs|std::fs|read_to_string|serde_json::(from_|to_)' "$APPLICATION" || true)
+  set +e
+  violations=$(python3 "$ROOT/.agents/hooks/check-config-adapter-boundary.py" "$APPLICATION")
+  scan_status=$?
+  set -e
+  if [ "$scan_status" -ne 0 ] && [ "$scan_status" -ne 2 ]; then
+    echo '{"decision":"block","reason":"Config adapter boundary scanner failed to execute."}'
+    exit 2
+  fi
 fi
 stubs=""
 if [ -f "$ADAPTERS" ]; then

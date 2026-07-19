@@ -1,6 +1,5 @@
 use crate::application::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use crate::application::chat::looping::queue::{QueueDrainPort, QueueFuture};
-use crate::LOG_TARGET;
 use context::session::ChatChain;
 use sdk::ChatInputEvent;
 use share::message::Message;
@@ -27,8 +26,7 @@ pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
         ChatInputEvent::ManageSession { .. } => "ManageSession",
         ChatInputEvent::ManageMemory { .. } => "ManageMemory",
         ChatInputEvent::ResumeSession { .. } => "ResumeSession",
-        ChatInputEvent::RunReflection => "RunReflection",
-        ChatInputEvent::ApplyReflection { .. } => "ApplyReflection",
+        ChatInputEvent::QueryReflectionHistory { .. } => "QueryReflectionHistory",
         ChatInputEvent::ListModels => "ListModels",
         ChatInputEvent::ListReminders => "ListReminders",
     }
@@ -96,11 +94,9 @@ pub enum PendingCommand {
     ResumeSession {
         id: String,
     },
-    /// 运行 reflection。
-    RunReflection,
-    /// 应用 reflection 结果。
-    ApplyReflection {
-        output: sdk::ReflectionOutputView,
+    /// 查询 reflection 历史；不触发执行或 apply。
+    QueryReflectionHistory {
+        limit: usize,
     },
     /// 查询模型列表。
     ListModels,
@@ -264,13 +260,13 @@ where
     if event_count > 0 {
         let kinds: Vec<&str> = events.iter().map(event_kind_name).collect();
         log::debug!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "[loop_debug] apply_gate kind={:?} is_idle={} drained_events={} kinds={:?}",
             kind, is_idle, event_count, kinds
         );
     } else {
         log::debug!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "apply_gate kind={:?} is_idle={} drained_events=0",
             kind, is_idle
         );
@@ -299,7 +295,7 @@ where
             ChatInputEvent::UserMessage { id, text, images } => {
                 let text_preview: String = text.chars().take(60).collect();
                 log::debug!(
-                    target: LOG_TARGET,
+                    target: crate::LOG_TARGET,
                     "apply_gate UserMessage id={} text_preview={:?} image_count={}",
                     id,
                     text_preview,
@@ -319,7 +315,7 @@ where
                         // the in-memory backing) leaves authoritative state
                         // untouched. Do not emit SessionReset or clear the
                         // compatibility store while Tasks still exist.
-                        log::error!(target: LOG_TARGET, "failed to clear authoritative tasks: {error}");
+                        log::error!(target: crate::LOG_TARGET, "failed to clear authoritative tasks: {error}");
                         dropped_events = iter.count();
                         decision = GateDecision::Proceed;
                         break;
@@ -441,24 +437,14 @@ where
                     buffer.push(ChatInputEvent::ResumeSession { id });
                 }
             }
-            ChatInputEvent::RunReflection => {
+            ChatInputEvent::QueryReflectionHistory { limit } => {
                 if is_idle {
-                    pending_command = Some(PendingCommand::RunReflection);
+                    pending_command = Some(PendingCommand::QueryReflectionHistory { limit });
                     dropped_events = iter.count();
                     decision = GateDecision::Proceed;
                     break;
                 } else {
-                    buffer.push(ChatInputEvent::RunReflection);
-                }
-            }
-            ChatInputEvent::ApplyReflection { output } => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::ApplyReflection { output });
-                    dropped_events = iter.count();
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    buffer.push(ChatInputEvent::ApplyReflection { output });
+                    buffer.push(ChatInputEvent::QueryReflectionHistory { limit });
                 }
             }
             ChatInputEvent::ListModels => {
@@ -486,7 +472,7 @@ where
 
     if appended_user_messages > 0 {
         log::debug!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "apply_gate sending PostToolExecutionSync + UserMessagesAdopted count={} kind={:?}",
             appended_user_messages,
             kind
@@ -512,7 +498,7 @@ where
     // 非 Proceed 决策时打点，避免刷屏。默认不输出，调试时拉高级别可见。
     if event_count > 0 || appended_user_messages > 0 || decision != GateDecision::Proceed {
         log::debug!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "[loop_debug] apply_gate DONE kind={:?} decision={:?} appended_user_messages={} pending_command={:?}",
             kind, decision, appended_user_messages,
             pending_command.as_ref().map(|_| "some")
@@ -535,7 +521,7 @@ fn append_user_message(
     text: String,
     images: Vec<sdk::ChatInputImage>,
 ) -> (sdk::InputId, Message) {
-    log::info!(target: LOG_TARGET, "{}",
+    log::info!(target: crate::LOG_TARGET, "{}",
         serde_json::to_string(&serde_json::json!({
             "event_type": "user_input",
             "text": &text,

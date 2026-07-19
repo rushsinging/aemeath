@@ -39,19 +39,31 @@ pub struct RuntimeHandle {
     /// 当前 active Run 的唯一注册表。同步 cancel_run(run_id) 在同一锁内校验 ID、
     /// 标记 Cancelling 并触发该 Run 的 token。
     pub(crate) active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
-    /// 会话历史唯一活跃真相——按 user turn 分段的 `ChatChain` 聚合。
+    /// 会话历史活跃写入 backing——按 user turn 分段的 `ChatChain` 聚合。
     ///
+    /// **Leased projection**: 此 chain 是 Runtime 对活跃 Run 的可变写入面，
+    /// 不是跨 BC 的唯一真相。权威态在 Context 的 `CanonicalSession`。
     /// 持久化 / 给 LLM / TUI 均为派生投影（`messages_flat()` / `active_segments()`）。
+    ///
+    /// **#871 CM5 fix**: 此 backing 由 `SessionProjectionParticipant` 在
+    /// `resume_prepared` 的 exclusive gate 内、Config watch 发布前同步更新。
+    /// 释放 gate 后任何 shared observer 第一次读即看到新 chain。
     pub(crate) current_chain: Arc<Mutex<context::session::ChatChain>>,
     /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
+    ///
+    /// 由 participant 在 gate 内同步更新。
     pub(crate) frozen_chats: Arc<Mutex<Vec<context::session::ChatSegment>>>,
     /// 活跃链的 compact summary（走 system 通道注入）。
+    ///
+    /// 由 participant 在 gate 内同步更新。
     pub(crate) active_summary: Arc<Mutex<Option<String>>>,
     /// Resume 标志：load_session 后设为 true，chat_impl 消费后重置为 false。
     ///
     /// loop-top idle 门据此在首次遇到 pending user turn 时强制 idle 等待，
     pub(crate) workspace: project::WorkspaceViews,
-    pub(crate) config_reader: Arc<dyn config::ConfigReader>,
+    /// Context-owned Main Session coordinator — provides admission gate,
+    /// session resume, and gate-aware config façades.
+    pub(crate) wiring: Arc<context::MainSessionWiring>,
     pub(crate) config_query: Arc<dyn config::ConfigQuery>,
     pub(crate) config_writer: Arc<dyn config::ConfigWriter>,
     pub(crate) event_sink_factory: Arc<
@@ -109,7 +121,7 @@ impl AgentClientImpl {
             context_size: ctx.resources.context_size,
             verbose: ctx.verbose,
             agent_runner: ctx.resources.agent_runner,
-            allow_all: self.inner.config_reader.committed_snapshot().allow_all(),
+            allow_all: self.inner.wiring.committed_config().allow_all(),
             task_store: ctx.resources.task_store,
             max_tool_concurrency: self.max_tool_concurrency(),
             max_agent_concurrency: self.max_agent_concurrency(),

@@ -23,9 +23,12 @@ for crate in ("runtime", "tools"):
         relative = path.relative_to(root).as_posix()
         if path.name.endswith("_tests.rs") or "tests" in path.parts or path.name == "trait_reflection.rs":
             continue
-        # Keep test code in the scan. Tests are allowed to use wiring through
-        # dedicated *_tests.rs files; inline modules must not hide later production code.
         text = path.read_text(encoding="utf-8")
+        # Inline cfg(test) modules are test-only capabilities; strip a terminal
+        # inline test module while keeping all preceding production code scanned.
+        marker = re.search(r"(?m)^\s*#\[cfg\(test\)\]\s*\n\s*mod\s+tests\s*\{", text)
+        if marker:
+            text = text[: marker.start()]
         # Remove comments before symbol scanning to avoid documentation-only matches.
         text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
         text = re.sub(r"(?m)//.*$", "", text)

@@ -54,67 +54,25 @@ PROJECT_ROOT_ACCESS_ALLOW = {
     "WorktreeKind",
     "wire_production_workspace",
 }
-PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW | {"LOG_TARGET"}
+PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW
 # 已迁移 feature 的目标 façade 位于 crate 根；集合必须保持窄且由真实消费者证明。
 # Tools crate-root façade (#993): tools 已迁到 domain/adapters 六边形物理层，
 # 只经 crate 根发布 Published Language，禁止恢复 tools::api。
 TOOLS_DOMAIN_FACADE = {
-    "AgentDispatch",
-    "AgentProgressEvent",
-    "AgentProgressKind",
-    "AgentRunRequest",
-    "AgentRunTerminal",
-    "AgentRunner",
-    "AgentToolCallProgress",
-    "CancellationDeclaration",
-    "CancellationSignal",
-    "CatalogQuery",
-    "ConcurrencyDeclaration",
-    "ExecutionScope",
-    "ExecutionScopeBuilder",
-    "FixedGuidance",
-    "FixedPlanMode",
-    "Guidance",
-    "ImageData",
-    "InputSafetyDeclaration",
-    "InvocationSource",
-    "MutexReadSet",
-    "PlanModeState",
-    "PolicyDecision",
-    "ProfileExpansionError",
-    "ProgressSink",
-    "ReadSet",
-    "RegistryScopeName",
-    "SessionReminder",
-    "SessionReminders",
-    "Tool",
-    "ToolCapabilities",
-    "ToolCapability",
-    "ToolCatalogPort",
-    "ToolCatalogSnapshot",
-    "ToolDescriptor",
-    "ToolErrorKind",
-    "ToolExecutionContextBindingGuard",
-    "ToolExecutionContextBindingPort",
-    "ToolExecutionContext",
-    "ToolExecutionOutcome",
-    "ToolExecutionPort",
-    "ToolInvocation",
-    "ToolListProvider",
-    "ToolName",
-    "ToolOutcome",
-    "ToolProfile",
-    "ToolProfileName",
-    "ToolExecutionPorts",
-    "ToolResult",
-    "ToolSuspension",
-    "UserInteractionSpec",
-    "UserOption",
-    "UserQuestion",
+    "AgentDispatch", "AgentProgressEvent", "AgentProgressKind", "AgentRunRequest",
+    "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "CancellationDeclaration",
+    "CancellationSignal", "CatalogQuery", "ConcurrencyDeclaration", "ExecutionScope",
+    "ExecutionScopeBuilder", "FixedGuidance", "FixedPlanMode", "Guidance", "ImageData",
+    "InputSafetyDeclaration", "InvocationSource", "MemoryPortSource", "MutexReadSet",
+    "PlanModeState", "PolicyDecision", "ProfileExpansionError", "ProgressSink", "ReadSet",
+    "RegistryScopeName", "SessionReminder", "SessionReminders", "Tool", "ToolCapabilities",
+    "ToolCapability", "ToolCatalogPort", "ToolCatalogSnapshot", "ToolDescriptor",
+    "ToolErrorKind", "ToolExecutionContext", "ToolExecutionContextBindingGuard",
+    "ToolExecutionContextBindingPort", "ToolExecutionOutcome", "ToolExecutionPort",
+    "ToolExecutionPorts", "ToolInvocation", "ToolListProvider", "ToolName", "ToolOutcome",
+    "ToolProfile", "ToolProfileName", "ToolResult", "ToolSuspension", "TypedTool",
+    "TypedToolAdapter", "TypedToolResult", "UserInteractionSpec", "UserOption", "UserQuestion",
     "WorkspaceReadAccess",
-    "TypedTool",
-    "TypedToolAdapter",
-    "TypedToolResult",
 }
 TOOLS_ADAPTER_FACADE = {
     "is_readonly_command",
@@ -138,7 +96,6 @@ TOOLS_ROOT_ACCESS_ALLOW = {"LOG_TARGET", "types"} | TOOLS_DOMAIN_FACADE | TOOLS_
 }
 
 ROOT_ACCESS_ALLOW = {
-    "memory": {"api"},
     "provider": {
         "CancellationSignal",
         "InvocationDelta",
@@ -212,18 +169,37 @@ ROOT_ACCESS_ALLOW = {
         "UsageSink",
         "from_args_with_workspace",
     },
-    "policy": {
-        "AllowAllPolicy", "ApprovalSubject", "PolicyDecision", "PolicyMode", "PolicyPort",
-        "PolicyReason", "PolicyRequest", "PolicyRequestError",
-    },
+      "policy": {
+          "AllowAllPolicy", "ApprovalSubject", "PolicyDecision", "PolicyMode", "PolicyPort",
+          "PolicyReason", "PolicyRequest", "PolicyRequestError",
+      },
     "workflow": set(),
     "project": PROJECT_ROOT_ACCESS_ALLOW,
     "tools": TOOLS_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
-    "context": {"compact", "context_port", "domain", "guidance", "session", "skill", "compose_session_task_capture", "LegacyTaskCapture"},
+    "context": {
+        "compact", "context_port", "domain", "guidance", "session", "skill",
+        "compose_session_task_capture", "LegacyTaskCapture", "test_support",
+        "wire_main_session", "BoundMainRun", "MainSessionDependencies", "MainSessionError",
+        "MainSessionWiring", "MainSessionWiringBuilder", "OwnedSessionExclusivePermit",
+        "OwnedSessionSharedPermit", "SessionProjectionParticipant", "SessionSwitchClosed",
+        "SessionSwitchGate", "SessionSwitchInProgress",
+    },
+    "memory": {
+        "AtomicDatasetMemoryStore", "CompactResult", "DatasetMemoryOpener",
+        "FileLegacyMemorySourceFactory", "InMemoryMemory", "LegacyMemoryLayer",
+        "LegacyMemoryMember", "LegacyMemorySource", "LegacyMemorySourceError",
+        "LegacyMemorySourceFactory", "MemoryCategory", "MemoryCommitReceipt",
+        "MemoryCommitVisibility", "MemoryDataset", "MemoryDatasetStore", "MemoryEntry",
+        "MemoryError", "MemoryId", "MemoryLayer", "MemoryLocation", "MemoryOpenError",
+        "MemoryOpener", "MemoryOpenerError", "MemoryPolicy", "MemoryPort", "MemoryQuery",
+        "MemoryRetrievalMode", "MemorySearchHit", "MemorySearchQuery", "MemorySearchResult",
+        "MemorySource", "MemoryStats", "MemoryStorageErrorKind", "ProjectMemoryKey",
+        "ReflectionApplyResult", "ReflectionOutput", "WriteResult", "map_storage_error",
+    },
     # Storage 的 #991 过渡 façade；最终随 #880/#983/#883/#884 收敛。
     "storage": {
-        "FileSystemDatasetAdapter",
+        "Batch",
         "BatchStatus",
         "MemoryStore",
         "SafeOpenOptions",
@@ -237,6 +213,8 @@ ROOT_ACCESS_ALLOW = {
         "TaskSnapshot",
         "TaskStatus",
         "TaskStore",
+        "FileSystemBlobAdapter",
+        "FileSystemDatasetAdapter",
         "memory_base_dir",
         "project_file_name",
         "project_file_name_from_path",
@@ -587,7 +565,6 @@ def run_sanity() -> None:
     if not project_import_violations("tools", "use project::{\n    WorkspaceRead,\n    WorkspaceService,\n};"):
         raise AssertionError("sanity block failed: removed Project concrete service import")
     valid_facade = '''
-pub const LOG_TARGET: &str = "aemeath:agent:project";
 pub use adapters::wiring::{wire_production_workspace, WorkspaceViews, WorkspaceWiring};
 pub use domain::state::PreparedWorkspaceRestore;
 pub use domain::types::{GitOperationError, GitProbeError, WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspaceInitError, WorkspacePersist, WorkspaceRead, WorkspaceRestoreError};

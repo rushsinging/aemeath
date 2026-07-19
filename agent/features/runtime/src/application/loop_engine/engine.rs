@@ -148,7 +148,7 @@ where
     }
 
     log::debug!(
-        target: "aemeath:agent:runtime",
+        target: crate::LOG_TARGET,
         "[run_loop] entered run_id={} parent={} spec={:?}",
         run.id(),
         run.parent_id().map(|id| id.to_string()).unwrap_or_else(|| "none".into()),
@@ -240,7 +240,7 @@ where
                 .map(|v| v as u32)
                 .unwrap_or(0);
             log::info!(
-                target: "aemeath:agent:runtime",
+                target: crate::LOG_TARGET,
                 "token usage: input={} (cached {}) | output={} (cache_write {}) | reasoning={} | total={} | context_window={} | {pct}% \
                  | stop_reason={} | est: system={} tools={} messages={} total_est={}",
                 token_usage.input_tokens,
@@ -263,7 +263,7 @@ where
         run.record_model_invocation(&step_id, model_invocation(&model_step))?;
         run.transition(RunTransition::ModelInvoked)?;
         log::debug!(
-            target: "aemeath:agent:runtime",
+            target: crate::LOG_TARGET,
             "[run_loop] model_step={} run_id={}",
             model_step_label(&model_step),
             short(run.id()),
@@ -384,7 +384,7 @@ where
                     }
                 }
                 log::debug!(
-                    target: "aemeath:agent:runtime",
+                    target: crate::LOG_TARGET,
                     "[run_loop] execute_tools count={} run_id={}",
                     guarded_calls.len(),
                     short(run.id()),
@@ -517,7 +517,7 @@ where
     if run.status() != RunStatus::Cancelling {
         if !port.claim_cancellation(run.id()) {
             log::debug!(
-                target: "aemeath:agent:runtime",
+                target: crate::LOG_TARGET,
                 "[cancel_run] cancellation not claimed (owned by another port) run_id={}",
                 short(run.id()),
             );
@@ -528,14 +528,14 @@ where
             RunCancellationRequest::AlreadyTerminal => return Ok(()),
         }
         log::debug!(
-            target: "aemeath:agent:runtime",
+            target: crate::LOG_TARGET,
             "[cancel_run] phase1 CancellationRequested run_id={}",
             short(run.id()),
         );
         emit_events(run, port).await?;
     }
     log::debug!(
-        target: "aemeath:agent:runtime",
+        target: crate::LOG_TARGET,
         "[cancel_run] phase2 finish_cancellation run_id={}",
         short(run.id()),
     );

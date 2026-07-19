@@ -127,6 +127,7 @@
 //! }
 //! ```
 
+pub(crate) const LOG_TARGET: &str = "aemeath:agent:task";
 mod business;
 mod core;
 

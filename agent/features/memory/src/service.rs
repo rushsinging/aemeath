@@ -52,6 +52,25 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         policy: MemoryPolicy,
         clock: impl Fn() -> u64 + Send + Sync + 'static,
     ) -> Result<Self, MemoryError> {
+        log::debug!(target: crate::LOG_TARGET, "open_with_clock enter");
+        let outcome = Self::load_open(store, policy, clock).await;
+        match &outcome {
+            Ok(_) => log::debug!(target: crate::LOG_TARGET, "open_with_clock ok"),
+            Err(error) => log::debug!(target: crate::LOG_TARGET, "open_with_clock error: {error}"),
+        }
+        outcome
+    }
+
+    /// Loads both layers and assembles the service without logging. The public
+    /// `open_with_clock` wraps this so every open records an enter marker and a
+    /// success/failure exit marker. Keeping the typed `MemoryError` unchanged
+    /// means the exit log only carries the error's Display form (which never
+    /// embeds memory content), never the raw error value.
+    async fn load_open(
+        store: S,
+        policy: MemoryPolicy,
+        clock: impl Fn() -> u64 + Send + Sync + 'static,
+    ) -> Result<Self, MemoryError> {
         validate_policy(policy)?;
         let global = load_layer(&store, MemoryLayer::Global).await?;
         let project = load_layer(&store, MemoryLayer::Project).await?;
@@ -341,7 +360,10 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
         &self,
         output: &ReflectionOutput,
     ) -> Result<ReflectionApplyResult, MemoryError> {
-        let mut result = ReflectionApplyResult::default();
+        // Validate the whole model-produced batch before the first durable write.
+        // This prevents malformed later suggestions/ids from causing the common
+        // form of partial application.
+        let mut prepared = Vec::with_capacity(output.suggested_memories.len());
         for suggestion in &output.suggested_memories {
             let now = (self.clock)();
             let id = reflection_memory_id(now)?;
@@ -354,27 +376,49 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 MemorySource::Llm,
             )?;
             entry.tags = suggestion.tags.clone();
+            prepared.push(entry);
+        }
+        let outdated = output
+            .outdated_memories
+            .iter()
+            .map(MemoryId::new)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut result = ReflectionApplyResult {
+            attempted: prepared.len() + outdated.len(),
+            ..ReflectionApplyResult::default()
+        };
+        for entry in prepared {
             let policy = self.policy;
-            let write_result = self
+            let write_result = match self
                 .mutate_layer(entry.layer, move |dataset| {
                     apply_reflection_entry(dataset, &entry, policy)
                 })
-                .await?;
+                .await
+            {
+                Ok(value) => value,
+                Err(error) => return Err(partial_apply_or(error, &result)),
+            };
             match write_result {
                 WriteResult::Added { .. } | WriteResult::Merged { .. } => {
                     result.suggestions_added += 1;
                 }
                 WriteResult::NeedsEviction { .. } => {
-                    return Err(reflection_capacity_error());
+                    return Err(partial_apply_or(reflection_capacity_error(), &result));
                 }
                 WriteResult::NoOp => {}
             }
+            result.completed += 1;
         }
-
-        for raw_id in &output.outdated_memories {
-            let id = MemoryId::new(raw_id)?;
-            if self.mark_outdated(&id).await? {
-                result.outdated_marked += 1;
+        for id in outdated {
+            match self.mark_outdated(&id).await {
+                Ok(marked) => {
+                    if marked {
+                        result.outdated_marked += 1;
+                    }
+                    result.completed += 1;
+                }
+                Err(error) => return Err(partial_apply_or(error, &result)),
             }
         }
         Ok(result)
@@ -454,6 +498,19 @@ fn reflection_memory_id(now: u64) -> Result<MemoryId, MemoryError> {
 fn reflection_capacity_error() -> MemoryError {
     MemoryError::InvalidEntry {
         message: "Reflection 淘汰非 pinned 候选后重试一次仍超过记忆容量".to_string(),
+    }
+}
+
+fn partial_apply_or(error: MemoryError, result: &ReflectionApplyResult) -> MemoryError {
+    if result.completed == 0 {
+        error
+    } else {
+        MemoryError::PartialApply {
+            result_attempted: result.attempted,
+            result_completed: result.completed,
+            suggestions_added: result.suggestions_added,
+            outdated_marked: result.outdated_marked,
+        }
     }
 }
 
@@ -1050,5 +1107,139 @@ mod tests {
         service.stats();
         assert_eq!(observer.calls(MemoryLayer::Global), (1, 0));
         assert_eq!(observer.calls(MemoryLayer::Project), (1, 0));
+    }
+
+    // -----------------------------------------------------------------
+    // open_with_clock logging contract.
+    //
+    // A thread-local capturing logger records only memory-target records so
+    // tests can assert the enter / success-exit / failure-exit markers that
+    // the *real* entry point emits — without touching production code and
+    // without leaking memory content into any log line.
+    // -----------------------------------------------------------------
+
+    thread_local! {
+        static CAPTURED_MEMORY_LOGS: std::cell::RefCell<Vec<(log::Level, String)>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    struct CapturingLogger;
+
+    impl log::Log for CapturingLogger {
+        fn enabled(&self, _metadata: &log::Metadata) -> bool {
+            true
+        }
+
+        fn log(&self, record: &log::Record) {
+            if record.target() == crate::LOG_TARGET {
+                CAPTURED_MEMORY_LOGS.with(|cell| {
+                    cell.borrow_mut()
+                        .push((record.level(), format!("{}", record.args())));
+                });
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    /// Installs the capturing logger exactly once per test process. Safe to
+    /// call from every test: `log::set_logger` only succeeds once, later
+    /// calls are no-ops via `Once`. Capture storage is thread-local, so
+    /// tests running on separate OS threads never observe each other's
+    /// captured records.
+    fn install_capturing_logger() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            log::set_boxed_logger(Box::new(CapturingLogger))
+                .expect("capturing logger must install exactly once per process");
+            log::set_max_level(log::LevelFilter::Trace);
+        });
+    }
+
+    fn drain_captured_memory_logs() -> Vec<(log::Level, String)> {
+        CAPTURED_MEMORY_LOGS.with(|cell| std::mem::take(&mut *cell.borrow_mut()))
+    }
+
+    #[tokio::test]
+    async fn open_with_clock_logs_enter_and_success_exit_without_memory_content() {
+        install_capturing_logger();
+        drain_captured_memory_logs();
+
+        let secret = "DO-NOT-LOG-THIS-MEMORY-CONTENT";
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![entry(MemoryLayer::Project, secret)],
+                ))],
+                vec![],
+            ),
+        );
+
+        MemoryService::open_with_clock(store, MemoryPolicy::default(), || 0)
+            .await
+            .expect("open must succeed with a valid policy and store");
+
+        let logs = drain_captured_memory_logs();
+        let payloads: Vec<&str> = logs.iter().map(|(_, msg)| msg.as_str()).collect();
+        assert!(
+            payloads.iter().any(|msg| msg.contains("enter")),
+            "open_with_clock must log an enter record, got {payloads:?}"
+        );
+        assert!(
+            payloads.iter().any(|msg| msg.contains("ok")),
+            "open_with_clock must log a success-exit record, got {payloads:?}"
+        );
+        // The success path loaded a project layer carrying sensitive content;
+        // none of the emitted records may echo it back.
+        assert!(
+            !payloads.iter().any(|msg| msg.contains(secret)),
+            "open_with_clock logs must not contain memory content, got {payloads:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn open_with_clock_logs_enter_and_failure_exit_without_memory_content() {
+        install_capturing_logger();
+        drain_captured_memory_logs();
+
+        let secret = "DO-NOT-LOG-THIS-MEMORY-CONTENT";
+        let store = ScriptedStore::new(
+            layer_script(
+                vec![Ok(committed(
+                    1,
+                    MemoryLayer::Global,
+                    vec![entry(MemoryLayer::Global, secret)],
+                ))],
+                vec![],
+            ),
+            layer_script(vec![Err(storage(MemoryStorageErrorKind::Io))], vec![]),
+        );
+
+        let error = match MemoryService::open_with_clock(store, MemoryPolicy::default(), || 0).await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("open must fail when the project layer load errors"),
+        };
+        assert_eq!(error, storage(MemoryStorageErrorKind::Io));
+
+        let logs = drain_captured_memory_logs();
+        let payloads: Vec<&str> = logs.iter().map(|(_, msg)| msg.as_str()).collect();
+        assert!(
+            payloads.iter().any(|msg| msg.contains("enter")),
+            "open_with_clock must log an enter record, got {payloads:?}"
+        );
+        assert!(
+            payloads.iter().any(|msg| msg.contains("error")),
+            "open_with_clock must log a failure-exit record, got {payloads:?}"
+        );
+        // The global layer carrying sensitive content *was* loaded before the
+        // project load failed; the failure-exit record must not echo it.
+        assert!(
+            !payloads.iter().any(|msg| msg.contains(secret)),
+            "open_with_clock logs must not contain memory content, got {payloads:?}"
+        );
     }
 }
