@@ -9,16 +9,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::adapters::http_attempt::{
     AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
-    HttpFailureKind, NetworkFailureKind,
 };
-use crate::adapters::stream::{parse_invocation_stream, parse_stream};
-use crate::domain::invoke::{CreateMessageRequest, StreamResponse, SystemBlock};
-use crate::ports::{LegacyStreamSink, LlmProvider};
+use crate::adapters::stream::parse_invocation_stream;
+use crate::domain::invoke::{CreateMessageRequest, SystemBlock};
+use crate::ports::LlmProvider;
 
-use message_conversion::{
-    apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas,
-    send_message_non_stream, RequestParams, TrackingHandler,
-};
+use message_conversion::{apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas};
 
 pub struct AnthropicProvider {
     api_key: String,
@@ -26,8 +22,6 @@ pub struct AnthropicProvider {
     model: String,
     user_agent: String,
     http: reqwest::Client,
-    /// Maximum retry attempts (default 3)
-    max_retries: u32,
     /// Request timeout in seconds — stored for diagnostics; the value is applied
     /// to the reqwest client at construction time.
     #[allow(dead_code)]
@@ -52,17 +46,8 @@ impl AnthropicProvider {
                 .connect_timeout(std::time::Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
                 .build()
                 .expect("failed to create HTTP client"),
-            max_retries: 10,
             timeout_secs,
         }
-    }
-
-    /// Set maximum retry attempts
-    /// builder 方法当前无调用点，收窄可见性后暴露为孤儿，保留备用（refs #61 D3）。
-    #[allow(dead_code)]
-    pub fn with_max_retries(mut self, retries: u32) -> Self {
-        self.max_retries = retries;
-        self
     }
 
     /// Set request timeout in seconds (builder 旋钮，当前无外部调用点).
@@ -221,276 +206,18 @@ impl LlmProvider for AnthropicProvider {
     fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
         crate::ports::ReasoningLevel::Max
     }
-
-    async fn legacy_stream_message(
-        &self,
-        scope: &crate::InvocationScope,
-        system: &[SystemBlock],
-        messages: &[Message],
-        tool_schemas: &[serde_json::Value],
-        handler: &mut dyn LegacyStreamSink,
-        cancel: &CancellationToken,
-    ) -> Result<StreamResponse, crate::LlmError> {
-        let mut api_messages = convert_messages(messages);
-
-        // 断点③：在 messages 倒数第二条消息上注入 cache_control，
-        // 让 Anthropic 缓存整个对话历史前缀。配合断点①（system static）
-        // 和断点②（tools），共使用 3/4 个允许的断点。
-        apply_message_cache_breakpoint(&mut api_messages);
-
-        // 先清洗 tool schema（移除 data_schema 等内部扩展字段），再为
-        // 最后一个 tool 追加 cache_control 断点，让 Anthropic 缓存整个
-        // tools schema（≈6K tokens）。后续 turn 命中 cache 后固定开销
-        // 成本降至约 1/10。Anthropic 原生支持 tools 数组缓存。
-        let mut cached_tools = sanitize_tool_schemas(tool_schemas);
-        if let Some(last_tool) = cached_tools.last_mut() {
-            if let Some(obj) = last_tool.as_object_mut() {
-                obj.insert(
-                    "cache_control".to_string(),
-                    serde_json::json!({"type": "ephemeral"}),
-                );
-            }
-        }
-        let effort = match scope.effective_reasoning() {
-            crate::ports::ReasoningLevel::Off => None,
-            level => Some(level.as_str().to_string()),
-        };
-        let request = CreateMessageRequest::new(
-            scope.model().to_string(),
-            scope.max_tokens(),
-            effort,
-            system.to_vec(),
-            api_messages,
-            cached_tools,
-            true,
-        );
-
-        let headers = self.build_headers()?;
-
-        let request_json = request.clone().into_json();
-        let request_bytes = serde_json::to_string(&request_json)
-            .map(|value| value.len())
-            .unwrap_or(0);
-        let endpoint = format!("{}/v1/messages", self.base_url);
-        let mut last_error = None;
-        for attempt in 0..self.max_retries {
-            if cancel.is_cancelled() {
-                return Err(crate::LlmError::Cancelled);
-            }
-
-            if attempt > 0 {
-                let delay =
-                    std::time::Duration::from_millis((1000 * 2u64.pow(attempt)).min(30_000));
-                tokio::select! {
-                    biased;
-                    _ = cancel.cancelled() => {
-                        return Err(crate::LlmError::Cancelled);
-                    }
-                    _ = tokio::time::sleep(delay) => {}
-                }
-            }
-
-            let context = HttpAttemptContext {
-                driver: "anthropic",
-                api: "messages_stream",
-                provider: "anthropic",
-                model: scope.model(),
-                method: "POST",
-                endpoint: &endpoint,
-                attempt: attempt + 1,
-                max_attempts: self.max_retries,
-                message_count: messages.len(),
-                tool_count: tool_schemas.len(),
-                request_bytes,
-            };
-
-            let response = match HttpAttemptExecutor::execute(
-                self.http
-                    .post(&endpoint)
-                    .headers(headers.clone())
-                    .json(&request_json),
-                &context,
-                cancel,
-            )
-            .await
-            {
-                Ok(success) => success.response,
-                Err(failure) => {
-                    let remaining = self.max_retries.saturating_sub(attempt + 1);
-                    // Disposition must reflect the driver's actual,
-                    // post-classification control-flow decision below — not
-                    // a pre-guess made before the failure kind was known.
-                    // Client/ContextTooLong are unconditionally terminal
-                    // regardless of remaining retry budget.
-                    let disposition = match &failure {
-                        HttpAttemptFailure::Cancelled => AttemptDisposition::FinalFailure,
-                        HttpAttemptFailure::Network { .. } => {
-                            AttemptDisposition::from_remaining(remaining)
-                        }
-                        HttpAttemptFailure::Http { kind, .. } => match kind {
-                            HttpFailureKind::RateLimited | HttpFailureKind::Server => {
-                                AttemptDisposition::from_remaining(remaining)
-                            }
-                            HttpFailureKind::ContextTooLong
-                            | HttpFailureKind::Client
-                            | HttpFailureKind::Authentication
-                            | HttpFailureKind::PermissionDenied
-                            | HttpFailureKind::ModelUnavailable => AttemptDisposition::FinalFailure,
-                        },
-                    };
-                    // 单次记录：typed 分类决定 disposition 后，消费式
-                    // failure.log(disposition) 只记一次，反映真实终态。
-                    failure.log(disposition);
-                    match failure {
-                        HttpAttemptFailure::Cancelled => {
-                            return Err(crate::LlmError::Cancelled);
-                        }
-                        HttpAttemptFailure::Network { source, kind, .. } => {
-                            let detail = match kind {
-                                NetworkFailureKind::Connect => "connection failed",
-                                NetworkFailureKind::Timeout => "request timed out",
-                                NetworkFailureKind::Redirect => "too many redirects",
-                                NetworkFailureKind::Request => "request build error",
-                                NetworkFailureKind::Body => "request body error",
-                                NetworkFailureKind::Decode => "response decode error",
-                                NetworkFailureKind::Unknown => "unknown",
-                            };
-                            if remaining > 0 {
-                                handler.on_error(&format!(
-                                    "network error ({detail}), retrying ({}/{})...",
-                                    attempt + 2,
-                                    self.max_retries
-                                ));
-                            }
-                            let mut msg = format!("{} ({})\n  URL: {}", source, detail, endpoint);
-                            let mut cause: Option<&dyn std::error::Error> =
-                                std::error::Error::source(&source);
-                            let mut depth = 1;
-                            while let Some(c) = cause {
-                                msg.push_str(&format!("\n  Cause #{}: {}", depth, c));
-                                cause = c.source();
-                                depth += 1;
-                            }
-                            last_error = Some(crate::LlmError::Network(msg));
-                            continue;
-                        }
-                        HttpAttemptFailure::Http {
-                            status, kind, body, ..
-                        } => match kind {
-                            HttpFailureKind::RateLimited => {
-                                if remaining > 0 {
-                                    handler.on_error(&format!(
-                                        "rate limited ({}), retrying ({}/{})...",
-                                        status,
-                                        attempt + 2,
-                                        self.max_retries
-                                    ));
-                                }
-                                last_error = Some(crate::LlmError::RateLimited);
-                                continue;
-                            }
-                            HttpFailureKind::ContextTooLong => {
-                                return Err(crate::LlmError::ContextTooLong);
-                            }
-                            HttpFailureKind::Server => {
-                                if remaining > 0 {
-                                    handler.on_error(&format!(
-                                        "server error ({}), retrying ({}/{})...",
-                                        status,
-                                        attempt + 2,
-                                        self.max_retries
-                                    ));
-                                }
-                                last_error = Some(crate::LlmError::Api {
-                                    error_type: status.to_string(),
-                                    message: body.text().to_string(),
-                                });
-                                continue;
-                            }
-                            // Authentication / permission / model-unavailable
-                            // are unconditionally terminal alongside a generic
-                            // client error: surface a non-retryable Api error
-                            // immediately (legacy behavior preserved, match
-                            // made exhaustive over the widened HttpFailureKind).
-                            HttpFailureKind::Client
-                            | HttpFailureKind::Authentication
-                            | HttpFailureKind::PermissionDenied
-                            | HttpFailureKind::ModelUnavailable => {
-                                return Err(crate::LlmError::Api {
-                                    error_type: status.to_string(),
-                                    message: body.text().to_string(),
-                                });
-                            }
-                        },
-                    }
-                }
-            };
-
-            let mut tracking = TrackingHandler::new(handler);
-            let stream_result = parse_stream(response, &mut tracking, cancel).await;
-            let emitted = tracking.emitted;
-            match stream_result {
-                Ok(resp) => return Ok(resp),
-                Err(crate::LlmError::Stream(ref msg)) if msg.contains("interrupted") => {
-                    return Err(crate::LlmError::Stream(msg.clone()));
-                }
-                Err(crate::LlmError::Stream(msg)) => {
-                    // Streaming failed for non-cancel reason.
-                    // Only fall back to non-streaming if no partial output was emitted;
-                    // otherwise retrying would duplicate already-rendered text in the UI.
-                    if emitted {
-                        return Err(crate::LlmError::Stream(format!(
-                            "stream interrupted after partial output: {msg}"
-                        )));
-                    }
-                    let effort = match scope.effective_reasoning() {
-                        crate::ports::ReasoningLevel::Off => None,
-                        level => Some(level.as_str().to_string()),
-                    };
-                    let params = RequestParams {
-                        model: scope.model().to_string(),
-                        max_tokens: scope.max_tokens(),
-                        effort,
-                        base_url: self.base_url.clone(),
-                        headers: self.build_headers()?,
-                        http: &self.http,
-                    };
-                    return send_message_non_stream(
-                        params,
-                        system,
-                        messages,
-                        tool_schemas,
-                        handler,
-                        cancel,
-                    )
-                    .await;
-                }
-                Err(e) => return Err(e),
-            }
-        }
-
-        Err(last_error.unwrap_or(crate::LlmError::Network("max retries exceeded".to_string())))
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::AnthropicProvider;
     use crate::domain::invoke::{CreateMessageRequest, InvocationScope};
-    use crate::ports::{LegacyStreamSink, LlmProvider, ReasoningLevel};
+    use crate::ports::{LlmProvider, ReasoningLevel};
     use share::message::Message;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio::net::TcpListener;
     use tokio_util::sync::CancellationToken;
-
-    struct NoopHandler;
-
-    impl LegacyStreamSink for NoopHandler {
-        fn on_text(&mut self, _text: &str) {}
-        fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
-        fn on_error(&mut self, _error: &str) {}
-    }
 
     /// Spawn a server that returns `raw_response` for every request and counts
     /// how many requests it has served.
@@ -528,8 +255,7 @@ mod tests {
             8192,
             ReasoningLevel::Off,
             60,
-        )
-        .with_max_retries(10);
+        );
         let scope =
             InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
@@ -573,19 +299,20 @@ mod tests {
         );
         let leaked: &'static str = Box::leak(response.into_boxed_str());
         let (base_url, request_count) = spawn_counting_server(leaked).await;
-        let client = crate::LlmClient::from_config(crate::LlmConfigOptions {
-            driver: crate::ProviderDriverKind::Anthropic.as_str().to_string(),
-            source_key: "anthropic".to_string(),
-            api_style: None,
-            api_key: "test-key".to_string(),
-            base_url: Some(base_url),
-            model: "test-model".to_string(),
-            max_tokens: 8192,
-            reasoning: false,
-            reasoning_config: None,
-            timeout_secs: 60,
-        })
-        .expect("valid anthropic config");
+        let client =
+            crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptions {
+                driver: crate::ProviderDriverKind::Anthropic.as_str().to_string(),
+                source_key: "anthropic".to_string(),
+                api_style: None,
+                api_key: "test-key".to_string(),
+                base_url: Some(base_url),
+                model: "test-model".to_string(),
+                max_tokens: 8192,
+                reasoning: false,
+                reasoning_config: None,
+                timeout_secs: 60,
+            })
+            .expect("valid anthropic config");
         let scope =
             InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
@@ -674,11 +401,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_stream_message_returns_context_too_long_on_413_without_retrying() {
+    async fn invocation_stream_returns_context_too_long_on_413_without_retrying() {
         // 413 → HttpAttemptFailure::Http { kind: ContextTooLong } → driver
-        // returns LlmError::ContextTooLong immediately. Verifies that the
+        // returns ProviderError::ContextTooLong immediately. Verifies that the
         // executor-driven path preserves the original "no retry on 413"
-        // policy.
+        // policy in the single-attempt pull-stream entry.
         let response =
             "HTTP/1.1 413 Payload Too Large\r\ncontent-length: 17\r\n\r\n{\"err\":\"too big\"}";
         let (base_url, request_count) = spawn_counting_server(response).await;
@@ -695,16 +422,17 @@ mod tests {
             InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
         let cancel = CancellationToken::new();
-        let messages = vec![Message::user("hi")];
-        let mut handler = NoopHandler;
 
-        let err = provider
-            .legacy_stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
-            .await
-            .expect_err("expected 413 → LlmError::ContextTooLong");
+        let result = provider
+            .invocation_stream(&scope, &[], &[Message::user("hi")], &[], &cancel)
+            .await;
+        let err = match result {
+            Ok(_) => panic!("expected 413 → ProviderError::ContextTooLong, got Ok"),
+            Err(err) => err,
+        };
 
         assert!(
-            matches!(err, crate::LlmError::ContextTooLong),
+            err.kind == crate::ProviderErrorKind::ContextTooLong,
             "expected ContextTooLong, got {err:?}"
         );
         assert_eq!(
@@ -715,10 +443,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_stream_message_returns_api_error_on_400_without_retrying() {
+    async fn invocation_stream_returns_upstream_unavailable_on_400_without_retrying() {
         // 400 → HttpAttemptFailure::Http { kind: Client } → driver returns
-        // LlmError::Api without retry. Verifies the executor-driven path
-        // preserves the "client error → terminal" policy.
+        // ProviderError::UpstreamUnavailable without retry. Verifies the
+        // executor-driven path preserves the "client error → terminal" policy.
         let response = "HTTP/1.1 400 Bad Request\r\ncontent-length: 10\r\n\r\n{\"e\":\"bad\"}";
         let (base_url, request_count) = spawn_counting_server(response).await;
 
@@ -734,18 +462,20 @@ mod tests {
             InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
         let cancel = CancellationToken::new();
-        let messages = vec![Message::user("hi")];
-        let mut handler = NoopHandler;
 
-        let err = provider
-            .legacy_stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
-            .await
-            .expect_err("expected 400 → LlmError::Api");
+        let result = provider
+            .invocation_stream(&scope, &[], &[Message::user("hi")], &[], &cancel)
+            .await;
+        let err = match result {
+            Ok(_) => panic!("expected 400 → ProviderError::InvalidRequest, got Ok"),
+            Err(err) => err,
+        };
 
         assert!(
-            matches!(err, crate::LlmError::Api { ref error_type, .. } if error_type == "400 Bad Request"),
-            "expected Api(400), got {err:?}"
+            err.kind == crate::ProviderErrorKind::InvalidRequest,
+            "expected InvalidRequest (400), got {err:?}"
         );
+        assert!(!err.retryable, "InvalidRequest (400) must be non-retryable");
         assert_eq!(
             request_count.load(Ordering::SeqCst),
             1,
@@ -754,11 +484,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_stream_message_retries_429_then_returns_rate_limited() {
-        // 429 → HttpAttemptFailure::Http { kind: RateLimited } → driver
-        // continues the retry loop. After max_retries is exhausted, the loop
-        // falls through to Err(last_error) which is RateLimited. The executor
-        // path replaces the prior inline 429 branch.
+    async fn invocation_stream_returns_retryable_rate_limited_on_429() {
+        // 429 → HttpAttemptFailure::Http { kind: RateLimited } → driver maps to
+        // a single-attempt retryable ProviderError::RateLimited. P6 retry
+        // ownership is intentionally out of scope here (Runtime owns retry),
+        // so we only assert the typed single-attempt classification.
         let response = "HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n";
         let (base_url, request_count) = spawn_counting_server(response).await;
 
@@ -769,28 +499,32 @@ mod tests {
             8192,
             ReasoningLevel::Off,
             60,
-        )
-        .with_max_retries(2);
+        );
         let scope =
             InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
         let cancel = CancellationToken::new();
-        let messages = vec![Message::user("hi")];
-        let mut handler = NoopHandler;
 
-        let err = provider
-            .legacy_stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
-            .await
-            .expect_err("expected retries exhausted → RateLimited");
+        let result = provider
+            .invocation_stream(&scope, &[], &[Message::user("hi")], &[], &cancel)
+            .await;
+        let err = match result {
+            Ok(_) => panic!("expected single-attempt 429 → ProviderError::RateLimited, got Ok"),
+            Err(err) => err,
+        };
 
         assert!(
-            matches!(err, crate::LlmError::RateLimited),
+            err.kind == crate::ProviderErrorKind::RateLimited,
             "expected RateLimited, got {err:?}"
+        );
+        assert!(
+            err.retryable,
+            "429 must surface as retryable to Runtime (P6 owns retry)"
         );
         assert_eq!(
             request_count.load(Ordering::SeqCst),
-            2,
-            "429 should be retried up to max_retries (policy preserved)"
+            1,
+            "single-attempt pull-stream entry must not retry internally"
         );
     }
 
@@ -858,17 +592,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_stream_message_400_with_remaining_attempts_logs_final_failure_disposition() {
+    async fn invocation_stream_400_logs_final_failure_disposition() {
         // 400 is unconditionally terminal per
-        // `legacy_stream_message_returns_api_error_on_400_without_retrying` above —
-        // the driver returns `Err` immediately regardless of how much retry
-        // budget remains. With the default `max_retries = 10`, attempt 0
-        // still has 9 attempts of budget remaining, so the driver's
-        // pre-classification `disposition` precompute
-        // (`remaining > 0 → RetryPlanned`) picks `RetryPlanned` even though
-        // the *actual* outcome for a Client-kind HTTP failure is always
-        // `FinalFailure`. The diagnostic log this failure emits must reflect
-        // the real (terminal) outcome, not the precompute.
+        // `invocation_stream_returns_upstream_unavailable_on_400_without_retrying`
+        // above — the driver returns `Err` immediately. The diagnostic log this
+        // failure emits must reflect the terminal outcome (`FinalFailure` →
+        // `Error` level), and `retryable` in the structured record must be
+        // false even though the retry budget had no chance to be exercised.
         install_capturing_logger();
         drain_captured_logs();
 
@@ -887,14 +617,14 @@ mod tests {
             InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
         let cancel = CancellationToken::new();
-        let messages = vec![Message::user("hi")];
-        let mut handler = NoopHandler;
 
-        let err = provider
-            .legacy_stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
-            .await
-            .expect_err("expected 400 → terminal LlmError::Api");
-        assert!(matches!(err, crate::LlmError::Api { .. }));
+        let result = provider
+            .invocation_stream(&scope, &[], &[Message::user("hi")], &[], &cancel)
+            .await;
+        match result {
+            Ok(_) => panic!("expected 400 → terminal ProviderError::InvalidRequest, got Ok"),
+            Err(err) => assert_eq!(err.kind, crate::ProviderErrorKind::InvalidRequest),
+        }
         assert_eq!(
             request_count.load(Ordering::SeqCst),
             1,
@@ -916,11 +646,8 @@ mod tests {
         assert_eq!(
             *level,
             log::Level::Error,
-            "expected FinalFailure disposition (Error level) for a terminal 400 with retry \
-             budget remaining, got {level:?} instead — the driver logs the pre-classification \
-             disposition (RetryPlanned, because `remaining attempts > 0`) instead of the \
-             post-classification terminal outcome (FinalFailure, because HttpFailureKind::Client \
-             is unconditionally terminal). payload={payload}"
+            "expected FinalFailure disposition (Error level) for a terminal 400, got {level:?} \
+             instead. payload={payload}"
         );
         assert!(
             payload.contains("\"retryable\":false"),

@@ -45,4 +45,4 @@ pub use input_log::logged_input_messages;
 pub use loop_context::{ChatLoopContext, SwitchClientFn};
 pub use loop_runner::process_chat_loop;
 pub use queue::{append_queued_input, QueueDrainPort, QueueFuture};
-pub(crate) use stream_handler::InvocationEventReducer;
+pub(crate) use stream_handler::{InvocationEventReducer, InvocationResponse};

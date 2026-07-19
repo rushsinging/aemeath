@@ -219,9 +219,7 @@ pub struct Usage {
     /// turns read from cache at a steep discount.
     #[serde(default, alias = "cache_creation_input_tokens")]
     pub cache_creation_tokens: Option<u32>,
-    /// Tokens consumed by reasoning/thinking.
-    /// Parsed from `completion_tokens_details.reasoning_tokens` (OpenAI-compatible)
-    /// or `usage.reasoning_tokens` (if provider supports it).
+    /// Tokens consumed by reasoning/thinking within the decoder's compatibility aggregate.
     #[serde(default)]
     pub reasoning_tokens: Option<u32>,
     /// Provider-normalized total tokens for this request.
@@ -236,6 +234,7 @@ pub struct Usage {
 
 impl Usage {
     pub fn normalized_total_tokens(&self, additional_input_tokens: u32) -> u32 {
+        let _reported_reasoning_tokens = self.reasoning_tokens;
         self.total_tokens.unwrap_or_else(|| {
             self.input_tokens
                 .saturating_add(additional_input_tokens)
@@ -320,7 +319,6 @@ impl StopReason {
 #[derive(Debug, Clone)]
 pub struct StreamResponse {
     pub assistant_message: share::message::Message,
-    pub usage: Usage,
     pub stop_reason: StopReason,
 }
 

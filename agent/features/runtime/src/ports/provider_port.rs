@@ -24,6 +24,7 @@ pub use provider::{
     ModelCapability, ModelId, ModelToolSchema, ProviderCompletion, ProviderContentBlock,
     ProviderError, ProviderErrorKind, ProviderStopReason as StopReason, ProviderToolCall,
     ProviderToolCallId, RawUsageSnapshot, ReasoningCapability, ReasoningMappingKind,
+    RequestSystemBlock,
 };
 
 // ReasoningLevel 已由 provider crate 从 core::provider re-export。
@@ -73,6 +74,7 @@ pub(crate) mod fake {
 
     use super::*;
     use futures::stream;
+    use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
     /// 可编程的 fake provider：按预设事件列表依次产出。
@@ -156,6 +158,23 @@ pub(crate) mod fake {
                 return Err(ProviderError::cancelled());
             }
             Ok(Self::happy_path_stream("hello"))
+        }
+    }
+
+    pub struct FakeProviderFactory;
+
+    impl crate::ports::ProviderFactory for FakeProviderFactory {
+        fn build(
+            &self,
+            spec: crate::ports::ProviderBuildSpec,
+        ) -> Result<crate::ports::ProviderBinding, ProviderError> {
+            Ok(crate::ports::ProviderBinding {
+                provider: Arc::new(FakeProvider::new()),
+                model: spec.model,
+                max_tokens: spec.max_tokens,
+                requested_reasoning: spec.requested_reasoning,
+                context_window: spec.context_window,
+            })
         }
     }
 

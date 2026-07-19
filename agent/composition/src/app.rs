@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use provider::LlmProviderGateway;
+use runtime::ProviderFactory;
 use sdk::{AgentClient, MemoryConfigView, SdkError, SkillView};
 use tools::ToolCatalogGateway;
 
@@ -31,14 +31,14 @@ pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
 
 pub struct FeatureGateways {
     pub tools: Arc<dyn ToolCatalogGateway>,
-    pub provider: Arc<dyn LlmProviderGateway>,
+    pub provider: Arc<dyn ProviderFactory>,
     pub policy: Arc<dyn policy::PolicyPort>,
 }
 
 impl FeatureGateways {
     pub fn new(
         tools: Arc<dyn ToolCatalogGateway>,
-        provider: Arc<dyn LlmProviderGateway>,
+        provider: Arc<dyn ProviderFactory>,
         policy: Arc<dyn policy::PolicyPort>,
     ) -> Self {
         Self {
@@ -51,7 +51,7 @@ impl FeatureGateways {
     pub fn wire_default(policy: Arc<dyn policy::PolicyPort>) -> Self {
         Self::new(
             crate::tools::wire_tools(),
-            crate::provider::wire_provider(),
+            crate::provider::provider_factory(),
             policy,
         )
     }
@@ -239,10 +239,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config).await?;
     let launch = runtime_client.tui_launch_context();
-    let thinking = !matches!(
-        launch.client.default_scope().effective_reasoning(),
-        provider::ReasoningLevel::Off
-    );
+    let thinking = launch.binding.requested_reasoning != provider::ReasoningLevel::Off;
     let client = agent_client_from_runtime(runtime_client);
     let cwd = launch.workspace_root.clone();
 
@@ -262,15 +259,10 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
-    use provider::{
-        InvocationScope, InvocationStream, LlmClient, LlmClientPool, LlmConfigOptions, LlmError,
-        LlmProvider, LlmProviderGateway, ProviderError, SystemBlock,
-    };
-    use share::config::{Config, ModelsConfig};
-    use share::message::Message;
+    use provider::ProviderError;
+    use runtime::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
+    use share::config::Config;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use tokio_util::sync::CancellationToken;
     use tools::composition::CountingToolCatalogGateway;
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -340,42 +332,14 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct CountingProviderGateway {
-        client_from_config_calls: AtomicUsize,
+    struct CountingProviderFactory {
+        build_calls: AtomicUsize,
     }
 
-    #[async_trait]
-    impl LlmProviderGateway for CountingProviderGateway {
-        fn client_from_provider(&self, provider: Arc<dyn LlmProvider>) -> LlmClient {
-            provider::wire_provider().client_from_provider(provider)
-        }
-
-        fn client_from_config(&self, options: LlmConfigOptions) -> Result<LlmClient, LlmError> {
-            self.client_from_config_calls.fetch_add(1, Ordering::SeqCst);
-            provider::wire_provider().client_from_config(options)
-        }
-
-        fn client_pool(
-            &self,
-            default_client: Arc<LlmClient>,
-            models_config: Arc<ModelsConfig>,
-            timeout_secs: u64,
-        ) -> LlmClientPool {
-            provider::wire_provider().client_pool(default_client, models_config, timeout_secs)
-        }
-
-        async fn invocation_stream(
-            &self,
-            client: &LlmClient,
-            scope: &InvocationScope,
-            system: &[SystemBlock],
-            messages: &[Message],
-            tool_schemas: &[serde_json::Value],
-            cancel: &CancellationToken,
-        ) -> Result<InvocationStream, ProviderError> {
-            provider::wire_provider()
-                .invocation_stream(client, scope, system, messages, tool_schemas, cancel)
-                .await
+    impl ProviderFactory for CountingProviderFactory {
+        fn build(&self, spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError> {
+            self.build_calls.fetch_add(1, Ordering::SeqCst);
+            crate::provider::provider_factory().build(spec)
         }
     }
 
@@ -415,7 +379,7 @@ mod tests {
 
         let _env = EnvGuard::set(&agents_dir, temp.path());
 
-        let provider = Arc::new(CountingProviderGateway::default());
+        let provider = Arc::new(CountingProviderFactory::default());
         let tools = Arc::new(CountingToolCatalogGateway::default());
         let gateways = FeatureGateways::new(
             tools.clone(),
@@ -434,7 +398,7 @@ mod tests {
         let result = build_agent_client_with_gateways(args, gateways).await;
 
         result.expect("build client with injected gateways");
-        assert_eq!(provider.client_from_config_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.build_calls.load(Ordering::SeqCst), 1);
         assert_eq!(tools.new_registry_calls(), 1);
         assert_eq!(tools.register_all_tools_calls(), 1);
     }

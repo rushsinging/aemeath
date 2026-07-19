@@ -7,8 +7,8 @@
 //! - `response.completed` — 含 usage
 
 use super::usage::parse_responses_usage;
+use crate::adapters::stream::InvocationSink;
 use crate::domain::invoke::{StopReason, StreamResponse, Usage};
-use crate::ports::LegacyStreamSink;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
 use std::io;
@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 /// 解析 Responses API SSE 流
 pub(crate) async fn parse_responses_stream(
     response: reqwest::Response,
-    handler: &mut dyn LegacyStreamSink,
+    handler: &mut dyn InvocationSink,
     cancel: &CancellationToken,
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
@@ -102,7 +102,7 @@ pub(crate) async fn parse_responses_stream(
         match event_type {
             "response.output_text.delta" => {
                 if let Some(delta) = event.get("delta").and_then(|d| d.as_str()) {
-                    handler.on_text(delta);
+                    handler.emit_text(delta);
                     current_text.push_str(delta);
                 }
             }
@@ -127,7 +127,7 @@ pub(crate) async fn parse_responses_stream(
                             .to_string();
                         function_calls
                             .insert(output_index, (call_id.clone(), name.clone(), String::new()));
-                        handler.on_tool_use_start(&name, Some(&call_id), output_index);
+                        handler.emit_tool_use_start(&name, Some(&call_id), output_index);
                     }
                 }
             }
@@ -141,7 +141,12 @@ pub(crate) async fn parse_responses_stream(
                     if let Some(entry) = function_calls.get_mut(&output_index) {
                         entry.2.push_str(delta);
                         let (call_id, name, args) = entry.clone();
-                        handler.on_tool_arguments_delta(output_index, &name, Some(&call_id), &args);
+                        handler.emit_tool_arguments_delta(
+                            output_index,
+                            &name,
+                            Some(&call_id),
+                            &args,
+                        );
                     }
                 }
             }
@@ -218,7 +223,6 @@ pub(crate) async fn parse_responses_stream(
 
     Ok(StreamResponse {
         assistant_message,
-        usage,
         stop_reason,
     })
 }

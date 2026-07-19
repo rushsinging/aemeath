@@ -1,3 +1,4 @@
+use crate::ports::ProviderPort;
 use memory::api::{
     MemoryLayer, MemoryPort, ReflectionApplyResult, ReflectionErrorCategory,
     ReflectionHistoryStore, ReflectionMessage, ReflectionOutput, ReflectionPromptPort,
@@ -247,10 +248,14 @@ impl ReflectionTaskAdapter {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn for_complete_reflection(
         timeout: std::time::Duration,
         config: share::config::MemoryConfig,
-        client: std::sync::Arc<provider::LlmClient>,
+        provider: std::sync::Arc<dyn ProviderPort>,
+        model: provider::ModelId,
+        max_tokens: u32,
+        requested_reasoning: provider::ReasoningLevel,
         system_prompt_text: impl Into<String>,
         lang: impl Into<String>,
         memory: std::sync::Arc<dyn MemoryPort>,
@@ -264,7 +269,8 @@ impl ReflectionTaskAdapter {
         let lang = std::sync::Arc::new(lang.into());
         let mut adapter = Self::new(timeout, move |request, _cancel| {
             let config = std::sync::Arc::clone(&config);
-            let client = std::sync::Arc::clone(&client);
+            let provider = std::sync::Arc::clone(&provider);
+            let model = model.clone();
             let system_prompt_text = std::sync::Arc::clone(&system_prompt_text);
             let lang = std::sync::Arc::clone(&lang);
             let memory = std::sync::Arc::clone(&memory);
@@ -284,7 +290,10 @@ impl ReflectionTaskAdapter {
                 execute_and_record(
                     request,
                     &config,
-                    &client,
+                    provider.as_ref(),
+                    &model,
+                    max_tokens,
+                    requested_reasoning,
                     &system_prompt_text,
                     &lang,
                     memory.as_ref(),
@@ -467,7 +476,10 @@ impl ReflectionTaskAdapter {
         &self,
         request: ReflectionTaskRequest,
         config: share::config::MemoryConfig,
-        client: std::sync::Arc<provider::LlmClient>,
+        provider: std::sync::Arc<dyn ProviderPort>,
+        model: provider::ModelId,
+        max_tokens: u32,
+        requested_reasoning: provider::ReasoningLevel,
         system_prompt_text: String,
         lang: String,
         memory: std::sync::Arc<dyn MemoryPort>,
@@ -490,7 +502,10 @@ impl ReflectionTaskAdapter {
                 execute_and_record(
                     request,
                     &config,
-                    client.as_ref(),
+                    provider.as_ref(),
+                    &model,
+                    max_tokens,
+                    requested_reasoning,
                     &system_prompt_text,
                     &lang,
                     memory.as_ref(),
@@ -588,7 +603,10 @@ fn completion_status_label(status: ReflectionTaskCompletionStatus) -> &'static s
 async fn execute_and_record(
     request: ReflectionTaskRequest,
     config: &share::config::MemoryConfig,
-    client: &provider::LlmClient,
+    provider: &dyn ProviderPort,
+    model: &provider::ModelId,
+    max_tokens: u32,
+    requested_reasoning: provider::ReasoningLevel,
     system_prompt_text: &str,
     lang: &str,
     memory: &dyn MemoryPort,
@@ -603,7 +621,10 @@ async fn execute_and_record(
         request.trigger.run_mode(),
         config,
         &request.messages,
-        client,
+        provider,
+        model,
+        max_tokens,
+        requested_reasoning,
         system_prompt_text,
         lang,
         memory,
@@ -674,7 +695,10 @@ pub async fn run_complete_reflection(
     mode: ReflectionRunMode,
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
-    client: &provider::LlmClient,
+    provider: &dyn ProviderPort,
+    model: &provider::ModelId,
+    max_tokens: u32,
+    requested_reasoning: provider::ReasoningLevel,
     system_prompt_text: &str,
     lang: &str,
     memory: &dyn MemoryPort,
@@ -699,8 +723,15 @@ pub async fn run_complete_reflection(
     let recent_summary = reflection.recent_messages_summary(&reflection_messages, usize::MAX);
     let prompt = reflection.build_prompt(&project_memory, &recent_summary, lang);
 
-    let (full_response, input_tokens, output_tokens) =
-        call_llm_for_reflection(client, &prompt, system_prompt_text).await?;
+    let (full_response, input_tokens, output_tokens) = call_llm_for_reflection(
+        provider,
+        model,
+        max_tokens,
+        requested_reasoning,
+        &prompt,
+        system_prompt_text,
+    )
+    .await?;
 
     let output = reflection
         .parse_output(&full_response)
@@ -776,24 +807,27 @@ fn should_run_reflection(mode: ReflectionRunMode, config: &share::config::Memory
 }
 
 async fn call_llm_for_reflection(
-    client: &provider::LlmClient,
+    provider: &dyn ProviderPort,
+    model: &provider::ModelId,
+    max_tokens: u32,
+    requested_reasoning: provider::ReasoningLevel,
     prompt: &str,
     system_prompt_text: &str,
 ) -> ReflectionResult<(String, u32, u32)> {
+    use crate::ports::provider_port::{InvocationOptions, InvocationRequest, RequestSystemBlock};
     use futures::StreamExt;
-    use provider::SystemBlock;
 
-    let system_blocks = vec![SystemBlock::dynamic(system_prompt_text.to_string())];
-    let messages = vec![share::message::Message::user(prompt)];
     let cancel = tokio_util::sync::CancellationToken::new();
-    let mut stream = client
-        .invocation_stream(
-            client.default_scope(),
-            &system_blocks,
-            &messages,
-            &[],
-            &cancel,
-        )
+    let request = InvocationRequest {
+        model: model.clone(),
+        cancellation: cancel.clone(),
+        messages: vec![share::message::Message::user(prompt)],
+        system: vec![RequestSystemBlock::Text(system_prompt_text.to_string())],
+        tools: vec![],
+        options: InvocationOptions::new(max_tokens, requested_reasoning),
+    };
+    let mut stream = provider
+        .invoke(request, &cancel)
         .await
         .map_err(|error| ReflectionError::LlmCall(error.to_string()))?;
     while let Some(event) = stream.next().await {
@@ -834,11 +868,14 @@ async fn call_llm_for_reflection(
 mod tests {
     use super::*;
     use crate::application::testing::text_completion_stream;
+    use crate::ports::provider_port::{
+        InvocationRequest, InvocationStream, ModelCapability, ModelId, ProviderError,
+        ProviderErrorKind, ReasoningCapability,
+    };
+    use crate::ports::ProviderPort;
     use async_trait::async_trait;
     use memory::api::{NoOpMemory, ReflectionEngine};
-    use provider::{InvocationStream, LlmProvider, ProviderError, SystemBlock};
     use std::sync::Arc;
-    use tokio_util::sync::CancellationToken;
 
     struct StaticProvider {
         response: String,
@@ -847,14 +884,30 @@ mod tests {
     }
 
     #[async_trait]
-    impl LlmProvider for StaticProvider {
-        async fn invocation_stream(
+    impl ProviderPort for StaticProvider {
+        fn capabilities(&self, model: &ModelId) -> Result<ModelCapability, ProviderError> {
+            if model.provider == "reflection-test-provider" {
+                Ok(ModelCapability {
+                    model: model.clone(),
+                    supports_tools: false,
+                    supports_parallel_tool_calls: false,
+                    supports_streaming: true,
+                    reasoning: ReasoningCapability::none(),
+                    context_limit: Some(8_192),
+                    output_limit: Some(4_096),
+                })
+            } else {
+                Err(ProviderError::fatal(
+                    ProviderErrorKind::ModelUnavailable,
+                    format!("unknown model: {model}"),
+                ))
+            }
+        }
+
+        async fn invoke(
             &self,
-            _scope: &provider::InvocationScope,
-            _system: &[SystemBlock],
-            _messages: &[share::message::Message],
-            _tool_schemas: &[serde_json::Value],
-            _cancel: &CancellationToken,
+            _request: InvocationRequest,
+            _cancel: &dyn crate::ports::provider_port::CancellationSignal,
         ) -> Result<InvocationStream, ProviderError> {
             Ok(text_completion_stream(
                 self.response.clone(),
@@ -862,22 +915,21 @@ mod tests {
                 self.output_tokens,
             ))
         }
+    }
 
-        fn model_name(&self) -> &str {
-            "reflection-test-model"
-        }
-
-        fn provider_name(&self) -> &str {
-            "reflection-test-provider"
+    fn reflection_model() -> ModelId {
+        ModelId {
+            provider: "reflection-test-provider".to_string(),
+            model: "reflection-test-model".to_string(),
         }
     }
 
-    fn client(response: &str) -> provider::LlmClient {
-        provider::LlmClient::from_provider(Arc::new(StaticProvider {
+    fn client(response: &str) -> Arc<dyn ProviderPort> {
+        Arc::new(StaticProvider {
             response: response.to_string(),
             input_tokens: 11,
             output_tokens: 22,
-        }))
+        })
     }
 
     #[tokio::test]
@@ -888,7 +940,10 @@ mod tests {
             ReflectionRunMode::Forced,
             &config,
             &[],
-            &client("not json"),
+            client("not json").as_ref(),
+            &reflection_model(),
+            4_096,
+            provider::ReasoningLevel::Off,
             "system",
             "en",
             &NoOpMemory,
@@ -906,7 +961,10 @@ mod tests {
             ReflectionRunMode::Forced,
             &config,
             &[share::message::Message::user("reflect")],
-            &client(r#"{"deviations":["drift"],"suggested_memories":[]}"#),
+            client(r#"{"deviations":["drift"],"suggested_memories":[]}"#).as_ref(),
+            &reflection_model(),
+            4_096,
+            provider::ReasoningLevel::Off,
             "system",
             "en",
             &NoOpMemory,
@@ -929,7 +987,10 @@ mod tests {
             ReflectionRunMode::Forced,
             &config,
             &[],
-            &client(r#"{"suggested_memories":[]}"#),
+            client(r#"{"suggested_memories":[]}"#).as_ref(),
+            &reflection_model(),
+            4_096,
+            provider::ReasoningLevel::Off,
             "system",
             "en",
             &NoOpMemory,
@@ -948,7 +1009,10 @@ mod tests {
             ReflectionRunMode::Forced,
             &config,
             &[],
-            &client("not json"),
+            client("not json").as_ref(),
+            &reflection_model(),
+            4_096,
+            provider::ReasoningLevel::Off,
             "system",
             "en",
             &NoOpMemory,
@@ -1056,24 +1120,20 @@ mod task_adapter_tests {
     struct PanicProvider;
 
     #[async_trait::async_trait]
-    impl provider::LlmProvider for PanicProvider {
-        async fn invocation_stream(
+    impl crate::ports::ProviderPort for PanicProvider {
+        async fn invoke(
             &self,
-            _scope: &provider::InvocationScope,
-            _system: &[provider::SystemBlock],
-            _messages: &[share::message::Message],
-            _tool_schemas: &[serde_json::Value],
-            _cancel: &CancellationToken,
+            _request: crate::ports::provider_port::InvocationRequest,
+            _cancel: &dyn crate::ports::provider_port::CancellationSignal,
         ) -> Result<provider::InvocationStream, provider::ProviderError> {
             panic!("disabled reflection must not invoke provider")
         }
 
-        fn model_name(&self) -> &str {
-            "disabled-test"
-        }
-
-        fn provider_name(&self) -> &str {
-            "disabled-test"
+        fn capabilities(
+            &self,
+            _model: &provider::ModelId,
+        ) -> Result<crate::ports::provider_port::ModelCapability, provider::ProviderError> {
+            panic!("disabled reflection must not query capabilities")
         }
     }
 
@@ -1085,7 +1145,13 @@ mod task_adapter_tests {
         let outcome = adapter.submit_complete(
             pre_compact_request(vec![share::message::Message::user("ignored")]),
             config,
-            Arc::new(provider::LlmClient::from_provider(Arc::new(PanicProvider))),
+            Arc::new(PanicProvider) as Arc<dyn crate::ports::ProviderPort>,
+            provider::ModelId {
+                provider: "reflection-test-provider".to_string(),
+                model: "reflection-test-model".to_string(),
+            },
+            4_096,
+            provider::ReasoningLevel::Off,
             String::new(),
             "en".to_string(),
             Arc::new(memory::api::NoOpMemory),

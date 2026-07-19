@@ -131,7 +131,25 @@ trait ProviderPort: Send + Sync {
 
 Provider BC 的 ACL / adapter 实现该 Runtime-owned SPI；完整 stream、client scope 与能力映射说明见 [Provider adapter design](../provider/02-ports-stream-and-client-scope.md)，但不得在那里复制 trait。
 
-> **v0.1.0 scope（#921 收缩）**：`resolve_invocation_options` 领域模型已完成迁移，但 Runtime **尚未**在生产链路调用该方法；effective reasoning 尚未端到端冻结。是否接线由 v0.2.0 #1142 决策。
+Runtime 同时拥有 `ProviderFactory` 与 `ProviderBinding`（定义在 `runtime::ports::provider_factory`）：
+
+```rust
+trait ProviderFactory: Send + Sync {
+    fn build(&self, spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError>;
+}
+
+struct ProviderBinding {
+    provider: Arc<dyn ProviderPort>,
+    model: ModelId,
+    max_tokens: u32,
+    requested_reasoning: ReasoningLevel,
+    context_window: Option<usize>,
+}
+```
+
+Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderFactory` / `ProviderBinding` / `ProviderPort` 与 Provider Published Language，**NEVER** 直接持有具体 client、pool 或 driver。Composition 实现 `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占构造——非 Composition crate **NEVER** 引用该模块或具体构造符号（`check-provider-construction-ownership.sh` 零白名单守卫锁定）。
+
+> **v0.1.0 scope（#921 收缩）**：`resolve_invocation_options` 领域模型已完成迁移，但 Runtime **尚未**在生产链路调用该方法；effective reasoning 尚未端到端冻结。是否接线由 v0.2.0 #1142 决策。#1142 仍延期，**NEVER** 冒充已完成。
 
 ### 2.2 Runtime-owned InteractionPort 与交互语言
 
@@ -405,6 +423,7 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 
 - **唯一生产装配入口**：`agent/composition`。Runtime 的 `domain/application/ports/adapters` 只定义领域行为、应用用例、边界契约与 Runtime-owned 转换，**NEVER** 选择具体生产实现或触发生产 factory。
 - `agent/composition` 持有各 Port 的具体实现或模块提供的 composition-only opaque wiring（provider driver / tool registry / storage / workspace / hook …），提供 `assemble()` 所需的 `root.*()` 工厂。
+- **Provider 构造独占（#907）**：Composition 实现 Runtime-owned `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占具体 provider client / driver / transport 构造。非 Composition crate **NEVER** 引用 `provider::composition` 或具体构造符号（`LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider`）。`check-provider-construction-ownership.sh` 守卫以零白名单与负向探针锁定此边界。
 - Runtime feature 内 **NEVER** 建立 `bootstrap/`、service locator 或第二个 Composition Root；现有 Runtime `utils/bootstrap` 的生产构造责任迁入 `agent/composition`，其余代码按单一 `agent_execution` 能力的六边形职责归位。
 - `RuntimeContext` 属 application：它只传递本 Run 的活契约，**NEVER** 进入 domain 或通用 shared，也 **NEVER** 保存具体 Provider、Registry、Store 或全局 Config reader。
 - Runtime 当前只有一个完整业务能力，因此 **NEVER** 添加单元素 `capabilities/agent_execution` 包装；没有真实跨 capability 复用内容时也 **NEVER** 创建 `shared/`。
@@ -445,6 +464,7 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-19 | #907 补入 Runtime-owned `ProviderFactory` / `ProviderBinding` / `ProviderBuildSpec` 契约定义；明确 Runtime Main/Sub/Reflection/Compact 只依赖这三个 port 与 PL，Composition 独占 `provider::composition` 构造面；#1142 resolver `build_window` 接线仍延期 | [#907](https://github.com/rushsinging/aemeath/issues/907) |
 | 2026-07-18 | #899 完成 Reflection 三 trigger Runtime 单槽异步、busy skip、静默完成、Memory-owned history append/query、`/reflect [limit]` 只读安全投影及 Run teardown drain/cancel timeout | #899 |
 | 2026-07-11 | 初稿：入站端口、出站端口签名、RuntimeContext 按 RunSpec 装配、Composition Root、ACL、实现缺口 | #761 |
 | 2026-07-11 | RuntimeContext/assemble 补入站端口 InputBuffer（Main=TUI 通道+buffer，Sub=固定队列）| #761 |

@@ -412,6 +412,7 @@ dependencies = [
  "audit",
  "config",
  "context",
+ "futures-util",
  "log",
  "logging",
  "memory",

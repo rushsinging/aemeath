@@ -1,4 +1,5 @@
 use crate::application::agent::ToolCall;
+use crate::application::chat::looping::InvocationResponse;
 use serde_json::json;
 use share::message::Message;
 
@@ -33,7 +34,7 @@ pub(crate) fn build_json_logger_input_data(
 }
 
 pub(crate) fn build_json_logger_output_data(
-    resp: &provider::StreamResponse,
+    resp: &InvocationResponse,
     elapsed_secs: f64,
     provider: &str,
 ) -> serde_json::Value {

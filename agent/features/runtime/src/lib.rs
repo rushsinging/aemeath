@@ -10,7 +10,7 @@ pub use application::client::{
     from_args_with_workspace, resume_session_to_backing, AgentClientImpl, ResumeError,
     RuntimeBootstrapDependencies,
 };
-pub use ports::UsageSink;
+pub use ports::{ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort, UsageSink};
 pub use sdk::{
     AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ProjectContext,
     SessionSnapshot, TaskSummary,

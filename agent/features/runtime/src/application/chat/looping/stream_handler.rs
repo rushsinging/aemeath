@@ -2,9 +2,24 @@ use crate::application::chat::looping::events::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
 use crate::application::tool_coordination::identity::ToolIdentityRegistry;
-use provider::{InvocationDelta, InvocationEvent};
+use crate::ports::RawUsageSnapshot;
+use provider::{InvocationDelta, InvocationEvent, ProviderStopReason};
 use share::message::{ContentBlock, Message, Role};
 use std::sync::{Arc, Mutex};
+
+/// Runtime-facing aggregated invocation result.
+///
+/// Built by [`InvocationEventReducer`] from a terminal `InvocationEvent::Completed`.
+/// Replaces the legacy provider response type which coupled to provider-internal `Usage`.
+#[derive(Debug)]
+pub struct InvocationResponse {
+    /// Assistant message assembled from the completion output.
+    pub assistant_message: Message,
+    /// Token usage snapshot from the provider (optional fields, `None` = unreported).
+    pub usage: RawUsageSnapshot,
+    /// Stop reason reported by the provider.
+    pub stop_reason: ProviderStopReason,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StreamingBlockKind {
@@ -80,7 +95,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
     pub fn apply(
         &mut self,
         event: InvocationEvent,
-    ) -> Result<Option<provider::StreamResponse>, provider::ProviderError> {
+    ) -> Result<Option<InvocationResponse>, provider::ProviderError> {
         match event {
             InvocationEvent::Delta(delta) => {
                 match delta {
@@ -160,33 +175,14 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                     })
                     .collect();
                 let usage = completion.usage.unwrap_or_default();
-                Ok(Some(provider::StreamResponse {
+                Ok(Some(InvocationResponse {
                     assistant_message: Message {
                         role: Role::Assistant,
                         content,
                         metadata: None,
                     },
-                    usage: provider::Usage {
-                        input_tokens: usage.input_tokens.unwrap_or(0),
-                        output_tokens: usage.output_tokens.unwrap_or(0),
-                        cached_tokens: usage.cache_read_tokens,
-                        cache_creation_tokens: usage.cache_write_tokens,
-                        reasoning_tokens: usage.reasoning_tokens,
-                        total_tokens: usage
-                            .input_tokens
-                            .zip(usage.output_tokens)
-                            .map(|(input, output)| input.saturating_add(output)),
-                    },
-                    stop_reason: match completion.stop_reason {
-                        provider::ProviderStopReason::EndTurn => provider::StopReason::EndTurn,
-                        provider::ProviderStopReason::ToolUse => provider::StopReason::ToolUse,
-                        provider::ProviderStopReason::MaxOutputTokens => {
-                            provider::StopReason::MaxTokens
-                        }
-                        provider::ProviderStopReason::ContentFiltered
-                        | provider::ProviderStopReason::StopSequence
-                        | provider::ProviderStopReason::Other(_) => provider::StopReason::EndTurn,
-                    },
+                    usage,
+                    stop_reason: completion.stop_reason,
                 }))
             }
             InvocationEvent::Failed(error) => {
@@ -424,7 +420,7 @@ mod invocation_reducer_tests {
             .unwrap()
             .expect("completion produces response");
         assert_eq!(response.assistant_message.text_content(), "hi");
-        assert_eq!(response.usage.input_tokens, 2);
+        assert_eq!(response.usage.input_tokens, Some(2));
         assert!(matches!(
             events.lock().unwrap().first(),
             Some(RuntimeStreamEvent::Text { text, .. }) if text == "hi"

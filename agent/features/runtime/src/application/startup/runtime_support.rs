@@ -1,8 +1,8 @@
 use crate::application::agent::runner as agent_runner;
 #[cfg(test)]
 use crate::application::startup::config_paths;
+use crate::ports::ProviderFactory;
 use hook::api::HookRunner;
-use provider::LlmClient;
 use share::config::hooks::HooksConfig;
 use share::config::{AgentsConfig, ModelsConfig};
 use std::path::Path;
@@ -32,10 +32,10 @@ pub fn start_session(resume_session_id: Option<String>) -> String {
 pub fn build_agent_runner(
     models: Option<&ModelsConfig>,
     agents: Option<&AgentsConfig>,
-    client: Arc<LlmClient>,
+    factory: Arc<dyn ProviderFactory>,
+    api_timeout_secs: u64,
     hook_runner: HookRunner,
     reasoning: bool,
-    timeout_secs: u64,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     policy: Arc<dyn policy::PolicyPort>,
     max_tool_concurrency: usize,
@@ -49,17 +49,16 @@ pub fn build_agent_runner(
     tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
 ) -> Arc<agent_runner::CliAgentRunner> {
     let models_config = Arc::new(models.cloned().unwrap_or_default());
-    let pool = build_llm_client_pool(agents, client.clone(), models_config.clone(), timeout_secs);
     let agents_config = Arc::new(agents.cloned().unwrap_or_default());
 
     Arc::new(agent_runner::CliAgentRunner {
-        client,
-        pool,
+        factory,
         active_run,
         agents_config,
         hook_runner,
         reasoning,
         models_config,
+        api_timeout_secs,
         max_tool_concurrency,
         agent_semaphore,
         tool_result_materializer,
@@ -73,23 +72,7 @@ pub fn build_agent_runner(
     })
 }
 
-fn build_llm_client_pool(
-    agents: Option<&AgentsConfig>,
-    client: Arc<LlmClient>,
-    models_config: Arc<share::config::ModelsConfig>,
-    timeout_secs: u64,
-) -> Option<Arc<provider::LlmClientPool>> {
-    if !has_multi_provider_or_agent_roles(agents, &models_config) {
-        return None;
-    }
-
-    Some(Arc::new(provider::LlmClientPool::new(
-        client,
-        models_config,
-        timeout_secs,
-    )))
-}
-
+#[cfg(test)]
 fn has_multi_provider_or_agent_roles(
     agents: Option<&AgentsConfig>,
     models_config: &share::config::ModelsConfig,
@@ -144,10 +127,10 @@ mod tests {
         let runner = build_agent_runner(
             None,
             None,
-            Arc::new(LlmClient::new(String::new())),
+            Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
+            30,
             HookRunner::empty(),
             false,
-            30,
             Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
             policy.clone(),
             10,

@@ -1,8 +1,8 @@
 use hook::api::HookRunner;
-use provider::LlmClient;
-use provider::LlmClientPool;
 use share::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
 use std::sync::Arc;
+
+use crate::ports::ProviderFactory;
 
 mod finalize;
 pub use finalize::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
@@ -15,10 +15,8 @@ mod setup;
 mod tests;
 
 pub struct CliAgentRunner {
-    /// Default LLM client (used when no model_spec is provided).
-    pub client: Arc<LlmClient>,
-    /// Client pool for multi-LLM routing. `None` if only one model is configured.
-    pub pool: Option<Arc<LlmClientPool>>,
+    /// Provider factory for building sub-agent bindings from model specs.
+    pub factory: Arc<dyn ProviderFactory>,
     /// Shared per-Run registry used by Main and every Sub Run.
     pub active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     /// Agent config for role resolution.
@@ -27,8 +25,10 @@ pub struct CliAgentRunner {
     pub hook_runner: HookRunner,
     /// Default reasoning setting for sub-agents (from config / CLI).
     pub reasoning: bool,
-    /// Model entries config for reasoning lookup.
+    /// Model entries config for reasoning lookup and ProviderBuildSpec construction.
     pub models_config: Arc<ModelsConfig>,
+    /// Per-request API timeout (seconds) forwarded to ProviderBuildSpec.
+    pub api_timeout_secs: u64,
     pub max_tool_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub tool_result_materializer:
