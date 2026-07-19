@@ -237,10 +237,8 @@ mod tests {
     use share::config::{Config, ModelsConfig};
     use share::message::Message;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use task::TaskAccess;
-    use tokio::sync::Mutex;
     use tokio_util::sync::CancellationToken;
-    use tools::{DefaultToolCatalogGateway, ToolCatalogGateway, ToolRegistry};
+    use tools::composition::CountingToolCatalogGateway;
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -348,71 +346,6 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
-    struct CountingToolGateway {
-        new_registry_calls: AtomicUsize,
-        register_all_tools_calls: AtomicUsize,
-    }
-
-    impl ToolCatalogGateway for CountingToolGateway {
-        fn new_registry(&self) -> ToolRegistry {
-            self.new_registry_calls.fetch_add(1, Ordering::SeqCst);
-            DefaultToolCatalogGateway.new_registry()
-        }
-
-        fn register_all_tools(
-            &self,
-            registry: &ToolRegistry,
-            task_access: Arc<dyn TaskAccess>,
-            skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
-            memory_source: Arc<dyn tools::MemoryPortSource>,
-            workspace_control: Arc<dyn project::WorkspaceControl>,
-        ) {
-            self.register_all_tools_calls.fetch_add(1, Ordering::SeqCst);
-            DefaultToolCatalogGateway.register_all_tools(
-                registry,
-                task_access,
-                skills,
-                memory_source,
-                workspace_control,
-            );
-        }
-
-        fn register_all_tools_except_agent(
-            &self,
-            registry: &ToolRegistry,
-            task_access: Arc<dyn TaskAccess>,
-            skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
-            memory_source: Arc<dyn tools::MemoryPortSource>,
-            workspace_control: Arc<dyn project::WorkspaceControl>,
-        ) {
-            DefaultToolCatalogGateway.register_all_tools_except_agent(
-                registry,
-                task_access,
-                skills,
-                memory_source,
-                workspace_control,
-            );
-        }
-
-        fn register_subagent_tools(
-            &self,
-            registry: &mut ToolRegistry,
-            task_access: Arc<dyn TaskAccess>,
-            skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
-            memory_source: Arc<dyn tools::MemoryPortSource>,
-            workspace_control: Arc<dyn project::WorkspaceControl>,
-        ) {
-            DefaultToolCatalogGateway.register_subagent_tools(
-                registry,
-                task_access,
-                skills,
-                memory_source,
-                workspace_control,
-            );
-        }
-    }
-
     #[tokio::test(flavor = "current_thread")]
     async fn build_agent_client_with_gateways_consumes_injected_provider_and_tools() {
         let temp = tempfile::tempdir().expect("create temp root");
@@ -450,7 +383,7 @@ mod tests {
         let _env = EnvGuard::set(&agents_dir, temp.path());
 
         let provider = Arc::new(CountingProviderGateway::default());
-        let tools = Arc::new(CountingToolGateway::default());
+        let tools = Arc::new(CountingToolCatalogGateway::default());
         let gateways = FeatureGateways::new(
             tools.clone(),
             provider.clone(),
@@ -469,8 +402,8 @@ mod tests {
 
         result.expect("build client with injected gateways");
         assert_eq!(provider.client_from_config_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(tools.new_registry_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(tools.register_all_tools_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(tools.new_registry_calls(), 1);
+        assert_eq!(tools.register_all_tools_calls(), 1);
     }
 
     #[test]

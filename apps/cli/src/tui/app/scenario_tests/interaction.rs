@@ -17,6 +17,7 @@ fn ask_user_selects_option_and_submits_reply() {
                 sdk::OptionItem::title_only("B"),
             ],
             multi_select: false,
+            allow_free_input: true,
             default: None,
         }],
         reply_tx,
@@ -28,7 +29,10 @@ fn ask_user_selects_option_and_submits_reply() {
     harness.key(input::press(KeyCode::Down, KeyModifiers::NONE));
     harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
     harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
-    assert_eq!(reply_rx.try_recv().expect("ask reply"), vec!["B"]);
+    assert_eq!(
+        reply_rx.try_recv().expect("ask reply"),
+        sdk::AskUserReply::Answers(vec!["B".to_string()])
+    );
     harness.render();
     insta::assert_snapshot!("ask_user__confirmed__100x30", harness.screen());
     harness.assert_idle();

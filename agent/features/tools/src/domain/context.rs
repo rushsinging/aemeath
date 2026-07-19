@@ -47,7 +47,7 @@ impl ExecutionScope {
             workspace_root,
             invocation_source: InvocationSource::MainRun,
             registry_scope: RegistryScopeName::new("main"),
-            profile: ToolProfileName::new("default"),
+            profile: ToolProfileName::new("main-full"),
             deadline: None,
         })
     }

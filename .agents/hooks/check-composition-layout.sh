@@ -88,8 +88,7 @@ else:
             "injected tool gateway parameter": r"tool_gateway\s*:\s*Arc<dyn tools::ToolCatalogGateway>",
             "injected policy parameter": r"policy\s*:\s*Arc<dyn policy::PolicyPort>",
             "provider gateway client construction": r"build_llm_client_with_gateway\s*\(\s*provider_gateway\.as_ref\(\)",
-            "tool gateway registry construction": r"tool_gateway\.new_registry\s*\(\)",
-            "tool gateway registration": r"tool_gateway\.register_all_tools\s*\(",
+            "tool factory construction": r"tools::composition::wire_builtin_catalog_execution\s*\(",
         }
         for label, pattern in required_patterns.items():
             if not re.search(pattern, text, re.DOTALL):

@@ -7,7 +7,7 @@ pub mod provider_client;
 pub mod runtime_support;
 
 pub use concurrency::resolve_concurrency_limits;
-pub use mcp_loader::spawn_mcp_connect;
+pub use mcp_loader::{load_mcp_manager, spawn_mcp_connect};
 pub use model_runtime::{resolve_model_runtime_settings, ModelRuntimeSettings};
 pub use provider_client::{
     build_llm_client, build_llm_client_with_gateway, resolve_api_key, resolve_base_url,

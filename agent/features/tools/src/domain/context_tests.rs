@@ -30,7 +30,7 @@ fn execution_scope_builder_uses_main_run_defaults() {
     assert_eq!(scope.parent_run_id(), None);
     assert_eq!(scope.invocation_source(), InvocationSource::MainRun);
     assert_eq!(scope.registry_scope().as_str(), "main");
-    assert_eq!(scope.profile().as_str(), "default");
+    assert_eq!(scope.profile().as_str(), "main-full");
     assert_eq!(scope.deadline(), None);
 }
 

@@ -17,7 +17,7 @@ use super::tools::{
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_non_agent<S>(
     context: &RuntimeTurnContext,
-    agent: &Agent<'_>,
+    agent: &Agent,
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
@@ -70,7 +70,7 @@ where
 #[allow(clippy::too_many_arguments)]
 async fn execute_multiple_non_agent<S>(
     context: &RuntimeTurnContext,
-    agent: &Agent<'_>,
+    agent: &Agent,
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
@@ -161,15 +161,14 @@ where
         .collect()
 }
 
-fn partition_calls(agent: &Agent<'_>, calls: &[&ToolCall]) -> (Vec<usize>, Vec<usize>) {
+fn partition_calls(agent: &Agent, calls: &[&ToolCall]) -> (Vec<usize>, Vec<usize>) {
     let mut concurrent_positions = Vec::new();
     let mut sequential_positions = Vec::new();
     for (i, call) in calls.iter().enumerate() {
         let is_safe = agent
-            .registry
-            .get(&call.name)
-            .map(|t| t.is_concurrency_safe())
-            .unwrap_or(false);
+            .catalog
+            .find(&tools::ToolName::new(&call.name))
+            .is_some_and(|descriptor| descriptor.is_concurrency_safe());
         if is_safe {
             concurrent_positions.push(i);
         } else {
@@ -190,7 +189,7 @@ fn cancelled_result(call: &ToolCall, language: &str) -> ToolExecution {
 #[allow(clippy::too_many_arguments)]
 async fn execute_one_non_agent<S>(
     context: &RuntimeTurnContext,
-    agent: &Agent<'_>,
+    agent: &Agent,
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
@@ -427,7 +426,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use serde_json::Value;
-    use tools::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
+    use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
     struct ConcurrencyFlagTool {
         name: &'static str,
@@ -482,7 +481,7 @@ mod tests {
 
     #[test]
     fn test_partition_calls_routes_concurrency_safe_tools_to_concurrent() {
-        let registry = ToolRegistry::new();
+        let registry = tools::composition::TestCatalogExecutionFactory::new();
         registry.register(ConcurrencyFlagTool {
             name: "safe_a",
             safe: true,
@@ -503,7 +502,7 @@ mod tests {
 
     #[test]
     fn test_partition_calls_routes_non_concurrency_safe_tools_to_sequential() {
-        let registry = ToolRegistry::new();
+        let registry = tools::composition::TestCatalogExecutionFactory::new();
         registry.register(ConcurrencyFlagTool {
             name: "unsafe_a",
             safe: false,
@@ -524,7 +523,7 @@ mod tests {
 
     #[test]
     fn test_partition_calls_preserves_mixed_positions() {
-        let registry = ToolRegistry::new();
+        let registry = tools::composition::TestCatalogExecutionFactory::new();
         registry.register(ConcurrencyFlagTool {
             name: "safe",
             safe: true,
@@ -545,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_partition_calls_routes_unknown_tools_to_sequential() {
-        let registry = ToolRegistry::new();
+        let registry = tools::composition::TestCatalogExecutionFactory::new();
         let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("missing", 0)];
         let refs = calls.iter().collect::<Vec<_>>();

@@ -5,9 +5,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, Notify};
-use tools::{
-    Tool, ToolExecutionContext, ToolRegistry, TypedTool, TypedToolAdapter, TypedToolResult,
-};
+use tools::composition::TestCatalogExecutionFactory;
+use tools::{Tool, ToolExecutionContext, TypedTool, TypedToolAdapter, TypedToolResult};
 
 #[test]
 fn agent_for_test_persist_uses_context_workspace_backing() {
@@ -17,7 +16,7 @@ fn agent_for_test_persist_uses_context_workspace_backing() {
         tokio_util::sync::CancellationToken::new(),
     );
     let backing = crate::application::testing::runtime_workspace(&ctx);
-    let registry = ToolRegistry::new();
+    let registry = TestCatalogExecutionFactory::new();
     let agent = Agent::for_test(&registry, ctx, 1);
 
     backing
@@ -233,7 +232,7 @@ fn test_typed_tool_defaults_to_not_concurrency_safe() {
 #[tokio::test]
 async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let registry = ToolRegistry::new();
+    let registry = TestCatalogExecutionFactory::new();
     registry.register(TimedTool {
         name: "parallel_a".to_string(),
         safe: true,
@@ -350,7 +349,7 @@ async fn test_execute_tools_concurrency_window_backfills_without_exceeding_limit
     let active = Arc::new(AtomicUsize::new(0));
     let max_active = Arc::new(AtomicUsize::new(0));
     let (started_tx, mut started_rx) = mpsc::unbounded_channel();
-    let registry = ToolRegistry::new();
+    let registry = TestCatalogExecutionFactory::new();
     registry.register(ControlledTool {
         started: started_tx,
         gates: gates.clone(),
@@ -410,7 +409,7 @@ async fn test_execute_tools_concurrency_window_backfills_without_exceeding_limit
 #[tokio::test]
 async fn test_execute_tools_non_concurrent_safe_run_sequentially() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let registry = ToolRegistry::new();
+    let registry = TestCatalogExecutionFactory::new();
     registry.register(TimedTool {
         name: "seq_a".to_string(),
         safe: false,
@@ -499,7 +498,7 @@ async fn test_execute_tools_preserves_original_order() {
     }
 
     let results = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let registry = ToolRegistry::new();
+    let registry = TestCatalogExecutionFactory::new();
     registry.register(OrderTool {
         name: "tool_c".to_string(),
         order_counter: counter.clone(),
@@ -596,7 +595,7 @@ async fn test_execute_tools_cancel_interrupts_in_flight_tool() {
 
     let started = Arc::new(Notify::new());
     let completed = Arc::new(AtomicUsize::new(0));
-    let registry = ToolRegistry::new();
+    let registry = TestCatalogExecutionFactory::new();
     registry.register(BlockingTool {
         started: started.clone(),
         completed: completed.clone(),
@@ -636,7 +635,7 @@ async fn test_execute_tools_cancel_interrupts_in_flight_tool() {
 
 #[tokio::test]
 async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() {
-    let registry = ToolRegistry::new();
+    let registry = TestCatalogExecutionFactory::new();
     registry.register(TimedTool {
         name: "slow_tool".to_string(),
         safe: true,
@@ -697,7 +696,7 @@ async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() 
 #[tokio::test]
 async fn test_execute_tools_mixed_concurrent_and_sequential() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let registry = ToolRegistry::new();
+    let registry = TestCatalogExecutionFactory::new();
     registry.register(TimedTool {
         name: "parallel".to_string(),
         safe: true,

@@ -157,7 +157,7 @@ pub enum AppEvent {
     /// AskUserQuestion 批量请求——一次携带多个问题。
     AskUserBatch {
         items: Vec<sdk::AskUserQuestionItem>,
-        reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
+        reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,
     },
     /// Sub-agent progress update (streams per-turn output to TUI)
     AgentProgress {
