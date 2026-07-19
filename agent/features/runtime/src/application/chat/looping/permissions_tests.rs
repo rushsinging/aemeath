@@ -2,7 +2,7 @@
 mod tests {
     use crate::application::agent::ToolCall;
     use crate::application::chat::looping::permissions::evaluate_calls;
-    use policy::{PolicyDecision, PolicyPort, PolicyReason, PolicyRequest};
+    use policy::{ApprovalSubject, PolicyDecision, PolicyPort, PolicyReason, PolicyRequest};
     use std::sync::Mutex;
     use tools::ToolRegistry;
 
@@ -22,6 +22,16 @@ mod tests {
         }
     }
 
+    fn call(name: &str) -> ToolCall {
+        ToolCall {
+            provider_id: format!("provider-{name}"),
+            id: sdk::ToolCallId::new_v7(),
+            name: name.into(),
+            index: 0,
+            input: serde_json::json!({}),
+        }
+    }
+
     #[test]
     fn evaluate_calls_uses_injected_policy_and_real_ids() {
         let registry = ToolRegistry::new();
@@ -35,13 +45,7 @@ mod tests {
             seen: Mutex::new(Vec::new()),
             decision: PolicyDecision::Allow,
         };
-        let call = ToolCall {
-            provider_id: "provider-read".into(),
-            id: sdk::ToolCallId::new_v7(),
-            name: "Read".into(),
-            index: 0,
-            input: serde_json::json!({}),
-        };
+        let call = call("Read");
 
         let (approved, denied) = evaluate_calls(
             &[call],
@@ -73,13 +77,7 @@ mod tests {
                 reason: PolicyReason::RestrictedTool,
             },
         };
-        let call = ToolCall {
-            provider_id: "provider-edit".into(),
-            id: sdk::ToolCallId::new_v7(),
-            name: "Edit".into(),
-            index: 0,
-            input: serde_json::json!({}),
-        };
+        let call = call("Edit");
         let (approved, denied) = evaluate_calls(
             &[call],
             &registry,
@@ -90,5 +88,95 @@ mod tests {
         );
         assert!(approved.is_empty());
         assert_eq!(denied.len(), 1);
+        assert_eq!(denied[0].name, "Edit");
+        assert!(denied[0].reason.contains("RestrictedTool"));
+    }
+
+    #[test]
+    fn evaluate_calls_maps_require_approval_to_denied_call_with_subject_and_reason() {
+        let registry = ToolRegistry::new();
+        registry.declare_capabilities_for_test(
+            &tools::ToolName::new("Bash"),
+            tools::ToolCapabilities::ExecuteProcess,
+        );
+        let policy = RecordingPolicy {
+            seen: Mutex::new(Vec::new()),
+            decision: PolicyDecision::RequireApproval {
+                reason: PolicyReason::RestrictedWorkspace,
+                subject: ApprovalSubject::UserInteraction,
+            },
+        };
+
+        let (approved, denied) = evaluate_calls(
+            &[call("Bash")],
+            &registry,
+            &policy,
+            &sdk::RunId::new_v7(),
+            &sdk::RunStepId::new_v7(),
+            std::path::Path::new("/workspace"),
+        );
+
+        assert!(approved.is_empty());
+        assert_eq!(denied.len(), 1);
+        assert_eq!(denied[0].name, "Bash");
+        assert_eq!(
+            denied[0].reason,
+            "approval required: UserInteraction: RestrictedWorkspace"
+        );
+    }
+
+    #[test]
+    fn evaluate_calls_rejects_unregistered_tool_without_invoking_policy() {
+        let registry = ToolRegistry::new();
+        let policy = RecordingPolicy {
+            seen: Mutex::new(Vec::new()),
+            decision: PolicyDecision::Allow,
+        };
+
+        let (approved, denied) = evaluate_calls(
+            &[call("Unknown")],
+            &registry,
+            &policy,
+            &sdk::RunId::new_v7(),
+            &sdk::RunStepId::new_v7(),
+            std::path::Path::new("/workspace"),
+        );
+
+        assert!(approved.is_empty());
+        assert_eq!(denied.len(), 1);
+        assert_eq!(denied[0].name, "Unknown");
+        assert_eq!(
+            denied[0].reason,
+            "Tool is not registered with declared capabilities"
+        );
+        assert!(policy.seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn evaluate_calls_rejects_invalid_policy_request_without_invoking_policy() {
+        let registry = ToolRegistry::new();
+        registry.declare_capabilities_for_test(
+            &tools::ToolName::new("Read"),
+            tools::ToolCapabilities::ReadWorkspace,
+        );
+        let policy = RecordingPolicy {
+            seen: Mutex::new(Vec::new()),
+            decision: PolicyDecision::Allow,
+        };
+
+        let (approved, denied) = evaluate_calls(
+            &[call("Read")],
+            &registry,
+            &policy,
+            &sdk::RunId::new_v7(),
+            &sdk::RunStepId::new_v7(),
+            std::path::Path::new(""),
+        );
+
+        assert!(approved.is_empty());
+        assert_eq!(denied.len(), 1);
+        assert_eq!(denied[0].name, "Read");
+        assert_eq!(denied[0].reason, "Policy 请求的工作区根不能为空");
+        assert!(policy.seen.lock().unwrap().is_empty());
     }
 }
