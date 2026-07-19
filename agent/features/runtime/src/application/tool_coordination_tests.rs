@@ -10,6 +10,23 @@ use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
 struct RecordingPolicy {
     names: Mutex<Vec<String>>,
+    decision: Option<PolicyDecision>,
+}
+
+impl RecordingPolicy {
+    fn allow_except_denied() -> Self {
+        Self {
+            names: Mutex::new(Vec::new()),
+            decision: None,
+        }
+    }
+
+    fn returning(decision: PolicyDecision) -> Self {
+        Self {
+            names: Mutex::new(Vec::new()),
+            decision: Some(decision),
+        }
+    }
 }
 
 impl PolicyPort for RecordingPolicy {
@@ -18,13 +35,15 @@ impl PolicyPort for RecordingPolicy {
             .lock()
             .unwrap()
             .push(request.tool_name().as_str().to_string());
-        if request.tool_name().as_str() == "Denied" {
-            PolicyDecision::Deny {
-                reason: PolicyReason::RestrictedTool,
+        self.decision.clone().unwrap_or_else(|| {
+            if request.tool_name().as_str() == "Denied" {
+                PolicyDecision::Deny {
+                    reason: PolicyReason::RestrictedTool,
+                }
+            } else {
+                PolicyDecision::Allow(tools::AuthorizationContext::STANDARD)
             }
-        } else {
-            PolicyDecision::Allow(tools::AuthorizationContext::STANDARD)
-        }
+        })
     }
 }
 
@@ -75,9 +94,7 @@ fn prepare_round_applies_policy_before_fuse_and_preserves_positions() {
         tokio_util::sync::CancellationToken::new(),
     );
     let catalog = factory.build(ctx).catalog();
-    let policy = RecordingPolicy {
-        names: Mutex::new(Vec::new()),
-    };
+    let policy = RecordingPolicy::allow_except_denied();
     let calls = vec![
         (call("Allowed", 0), ToolGuardDecision::Allow),
         (
@@ -158,6 +175,96 @@ fn allow_all_bypasses_fuse_after_single_policy_evaluation() {
 }
 
 #[test]
+fn prepare_round_maps_require_approval_to_denied_call_with_subject_and_reason() {
+    let factory = TestCatalogExecutionFactory::new();
+    factory.register(TestTool("Bash"));
+    let ctx = crate::application::testing::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let catalog = factory.build(ctx).catalog();
+    let policy = RecordingPolicy::returning(PolicyDecision::RequireApproval {
+        reason: PolicyReason::RestrictedWorkspace,
+        subject: ApprovalSubject::UserInteraction,
+    });
+
+    let prepared = prepare_tool_round(
+        &[(call("Bash", 0), ToolGuardDecision::Allow)],
+        &catalog,
+        &policy,
+        &sdk::RunId::new_v7(),
+        &sdk::RunStepId::new_v7(),
+        &std::env::current_dir().unwrap(),
+    );
+
+    assert!(prepared.executable.is_empty());
+    assert_eq!(prepared.denied.len(), 1);
+    assert_eq!(prepared.denied[0].call.name, "Bash");
+    assert_eq!(
+        prepared.denied[0].reason,
+        "approval required: UserInteraction: RestrictedWorkspace"
+    );
+}
+
+#[test]
+fn prepare_round_rejects_missing_catalog_tool_without_invoking_policy() {
+    let factory = TestCatalogExecutionFactory::new();
+    let ctx = crate::application::testing::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let catalog = factory.build(ctx).catalog();
+    let policy =
+        RecordingPolicy::returning(PolicyDecision::Allow(tools::AuthorizationContext::STANDARD));
+
+    let prepared = prepare_tool_round(
+        &[(call("Unknown", 0), ToolGuardDecision::Allow)],
+        &catalog,
+        &policy,
+        &sdk::RunId::new_v7(),
+        &sdk::RunStepId::new_v7(),
+        &std::env::current_dir().unwrap(),
+    );
+
+    assert!(prepared.executable.is_empty());
+    assert_eq!(prepared.denied.len(), 1);
+    assert_eq!(prepared.denied[0].call.name, "Unknown");
+    assert_eq!(
+        prepared.denied[0].reason,
+        "Tool is not present in the catalog"
+    );
+    assert!(policy.names.lock().unwrap().is_empty());
+}
+
+#[test]
+fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
+    let factory = TestCatalogExecutionFactory::new();
+    factory.register(TestTool("Read"));
+    let ctx = crate::application::testing::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let catalog = factory.build(ctx).catalog();
+    let policy =
+        RecordingPolicy::returning(PolicyDecision::Allow(tools::AuthorizationContext::STANDARD));
+
+    let prepared = prepare_tool_round(
+        &[(call("Read", 0), ToolGuardDecision::Allow)],
+        &catalog,
+        &policy,
+        &sdk::RunId::new_v7(),
+        &sdk::RunStepId::new_v7(),
+        std::path::Path::new(""),
+    );
+
+    assert!(prepared.executable.is_empty());
+    assert_eq!(prepared.denied.len(), 1);
+    assert_eq!(prepared.denied[0].call.name, "Read");
+    assert_eq!(prepared.denied[0].reason, "Policy 请求的工作区根不能为空");
+    assert!(policy.names.lock().unwrap().is_empty());
+}
+
+#[test]
 fn restore_tool_call_order_uses_original_call_order() {
     let calls = vec![call("Allowed", 0), call("Allowed", 1), call("Allowed", 2)];
     let results = vec![
@@ -217,7 +324,7 @@ impl PolicyPort for HookTestPolicy {
                 reason: PolicyReason::RestrictedTool,
                 subject: ApprovalSubject::UserInteraction,
             },
-            _ => PolicyDecision::Allow,
+            _ => PolicyDecision::Allow(tools::AuthorizationContext::STANDARD),
         }
     }
 }
@@ -380,10 +487,15 @@ fn hook_directive_updated_input_valid_passes_schema_and_policy() {
     );
 
     match outcome {
-        HookDirectiveOutcome::Ready { call, context } => {
+        HookDirectiveOutcome::Ready {
+            call,
+            context,
+            authorization,
+        } => {
             assert_eq!(call.name, "Allowed");
             assert_eq!(call.input, serde_json::json!({"path": "/tmp/file"}));
             assert!(context.is_none());
+            assert_eq!(authorization, tools::AuthorizationContext::STANDARD);
         }
         other => panic!("expected Ready, got {other:?}"),
     }
@@ -499,9 +611,14 @@ fn hook_directive_context_and_input_preserves_context_in_ready() {
     );
 
     match outcome {
-        HookDirectiveOutcome::Ready { call, context } => {
+        HookDirectiveOutcome::Ready {
+            call,
+            context,
+            authorization,
+        } => {
             assert_eq!(call.input, serde_json::json!({"path": "/updated"}));
             assert_eq!(context.as_deref(), Some("important context"));
+            assert_eq!(authorization, tools::AuthorizationContext::STANDARD);
         }
         other => panic!("expected Ready, got {other:?}"),
     }

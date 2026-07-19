@@ -256,7 +256,7 @@ pub async fn from_args_with_workspace(
         max_agent_concurrency
     );
 
-    // 16. Policy port — derived from snapshot.allow_all().
+    // 16. PolicyPort 已由 Composition 注入；同一 Arc 分发给 Main 与 Sub。
 
     // 17. Memory port — gate-aware, from wiring.
     let memory: Arc<dyn memory::api::MemoryPort> = wiring.committed_memory();
@@ -428,7 +428,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn from_args_keeps_cloned_workspace_views_synchronized() {
+    async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         struct TestReflectionHistory;
 
         #[async_trait::async_trait]
@@ -521,19 +521,24 @@ mod tests {
             ))),
         )
         .await;
+        let policy: Arc<dyn policy::PolicyPort> = Arc::new(policy::AllowAllPolicy);
         let dependencies = RuntimeBootstrapDependencies::new(
             workspace,
             wiring,
             provider::wire_provider(),
             tools::wire_tools(),
             Arc::new(TestReflectionHistory),
-            Arc::new(policy::AllowAllPolicy),
+            policy.clone(),
             Arc::new(task::TaskStore::new()),
         );
         let client = from_args_with_workspace(args, dependencies)
             .await
             .expect("build client with workspace");
 
+        assert!(
+            Arc::ptr_eq(&client.inner.context.resources.policy, &policy),
+            "Main Run 必须保留 Composition 注入的同一 PolicyPort 实例"
+        );
         assert_eq!(
             client.inner.workspace.read().current_path_base(),
             sub.canonicalize().expect("canonicalize subdirectory")
