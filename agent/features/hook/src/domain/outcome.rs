@@ -62,6 +62,63 @@ pub enum HookReason {
         /// 最后一次执行失败的错误摘要。
         error: String,
     },
+    /// 配置 `failure_policy=Block` 的普通 Hook 重试耗尽后合成的 Block。
+    ///
+    /// 仅适用于可配置 failure_policy 的前置闸门（Stop 走 `StopHookExecutionFailed`）。
+    PolicyBlock {
+        /// 最后一次执行失败的错误摘要。
+        error: String,
+    },
+}
+
+// ─── ClassifyError（#924 协议分类 TDD）─────────────────────────
+
+/// `classify_directive` 的 typed 分类失败。
+///
+/// 对应设计 §5 真值表中的 ExecutionFailed 路径，与业务 Block（`HookReason`）严格区分：
+/// - 业务 Block 是 Hook 的合法业务结果，永不重试；
+/// - 分类失败是协议级故障，需进入 ExecutionFailed / 重试处理。
+///
+/// 分类规则：
+/// - exit 0 + 非法 JSON → `InvalidJson`；
+/// - `exit_code=None`（进程未正常退出）→ `MissingExitCode`；
+/// - 能力矩阵违规（point 元数据不支持该 directive）→ `Protocol`。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClassifyError {
+    /// exit 0 + 非法 JSON stdout。
+    ///
+    /// 不阻断流程，但调用方必须记录为 ExecutionFailed（可重试）。
+    InvalidJson {
+        /// 触发解析失败的原始 stdout（已按 `OUTPUT_MAX_BYTES` 截断）。
+        raw: String,
+        /// 解析错误摘要。
+        error: String,
+    },
+    /// 进程未正常退出，缺少退出码（`exit_code=None`）。
+    ///
+    /// 进程未正常退出时没有退出码可供分类，必须进入 ExecutionFailed 可重试路径，
+    /// **不得**按空 stdout 误判为 Continue。
+    MissingExitCode,
+    /// 能力矩阵违规：HookPoint 元数据不支持收到的 directive。
+    ///
+    /// 设计 §3：`can_block=false` 收到 Block、`can_modify_input=false` 收到
+    /// UpdatedInput、`can_add_context=false` 收到 Context，均为协议错误。
+    Protocol {
+        /// 违规详情。
+        violation: ProtocolViolation,
+    },
+}
+
+/// 能力矩阵违规类型。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtocolViolation {
+    /// 非阻塞 point（`can_block=false`）收到 Block
+    /// （非零 exit / JSON `decision:"block"` / `continue:false`）。
+    BlockOnNonBlocking,
+    /// `can_modify_input=false` 的 point 收到 UpdatedInput。
+    UpdatedInputOnNonModifiable,
+    /// `can_add_context=false` 的 point 收到 AdditionalContext。
+    ContextOnNonContextual,
 }
 
 // ─── HookExecution ────────────────────────────────────────────

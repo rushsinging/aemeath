@@ -12,6 +12,7 @@
 //! - `ToolCapabilities` 只能通过 baseline 或 `derive_restricted` 收缩，不可扩权；
 //! - `ToolOutcome` 是单一结果通道（含错误），不额外暴露 `Result::Err`。
 
+use super::{ExecutionScope, ToolSuspension};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -199,6 +200,14 @@ pub enum CancellationDeclaration {
 
 // ── ToolDescriptor ──────────────────────────────────────────────────
 
+/// Runtime-safe declaration for input-dependent auto-approval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InputSafetyDeclaration {
+    Always,
+    Never,
+    ReadOnlyShellCommand,
+}
+
 /// Tool Catalog 的 Published Language。
 ///
 /// 不包含 Tool 实例、来源 adapter、MCP server、函数指针、transport、client
@@ -216,6 +225,13 @@ pub struct ToolDescriptor {
     pub concurrency: ConcurrencyDeclaration,
     /// 取消声明。
     pub cancellation: CancellationDeclaration,
+    /// Runtime-owned timeout policy reads this value; dispatch does not enforce it.
+    pub timeout_secs: u64,
+    /// Value-only approval declarations (no executable Tool callback escapes Catalog).
+    pub read_only: bool,
+    pub input_safety: InputSafetyDeclaration,
+    /// Output JSON Schema used by presentation layers.
+    pub data_schema: serde_json::Value,
 }
 
 impl ToolDescriptor {
@@ -228,6 +244,17 @@ impl ToolDescriptor {
     pub fn is_cooperative_cancel(&self) -> bool {
         self.cancellation == CancellationDeclaration::Cooperative
     }
+
+    pub fn is_input_safe(&self, input: &serde_json::Value) -> bool {
+        match self.input_safety {
+            InputSafetyDeclaration::Always => true,
+            InputSafetyDeclaration::Never => false,
+            InputSafetyDeclaration::ReadOnlyShellCommand => input
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(crate::domain::shell_safety::is_readonly_command),
+        }
+    }
 }
 
 // ── ToolInvocation ──────────────────────────────────────────────────
@@ -235,17 +262,23 @@ impl ToolDescriptor {
 /// 工具调用请求。
 ///
 /// 不携带 RuntimeContext、Registry、Session、Store 或 MCP 类型。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ToolInvocation {
     pub tool_name: ToolName,
     pub input: serde_json::Value,
+    pub execution_scope: ExecutionScope,
 }
 
 impl ToolInvocation {
-    pub fn new(tool_name: impl Into<ToolName>, input: serde_json::Value) -> Self {
+    pub fn new(
+        tool_name: impl Into<ToolName>,
+        input: serde_json::Value,
+        execution_scope: ExecutionScope,
+    ) -> Self {
         Self {
             tool_name: tool_name.into(),
             input,
+            execution_scope,
         }
     }
 }
@@ -381,6 +414,7 @@ pub enum ToolOutcome {
     Success(ToolSuccess),
     Failure(ToolFailure),
     Cancelled(ToolCancelled),
+    Suspended(ToolSuspension),
 }
 
 impl ToolOutcome {
@@ -497,6 +531,20 @@ impl ToolCatalogSnapshot {
     /// 按 name 查找 Descriptor。
     pub fn find(&self, name: &ToolName) -> Option<&ToolDescriptor> {
         self.tools.iter().find(|d| d.name == *name)
+    }
+
+    pub fn model_schemas(&self) -> Vec<serde_json::Value> {
+        self.tools
+            .iter()
+            .map(|tool| {
+                serde_json::json!({
+                    "name": tool.name.as_str(),
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
+                    "data_schema": tool.data_schema,
+                })
+            })
+            .collect()
     }
 
     /// Snapshot 中工具数量。
@@ -641,6 +689,10 @@ mod tests {
             required_capabilities: ToolCapabilities::ReadWorkspace,
             concurrency: ConcurrencyDeclaration::safe(),
             cancellation: CancellationDeclaration::Cooperative,
+            timeout_secs: 120,
+            read_only: true,
+            input_safety: InputSafetyDeclaration::Always,
+            data_schema: serde_json::Value::Null,
         };
         assert!(desc.is_concurrency_safe());
         assert!(desc.is_cooperative_cancel());
@@ -656,19 +708,16 @@ mod tests {
                 | ToolCapabilities::WriteWorkspace,
             concurrency: ConcurrencyDeclaration::serialized(),
             cancellation: CancellationDeclaration::NonCooperative,
+            timeout_secs: 120,
+            read_only: false,
+            input_safety: InputSafetyDeclaration::Never,
+            data_schema: serde_json::Value::Null,
         };
         assert!(!desc.is_concurrency_safe());
         assert!(!desc.is_cooperative_cancel());
     }
 
     // ── ToolInvocation ─────────────────────────────────────────────
-
-    #[test]
-    fn test_tool_invocation_construction() {
-        let inv = ToolInvocation::new("Read", serde_json::json!({"path": "/tmp"}));
-        assert_eq!(inv.tool_name, ToolName::new("read"));
-        assert_eq!(inv.input["path"], "/tmp");
-    }
 
     // ── ToolErrorKind ──────────────────────────────────────────────
 
@@ -782,6 +831,10 @@ mod tests {
             required_capabilities: ToolCapabilities::ReadWorkspace,
             concurrency: ConcurrencyDeclaration::safe(),
             cancellation: CancellationDeclaration::Cooperative,
+            timeout_secs: 120,
+            read_only: true,
+            input_safety: InputSafetyDeclaration::Always,
+            data_schema: serde_json::Value::Null,
         };
         let desc2 = ToolDescriptor {
             name: ToolName::new("Bash"),
@@ -790,6 +843,10 @@ mod tests {
             required_capabilities: ToolCapabilities::ExecuteProcess,
             concurrency: ConcurrencyDeclaration::serialized(),
             cancellation: CancellationDeclaration::NonCooperative,
+            timeout_secs: 120,
+            read_only: false,
+            input_safety: InputSafetyDeclaration::Never,
+            data_schema: serde_json::Value::Null,
         };
         let snapshot = ToolCatalogSnapshot::new("main", "full", vec![desc1, desc2]);
 

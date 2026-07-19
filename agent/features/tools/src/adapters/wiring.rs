@@ -19,9 +19,6 @@ pub use crate::adapters::registry::{
 };
 pub use crate::adapters::tool_registry::ToolRegistry;
 
-/// Published name for the tool catalog gateway.
-pub type ToolCatalog = ToolRegistry;
-
 /// OHS gateway for constructing and populating tool catalogs.
 pub trait ToolCatalogGateway: Send + Sync {
     fn new_registry(&self) -> ToolRegistry;

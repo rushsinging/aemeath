@@ -19,6 +19,11 @@ pub use application::{
     SessionProjectionParticipant, SessionSwitchClosed, SessionSwitchGate, SessionSwitchInProgress,
 };
 
+pub mod api {
+    pub use crate::adapters::MemoryRetrieveAdapter;
+    pub use crate::ports::MemoryMaterialization;
+}
+
 pub mod context_port {
     pub use crate::domain::*;
     pub use crate::ports::ContextPort;

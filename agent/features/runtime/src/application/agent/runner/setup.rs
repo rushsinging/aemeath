@@ -5,26 +5,7 @@ use async_trait::async_trait;
 use provider::SystemBlock;
 use share::message::Message;
 use tools::{AgentProgressEvent, AgentProgressKind};
-use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
-
-/// #871 dynamic memory bridge for sub-agents.
-///
-/// Sub-agents receive the parent Run's already-resolved MemoryPort via
-/// [`AgentRunRequest::memory`] — the parent called `wiring.committed_memory()`
-/// at dispatch time. We wrap it in a [`tools::MemoryPortSource`] so that
-/// [`tools::register_subagent_tools`] can register the MemoryTool with the
-/// same dynamic-source contract the Main Run uses. For the sub-agent's
-/// lifetime the source always returns this same Arc; resume swaps are
-/// handled at the parent level before a new sub Run is dispatched.
-struct SubAgentMemoryPortSource {
-    memory: std::sync::Arc<dyn memory::MemoryPort>,
-}
-
-impl tools::MemoryPortSource for SubAgentMemoryPortSource {
-    fn current(&self) -> std::sync::Arc<dyn memory::MemoryPort> {
-        self.memory.clone()
-    }
-}
+use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
@@ -202,24 +183,19 @@ impl AgentRunner for CliAgentRunner {
         // Sub Run 用独立的 task::TaskStore access，不共享父 Run 的 Task 状态（#889）。
         let sub_task_access: std::sync::Arc<dyn task::TaskAccess> =
             std::sync::Arc::new(task::TaskStore::new());
-        let sub_skills =
-            std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let sub_workspace = self.workspace.derive_isolated();
-        let mut sub_registry = ToolRegistry::new();
-        // #871 dynamic memory: wrap the parent-provided MemoryPort in a source
-        // so the sub-agent's MemoryTool resolves through the same contract.
-        let sub_memory_source: std::sync::Arc<dyn tools::MemoryPortSource> =
-            std::sync::Arc::new(SubAgentMemoryPortSource {
-                memory: memory.clone(),
-            });
-        tools::register_subagent_tools(
-            &mut sub_registry,
-            sub_task_access,
-            sub_skills,
-            sub_memory_source,
-            sub_workspace.control(),
-        );
-        let sub_schemas = sub_registry.schemas_for(guidance.language());
+        let sub_catalog = match self.tool_catalog.snapshot(
+            &tools::RegistryScopeName::new("sub-agent"),
+            &tools::ToolProfileName::new("sub-agent-restricted"),
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                return tools::AgentRunTerminal::Failed {
+                    error: error.to_string(),
+                }
+            }
+        };
+        let sub_schemas = sub_catalog.model_schemas();
         let messages = vec![Message::user(prompt)];
         // For sub-agents, use the system prompt as a single cached block
         let system_blocks = vec![SystemBlock::cached(system.clone())];
@@ -280,8 +256,10 @@ impl AgentRunner for CliAgentRunner {
             .with_catalog(catalog)
             .with_progress(request_progress),
         );
+        let _ = sub_task_access;
         let agent = Agent {
-            registry: &sub_registry,
+            catalog: sub_catalog,
+            execution: self.tool_execution.clone(),
             ctx: sub_ctx,
             max_tool_concurrency: self.max_tool_concurrency,
             agent_semaphore: self.agent_semaphore.clone(),
@@ -336,6 +314,7 @@ impl AgentRunner for CliAgentRunner {
             ctx_context_size: context_size,
             tool_result_materializer: self.tool_result_materializer.clone(),
             policy: self.policy.clone(),
+            tool_context_binding: self.tool_context_binding.clone(),
         }
         .run_loop()
         .await

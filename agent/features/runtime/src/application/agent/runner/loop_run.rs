@@ -123,7 +123,7 @@ pub(super) struct SubAgentRun<'a> {
     pub messages: Vec<Message>,
     pub system_blocks: Vec<SystemBlock>,
     pub log_request_messages: Box<dyn Fn(usize, &[Message]) + Send + Sync + 'a>,
-    pub agent: Agent<'a>,
+    pub agent: Agent,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
     pub timeout: std::time::Duration,
     pub turn_count: usize,
@@ -142,6 +142,7 @@ pub(super) struct SubAgentRun<'a> {
     pub tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub policy: Arc<dyn policy::PolicyPort>,
+    pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -160,6 +161,13 @@ impl<'a> SubAgentRun<'a> {
             self.run_id.clone(),
             cancel.clone(),
         );
+        let _binding = match tools::ToolExecutionContextBindingGuard::bind(
+            self.tool_context_binding.clone(),
+            self.agent.ctx.clone(),
+        ) {
+            Ok(binding) => binding,
+            Err(error) => return AgentRunTerminal::Failed { error },
+        };
         let loop_result = shared_run_loop(&mut run, &cancel, &mut self).await;
 
         // A normal terminal path is recorded by `emit` from the authoritative
@@ -405,7 +413,6 @@ impl RunLoopPort for SubAgentRun<'_> {
                 (self.log_request_messages)(turn_number, &self.messages);
                 self.log_input();
 
-                // Sub-runs receive the formal NoOp MemoryPort and do not inherit memory injection.
                 let effective_blocks = self.system_blocks.clone();
 
                 let messages_for_api = messages_for_llm(&self.messages);
@@ -613,7 +620,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                 let (approved, denied) =
                     crate::application::chat::looping::permissions::evaluate_calls(
                         &allowed,
-                        self.agent.registry,
+                        &self.agent.catalog,
                         self.policy.as_ref(),
                         run_id,
                         step_id,

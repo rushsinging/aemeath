@@ -48,7 +48,7 @@ pub(crate) enum DiagnosticSinkId {
     Storage,
     Project,
     Policy,
-    Audit,
+    AuditDiagnostic,
     Update,
     Workflow,
     Context,
@@ -129,7 +129,12 @@ const TARGETS: &[TargetSpec] = &[
         "agent-project.log"
     ),
     target!("aemeath:agent:policy", Policy, Policy, "agent-policy.log"),
-    target!("aemeath:agent:audit", Audit, Audit, "agent-audit.log"),
+    target!(
+        "aemeath:diagnostic:audit",
+        Audit,
+        AuditDiagnostic,
+        "audit-diagnostic.log"
+    ),
     target!("aemeath:agent:update", Update, Update, "agent-update.log"),
     target!(
         "aemeath:agent:workflow",
@@ -243,6 +248,14 @@ mod tests {
                 Some(file)
             );
         }
+    }
+
+    #[test]
+    fn audit_facts_have_no_diagnostic_route() {
+        assert!(TargetCatalog::exact("aemeath:agent:audit").is_none());
+        assert!(TargetCatalog::specs()
+            .iter()
+            .all(|spec| spec.file_name != "agent-audit.log"));
     }
 
     #[test]

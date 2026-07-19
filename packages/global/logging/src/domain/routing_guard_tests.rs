@@ -436,6 +436,14 @@ fn current_workspace_obeys_owner_aware_log_target_policy() {
 }
 
 #[test]
+fn audit_facts_are_forbidden_from_diagnostic_catalog() {
+    assert!(TargetCatalog::exact("aemeath:agent:audit").is_none());
+    assert!(TargetCatalog::specs()
+        .iter()
+        .all(|spec| spec.file_name != "agent-audit.log"));
+}
+
+#[test]
 fn catalog_targets_are_valid_and_unique() {
     let mut seen = std::collections::HashSet::new();
     for TargetSpec { target, .. } in TargetCatalog::specs() {
@@ -463,10 +471,10 @@ fn catalog_covers_exactly_runtime_owners() {
         ),
         (
             "agent/features/audit",
-            "aemeath:agent:audit",
+            "aemeath:diagnostic:audit",
             Owner::Audit,
-            Sink::Audit,
-            "agent-audit.log",
+            Sink::AuditDiagnostic,
+            "audit-diagnostic.log",
         ),
         (
             "agent/features/config",

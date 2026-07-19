@@ -49,7 +49,7 @@ impl App {
                             self.handle_input_intent(
                                 crate::tui::model::input::intent::InputIntent::Clear,
                             );
-                            let _ = reply_tx.send(vec![text]);
+                            let _ = reply_tx.send(sdk::AskUserReply::Answers(vec![text]));
                             self.spinner_phase(SpinnerPhase::Generating);
                         }
                     }
@@ -61,7 +61,7 @@ impl App {
                         self.handle_input_intent(
                             crate::tui::model::input::intent::InputIntent::Clear,
                         );
-                        let _ = reply_tx.send(vec![String::new()]);
+                        let _ = reply_tx.send(sdk::AskUserReply::Cancelled);
                         self.spinner_phase(SpinnerPhase::Generating);
                     }
                     return Some(UpdateResult::none());
@@ -289,17 +289,16 @@ impl App {
             .conversation
             .apply(ConversationIntent::ConfirmAskUserBatch(ConfirmAskUserBatch));
         self.mark_output_dirty();
-        let _ = state.reply_tx.send(answers);
+        let _ = state.reply_tx.send(sdk::AskUserReply::Answers(answers));
         self.spinner_phase(SpinnerPhase::Generating);
     }
 
-    /// 取消整个 batch：回传空答案。
+    /// 取消整个 batch：显式回传取消。
     fn cancel_ask_user_batch(&mut self) {
         if let Some(state) = self.input.ask_user_state.take() {
-            let empty: Vec<String> = state.items.iter().map(|_| String::new()).collect();
             self.dismiss_ask_user_block();
             self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
-            let _ = state.reply_tx.send(empty);
+            let _ = state.reply_tx.send(sdk::AskUserReply::Cancelled);
             self.spinner_phase(SpinnerPhase::Generating);
         }
     }
