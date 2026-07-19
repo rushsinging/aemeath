@@ -47,6 +47,17 @@ Release Gate issue 模板见仓库 `.github/ISSUE_TEMPLATE/`。
 5. **必有收尾能力**：大型工作 **MUST** 覆盖 Guard + Verify、收尾退役、大文件拆分三类交付。
 6. **依赖顺序**：sub-issues **MUST** 按领域模型 → Port / PL → Adapter → 消费方 → Guard / 退役的方向拆分。依赖方向严格从内到外。
 
+## 开发环境（cargo target / direnv / sccache）
+
+worktree 模式下 cargo 默认在每个 worktree 根建 `target/`，独立全量编译会迅速堆积到几十 GB。项目已配置三层治理（#1226）：
+
+- **按分支隔离 target**：`.cargo/set-target.sh` 把 `CARGO_TARGET_DIR` 设到 `~/.cache/aemeath-target/<分支名>`，同分支跨 worktree 共享增量编译产物。
+- **direnv 自动激活**：项目根 `.envrc` 进入任意 worktree 时自动 `source set-target.sh`，离开自动卸载。**SHOULD** 安装 direnv（`brew install direnv` + shell hook + `direnv allow`）。
+- **sccache 跨分支共享**：`~/.cargo/config.toml` 设 `rustc-wrapper = "sccache"`，跨所有分支按 content hash 复用编译单元，自带 LRU（默认 10G 上限）。**SHOULD** 安装 sccache（`brew install sccache`）。
+- **定期瘦身**：`scripts/clean-worktree-targets.sh [--dry-run] [--keep-current] [--yes]` 清理 worktree 内 `target/`、僵尸 worktree、共享缓存中不活跃分支。
+
+未装 direnv/sccache 时编译仍可正常进行（退化为 worktree 内 `target/`），仅失去共享缓存收益。
+
 ## Git 工作流
 
 日常开发在 `main` 上进行；`release/vX.Y.Z` 分支仅在发版时从 `origin/main` 切出，用于版本发布与发版后的维护（hotfix）。
