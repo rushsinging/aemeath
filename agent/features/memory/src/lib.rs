@@ -12,26 +12,23 @@ mod service;
 
 pub mod api {
     pub use crate::{
-        AtomicDatasetMemoryStore, AtomicDatasetReflectionHistoryStore, CompactResult,
-        InMemoryMemory, LegacyMemoryLayer, LegacyMemoryMember, LegacyMemorySource,
-        LegacyMemorySourceError, MemoryCategory, MemoryEntry, MemoryError, MemoryId, MemoryLayer,
-        MemoryLocation, MemoryOpenError, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort,
-        MemoryQuery, MemoryRetrievalMode, MemorySearchHit, MemorySearchQuery, MemorySearchResult,
-        MemorySource, MemoryStats, MemorySuggestion, NoOpMemory, ProjectMemoryKey,
-        ProjectMemoryOpener, ReflectionApplyResult, ReflectionApplyStatus, ReflectionEngine,
-        ReflectionError, ReflectionErrorCategory, ReflectionHistoryQuery, ReflectionHistoryStore,
-        ReflectionMessage, ReflectionOutput, ReflectionPromptPort, ReflectionRecord,
-        ReflectionResult, ReflectionSafeSummary, ReflectionStatus, ReflectionTokenUsage,
-        ReflectionTrigger, WriteResult,
+        AtomicDatasetReflectionHistoryStore, CompactResult, DatasetMemoryOpener,
+        FileLegacyMemorySourceFactory, InMemoryMemory, MemoryCategory, MemoryEntry, MemoryError,
+        MemoryId, MemoryLayer, MemoryLocation, MemoryOpenError, MemoryOpener, MemoryOpenerError,
+        MemoryPolicy, MemoryPort, MemoryQuery, MemoryRetrievalMode, MemorySearchHit,
+        MemorySearchQuery, MemorySearchResult, MemorySource, MemoryStats, MemorySuggestion,
+        NoOpMemory, ProjectMemoryKey, ReflectionApplyResult, ReflectionApplyStatus,
+        ReflectionEngine, ReflectionError, ReflectionErrorCategory, ReflectionHistoryQuery,
+        ReflectionHistoryStore, ReflectionMessage, ReflectionOutput, ReflectionPromptPort,
+        ReflectionRecord, ReflectionResult, ReflectionSafeSummary, ReflectionStatus,
+        ReflectionTokenUsage, ReflectionTrigger, WriteResult,
     };
 }
 
 pub use adapters::{
-    map_storage_error, AtomicDatasetMemoryStore, AtomicDatasetReflectionHistoryStore,
-    DatasetMemoryOpener, FileLegacyMemorySourceFactory, InMemoryMemory, MemoryPolicy,
-    ProjectMemoryOpener,
+    AtomicDatasetReflectionHistoryStore, DatasetMemoryOpener, FileLegacyMemorySourceFactory,
+    InMemoryMemory, MemoryPolicy,
 };
 pub use domain::*;
 pub use noop::NoOpMemory;
 pub use ports::*;
-pub use service::MemoryService;

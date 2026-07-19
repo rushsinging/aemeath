@@ -308,7 +308,6 @@ where
                     memory.clone(),
                     Arc::new(tools::FixedGuidance {
                         language: language.to_string(),
-                        allow_all: false,
                     }),
                 )
                 .with_memory_context(
@@ -790,7 +789,7 @@ where
             agent.ctx.clone(),
         )
         .map_err(LoopEngineError::Adapter)?;
-        let all_results = execute_tool_round(
+        let (all_results, fuse_bypassed) = execute_tool_round(
             &self.turn_context,
             &raw_calls,
             self.tool_catalog,
@@ -873,7 +872,11 @@ where
             &self.current_cwd(),
         )
         .await;
-        Ok(ToolStep::Continue)
+        Ok(if fuse_bypassed.is_empty() {
+            ToolStep::Continue
+        } else {
+            ToolStep::ContinueWithFuseBypass(fuse_bypassed)
+        })
     }
 
     async fn on_stuck(

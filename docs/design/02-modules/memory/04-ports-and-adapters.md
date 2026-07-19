@@ -83,7 +83,7 @@ enum MemoryStorageErrorKind {
 
 ### 设计约束
 
-- **MUST NOT** 返回内部 `MemoryStore` 实例或文件路径。
+- **MUST NOT** 返回内部 Memory service、dataset adapter 实例或文件路径。
 - **MUST NOT** 暴露文件 I/O 细节（路径、序列化格式）。
 - **MUST NOT** 依赖 ProviderPort（Reflection 的 LLM 调用由 Runtime 编排）。
 - **MUST** 所有可能落盘的 mutation 传播结构化 `MemoryError`；permission、disk-full、serialization 与 atomic-write 失败 **NEVER** 被压成 `false` / `()` 或假成功。Memory BC 把 Storage adapter 错误 ACL 为稳定 `MemoryStorageErrorKind`，**NEVER** 泄漏具体 adapter error。
@@ -263,8 +263,8 @@ fn assemble_reflection_history(
 
 ### 装配约束
 
-- **MUST** MemoryPort 实例由 Composition Root 构造，不在核心或适配器内私自 `new`。
-- **MUST** MemoryStorageAdapter 由 Composition Root 注入 MemoryService。
+- **MUST** active `MemoryPort` 只由 Composition 提供的 `DatasetMemoryOpener` 经 Context-owned Main Session wiring 打开；业务调用方和 Composition Runtime bootstrap **NEVER** 直接构造 `MemoryService` / `AtomicDatasetMemoryStore` / 内部 project opener。
+- **MUST** Memory dataset adapter 只在 Memory-owned opener 内构造并注入 MemoryService。
 - **MUST NOT** MemoryService 直接 `std::fs::read` / `std::fs::write`——经 Storage adapter。
 - **MUST** `open_memory` 应用传入的 `MemoryConfig`，eager-read 并验证 active + archive 文件、schema 与权限后才返回可用 Arc；它 **NEVER** 自行读取全局 current ConfigSnapshot，lazy open **NEVER** 把 fallible I/O 推迟到 resume commit 之后。
 - **MUST** open 先在 dataset lock 下完成任何 prepared journal 的 roll-forward / rollback，再读取同一 committed generation；任一 recovery / decode / invariant 失败返回 `MemoryOpenerError`，**NEVER** 发布部分 service。
@@ -325,6 +325,7 @@ Target 要求机械守卫证明：production Memory wiring 只由 Composition Ro
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-19 | #900 删除 Composition 第二 active Memory open，将 concrete dataset store/project opener/service 收回 Memory crate 内，生产仅经 Main Session `DatasetMemoryOpener` 返回 `MemoryPort` | #900 |
 | 2026-07-18 | #899 实现 Memory-owned durable Reflection history append/query；冻结 `/reflect [limit]` 仅安全摘要、正文不进入 TUI/日志 | #899 |
 | 2026-07-18 | #897 落地 NoOpMemory、Composition active Memory prepare/install 与 Disabled/Shared 派生；Main 启动按 ProjectIdentity/committed Config 单次 open，Tool 通过同一 MemoryPort Arc 操作 | #897 |
 | 2026-07-12 | 初稿：MemoryPort trait、ReflectionPromptPort、NoOpMemory、Storage 边界、Composition Root、现状缺口 M1-M10 | #789 |

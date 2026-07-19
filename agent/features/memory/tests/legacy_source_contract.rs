@@ -47,8 +47,8 @@ fn storage(root: &std::path::Path) -> Arc<dyn storage_api::AtomicDatasetPort> {
     Arc::new(storage::FileSystemDatasetAdapter::new(root).unwrap())
 }
 
-/// Serialize a single legacy entry as the plain JSON array the predecessor
-/// `MemoryStore` wrote to disk.
+/// Serialize a single legacy entry as the plain JSON array written by the
+/// predecessor flat-file format.
 fn legacy_entry_bytes(content: &str, layer: MemoryLayer) -> Vec<u8> {
     let entry = MemoryEntry::new(
         MemoryId::now_v7(),

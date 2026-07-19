@@ -77,12 +77,5 @@ pub fn app_version() -> Option<&'static str> {
 mod scope_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pid_returns_process_id() {
-        let p = pid();
-        assert_eq!(p, std::process::id());
-    }
-}
+#[path = "context_tests.rs"]
+mod tests;

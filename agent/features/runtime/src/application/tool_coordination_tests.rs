@@ -35,12 +35,12 @@ impl PolicyPort for RecordingPolicy {
             .unwrap()
             .push(request.tool_name().as_str().to_string());
         self.decision.clone().unwrap_or_else(|| {
-            if request.tool_name().as_str().eq_ignore_ascii_case("denied") {
+            if request.tool_name().as_str() == "Denied" {
                 PolicyDecision::Deny {
                     reason: PolicyReason::RestrictedTool,
                 }
             } else {
-                PolicyDecision::Allow
+                PolicyDecision::Allow(tools::AuthorizationContext::STANDARD)
             }
         })
     }
@@ -84,7 +84,7 @@ fn call(name: &str, index: usize) -> ToolCall {
 }
 
 #[test]
-fn prepare_round_applies_guard_before_policy_and_preserves_positions() {
+fn prepare_round_applies_policy_before_fuse_and_preserves_positions() {
     let factory = TestCatalogExecutionFactory::new();
     factory.register(TestTool("Allowed"));
     factory.register(TestTool("Denied"));
@@ -116,14 +116,61 @@ fn prepare_round_applies_guard_before_policy_and_preserves_positions() {
 
     assert_eq!(
         policy.names.lock().unwrap().as_slice(),
-        ["Allowed", "Denied"]
+        ["Allowed", "Allowed", "Denied"]
     );
     assert_eq!(prepared.executable.len(), 1);
-    assert_eq!(prepared.executable[0].index, 0);
+    assert_eq!(prepared.executable[0].call.index, 0);
     assert_eq!(prepared.guard_blocked.len(), 1);
     assert_eq!(prepared.guard_blocked[0].call_id, calls[1].0.id);
     assert_eq!(prepared.denied.len(), 1);
     assert_eq!(prepared.denied[0].call.id, calls[2].0.id);
+}
+
+struct AllowAllRecordingPolicy {
+    names: Mutex<Vec<String>>,
+}
+
+impl PolicyPort for AllowAllRecordingPolicy {
+    fn evaluate(&self, request: &PolicyRequest) -> PolicyDecision {
+        self.names
+            .lock()
+            .unwrap()
+            .push(request.tool_name().as_str().to_string());
+        PolicyDecision::Allow(tools::AuthorizationContext::ALLOW_ALL)
+    }
+}
+
+#[test]
+fn allow_all_bypasses_fuse_after_single_policy_evaluation() {
+    let factory = TestCatalogExecutionFactory::new();
+    factory.register(TestTool("Allowed"));
+    let ctx = crate::application::testing::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let catalog = factory.build(ctx).catalog();
+    let policy = AllowAllRecordingPolicy {
+        names: Mutex::new(Vec::new()),
+    };
+    let call = call("Allowed", 0);
+    let prepared = prepare_tool_round(
+        &[(
+            call.clone(),
+            ToolGuardDecision::SoftBlock {
+                reason: "loop".to_string(),
+            },
+        )],
+        &catalog,
+        &policy,
+        &sdk::RunId::new_v7(),
+        &sdk::RunStepId::new_v7(),
+        &std::env::current_dir().unwrap(),
+    );
+
+    assert_eq!(policy.names.lock().unwrap().as_slice(), ["Allowed"]);
+    assert_eq!(prepared.executable.len(), 1);
+    assert!(prepared.guard_blocked.is_empty());
+    assert_eq!(prepared.fuse_bypassed, vec![call.id]);
 }
 
 #[test]
@@ -166,7 +213,8 @@ fn prepare_round_rejects_missing_catalog_tool_without_invoking_policy() {
         tokio_util::sync::CancellationToken::new(),
     );
     let catalog = factory.build(ctx).catalog();
-    let policy = RecordingPolicy::returning(PolicyDecision::Allow);
+    let policy =
+        RecordingPolicy::returning(PolicyDecision::Allow(tools::AuthorizationContext::STANDARD));
 
     let prepared = prepare_tool_round(
         &[(call("Unknown", 0), ToolGuardDecision::Allow)],
@@ -196,7 +244,8 @@ fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
         tokio_util::sync::CancellationToken::new(),
     );
     let catalog = factory.build(ctx).catalog();
-    let policy = RecordingPolicy::returning(PolicyDecision::Allow);
+    let policy =
+        RecordingPolicy::returning(PolicyDecision::Allow(tools::AuthorizationContext::STANDARD));
 
     let prepared = prepare_tool_round(
         &[(call("Read", 0), ToolGuardDecision::Allow)],

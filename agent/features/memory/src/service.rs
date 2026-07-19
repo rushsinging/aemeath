@@ -34,7 +34,7 @@ struct CommittedState<R> {
 /// every mutation is serialized through one async gate and publishes only
 /// after Storage reports a committed receipt. Each layer owns an independent
 /// revision, so a mutation only commits the layer it actually changed.
-pub struct MemoryService<S: MemoryDatasetStore> {
+pub(crate) struct MemoryService<S: MemoryDatasetStore> {
     store: S,
     policy: MemoryPolicy,
     state: RwLock<CommittedState<S::Revision>>,

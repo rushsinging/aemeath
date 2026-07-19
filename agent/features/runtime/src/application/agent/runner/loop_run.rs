@@ -740,7 +740,13 @@ impl RunLoopPort for SubAgentRun<'_> {
                     step_id,
                     &self.agent.ctx.workspace_read().current_workspace_root(),
                 );
-                let allowed = prepared.executable;
+                let allowed_calls = prepared
+                    .executable
+                    .iter()
+                    .map(|prepared| prepared.call.clone())
+                    .collect::<Vec<_>>();
+                let fuse_bypassed = prepared.fuse_bypassed;
+                let executable = prepared.executable;
                 let mut results = prepared.guard_blocked;
                 results.extend(
                     prepared
@@ -752,7 +758,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                 self.log_tool_calls(&all_calls);
                 let call_info = self.build_call_info(&all_calls);
                 if let Some(ref sink) = self.progress_sink {
-                    sink.emit(build_tool_calls_progress_event(turn_number, &allowed));
+                    sink.emit(build_tool_calls_progress_event(turn_number, &allowed_calls));
                 }
 
                 let cancellation = self.agent.ctx.cancellation();
@@ -760,7 +766,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                     _ = cancellation.cancelled() => {
                         return Err(LoopEngineError::Cancelled);
                     }
-                    executed = self.agent.execute_tools(&allowed) => executed,
+                    executed = self.agent.execute_prepared_tools(&executable) => executed,
                 };
                 results.append(&mut executed);
                 let results = crate::application::tool_coordination::restore_tool_call_order(
@@ -776,7 +782,11 @@ impl RunLoopPort for SubAgentRun<'_> {
                     &self.session_id,
                 )
                 .await;
-                Ok(ToolStep::Continue)
+                Ok(if fuse_bypassed.is_empty() {
+                    ToolStep::Continue
+                } else {
+                    ToolStep::ContinueWithFuseBypass(fuse_bypassed)
+                })
             },
         )
         .await

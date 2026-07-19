@@ -565,21 +565,22 @@ Memory active+archive 与 legacy key migration 的跨 BC 场景不属于 #983；
 
 ### 11.8 #1062 Policy L0–L5 覆盖证据
 
-Policy v0.1.0 只生产 `AllowAll`，`Deny` / `RequireApproval` 仅为 Published Language 的 Future 兼容变体。测试审查以“生产只允许合法请求、Runtime 正确消费全部决策形状、Main/Sub 保持同一注入实例”为边界：
+Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / `RequireApproval` 仍是 Published Language 的 Future 兼容变体。#1221 将原先单纯的 AllowAll decision 扩展为 Config 驱动的统一授权链，因此测试审查以“模式真相唯一、每个 ToolCall 只评估一次、授权上下文无损到达所有消费者、Main/Sub/MCP 行为一致”为边界：
 
 | 行为 / 风险 | 必要层级 | 证据路径 | 结论 |
 |---|---|---|---|
-| `PolicyMode` 本期只暴露 `AllowAll`，Policy façade 保持窄且生产可达 | L0 / L3 | `agent/features/policy/tests/policy_contract.rs`；`check-cola-layer-purity.sh`、`check-crate-api-boundary.sh`、`check-production-reachability.sh` | 已覆盖 |
+| Config Ask/AutoRead/AllowAll 映射为唯一 `PolicyMode`，Policy façade 保持窄且生产可达 | L0 / L3 | `agent/features/policy/tests/policy_contract.rs`；`check-unified-authorization.sh`、`check-crate-api-boundary.sh`、`check-production-reachability.sh` | 已覆盖 |
 | `PolicyRequest` 保留 Run、Step、Tool、capabilities、workspace，空 workspace 拒绝 | L1 / L3 | `agent/features/policy/tests/policy_contract.rs`；`agent/features/runtime/src/application/tool_coordination_tests.rs` | 已覆盖 |
-| `AllowAllPolicy` 对 Read / Edit / Bash 等合法请求始终返回 `Allow` | L3 | `agent/features/policy/tests/policy_contract.rs` | 已覆盖 |
-| Policy 日志只记录 mode、capability count、decision，不泄漏 Tool、路径或 ID | L1 | `agent/features/policy/src/adapters/adapters_tests.rs` | 已覆盖 |
-| Runtime 将 `Allow` 放入批准集，将 `Deny` / `RequireApproval` 映射为带原因的拒绝；未注册 Tool 与非法请求不调用 Policy | L2 | `agent/features/runtime/src/application/tool_coordination_tests.rs` | 已覆盖 |
+| Standard 保留五项授权 guard，AllowAll 关闭五项授权限制并对合法请求返回对应 `AuthorizationContext` | L1 / L3 | `agent/features/policy/tests/policy_contract.rs` | 已覆盖 |
+| `ConfiguredPolicy` 每次评估读取 committed mode，动态更新对下一 ToolCall 生效 | L3 | `agent/features/policy/tests/policy_contract.rs` | 已覆盖 |
+| Policy 日志只记录 mode、capability count、decision，不泄漏 Tool、路径或 ID，且全局 logger 测试串行确定 | L1 | `agent/features/policy/src/adapters/adapters_tests.rs` | 已覆盖 |
+| Runtime 对每个 ToolCall 先评估 Policy，再按授权上下文执行或绕过 fuse；`Deny` / `RequireApproval` 映射为拒绝；目录缺失与非法请求不调用 Policy | L2 | `agent/features/runtime/src/application/tool_coordination_tests.rs` | 已覆盖 |
 | Composition 注入的同一 `Arc<dyn PolicyPort>` 同时到达 Main 与 Sub runner | L2 | `agent/features/runtime/src/application/client/from_args.rs`；`agent/features/runtime/src/application/startup/runtime_support.rs` | 已覆盖 |
 | `--yolo` 与 `--allow-all` 经过 CLI → SDK bootstrap 投影为同一兼容 ACL | L3 | `apps/cli/src/args.rs` | 已覆盖 |
-| 用户可感知的 Deny / Approval 旅程 | L4 | v0.1.0 生产 adapter 只返回 `Allow`；Deny / Approval 的规则、暂停恢复与 UI 明确属于 Future | 不适用，不伪造未来场景 |
-| 真进程、PTY、网络、平台或发布资产 | L5 | Policy 是进程内纯决策 Port，无不可由 L0–L3 Harness 覆盖的系统边界 | 不适用 |
+| CLI/config AllowAll 对项目外路径、read-before-write、Bash safety、fuse 与 permission hooks 的完整授权旅程 | L4 | #1221 的 Tool/Project/Runtime 场景与统一授权 Guard；`agent/features/tools/src/adapters/*_tests.rs`、`agent/features/runtime/src/application/tool_coordination_tests.rs` | 已覆盖 |
+| 真进程、PTY、网络、平台或发布资产 | L5 | Policy 与授权消费者均可由进程内契约/场景覆盖，无额外系统边界 | 不适用 |
 
-覆盖率以 `./scripts/coverage.sh` 的实际输出为准；#1062 验收实测 policy 为 regions 93.62%、functions 87.50%、lines 93.75%，高于初始基线 90.60% / 83.87% / 88.17%。未满覆盖主要来自简单 getter；Future 原因/审批变体的构造与 Runtime 消费分支已有契约覆盖，不把重复 getter 测试当作质量提升。changed-lines 在 v0.1.0 仅记录信号、不设阈值；production reachability 与覆盖率独立执行。审查未发现需要新增 L4/L5 或由新 Issue 承接的 Policy 关键行为缺口。
+覆盖率以 `./scripts/coverage.sh` 的实际输出为准；#1062 同步 #1221 后实测 policy 为 regions 86.30%、functions 76.92%、lines 85.07%。绝对百分比低于旧 AllowAll-only 基线 90.60% / 83.87% / 88.17%，原因是 #1221 新增 Standard/ConfiguredPolicy 与五维授权上下文后分母扩大；新增核心分支均有 L1～L4 证据，未覆盖项主要为简单 getter 与 defensive 分支。changed-lines 在 v0.1.0 仅记录信号、不设阈值；production reachability 与覆盖率独立执行。审查未发现需要新增 L5 或由新 Issue 承接的 Policy 关键行为缺口。
 
 ## 12. 相关文档
 
@@ -598,4 +599,4 @@ Policy v0.1.0 只生产 `AllowAll`，`Deny` / `RequireApproval` 仅为 Published
 | 2026-07-15 | 落地 TUI P0 Scripted Harness、稳定快照、本地草稿检查与 completion 回归 | [#1017](https://github.com/rushsinging/aemeath/issues/1017) |
 | 2026-07-17 | 登记 #884 Tool Result 的 L1/L3/L4 覆盖：Config policy、Unicode materialization、写失败 fallback、AtomicBlob adapter contract、Main/Sub 共享入口与旧 `.txt` 引用兼容边界 | [#884](https://github.com/rushsinging/aemeath/issues/884) |
 | 2026-07-17 | 登记 #983 AtomicDataset 的 L0–L5 覆盖：纯规则、adapter 协作、公共 port contract、Prepared/roll-forward/corruption fault matrix 与真实进程 abort/OS lock；Memory 集成 deferred 至 #896 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
-| 2026-07-19 | 完成 #1062 Policy 测试审查：登记 AllowAll 契约、Runtime 决策映射、Main/Sub 同实例注入、CLI ACL 投影及 L4/L5 不适用理由 | [#1062](https://github.com/rushsinging/aemeath/issues/1062) |
+| 2026-07-19 | 完成 #1062 Policy 测试审查：登记 Standard/AllowAll Config 映射、五维授权上下文、Runtime 单次评估与 fuse、Main/Sub 同实例注入、CLI ACL、L4 授权旅程及 L5 不适用理由 | [#1062](https://github.com/rushsinging/aemeath/issues/1062)、[#1221](https://github.com/rushsinging/aemeath/issues/1221) |

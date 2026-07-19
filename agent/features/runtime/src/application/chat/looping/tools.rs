@@ -34,7 +34,7 @@ pub(crate) async fn execute_tool_round<S>(
     language: &str,
     workspace_root: &Path,
     guarded_calls: &[(ToolCall, crate::application::loop_engine::ToolGuardDecision)],
-) -> Vec<ToolExecution>
+) -> (Vec<ToolExecution>, Vec<ToolCallId>)
 where
     S: ChatEventSink,
 {
@@ -45,15 +45,18 @@ where
         Ok(catalog) => catalog,
         Err(error) => {
             log::error!(target: crate::LOG_TARGET, "tool catalog snapshot failed: {error}");
-            return tool_calls
-                .iter()
-                .map(|call| {
-                    ToolExecution::new(
-                        call,
-                        ToolOutcome::error(format!("tool catalog unavailable: {error}")),
-                    )
-                })
-                .collect();
+            return (
+                tool_calls
+                    .iter()
+                    .map(|call| {
+                        ToolExecution::new(
+                            call,
+                            ToolOutcome::error(format!("tool catalog unavailable: {error}")),
+                        )
+                    })
+                    .collect(),
+                Vec::new(),
+            );
         }
     };
     let prepared = prepare_tool_round(
@@ -73,32 +76,36 @@ where
         workspace_root,
     )
     .await;
+    let fuse_bypassed = prepared.fuse_bypassed.clone();
     let approved = prepared.executable;
     let fused_results =
         publish_guard_blocked(prepared.guard_blocked, tool_calls, sink, context).await;
 
-    let (agent_approved, non_agent_approved): (Vec<ToolCall>, Vec<ToolCall>) =
-        approved.into_iter().partition(|c| c.name == "Agent");
+    let (agent_approved, non_agent_approved): (Vec<_>, Vec<_>) = approved
+        .into_iter()
+        .partition(|prepared| prepared.call.name == "Agent");
 
     // AskUser must cross the same execution port as every production tool.
     // Only a typed Suspended outcome enters Runtime's existing waiter; every
     // failure/cancellation remains a concrete ToolExecution result.
     let mut ask_user_suspensions = Vec::new();
     let mut ask_user_terminal = Vec::new();
-    for call in non_agent_approved
+    for prepared in non_agent_approved
         .iter()
-        .filter(|call| call.name == "AskUserQuestion")
+        .filter(|prepared| prepared.call.name == "AskUserQuestion")
     {
+        let call = &prepared.call;
         let mut input = call.input.clone();
         tools::strip_runtime_meta(&mut input);
         let invocation =
-            tools::ToolInvocation::new(call.name.as_str(), input, agent.ctx.scope().clone());
+            tools::ToolInvocation::new(call.name.as_str(), input, agent.ctx.scope().clone())
+                .with_authorization(prepared.authorization);
         match tool_execution
             .execute(invocation, agent.ctx.cancellation().as_ref())
             .await
         {
             tools::ToolExecutionOutcome::Suspended(suspension) => {
-                ask_user_suspensions.push((call, suspension));
+                ask_user_suspensions.push((call, suspension, prepared.authorization));
             }
             outcome => ask_user_terminal.push(ToolExecution::new(
                 call,
@@ -150,7 +157,7 @@ where
         .chain(fused_results)
         .chain(denied_results)
         .collect();
-    restore_tool_call_order(tool_calls, results)
+    (restore_tool_call_order(tool_calls, results), fuse_bypassed)
 }
 
 async fn publish_guard_blocked<S>(
@@ -509,6 +516,61 @@ mod tests {
             index,
             input: serde_json::json!({"label": format!("call-{index}")}),
         }
+    }
+
+    #[tokio::test]
+    async fn allow_all_bypasses_soft_block_and_blocking_pre_tool_hook() {
+        let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
+        registry.register(UnsafeLifecycleTool);
+        let ctx = test_tool_context();
+        let agent = Agent::for_test(registry.as_ref(), ctx, 10);
+        let sink = RecordingSink::default();
+        let hook_ui = HookUi::new(sink.clone());
+        let mut events = std::collections::HashMap::new();
+        events.insert(
+            share::config::hooks::HookEvent::PreToolUse,
+            vec![share::config::hooks::HookEntry {
+                matcher: "UnsafeLifecycle".to_string(),
+                command: "exit 2".to_string(),
+                timeout: 5,
+            }],
+        );
+        let hook_runner = hook::api::HookRunner::new(share::config::hooks::HooksConfig { events });
+        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let workspace_root = std::env::current_dir().unwrap();
+        let call = lifecycle_call(0);
+        let ports = registry.build(agent.ctx.clone());
+
+        let (results, bypassed) = execute_tool_round(
+            &context,
+            std::slice::from_ref(&call),
+            &ports.catalog_port(),
+            &ports.execution(),
+            &policy::AllowAllPolicy,
+            &sdk::RunId::new_v7(),
+            &sdk::RunStepId::new_v7(),
+            &agent,
+            &sink,
+            &hook_ui,
+            &hook_runner,
+            &tokio_util::sync::CancellationToken::new(),
+            "en",
+            &workspace_root,
+            &[(
+                call.clone(),
+                ToolGuardDecision::SoftBlock {
+                    reason: "loop".to_string(),
+                },
+            )],
+        )
+        .await;
+
+        assert_eq!(bypassed, vec![call.id]);
+        assert_eq!(results.len(), 1);
+        assert!(
+            !results[0].outcome.is_error,
+            "AllowAll must execute the tool"
+        );
     }
 
     #[tokio::test]

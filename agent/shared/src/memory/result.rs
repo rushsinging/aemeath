@@ -1,7 +1,7 @@
 //! Memory 操作结果 DTO（纯数据，无 IO）。
 //!
-//! 这些类型描述 MemoryStore 操作的结果，本身不含文件系统 IO，属共享内核；
-//! 具体的持久化实现（MemoryStore）位于 `storage::memory`。
+//! 这些类型描述 legacy Memory 操作结果，本身不含文件系统 IO；持久化与
+//! 查询行为已由 Memory BC 的 `MemoryPort` / service 接管。
 
 use super::MemoryEntry;
 

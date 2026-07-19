@@ -21,17 +21,24 @@ pub(crate) struct DeniedToolCall {
     pub reason: String,
 }
 
-#[derive(Default)]
-pub(crate) struct PreparedToolRound {
-    pub executable: Vec<ToolCall>,
-    pub guard_blocked: Vec<ToolExecution>,
-    pub denied: Vec<DeniedToolCall>,
+pub(crate) struct PreparedToolCall {
+    pub call: ToolCall,
+    pub authorization: tools::AuthorizationContext,
 }
 
-/// Applies the Runtime-owned guard and Policy gates in their canonical order.
+#[derive(Default)]
+pub(crate) struct PreparedToolRound {
+    pub executable: Vec<PreparedToolCall>,
+    pub guard_blocked: Vec<ToolExecution>,
+    pub denied: Vec<DeniedToolCall>,
+    pub fuse_bypassed: Vec<sdk::ToolCallId>,
+}
+
+/// Applies catalog validity, Policy and Runtime guard in canonical order.
 ///
-/// Guard-blocked calls never reach Policy. Calls absent from the frozen catalog
-/// are denied before Policy because no trustworthy capability set exists.
+/// Calls absent from the frozen catalog are denied before Policy because no
+/// trustworthy capability set exists. Policy is evaluated once per valid call;
+/// its AuthorizationContext decides whether the Runtime fuse remains active.
 pub(crate) fn prepare_tool_round(
     calls: &[(ToolCall, ToolGuardDecision)],
     catalog: &ToolCatalogSnapshot,
@@ -42,13 +49,6 @@ pub(crate) fn prepare_tool_round(
 ) -> PreparedToolRound {
     let mut prepared = PreparedToolRound::default();
     for (call, decision) in calls {
-        if let ToolGuardDecision::SoftBlock { reason } = decision {
-            prepared
-                .guard_blocked
-                .push(blocked_tool_execution(call, reason));
-            continue;
-        }
-
         let Some(descriptor) = catalog.find(&ToolName::new(&call.name)) else {
             prepared.denied.push(DeniedToolCall {
                 call: call.clone(),
@@ -73,7 +73,21 @@ pub(crate) fn prepare_tool_round(
             }
         };
         match policy.evaluate(&request) {
-            PolicyDecision::Allow => prepared.executable.push(call.clone()),
+            PolicyDecision::Allow(authorization) => {
+                if let ToolGuardDecision::SoftBlock { reason } = decision {
+                    if authorization.enforce_tool_fuse {
+                        prepared
+                            .guard_blocked
+                            .push(blocked_tool_execution(call, reason));
+                        continue;
+                    }
+                    prepared.fuse_bypassed.push(call.id.clone());
+                }
+                prepared.executable.push(PreparedToolCall {
+                    call: call.clone(),
+                    authorization,
+                });
+            }
             PolicyDecision::Deny { reason } => prepared.denied.push(DeniedToolCall {
                 call: call.clone(),
                 reason: format!("{reason:?}"),

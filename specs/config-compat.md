@@ -42,12 +42,13 @@ Runtime / SDK / TUI
 
 ## 配置分层（优先级从高到低）
 
-1. CLI 参数（`--provider`、`--model` 等）
-2. 环境变量（`AEMEATH_*`、`*_API_KEY` 等）——由 `EnvAdapter` 统一读取
-3. 项目级配置：`.agents/aemeath.json` 优先，其次兼容 `.claude/settings.json` 的 hooks 配置
-4. 全局配置（`~/.agents/aemeath.json`）
-5. Claude Code settings.json（ACL 兼容层）
-6. 硬编码默认值
+1. CLI 参数（启动期永久覆盖）
+2. 环境变量（启动期覆盖，由 `EnvAdapter` 统一读取）
+3. Local config：项目 `.agents/aemeath.json`、兼容 `.claude/settings.json`，以及 AgentClient 动态更新持久化的项目级补丁
+4. Global config（`~/.agents/aemeath.json`）
+5. 硬编码默认值
+
+**MUST** 合并顺序固定为 `Default → Global → Local → Env → CLI`。动态 Config 更新属于 Local 层，提交 candidate 前必须重新应用 Env 与 CLI；CLI/Env 未提供对应字段时，动态 Local 更新才可生效。**NEVER** 新增高于 CLI/Env 的 runtime/native override 层。
 
 **关键约束**：业务 env **NEVER** 在 config 包外读取。`check-config-env-guard.sh` 守卫强制执行此约束。消费方通过 `ConfigReader` port 或 `ConfigView` 获取配置值。
 
