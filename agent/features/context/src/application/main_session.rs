@@ -15,6 +15,7 @@ use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidatio
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock as TokioRwLock};
 
 use crate::domain::session::{CanonicalSession, SessionRestore, SnapshotState};
+use crate::ports::{ContextPort, MainContextFactory};
 
 // ─── SessionSwitchGate (existing) ────────────────────────────────────
 
@@ -166,6 +167,7 @@ pub enum MainSessionError {
 pub struct BoundMainRun {
     _permit: OwnedSessionSharedPermit,
     session: Arc<CanonicalSession>,
+    context: Arc<dyn ContextPort>,
     memory: Arc<dyn MemoryPort>,
     config: ConfigSnapshot,
 }
@@ -174,6 +176,11 @@ impl BoundMainRun {
     /// The committed canonical session backing the main run.
     pub fn session(&self) -> &CanonicalSession {
         &self.session
+    }
+
+    /// The Context-owned OHS bound to the same committed Session backing.
+    pub fn context(&self) -> Arc<dyn ContextPort> {
+        Arc::clone(&self.context)
     }
 
     /// The committed memory port backing the main run.
@@ -202,6 +209,7 @@ pub struct MainSessionDependencies {
     pub config_reader: Arc<dyn ConfigReader>,
     pub config_participant: Arc<dyn ProjectConfigParticipant>,
     pub memory_opener: Box<dyn MemoryOpener>,
+    pub context_factory: Arc<dyn MainContextFactory>,
 }
 
 /// Constructs a [`MainSessionWiring`] suitable for Runtime bootstrap.
@@ -276,6 +284,7 @@ pub async fn wire_main_session(
         memory_opener: deps.memory_opener,
         initial_session,
         initial_memory,
+        context_factory: deps.context_factory,
     };
     Ok(Arc::new(MainSessionWiring::build(builder)))
 }
@@ -355,6 +364,8 @@ pub struct MainSessionWiring {
     // ── Committed state holders ──
     committed_session: Arc<StdRwLock<Arc<CanonicalSession>>>,
     committed_memory: Arc<StdRwLock<Arc<dyn MemoryPort>>>,
+    context: Arc<dyn ContextPort>,
+    mutation_gate: Arc<tokio::sync::Mutex<()>>,
 
     // ── Optional projection participant ──
     //
@@ -386,12 +397,23 @@ pub struct MainSessionWiringBuilder {
     pub memory_opener: Box<dyn MemoryOpener>,
     pub initial_session: CanonicalSession,
     pub initial_memory: Arc<dyn MemoryPort>,
+    pub context_factory: Arc<dyn MainContextFactory>,
 }
 
 impl MainSessionWiring {
     /// Assembles the coordinator from its cross-BC dependencies and the initial
     /// committed state.
     pub fn build(builder: MainSessionWiringBuilder) -> Self {
+        let committed_session = Arc::new(StdRwLock::new(Arc::new(builder.initial_session)));
+        let mutation_gate = Arc::new(tokio::sync::Mutex::new(()));
+        let committed_memory = Arc::new(StdRwLock::new(builder.initial_memory));
+        let context = builder.context_factory.build(
+            Arc::clone(&committed_session),
+            Arc::clone(&builder.task_persist),
+            Arc::clone(&builder.workspace_persist),
+            Arc::clone(&committed_memory),
+            Arc::clone(&mutation_gate),
+        );
         Self {
             gate: SessionSwitchGate::new(),
             workspace_read: builder.workspace_read,
@@ -400,8 +422,10 @@ impl MainSessionWiring {
             config_reader: builder.config_reader,
             config_participant: builder.config_participant,
             memory_opener: builder.memory_opener,
-            committed_session: Arc::new(StdRwLock::new(Arc::new(builder.initial_session))),
-            committed_memory: Arc::new(StdRwLock::new(builder.initial_memory)),
+            committed_session,
+            committed_memory,
+            context,
+            mutation_gate,
             projection_participant: StdRwLock::new(None),
         }
     }
@@ -524,6 +548,7 @@ impl MainSessionWiring {
         Ok(BoundMainRun {
             _permit: permit,
             session,
+            context: Arc::clone(&self.context),
             memory,
             config,
         })
@@ -548,6 +573,7 @@ impl MainSessionWiring {
             .acquire_owned_exclusive()
             .await
             .map_err(|_| MainSessionError::GateClosed)?;
+        let _mutation = self.mutation_gate.lock().await;
 
         // ── 1. Project prepare ──
         //
@@ -868,6 +894,7 @@ pub mod test_support {
         task_persist: Arc<dyn task::TaskPersist>,
         config_reader: Arc<dyn ConfigReader>,
         config_participant: Arc<dyn ProjectConfigParticipant>,
+        context_factory: Arc<dyn MainContextFactory>,
     ) -> Arc<MainSessionWiring> {
         wire_main_session(MainSessionDependencies {
             workspace: workspace.clone(),
@@ -875,6 +902,7 @@ pub mod test_support {
             config_reader,
             config_participant,
             memory_opener: Box::new(InMemoryTestOpener),
+            context_factory,
         })
         .await
         .expect("test wiring with InMemoryTestOpener should not fail")

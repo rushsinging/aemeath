@@ -578,6 +578,9 @@
 - **检查方式**：确认 Runtime 的 Main/Sub 入口调用唯一 `loop_engine::run_loop`，禁止旧 FSM；并扫描 `agent/features/runtime/src`、`agent/features/tools/src/adapters/agent_tool.rs` 与 `agent/features/tools/src/domain/types/agent.rs`，禁止恢复 Session token 槽或 `max_turns`。
 - **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
 
+- **#876 Context execution 边界**：`main_run_port.rs`、Sub `loop_run.rs` 与 `context_coordination.rs` 禁止引用 `context::session::*`、`ChatChain` / `ChatSegment`、`save_chain` 或 legacy compact helper；Main/Sub 必须各自经 `append_finalized` 接入 ContextPort 的唯一 finalized Step 提交。idle/session command 兼容路径不在本规则扫描范围，由 #872/#879 退役。
+- **故意违规验证**：向 Main/Sub execution path 临时加入 `ChatChain` 或 `save_chain` 标记时守卫必须阻断；移除后恢复通过。
+
 ## 23. check-run-control-boundary.sh
 
 - **位置**：`.agents/hooks/check-run-control-boundary.sh`。

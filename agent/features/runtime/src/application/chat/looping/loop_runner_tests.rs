@@ -53,6 +53,9 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
                 committed_steps: Vec::new(),
             },
             initial_memory: Arc::new(memory::api::NoOpMemory),
+            context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
+                Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+            )),
         },
     ))
 }
@@ -2350,31 +2353,11 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         events.iter().any(|e| e == "Text:turn 2 final"),
         "重置 token 后回合 2 应正常调用 LLM 并完成: {events:?}"
     );
-    // 回滚断言（per-turn 基线语义，与重构前 per-`chat()` 一致）：cancel 把基线设在
-    // 「本回合用户消息已入、assistant 未产生」处，故取消只回滚本回合的 partial
-    // assistant/tool 输出，**保留本回合用户消息 "first"**。检查取消回滚那次
-    // MessagesSync（Cancelled 之前最近一次）应含 "first" 但不含任何 assistant 文本。
-    let cancelled_idx = events
-        .iter()
-        .position(|e| e == "Cancelled")
-        .expect("应有 Cancelled 事件");
-    let syncs_before_cancel = events[..cancelled_idx]
-        .iter()
-        .filter(|e| e.starts_with("CompactRollback"))
-        .count();
     assert!(
-        syncs_before_cancel >= 1,
-        "Cancelled 前应至少有一次 CompactRollback（回滚同步）: {events:?}"
-    );
-    let rollback_snapshot = &sink.synced_messages()[syncs_before_cancel - 1];
-    let rollback_texts: Vec<String> = rollback_snapshot.iter().map(|m| m.text_content()).collect();
-    assert!(
-        rollback_texts.iter().any(|t| t == "first"),
-        "per-turn 基线设在用户消息之后：回合 1 取消应保留本回合用户消息 'first': {rollback_texts:?}"
-    );
-    assert!(
-        rollback_texts.iter().all(|t| t != "turn 2 final"),
-        "回合 1 取消的回滚快照不应含回合 2 的 assistant 输出: {rollback_texts:?}"
+        events
+            .iter()
+            .all(|event| !event.starts_with("CompactRollback")),
+        "finalized partial Step 由 Context append 保存，取消不得恢复旧 rollback 路径: {events:?}"
     );
 }
 
@@ -2574,52 +2557,11 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         "回合 2 进行中 cancel 应发出 Cancelled 事件: {events:?}"
     );
 
-    // 关键回归断言：回合 2 取消后第一次 CompactRollback（cancel_to_idle 内的回滚同步）
-    // 必须仍包含回合 1 的 user+assistant。pre-fix 用 loop_start_baseline=0 回滚 →
-    // 这两条被删除 → 断言失败；修复后 per-turn 基线保留它们 → 通过。
-    let cancelled_idx = events
-        .iter()
-        .position(|e| e == "Cancelled")
-        .expect("应有 Cancelled 事件");
-    // cancel_to_idle 先发 CompactRollback（回滚后）再发 Cancelled；取 Cancelled 之前最近一次
-    // CompactRollback 对应的快照即「取消回滚后的 messages」。
-    let _syncs = sink.synced_messages();
-    // 找到「取消回滚」那次 sync：它是 events 中 Cancelled 之前最后一个 CompactRollback。
-    let messages_sync_count_before_cancel = events[..cancelled_idx]
-        .iter()
-        .filter(|e| e.starts_with("CompactRollback"))
-        .count();
     assert!(
-        messages_sync_count_before_cancel >= 1,
-        "Cancelled 前应至少有一次 CompactRollback（回滚同步）: {events:?}"
-    );
-    // syncs 按时间顺序收集所有 sync 类事件（TurnStarted/PostToolExecutionSync/CompactRollback 等）的快照。
-    // cancel_to_idle 中 Cancelled 之前最后一次 sync 就是 CompactRollback（回滚后）。
-    // 但 syncs 也包含非 rollback 事件，需要找最后一个。由于 cancel 前最后一次 sync 必然是回滚，
-    // 直接取 syncs 中 Cancelled 前最后一次即可。
-    // syncs 的事件和 events 一一对应（所有 sync 类事件都同时 push 到 syncs 和 events）。
-    // 但 events 也包含非 sync 事件（如 Cancelled、Thinking 等），所以不能直接索引。
-    // 简化：syncs 的最后一个元素就是 cancel 前最后一次 sync 的快照。
-    let rollback_guard = sink.compact_rollback_snapshots.lock().unwrap();
-    let rollback_snapshot = rollback_guard
-        .last()
-        .expect("应至少有一次 CompactRollback 快照");
-    let texts: Vec<String> = rollback_snapshot.iter().map(|m| m.text_content()).collect();
-    assert!(
-        texts.iter().any(|t| t == "turn1-user"),
-        "回合 2 取消不得删除回合 1 的用户消息 'turn1-user': {texts:?}"
-    );
-    assert!(
-        texts.iter().any(|t| t == "turn 1 assistant"),
-        "回合 2 取消不得删除回合 1 的 assistant 响应 'turn 1 assistant': {texts:?}"
-    );
-    // 回合 2 的 partial 输出（用户消息 'turn2-user' 之后无 assistant，因 LLM 被取消）：
-    // 'turn2-user' 应被回滚（与重构前语义一致：保留用户消息这一点见下），实际本回合
-    // 用户消息也属当前回合内容、应回滚到 per-turn 基线之内。本回合用户消息保留与否取决于
-    // 捕获点：本实现把基线设在「用户消息已入、assistant 未产生」处，故回合 2 用户消息保留。
-    assert!(
-        texts.iter().any(|t| t == "turn2-user"),
-        "per-turn 基线设在用户消息之后：回合 2 取消应保留本回合用户消息 'turn2-user': {texts:?}"
+        events
+            .iter()
+            .all(|event| !event.starts_with("CompactRollback")),
+        "回合 2 取消应提交 finalized partial Step，禁止恢复旧 rollback 路径: {events:?}"
     );
 
     // cancel 后未退 loop：回合 3 正常完成，总计 2 个 DoneWithDuration。

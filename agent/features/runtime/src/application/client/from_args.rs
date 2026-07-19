@@ -607,6 +607,9 @@ mod tests {
             task_wiring.persist(),
             config.reader(),
             config.participant(),
+            Arc::new(context::adapters::ProductionMainContextFactory::new(
+                Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+            )),
         )
         .await;
         let dependencies = RuntimeBootstrapDependencies::new(

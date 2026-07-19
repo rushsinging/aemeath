@@ -5,6 +5,7 @@ use super::logging::{
 use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use crate::application::agent::Agent;
+use crate::application::context_coordination::ContextCoordinator;
 use crate::application::loop_engine::{
     run_loop as shared_run_loop, LoopEngineError, ModelStep, RunLoopPort, ToolGuardDecision,
     ToolStep,
@@ -121,6 +122,10 @@ pub(super) struct SubAgentRun<'a> {
     pub hook_runner: hook::api::HookRunner,
     pub sub_schemas: Vec<serde_json::Value>,
     pub messages: Vec<Message>,
+    pub committed_message_count: usize,
+    pub context: ContextCoordinator,
+    pub context_request: Option<crate::ports::ContextRequest>,
+    pub context_window: Option<crate::ports::ContextWindow>,
     pub system_blocks: Vec<SystemBlock>,
     pub log_request_messages: Box<dyn Fn(usize, &[Message]) + Send + Sync + 'a>,
     pub agent: Agent<'a>,
@@ -145,6 +150,35 @@ pub(super) struct SubAgentRun<'a> {
 }
 
 impl<'a> SubAgentRun<'a> {
+    fn freeze_request(&self, step_id: &sdk::RunStepId) -> crate::ports::ContextRequest {
+        crate::ports::ContextRequest {
+            session_id: crate::ports::SessionId::new(&self.session_id),
+            request_id: crate::ports::ContextRequestId::new(uuid::Uuid::now_v7().to_string()),
+            run_id: self.run_id.clone(),
+            step_id: step_id.clone(),
+            pending_messages: self.messages[self.committed_message_count..].to_vec(),
+            system_prompt: crate::ports::SystemPromptSpec::new(&self.system),
+            model_id: self.model_name_for_log.clone(),
+            effective_reasoning: self.invocation_scope.effective_reasoning(),
+            current_date: crate::ports::CalendarDate::new(
+                chrono::Local::now().format("%Y-%m-%d").to_string(),
+            ),
+            task_reminder: crate::ports::TaskReminderSnapshot::default(),
+            language: crate::ports::Language::new("en"),
+            agent_roles: std::collections::HashMap::new(),
+            config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
+                share::config::Config::default(),
+            ),
+            context_size: self.ctx_context_size,
+            max_output_tokens: self.invocation_scope.max_tokens() as usize,
+            last_api_input_tokens: self.last_total_tokens,
+            tool_schemas: vec![],
+            tool_schema_tokens: 0,
+            prev_system_tokens: None,
+            prev_tool_schema_tokens: None,
+        }
+    }
+
     /// Runs a sub-agent through the same loop engine used by every agent run.
     pub async fn run_loop(mut self) -> AgentRunTerminal {
         let mut run = Run::with_id(
@@ -354,13 +388,17 @@ fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal
     }
 }
 
-fn sub_needs_compaction(last_total_tokens: Option<u64>, context_size: usize) -> bool {
-    last_total_tokens
-        .is_some_and(|total| context::compact::needs_compaction_total(total, context_size))
-}
-
 #[async_trait]
 impl RunLoopPort for SubAgentRun<'_> {
+    fn freeze_step(
+        &mut self,
+        step_id: &sdk::RunStepId,
+        _inputs: &[crate::application::loop_engine::LoopInput],
+    ) {
+        self.context_request = Some(self.freeze_request(step_id));
+        self.context_window = None;
+    }
+
     async fn drain_input(
         &mut self,
     ) -> Result<Vec<crate::application::loop_engine::LoopInput>, LoopEngineError> {
@@ -368,23 +406,52 @@ impl RunLoopPort for SubAgentRun<'_> {
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-        Ok(sub_needs_compaction(
-            self.last_total_tokens,
-            self.ctx_context_size,
-        ))
+        let request = self
+            .context_request
+            .as_ref()
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+        let window = self
+            .context
+            .build_window(request)
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        let needed = self
+            .context
+            .needs_compaction(request)
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        self.context_window = Some(window);
+        Ok(needed)
     }
 
     async fn compact(
         &mut self,
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(), LoopEngineError> {
-        self.compact_now(self.turn_count).await;
-        if !self.agent.ctx.cancellation().is_cancelled() {
-            self.last_total_tokens = None;
+        let request = self
+            .context_request
+            .as_ref()
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+        let source_revision = self
+            .context_window
+            .as_ref()
+            .map(|window| window.backing_revision)
+            .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
+        match self
+            .context
+            .compact(request, source_revision)
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?
+        {
+            crate::ports::CompactOutcome::Committed(_) => {
+                self.last_total_tokens = None;
+                self.context_window = None;
+                Ok(())
+            }
+            crate::ports::CompactOutcome::Skipped(reason) => Err(LoopEngineError::Adapter(
+                format!("Context compact 被跳过：{reason:?}"),
+            )),
         }
-        // The engine owns cancellation transitions. Returning success lets its
-        // post-compaction cancellation check emit the authoritative event.
-        Ok(())
     }
 
     async fn invoke_model(
@@ -408,7 +475,23 @@ impl RunLoopPort for SubAgentRun<'_> {
                 // Sub-runs receive the formal NoOp MemoryPort and do not inherit memory injection.
                 let effective_blocks = self.system_blocks.clone();
 
-                let messages_for_api = messages_for_llm(&self.messages);
+                let window = if let Some(window) = self.context_window.clone() {
+                    Some(window)
+                } else if let Some(request) = &self.context_request {
+                    Some(
+                        self.context
+                            .build_window(request)
+                            .await
+                            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?,
+                    )
+                } else {
+                    None
+                };
+                let messages_for_api = window
+                    .as_ref()
+                    .map(|window| messages_for_llm(&window.messages))
+                    .unwrap_or_else(|| messages_for_llm(&self.messages));
+                self.context_window = window;
                 let mut coordinator =
                     crate::application::model_invocation::ModelInvocationCoordinator::new();
                 let resp = loop {
@@ -478,8 +561,10 @@ impl RunLoopPort for SubAgentRun<'_> {
                                 self.runtime_cancellation.cancel();
                                 return Err(LoopEngineError::Cancelled);
                             }
-                            crate::application::model_invocation::RetryStep::Compact
-                            | crate::application::model_invocation::RetryStep::Fail => {
+                            crate::application::model_invocation::RetryStep::Compact => {
+                                return Err(LoopEngineError::NeedsCompaction(error.to_string()));
+                            }
+                            crate::application::model_invocation::RetryStep::Fail => {
                                 return Err(LoopEngineError::Adapter(error.to_string()));
                             }
                         },
@@ -505,16 +590,18 @@ impl RunLoopPort for SubAgentRun<'_> {
                         &resp.usage,
                     ),
                     context_window: self.ctx_context_size as u64,
-                    est_system_tokens: effective_blocks
-                        .iter()
-                        .map(|b| context::compact::estimate_tokens(&b.text))
-                        .sum(),
-                    est_tool_tokens: context::compact::estimate_tool_schemas_tokens(
-                        &self.sub_schemas,
-                    ),
-                    est_message_tokens: context::compact::estimate_messages_tokens(
-                        &messages_for_api,
-                    ),
+                    est_system_tokens: self
+                        .context_window
+                        .as_ref()
+                        .map_or(0, |window| window.token_estimation.system_tokens),
+                    est_tool_tokens: self
+                        .context_window
+                        .as_ref()
+                        .map_or(0, |window| window.token_estimation.tool_schema_tokens),
+                    est_message_tokens: self
+                        .context_window
+                        .as_ref()
+                        .map_or(0, |window| window.token_estimation.message_tokens),
                     stop_reason: format!("{:?}", resp.stop_reason).to_lowercase(),
                 };
 
@@ -572,6 +659,52 @@ impl RunLoopPort for SubAgentRun<'_> {
             },
         )
         .await
+    }
+
+    async fn finalize_step(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
+        let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
+            return Ok(());
+        };
+        debug_assert_eq!(&request.step_id, step_id);
+        let messages = self.messages[self.committed_message_count..].to_vec();
+        self.context
+            .append_finalized(
+                request,
+                step_id.clone(),
+                window.backing_revision,
+                crate::ports::FinalizeCause::Completed,
+                messages,
+                vec![],
+                self.last_total_tokens,
+            )
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        self.committed_message_count = self.messages.len();
+        Ok(())
+    }
+
+    async fn finalize_cancelled_step(
+        &mut self,
+        step_id: &sdk::RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
+            return Ok(());
+        };
+        debug_assert_eq!(&request.step_id, step_id);
+        self.context
+            .append_finalized(
+                request,
+                step_id.clone(),
+                window.backing_revision,
+                crate::ports::FinalizeCause::UserCancelledStep,
+                self.messages[self.committed_message_count..].to_vec(),
+                vec![],
+                self.last_total_tokens,
+            )
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        self.committed_message_count = self.messages.len();
+        Ok(())
     }
 
     async fn execute_tools(
@@ -710,9 +843,7 @@ impl RunLoopPort for SubAgentRun<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        messages_for_llm, sub_needs_compaction, terminal_from_domain_event, ActiveRunRegistration,
-    };
+    use super::{messages_for_llm, terminal_from_domain_event, ActiveRunRegistration};
     use crate::domain::agent_run::{ActiveRunPort, RunDomainEvent, RunId};
     use share::message::{ContentBlock, Message, Role};
 
@@ -737,12 +868,6 @@ mod tests {
         fn clear(&self, run_id: &RunId) {
             self.active.lock().unwrap().remove(run_id);
         }
-    }
-
-    #[test]
-    fn sub_compact_requires_latest_normalized_total() {
-        assert!(!sub_needs_compaction(None, 1_048_576));
-        assert!(sub_needs_compaction(Some(900_000), 1_048_576));
     }
 
     #[test]

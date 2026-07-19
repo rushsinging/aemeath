@@ -1,0 +1,278 @@
+use std::sync::{Arc, RwLock};
+
+use async_trait::async_trait;
+
+use crate::domain::session::{CanonicalSession, ChatChain, CommittedStep, SnapshotState};
+use crate::domain::{
+    AppendReceipt, CompactOutcome, CompactRequest, CompactSkipReason, ContextAppend,
+    ContextAppendError, ContextPortError, SessionId, SessionRevision,
+};
+use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
+
+#[async_trait]
+pub trait CanonicalSessionWriter: Send + Sync {
+    async fn save(&self, session: &CanonicalSession) -> Result<(), String>;
+}
+
+pub struct AtomicBlobCanonicalSessionWriter {
+    blob: Arc<dyn storage::api::AtomicBlobPort>,
+}
+
+impl AtomicBlobCanonicalSessionWriter {
+    pub fn new(blob: Arc<dyn storage::api::AtomicBlobPort>) -> Self {
+        Self { blob }
+    }
+}
+
+#[async_trait]
+impl CanonicalSessionWriter for AtomicBlobCanonicalSessionWriter {
+    async fn save(&self, session: &CanonicalSession) -> Result<(), String> {
+        use crate::ports::SessionSnapshotStore;
+
+        let store =
+            crate::adapters::AtomicBlobSessionStore::new(Arc::clone(&self.blob), &session.id)
+                .map_err(|error| error.to_string())?;
+        let bytes = crate::domain::session::SessionCodec::encode(session)
+            .map_err(|error| error.to_string())?;
+        store.write(&bytes).await.map_err(|error| error.to_string())
+    }
+}
+
+pub struct NoOpCanonicalSessionWriter;
+
+#[async_trait]
+impl CanonicalSessionWriter for NoOpCanonicalSessionWriter {
+    async fn save(&self, _session: &CanonicalSession) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+pub struct ProductionMainContextFactory {
+    writer: Arc<dyn CanonicalSessionWriter>,
+}
+
+impl ProductionMainContextFactory {
+    pub fn new(writer: Arc<dyn CanonicalSessionWriter>) -> Self {
+        Self { writer }
+    }
+}
+
+impl MainContextFactory for ProductionMainContextFactory {
+    fn build(
+        &self,
+        session: Arc<RwLock<Arc<CanonicalSession>>>,
+        task_persist: Arc<dyn task::TaskPersist>,
+        workspace_persist: Arc<dyn project::WorkspacePersist>,
+        memory: Arc<RwLock<Arc<dyn memory::MemoryPort>>>,
+        mutation_gate: Arc<tokio::sync::Mutex<()>>,
+    ) -> Arc<dyn ContextPort> {
+        Arc::new(crate::application::ContextApplicationService::new(
+            Arc::new(CanonicalSessionRepository::new(
+                session,
+                task_persist,
+                workspace_persist,
+                Arc::clone(&self.writer),
+                mutation_gate,
+            )),
+            Arc::new(crate::adapters::BaselinePromptSource),
+            Arc::new(crate::adapters::CommittedMemoryRetrieveAdapter::new(memory)),
+        ))
+    }
+}
+
+pub struct CanonicalSessionRepository {
+    session: Arc<RwLock<Arc<CanonicalSession>>>,
+    task_persist: Arc<dyn task::TaskPersist>,
+    workspace_persist: Arc<dyn project::WorkspacePersist>,
+    writer: Arc<dyn CanonicalSessionWriter>,
+    mutation_gate: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl CanonicalSessionRepository {
+    pub fn new(
+        session: Arc<RwLock<Arc<CanonicalSession>>>,
+        task_persist: Arc<dyn task::TaskPersist>,
+        workspace_persist: Arc<dyn project::WorkspacePersist>,
+        writer: Arc<dyn CanonicalSessionWriter>,
+        mutation_gate: Arc<tokio::sync::Mutex<()>>,
+    ) -> Self {
+        Self {
+            session,
+            task_persist,
+            workspace_persist,
+            writer,
+            mutation_gate,
+        }
+    }
+
+    fn receipt(append: &ContextAppend, revision: SessionRevision) -> AppendReceipt {
+        AppendReceipt {
+            run_id: append.run_id.clone(),
+            step_id: append.step_id.clone(),
+            committed_revision: revision,
+            fingerprint: append.fingerprint.clone(),
+        }
+    }
+}
+
+#[async_trait]
+impl SessionRepository for CanonicalSessionRepository {
+    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String> {
+        let session = self.session.read().map_err(|error| error.to_string())?;
+        if session.id != session_id.as_str() {
+            return Err(format!("Session 不存在：{session_id}"));
+        }
+        let chain = ChatChain::from_chats(&session.chats);
+        Ok(SessionSnapshot {
+            revision: SessionRevision::new(session.revision),
+            messages: chain.messages(),
+            active_summary: chain.active_summary().map(str::to_string),
+        })
+    }
+
+    async fn append_finalized(
+        &self,
+        append: &ContextAppend,
+    ) -> Result<AppendReceipt, ContextAppendError> {
+        let _mutation = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| ContextAppendError::Storage(error.to_string()))?
+            .clone();
+        if current.id != append.session_id.as_str() {
+            return Err(ContextAppendError::SessionNotFound(
+                append.session_id.clone(),
+            ));
+        }
+        if let Some(committed) = current.committed_steps.iter().find(|committed| {
+            committed.run_id == append.run_id.to_string()
+                && committed.step_id == append.step_id.as_str()
+        }) {
+            if committed.fingerprint == append.fingerprint.as_str() {
+                return Ok(Self::receipt(
+                    append,
+                    SessionRevision::new(committed.committed_revision),
+                ));
+            }
+            return Err(ContextAppendError::ContentConflict {
+                run_id: append.run_id.clone(),
+                step_id: append.step_id.clone(),
+            });
+        }
+        let actual = SessionRevision::new(current.revision);
+        if actual != append.expected_revision {
+            return Err(ContextAppendError::RevisionConflict {
+                expected: append.expected_revision,
+                actual,
+            });
+        }
+
+        let mut candidate = (*current).clone();
+        let active_start = candidate
+            .chats
+            .iter()
+            .rposition(|segment| segment.kind == crate::domain::session::SegmentKind::Compact)
+            .or_else(|| {
+                candidate
+                    .chats
+                    .iter()
+                    .position(|segment| segment.parent_id.is_none())
+            })
+            .unwrap_or(candidate.chats.len());
+        let frozen_prefix = candidate.chats[..active_start].to_vec();
+        let mut chain = ChatChain::from_chats(&candidate.chats);
+        for message in &append.messages {
+            chain.push(message.clone(), append.run_id.as_str());
+        }
+        candidate.chats = frozen_prefix;
+        candidate.chats.extend_from_slice(chain.active_segments());
+        candidate.revision += 1;
+        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.committed_steps.push(CommittedStep {
+            run_id: append.run_id.to_string(),
+            step_id: append.step_id.as_str().to_string(),
+            fingerprint: append.fingerprint.as_str().to_string(),
+            committed_revision: candidate.revision,
+        });
+
+        self.writer
+            .save(&candidate)
+            .await
+            .map_err(ContextAppendError::Storage)?;
+        let revision = SessionRevision::new(candidate.revision);
+        *self
+            .session
+            .write()
+            .map_err(|error| ContextAppendError::Storage(error.to_string()))? = Arc::new(candidate);
+        Ok(Self::receipt(append, revision))
+    }
+
+    async fn commit_compaction(
+        &self,
+        request: &CompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        let _mutation = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
+            .clone();
+        if current.id != request.source.session_id.as_str() {
+            return Err(ContextPortError::SessionNotFound(
+                request.source.session_id.clone(),
+            ));
+        }
+        let source_revision = request.source_revision;
+        let actual_revision = SessionRevision::new(current.revision);
+        if source_revision != actual_revision {
+            return Err(ContextPortError::Compact(format!(
+                "Session revision 冲突：期望 {source_revision:?}，实际 {actual_revision:?}"
+            )));
+        }
+        let chain = ChatChain::from_chats(&current.chats);
+        let messages = chain.messages();
+        let Some(compacted) = crate::adapters::compact_summary::compact_messages(
+            &messages,
+            request.source.system_prompt.as_str(),
+            request.source.context_size,
+        ) else {
+            return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
+        };
+        let mut candidate = (*current).clone();
+        let source_revision = SessionRevision::new(candidate.revision);
+        candidate
+            .chats
+            .push(crate::domain::session::ChatSegment::compact(
+                compacted.summary.clone(),
+                compacted.recent_messages.clone(),
+            ));
+        candidate.revision += 1;
+        candidate.updated_at = crate::domain::session::now_iso();
+        self.writer
+            .save(&candidate)
+            .await
+            .map_err(ContextPortError::Compact)?;
+        *self
+            .session
+            .write()
+            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))? =
+            Arc::new(candidate);
+        Ok(CompactOutcome::Committed(crate::domain::CompactResult {
+            summary: compacted.summary,
+            recent_messages: compacted.recent_messages,
+            source_revision,
+        }))
+    }
+}
+
+#[async_trait]
+impl CanonicalSessionWriter for crate::application::SessionPersistenceService {
+    async fn save(&self, session: &CanonicalSession) -> Result<(), String> {
+        crate::application::SessionPersistenceService::save(self, session)
+            .await
+            .map_err(|error| error.to_string())
+    }
+}

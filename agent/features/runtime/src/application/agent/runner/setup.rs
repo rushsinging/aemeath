@@ -307,6 +307,10 @@ impl AgentRunner for CliAgentRunner {
             &format!("Sub-agent started with model: {}", model_display),
         );
 
+        let isolated_session_id = sdk::SessionId::new_v7().to_string();
+        let isolated_context = crate::application::context_coordination::ContextCoordinator::new(
+            context::adapters::isolated_context(&isolated_session_id),
+        );
         SubAgentRun {
             prompt,
             system,
@@ -316,6 +320,10 @@ impl AgentRunner for CliAgentRunner {
             hook_runner,
             sub_schemas,
             messages,
+            committed_message_count: 0,
+            context: isolated_context,
+            context_request: None,
+            context_window: None,
             system_blocks,
             log_request_messages: Box::new(log_request_messages),
             agent,
@@ -326,7 +334,7 @@ impl AgentRunner for CliAgentRunner {
             active_run: self.active_run.clone(),
             terminal: None,
             start_time: std::time::Instant::now(),
-            session_id,
+            session_id: isolated_session_id,
             run_id: sub_run_id,
             parent_run_id,
             role_name_for_log,
