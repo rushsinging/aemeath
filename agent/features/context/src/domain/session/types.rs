@@ -2,9 +2,9 @@
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use share::message::{Message, Role};
 use std::path::PathBuf;
-use storage::TaskSnapshot;
 use uuid::NoContext;
 use uuid::Timestamp;
 use uuid::Uuid;
@@ -66,9 +66,10 @@ pub struct Session {
     /// Session metadata for organization
     #[serde(default)]
     pub metadata: SessionMetadata,
-    /// Task snapshot for resuming in-progress tasks
+    /// Legacy Task snapshot wire. Context preserves this JSON only while reading
+    /// or rewriting pre-canonical Session files; Task owns interpretation.
     #[serde(default)]
-    pub tasks: Option<TaskSnapshot>,
+    pub tasks: Option<Value>,
     #[serde(default)]
     pub workspace: Option<PersistedWorkspaceContext>,
 }

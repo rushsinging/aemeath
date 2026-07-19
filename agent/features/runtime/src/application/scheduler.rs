@@ -22,14 +22,24 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use storage::{TaskStatus, TaskStore};
+use task::{TaskAccess, TaskId, TaskStatus};
 use tokio::sync::{Mutex, Notify};
 
+fn parse_task_id(raw: &str) -> Result<TaskId, String> {
+    let value = raw
+        .parse::<u64>()
+        .map_err(|_| format!("Invalid task ID: {raw}"))?;
+    if value == 0 {
+        return Err(format!("Invalid task ID: {raw}"));
+    }
+    Ok(TaskId::new(value))
+}
+
 /// Background task scheduler
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct TaskScheduler {
-    /// Task store reference
-    task_store: Arc<TaskStore>,
+    /// Task capability reference
+    task_access: Arc<dyn TaskAccess>,
     /// Active background tasks
     active_tasks: Arc<Mutex<HashMap<String, BackgroundTaskContext>>>,
     /// Task queue (pending tasks waiting to run)
@@ -46,9 +56,9 @@ pub struct TaskScheduler {
 
 impl TaskScheduler {
     /// Create a new task scheduler
-    pub fn new(task_store: Arc<TaskStore>) -> Self {
+    pub fn new(task_access: Arc<dyn TaskAccess>) -> Self {
         Self {
-            task_store,
+            task_access,
             active_tasks: Arc::new(Mutex::new(HashMap::new())),
             task_queue: Arc::new(Mutex::new(Vec::new())),
             config: SchedulerConfig::default(),
@@ -59,9 +69,9 @@ impl TaskScheduler {
     }
 
     /// Create with custom configuration
-    pub fn with_config(task_store: Arc<TaskStore>, config: SchedulerConfig) -> Self {
+    pub fn with_config(task_access: Arc<dyn TaskAccess>, config: SchedulerConfig) -> Self {
         Self {
-            task_store,
+            task_access,
             active_tasks: Arc::new(Mutex::new(HashMap::new())),
             task_queue: Arc::new(Mutex::new(Vec::new())),
             config,
@@ -74,9 +84,10 @@ impl TaskScheduler {
     /// Queue a task for background execution
     pub async fn queue_task(&self, task_id: String) -> Result<(), String> {
         // Verify task exists and is in Pending status
-        let task = self.task_store.get(&task_id).await;
+        let typed_id = parse_task_id(&task_id)?;
+        let task = self.task_access.get(typed_id);
         let task = task.ok_or_else(|| format!("Task {} not found", task_id))?;
-        if task.status != TaskStatus::Pending {
+        if task.status() != TaskStatus::Pending {
             return Err(format!("Task {} is not in Pending status", task_id));
         }
 
@@ -99,16 +110,19 @@ impl TaskScheduler {
             queue_snapshot = queue.clone();
         } // task_queue lock released
 
-        // Phase 2: Find an unblocked task (can safely await task_store)
+        // Phase 2: Find an unblocked task through the Task-owned port.
         for (i, task_id) in queue_snapshot.iter().enumerate() {
-            let task = self.task_store.get(task_id).await;
+            let Ok(typed_id) = parse_task_id(task_id) else {
+                continue;
+            };
+            let task = self.task_access.get(typed_id);
             let Some(task) = task else { continue };
 
             // Check if all blocking tasks are completed
             let mut all_blockers_done = true;
-            for b in &task.blocked_by {
-                if let Some(blocker) = self.task_store.get(b).await {
-                    if blocker.status != TaskStatus::Completed {
+            for blocker_id in task.blocked_by() {
+                if let Some(blocker) = self.task_access.get(*blocker_id) {
+                    if blocker.status() != TaskStatus::Completed {
                         all_blockers_done = false;
                         break;
                     }
@@ -157,12 +171,11 @@ impl TaskScheduler {
             context
         }; // active_tasks lock released
 
-        // Phase 2: Update task store WITHOUT holding active_tasks
-        self.task_store
-            .update(&context.task_id, |t| {
-                t.status = TaskStatus::InProgress;
-            })
-            .await;
+        // Phase 2: Update Task-owned state WITHOUT holding active_tasks.
+        let typed_id = parse_task_id(&context.task_id)?;
+        self.task_access
+            .transition(typed_id, TaskStatus::InProgress, current_timestamp())
+            .map_err(|error| error.to_string())?;
 
         Ok(context)
     }
@@ -214,18 +227,16 @@ impl TaskScheduler {
         // --- Phase 2: Update task store WITHOUT holding active_tasks ---
         match post_action {
             Some(PostAction::MarkCompleted) => {
-                self.task_store
-                    .update(task_id, |t| {
-                        t.status = TaskStatus::Completed;
-                    })
-                    .await;
+                if let Ok(id) = parse_task_id(task_id) {
+                    let _ =
+                        self.task_access
+                            .transition(id, TaskStatus::Completed, current_timestamp());
+                }
             }
             Some(PostAction::MarkFailed) => {
-                self.task_store
-                    .update(task_id, |t| {
-                        t.status = TaskStatus::Pending;
-                    })
-                    .await;
+                // A failed background attempt remains observable in scheduler
+                // history. Task status is not force-rewound: Task owns legal
+                // transitions and retry admission.
             }
             _ => {}
         }
@@ -262,12 +273,11 @@ impl TaskScheduler {
             active.remove(task_id);
         } // active_tasks lock released
 
-        // Phase 2: Update task store WITHOUT holding active_tasks
-        self.task_store
-            .update(task_id, |t| {
-                t.status = TaskStatus::Deleted;
-            })
-            .await;
+        // Phase 2: Update Task-owned state WITHOUT holding active_tasks.
+        let typed_id = parse_task_id(task_id)?;
+        self.task_access
+            .delete(typed_id, current_timestamp())
+            .map_err(|error| error.to_string())?;
 
         Ok(())
     }

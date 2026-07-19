@@ -33,6 +33,7 @@ fn hook_result(
             output: output.to_string(),
             error: error.map(str::to_string),
             exit_code: if blocked { Some(2) } else { Some(0) },
+            output_truncated: false,
         },
         None,
     )
@@ -106,6 +107,7 @@ fn test_hook_feedback_details_writes_long_output_to_file() {
         output: long_output,
         error: Some("stderr details".to_string()),
         exit_code: Some(2),
+        output_truncated: false,
     };
 
     let feedback = runtime.block_on(hook_feedback_details(
@@ -169,6 +171,7 @@ fn hook_result_with_json_reason(
             output: String::new(),
             error: None,
             exit_code: Some(0),
+            output_truncated: false,
         },
         Some(HookJsonOutput {
             decision: Some("block".to_string()),

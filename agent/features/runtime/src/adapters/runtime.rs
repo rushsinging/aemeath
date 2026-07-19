@@ -7,9 +7,7 @@
 pub use share::adapter::hook::HookRunnerAdapter;
 pub use share::adapter::provider::LlmClientAdapter;
 
-use crate::ports::legacy::{HookNotificationPort, ProviderInfoPort, TaskStorePort};
-use std::collections::HashMap;
-use storage::{Task, TaskSnapshot, TaskStore};
+use crate::ports::legacy::{HookNotificationPort, ProviderInfoPort};
 
 impl ProviderInfoPort for LlmClientAdapter<provider::LlmClient> {
     fn provider_name(&self) -> &str {
@@ -25,25 +23,5 @@ impl ProviderInfoPort for LlmClientAdapter<provider::LlmClient> {
 impl HookNotificationPort for HookRunnerAdapter<hook::api::HookRunner> {
     async fn on_notification(&self, message: &str, kind: &str, workspace_root: &std::path::Path) {
         let _ = self.0.on_notification(message, kind, workspace_root).await;
-    }
-}
-
-// TaskStore 在 share（共享内核）中，runtime 可直接为其实现 port trait
-#[async_trait::async_trait]
-impl TaskStorePort for TaskStore {
-    async fn snapshot(&self) -> TaskSnapshot {
-        TaskStore::snapshot(self).await
-    }
-
-    async fn restore(&self, snapshot: TaskSnapshot) {
-        TaskStore::restore(self, snapshot).await
-    }
-
-    async fn list_current_batch(&self) -> Vec<Task> {
-        TaskStore::list_current_batch(self).await
-    }
-
-    async fn get_batch_display_map(&self) -> HashMap<String, usize> {
-        TaskStore::get_batch_display_map(self).await
     }
 }

@@ -40,8 +40,7 @@
 
 ## 日志规范
 
-- UnifiedLogger 驱动，从配置文件的 `logging.level` 读取全局日志级别。
-- 设置 `AEMEATH_LOG_STDERR=1` 可恢复 stderr 输出（用于 `--no-tui` 模式）。
+- UnifiedLogger 驱动，从配置文件的 `logging.level` 读取全局日志级别；输出模式（File/Stderr）由 CLI typed bootstrap 输入决定（`-q -v` → Stderr，否则 File，见 #941/#1215），**NEVER** 经 env 旁路。
 
 ### 日志文件路由
 
