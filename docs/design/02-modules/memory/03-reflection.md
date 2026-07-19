@@ -153,7 +153,7 @@ Prompt 结构（i18n）：
 {...}
 ```
 
-- **project_memory**：从 MemoryStore 读取 Project 层 active 条目，格式化为 `- [Category][tags] content` 列表。
+- **project_memory**：从当前 Run 持有的同一 `MemoryPort` 读取 Project 层 active 条目，格式化为 `- [Category][tags] content` 列表。
 - **recent_summary**：从最近对话消息提取文本，按 `[User]/[Assistant]: text` 格式逆序拼接，截断到合理长度。
 - **i18n**：prompt 模板支持中英文，按 `lang` 参数选择。
 
@@ -193,9 +193,8 @@ fn parse_output(raw: &str) -> Result<ReflectionOutput, serde_json::Error>;
 ```rust
 enum ReflectionError {
     Parse(serde_json::Error),              // JSON 解析失败
-    Memory(MemoryError),                   // Memory 操作失败
+    Memory(MemoryError),                   // MemoryPort 操作失败
     Apply(String),                         // apply 流程失败
-    StoreInit(String),                     // MemoryStore 初始化失败
     LlmCall(String),                       // LLM 调用失败（由 Runtime 设置）
     EmptyResponse,                         // LLM 返回空响应
     Unparseable(String),                   // 响应无法解析为 JSON
@@ -207,43 +206,25 @@ enum ReflectionError {
 ## 7. Apply 流程
 
 ```rust
-fn apply_output(
+async fn apply_output(
     output: &ReflectionOutput,
-    store: &mut MemoryStore,
-) -> Result<ReflectionApplyResult, ReflectionError>;
+    memory: &dyn MemoryPort,
+) -> Result<ReflectionApplyResult, MemoryError> {
+    memory.apply_reflection(output).await
+}
 ```
 
 ### 步骤
 
-1. **apply_suggestions**：遍历 `suggested_memories`，每条转换为 MemoryEntry（UUIDv7 + now + source=Llm），调用 `add_with_eviction_retry` 写入。
-2. **apply_outdated**：遍历 `outdated_memories`，调用 `store.mark_outdated(id)` 标记过期。
-
-### add_with_eviction_retry
-
-```rust
-fn add_with_eviction_retry(store: &mut MemoryStore, entry: MemoryEntry) -> Result<bool, ReflectionError> {
-    match store.add(entry.clone())? {
-        AddResult::Added { .. } | AddResult::Merged { .. } => Ok(true),
-        AddResult::NeedsEviction { candidates } => {
-            let ids = candidates.iter().map(|e| e.id.clone()).collect();
-            store.evict(&ids)?;
-            match store.add(entry)? {
-                Added | Merged => Ok(true),
-                NeedsEviction { .. } => Err(Apply("still requires eviction after retry")),
-            }
-        }
-    }
-}
-```
+1. **apply_suggestions**：`MemoryPort::apply_reflection` 遍历 `suggested_memories`，将每条转换为 MemoryEntry（UUIDv7 + now + source=Llm），执行去重、容量判断与必要的归档重试。
+2. **apply_outdated**：同一 Port 实例遍历 `outdated_memories` 并标记过期；它就是当前 Run shared lease 捕获的 active Memory Arc。
+3. **提交语义**：每个 layer 使用 MemoryService candidate/CAS/publish 协议；跨层部分完成返回结构化 `MemoryError::PartialApply`，不伪装成全成功。
 
 ### auto_apply_suggestions
 
 ```rust
 if config.reflection.auto_apply_suggestions {
-    match apply_output(&output, &mut store) {
-        Ok(result) => { /* 追加 auto-apply 摘要到 formatted_content */ }
-        Err(e) => { /* warn log，不阻断 */ }
-    }
+    memory.apply_reflection(&output).await
 }
 ```
 
@@ -323,6 +304,7 @@ struct ReflectionConfig {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-19 | #900 将旧 `MemoryStore` apply 示例更新为当前 Run shared lease 捕获的同一 `MemoryPort::apply_reflection`，保留 `ReflectionEngine` 作为无状态 prompt/parse 领域服务 | #900 |
 | 2026-07-18 | #899 完成三 trigger Runtime 单槽异步、busy skip、静默完成、Memory-owned history append/query 持久化、`/reflect [limit]` 只读安全摘要、安全日志与 Run teardown drain/cancel timeout | #899 |
 | 2026-07-12 | 初稿：ReflectionEngine 领域服务、MemorySuggestion、触发条件、prompt/output/apply、职责边界 | #789 |
 | 2026-07-12 | 早期并发方案已由 #899 的三 trigger 统一异步单槽语义取代 | #789/#899 |

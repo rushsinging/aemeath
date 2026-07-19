@@ -125,9 +125,8 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
 
 /// 执行 /memory 命令（非 remind 子命令）。
 ///
-/// #871：所有 memory 查询/变更均通过 `MemoryPort` API，不再直接打开
-/// `storage::MemoryStore`。调用方（loop_runner）负责通过 session-switch gate
-/// 捕获 `committed_memory` 后传入。
+/// #871/#900：所有 memory 查询/变更均通过 `MemoryPort` API；调用方
+///（loop_runner）负责通过 session-switch gate 捕获 `committed_memory` 后传入。
 pub async fn execute_memory(
     args: &str,
     port: &dyn MemoryPort,
