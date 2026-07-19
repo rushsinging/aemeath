@@ -2,7 +2,9 @@
 
 use crate::chat::AskUserQuestionItem;
 use crate::chat_result::{ChatResult, ToolResultImage};
-use crate::chat_view::{AgentProgressEventView, HookEventView, WorkspaceContextView};
+use crate::chat_view::{
+    AgentProgressEventView, HookEventView, HookMessageView, WorkspaceContextView,
+};
 use crate::ChatMessage;
 use serde::{Deserialize, Serialize};
 
@@ -303,6 +305,8 @@ pub enum ChatEvent {
     CurrentTurnChanged(usize),
     /// Hook 事件。
     HookEvent(HookEventView),
+    /// 结构化 hook 执行消息（typed projection）。
+    HookMessage(HookMessageView),
     /// Runtime-owned pure-value interaction request. Production waiter cutover is tracked by #878.
     InteractionRequested {
         request: crate::InteractionRequest,

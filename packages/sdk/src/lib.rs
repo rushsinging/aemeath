@@ -37,9 +37,10 @@ pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserQuestionItem,
     AskUserReply, ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage,
     ChatRequest, ChatResult, ChatStream, HookEventStatus, HookEventView, HookExecutionResultView,
-    OptionItem, ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
-    ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ToolCallStatusView,
-    ToolResultImage, UserInput, WorkspaceContextView, WorkspaceStackEntryView,
+    HookMessageKindView, HookMessageView, OptionItem, ReflectionApplyStatusView,
+    ReflectionErrorCategoryView, ReflectionHistoryView, ReflectionStatusView,
+    ReflectionTokenUsageView, ReflectionTriggerView, ToolCallStatusView, ToolResultImage,
+    UserInput, WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
 pub use commands::builtin_commands;

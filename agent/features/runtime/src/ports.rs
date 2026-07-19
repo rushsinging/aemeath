@@ -20,7 +20,6 @@
 
 pub mod context_port;
 pub mod event_sink;
-pub mod hook_port;
 pub mod input_buffer;
 pub mod legacy;
 pub mod policy_port;
@@ -39,7 +38,7 @@ pub use context_port::{
     SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, ToolOutcomeKind, Urgency,
 };
 pub use event_sink::EventSink;
-pub use hook_port::{HookInvocation, HookOutcome, HookPoint, HookPort};
+pub use hook::api::{HookInvocation, HookOutcome, HookPoint, HookPort};
 pub use input_buffer::InputBuffer;
 pub(crate) use input_buffer::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort};
 pub use policy_port::{

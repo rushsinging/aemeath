@@ -365,6 +365,12 @@ impl RecordingSink {
             RuntimeStreamEvent::HookEvent(event) => {
                 format!("HookEvent:{}:{:?}", event.hook_name, event.status)
             }
+            RuntimeStreamEvent::HookMessage(msg) => {
+                format!(
+                    "HookMessage:{:?}:{}:{}",
+                    msg.point, msg.execution_ordinal, msg.attempt
+                )
+            }
             RuntimeStreamEvent::TurnChanged(turn) => format!("TurnChanged:{turn}"),
             RuntimeStreamEvent::Usage { .. } => "Usage".to_string(),
             RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),

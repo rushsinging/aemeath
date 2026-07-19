@@ -8,6 +8,7 @@ pub use looping::{
     EmptyInputEventDrainPort, EmptyQueueDrainPort, EventFuture, GateDecision, GateKind,
     GateOutcome, InputEventDrainPort, InputEventFuture, InputEventOptFuture, PendingInputBuffer,
     QueueDrainPort, QueueFuture, RuntimeHookEvent, RuntimeHookEventStatus,
-    RuntimeHookExecutionResult, RuntimeStreamEvent, RuntimeToolCallStatus,
+    RuntimeHookExecutionResult, RuntimeHookMessage, RuntimeHookMessageKind, RuntimeStreamEvent,
+    RuntimeToolCallStatus,
 };
 pub use request::{ChatLaunchOptions, NoTuiChatLaunch, TuiChatLaunch};

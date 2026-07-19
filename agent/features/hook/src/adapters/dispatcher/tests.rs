@@ -18,7 +18,9 @@ use tokio_util::sync::CancellationToken;
 use crate::domain::invocation::{
     HookInvocation, HookPoint, PreToolUseInput, StopInput, UserPromptInput,
 };
-use crate::domain::outcome::{HookDirective, HookExecutionStatus, HookReason};
+use crate::domain::outcome::{
+    HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecutionStatus, HookReason,
+};
 use crate::domain::subscription::{HookFailurePolicy, HookMatcher, HookSubscription};
 use crate::ports::HookPort;
 
@@ -1054,4 +1056,182 @@ async fn cancelled_records_execution_failed_with_chinese_detail() {
         }
         other => panic!("Cancelled 这一次 attempt 应记为 ExecutionFailed，实际 status = {other:?}"),
     }
+}
+
+// ════════════════════════════════════════════════════════════
+// 15. BC 保留展示消息（HookOutcome.messages，#925）
+// ════════════════════════════════════════════════════════════
+
+/// 单 subscription 同时返回 additionalContext 与 systemMessage →
+/// `outcome.messages` 必须逐条保留两条消息（AdditionalContext + SystemMessage），
+/// 各自携带正确的 point / source / attempt / execution_ordinal。
+#[tokio::test]
+async fn display_messages_preserves_both_kinds_from_one_subscription() {
+    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let scripted = Scripted::from_steps([ScriptStep::ok_json(
+        r#"{"additionalContext":"ctx","systemMessage":"warn"}"#,
+    )]);
+    let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
+
+    let outcome = dispatcher
+        .dispatch(pre_tool_use("Bash"), &CancellationToken::new())
+        .await;
+
+    let ctx_msgs: Vec<&HookDisplayMessage> = outcome
+        .messages
+        .iter()
+        .filter(|m| m.kind == HookDisplayMessageKind::AdditionalContext)
+        .collect();
+    let sys_msgs: Vec<&HookDisplayMessage> = outcome
+        .messages
+        .iter()
+        .filter(|m| m.kind == HookDisplayMessageKind::SystemMessage)
+        .collect();
+
+    assert_eq!(
+        ctx_msgs.len(),
+        1,
+        "additionalContext 应保留 1 条 AdditionalContext 消息，实际 = {:?}",
+        outcome.messages
+    );
+    assert_eq!(
+        sys_msgs.len(),
+        1,
+        "systemMessage 应保留 1 条 SystemMessage 消息，实际 = {:?}",
+        outcome.messages
+    );
+    assert_eq!(ctx_msgs[0].text, "ctx");
+    assert_eq!(sys_msgs[0].text, "warn");
+    // point / source / attempt / execution_ordinal（All matcher，第 1 次成功执行）。
+    for m in &outcome.messages {
+        assert_eq!(m.point, HookPoint::PreToolUse);
+        assert_eq!(m.source, "*", "All matcher 的稳定来源应为 *");
+        assert_eq!(m.attempt, 1, "首次成功 attempt 应为 1");
+        assert_eq!(m.execution_ordinal, 1, "首条 execution 的序号应为 1");
+    }
+    // directive 仍聚合 context（注入用），与逐条展示消息分离。
+    assert!(matches!(
+        outcome.directive,
+        HookDirective::ContinueWithContext { ref context } if context == "ctx"
+    ));
+}
+
+/// `ToolName` matcher 的来源应为工具名本身（稳定非秘密值）。
+#[tokio::test]
+async fn display_message_source_reflects_tool_name_matcher() {
+    let subs =
+        vec![sub(HookPoint::PreToolUse, "cmd").with_matcher(HookMatcher::ToolName("Bash".into()))];
+    let scripted = Scripted::from_steps([ScriptStep::ok_json(r#"{"systemMessage":"hi"}"#)]);
+    let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
+
+    let outcome = dispatcher
+        .dispatch(pre_tool_use("Bash"), &CancellationToken::new())
+        .await;
+
+    assert_eq!(outcome.messages.len(), 1);
+    assert_eq!(
+        outcome.messages[0].source, "Bash",
+        "ToolName matcher 来源应为工具名"
+    );
+    assert_eq!(
+        outcome.messages[0].kind,
+        HookDisplayMessageKind::SystemMessage
+    );
+}
+
+/// 多 subscription 的展示消息必须按 executions 聚合顺序递增 execution_ordinal，
+/// attempt 反映各自 subscription 内的成功尝试序号。
+#[tokio::test]
+async fn display_messages_ordinal_and_attempt_across_subscriptions() {
+    let subs = vec![
+        sub(HookPoint::PreToolUse, "a"),
+        sub(HookPoint::PreToolUse, "b"),
+    ];
+    let scripted = Scripted::from_steps([
+        ScriptStep::ok_json(r#"{"additionalContext":"ctx-a"}"#),
+        ScriptStep::ok_json(r#"{"systemMessage":"warn-b"}"#),
+    ]);
+    let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
+
+    let outcome = dispatcher
+        .dispatch(pre_tool_use("X"), &CancellationToken::new())
+        .await;
+
+    assert_eq!(
+        outcome.messages.len(),
+        2,
+        "两条 subscription 各产 1 条消息，实际 = {:?}",
+        outcome.messages
+    );
+    let (m0, m1) = (&outcome.messages[0], &outcome.messages[1]);
+    // a 先执行：ordinal=1, attempt=1, AdditionalContext(ctx-a)。
+    assert_eq!(m0.execution_ordinal, 1);
+    assert_eq!(m0.attempt, 1);
+    assert_eq!(m0.kind, HookDisplayMessageKind::AdditionalContext);
+    assert_eq!(m0.text, "ctx-a");
+    // b 后执行：ordinal=2, attempt=1, SystemMessage(warn-b)。
+    assert_eq!(m1.execution_ordinal, 2);
+    assert_eq!(m1.attempt, 1);
+    assert_eq!(m1.kind, HookDisplayMessageKind::SystemMessage);
+    assert_eq!(m1.text, "warn-b");
+}
+
+/// 多 attempt（重试后成功）：展示消息的 attempt 必须为最终成功 attempt 序号，
+/// execution_ordinal 必须为该次成功 execution 在聚合 executions 中的位置（含前序失败）。
+#[tokio::test]
+async fn display_message_attempt_and_ordinal_after_retries() {
+    let subs = vec![
+        sub(HookPoint::PreToolUse, "flaky"),
+        sub(HookPoint::PreToolUse, "stable"),
+    ];
+    // flaky：两次失败后第三次成功返回 systemMessage；stable：首次成功返回 additionalContext。
+    let scripted = Scripted::from_steps([
+        ScriptStep::fault(ExecutionFault::Io),
+        ScriptStep::fault(ExecutionFault::Io),
+        ScriptStep::ok_json(r#"{"systemMessage":"finally"}"#),
+        ScriptStep::ok_json(r#"{"additionalContext":"ctx-stable"}"#),
+    ]);
+    let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
+
+    let outcome = dispatcher
+        .dispatch(pre_tool_use("X"), &CancellationToken::new())
+        .await;
+
+    assert_eq!(outcome.executions.len(), 4);
+    assert_eq!(outcome.messages.len(), 2, "实际 = {:?}", outcome.messages);
+    // flaky 第三次成功：该 execution 是聚合 executions 的第 3 条（ordinal=3），attempt=3。
+    let flaky_msg = &outcome.messages[0];
+    assert_eq!(flaky_msg.kind, HookDisplayMessageKind::SystemMessage);
+    assert_eq!(flaky_msg.text, "finally");
+    assert_eq!(flaky_msg.attempt, 3, "flaky 第三次成功的 attempt 应为 3");
+    assert_eq!(
+        flaky_msg.execution_ordinal, 3,
+        "flaky 成功 execution 是第 3 条，ordinal 应为 3"
+    );
+    // stable 首次成功：聚合 executions 的第 4 条（ordinal=4），attempt=1。
+    let stable_msg = &outcome.messages[1];
+    assert_eq!(stable_msg.kind, HookDisplayMessageKind::AdditionalContext);
+    assert_eq!(stable_msg.text, "ctx-stable");
+    assert_eq!(stable_msg.attempt, 1);
+    assert_eq!(stable_msg.execution_ordinal, 4);
+    // ordinal 单调递增。
+    assert!(flaky_msg.execution_ordinal < stable_msg.execution_ordinal);
+}
+
+/// 没有 additionalContext / systemMessage 的成功执行不应产生展示消息。
+#[tokio::test]
+async fn display_messages_empty_when_no_context_or_system_message() {
+    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, "")]);
+    let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
+
+    let outcome = dispatcher
+        .dispatch(pre_tool_use("X"), &CancellationToken::new())
+        .await;
+
+    assert!(
+        outcome.messages.is_empty(),
+        "无 context / systemMessage 时不应产生展示消息，实际 = {:?}",
+        outcome.messages
+    );
 }

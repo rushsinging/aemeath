@@ -148,6 +148,8 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             UiEvent::CurrentTurnChanged(turn)
         }
         sdk::ChatEvent::HookEvent(event) => UiEvent::HookEvent(event),
+        // Structured hook message has no dedicated UiEvent yet; intentionally ignored.
+        sdk::ChatEvent::HookMessage(_) => UiEvent::SystemMessage(String::new()),
         sdk::ChatEvent::AskUserBatch { items, reply_tx } => {
             UiEvent::AskUserBatch { items, reply_tx }
         }
