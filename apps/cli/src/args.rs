@@ -175,7 +175,8 @@ impl From<Args> for sdk::ChatBootstrapArgs {
             max_agent_concurrency: args.max_agent_concurrency,
             no_think: args.no_think,
             max_reasoning: args.max_reasoning,
-            logging_output: if args.verbose {
+            logging_output: if args.quiet && args.verbose {
+                // 仅 no-tui（--quiet）+ --verbose 时走 stderr；TUI 模式 stderr 会糊屏（#1215）。
                 sdk::LoggingOutputMode::Stderr
             } else {
                 sdk::LoggingOutputMode::File
@@ -251,10 +252,21 @@ mod tests {
 
     #[test]
     fn verbose_cli_maps_to_stderr_logging_output() {
-        let cli = Cli::try_parse_from(["aemeath", "--verbose"]).unwrap();
+        // 仅在 no-tui（--quiet）下 --verbose 走 stderr，保留实时日志语义。
+        let cli = Cli::try_parse_from(["aemeath", "--quiet", "--verbose"]).unwrap();
         let bootstrap = sdk::ChatBootstrapArgs::from(Args::from(cli.run_args));
 
         assert_eq!(bootstrap.logging_output, sdk::LoggingOutputMode::Stderr);
+    }
+
+    #[test]
+    fn tui_verbose_stays_file_to_avoid_stderr_polluting_alternate_screen() {
+        // TUI 模式（非 --quiet）下 --verbose 绝不走 stderr——stderr 会越过
+        // alternate screen 的双缓冲直接糊屏（#1215）。
+        let cli = Cli::try_parse_from(["aemeath", "--verbose"]).unwrap();
+        let bootstrap = sdk::ChatBootstrapArgs::from(Args::from(cli.run_args));
+
+        assert_eq!(bootstrap.logging_output, sdk::LoggingOutputMode::File);
     }
 
     #[test]

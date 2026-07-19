@@ -82,7 +82,7 @@ impl LegacyTaskCapture for TaskSnapshotSource {
     }
 }
 
-fn snapshot_to_legacy(snapshot: TaskSnapshot) -> Result<storage::TaskSnapshot, String> {
+fn snapshot_to_legacy(snapshot: TaskSnapshot) -> Result<serde_json::Value, String> {
     // Task owns the canonical wire. The legacy DTO is only a compatibility
     // target, so conversion deliberately passes through that wire rather than
     // duplicating a field-by-field projection in Runtime.
@@ -125,7 +125,7 @@ fn snapshot_to_legacy(snapshot: TaskSnapshot) -> Result<storage::TaskSnapshot, S
             .unwrap_or(0),
         "batches": batches,
     });
-    serde_json::from_value(legacy).map_err(|error| error.to_string())
+    Ok(legacy)
 }
 
 fn parse_wire_u64(value: Option<&serde_json::Value>, field: &str) -> Result<u64, String> {

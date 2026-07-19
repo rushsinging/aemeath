@@ -4,13 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-share = { path = "../../shared" }
 tokio = { workspace = true }
-dirs = "6"
-log = "0.4"
+log = { version = "0.4", features = ["std"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-chrono = { workspace = true }
 uuid = { version = "1", features = ["v4", "v7"] }
 cap-std = "4"
 async-trait = { workspace = true }

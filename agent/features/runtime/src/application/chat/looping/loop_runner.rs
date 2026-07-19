@@ -68,7 +68,6 @@ where
                 tool_result_materializer,
                 policy,
                 active_run,
-                task_store,
                 task_access,
                 max_tool_concurrency,
                 agent_semaphore,
@@ -372,7 +371,6 @@ where
                         &sink,
                         &mut chain,
                         &next_segment,
-                        &task_store,
                         task_access.as_ref(),
                         true,
                     )
@@ -393,7 +391,6 @@ where
                         &sink,
                         &mut chain,
                         &next_segment,
-                        &task_store,
                         task_access.as_ref(),
                         true,
                     )
@@ -411,7 +408,6 @@ where
                         &sink,
                         &mut pending_input,
                         &mut chain,
-                        &task_store,
                         task_access.as_ref(),
                     )
                     .await

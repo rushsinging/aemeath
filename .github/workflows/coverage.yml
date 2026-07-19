@@ -1,14 +1,11 @@
 name: Coverage
 
+# 所有 PR 都跑 coverage：ruleset（main-branch-protection.json）将
+# "Workspace coverage summary" 设为 required_status_checks，若用 paths 过滤会让
+# 只改非匹配路径（如 .agents/hooks/*.sh）的 PR 永不触发该 check → 永远 pending → 卡死。
+# 见 #1220 配套讨论。
 on:
   pull_request:
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - 'Cargo.lock'
-      - 'scripts/coverage.sh'
-      - 'tools/xtask/**'
-      - '.github/workflows/coverage.yml'
   workflow_dispatch:
 
 permissions:

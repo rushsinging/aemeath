@@ -192,7 +192,6 @@ pub async fn run_loop_gate<Q, I, S>(
     sink: &S,
     chain: &mut ChatChain,
     segment_id: &str,
-    task_store: &storage::TaskStore,
     task_access: &dyn task::TaskAccess,
     is_idle: bool,
 ) -> GateOutcome
@@ -202,17 +201,7 @@ where
     S: ChatEventSink,
 {
     drain_sources(buffer, queue, input_events).await;
-    apply_gate(
-        kind,
-        buffer,
-        sink,
-        chain,
-        segment_id,
-        task_store,
-        task_access,
-        is_idle,
-    )
-    .await
+    apply_gate(kind, buffer, sink, chain, segment_id, task_access, is_idle).await
 }
 
 pub async fn drain_sources<Q, I>(buffer: &mut PendingInputBuffer, queue: &Q, input_events: &I)
@@ -237,7 +226,6 @@ pub async fn apply_gate<S>(
     sink: &S,
     chain: &mut ChatChain,
     segment_id: &str,
-    task_store: &storage::TaskStore,
     task_access: &dyn task::TaskAccess,
     is_idle: bool,
 ) -> GateOutcome
@@ -324,9 +312,6 @@ where
                     chain.clear();
                     added.clear();
                     appended_user_messages = 0;
-                    // Keep clearing the legacy store only as a compatibility
-                    // measure until #890/#891.
-                    task_store.clear().await;
                     sink.send_event(RuntimeStreamEvent::SessionReset).await;
                     dropped_events = iter.count();
                     decision = GateDecision::Proceed;

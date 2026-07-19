@@ -9,11 +9,6 @@ use share::message::Message;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
-/// #567 S5：gate 测试用 task_store（run_loop_gate 新增参数）
-pub(super) fn test_task_store() -> storage::TaskStore {
-    storage::TaskStore::new()
-}
-
 /// Mock port backed by tokio mpsc; supports both drain and blocking recv.
 #[derive(Clone)]
 pub(super) struct MockInputPort {
@@ -143,7 +138,6 @@ async fn test_run_loop_gate_before_finish_continues_on_user_message() {
     let sink = TestSink::default();
     let mut chain = ChatChain::from_flat_messages(vec![Message::user("first")]);
 
-    let task_store = test_task_store();
     let outcome = run_loop_gate(
         GateKind::BeforeFinish,
         &mut buffer,
@@ -152,7 +146,6 @@ async fn test_run_loop_gate_before_finish_continues_on_user_message() {
         &sink,
         &mut chain,
         "seg",
-        &task_store,
         &task::TaskStore::new(),
         false,
     )
@@ -186,7 +179,6 @@ async fn test_user_message_with_images_assembles_image_block() {
     let sink = TestSink::default();
     let mut chain = ChatChain::from_flat_messages(Vec::new());
 
-    let task_store = test_task_store();
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &mut buffer,
@@ -195,7 +187,6 @@ async fn test_user_message_with_images_assembles_image_block() {
         &sink,
         &mut chain,
         "seg",
-        &task_store,
         &task::TaskStore::new(),
         false,
     )
@@ -254,7 +245,6 @@ async fn test_user_message_with_multiple_images_interleaves_by_placeholder() {
     let sink = TestSink::default();
     let mut chain = ChatChain::from_flat_messages(Vec::new());
 
-    let task_store = test_task_store();
     let _ = run_loop_gate(
         GateKind::BeforeLlm,
         &mut buffer,
@@ -263,7 +253,6 @@ async fn test_user_message_with_multiple_images_interleaves_by_placeholder() {
         &sink,
         &mut chain,
         "seg",
-        &task_store,
         &task::TaskStore::new(),
         false,
     )
@@ -306,7 +295,6 @@ async fn query_reflection_history_is_buffered_while_gate_is_busy() {
         &sink,
         &mut chain,
         "seg",
-        &test_task_store(),
         &task::TaskStore::new(),
         false,
     )
@@ -330,7 +318,6 @@ async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
     let sink = TestSink::default();
     let mut chain = ChatChain::from_flat_messages(Vec::new());
 
-    let task_store = test_task_store();
     let outcome = run_loop_gate(
         GateKind::AfterBlockingBoundary,
         &mut buffer,
@@ -339,7 +326,6 @@ async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
         &sink,
         &mut chain,
         "seg",
-        &task_store,
         &task::TaskStore::new(),
         false,
     )
@@ -363,7 +349,6 @@ async fn test_run_loop_gate_preserves_side_effect_command_order() {
     let sink = TestSink::default();
     let mut chain = ChatChain::from_flat_messages(Vec::new());
 
-    let task_store = test_task_store();
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &mut buffer,
@@ -372,7 +357,6 @@ async fn test_run_loop_gate_preserves_side_effect_command_order() {
         &sink,
         &mut chain,
         "seg",
-        &task_store,
         &task::TaskStore::new(),
         false,
     )
@@ -398,7 +382,6 @@ async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
     let sink = TestSink::default();
     let mut chain = ChatChain::from_flat_messages(Vec::new());
 
-    let task_store = test_task_store();
     let outcome = run_loop_gate(
         GateKind::BeforeFinish,
         &mut buffer,
@@ -407,7 +390,6 @@ async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
         &sink,
         &mut chain,
         "seg",
-        &task_store,
         &task::TaskStore::new(),
         false,
     )
@@ -430,7 +412,6 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
     let sink = TestSink::default();
     let mut chain = ChatChain::from_flat_messages(Vec::new());
 
-    let task_store = test_task_store();
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &mut buffer,
@@ -439,7 +420,6 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
         &sink,
         &mut chain,
         "seg",
-        &task_store,
         &task::TaskStore::new(),
         false,
     )
@@ -467,7 +447,6 @@ async fn test_run_loop_gate_no_dedup_push_and_pull_same_text() {
     let sink = TestSink::default();
     let mut chain = ChatChain::from_flat_messages(Vec::new());
 
-    let task_store = test_task_store();
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &mut buffer,
@@ -476,7 +455,6 @@ async fn test_run_loop_gate_no_dedup_push_and_pull_same_text() {
         &sink,
         &mut chain,
         "seg",
-        &task_store,
         &task::TaskStore::new(),
         false,
     )

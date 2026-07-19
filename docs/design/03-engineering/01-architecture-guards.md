@@ -76,11 +76,11 @@
 - **功能**：调用 `cargo run -p xtask -- guard-registry check`，以 `.agents/architecture-guard-registry.json` 为单一机器可读治理注册表。
 - **分类**：`target_capability_policy`、`target_hexagonal_policy`、`scope_exclusion`、`false_positive_suppression`、`migration_exception`；只有最后一类计入迁移债务。
 - **schema**：每项使用全局唯一 stable id，并记录 guard、module、scope、owner、reason、tracking issue、introduced baseline、exit condition 与 status。迁移例外缺失归责或退出信息时 fail-closed。
-- **预算**：Current 冻结迁移债务为 repository `7`，其中 Runtime `5`、Storage `1`、TUI `1`；模块和仓库预算均只允许下降。
+- **预算**：Current 冻结迁移债务为 repository `6`，其中 Runtime `5`、TUI `1`；Storage 的 #883 transitional business modules 债务已删除，模块和仓库预算均只允许下降。
 - **stale / 隐式排除**：精确 path/path-prefix 不存在即 stale；每个注册项必须被其声明的 Guard 以精确 `guard-registry:<stable-id>` 引用；Shell 中 `grep -v`、`--exclude`、`--exclude-dir`、`EXEMPT_FILES`、migration exception 集合和自由格式 inline allow 必须在同一行或前一行引用同 Guard 下已登记 stable id。
 - **expiry**：每次执行通过 GitHub CLI 核验所有 migration exception 的 tracking Issue 仍为 OPEN；查询失败或 Issue 已关闭均 fail-closed。
 - **报告**：`cargo run -p xtask -- guard-registry report . <output>` 按 stable id 确定性输出 classification、module、guard、scope kind 与 lifecycle 维度，用于模块开发前/完成后预算复核。
-- **Current 基线复核**：Storage 的 Target policy 仍不计债务，但 `STORAGE_TRANSITIONAL_MODULES` 是 #883 承接的真实迁移债务 1；Composition 仅有合法唯一装配 policy；Workflow、Audit、Project 未发现 migration exception，与人工基线一致。
+- **Current 基线复核**：Storage 的 Target policy 不计债务；#883 已删除 `STORAGE_TRANSITIONAL_MODULES` 及其唯一 migration exception，Storage migration debt 为 `0`。Composition 仅有合法唯一装配 policy；Workflow、Audit、Project 未发现 migration exception，与人工基线一致。
 - **边界**：本守卫只治理例外和 policy 元数据，NEVER 替代 #1022 的 capability-first 正式边界，也不退役 legacy COLA Guard。
 - **故意违规证据**：缺 owner、重复 id、stale path、超预算、未登记 `grep -v` 均被定向元守卫阻断；恢复后元守卫及总编排 clean pass。
 
@@ -196,7 +196,7 @@
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
 - **功能**：检查未迁移 feature 与已迁移 feature 的层级方向；Policy 在 #916 后只允许 `lib.rs`，#917 随真实实现恢复 domain/adapters；Audit 在 #929 后允许 `domain + application + ports + adapters`；Tools 锁定 #909 scope/profile 授权边界。
 - **Tools scope/profile 机械约束**：生产代码不得恢复 ToolProfile 黑名单；allowed_capabilities 是唯一授权真相，RegistryScope 内部不从 crate root 导出。
-- **实际检查语义**：Policy 由空层集合 + `lib.rs` 锁定 #916 基线；Audit 由 `AUDIT_HEX_LAYERS = {domain, application, ports, adapters}`、精确顶层文件和 legacy 禁单锁定 #929 基线；Storage domain 禁物理 fs API、PathBuf 与 adapters 反向依赖。
+- **实际检查语义**：Policy 由空层集合 + `lib.rs` 锁定 #916 基线；Audit 由 `AUDIT_HEX_LAYERS = {domain, application, ports, adapters}`、精确顶层文件和 legacy 禁单锁定 #929 基线；Storage 只允许 `domain/ports/adapters`，`memory_store` / `task_store` 被列入 legacy 禁单，且 domain 禁物理 fs API、PathBuf 与 adapters 反向依赖。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据只在 Migration Governance 维护。
 - **结构定义**：Audit 使用 `domain/application/ports/adapters`，#930 只能随真实 query 实现扩展；Policy #917 随真实实现恢复层；其他过渡集合禁止无证据扩张。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
@@ -510,8 +510,8 @@
 ### 17b. check-logging-settings-injection.sh
 
 - **功能**：扫描 Logging、Runtime 与全仓初始化调用，锁定 ConfigSnapshot → LoggingSettings 的单向注入。
-- **守护**：`packages/global/logging/src` 生产代码不得读取 env；Runtime 不得调用 `UnifiedLogger::init`、构造 `LoggingSettings`、恢复 `init_logging` 或读取 `AEMEATH_LOG_STDERR`；`UnifiedLogger::init` 的唯一生产调用点必须是 `agent/composition/src/logging_setup.rs`。
-- **白名单**：无路径排除或 migration exception；Config `EnvAdapter` 仍是 `AEMEATH_LOG_LEVEL` 的唯一业务 env reader，Composition 仅映射系统输出模式 `AEMEATH_LOG_STDERR`。
+- **守护**：`packages/global/logging/src` 生产代码不得读取 env；Runtime 不得调用 `UnifiedLogger::init`、构造 `LoggingSettings` 或恢复 `init_logging`；`UnifiedLogger::init` 的唯一生产调用点必须是 `agent/composition/src/app.rs::init_logging`。日志输出模式（File/Stderr）由 CLI typed bootstrap 输入注入，**NEVER** 经 env 旁路（#941 已删除 `AEMEATH_LOG_STDERR`，防回归断言见 `agent/features/config/src/adapters.rs`）。
+- **白名单**：无路径排除或 migration exception；Config `EnvAdapter` 仍是 `AEMEATH_LOG_LEVEL` 的唯一业务 env reader。
 - **故意违规证据**：临时在 Logging formatter 恢复 `std::env::var("AEMEATH_LOG_LEVEL")` 后单 Guard 以 exit 2 阻断；恢复后单 Guard clean pass。
 
 ## 18. no_mod_rs.sh
