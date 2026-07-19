@@ -75,7 +75,7 @@ where
                 agent_semaphore,
                 hook_runner,
                 memory_config,
-                memory,
+                memory: _,
                 reflection_history,
                 language,
                 frozen_chats,
@@ -113,24 +113,33 @@ where
         ($cmd:expr) => {
             match $cmd {
                 PendingCommand::Compact => {
-                    if let Some(outcome) = manual_compact(
-                        &sink,
-                        &hook_ui,
-                        &hook_runner,
-                        turn_count,
-                        &chain.messages_flat(),
-                        active_summary.as_deref(),
-                        &system_prompt_text,
-                        context_size,
-                        &memory_config,
-                        &memory,
-                        &reflection_history,
-                        &reflection_tasks,
-                        &client,
-                        &language,
-                        &cwd,
-                    )
-                    .await
+                let bound_run = match wiring.bind_main_run().await {
+                    Ok(bound) => bound,
+                    Err(error) => {
+                        log::error!(target: crate::LOG_TARGET, "bind run resources failed: {error}");
+                        continue;
+                    }
+                };
+                let run_memory = bound_run.memory_arc();
+                let run_memory_config = bound_run.config().memory().clone();
+                if let Some(outcome) = manual_compact(
+                    &sink,
+                    &hook_ui,
+                    &hook_runner,
+                    turn_count,
+                    &chain.messages_flat(),
+                    active_summary.as_deref(),
+                    &system_prompt_text,
+                    context_size,
+                    &run_memory_config,
+                    &run_memory,
+                    &reflection_history,
+                    &reflection_tasks,
+                    &client,
+                    &language,
+                    &cwd,
+                )
+                .await
                     {
                         apply_compact_outcome(
                             &sink,
@@ -462,6 +471,16 @@ where
 
                 let cancel = CancellationToken::new();
                 let mut run = Run::new(RunSpec::main(), None);
+                let memory_mode = run.spec().memory;
+                let bound_run = match wiring.bind_main_run().await {
+                    Ok(bound) => bound,
+                    Err(error) => {
+                        log::error!(target: crate::LOG_TARGET, "bind run resources failed: {error}");
+                        continue;
+                    }
+                };
+                let run_memory = bound_run.memory_arc();
+                let run_memory_config = bound_run.config().memory().clone();
                 let run_id = run.id().clone();
                 active_run.activate(run_id.clone(), cancel.clone());
                 let mut port = MainRunPort {
@@ -488,8 +507,9 @@ where
                     max_tool_concurrency,
                     agent_semaphore: &agent_semaphore,
                     hook_runner: &hook_runner,
-                    memory_config: &memory_config,
-                    memory: &memory,
+                    memory_mode,
+                    memory_config: &run_memory_config,
+                    memory: &run_memory,
                     reflection_history: &reflection_history,
                     reflection_tasks: &reflection_tasks,
                     language: &language,

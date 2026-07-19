@@ -7,12 +7,18 @@ use serde::{Deserialize, Serialize};
 pub struct HookResult {
     /// hook 是否阻止了操作（任意非零退出码）
     pub blocked: bool,
-    /// hook 的 stdout 输出
+    /// hook 的 stdout 输出（超限时为截断后的前缀，**NEVER** 因截断而清空）
     pub output: String,
     /// 如果 hook 执行失败，包含错误信息
     pub error: Option<String>,
     /// hook 进程退出码；进程未正常退出时为空。
     pub exit_code: Option<i32>,
+    /// stdout/stderr 是否因超过 `DEFAULT_OUTPUT_LIMIT` 被截断。
+    ///
+    /// 截断是**信息性**事件，**NEVER** 影响阻断判定（`is_blocking`）也 **NEVER** 设 error
+    /// ——hook 仍可能正常 exit 0。保留截断后的 stdout 前缀足以解析 JSON directive。
+    /// 见 #1220。
+    pub output_truncated: bool,
 }
 
 impl HookResult {
@@ -23,6 +29,7 @@ impl HookResult {
             output: String::new(),
             error: Some(message.into()),
             exit_code: None,
+            output_truncated: false,
         }
     }
 

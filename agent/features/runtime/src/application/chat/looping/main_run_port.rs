@@ -17,7 +17,6 @@ use crate::application::chat::looping::finalize::{
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::application::chat::looping::loop_phases::build_api_messages;
-use crate::application::chat::looping::memory_inject::build_memory_block_from_port;
 use crate::application::chat::looping::post_batch::run_post_tool_batch;
 use crate::application::chat::looping::reflection::{
     should_run_turn_reflection, submit_interval_reflection,
@@ -99,6 +98,7 @@ where
     pub(crate) max_tool_concurrency: usize,
     pub(crate) agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
     pub(crate) hook_runner: &'a hook::api::HookRunner,
+    pub(crate) memory_mode: crate::domain::agent_run::MemoryMode,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
     pub(crate) memory: &'a Arc<dyn memory::MemoryPort>,
     pub(crate) reflection_history: &'a Arc<dyn memory::api::ReflectionHistoryStore>,
@@ -341,19 +341,13 @@ where
             .map(|snapshot| snapshot.model_schemas())
             .unwrap_or_default();
         let mut effective_system_blocks = self.system_blocks.to_vec();
-        // #871: Main 注入走 MemoryPort（不再读旧 storage::MemoryStore 文件）。
-        if self.memory_config.enabled && self.memory_config.inject_count > 0 {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            if let Some(block) = build_memory_block_from_port(
-                self.memory.as_ref(),
-                now,
-                self.memory_config.inject_count,
-            ) {
-                effective_system_blocks.push(block);
-            }
+        if self.memory_mode == crate::domain::agent_run::MemoryMode::Enabled {
+            effective_system_blocks.extend(
+                context::api::MemoryRetrieveAdapter::new(self.memory.clone())
+                    .materialize_provider_blocks(self.memory_config)
+                    .await
+                    .map_err(LoopEngineError::Adapter)?,
+            );
         }
         if let Some(summary) = self.active_summary.clone() {
             effective_system_blocks.push(provider::SystemBlock {
