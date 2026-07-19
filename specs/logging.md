@@ -37,7 +37,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 9 | `aemeath:agent:storage` | `agent-storage.log` | `agent/features/storage` | 会话/记忆/历史落盘 |
 | 10 | `aemeath:agent:project` | `agent-project.log` | `agent/features/project` | worktree 进入/退出/持久化 |
 | 11 | `aemeath:agent:policy` | `agent-policy.log` | `agent/features/policy` | 权限评估决策 |
-| 12 | `aemeath:agent:audit` | `agent-audit.log` | `agent/features/audit` | 审计事件 |
+| 12 | `aemeath:diagnostic:audit` | `audit-diagnostic.log` | `agent/features/audit` | Audit 模块自身的 queue/write/drain 运行诊断；**NEVER** 承载 Audit Fact |
 | 13 | `aemeath:agent:update` | `agent-update.log` | `agent/features/update` | 更新检查与安装诊断 |
 | 14 | `aemeath:agent:workflow` | `agent-workflow.log` | `agent/features/workflow` | Reasoning Graph / effort 诊断 |
 | 15 | `aemeath:context` | `context.log` | `agent/features/context` | Context Management 诊断 |
@@ -259,6 +259,6 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 ### request_id 生命周期
 
 - **生成**：每次 LLM 请求前（`loop_run.rs` 中 `uuid::Uuid::new_v4()`）
-- **贯穿**：从 `set_current_request_id()` 到该请求的最后一个 chunk 响应
-- **清理**：请求结束后由下一个 `set_current_request_id()` 覆盖
+- **贯穿**：每次物理请求创建不可变 child `LogContext`，该 scope 覆盖请求开始到最后一个 chunk / 终态响应
+- **清理**：request child scope 结束后自动恢复父级 turn context；retry 创建新的 request ID 与新 child scope
 - **用途**：将 `llm_request_start` → `llm_chunk` × N → `llm_output` / `llm_error` 串联为一次完整 LLM 调用
