@@ -136,6 +136,7 @@ pub fn project_domain_event(event: RunDomainEvent) -> ChatEvent {
         RunDomainEvent::AwaitingUser {
             run_id,
             parent_run_id,
+            ..
         } => ChatEvent::RunAwaitingUser {
             run_id,
             parent_run_id,
@@ -143,6 +144,7 @@ pub fn project_domain_event(event: RunDomainEvent) -> ChatEvent {
         RunDomainEvent::Resumed {
             run_id,
             parent_run_id,
+            ..
         } => ChatEvent::RunResumed {
             run_id,
             parent_run_id,
