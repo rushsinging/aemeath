@@ -189,19 +189,14 @@ impl HookRunner {
                 );
 
                 let output_truncated = output.stdout_truncated || output.stderr_truncated;
+                // #1220：输出截断是信息性事件，MUST NOT 判 block（blocked 仅由 exit code 决定）、
+                // MUST NOT 设 error、MUST 保留 stdout 前缀（截断后的前 8192 字节足以解析 JSON
+                // directive）。丢弃 stdout 会丢失 hook 的 continue/decision 指令，设 error 会
+                // 把正常 exit 0 的 hook 误报为失败，触发 Stop hook 反复 block。
                 HookResult {
                     blocked,
-                    output: if output_truncated {
-                        String::new()
-                    } else {
-                        stdout
-                    },
-                    error: if output_truncated {
-                        Some(format!(
-                            "hook 输出超过 {} 字节上限，结果已截断",
-                            DEFAULT_OUTPUT_LIMIT
-                        ))
-                    } else if code != 0 {
+                    output: stdout,
+                    error: if code != 0 {
                         Some(format!(
                             "exit code {code}: {}",
                             non_empty_text(&stderr).unwrap_or_else(|| "无错误输出".to_string())
@@ -210,6 +205,7 @@ impl HookRunner {
                         None
                     },
                     exit_code: Some(code),
+                    output_truncated,
                 }
             }
             Err(failure) => {
