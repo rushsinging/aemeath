@@ -324,7 +324,7 @@ impl PolicyPort for HookTestPolicy {
                 reason: PolicyReason::RestrictedTool,
                 subject: ApprovalSubject::UserInteraction,
             },
-            _ => PolicyDecision::Allow,
+            _ => PolicyDecision::Allow(tools::AuthorizationContext::STANDARD),
         }
     }
 }
@@ -487,10 +487,15 @@ fn hook_directive_updated_input_valid_passes_schema_and_policy() {
     );
 
     match outcome {
-        HookDirectiveOutcome::Ready { call, context } => {
+        HookDirectiveOutcome::Ready {
+            call,
+            context,
+            authorization,
+        } => {
             assert_eq!(call.name, "Allowed");
             assert_eq!(call.input, serde_json::json!({"path": "/tmp/file"}));
             assert!(context.is_none());
+            assert_eq!(authorization, tools::AuthorizationContext::STANDARD);
         }
         other => panic!("expected Ready, got {other:?}"),
     }
@@ -606,9 +611,14 @@ fn hook_directive_context_and_input_preserves_context_in_ready() {
     );
 
     match outcome {
-        HookDirectiveOutcome::Ready { call, context } => {
+        HookDirectiveOutcome::Ready {
+            call,
+            context,
+            authorization,
+        } => {
             assert_eq!(call.input, serde_json::json!({"path": "/updated"}));
             assert_eq!(context.as_deref(), Some("important context"));
+            assert_eq!(authorization, tools::AuthorizationContext::STANDARD);
         }
         other => panic!("expected Ready, got {other:?}"),
     }
