@@ -35,19 +35,10 @@ pub(super) async fn chat_impl(
         }
     }
 
-    // 获取 chain：优先复用 current_chain（resume 场景已 load），
-    // 否则初始化空 chain（loop idle 会等第一条用户输入）。
-    // 若有初始 user_input，构造首条消息放入 chain。
-    let chain = {
-        let existing = me
-            .inner
-            .current_chain
-            .lock()
-            .map_err(|_| SdkError::Internal("当前 session chain 锁已损坏".to_string()))?;
-        if !existing.is_empty() {
-            existing.clone()
-        } else if let Some(ref user_input) = input.user_input {
-            // 首次启动且有初始输入：构造单条消息
+    // #872: Runtime 不再持有/回写会话链；将初始 user_input 转为
+    // Vec<Message> 并准备传 ChatLoopContext（历史由 Context backing 提供）。
+    let initial_messages: Vec<share::message::Message> =
+        if let Some(ref user_input) = input.user_input {
             let msg = if user_input.images.is_empty() {
                 share::message::Message::user(&user_input.text)
             } else {
@@ -60,140 +51,112 @@ pub(super) async fn chat_impl(
                         .collect(),
                 )
             };
-            context::session::ChatChain::from_flat_messages(vec![msg])
+            vec![msg]
         } else {
-            context::session::ChatChain::default()
-        }
-    };
-
-    *me.inner
-        .current_chain
-        .lock()
-        .map_err(|_| SdkError::Internal("当前 session chain 锁已损坏".to_string()))? =
-        chain.clone();
+            Vec::new()
+        };
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let sink = (me.inner.event_sink_factory)(tx);
     let inner = me.inner.clone();
     let session_context = logging::capture();
     logging::spawn_instrumented(session_context, async move {
-        let final_chain = crate::application::chat::process_chat_loop(
-            crate::application::chat::ChatLoopContext {
-                sink,
-                queue: RuntimeQueueDrainPort::new(queue_drain),
-                input_events: RuntimeInputEventDrainPort::new(input_events),
-                client: inner.context.resources.client.clone(),
-                tool_catalog: inner.context.resources.tool_catalog.clone(),
-                tool_execution: inner.context.resources.tool_execution.clone(),
-                tool_context_binding: inner.context.resources.tool_context_binding.clone(),
-                system_blocks: inner.context.resources.system_blocks.clone(),
-                system_prompt_text: inner.context.resources.system_prompt_text.clone(),
-                user_context: inner.context.resources.user_context.clone(),
-                chain,
-                context_size: inner.context.resources.context_size,
-                workspace: inner.workspace.clone(),
-                wiring: inner.wiring.clone(),
-                session_id: inner.session_id.clone(),
-                read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
-                session_reminders: Arc::new(Mutex::new(Default::default())),
-                agent_runner: Some(inner.context.resources.agent_runner.clone()),
-                tool_result_materializer: inner.context.resources.tool_result_materializer.clone(),
-                policy: inner.context.resources.policy.clone(),
-                active_run: inner.active_run.clone(),
-                task_access: inner.context.resources.task_access.clone(),
-                max_tool_concurrency: inner.max_tool_concurrency,
-                agent_semaphore: inner.context.resources.agent_semaphore.clone(),
-                hook_runner: inner.context.resources.hook_runner.clone(),
-                memory_config: inner.context.resources.memory_config.clone(),
-                memory: inner.wiring.committed_memory(),
-                reflection_history: inner.context.resources.reflection_history.clone(),
-                language: inner.context.resources.language.clone(),
-                frozen_chats: inner.frozen_chats.clone(),
-                active_summary: inner.active_summary.clone(),
-                reasoning: workflow::adaptive_reasoning(
-                    inner
-                        .context
-                        .resources
-                        .client
-                        .default_scope()
-                        .requested_reasoning(),
-                ),
-                build_switched_client: {
-                    let config_query = inner.config_query.clone();
-                    std::sync::Arc::new(move |selection: &str| {
-                        let selection = selection.to_string();
-                        let config_query = config_query.clone();
-                        Box::pin(async move {
-                            super::trait_model::build_llm_client_for_switch(
-                                &selection,
-                                config_query.as_ref(),
-                            )
-                            .await
-                        })
+        crate::application::chat::process_chat_loop(crate::application::chat::ChatLoopContext {
+            sink,
+            queue: RuntimeQueueDrainPort::new(queue_drain),
+            input_events: RuntimeInputEventDrainPort::new(input_events),
+            client: inner.context.resources.client.clone(),
+            tool_catalog: inner.context.resources.tool_catalog.clone(),
+            tool_execution: inner.context.resources.tool_execution.clone(),
+            tool_context_binding: inner.context.resources.tool_context_binding.clone(),
+            system_blocks: inner.context.resources.system_blocks.clone(),
+            system_prompt_text: inner.context.resources.system_prompt_text.clone(),
+            user_context: inner.context.resources.user_context.clone(),
+            initial_messages,
+            context_size: inner.context.resources.context_size,
+            workspace: inner.workspace.clone(),
+            wiring: inner.wiring.clone(),
+            session_id: inner.session_id.clone(),
+            read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            session_reminders: Arc::new(Mutex::new(Default::default())),
+            agent_runner: Some(inner.context.resources.agent_runner.clone()),
+            tool_result_materializer: inner.context.resources.tool_result_materializer.clone(),
+            policy: inner.context.resources.policy.clone(),
+            active_run: inner.active_run.clone(),
+            task_access: inner.context.resources.task_access.clone(),
+            max_tool_concurrency: inner.max_tool_concurrency,
+            agent_semaphore: inner.context.resources.agent_semaphore.clone(),
+            hook_runner: inner.context.resources.hook_runner.clone(),
+            memory_config: inner.context.resources.memory_config.clone(),
+            memory: inner.wiring.committed_memory(),
+            reflection_history: inner.context.resources.reflection_history.clone(),
+            language: inner.context.resources.language.clone(),
+            reasoning: workflow::adaptive_reasoning(
+                inner
+                    .context
+                    .resources
+                    .client
+                    .default_scope()
+                    .requested_reasoning(),
+            ),
+            build_switched_client: {
+                let config_query = inner.config_query.clone();
+                std::sync::Arc::new(move |selection: &str| {
+                    let selection = selection.to_string();
+                    let config_query = config_query.clone();
+                    Box::pin(async move {
+                        super::trait_model::build_llm_client_for_switch(
+                            &selection,
+                            config_query.as_ref(),
+                        )
+                        .await
                     })
-                },
-                save_chain: {
-                    let inner = inner.clone();
-                    std::sync::Arc::new(move |chain: &context::session::ChatChain| {
-                        let inner = inner.clone();
-                        let chain = chain.clone();
-                        Box::pin(async move {
-                            super::trait_session::save_chain_to_handle(&chain, &inner).await
-                        })
-                    })
-                },
-                list_reflection_history: {
-                    let inner = inner.clone();
-                    std::sync::Arc::new(move |limit| {
-                        let inner = inner.clone();
-                        Box::pin(async move {
-                            let me = super::accessors::AgentClientImpl { inner };
-                            super::trait_reflection::list_reflection_history_impl(&me, limit).await
-                        })
-                    })
-                },
-                list_models: {
-                    let inner = inner.clone();
-                    std::sync::Arc::new(move || {
-                        let inner = inner.clone();
-                        Box::pin(async move {
-                            let me = super::accessors::AgentClientImpl { inner };
-                            super::trait_model::list_models_impl(&me).await
-                        })
-                    })
-                },
-                list_reminders: {
-                    let inner = inner.clone();
-                    std::sync::Arc::new(move || {
-                        let inner = inner.clone();
-                        Box::pin(async move {
-                            let me = super::accessors::AgentClientImpl { inner };
-                            super::trait_memory::list_reminders_impl(&me).await
-                        })
-                    })
-                },
-                list_sessions: {
-                    let inner = inner.clone();
-                    std::sync::Arc::new(move || {
-                        let inner = inner.clone();
-                        Box::pin(async move {
-                            let me = super::accessors::AgentClientImpl { inner };
-                            super::trait_session::list_sessions_impl(&me).await
-                        })
-                    })
-                },
+                })
             },
-        )
+            list_reflection_history: {
+                let inner = inner.clone();
+                std::sync::Arc::new(move |limit| {
+                    let inner = inner.clone();
+                    Box::pin(async move {
+                        let me = super::accessors::AgentClientImpl { inner };
+                        super::trait_reflection::list_reflection_history_impl(&me, limit).await
+                    })
+                })
+            },
+            list_models: {
+                let inner = inner.clone();
+                std::sync::Arc::new(move || {
+                    let inner = inner.clone();
+                    Box::pin(async move {
+                        let me = super::accessors::AgentClientImpl { inner };
+                        super::trait_model::list_models_impl(&me).await
+                    })
+                })
+            },
+            list_reminders: {
+                let inner = inner.clone();
+                std::sync::Arc::new(move || {
+                    let inner = inner.clone();
+                    Box::pin(async move {
+                        let me = super::accessors::AgentClientImpl { inner };
+                        super::trait_memory::list_reminders_impl(&me).await
+                    })
+                })
+            },
+            list_sessions: {
+                let inner = inner.clone();
+                std::sync::Arc::new(move || {
+                    let inner = inner.clone();
+                    Box::pin(async move {
+                        let me = super::accessors::AgentClientImpl { inner };
+                        super::trait_session::list_sessions_impl(&me).await
+                    })
+                })
+            },
+        })
         .await;
-        // 最终 chain 同步到共享 slot（覆盖 loop 内任何未同步的变更）。
-        if let Ok(mut guard) = inner.current_chain.lock() {
-            *guard = final_chain;
-        }
-        // auto-save：loop 退出后自动保存当前 session。TUI 退出时只需 drop input_event_tx →
-        // loop shutdown → runtime 自动 save，不再调 session RPC。
-        if let Err(e) = super::trait_session::save_session_from_handle(&inner).await {
-            log::warn!(target: crate::LOG_TARGET, "auto-save failed on loop exit: {e}");
-        }
+        // #872: 不再回写 RuntimeHandle chain，不再 loop-exit auto-save。
+        // session 持久化由 Context backing 统一负责。
     });
 
     Ok(ChatStream::new(rx))

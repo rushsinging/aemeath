@@ -25,19 +25,20 @@ pub use domain::types;
 // Published language: shared-kernel tool types, DTOs, and ports.
 pub use domain::{
     AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal,
-    AgentRunner, AgentToolCallProgress, CacheHint, CancellationDeclaration, CancellationSignal,
-    CatalogQuery, ConcurrencyDeclaration, ExecutionScope, ExecutionScopeBuilder, FixedGuidance,
-    FixedPlanMode, Guidance, ImageData, InputSafetyDeclaration, InvocationSource, MemoryPortSource,
-    MutexReadSet, PlanModeState, PolicyDecision, ProfileExpansionError, ProgressSink,
-    PromptFragment, ReadSet, RegistryScopeName, SessionReminder, SessionReminders,
-    SkillCatalogPort, SkillDescriptor, SkillError, SkillMaterializationPort,
-    SkillMaterializationQuery, SkillMaterializationRevision, SkillMaterializationSnapshot,
-    SkillQuery, SkillSource, SkillSourceKind, Tool, ToolCapabilities, ToolCapability,
-    ToolCatalogPort, ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind, ToolExecutionContext,
-    ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort, ToolExecutionOutcome,
-    ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider, ToolName, ToolOutcome,
-    ToolProfile, ToolProfileName, ToolResult, ToolSuspension, TypedTool, TypedToolAdapter,
-    TypedToolResult, UserInteractionSpec, UserOption, UserQuestion, WorkspaceReadAccess,
+    AgentRunner, AgentToolCallProgress, AuthorizationContext, CacheHint, CancellationDeclaration,
+    CancellationSignal, CatalogQuery, ConcurrencyDeclaration, ExecutionScope,
+    ExecutionScopeBuilder, FixedGuidance, FixedPlanMode, Guidance, ImageData,
+    InputSafetyDeclaration, InvocationSource, MemoryPortSource, MutexReadSet, PlanModeState,
+    ProfileExpansionError, ProgressSink, PromptFragment, ReadSet, RegistryScopeName,
+    SessionReminder, SessionReminders, SkillCatalogPort, SkillDescriptor, SkillError,
+    SkillMaterializationPort, SkillMaterializationQuery, SkillMaterializationRevision,
+    SkillMaterializationSnapshot, SkillQuery, SkillSource, SkillSourceKind, Tool, ToolCapabilities,
+    ToolCapability, ToolCatalogPort, ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind,
+    ToolExecutionContext, ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort,
+    ToolExecutionOutcome, ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider,
+    ToolName, ToolOutcome, ToolProfile, ToolProfileName, ToolResult, ToolSuspension, TypedTool,
+    TypedToolAdapter, TypedToolResult, UserInteractionSpec, UserOption, UserQuestion,
+    WorkspaceReadAccess,
 };
 
 // Schema validator (moved from runtime).

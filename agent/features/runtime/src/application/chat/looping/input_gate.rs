@@ -1,6 +1,5 @@
 use crate::application::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use crate::application::chat::looping::queue::{QueueDrainPort, QueueFuture};
-use context::session::ChatChain;
 use sdk::ChatInputEvent;
 use share::message::Message;
 use std::collections::VecDeque;
@@ -112,12 +111,16 @@ impl PartialEq for PendingCommand {
 }
 impl Eq for PendingCommand {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct GateOutcome {
     pub decision: GateDecision,
     pub commands: Vec<ControlCommand>,
     pub appended_user_messages: usize,
     pub dropped_events: usize,
+    /// 本次 gate 采用的用户消息；调用方把它们绑定到下一 RunStep。
+    pub adopted_messages: Vec<(sdk::InputId, Message)>,
+    /// idle reset 已完成 Task 清理，请求 Context owner 清空 durable Session。
+    pub reset_requested: bool,
     /// idle 时收到的待执行命令（替代 compact_requested + model_switch_requested）。
     pub pending_command: Option<PendingCommand>,
 }
@@ -190,8 +193,6 @@ pub async fn run_loop_gate<Q, I, S>(
     queue: &Q,
     input_events: &I,
     sink: &S,
-    chain: &mut ChatChain,
-    segment_id: &str,
     task_access: &dyn task::TaskAccess,
     is_idle: bool,
 ) -> GateOutcome
@@ -201,7 +202,7 @@ where
     S: ChatEventSink,
 {
     drain_sources(buffer, queue, input_events).await;
-    apply_gate(kind, buffer, sink, chain, segment_id, task_access, is_idle).await
+    apply_gate(kind, buffer, sink, task_access, is_idle).await
 }
 
 pub async fn drain_sources<Q, I>(buffer: &mut PendingInputBuffer, queue: &Q, input_events: &I)
@@ -224,8 +225,6 @@ pub async fn apply_gate<S>(
     kind: GateKind,
     buffer: &mut PendingInputBuffer,
     sink: &S,
-    chain: &mut ChatChain,
-    segment_id: &str,
     task_access: &dyn task::TaskAccess,
     is_idle: bool,
 ) -> GateOutcome
@@ -238,6 +237,7 @@ where
     let mut decision = GateDecision::Proceed;
     let mut pending_command: Option<PendingCommand> = None;
     let mut added: Vec<(sdk::InputId, Message)> = Vec::new();
+    let mut reset_requested = false;
 
     let events = buffer.drain_all();
     let event_count = events.len();
@@ -259,7 +259,6 @@ where
             kind, is_idle
         );
     }
-    let mut appended_this_gate = 0usize;
     let mut iter = events.into_iter().peekable();
     while let Some(event) = iter.next() {
         match event {
@@ -271,9 +270,6 @@ where
                 });
                 if kind == ControlCommandKind::Abort {
                     dropped_events = iter.count();
-                    for _ in 0..appended_this_gate {
-                        chain.pop_last_message();
-                    }
                     appended_user_messages = 0;
                     added.clear();
                     decision = GateDecision::AbortCurrentLoop;
@@ -289,8 +285,7 @@ where
                     text_preview,
                     images.len()
                 );
-                added.push(append_user_message(chain, segment_id, id, text, images));
-                appended_this_gate += 1;
+                added.push(build_user_message(id, text, images));
                 appended_user_messages += 1;
             }
             ChatInputEvent::Reset => {
@@ -308,11 +303,8 @@ where
                         decision = GateDecision::Proceed;
                         break;
                     }
-                    // idle：权威 Task 清理成功后再清空会话并通知 UI（保持 idle，不退出 loop）。
-                    chain.clear();
-                    added.clear();
-                    appended_user_messages = 0;
-                    sink.send_event(RuntimeStreamEvent::SessionReset).await;
+                    // idle：权威 Task 清理成功后请求 Context owner 清空会话。
+                    reset_requested = true;
                     dropped_events = iter.count();
                     decision = GateDecision::Proceed;
                     break;
@@ -330,16 +322,13 @@ where
                     })
                     .collect();
                 // 回滚本批已 append 的 UserMessage（与 added 顺序一致）。
-                if appended_this_gate > 0 || !texts.is_empty() {
+                if !added.is_empty() || !texts.is_empty() {
                     // added 逆序 = append 逆序，拼到 texts 前面保持原始提交顺序。
                     // 用 message.text_content() 还原用户视角文本（含 image placeholder）。
                     let mut all_texts: Vec<String> =
                         added.iter().map(|(_, m)| m.text_content()).collect();
                     all_texts.append(&mut texts);
-                    // 回滚已 append 的 messages。
-                    for _ in 0..appended_this_gate {
-                        chain.pop_last_message();
-                    }
+                    // 本批消息尚未提交给 Context，清空 adopted 即完成回滚。
                     appended_user_messages = 0;
                     added.clear();
                     sink.send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts: all_texts })
@@ -462,11 +451,11 @@ where
             appended_user_messages,
             kind
         );
-        let flat = chain.messages_flat();
-        sink.send_event(RuntimeStreamEvent::PostToolExecutionSync { messages: flat })
+        let messages = added.iter().map(|(_, message)| message.clone()).collect();
+        sink.send_event(RuntimeStreamEvent::PostToolExecutionSync { messages })
             .await;
         sink.send_event(RuntimeStreamEvent::UserMessagesAdopted {
-            items: added,
+            items: added.clone(),
             queued: vec![],
         })
         .await;
@@ -495,13 +484,13 @@ where
         commands,
         appended_user_messages,
         dropped_events,
+        adopted_messages: added,
+        reset_requested,
         pending_command,
     }
 }
 
-fn append_user_message(
-    chain: &mut ChatChain,
-    segment_id: &str,
+fn build_user_message(
     id: sdk::InputId,
     text: String,
     images: Vec<sdk::ChatInputImage>,
@@ -514,7 +503,6 @@ fn append_user_message(
         })).unwrap_or_default()
     );
     let message = user_message_with_images(text, images);
-    chain.push(message.clone(), segment_id);
     (id, message)
 }
 

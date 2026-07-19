@@ -1,7 +1,5 @@
 mod agent_calls;
 mod ask_user;
-pub(crate) mod compact;
-mod compact_outcome;
 pub(crate) mod config_reload;
 mod events;
 mod finalize;
@@ -35,8 +33,8 @@ mod tools;
 
 pub use events::{
     ChatEventSink, ChatEventSinkHandle, CompactStage, EventFuture, RuntimeHookEvent,
-    RuntimeHookEventStatus, RuntimeHookExecutionResult, RuntimeStreamEvent, RuntimeToolCallStatus,
-    RuntimeTurnContext,
+    RuntimeHookEventStatus, RuntimeHookExecutionResult, RuntimeHookMessage, RuntimeHookMessageKind,
+    RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
 pub use input_gate::{
     apply_gate, drain_sources, run_loop_gate, ControlCommand, ControlCommandKind,

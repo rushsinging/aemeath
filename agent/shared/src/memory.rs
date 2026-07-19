@@ -1,8 +1,8 @@
 //! Memory 共享内核：DTO / 枚举 / error / 纯函数（scoring、dedup、format）与
 //! SessionReminders。
 //!
-//! 带文件系统 IO 的持久化职责（MemoryStore + 路径解析）已归位 `storage::memory`
-//! （047 spec §13），不再留在 share 共享内核。
+//! 旧 Memory 持久化业务 façade 已退役；当前持久化由 Memory BC 经
+//! Storage 原子 dataset 机制完成，不再留在 share 共享内核。
 
 pub mod dedup;
 pub mod entry;

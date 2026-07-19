@@ -4,6 +4,7 @@
 
 mod chat_chain;
 mod envelope;
+mod management;
 mod message_integrity;
 mod restore;
 mod types;
@@ -13,12 +14,11 @@ pub use envelope::{
     CanonicalSession, CommittedStep, DecodedSession, SessionCodec, SessionCodecError,
     SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };
+pub use management::{
+    SessionListEntry, SessionManagementError, SessionMetadataUpdate, SessionResumeProjection,
+};
 pub use restore::SessionRestore;
 pub use types::{
     extract_project_name, new_session_id, now_iso, validate_session_id, PersistedWorkspaceContext,
-    PersistedWorkspaceFrame, Session, SessionFilter, SessionMetadata,
+    PersistedWorkspaceFrame, SessionMetadata,
 };
-
-#[cfg(test)]
-#[path = "session/tests.rs"]
-mod tests;

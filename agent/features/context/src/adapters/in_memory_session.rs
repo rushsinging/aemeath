@@ -120,4 +120,26 @@ impl SessionRepository for InMemorySessionRepository {
     ) -> Result<CompactOutcome, ContextPortError> {
         Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
     }
+
+    async fn commit_manual_compaction(
+        &self,
+        _request: &crate::domain::ManualCompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
+    }
+
+    async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?;
+        let state = sessions
+            .get_mut(session_id.as_str())
+            .ok_or_else(|| ContextPortError::SessionNotFound(session_id.clone()))?;
+        state.messages.clear();
+        state.active_summary = None;
+        state.committed_steps.clear();
+        state.revision += 1;
+        Ok(())
+    }
 }

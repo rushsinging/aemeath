@@ -7,7 +7,7 @@ pub use main_session::test_support;
 pub use main_session::{
     wire_main_session, BoundMainRun, MainSessionDependencies, MainSessionError, MainSessionWiring,
     MainSessionWiringBuilder, OwnedSessionExclusivePermit, OwnedSessionSharedPermit,
-    SessionProjectionParticipant, SessionSwitchClosed, SessionSwitchGate, SessionSwitchInProgress,
+    SessionSwitchClosed, SessionSwitchGate, SessionSwitchInProgress,
 };
 pub use service::ContextApplicationService;
 pub use session_persistence::{SessionLoadError, SessionPersistenceService};

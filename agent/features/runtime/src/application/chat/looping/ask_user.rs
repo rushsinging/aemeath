@@ -18,7 +18,7 @@ pub(crate) async fn ask_user<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    suspended_calls: &[(&ToolCall, ToolSuspension)],
+    suspended_calls: &[(&ToolCall, ToolSuspension, tools::AuthorizationContext)],
     cancel: &tokio_util::sync::CancellationToken,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
@@ -30,7 +30,10 @@ where
     }
 
     // 对每个 call 运行 PermissionRequest hook（保持现有逻辑不变）
-    for (call, _) in suspended_calls {
+    for (call, _, authorization) in suspended_calls {
+        if !authorization.enforce_permission_hooks {
+            continue;
+        }
         let _ = hook_ui
             .run_plain(
                 hook_runner,
@@ -48,7 +51,7 @@ where
     // Preserve call order, and question order within each typed suspension.
     let items = suspended_calls
         .iter()
-        .flat_map(|(call, suspension)| {
+        .flat_map(|(call, suspension, _)| {
             user_interaction_items(call.id.as_ref(), suspension).into_iter()
         })
         .collect();
@@ -68,7 +71,7 @@ where
         sdk::AskUserReply::Answers(answers) => answers,
         sdk::AskUserReply::Cancelled => {
             let mut results = Vec::with_capacity(suspended_calls.len());
-            for (call, _) in suspended_calls {
+            for (call, _, _) in suspended_calls {
                 let result =
                     ToolExecution::new(call, ToolOutcome::error("用户取消了 AskUserQuestion"));
                 send_tool_result(sink, context, &result).await;
@@ -82,7 +85,7 @@ where
     // that call's answer slice, applying defaults without crossing call IDs.
     let mut answer_index = 0;
     let mut ask_user_results = Vec::new();
-    for (call, suspension) in suspended_calls {
+    for (call, suspension, _) in suspended_calls {
         let ToolSuspension::UserInteraction(spec) = suspension;
         if spec.questions.is_empty() {
             let result = ToolExecution::new(
@@ -235,8 +238,16 @@ mod tests {
             )])),
         ];
         let suspended_calls = vec![
-            (&calls[0], suspensions[0].clone()),
-            (&calls[1], suspensions[1].clone()),
+            (
+                &calls[0],
+                suspensions[0].clone(),
+                tools::AuthorizationContext::STANDARD,
+            ),
+            (
+                &calls[1],
+                suspensions[1].clone(),
+                tools::AuthorizationContext::STANDARD,
+            ),
         ];
         let sink = ReplyingSink {
             items: Arc::new(Mutex::new(Vec::new())),
@@ -289,7 +300,7 @@ mod tests {
                 true,
                 None,
             )]));
-        let suspended_calls = vec![(&calls[0], suspension)];
+        let suspended_calls = vec![(&calls[0], suspension, tools::AuthorizationContext::STANDARD)];
         let reply_tx = Arc::new(Mutex::new(None));
         let final_results = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let sink = WaitingSink {
@@ -343,7 +354,14 @@ mod tests {
                 true,
                 None,
             )]));
-        let suspended_calls = vec![(&calls[0], suspension.clone()), (&calls[1], suspension)];
+        let suspended_calls = vec![
+            (
+                &calls[0],
+                suspension.clone(),
+                tools::AuthorizationContext::STANDARD,
+            ),
+            (&calls[1], suspension, tools::AuthorizationContext::STANDARD),
+        ];
         let cancel = tokio_util::sync::CancellationToken::new();
         let sink = CancellingSink {
             cancel: cancel.clone(),
@@ -387,8 +405,16 @@ mod tests {
             )])),
         ];
         let suspended_calls = vec![
-            (&calls[0], suspensions[0].clone()),
-            (&calls[1], suspensions[1].clone()),
+            (
+                &calls[0],
+                suspensions[0].clone(),
+                tools::AuthorizationContext::STANDARD,
+            ),
+            (
+                &calls[1],
+                suspensions[1].clone(),
+                tools::AuthorizationContext::STANDARD,
+            ),
         ];
         let sink = ReplyingSink {
             items: Arc::new(Mutex::new(Vec::new())),

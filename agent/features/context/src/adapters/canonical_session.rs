@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::domain::session::{CanonicalSession, ChatChain, CommittedStep, SnapshotState};
 use crate::domain::{
     AppendReceipt, CompactOutcome, CompactRequest, CompactSkipReason, ContextAppend,
-    ContextAppendError, ContextPortError, SessionId, SessionRevision,
+    ContextAppendError, ContextPortError, ManualCompactRequest, SessionId, SessionRevision,
 };
 use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
 
@@ -296,6 +296,88 @@ impl SessionRepository for CanonicalSessionRepository {
             recent_messages: compacted.recent_messages,
             source_revision,
         }))
+    }
+    async fn commit_manual_compaction(
+        &self,
+        request: &ManualCompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        let _mutation = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
+            .clone();
+        if current.id != request.session_id.as_str() {
+            return Err(ContextPortError::SessionNotFound(
+                request.session_id.clone(),
+            ));
+        }
+        let chain = ChatChain::from_chats(&current.chats);
+        let messages = chain.messages();
+        if messages.len() <= 4 {
+            return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
+        }
+        let context_size = request.context_size.max(1);
+        let Some(compacted) = crate::adapters::compact_summary::compact_messages(
+            &messages,
+            request.system_prompt.as_str(),
+            context_size,
+        ) else {
+            return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
+        };
+        let mut candidate = (*current).clone();
+        let source_revision = SessionRevision::new(candidate.revision);
+        candidate
+            .chats
+            .push(crate::domain::session::ChatSegment::compact(
+                compacted.summary.clone(),
+                compacted.recent_messages.clone(),
+            ));
+        candidate.revision += 1;
+        candidate.updated_at = crate::domain::session::now_iso();
+        self.writer
+            .save(&candidate)
+            .await
+            .map_err(ContextPortError::Compact)?;
+        *self
+            .session
+            .write()
+            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))? =
+            Arc::new(candidate);
+        Ok(CompactOutcome::Committed(crate::domain::CompactResult {
+            summary: compacted.summary,
+            recent_messages: compacted.recent_messages,
+            source_revision,
+        }))
+    }
+
+    async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
+        let _mutation = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
+            .clone();
+        if current.id != session_id.as_str() {
+            return Err(ContextPortError::SessionNotFound(session_id.clone()));
+        }
+        let mut candidate = (*current).clone();
+        candidate.chats.clear();
+        candidate.committed_steps.clear();
+        candidate.revision += 1;
+        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        self.writer
+            .save(&candidate)
+            .await
+            .map_err(ContextPortError::SessionRepository)?;
+        *self
+            .session
+            .write()
+            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))? =
+            Arc::new(candidate);
+        Ok(())
     }
 }
 

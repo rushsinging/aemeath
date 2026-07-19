@@ -104,7 +104,6 @@ fn bound_invocation(
             Arc::new(memory::NoOpMemory),
             Arc::new(FixedGuidance {
                 language: "en".into(),
-                allow_all: true,
             }),
         ),
     );

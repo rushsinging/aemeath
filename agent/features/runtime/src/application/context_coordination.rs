@@ -23,7 +23,7 @@ use std::sync::Arc;
 use crate::ports::{
     AppendReceipt, CompactOutcome, CompactRequest, CompactTrigger, ContentFingerprint,
     ContextAppend, ContextAppendError, ContextPort, ContextPortError, ContextRequest,
-    ContextWindow, FinalizeCause, SessionRevision, StepReceipt,
+    ContextWindow, FinalizeCause, ManualCompactRequest, SessionId, SessionRevision, StepReceipt,
 };
 use sdk::RunStepId;
 use sha2::{Digest, Sha256};
@@ -67,6 +67,20 @@ impl ContextCoordinator {
                 trigger: CompactTrigger::Automatic,
             })
             .await
+    }
+
+    pub(crate) async fn manual_compact(
+        &self,
+        request: &ManualCompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        self.port.manual_compact(request).await
+    }
+
+    pub(crate) async fn clear_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), ContextPortError> {
+        self.port.clear_session(session_id).await
     }
 
     #[allow(clippy::too_many_arguments)]

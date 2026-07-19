@@ -60,11 +60,12 @@ PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW
 # 只经 crate 根发布 Published Language，禁止恢复 tools::api。
 TOOLS_DOMAIN_FACADE = {
     "AgentDispatch", "AgentProgressEvent", "AgentProgressKind", "AgentRunRequest",
-    "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "CancellationDeclaration",
+    "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "AuthorizationContext",
+    "CancellationDeclaration",
     "CancellationSignal", "CatalogQuery", "ConcurrencyDeclaration", "ExecutionScope",
     "ExecutionScopeBuilder", "FixedGuidance", "FixedPlanMode", "Guidance", "ImageData",
     "InputSafetyDeclaration", "InvocationSource", "MemoryPortSource", "MutexReadSet",
-    "PlanModeState", "PolicyDecision", "ProfileExpansionError", "ProgressSink", "ReadSet",
+    "PlanModeState", "ProfileExpansionError", "ProgressSink", "ReadSet",
     "CacheHint", "PromptFragment", "SkillCatalogPort", "SkillDescriptor", "SkillError",
     "SkillMaterializationPort", "SkillMaterializationQuery", "SkillMaterializationRevision",
     "SkillMaterializationSnapshot", "SkillQuery", "SkillSource", "SkillSourceKind",
@@ -173,8 +174,9 @@ ROOT_ACCESS_ALLOW = {
         "from_args_with_workspace",
     },
       "policy": {
-          "AllowAllPolicy", "ApprovalSubject", "PolicyDecision", "PolicyMode", "PolicyPort",
-          "PolicyReason", "PolicyRequest", "PolicyRequestError",
+          "AllowAllPolicy", "ApprovalSubject", "AuthorizationContext", "ConfiguredPolicy",
+          "PolicyDecision", "PolicyMode", "PolicyModeSource", "PolicyPort", "PolicyReason",
+          "PolicyRequest", "PolicyRequestError", "StandardPolicy",
       },
     "workflow": set(),
     "project": PROJECT_ROOT_ACCESS_ALLOW,
@@ -182,10 +184,13 @@ ROOT_ACCESS_ALLOW = {
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
     "context": {
         "compact", "context_port", "domain", "guidance", "session", "skill",
-        "compose_session_task_capture", "LegacyTaskCapture", "test_support",
-        "wire_main_session", "BoundMainRun", "MainSessionDependencies", "MainSessionError",
-        "MainSessionWiring", "MainSessionWiringBuilder", "OwnedSessionExclusivePermit",
-        "OwnedSessionSharedPermit", "SessionProjectionParticipant", "SessionSwitchClosed",
+        "delete_session_entry", "export_session_bytes", "import_session_bytes", "isolated_context",
+        "list_session_entries", "update_session_metadata_entry", "SessionListEntry",
+        "SessionManagementError", "SessionMetadataUpdate", "SessionResumeProjection",
+        "ProductionMainContextFactory", "NoOpCanonicalSessionWriter",
+        "test_support", "wire_main_session", "BoundMainRun", "MainSessionDependencies",
+        "MainSessionError", "MainSessionWiring", "MainSessionWiringBuilder",
+        "OwnedSessionExclusivePermit", "OwnedSessionSharedPermit", "SessionSwitchClosed",
         "SessionSwitchGate", "SessionSwitchInProgress",
     },
     "memory": {

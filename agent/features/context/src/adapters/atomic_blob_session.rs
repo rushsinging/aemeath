@@ -29,6 +29,13 @@ impl AtomicBlobSessionStore {
             SessionGeneration::Previous => Generation::Previous,
         }
     }
+
+    pub async fn delete_all(&self) -> Result<storage::api::DeleteOutcome, SessionStoreError> {
+        self.blob
+            .delete_all_generations(&self.key, storage::api::DeleteOptions::default())
+            .await
+            .map_err(|error| SessionStoreError(error.to_string()))
+    }
 }
 
 #[async_trait]

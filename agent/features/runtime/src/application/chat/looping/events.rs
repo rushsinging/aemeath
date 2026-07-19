@@ -1,7 +1,7 @@
-use context::session::PersistedWorkspaceContext;
 use provider::ReasoningLevel;
 use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
 use share::message::Message;
+use share::session_types::PersistedWorkspaceContext;
 use std::future::Future;
 use std::pin::Pin;
 use tools::{AgentProgressEvent, ImageData};
@@ -46,6 +46,28 @@ pub struct RuntimeHookEvent {
     pub matcher: Option<String>,
     pub command: Option<String>,
     pub result: Option<RuntimeHookExecutionResult>,
+}
+
+/// Hook 面向展示层的消息类别。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeHookMessageKind {
+    /// Hook JSON `additional_context`。
+    AdditionalContext,
+    /// Hook JSON `system_message`。
+    SystemMessage,
+}
+
+/// Hook 面向展示层的结构化消息。
+///
+/// 该类型独立于 `SystemMessage`，使消费方能按 HookPoint、来源和 attempt 归因。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeHookMessage {
+    pub point: hook::HookPoint,
+    pub source: String,
+    pub execution_ordinal: u32,
+    pub attempt: u8,
+    pub kind: RuntimeHookMessageKind,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,6 +204,8 @@ pub enum RuntimeStreamEvent {
     LiveTps(f64),
     TurnChanged(usize),
     HookEvent(RuntimeHookEvent),
+    /// 结构化 hook 执行消息（typed projection）。
+    HookMessage(RuntimeHookMessage),
     AskUserBatch {
         items: Vec<sdk::AskUserQuestionItem>,
         reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,

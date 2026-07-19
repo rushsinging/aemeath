@@ -5,8 +5,8 @@ use context::context_port::{
     AppendReceipt, CalendarDate, CompactOutcome, CompactRequest, CompactResult, CompactTrigger,
     CompactionDecision, ContentFingerprint, ContextAppend, ContextAppendError, ContextMessage,
     ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
-    FinalizeCause, Language, RunStepId, SessionId, SessionRevision, StepReceipt, SystemPromptSpec,
-    TaskReminderSnapshot, TokenBudget, ToolOutcomeKind, Urgency,
+    FinalizeCause, Language, ManualCompactRequest, RunStepId, SessionId, SessionRevision,
+    StepReceipt, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, ToolOutcomeKind, Urgency,
 };
 use provider::ReasoningLevel;
 use sdk::RunId;
@@ -83,6 +83,21 @@ impl ContextPort for FakeContextPort {
         }))
     }
 
+    async fn manual_compact(
+        &self,
+        request: &ManualCompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        Ok(CompactOutcome::Committed(CompactResult {
+            summary: format!("manual summary for {}", request.session_id.as_str()),
+            recent_messages: vec![],
+            source_revision: SessionRevision::new(5),
+        }))
+    }
+
+    async fn clear_session(&self, _session_id: &SessionId) -> Result<(), ContextPortError> {
+        Ok(())
+    }
+
     async fn append_and_persist(
         &self,
         append: &ContextAppend,
@@ -97,7 +112,7 @@ impl ContextPort for FakeContextPort {
 }
 
 #[tokio::test]
-async fn context_port_exposes_provider_neutral_four_method_contract() {
+async fn context_port_exposes_provider_neutral_six_method_contract() {
     let request = request();
     let port = FakeContextPort;
 
@@ -108,13 +123,27 @@ async fn context_port_exposes_provider_neutral_four_method_contract() {
         port.compact(&CompactRequest {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(3),
-            source: request,
+            source: request.clone(),
             trigger: CompactTrigger::Automatic,
         })
         .await
         .unwrap(),
         CompactOutcome::Committed(_)
     ));
+
+    let manual = port
+        .manual_compact(&ManualCompactRequest {
+            session_id: request.session_id.clone(),
+            run_id: request.run_id.clone(),
+            system_prompt: request.system_prompt.clone(),
+            context_size: request.context_size,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(manual, CompactOutcome::Committed(ref result)
+        if result.source_revision == SessionRevision::new(5)));
+
+    assert_eq!(port.clear_session(&request.session_id).await.unwrap(), ());
 }
 
 #[test]

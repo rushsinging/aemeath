@@ -26,8 +26,144 @@ fn test_start_line_of_match_error_when_missing() {
     assert_eq!(start_line_of_match("one\ntwo\n", "missing"), None);
 }
 
+fn outside_contexts(workspace: &tempfile::TempDir) -> (ToolExecutionContext, ToolExecutionContext) {
+    let standard = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+    let allow_all = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+    (standard, allow_all)
+}
+
 #[tokio::test]
-async fn file_edit_without_prior_read_is_rejected_even_when_allow_all() {
+async fn file_write_outside_workspace_follows_authorization_context() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let standard_path = outside.path().join("standard.txt");
+    let allow_path = outside.path().join("allowed.txt");
+    let (standard, allow_all) = outside_contexts(&workspace);
+
+    let denied = crate::adapters::file_write::FileWriteTool
+        .call(
+            serde_json::json!({"file_path": standard_path, "content": "denied"}),
+            &standard,
+        )
+        .await;
+    let allowed = crate::adapters::file_write::FileWriteTool
+        .call(
+            serde_json::json!({"file_path": allow_path, "content": "allowed"}),
+            &allow_all,
+        )
+        .await;
+
+    assert!(denied.is_error && denied.text.contains("工作区根"));
+    assert!(
+        !allowed.is_error,
+        "allow-all write failed: {}",
+        allowed.text
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(allow_path).await.unwrap(),
+        "allowed"
+    );
+}
+
+#[tokio::test]
+async fn glob_outside_workspace_follows_authorization_context() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    tokio::fs::write(outside.path().join("match.txt"), "value")
+        .await
+        .unwrap();
+    let (standard, allow_all) = outside_contexts(&workspace);
+    let input = serde_json::json!({"pattern": "*.txt", "path": outside.path()});
+
+    let denied = crate::adapters::glob_tool::GlobTool
+        .call(input.clone(), &standard)
+        .await;
+    let allowed = crate::adapters::glob_tool::GlobTool
+        .call(input, &allow_all)
+        .await;
+
+    assert!(denied.is_error && denied.text.contains("工作区根"));
+    assert!(!allowed.is_error, "allow-all glob failed: {}", allowed.text);
+    assert!(allowed.text.contains("match.txt"));
+}
+
+#[tokio::test]
+async fn grep_outside_workspace_follows_authorization_context() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    tokio::fs::write(outside.path().join("match.txt"), "needle\n")
+        .await
+        .unwrap();
+    let (standard, allow_all) = outside_contexts(&workspace);
+    let input = serde_json::json!({"pattern": "needle", "path": outside.path()});
+
+    let denied = crate::adapters::grep::GrepTool
+        .call(input.clone(), &standard)
+        .await;
+    let allowed = crate::adapters::grep::GrepTool
+        .call(input, &allow_all)
+        .await;
+
+    assert!(denied.is_error && denied.text.contains("工作区根"));
+    assert!(!allowed.is_error, "allow-all grep failed: {}", allowed.text);
+    assert!(allowed.text.contains("needle"));
+}
+
+#[tokio::test]
+async fn lsp_outside_workspace_follows_authorization_context() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let path = outside.path().join("valid.py");
+    tokio::fs::write(&path, "value = 1\n").await.unwrap();
+    let (standard, allow_all) = outside_contexts(&workspace);
+    let input = serde_json::json!({
+        "file_path": path,
+        "language": "python",
+        "operation": "diagnostics"
+    });
+
+    let denied = crate::adapters::lsp::LspTool
+        .call(input.clone(), &standard)
+        .await;
+    let allowed = crate::adapters::lsp::LspTool.call(input, &allow_all).await;
+
+    assert!(denied.is_error && denied.text.contains("工作区根"));
+    assert!(!allowed.is_error, "allow-all LSP failed: {}", allowed.text);
+}
+
+#[tokio::test]
+async fn file_read_outside_workspace_is_allowed_when_allow_all() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let path = outside.path().join("outside.txt");
+    tokio::fs::write(&path, "outside\n").await.unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+
+    let result = crate::adapters::file_read::FileReadTool
+        .call(serde_json::json!({ "file_path": path }), &ctx)
+        .await;
+
+    assert!(
+        !result.is_error,
+        "allow-all read should succeed: {}",
+        result.text
+    );
+    assert!(result.text.contains("outside"));
+}
+
+#[tokio::test]
+async fn file_edit_without_prior_read_is_allowed_when_allow_all() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sample.rs");
     tokio::fs::write(&path, "one\ntwo\n").await.unwrap();
@@ -47,11 +183,14 @@ async fn file_edit_without_prior_read_is_rejected_even_when_allow_all() {
         )
         .await;
 
-    assert!(result.is_error);
-    assert!(result.text.contains("must read"));
+    assert!(
+        !result.is_error,
+        "allow-all edit should succeed: {}",
+        result.text
+    );
     assert_eq!(
         tokio::fs::read_to_string(&path).await.unwrap(),
-        "one\ntwo\n"
+        "one\nTWO\n"
     );
 }
 

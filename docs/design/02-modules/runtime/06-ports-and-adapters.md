@@ -105,7 +105,7 @@ enum InteractionCommandOutcome {
 | Policy | `PolicyPort` | 调用前决策；见 [Policy](../policy/README.md) |
 | Memory | `MemoryPort` / `ReflectionPromptPort` / `ReflectionHistoryStore` | 当前项目 Memory、纯 Reflection prompt/parse 与 Memory-owned durable history append/query；见 [Memory ports](../memory/04-ports-and-adapters.md) |
 | Task | `TaskAccess` | 日常 Task 命令 / 查询；`TaskPersist` **NEVER** 进入 Runtime；见 [Task contracts](../task/02-ports-and-published-language.md) |
-| Hook | `HookPort` | 类型化 hook dispatch；见 [Hook](../hook/README.md) |
+| Hook | `HookPort` | 类型化 hook dispatch；Runtime 直接消费 Hook-owned façade，不定义同义 Port/Outcome。`HookOutcome` 经 application adapter 无损投影 directive、结构化 reason、全部 attempts 与 typed display messages；updated input 在 `tool_coordination` 重新经过 frozen Catalog、Tools-owned schema validation 与 Policy；见 [Hook](../hook/README.md) |
 | Workflow | `ReasoningPort` | effort 调节；见 [Workflow](../workflow/01-reasoning-graph.md) |
 | Config | `ConfigSnapshot` PL | 本 Run 的只读配置快照；见 [Config](../config/01-config-layer.md) |
 

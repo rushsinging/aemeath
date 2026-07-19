@@ -32,8 +32,11 @@ use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::invocation::{HookInvocation, HookPoint, StopFailureInput};
-use crate::domain::outcome::{HookDirective, HookExecution, HookExecutionStatus, HookOutcome};
-use crate::domain::protocol::classify_directive;
+use crate::domain::outcome::{
+    HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecution, HookExecutionStatus,
+    HookOutcome,
+};
+use crate::domain::protocol::classify_output;
 use crate::domain::subscription::{HookSubscription, SubscriptionError};
 
 use crate::ports::HookPort;
@@ -42,7 +45,7 @@ pub(crate) use executor::{ExecutionFault, Executor, ProcessDriverExecutor};
 #[cfg(test)]
 use fake::{ScriptStep, Scripted};
 use helpers::{
-    classify_error_summary, last_error_of, matcher_hits, push_context,
+    classify_error_summary, last_error_of, matcher_hits, matcher_source, push_context,
     synthesize_cancelled_directive, synthesize_exhausted_directive,
 };
 
@@ -118,9 +121,11 @@ enum AttemptOutcome {
     ///
     /// `executions` 携带该 subscription 的**全部** attempt 明细（含此前失败的
     /// 尝试与最终成功的尝试），确保 `HookOutcome.executions` 完整保留重试轨迹。
+    /// `system_message` 为本次成功执行独立保留的 systemMessage（展示用）。
     Success {
         executions: Vec<HookExecution>,
         directive: HookDirective,
+        system_message: Option<String>,
     },
     /// 重试耗尽（ExecutionFailed 达到 MAX_ATTEMPTS）。
     Exhausted { executions: Vec<HookExecution> },
@@ -153,6 +158,8 @@ impl HookPort for Dispatcher {
         let mut aggregated_context: Option<String> = None;
         let mut final_input: Option<serde_json::Value> = None;
         let mut all_executions: Vec<HookExecution> = Vec::new();
+        // BC 保留展示消息：按 executions 聚合顺序逐条保留 additionalContext / systemMessage。
+        let mut messages: Vec<HookDisplayMessage> = Vec::new();
 
         for sub in matching {
             let current_input =
@@ -165,17 +172,46 @@ impl HookPort for Dispatcher {
                 AttemptOutcome::Success {
                     executions,
                     directive,
+                    system_message,
                 } => {
                     all_executions.extend(executions);
+                    // 产生 directive / system_message 的成功 execution 是该 subscription
+                    // executions 的最后一条；其聚合位置即展示消息的 execution_ordinal。
+                    let execution_ordinal = all_executions.len() as u32;
+                    let attempt = all_executions
+                        .last()
+                        .expect("Success 携带至少 1 条 execution")
+                        .attempts;
+                    let source = matcher_source(&sub.matcher);
+                    // systemMessage 独立保留为展示消息（不折叠进 directive）。
+                    if let Some(text) = system_message {
+                        messages.push(HookDisplayMessage {
+                            point,
+                            source: source.clone(),
+                            execution_ordinal,
+                            attempt,
+                            kind: HookDisplayMessageKind::SystemMessage,
+                            text,
+                        });
+                    }
                     match directive {
                         HookDirective::Continue => {}
                         HookDirective::Block { reason } => {
                             return HookOutcome {
                                 executions: all_executions,
                                 directive: HookDirective::Block { reason },
+                                messages,
                             };
                         }
                         HookDirective::ContinueWithContext { context } => {
+                            messages.push(HookDisplayMessage {
+                                point,
+                                source: source.clone(),
+                                execution_ordinal,
+                                attempt,
+                                kind: HookDisplayMessageKind::AdditionalContext,
+                                text: context.clone(),
+                            });
                             push_context(&mut aggregated_context, context);
                         }
                         HookDirective::ContinueWithUpdatedInput { input } => {
@@ -183,6 +219,14 @@ impl HookPort for Dispatcher {
                             final_input = Some(input);
                         }
                         HookDirective::ContinueWithContextAndInput { context, input } => {
+                            messages.push(HookDisplayMessage {
+                                point,
+                                source: source.clone(),
+                                execution_ordinal,
+                                attempt,
+                                kind: HookDisplayMessageKind::AdditionalContext,
+                                text: context.clone(),
+                            });
                             push_context(&mut aggregated_context, context);
                             current_invocation.apply_updated_input(&input);
                             final_input = Some(input);
@@ -208,6 +252,7 @@ impl HookPort for Dispatcher {
                         return HookOutcome {
                             executions: all_executions,
                             directive,
+                            messages,
                         };
                     }
                     // 默认 / Continue policy：重试耗尽后不阻断流程。
@@ -221,6 +266,7 @@ impl HookPort for Dispatcher {
                     return HookOutcome {
                         executions: all_executions,
                         directive,
+                        messages,
                     };
                 }
             }
@@ -239,6 +285,7 @@ impl HookPort for Dispatcher {
         HookOutcome {
             executions: all_executions,
             directive,
+            messages,
         }
     }
 }
@@ -265,8 +312,8 @@ impl Dispatcher {
 
             match result {
                 Ok(raw) => {
-                    match classify_directive(sub.point, raw.exit_code, &raw.stdout, &raw.stderr) {
-                        Ok(directive) => {
+                    match classify_output(sub.point, raw.exit_code, &raw.stdout, &raw.stderr) {
+                        Ok((directive, system_message)) => {
                             let status = match &directive {
                                 HookDirective::Block { .. } => HookExecutionStatus::Blocked,
                                 _ => HookExecutionStatus::Success,
@@ -285,6 +332,7 @@ impl Dispatcher {
                             return AttemptOutcome::Success {
                                 executions,
                                 directive,
+                                system_message,
                             };
                         }
                         Err(err) => {
@@ -399,6 +447,7 @@ impl Dispatcher {
         HookOutcome {
             executions: all_executions,
             directive: HookDirective::Continue,
+            messages: Vec::new(),
         }
     }
 }

@@ -67,45 +67,6 @@ pub(crate) fn submit_interval_reflection(
     )
 }
 
-/// Submit a frozen snapshot of exactly the messages discarded by a successful compact.
-/// Busy submissions are skipped immediately and never queued.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn submit_precompact_reflection_snapshot(
-    adapter: &ReflectionTaskAdapter,
-    config: &share::config::MemoryConfig,
-    snapshot: Vec<share::message::Message>,
-    client: &Arc<provider::LlmClient>,
-    system_prompt_text: &str,
-    lang: &str,
-    memory: &Arc<dyn MemoryPort>,
-    history: &Arc<dyn ReflectionHistoryStore>,
-) {
-    if snapshot.is_empty() || !reflection_enabled(config) {
-        return;
-    }
-    if submit(
-        adapter,
-        ReflectionTaskTrigger::PreCompact,
-        config,
-        snapshot,
-        client,
-        system_prompt_text,
-        lang,
-        memory,
-        history,
-    ) == ReflectionTaskSubmitOutcome::BusySkipped
-    {
-        log::warn!(
-            target: crate::LOG_TARGET,
-            "[reflection_busy] trigger=pre_compact status=busy_skipped queued=false"
-        );
-    }
-}
-
-fn reflection_enabled(config: &share::config::MemoryConfig) -> bool {
-    config.enabled && config.reflection.enabled && config.reflection.interval_turns > 0
-}
-
 #[allow(clippy::too_many_arguments)]
 fn submit(
     adapter: &ReflectionTaskAdapter,

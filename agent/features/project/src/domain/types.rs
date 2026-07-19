@@ -168,10 +168,38 @@ pub trait WorkspaceRead: Send + Sync {
     fn current_workspace_root(&self) -> PathBuf;
     fn current_path_base(&self) -> PathBuf;
     fn resolve(&self, rel: &Path) -> PathBuf;
-    /// 解析文件路径并强制其位于当前 workspace root 内；目标可尚不存在。
+    /// 解析文件路径；默认限制在 workspace root，授权方可显式放行越界路径。
     fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
-    /// 解析已存在的搜索目录并强制其位于当前 workspace root 内。
+    fn resolve_file_path_authorized(
+        &self,
+        path: &Path,
+        allow_outside_workspace: bool,
+    ) -> Result<PathBuf, WorkspaceError> {
+        if allow_outside_workspace {
+            Ok(self.resolve(path))
+        } else {
+            self.resolve_file_path(path)
+        }
+    }
+    /// 解析已存在的搜索目录；默认限制在 workspace root。
     fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
+    fn resolve_search_path_authorized(
+        &self,
+        path: &Path,
+        allow_outside_workspace: bool,
+    ) -> Result<PathBuf, WorkspaceError> {
+        if !allow_outside_workspace {
+            return self.resolve_search_path(path);
+        }
+        let resolved = self
+            .resolve(path)
+            .canonicalize()
+            .map_err(|_| WorkspaceError::CannotResolveSearchPath(path.to_path_buf()))?;
+        if !resolved.is_dir() {
+            return Err(WorkspaceError::NotDirectory(resolved));
+        }
+        Ok(resolved)
+    }
     /// 当前工作根是否位于 linked git worktree（`.git/worktrees/*`）。
     /// 用于 worktree 嵌套校验，防止在 worktree 内再创建 worktree。
     fn in_worktree(&self) -> bool;

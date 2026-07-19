@@ -1,6 +1,5 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use context::SessionProjectionParticipant;
 use sdk::SdkError;
 
 use crate::adapters::runtime::LlmClientAdapter;
@@ -16,59 +15,6 @@ use provider::SystemBlock;
 
 use super::{AgentClientImpl, RuntimeHandle};
 
-// ─── RuntimeProjectionParticipant ────────────────────────────────────
-
-/// Concrete [`SessionProjectionParticipant`] that owns the three leased
-/// projection slots (`current_chain` / `frozen_chats` / `active_summary`).
-///
-/// Constructed in `from_args_with_workspace` **before** the first
-/// `resume_prepared` call. Registered with `MainSessionWiring` so that
-/// `resume_prepared` atomically updates the backing inside the exclusive
-/// session-switch gate — closing the CM5 observability window.
-///
-/// After bootstrap the same three `Arc<Mutex<…>>` are moved into
-/// [`RuntimeHandle`], so Main Run, the loop runner and the participant all
-/// read from / write to the **same** projection backing.
-struct RuntimeProjectionParticipant {
-    chain: Arc<Mutex<context::session::ChatChain>>,
-    frozen: Arc<Mutex<Vec<context::session::ChatSegment>>>,
-    summary: Arc<Mutex<Option<String>>>,
-}
-
-impl RuntimeProjectionParticipant {
-    /// Creates a new participant with default (empty) backing.
-    fn new() -> Self {
-        Self {
-            chain: Arc::new(Mutex::new(context::session::ChatChain::default())),
-            frozen: Arc::new(Mutex::new(Vec::new())),
-            summary: Arc::new(Mutex::new(None)),
-        }
-    }
-}
-
-impl SessionProjectionParticipant for RuntimeProjectionParticipant {
-    fn prepare(
-        &self,
-        session: &context::domain::session::CanonicalSession,
-    ) -> context::session::SessionRestore {
-        context::session::SessionRestore::from_canonical(session)
-    }
-
-    fn commit(&self, prepared: context::session::SessionRestore) {
-        // Sync, infallible, no-await — runs inside the exclusive gate's
-        // no-failure commit phase.
-        if let Ok(mut c) = self.chain.lock() {
-            *c = prepared.active_chain;
-        }
-        if let Ok(mut f) = self.frozen.lock() {
-            *f = prepared.frozen_chats;
-        }
-        if let Ok(mut s) = self.summary.lock() {
-            *s = prepared.active_summary;
-        }
-    }
-}
-
 /// Runtime bootstrap 所需的活依赖；由 Composition 一次性构造并注入。
 pub struct RuntimeBootstrapDependencies {
     workspace: project::WorkspaceViews,
@@ -78,7 +24,6 @@ pub struct RuntimeBootstrapDependencies {
     reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
     policy: Arc<dyn policy::PolicyPort>,
     task_access: Arc<dyn task::TaskAccess>,
-    session_tasks: Arc<dyn context::LegacyTaskCapture>,
 }
 
 impl RuntimeBootstrapDependencies {
@@ -90,7 +35,6 @@ impl RuntimeBootstrapDependencies {
         reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
         policy: Arc<dyn policy::PolicyPort>,
         task_access: Arc<dyn task::TaskAccess>,
-        session_tasks: Arc<dyn context::LegacyTaskCapture>,
     ) -> Self {
         Self {
             workspace,
@@ -100,7 +44,6 @@ impl RuntimeBootstrapDependencies {
             reflection_history,
             policy,
             task_access,
-            session_tasks,
         }
     }
 
@@ -112,10 +55,6 @@ impl RuntimeBootstrapDependencies {
         self.task_access.clone()
     }
 
-    pub fn session_tasks(&self) -> Arc<dyn context::LegacyTaskCapture> {
-        self.session_tasks.clone()
-    }
-
     pub fn wiring(&self) -> Arc<context::MainSessionWiring> {
         self.wiring.clone()
     }
@@ -125,7 +64,7 @@ impl RuntimeBootstrapDependencies {
 ///
 /// 模型选择直接使用 `Config.models.select_for_run()`，无需外部注入。
 ///
-/// `task_access` 和 `session_tasks` 由 Composition 层注入：Runtime 不得自行创建
+/// `task_access` 由 Composition 层注入；Runtime 不得自行创建
 /// Task BC 的 backing 或持久化封套（跨域越权，#890）。
 pub async fn from_args_with_workspace(
     args: ChatBootstrapArgs,
@@ -139,25 +78,12 @@ pub async fn from_args_with_workspace(
         reflection_history,
         policy,
         task_access,
-        session_tasks,
     } = dependencies;
 
     // Config query/writer come from the wiring gate-aware façade.
     // Bootstrap reads committed_config directly from wiring (one-shot).
     let config_query = wiring.config_query();
     let config_writer = wiring.config_writer();
-
-    // 0. Construct the projection backing and register it with wiring so that
-    //    any startup resume (step 3 below) atomically updates the leased
-    //    projection (chain/frozen/summary) inside the exclusive gate —
-    //    closing the CM5 observability window. The same Arc<Mutex<…>> are
-    //    later moved into RuntimeHandle so Main Run reads from the same
-    //    backing.
-    let projection = RuntimeProjectionParticipant::new();
-    let current_chain = Arc::clone(&projection.chain);
-    let frozen_chats = Arc::clone(&projection.frozen);
-    let active_summary = Arc::clone(&projection.summary);
-    wiring.register_projection_participant(Arc::new(projection));
 
     // 1. Guidance 目录初始化
     context::guidance::init_guidance_dir();
@@ -173,21 +99,15 @@ pub async fn from_args_with_workspace(
     //    below reflects the target project's config (model, API key, hooks,
     //    memory, etc.) after a cross-project resume. For non-resume,
     //    committed_config() is unchanged so behavior is identical.
-    //
-    //    The projection participant (registered in step 0) ensures that
-    //    `resume_prepared` atomically updates the leased projection backing
-    //    inside the exclusive gate. We do NOT extract chain/frozen/summary
-    //    from the restore return value — the backing Arcs already hold the
-    //    new values by the time `resume_session_to_backing` returns.
     let session_id = if let Some(resume_id) = args.resume.as_ref() {
         match crate::application::client::resume_helper::resume_session_to_backing(
             resume_id, &wiring,
         )
         .await
         {
-            Ok((_restore, sid)) => {
-                log::info!(target: crate::LOG_TARGET, "startup resume: {}", sid);
-                sid
+            Ok(projection) => {
+                log::info!(target: crate::LOG_TARGET, "startup resume: {}", projection.session_id);
+                projection.session_id
             }
             Err(error) => {
                 return Err(SdkError::Init(format!(
@@ -473,15 +393,11 @@ pub async fn from_args_with_workspace(
         cwd,
         resolved_model,
         session_id,
-        session_tasks,
         max_tool_concurrency,
         max_agent_concurrency,
         _mcp_manager: mcp_manager,
         current_client: std::sync::RwLock::new(current_client),
         active_run,
-        current_chain,
-        frozen_chats,
-        active_summary,
         workspace,
         wiring: wiring.clone(),
         config_query,
@@ -541,8 +457,6 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn from_args_keeps_cloned_workspace_views_synchronized() {
-        // Capture-only fake for tests — no-op that never reaches the real Task BC.
-        struct NoOpTaskCapture;
         struct TestReflectionHistory;
 
         #[async_trait::async_trait]
@@ -569,15 +483,6 @@ mod tests {
                 Ok(())
             }
         }
-        impl context::LegacyTaskCapture for NoOpTaskCapture {
-            fn capture_legacy_session(
-                &self,
-                _session: &mut context::session::Session,
-            ) -> Result<(), String> {
-                Ok(())
-            }
-        }
-
         let temp = tempfile::tempdir().expect("create temp root");
         let root = temp.path().join("root");
         let sub = root.join("sub");
@@ -639,9 +544,9 @@ mod tests {
             task_wiring.persist(),
             config.reader(),
             config.participant(),
-            Arc::new(context::adapters::ProductionMainContextFactory::new(
-                Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-            )),
+            Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            ))),
         )
         .await;
         let dependencies = RuntimeBootstrapDependencies::new(
@@ -652,7 +557,6 @@ mod tests {
             Arc::new(TestReflectionHistory),
             Arc::new(policy::AllowAllPolicy),
             Arc::new(task::TaskStore::new()),
-            Arc::new(NoOpTaskCapture),
         );
         let client = from_args_with_workspace(args, dependencies)
             .await

@@ -1,6 +1,6 @@
 use sdk::{
     ConfigField, ConfigUpdateResult, ConfigView, MemoryConfigView, ReflectionConfigView,
-    SessionSummary, WorkspaceContextView, WorkspaceStackEntryView,
+    SessionSummary,
 };
 
 pub(crate) fn config_snapshot_to_sdk(
@@ -51,44 +51,30 @@ pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> Memor
     }
 }
 
-pub(crate) fn session_summary_from_runtime(session: context::session::Session) -> SessionSummary {
-    let preview = session
-        .messages
-        .iter()
-        .find(|m| m.role == share::message::Role::User)
-        .map(|m| m.text_content())
-        .and_then(|text| {
-            let first_line = text.lines().next().unwrap_or("").trim();
-            if first_line.is_empty() {
-                None
-            } else {
-                Some(first_line.chars().take(50).collect())
-            }
-        });
-    let summary = session.summary();
+pub(crate) fn session_summary_from_context(session: context::SessionListEntry) -> SessionSummary {
     SessionSummary {
         id: session.id,
-        title: session.metadata.title,
-        project: session.metadata.project,
-        model: session.metadata.model,
+        title: session.title,
+        project: session.project,
+        model: session.model,
         created_at: session.created_at,
         updated_at: session.updated_at,
-        message_count: session.messages.len(),
-        preview,
-        summary,
+        message_count: session.message_count,
+        preview: session.preview,
+        summary: session.summary,
     }
 }
 
 pub(crate) fn workspace_context_to_sdk(
-    workspace: context::session::PersistedWorkspaceContext,
-) -> WorkspaceContextView {
-    WorkspaceContextView {
+    workspace: share::session_types::PersistedWorkspaceContext,
+) -> sdk::WorkspaceContextView {
+    sdk::WorkspaceContextView {
         path_base: workspace.path_base.into(),
         workspace_root: workspace.workspace_root.into(),
         context_stack: workspace
             .context_stack
             .into_iter()
-            .map(|entry| WorkspaceStackEntryView {
+            .map(|entry| sdk::WorkspaceStackEntryView {
                 path_base: entry.path_base.into(),
                 workspace_root: entry.workspace_root.into(),
             })

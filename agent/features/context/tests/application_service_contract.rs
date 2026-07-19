@@ -48,6 +48,26 @@ impl SessionRepository for FakeSession {
             context::domain::CompactSkipReason::ResumeProtection,
         ))
     }
+
+    async fn commit_manual_compaction(
+        &self,
+        _request: &context::domain::ManualCompactRequest,
+    ) -> Result<context::domain::CompactOutcome, context::domain::ContextPortError> {
+        Ok(context::domain::CompactOutcome::Committed(
+            context::domain::CompactResult {
+                summary: "manual".into(),
+                recent_messages: vec![],
+                source_revision: SessionRevision::new(4),
+            },
+        ))
+    }
+
+    async fn clear(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<(), context::domain::ContextPortError> {
+        Ok(())
+    }
 }
 
 struct FakePrompt;
@@ -162,4 +182,30 @@ async fn append_delegates_finalized_step_to_session_backing() {
     };
     let receipt = service().append_and_persist(&append).await.unwrap();
     assert_eq!(receipt.committed_revision, SessionRevision::new(3));
+}
+
+#[tokio::test]
+async fn manual_compact_and_clear_session_delegate_to_session_repository() {
+    use context::ports::ContextPort;
+
+    let service = service();
+    let outcome = service
+        .manual_compact(&context::domain::ManualCompactRequest {
+            session_id: SessionId::new("session"),
+            run_id: RunId::new("run"),
+            system_prompt: context::domain::SystemPromptSpec::new("system"),
+            context_size: 128_000,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        context::domain::CompactOutcome::Committed(ref result)
+            if result.source_revision == SessionRevision::new(4)
+    ));
+
+    service
+        .clear_session(&SessionId::new("session"))
+        .await
+        .unwrap();
 }

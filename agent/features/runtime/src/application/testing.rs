@@ -35,7 +35,6 @@ pub(crate) fn test_tool_execution_context(
             Arc::new(memory::NoOpMemory),
             Arc::new(tools::FixedGuidance {
                 language: "en".into(),
-                allow_all: true,
             }),
         ),
     )

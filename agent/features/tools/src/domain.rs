@@ -30,8 +30,8 @@ mod skill_pl_tests;
 
 pub use agent_port::{AgentDispatch, AgentRunRequest, AgentRunTerminal, AgentRunner};
 pub use context::{
-    CancellationSignal, ExecutionScope, ExecutionScopeBuilder, FixedGuidance, FixedPlanMode,
-    Guidance, InvocationSource, MutexReadSet, PlanModeState, ProgressSink, ReadSet,
+    AuthorizationContext, CancellationSignal, ExecutionScope, ExecutionScopeBuilder, FixedGuidance,
+    FixedPlanMode, Guidance, InvocationSource, MutexReadSet, PlanModeState, ProgressSink, ReadSet,
     ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
 pub use memory_source::MemoryPortSource;
@@ -56,6 +56,6 @@ pub use skill_ports::{SkillCatalogPort, SkillMaterializationPort};
 pub use suspension::{ToolSuspension, UserInteractionSpec, UserOption, UserQuestion};
 pub use tool::{Tool, ToolListProvider, TypedTool, TypedToolAdapter, TypedToolResult};
 pub use tool_types::{
-    AgentProgressEvent, AgentProgressKind, AgentToolCallProgress, ImageData, PolicyDecision,
-    SessionReminder, SessionReminders, ToolOutcome, ToolResult,
+    AgentProgressEvent, AgentProgressKind, AgentToolCallProgress, ImageData, SessionReminder,
+    SessionReminders, ToolOutcome, ToolResult,
 };

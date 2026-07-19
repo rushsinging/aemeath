@@ -25,7 +25,7 @@ pub enum ToolBackingError {
 #[derive(Clone)]
 pub struct ToolBacking {
     registry: Arc<ToolRegistry>,
-    scopes: Arc<HashMap<RegistryScopeName, RegistryScope>>,
+    scopes: Arc<parking_lot::RwLock<HashMap<RegistryScopeName, RegistryScope>>>,
     profiles: Arc<HashMap<ToolProfileName, ToolProfile>>,
 }
 
@@ -51,13 +51,13 @@ impl ToolBacking {
         }
         Ok(Self {
             registry,
-            scopes: Arc::new(scopes),
+            scopes: Arc::new(parking_lot::RwLock::new(scopes)),
             profiles: Arc::new(profiles),
         })
     }
 
-    pub(crate) fn scope(&self, name: &RegistryScopeName) -> Option<&RegistryScope> {
-        self.scopes.get(name)
+    pub(crate) fn scope(&self, name: &RegistryScopeName) -> Option<RegistryScope> {
+        self.scopes.read().get(name).cloned()
     }
 
     pub(crate) fn profile(&self, name: &ToolProfileName) -> Option<&ToolProfile> {
@@ -66,6 +66,22 @@ impl ToolBacking {
 
     pub(crate) fn registry(&self) -> &ToolRegistry {
         &self.registry
+    }
+
+    pub fn sync_dynamic_membership(
+        &self,
+        registrations: &[crate::domain::scope_profile::ToolRegistrationSpec],
+        removed: &[crate::domain::ToolName],
+    ) {
+        let mut scopes = self.scopes.write();
+        if let Some(scope) = scopes.get_mut(&RegistryScopeName::new("main")) {
+            for name in removed {
+                scope.remove(name);
+            }
+            for spec in registrations {
+                scope.insert_or_replace(spec.clone());
+            }
+        }
     }
 
     /// Conservative dynamic-source seam (including MCP Ready migration): add

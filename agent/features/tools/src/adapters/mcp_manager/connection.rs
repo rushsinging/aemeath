@@ -331,6 +331,21 @@ impl McpConnectionManager {
             .collect()
     }
 
+    pub async fn registration_specs(
+        &self,
+    ) -> Vec<crate::domain::scope_profile::ToolRegistrationSpec> {
+        self.get_all_tools()
+            .await
+            .into_iter()
+            .map(|(server, tool)| {
+                crate::domain::scope_profile::ToolRegistrationSpec::new(
+                    qualified_tool_name(&server, &tool.name),
+                    crate::domain::ToolCapabilities::all(),
+                )
+            })
+            .collect()
+    }
+
     /// Register MCP tools into a tool registry
     pub async fn register_tools(&self, registry: &ToolRegistry) {
         let connections = self.connections.lock().await;

@@ -5,14 +5,14 @@
 **次触发**：改暂停 / 恢复 / 重试逻辑；改成本追踪；新增 slash 命令。
 **配套**：Tool Published Language、Catalog/Execution 端口与 MCP 主体在 `tools.md`；provider 调用在 `provider.md`。
 
-## 会话历史唯一真相（#680）
+## 会话历史唯一真相（#872）
 
-- **MUST** 会话历史唯一可变真相 = `RuntimeHandle.current_chain: Arc<Mutex<ChatChain>>`。
-- **MUST** segment 边界由 loop turn 开始时生成 segment_id，`chain.push(msg, &segment_id)` 指定段追加。
-- **NEVER** 在 loop 外部（TUI / SDK / storage）持有可变消息副本或回写权威态。
-- **MUST** save 完全是 runtime 自身职责（turn-level + loop-exit auto-save），TUI `/save` 仅 UX 反馈。
+- **MUST** 会话历史唯一可变真相属于 Context Management 的 `CanonicalSession` backing。
+- **MUST** Runtime 每个 Run 用显式 Step message ownership 记录当前 Run/RunStep 的消息投影；**NEVER** 通过消息位置、长度、历史数量或索引推断归属。历史通过 `ContextPort::build_window` 读取，finalized Step 通过 `append_and_persist` 提交。
+- **NEVER** Runtime 生产代码引用 `context::session::*`、`ChatChain` / `ChatSegment`，或恢复 `current_chain` / `frozen_chats` / `active_summary` 第二 backing。
+- **NEVER** 恢复 `save_chain`、loop-exit auto-save 或 Runtime 自写 Session 文件；持久化由 Context 复用 Storage AtomicBlob。
 - **MUST** `ChatRequest` 只传增量 `user_input`，**NEVER** 传全量消息历史。
-- microcompact 按 segment 边界保护最近 3 个大 loop（`microcompact_chain`）。
+- **MUST** idle `/compact`、reset 与自动 compact 经 ContextPort；启动 resume 与运行期 `/resume` 经同一 `MainSessionWiring::resume_session` 协调器。
 
 ## Tool 执行编排
 

@@ -3,9 +3,7 @@
 use super::input_gate::*;
 use crate::application::chat::looping::events::{ChatEventSink, EventFuture, RuntimeStreamEvent};
 use crate::application::chat::looping::queue::{QueueDrainPort, QueueFuture};
-use context::session::ChatChain;
 use sdk::ChatInputEvent;
-use share::message::Message;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
@@ -136,7 +134,6 @@ async fn test_run_loop_gate_before_finish_continues_on_user_message() {
     let queue = EmptyQueueDrainPort;
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message("继续", Vec::new())]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(vec![Message::user("first")]);
 
     let outcome = run_loop_gate(
         GateKind::BeforeFinish,
@@ -144,8 +141,6 @@ async fn test_run_loop_gate_before_finish_continues_on_user_message() {
         &queue,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         false,
     )
@@ -153,7 +148,8 @@ async fn test_run_loop_gate_before_finish_continues_on_user_message() {
 
     assert_eq!(outcome.decision, GateDecision::ContinueNextTurn);
     assert_eq!(outcome.appended_user_messages, 1);
-    assert_eq!(chain.messages_flat().last().unwrap().text_content(), "继续");
+    assert_eq!(outcome.adopted_messages.len(), 1);
+    assert_eq!(outcome.adopted_messages[0].1.text_content(), "继续");
     // 现在 append 时发 MessagesSync + UserMessagesAdopted 两个事件
     assert_eq!(sink.events.lock().unwrap().len(), 2);
 }
@@ -177,7 +173,6 @@ async fn test_user_message_with_images_assembles_image_block() {
         vec![img],
     )]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(Vec::new());
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
@@ -185,16 +180,14 @@ async fn test_user_message_with_images_assembles_image_block() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         false,
     )
     .await;
 
     assert_eq!(outcome.appended_user_messages, 1);
-    let msgs = chain.messages_flat();
-    let last = msgs.last().expect("应追加一条消息");
+    assert_eq!(outcome.adopted_messages.len(), 1);
+    let last = &outcome.adopted_messages[0].1;
     // text_content 拼回完整文本（拆块后还原）
     assert_eq!(last.text_content(), text_with_marker);
     // 期望 content 是 [Text("看"), Image, Text("这张图")] 三块
@@ -243,23 +236,20 @@ async fn test_user_message_with_multiple_images_interleaves_by_placeholder() {
     let mut buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(text.clone(), imgs)]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(Vec::new());
 
-    let _ = run_loop_gate(
+    let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &mut buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         false,
     )
     .await;
 
-    let msgs = chain.messages_flat();
-    let last = msgs.last().expect("应追加一条消息");
+    assert_eq!(outcome.adopted_messages.len(), 1);
+    let last = &outcome.adopted_messages[0].1;
     assert_eq!(last.text_content(), text);
     let placeholders: Vec<String> = last
         .content
@@ -285,7 +275,6 @@ async fn query_reflection_history_is_buffered_while_gate_is_busy() {
     let mut buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::QueryReflectionHistory { limit: 7 }]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(Vec::new());
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
@@ -293,19 +282,17 @@ async fn query_reflection_history_is_buffered_while_gate_is_busy() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         false,
     )
     .await;
 
     assert!(outcome.pending_command.is_none());
+    assert!(outcome.adopted_messages.is_empty());
     assert!(matches!(
         buffer.drain_all().as_slice(),
         [ChatInputEvent::QueryReflectionHistory { limit: 7 }]
     ));
-    assert!(chain.is_empty());
 }
 
 #[tokio::test]
@@ -316,7 +303,6 @@ async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
         Vec::new(),
     )]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(Vec::new());
 
     let outcome = run_loop_gate(
         GateKind::AfterBlockingBoundary,
@@ -324,8 +310,6 @@ async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         false,
     )
@@ -333,7 +317,8 @@ async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
 
     assert_eq!(outcome.decision, GateDecision::Proceed);
     assert_eq!(outcome.appended_user_messages, 1);
-    assert_eq!(chain.messages_flat()[0].text_content(), "tool 后输入");
+    assert_eq!(outcome.adopted_messages.len(), 1);
+    assert_eq!(outcome.adopted_messages[0].1.text_content(), "tool 后输入");
 }
 
 #[tokio::test]
@@ -347,7 +332,6 @@ async fn test_run_loop_gate_preserves_side_effect_command_order() {
         ChatInputEvent::user_message("text2", Vec::new()),
     ]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(Vec::new());
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
@@ -355,8 +339,6 @@ async fn test_run_loop_gate_preserves_side_effect_command_order() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         false,
     )
@@ -365,8 +347,9 @@ async fn test_run_loop_gate_preserves_side_effect_command_order() {
     assert_eq!(outcome.decision, GateDecision::ContinueNextTurn);
     assert_eq!(outcome.commands.len(), 1);
     assert_eq!(outcome.commands[0].raw, "/save");
-    assert_eq!(chain.messages_flat()[0].text_content(), "text1");
-    assert_eq!(chain.messages_flat()[1].text_content(), "text2");
+    assert_eq!(outcome.adopted_messages.len(), 2);
+    assert_eq!(outcome.adopted_messages[0].1.text_content(), "text1");
+    assert_eq!(outcome.adopted_messages[1].1.text_content(), "text2");
 }
 
 #[tokio::test]
@@ -380,7 +363,6 @@ async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
         ChatInputEvent::user_message("text2", Vec::new()),
     ]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(Vec::new());
 
     let outcome = run_loop_gate(
         GateKind::BeforeFinish,
@@ -388,8 +370,6 @@ async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         false,
     )
@@ -398,7 +378,7 @@ async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
     assert_eq!(outcome.decision, GateDecision::AbortCurrentLoop);
     assert_eq!(outcome.dropped_events, 1);
     assert_eq!(outcome.commands[0].kind, ControlCommandKind::Abort);
-    assert!(chain.is_empty());
+    assert!(outcome.adopted_messages.is_empty());
 }
 
 #[tokio::test]
@@ -410,7 +390,6 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
         ChatInputEvent::user_message("same", Vec::new()),
     ]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(Vec::new());
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
@@ -418,15 +397,13 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         false,
     )
     .await;
 
     assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
-    assert_eq!(chain.messages_flat().len(), 2);
+    assert_eq!(outcome.adopted_messages.len(), 2);
     let added = sink.events.lock().unwrap().iter().find_map(|e| match e {
         RuntimeStreamEvent::UserMessagesAdopted { items, .. } => Some(items.clone()),
         _ => None,
@@ -445,7 +422,6 @@ async fn test_run_loop_gate_no_dedup_push_and_pull_same_text() {
     let queue = TestQueuePort::new(Some(vec!["same".to_string()]));
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message("same", Vec::new())]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(Vec::new());
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
@@ -453,15 +429,13 @@ async fn test_run_loop_gate_no_dedup_push_and_pull_same_text() {
         &queue,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         false,
     )
     .await;
 
     assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
-    assert_eq!(chain.messages_flat().len(), 2);
+    assert_eq!(outcome.adopted_messages.len(), 2);
 }
 
 /// #391 S3-1：drain_all 非空 → 返回全部事件 + buffer 清空。
