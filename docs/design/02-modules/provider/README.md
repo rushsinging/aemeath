@@ -132,7 +132,9 @@ Provider 发布原始 usage；Runtime 将其关联到 Model Invocation 并发出
 | Retry/fallback 所有权、usage/capability clamp | L0-L4 | Runtime attempt tests；Provider usage/capability tests；`check-provider-retry-ownership.sh` / `check-provider-usage-capability.sh` | 闭合；resolver 生产接线明确延期 #1142 |
 | 真进程、平台、安装或发布资产 | L5 | Provider 能力均可由进程内 HTTP/stream harness 覆盖，不承担 PTY、安装或发布资产职责 | 不适用 |
 
-覆盖率百分比只作为风险信号，不替代上述矩阵。#1061 定向复核基于 `cargo test -p provider`、Provider production/all-targets clippy、架构守卫和 workspace 格式门禁；新增共享契约针对历史重复 driver 断言与 consumer-drop 空白，不批量搬迁无关旧测试。
+覆盖率百分比只作为风险信号，不替代上述矩阵。PR #1259 的 CI（cargo-llvm-cov 0.8.7）记录 Provider：regions `6469/8064`（80.22%）、functions `491/593`（82.80%）、lines `4747/5793`（81.94%）；workspace 对照为 77.99% / 78.63% / 78.02%。当前统一 coverage 脚本只输出 workspace/per-crate summary，不产出 changed-lines 指标，因此该项明确记为工具链暂不提供，而非以 workspace 百分比替代。未覆盖分支主要集中在真实上游异常组合、超时防御和日志降级路径；关键 HTTP 分类、stream 生命周期、取消、consumer drop、四类 decoder 与 ACL 已有行为矩阵证据。
+
+L0 复核同时通过 Provider `--no-default-features` / `--all-features` check、all-features/all-targets clippy 与 all-features tests；Provider 唯一 feature 是 test-only `test-harness`，无平台专属 `cfg`，故无需额外 OS matrix。crate-root public surface 由 `check-crate-api-boundary.sh`、`check-provider-construction-ownership.sh` 与 `tests/crate_root_facade.rs` 共同锁定，test-only surface 仅在显式 feature 下出现。#1061 其余定向证据包括 `cargo test -p provider`、Provider production/all-targets clippy、架构守卫和 workspace 格式门禁；新增共享契约针对历史重复 driver 断言与 consumer-drop 空白，不批量搬迁无关旧测试。
 
 ## 9. 相关文档
 
