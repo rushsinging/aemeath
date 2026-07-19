@@ -270,6 +270,21 @@ async fn run_contract(factory: ContractFactory) {
     assert_eq!(ports.calls.load(Ordering::SeqCst), 2);
 
     ports.contexts.unbind(ports.scope.run_id());
+    let resource_missing = ports
+        .execution
+        .execute(
+            invocation(&ports.scope, "Suspend", json!({})),
+            &cancellation,
+        )
+        .await;
+    assert!(matches!(
+        resource_missing,
+        ExecutionOutcome::Failure(ref failure)
+            if failure.kind
+                == crate::domain::published_language::ToolErrorKind::ResourceUnavailable
+    ));
+    assert_eq!(ports.calls.load(Ordering::SeqCst), 2);
+
     let cancelled = ManualCancellation::cancelled();
     assert!(ports
         .execution

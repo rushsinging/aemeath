@@ -142,6 +142,36 @@ mod tests {
     }
 
     #[derive(Clone)]
+    struct WaitingSink {
+        reply_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<sdk::AskUserReply>>>>,
+        final_results: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl ChatEventSink for WaitingSink {
+        fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
+            Box::pin(async move {
+                match event {
+                    RuntimeStreamEvent::AskUserBatch { reply_tx, .. } => {
+                        *self.reply_tx.lock().unwrap() = Some(reply_tx);
+                    }
+                    RuntimeStreamEvent::ToolResult { .. } => {
+                        self.final_results
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    _ => {}
+                }
+            })
+        }
+
+        fn try_send_event(&self, event: RuntimeStreamEvent) {
+            if matches!(event, RuntimeStreamEvent::ToolResult { .. }) {
+                self.final_results
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+    }
+
+    #[derive(Clone)]
     struct CancellingSink {
         cancel: tokio_util::sync::CancellationToken,
     }
@@ -246,6 +276,60 @@ mod tests {
         assert_eq!(items[1].default.as_deref(), Some("fallback"));
         assert_eq!(results[0].outcome.text, "one");
         assert_eq!(results[1].outcome.text, "selected two");
+    }
+
+    #[tokio::test]
+    async fn reply_must_arrive_before_any_final_tool_result() {
+        let calls = [call("waiting-call", 0)];
+        let suspension =
+            ToolSuspension::UserInteraction(UserInteractionSpec::new(vec![UserQuestion::new(
+                "Continue?",
+                vec![],
+                false,
+                true,
+                None,
+            )]));
+        let suspended_calls = vec![(&calls[0], suspension)];
+        let reply_tx = Arc::new(Mutex::new(None));
+        let final_results = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let sink = WaitingSink {
+            reply_tx: reply_tx.clone(),
+            final_results: final_results.clone(),
+        };
+        let hook_ui = HookUi::new(sink.clone());
+        let hook_runner = hook::api::HookRunner::new(Default::default());
+        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let workspace_root = std::env::current_dir().unwrap();
+        let waiting = ask_user(
+            &context,
+            &sink,
+            &hook_ui,
+            &hook_runner,
+            &suspended_calls,
+            &cancel,
+            &workspace_root,
+        );
+        tokio::pin!(waiting);
+
+        tokio::select! {
+            _ = &mut waiting => panic!("AskUser completed before receiving a reply"),
+            _ = tokio::task::yield_now() => {}
+        }
+        assert_eq!(final_results.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let sender = reply_tx
+            .lock()
+            .unwrap()
+            .take()
+            .expect("AskUser request sender");
+        sender
+            .send(sdk::AskUserReply::Answers(vec!["yes".to_string()]))
+            .expect("send AskUser reply");
+
+        let results = waiting.await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].outcome.text, "yes");
+        assert_eq!(final_results.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

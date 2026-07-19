@@ -70,3 +70,7 @@ impl UserQuestion {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "suspension_tests.rs"]
+mod tests;
