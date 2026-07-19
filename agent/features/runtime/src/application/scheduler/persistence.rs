@@ -2,7 +2,6 @@
 
 use super::types::SchedulerState;
 use super::TaskScheduler;
-use storage::TaskStatus;
 
 impl TaskScheduler {
     /// Persist state to disk
@@ -65,20 +64,8 @@ impl TaskScheduler {
         *self.task_queue.lock().await = state.task_queue;
         *self.execution_history.lock().await = state.execution_history;
 
-        // Collect task IDs to re-queue, then update task store without holding locks
-        let task_ids: Vec<String> = {
-            let active = self.active_tasks.lock().await;
-            active.keys().cloned().collect()
-        }; // active_tasks lock released
-
-        for task_id in &task_ids {
-            self.task_store
-                .update(task_id, |t| {
-                    t.status = TaskStatus::Pending;
-                })
-                .await;
-        }
-
+        // Active execution is scheduler-owned recovery state. Task status is not
+        // force-rewound here; Task owns legal state transitions and restore.
         Ok(())
     }
 }
