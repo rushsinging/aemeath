@@ -3,6 +3,7 @@ use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
+use crate::application::tool_coordination::PreparedToolCall;
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
 use std::path::Path;
@@ -17,21 +18,20 @@ use super::tools::{
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_non_agent<S>(
     context: &RuntimeTurnContext,
-    agent: &Agent<'_>,
+    agent: &Agent,
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    non_agent_calls: &[ToolCall],
-    authorization_by_id: &std::collections::HashMap<sdk::ToolCallId, tools::AuthorizationContext>,
+    non_agent_calls: &[PreparedToolCall],
     language: &str,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
-    let other_calls: Vec<&ToolCall> = non_agent_calls
+    let other_calls: Vec<&PreparedToolCall> = non_agent_calls
         .iter()
-        .filter(|c| c.name != "AskUserQuestion")
+        .filter(|prepared| prepared.call.name != "AskUserQuestion")
         .collect();
 
     if other_calls.is_empty() {
@@ -49,7 +49,6 @@ where
             hook_ui,
             hook_runner,
             other_calls[0],
-            authorization_by_id,
             language,
             workspace_root,
         )
@@ -63,7 +62,6 @@ where
         hook_ui,
         hook_runner,
         &other_calls,
-        authorization_by_id,
         language,
         workspace_root,
     )
@@ -73,12 +71,11 @@ where
 #[allow(clippy::too_many_arguments)]
 async fn execute_multiple_non_agent<S>(
     context: &RuntimeTurnContext,
-    agent: &Agent<'_>,
+    agent: &Agent,
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    other_calls: &[&ToolCall],
-    authorization_by_id: &std::collections::HashMap<sdk::ToolCallId, tools::AuthorizationContext>,
+    other_calls: &[&PreparedToolCall],
     language: &str,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
@@ -113,7 +110,6 @@ where
                         &hook_ui,
                         &hook_runner,
                         call,
-                        authorization_by_id,
                         language,
                         &workspace_root,
                     )
@@ -143,7 +139,6 @@ where
                 hook_ui,
                 hook_runner,
                 call,
-                authorization_by_id,
                 language,
                 workspace_root,
             )
@@ -167,15 +162,14 @@ where
         .collect()
 }
 
-fn partition_calls(agent: &Agent<'_>, calls: &[&ToolCall]) -> (Vec<usize>, Vec<usize>) {
+fn partition_calls(agent: &Agent, calls: &[&PreparedToolCall]) -> (Vec<usize>, Vec<usize>) {
     let mut concurrent_positions = Vec::new();
     let mut sequential_positions = Vec::new();
     for (i, call) in calls.iter().enumerate() {
         let is_safe = agent
-            .registry
-            .get(&call.name)
-            .map(|t| t.is_concurrency_safe())
-            .unwrap_or(false);
+            .catalog
+            .find(&tools::ToolName::new(&call.call.name))
+            .is_some_and(|descriptor| descriptor.is_concurrency_safe());
         if is_safe {
             concurrent_positions.push(i);
         } else {
@@ -185,7 +179,8 @@ fn partition_calls(agent: &Agent<'_>, calls: &[&ToolCall]) -> (Vec<usize>, Vec<u
     (concurrent_positions, sequential_positions)
 }
 
-fn cancelled_result(call: &ToolCall, language: &str) -> ToolExecution {
+fn cancelled_result(prepared: &PreparedToolCall, language: &str) -> ToolExecution {
+    let call = &prepared.call;
     let msg = match language {
         "zh" => "用户已取消",
         _ => "Cancelled by user",
@@ -196,22 +191,19 @@ fn cancelled_result(call: &ToolCall, language: &str) -> ToolExecution {
 #[allow(clippy::too_many_arguments)]
 async fn execute_one_non_agent<S>(
     context: &RuntimeTurnContext,
-    agent: &Agent<'_>,
+    agent: &Agent,
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    call: &ToolCall,
-    authorization_by_id: &std::collections::HashMap<sdk::ToolCallId, tools::AuthorizationContext>,
+    prepared: &PreparedToolCall,
     language: &str,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
-    let authorization = authorization_by_id
-        .get(&call.id)
-        .copied()
-        .unwrap_or(tools::AuthorizationContext::STANDARD);
+    let call = &prepared.call;
+    let authorization = prepared.authorization;
     if authorization.enforce_permission_hooks {
         let _ = hook_ui
             .run_plain(
@@ -443,7 +435,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use serde_json::Value;
-    use tools::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
+    use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
     struct ConcurrencyFlagTool {
         name: &'static str,
@@ -498,7 +490,7 @@ mod tests {
 
     #[test]
     fn test_partition_calls_routes_concurrency_safe_tools_to_concurrent() {
-        let registry = ToolRegistry::new();
+        let registry = tools::composition::TestCatalogExecutionFactory::new();
         registry.register(ConcurrencyFlagTool {
             name: "safe_a",
             safe: true,
@@ -509,7 +501,14 @@ mod tests {
         });
         let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("safe_a", 0), call("safe_b", 1)];
-        let refs = calls.iter().collect::<Vec<_>>();
+        let prepared = calls
+            .into_iter()
+            .map(|call| PreparedToolCall {
+                call,
+                authorization: tools::AuthorizationContext::STANDARD,
+            })
+            .collect::<Vec<_>>();
+        let refs = prepared.iter().collect::<Vec<_>>();
 
         let (concurrent, sequential) = partition_calls(&agent, &refs);
 
@@ -519,7 +518,7 @@ mod tests {
 
     #[test]
     fn test_partition_calls_routes_non_concurrency_safe_tools_to_sequential() {
-        let registry = ToolRegistry::new();
+        let registry = tools::composition::TestCatalogExecutionFactory::new();
         registry.register(ConcurrencyFlagTool {
             name: "unsafe_a",
             safe: false,
@@ -530,7 +529,14 @@ mod tests {
         });
         let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("unsafe_a", 0), call("unsafe_b", 1)];
-        let refs = calls.iter().collect::<Vec<_>>();
+        let prepared = calls
+            .into_iter()
+            .map(|call| PreparedToolCall {
+                call,
+                authorization: tools::AuthorizationContext::STANDARD,
+            })
+            .collect::<Vec<_>>();
+        let refs = prepared.iter().collect::<Vec<_>>();
 
         let (concurrent, sequential) = partition_calls(&agent, &refs);
 
@@ -540,7 +546,7 @@ mod tests {
 
     #[test]
     fn test_partition_calls_preserves_mixed_positions() {
-        let registry = ToolRegistry::new();
+        let registry = tools::composition::TestCatalogExecutionFactory::new();
         registry.register(ConcurrencyFlagTool {
             name: "safe",
             safe: true,
@@ -551,7 +557,14 @@ mod tests {
         });
         let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("safe", 0), call("unsafe", 1), call("safe", 2)];
-        let refs = calls.iter().collect::<Vec<_>>();
+        let prepared = calls
+            .into_iter()
+            .map(|call| PreparedToolCall {
+                call,
+                authorization: tools::AuthorizationContext::STANDARD,
+            })
+            .collect::<Vec<_>>();
+        let refs = prepared.iter().collect::<Vec<_>>();
 
         let (concurrent, sequential) = partition_calls(&agent, &refs);
 
@@ -561,10 +574,17 @@ mod tests {
 
     #[test]
     fn test_partition_calls_routes_unknown_tools_to_sequential() {
-        let registry = ToolRegistry::new();
+        let registry = tools::composition::TestCatalogExecutionFactory::new();
         let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("missing", 0)];
-        let refs = calls.iter().collect::<Vec<_>>();
+        let prepared = calls
+            .into_iter()
+            .map(|call| PreparedToolCall {
+                call,
+                authorization: tools::AuthorizationContext::STANDARD,
+            })
+            .collect::<Vec<_>>();
+        let refs = prepared.iter().collect::<Vec<_>>();
 
         let (concurrent, sequential) = partition_calls(&agent, &refs);
 

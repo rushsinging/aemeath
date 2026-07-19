@@ -1,4 +1,7 @@
 /target/
+
+# worktree-local cargo config：由 .cargo/hooks/post-checkout 按 worktree 身份生成（#1226）。
+/.cargo/config.toml
 /UI_IMPROVEMENTS.md
 /ui/node_modules/
 /ui/dist/

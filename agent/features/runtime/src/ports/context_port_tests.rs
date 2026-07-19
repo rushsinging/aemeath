@@ -14,6 +14,7 @@ fn request() -> ContextRequest {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: sdk::RunId::new("run"),
+        step_id: sdk::RunStepId::new("step"),
         pending_messages: vec![],
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
@@ -40,6 +41,7 @@ impl ContextPort for FakeContextPort {
         request: &ContextRequest,
     ) -> Result<ContextWindow, ContextPortError> {
         Ok(ContextWindow {
+            backing_revision: SessionRevision::new(0),
             system_blocks: vec![],
             messages: request.pending_messages.clone(),
             tool_schemas: request.tool_schemas.clone(),

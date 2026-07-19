@@ -1,34 +1,32 @@
-// summary 已由 TUI 层从 input 参数组装，runtime 不再生成
 use crate::application::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::chat::looping::agent_calls::execute_agent_calls;
 use crate::application::chat::looping::ask_user::ask_user;
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::non_agent::execute_non_agent;
-use crate::application::chat::looping::permissions::evaluate_calls;
-use crate::application::chat::looping::tool_fuse::blocked_tool_execution;
 use crate::application::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
+use crate::application::tool_coordination::{prepare_tool_round, restore_tool_call_order};
 use hook::api::{HookData, ToolHookData};
 
-use crate::application::chat::looping::engine::DeniedCall;
 use sdk::ids::ToolCallId;
 use share::config::hooks::HookEvent;
 use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::ToolOutcome;
-use tools::ToolRegistry;
+use tools::{ToolCatalogPort, ToolExecutionPort};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
     context: &RuntimeTurnContext,
     tool_calls: &[ToolCall],
-    registry: &Arc<ToolRegistry>,
+    tool_catalog: &Arc<dyn ToolCatalogPort>,
+    tool_execution: &Arc<dyn ToolExecutionPort>,
     policy: &dyn policy::PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
-    agent: &Agent<'_>,
+    agent: &Agent,
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
@@ -40,70 +38,88 @@ pub(crate) async fn execute_tool_round<S>(
 where
     S: ChatEventSink,
 {
-    let (approved, denied) = evaluate_calls(
-        tool_calls,
-        registry,
+    let catalog = match tool_catalog.snapshot(
+        &tools::RegistryScopeName::new("main"),
+        &tools::ToolProfileName::new("main-full"),
+    ) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            log::error!(target: crate::LOG_TARGET, "tool catalog snapshot failed: {error}");
+            return (
+                tool_calls
+                    .iter()
+                    .map(|call| {
+                        ToolExecution::new(
+                            call,
+                            ToolOutcome::error(format!("tool catalog unavailable: {error}")),
+                        )
+                    })
+                    .collect(),
+                Vec::new(),
+            );
+        }
+    };
+    let prepared = prepare_tool_round(
+        guarded_calls,
+        &catalog,
         policy,
         run_id,
         step_id,
         workspace_root,
     );
-    let denied_results =
-        deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, workspace_root).await;
-    let authorization_by_id: std::collections::HashMap<_, _> = approved
-        .iter()
-        .map(|(call, authorization)| (call.id.clone(), *authorization))
-        .collect();
+    let denied_results = deny_tool_calls(
+        &prepared.denied,
+        sink,
+        context,
+        hook_ui,
+        hook_runner,
+        workspace_root,
+    )
+    .await;
+    let fuse_bypassed = prepared.fuse_bypassed.clone();
+    let approved = prepared.executable;
+    let fused_results =
+        publish_guard_blocked(prepared.guard_blocked, tool_calls, sink, context).await;
 
-    let fuse_bypassed: Vec<_> = guarded_calls
-        .iter()
-        .filter_map(|(call, decision)| {
-            (matches!(
-                decision,
-                crate::application::loop_engine::ToolGuardDecision::SoftBlock { .. }
-            ) && authorization_by_id
-                .get(&call.id)
-                .is_some_and(|authorization| !authorization.enforce_tool_fuse))
-            .then_some(call.id.clone())
-        })
-        .collect();
+    let (agent_approved, non_agent_approved): (Vec<_>, Vec<_>) = approved
+        .into_iter()
+        .partition(|prepared| prepared.call.name == "Agent");
 
-    let guard_by_id: std::collections::HashMap<_, _> = guarded_calls
+    // AskUser must cross the same execution port as every production tool.
+    // Only a typed Suspended outcome enters Runtime's existing waiter; every
+    // failure/cancellation remains a concrete ToolExecution result.
+    let mut ask_user_suspensions = Vec::new();
+    let mut ask_user_terminal = Vec::new();
+    for prepared in non_agent_approved
         .iter()
-        .map(|(call, decision)| (call.id.clone(), decision))
-        .collect();
-    let mut fused_results = Vec::new();
-    let mut fuse_allowed = Vec::new();
-    for (call, authorization) in approved {
-        match guard_by_id.get(&call.id) {
-            Some(crate::application::loop_engine::ToolGuardDecision::SoftBlock { reason })
-                if authorization.enforce_tool_fuse =>
-            {
-                send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Ready).await;
-                send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Running).await;
-                let execution = blocked_tool_execution(&call, reason);
-                send_tool_result(sink, context, &execution).await;
-                fused_results.push(execution);
+        .filter(|prepared| prepared.call.name == "AskUserQuestion")
+    {
+        let call = &prepared.call;
+        let mut input = call.input.clone();
+        tools::strip_runtime_meta(&mut input);
+        let invocation =
+            tools::ToolInvocation::new(call.name.as_str(), input, agent.ctx.scope().clone())
+                .with_authorization(prepared.authorization);
+        match tool_execution
+            .execute(invocation, agent.ctx.cancellation().as_ref())
+            .await
+        {
+            tools::ToolExecutionOutcome::Suspended(suspension) => {
+                ask_user_suspensions.push((call, suspension, prepared.authorization));
             }
-            Some(crate::application::loop_engine::ToolGuardDecision::Allow) | None => {
-                fuse_allowed.push(call)
-            }
-            Some(crate::application::loop_engine::ToolGuardDecision::SoftBlock { .. }) => {
-                fuse_allowed.push(call)
-            }
+            outcome => ask_user_terminal.push(ToolExecution::new(
+                call,
+                crate::application::agent::legacy_outcome(outcome),
+            )),
         }
     }
-
-    let (agent_approved, non_agent_approved): (Vec<ToolCall>, Vec<ToolCall>) =
-        fuse_allowed.into_iter().partition(|c| c.name == "Agent");
-
     let ask_user_results = ask_user(
         context,
         sink,
         hook_ui,
         hook_runner,
-        &non_agent_approved,
-        &authorization_by_id,
+        &ask_user_suspensions,
+        cancel,
         workspace_root,
     )
     .await;
@@ -114,7 +130,6 @@ where
         hook_ui,
         hook_runner,
         &non_agent_approved,
-        &authorization_by_id,
         language,
         workspace_root,
     )
@@ -122,8 +137,7 @@ where
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,
-        &authorization_by_id,
-        registry,
+        tool_execution,
         &agent.ctx,
         &agent.agent_semaphore,
         &agent.workspace_persist,
@@ -135,20 +149,39 @@ where
     )
     .await;
 
-    (
-        ask_user_results
-            .into_iter()
-            .chain(non_agent_results)
-            .chain(agent_results)
-            .chain(fused_results)
-            .chain(denied_results)
-            .collect(),
-        fuse_bypassed,
-    )
+    let results = ask_user_results
+        .into_iter()
+        .chain(ask_user_terminal)
+        .chain(non_agent_results)
+        .chain(agent_results)
+        .chain(fused_results)
+        .chain(denied_results)
+        .collect();
+    (restore_tool_call_order(tool_calls, results), fuse_bypassed)
+}
+
+async fn publish_guard_blocked<S>(
+    blocked: Vec<ToolExecution>,
+    calls: &[ToolCall],
+    sink: &S,
+    context: &RuntimeTurnContext,
+) -> Vec<ToolExecution>
+where
+    S: ChatEventSink,
+{
+    for execution in &blocked {
+        let Some(call) = calls.iter().find(|call| call.id == execution.call_id) else {
+            continue;
+        };
+        send_tool_call_status(sink, context, call, RuntimeToolCallStatus::Ready).await;
+        send_tool_call_status(sink, context, call, RuntimeToolCallStatus::Running).await;
+        send_tool_result(sink, context, execution).await;
+    }
+    blocked
 }
 
 async fn deny_tool_calls<S>(
-    denied: &[DeniedCall],
+    denied: &[crate::application::tool_coordination::DeniedToolCall],
     sink: &S,
     context: &RuntimeTurnContext,
     hook_ui: &HookUi<S>,
@@ -163,15 +196,15 @@ where
         log::warn!(
             target: crate::LOG_TARGET,
             "tool call denied by policy: name={}, reason={}, runtime_id={}, provider_id={}",
-            call.name, call.reason, call.id, call.provider_id,
+            call.call.name, call.reason, call.call.id, call.call.provider_id,
         );
         let _ = hook_ui
             .run_plain(
                 hook_runner,
                 HookEvent::PermissionDenied,
-                Some(&call.name),
+                Some(&call.call.name),
                 HookData::Permission(hook::api::PermissionHookData {
-                    tool_name: call.name.clone(),
+                    tool_name: call.call.name.clone(),
                     permission_rule: "deny".to_string(),
                 }),
                 workspace_root,
@@ -179,14 +212,14 @@ where
             .await;
         // 发送 ToolCall 事件，让 pending 占位行获取 LLM 的 tool_use_id，
         // 后续 ToolResult 中的 mark_tool_header_done 才能精确匹配（Bug #52）。
-        let call_id = sdk::ids::ToolCallId::from_legacy_or_new(&call.id);
+        let call_id = call.call.id.clone();
         let _ = sink
             .send_event(RuntimeStreamEvent::ToolCallUpdate {
                 context: context.clone(),
                 id: call_id.clone(),
-                provider_id: None,
-                name: call.name.clone(),
-                index: 0,
+                provider_id: Some(call.call.provider_id.clone()),
+                name: call.call.name.clone(),
+                index: call.call.index,
                 arguments_delta: None,
                 arguments: None,
                 status: RuntimeToolCallStatus::Ready,
@@ -204,8 +237,8 @@ where
         };
         let execution = ToolExecution::from_parts(
             call_id,
-            call.provider_id.clone(),
-            call.name.clone(),
+            call.call.provider_id.clone(),
+            call.call.name.clone(),
             outcome,
         );
         send_tool_result(sink, context, &execution).await;
@@ -396,7 +429,7 @@ mod tests {
     use share::message::ContentBlock;
     use std::sync::{Arc, Mutex};
     use tools::ToolOutcome;
-    use tools::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
+    use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
     #[derive(Clone, Default)]
     struct RecordingSink {
@@ -487,11 +520,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_concurrency_safe_tools_emit_running_after_previous_result() {
-        let registry = Arc::new(ToolRegistry::new());
-        registry.register_with_capabilities(
-            UnsafeLifecycleTool,
-            tools::ToolCapabilities::ReadWorkspace,
-        );
+        let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
+        registry.register(UnsafeLifecycleTool);
         let ctx = test_tool_context();
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
@@ -506,10 +536,14 @@ mod tests {
             .map(|call| (call, ToolGuardDecision::Allow))
             .collect::<Vec<_>>();
 
+        let ports = registry.build(agent.ctx.clone());
+        let catalog_port = ports.catalog_port();
+        let execution_port = ports.execution();
         let _ = execute_tool_round(
             &context,
             &calls,
-            &registry,
+            &catalog_port,
+            &execution_port,
             &policy::AllowAllPolicy,
             &sdk::RunId::new_v7(),
             &sdk::RunStepId::new_v7(),

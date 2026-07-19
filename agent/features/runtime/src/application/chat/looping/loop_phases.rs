@@ -7,7 +7,6 @@ use crate::application::chat::looping::config_reload::{
     check_config_changes, resolve_guidance_reload_policy,
 };
 use crate::application::chat::looping::snapshot_registry::SourceSnapshotRegistry;
-use crate::application::chat::looping::task_reminder::TaskReminderState;
 use crate::application::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use share::config::GuidanceReloadPolicy;
 use share::message::Message;
@@ -86,104 +85,5 @@ pub(crate) async fn handle_turn_boundary_config<S>(
                 }
             }
         }
-    }
-}
-
-/// 构建发送给 LLM API 的消息列表。
-///
-/// 在用户消息前注入 `user_context`（如 claudeMd）包装和任务提醒（如满足条件）。
-pub(crate) async fn build_api_messages(
-    user_context: &str,
-    language: &str,
-    task_reminder_state: &mut TaskReminderState,
-    turn_count: u64,
-    task_access: &dyn task::TaskAccess,
-    messages: &[Message],
-) -> Vec<Message> {
-    let mut api_msgs = Vec::new();
-    if !user_context.is_empty() {
-        let context_wrapper = match language {
-            "zh" => format!(
-                "<system-reminder>\n在回答用户问题时，你可以使用以下上下文：\n# claudeMd\n{user_context}\n\nIMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>"
-            ),
-            _ => format!(
-                "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# claudeMd\n{user_context}\n\nIMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>"
-            ),
-        };
-        api_msgs.push(Message::user(context_wrapper));
-    }
-    // Inject task reminder if conditions are met
-    if let Some(reminder) = task_reminder_state
-        .build_reminder(turn_count, task_access, language)
-        .await
-    {
-        api_msgs.push(reminder);
-    }
-    // text-first：仅对发送给 LLM 的克隆做转换，tool_result 降为文本、剥离结构化
-    // data；持久化的 `messages` 保持忠实（结构化 content 供 TUI / server）。
-    api_msgs.extend(messages.iter().map(Message::to_llm_view));
-    api_msgs
-}
-
-#[cfg(test)]
-mod tests {
-    use super::build_api_messages;
-    use crate::application::chat::looping::task_reminder::TaskReminderState;
-    use share::message::{ContentBlock, Message, Role};
-
-    #[tokio::test]
-    async fn test_build_api_messages_tool_result_is_text_first() {
-        // 持久化的 tool_result 带结构化 content + text；发送给 LLM 时应降为 text-first。
-        let messages = vec![Message {
-            role: Role::User,
-            content: vec![ContentBlock::ToolResult {
-                tool_use_id: "t1".to_string(),
-                content: serde_json::json!({"stdout": "hello", "exit_code": 0}),
-                is_error: false,
-                text: Some("hello".to_string()),
-            }],
-            metadata: None,
-        }];
-        let store = task::TaskStore::new();
-        let mut reminder = TaskReminderState::new();
-        let out = build_api_messages("", "en", &mut reminder, 1, &store, &messages).await;
-
-        let block = out
-            .iter()
-            .flat_map(|m| &m.content)
-            .find(|b| b.is_tool_result())
-            .expect("tool_result present");
-        let json = serde_json::to_value(block).unwrap();
-        assert_eq!(
-            json["content"],
-            serde_json::json!("hello"),
-            "LLM 应收到 text-first 文本而非结构化 data: {json}"
-        );
-        assert!(json.get("text").is_none(), "wire 不应带 text 字段: {json}");
-    }
-
-    #[tokio::test]
-    async fn test_build_api_messages_legacy_tool_result_without_text_unchanged() {
-        // 向后兼容：旧 session 的 tool_result 无 text → 原样保留结构化 content。
-        let messages = vec![Message {
-            role: Role::User,
-            content: vec![ContentBlock::ToolResult {
-                tool_use_id: "t1".to_string(),
-                content: serde_json::json!({"stdout": "x"}),
-                is_error: false,
-                text: None,
-            }],
-            metadata: None,
-        }];
-        let store = task::TaskStore::new();
-        let mut reminder = TaskReminderState::new();
-        let out = build_api_messages("", "en", &mut reminder, 1, &store, &messages).await;
-        let block = out
-            .iter()
-            .flat_map(|m| &m.content)
-            .find(|b| b.is_tool_result())
-            .expect("tool_result present");
-        let json = serde_json::to_value(block).unwrap();
-        assert_eq!(json["content"], serde_json::json!({"stdout": "x"}));
     }
 }

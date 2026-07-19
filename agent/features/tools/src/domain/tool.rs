@@ -1,5 +1,5 @@
 use super::ToolExecutionContext;
-use crate::domain::{types::tool_search::ToolInfo, ImageData, ToolResult};
+use crate::domain::{types::tool_search::ToolInfo, ImageData, ToolResult, ToolSuspension};
 use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::Value;
@@ -54,8 +54,18 @@ pub trait Tool: Send + Sync {
         120
     }
 
+    fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
+        crate::domain::published_language::CancellationDeclaration::NonCooperative
+    }
+
     fn is_input_safe(&self, _input: &Value) -> bool {
         false
+    }
+
+    /// Parse a validated input into a typed suspension without invoking the
+    /// legacy asynchronous call path. Most tools complete normally.
+    fn suspension(&self, _input: &Value) -> Option<Result<ToolSuspension, String>> {
+        None
     }
 
     /// Execute the tool（type-erased）。工具源应实现 [`TypedTool`]。
@@ -71,6 +81,7 @@ pub struct TypedToolResult<T: Serialize + Send + 'static> {
     /// 结构化数据（adapter 自动序列化为 JSON，给 TUI）。
     pub data: Option<T>,
     pub is_error: bool,
+    pub error_kind: Option<crate::domain::ToolErrorKind>,
     pub images: Vec<ImageData>,
 }
 
@@ -80,6 +91,7 @@ impl<T: Serialize + Send + 'static> TypedToolResult<T> {
             text: text.into(),
             data: Some(data),
             is_error: false,
+            error_kind: None,
             images: vec![],
         }
     }
@@ -89,6 +101,7 @@ impl<T: Serialize + Send + 'static> TypedToolResult<T> {
             text: text.into(),
             data: None,
             is_error: true,
+            error_kind: Some(crate::domain::ToolErrorKind::InvalidInput),
             images: vec![],
         }
     }
@@ -138,8 +151,18 @@ pub trait TypedTool: Send + Sync {
         120
     }
 
+    fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
+        crate::domain::published_language::CancellationDeclaration::NonCooperative
+    }
+
     fn is_input_safe(&self, _input: &Value) -> bool {
         false
+    }
+
+    /// Parse a validated input into a typed suspension. Returning `Some` makes
+    /// the execution adapter skip [`TypedTool::call`].
+    fn suspension(&self, _input: &Value) -> Option<Result<ToolSuspension, String>> {
+        None
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext)
@@ -191,8 +214,16 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
         self.0.timeout_secs()
     }
 
+    fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
+        self.0.cancellation()
+    }
+
     fn is_input_safe(&self, input: &Value) -> bool {
         self.0.is_input_safe(input)
+    }
+
+    fn suspension(&self, input: &Value) -> Option<Result<ToolSuspension, String>> {
+        self.0.suspension(input)
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
@@ -206,6 +237,7 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
             text: result.text,
             data,
             is_error: result.is_error,
+            error_kind: result.error_kind,
             images: result.images,
         }
     }

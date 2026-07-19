@@ -61,6 +61,9 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
+        tool_catalog: tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
     };
     let ctx_a = test_ctx();
@@ -825,6 +828,9 @@ fn test_runner(error: ProviderError) -> CliAgentRunner {
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        tool_catalog: tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: tools::composition::TestCatalogExecutionFactory::empty().binding(),
         workspace: crate::application::testing::runtime_workspace(
             &crate::application::testing::test_tool_execution_context(
                 std::env::temp_dir(),
@@ -849,6 +855,9 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        tool_catalog: tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: tools::composition::TestCatalogExecutionFactory::empty().binding(),
         workspace: crate::application::testing::runtime_workspace(
             &crate::application::testing::test_tool_execution_context(
                 std::env::temp_dir(),

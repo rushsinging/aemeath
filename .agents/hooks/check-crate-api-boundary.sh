@@ -60,23 +60,22 @@ PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW
 # 只经 crate 根发布 Published Language，禁止恢复 tools::api。
 TOOLS_DOMAIN_FACADE = {
     "AgentDispatch", "AgentProgressEvent", "AgentProgressKind", "AgentRunRequest",
-    "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "AuthorizationContext",
-    "CancellationSignal",
-    "CatalogQuery", "ExecutionScope", "ExecutionScopeBuilder", "FixedGuidance",
-    "FixedPlanMode", "Guidance", "ImageData", "InvocationSource", "MemoryPortSource",
-    "MutexReadSet", "PlanModeState", "ProfileExpansionError",
-    "ProgressSink", "ReadSet", "RegistryScopeName", "SessionReminder", "SessionReminders",
-    "Tool", "ToolCapabilities", "ToolCapability", "ToolCatalogPort", "ToolCatalogSnapshot",
-    "ToolExecutionContext", "ToolExecutionOutcome", "ToolExecutionPort", "ToolExecutionPorts",
-    "ToolInvocation", "ToolListProvider", "ToolName", "ToolOutcome", "ToolProfile",
-    "ToolProfileName", "ToolResult", "TypedTool", "TypedToolAdapter", "TypedToolResult",
+    "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "CancellationDeclaration",
+    "CancellationSignal", "CatalogQuery", "ConcurrencyDeclaration", "ExecutionScope",
+    "ExecutionScopeBuilder", "FixedGuidance", "FixedPlanMode", "Guidance", "ImageData",
+    "InputSafetyDeclaration", "InvocationSource", "MemoryPortSource", "MutexReadSet",
+    "PlanModeState", "PolicyDecision", "ProfileExpansionError", "ProgressSink", "ReadSet",
+    "RegistryScopeName", "SessionReminder", "SessionReminders", "Tool", "ToolCapabilities",
+    "ToolCapability", "ToolCatalogPort", "ToolCatalogSnapshot", "ToolDescriptor",
+    "ToolErrorKind", "ToolExecutionContext", "ToolExecutionContextBindingGuard",
+    "ToolExecutionContextBindingPort", "ToolExecutionOutcome", "ToolExecutionPort",
+    "ToolExecutionPorts", "ToolInvocation", "ToolListProvider", "ToolName", "ToolOutcome",
+    "ToolProfile", "ToolProfileName", "ToolResult", "ToolSuspension", "TypedTool",
+    "TypedToolAdapter", "TypedToolResult", "UserInteractionSpec", "UserOption", "UserQuestion",
     "WorkspaceReadAccess",
 }
 TOOLS_ADAPTER_FACADE = {
     "is_readonly_command",
-    "register_all_tools",
-    "register_all_tools_except_agent",
-    "register_subagent_tools",
     "wire_tools",
     "DefaultToolCatalogGateway",
     "McpConnectionManager",
@@ -84,11 +83,17 @@ TOOLS_ADAPTER_FACADE = {
     "McpToolDef",
     "McpTransportKind",
     "McpTool",
-    "ToolCatalog",
     "ToolCatalogGateway",
-    "ToolRegistry",
 }
-TOOLS_ROOT_ACCESS_ALLOW = {"LOG_TARGET", "types"} | TOOLS_DOMAIN_FACADE | TOOLS_ADAPTER_FACADE
+TOOLS_ROOT_ACCESS_ALLOW = {"LOG_TARGET", "types"} | TOOLS_DOMAIN_FACADE | TOOLS_ADAPTER_FACADE | {
+    "format_tool_input_error",
+    "strip_runtime_meta",
+    "validate_tool_input",
+    "ToolInputMismatch",
+    "RUNTIME_META_KEYS",
+    "ask_user_suspension",
+    "composition",
+}
 
 ROOT_ACCESS_ALLOW = {
     "provider": {
@@ -165,9 +170,8 @@ ROOT_ACCESS_ALLOW = {
         "from_args_with_workspace",
     },
       "policy": {
-          "AllowAllPolicy", "ApprovalSubject", "AuthorizationContext", "ConfiguredPolicy",
-          "PolicyDecision", "PolicyMode", "PolicyModeSource", "PolicyPort", "PolicyReason",
-          "PolicyRequest", "PolicyRequestError", "StandardPolicy",
+          "AllowAllPolicy", "ApprovalSubject", "PolicyDecision", "PolicyMode", "PolicyPort",
+          "PolicyReason", "PolicyRequest", "PolicyRequestError",
       },
     "workflow": set(),
     "project": PROJECT_ROOT_ACCESS_ALLOW,
@@ -485,6 +489,26 @@ def check_tools_facade() -> list[str]:
 
     actual_domain = braced_names("domain")
     actual_adapters = braced_names("adapters::wiring")
+    supplemental = {
+        "format_tool_input_error",
+        "strip_runtime_meta",
+        "validate_tool_input",
+        "ToolInputMismatch",
+        "RUNTIME_META_KEYS",
+        "ask_user_suspension",
+        "composition",
+    }
+    public_supplemental = set()
+    if re.search(r"\bpub\s+mod\s+composition\b", text):
+        public_supplemental.add("composition")
+    for name in supplemental - {"composition"}:
+        if re.search(rf"\bpub\s+use\b[^;]*\b{re.escape(name)}\b", text, re.S):
+            public_supplemental.add(name)
+    if public_supplemental != supplemental:
+        errors.append(
+            "agent/features/tools/src/lib.rs: supplemental facade drift; expected "
+            + str(sorted(supplemental)) + ", found " + str(sorted(public_supplemental))
+        )
     if not re.search(r"\bpub\s+use\s+domain::types\s*;", text):
         errors.append("agent/features/tools/src/lib.rs: public `types` module facade is missing")
     if actual_domain != TOOLS_DOMAIN_FACADE:
@@ -497,7 +521,7 @@ def check_tools_facade() -> list[str]:
             "agent/features/tools/src/lib.rs: adapter facade drift; expected "
             + str(sorted(TOOLS_ADAPTER_FACADE)) + ", found " + str(sorted(actual_adapters))
         )
-    actual_root = {"LOG_TARGET", "types"} | actual_domain | actual_adapters
+    actual_root = {"LOG_TARGET", "types"} | actual_domain | actual_adapters | public_supplemental
     if actual_root != ROOT_ACCESS_ALLOW["tools"]:
         errors.append("ROOT_ACCESS_ALLOW[tools] must exactly match tools/src/lib.rs public facade")
     return errors

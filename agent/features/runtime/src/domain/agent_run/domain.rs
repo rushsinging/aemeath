@@ -213,14 +213,27 @@ impl Run {
         );
     }
 
+    pub fn active_step_id(&self) -> Option<RunStepId> {
+        self.steps
+            .iter()
+            .find(|step| step.is_active())
+            .map(|step| step.id.clone())
+    }
+
     pub fn begin_step(&mut self) -> Result<RunStepId, RunTransitionError> {
+        self.begin_step_with_id(RunStepId::new_v7())
+    }
+
+    pub fn begin_step_with_id(
+        &mut self,
+        step_id: RunStepId,
+    ) -> Result<RunStepId, RunTransitionError> {
         if self.status != RunStatus::InvokingModel {
             return Err(RunTransitionError::RunNotActive(self.status));
         }
         if self.steps.iter().any(RunStep::is_active) {
             return Err(RunTransitionError::ActiveStepAlreadyExists);
         }
-        let step_id = RunStepId::new_v7();
         self.steps.push(RunStep {
             id: step_id.clone(),
             status: RunStepStatus::Invoking,

@@ -3,6 +3,9 @@ name = "tools"
 version.workspace = true
 edition.workspace = true
 
+[features]
+test-harness = []
+
 [dependencies]
 share = { path = "../../shared" }
 project = { path = "../project" }

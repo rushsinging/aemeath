@@ -21,16 +21,16 @@ build_window
 
 - **MemoryPort 是独立端口**：被 ContextPort（注入）、Tool BC（Memory tool）、Reflection（写入）三方消费
 - **Memory BC 属支撑域**：Memory 独占检索与排序；Context Management 独占 Context Window 中的 render / placement / budget / dedup
-- **Sub Run 使用 `NoOpMemoryPort`**：Sub 不注入 memory，不写 reflection
+- **Memory capability 由 `RunSpec.memory` 装配**：Enabled 使用 shared lease 捕获的 active Arc；Disabled 使用 owner-owned `NoOpMemory`，统一 Loop 不按 Main / Sub 角色分支
 
 ## 2. MemoryPort 消费边界
 
-`MemoryPort` 的完整方法、`MemoryQuery` / `WriteResult`、NoOp 行为与 `ProjectMemoryOpener` **MUST** 只在 [Memory 端口与适配器](../memory/04-ports-and-adapters.md) 定义；本文 **NEVER** 复制第二份 trait。Context Management 只消费当前 Main Run shared lease 绑定的同一 `Arc<dyn MemoryPort>`，在 `build_window` 内调用 `retrieve_for_inject(&MemoryQuery)` 并把结果渲染为 SystemBlock。
+`MemoryPort` 的完整方法、`MemoryQuery` / `WriteResult`、NoOp 行为与 `ProjectMemoryOpener` **MUST** 只在 [Memory 端口与适配器](../memory/04-ports-and-adapters.md) 定义；本文 **NEVER** 复制第二份 trait。Context Management 只消费当前 Run shared lease / `RunSpec` 装配绑定的 `Arc<dyn MemoryPort>`，调用 `retrieve_for_inject(&MemoryQuery)` 并把结果渲染为 SystemBlock。
 
 - `retrieve_for_inject` **MUST** 只读且不 touch access count；
 - Context Management **NEVER** 调用 Memory 写方法，也 **NEVER** 构造 / 打开 store；
 - Runtime Reflection 与 MemoryTool 若写入，**MUST** 使用同一 Run 绑定的 Arc；
-- Disabled Sub 使用 Memory 文档定义的 NoOp；显式 share 的 Sub clone 父 Run Arc，**NEVER** 重新 open。
+- `MemoryMode::Disabled` 使用 Memory 文档定义的 NoOp；显式 Enabled 的派生 Run clone 父 Run Arc，**NEVER** 重新 open。
 
 ## 3. 注入管线
 
@@ -89,7 +89,7 @@ if config.memory.enabled && config.memory.inject_count > 0 {
 
 - Memory key **MUST** 使用完整、版本化 `ProjectIdentity`，**NEVER** 只取 cwd / basename；
 - `ProjectMemoryOpener::open_for_project(identity, memory_config).await` **MUST** 在 resume prepare 中完成 dataset recovery、eager-read，并验证 active / archive、schema 与权限，无副作用地返回 candidate Arc；
-- 每个 Main Run 只在 shared session lease 下取得 active Arc，Context / Runtime / MemoryTool / Reflection 共享它；
+- 每个 Run 在 shared session lease 下取得 active Arc；Context / Runtime / MemoryTool / Reflection 共享它；
 - Memory 查询与 mutation **MUST** 受同一 lease 保护，后台 Reflection 在 exclusive resume 前 join / cancel；
 - MemoryService 的 mutation **MUST** 由单一 async mutation permit 串行化：candidate state → Storage dataset CAS commit → 无失败 publish；query 只读已验证 in-memory state。同一 Composition / 进程的 active Main slot **NEVER** 为同一 identity 重复 open，而独立进程间的同 identity writer **MUST** 由 `DatasetRevision` CAS 检测冲突；任一实例都 **NEVER** 在未提交失败后暴露 candidate。
 

@@ -75,6 +75,7 @@ pub struct ContextRequest {
     pub session_id: SessionId,
     pub request_id: ContextRequestId,
     pub run_id: RunId,
+    pub step_id: RunStepId,
     pub pending_messages: Vec<ContextMessage>,
     pub system_prompt: SystemPromptSpec,
     pub model_id: String,
@@ -112,6 +113,7 @@ pub struct TokenBudget {
 /// Context window 及同一冻结输入上计算的压缩决策。
 #[derive(Debug, Clone)]
 pub struct ContextWindow {
+    pub backing_revision: SessionRevision,
     pub system_blocks: Vec<SystemBlock>,
     pub messages: Vec<ContextMessage>,
     pub tool_schemas: Vec<ModelToolSchema>,
@@ -152,6 +154,7 @@ pub enum CompactTrigger {
 #[derive(Debug, Clone)]
 pub struct CompactRequest {
     pub run_id: RunId,
+    pub source_revision: SessionRevision,
     pub source: ContextRequest,
     pub trigger: CompactTrigger,
 }

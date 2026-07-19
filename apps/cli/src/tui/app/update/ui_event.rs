@@ -228,7 +228,7 @@ impl App {
                         .map(|item| {
                             let llm_count = item.options.len();
                             let mut all_options = item.options.clone();
-                            if llm_count >= 1 {
+                            if item.allow_free_input && llm_count >= 1 {
                                 all_options.push(sdk::OptionItem::title_only(
                                     crate::tui::app::state::BUILTIN_OPTION_CHAT,
                                 ));

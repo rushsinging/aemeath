@@ -1,7 +1,6 @@
-use crate::application::agent::{ToolCall, ToolExecution};
+use crate::application::agent::ToolCall;
 use serde_json::Value;
 use std::collections::VecDeque;
-use tools::ToolOutcome;
 
 const RECENT_TOOL_CALL_LIMIT: usize = 64;
 const CONSECUTIVE_TOOL_CALL_SOFT_LIMIT: usize = 3;
@@ -132,26 +131,6 @@ impl ToolCallFuse {
         }
         None
     }
-}
-
-pub(crate) fn blocked_tool_execution(call: &ToolCall, reason: &str) -> ToolExecution {
-    let message = format!(
-        "Tool call blocked: repeated tool-call loop detected.\n\nReason: {reason}\n\nDo not call this tool again with the same inputs. Use the existing results to summarize findings, change strategy, or ask the user for clarification."
-    );
-    ToolExecution::new(
-        call,
-        ToolOutcome {
-            text: message.clone(),
-            data: serde_json::json!({
-                "status": "error",
-                "message": message,
-                "reason": reason,
-                "error_type": "tool_call_loop_fuse",
-            }),
-            is_error: true,
-            images: Vec::new(),
-        },
-    )
 }
 
 fn normalize_json(value: &Value) -> String {

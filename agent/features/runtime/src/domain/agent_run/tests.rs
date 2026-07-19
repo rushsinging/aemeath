@@ -709,6 +709,7 @@ fn main_run_spec_uses_shared_interactive_unlimited_defaults() {
     assert_eq!(spec.events, EventRoute::Client);
     assert_eq!(spec.context, ResourceMode::Shared);
     assert_eq!(spec.workspace, ResourceMode::Shared);
+    assert_eq!(spec.memory, MemoryMode::Enabled);
     assert_eq!(spec.tools, ToolScope::Full);
 }
 
@@ -724,6 +725,7 @@ fn sub_run_spec_is_isolated_noninteractive_and_parent_routed() {
     assert_eq!(spec.events, EventRoute::ParentRun);
     assert_eq!(spec.context, ResourceMode::Isolated);
     assert_eq!(spec.workspace, ResourceMode::Isolated);
+    assert_eq!(spec.memory, MemoryMode::Disabled);
     assert_eq!(spec.tools, ToolScope::Restricted);
 }
 
@@ -735,6 +737,11 @@ fn derived_sub_spec_can_only_restrict_parent_capabilities() {
     assert_eq!(sub.tools, ToolScope::Restricted);
     assert_eq!(sub.interaction, InteractionMode::NonInteractive);
     assert_eq!(sub.workspace, ResourceMode::Isolated);
+    assert_eq!(sub.memory, MemoryMode::Disabled);
+    assert_eq!(
+        sub.clone().with_memory_mode(MemoryMode::Enabled),
+        Err(RunSpecError::CapabilityEscalation)
+    );
     assert_eq!(
         sub.with_tool_scope(ToolScope::Full),
         Err(RunSpecError::CapabilityEscalation)

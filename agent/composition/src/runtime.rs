@@ -44,6 +44,8 @@ pub(crate) async fn from_args_with_gateways(
     );
 
     let task_wiring = task::wire_task();
+    let session_blob = storage::api::file_system_blob(share::config::paths::global_agents_dir())
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let deps = context::MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
@@ -58,10 +60,37 @@ pub(crate) async fn from_args_with_gateways(
                 share::config::paths::global_memory_dir(),
             )),
         )),
+        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
+            Arc::new(context::adapters::AtomicBlobCanonicalSessionWriter::new(
+                session_blob,
+            )),
+        )),
     };
     let wiring = context::wire_main_session(deps)
         .await
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+
+    // Preserve the injected legacy gateway seam until #914 retires it. Runtime
+    // receives only Catalog/Execution ports and never observes this registry.
+    struct WiringMemoryPortSource {
+        wiring: Arc<context::MainSessionWiring>,
+    }
+    impl tools::MemoryPortSource for WiringMemoryPortSource {
+        fn current(&self) -> Arc<dyn memory::MemoryPort> {
+            self.wiring.committed_memory()
+        }
+    }
+    let registry = gateways.tools.new_registry();
+    gateways.tools.register_all_tools(
+        &registry,
+        task_wiring.access(),
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        Arc::new(WiringMemoryPortSource {
+            wiring: wiring.clone(),
+        }),
+        workspace.control(),
+    );
+
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         workspace,
         wiring,

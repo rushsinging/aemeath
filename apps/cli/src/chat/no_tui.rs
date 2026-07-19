@@ -234,12 +234,12 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
                 let reply = read_ask_user_reply(
                     &item.question,
                     &item.options,
-                    true,
+                    item.allow_free_input,
                     item.default.as_deref(),
                 )?;
                 answers.push(reply);
             }
-            let _ = reply_tx.send(answers);
+            let _ = reply_tx.send(sdk::AskUserReply::Answers(answers));
         }
         sdk::ChatEvent::AgentProgress { event, .. } => {
             eprintln!("[agent] {event}");

@@ -52,6 +52,9 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
+        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
+            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+        )),
     })
     .await
     .unwrap();

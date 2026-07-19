@@ -77,6 +77,7 @@ impl ContextApplicationService {
             crate::domain::context_decision::token_budget(request, &messages, &blocks);
         let decision = crate::domain::context_decision::calculate(request, &messages, &blocks);
         Ok(ContextWindow {
+            backing_revision: snapshot.revision,
             system_blocks: blocks,
             messages,
             tool_schemas: request.tool_schemas.clone(),

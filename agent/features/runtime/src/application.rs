@@ -15,6 +15,9 @@ pub mod runtime_context;
 pub mod scheduler;
 pub mod service;
 pub mod startup;
+pub mod suspension_mapping;
+#[cfg(test)]
+mod suspension_mapping_tests;
 #[cfg(test)]
 pub(crate) mod testing;
 pub(crate) mod token_usage;

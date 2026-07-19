@@ -74,6 +74,8 @@ pub enum LoopDirective {
 pub enum LoopEngineError {
     #[error("run state error: {0}")]
     Domain(#[from] RunTransitionError),
+    #[error("loop adapter requested context compaction: {0}")]
+    NeedsCompaction(String),
     #[error("loop adapter error: {0}")]
     Adapter(String),
     #[error("loop operation cancelled")]
@@ -83,12 +85,22 @@ pub enum LoopEngineError {
 #[async_trait]
 pub trait RunLoopPort: Send {
     async fn drain_input(&mut self) -> Result<Vec<LoopInput>, LoopEngineError>;
+    fn freeze_step(&mut self, _step_id: &sdk::RunStepId, _inputs: &[LoopInput]) {}
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError>;
     async fn compact(&mut self, cancel: &CancellationToken) -> Result<(), LoopEngineError>;
     async fn invoke_model(
         &mut self,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError>;
+    async fn finalize_step(&mut self, _step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
+        Ok(())
+    }
+    async fn finalize_cancelled_step(
+        &mut self,
+        _step_id: &sdk::RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        Ok(())
+    }
     async fn execute_tools(
         &mut self,
         run_id: &sdk::RunId,
@@ -180,6 +192,8 @@ where
             run.transition(RunTransition::UserResumed)?;
         }
 
+        let step_id = sdk::RunStepId::new_v7();
+        port.freeze_step(&step_id, &inputs);
         let needs_compaction = match await_interruptible(run, cancel, port.needs_compaction()).await
         {
             Interrupt::Completed(result) => result?,
@@ -212,14 +226,41 @@ where
             return Ok(LoopDirective::Terminal);
         }
         run.transition(RunTransition::ContextPrepared)?;
-        let step_id = run.begin_step()?;
+        let step_id = run.begin_step_with_id(step_id)?;
         emit_events(run, port).await?;
-        let (model_step, token_usage) =
+        let mut compacted_after_context_too_long = false;
+        let (model_step, token_usage) = loop {
             match await_interruptible(run, cancel, port.invoke_model(cancel)).await {
-                Interrupt::Completed(Ok(result)) => result,
+                Interrupt::Completed(Ok(result)) => break result,
                 Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
                     cancel_run(run, port).await?;
                     return Ok(LoopDirective::Terminal);
+                }
+                Interrupt::Completed(Err(LoopEngineError::NeedsCompaction(error))) => {
+                    if compacted_after_context_too_long {
+                        fail_run(
+                            run,
+                            port,
+                            format!("compact 后 Provider 仍报告 context 超限：{error}"),
+                        )
+                        .await?;
+                        return Ok(LoopDirective::Terminal);
+                    }
+                    run.transition(RunTransition::ModelContextExceeded)?;
+                    match await_interruptible(run, cancel, port.compact(cancel)).await {
+                        Interrupt::Completed(result) => result?,
+                        Interrupt::Cancelled => {
+                            cancel_run(run, port).await?;
+                            return Ok(LoopDirective::Terminal);
+                        }
+                        Interrupt::TimedOut => {
+                            timeout_run(run, port).await?;
+                            return Ok(LoopDirective::Terminal);
+                        }
+                    }
+                    run.transition(RunTransition::CompactionCompleted)?;
+                    run.transition(RunTransition::ContextPrepared)?;
+                    compacted_after_context_too_long = true;
                 }
                 Interrupt::Completed(Err(error)) => {
                     fail_run(run, port, error.to_string()).await?;
@@ -229,7 +270,8 @@ where
                     timeout_run(run, port).await?;
                     return Ok(LoopDirective::Terminal);
                 }
-            };
+            }
+        };
 
         // Per-step token usage + context window 诊断日志
         {
@@ -277,6 +319,7 @@ where
                         record_stuck(run, port, &decision).await?;
                         run.transition(RunTransition::ContinueAfterResponse)?;
                         run.complete_step(&step_id)?;
+                        port.finalize_step(&step_id).await?;
                         continue;
                     }
                     decision @ StuckDecision::HardPause { .. } => {
@@ -292,6 +335,7 @@ where
                 }
                 run.transition(RunTransition::ResponseWithoutTools)?;
                 run.complete_step(&step_id)?;
+                port.finalize_step(&step_id).await?;
                 if handle_interrupt(run, cancel, port).await? {
                     return Ok(LoopDirective::Terminal);
                 }
@@ -317,6 +361,7 @@ where
                 }
                 run.transition(RunTransition::ContinueAfterResponse)?;
                 run.complete_step(&step_id)?;
+                port.finalize_step(&step_id).await?;
             }
             ModelStep::StopHookBlocked { text: _ } => {
                 let decision = guard.record_stop_hook_block();
@@ -331,6 +376,7 @@ where
                     | StuckDecision::HardPause { .. } => {
                         run.transition(RunTransition::ContinueAfterResponse)?;
                         run.complete_step(&step_id)?;
+                        // Stop Hook Block 明确不提交当前 Step。
                     }
                 }
             }
@@ -427,6 +473,7 @@ where
                 match tool_step {
                     ToolStep::Continue | ToolStep::ContinueWithFuseBypass(_) => {
                         run.complete_step(&step_id)?;
+                        port.finalize_step(&step_id).await?;
                         run.transition(RunTransition::ToolsCompleted)?;
                     }
                     ToolStep::AwaitUser => {
@@ -519,6 +566,7 @@ async fn cancel_run<P>(run: &mut Run, port: &mut P) -> Result<(), LoopEngineErro
 where
     P: RunLoopPort,
 {
+    let active_step = run.active_step_id();
     if run.status() != RunStatus::Cancelling {
         if !port.claim_cancellation(run.id()) {
             log::debug!(
@@ -544,6 +592,9 @@ where
         "[cancel_run] phase2 finish_cancellation run_id={}",
         short(run.id()),
     );
+    if let Some(step_id) = &active_step {
+        port.finalize_cancelled_step(step_id).await?;
+    }
     run.finish_cancellation()?;
     emit_events(run, port).await
 }

@@ -3,7 +3,6 @@ mod ask_user;
 pub(crate) mod compact;
 mod compact_outcome;
 pub(crate) mod config_reload;
-mod engine;
 mod events;
 mod finalize;
 mod hook_ui;
@@ -21,11 +20,7 @@ mod loop_phases;
 mod loop_runner;
 #[cfg(test)]
 mod loop_runner_tests;
-pub(crate) mod memory_inject;
 mod non_agent;
-pub(crate) mod permissions;
-#[cfg(test)]
-mod permissions_tests;
 mod post_batch;
 mod queue;
 pub(crate) mod reflection;
@@ -36,8 +31,6 @@ mod stream_handler;
 mod stream_handler_tests;
 mod task_reminder;
 mod task_snapshot;
-pub(crate) mod tool_fuse;
-mod tool_identity;
 mod tools;
 
 pub use events::{

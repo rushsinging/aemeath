@@ -12,39 +12,76 @@
 //! - `ToolCapabilities` 只能通过 baseline 或 `derive_restricted` 收缩，不可扩权；
 //! - `ToolOutcome` 是单一结果通道（含错误），不额外暴露 `Result::Err`。
 
+use super::{ExecutionScope, ToolSuspension};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 // ── ToolName ────────────────────────────────────────────────────────
 
-/// 规范化逻辑键：在同一 Registry Scope 内唯一。
+/// 工具名称：保留 canonical 协议拼写，同时以 ASCII 小写键比较与哈希。
 ///
-/// 规范化策略与 `ToolRegistry` 的 `normalize_key` 一致（ASCII 小写），
-/// 保证注册与查找的 key 统一。MCP 限定名（`mcp__server__tool`）的
-/// 跨段语义不受影响。
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ToolName(String);
+/// canonical 名称用于模型 schema、Runtime/SDK 事件与 TUI；normalized key
+/// 用于 Registry Scope、Profile 与 Execution 查询。MCP 限定名的跨段语义不变。
+#[derive(Debug, Clone)]
+pub struct ToolName {
+    canonical: String,
+    normalized: String,
+}
 
 impl ToolName {
-    /// 从任意字符串构造，内部存储规范化后的值。
     pub fn new(name: impl Into<String>) -> Self {
-        Self(name.into().to_ascii_lowercase())
+        let canonical = name.into();
+        let normalized = canonical.to_ascii_lowercase();
+        Self {
+            canonical,
+            normalized,
+        }
     }
 
-    /// 规范化（ASCII 小写）后的名称。
     pub fn normalized(&self) -> &str {
-        &self.0
+        &self.normalized
     }
 
-    /// 原始值（已规范化，等价于 `normalized`）。
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.canonical
+    }
+}
+
+impl PartialEq for ToolName {
+    fn eq(&self, other: &Self) -> bool {
+        self.normalized == other.normalized
+    }
+}
+
+impl Eq for ToolName {}
+
+impl std::hash::Hash for ToolName {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.normalized.hash(state);
     }
 }
 
 impl fmt::Display for ToolName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.canonical)
+    }
+}
+
+impl serde::Serialize for ToolName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.canonical)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ToolName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(Self::new)
     }
 }
 
@@ -199,6 +236,14 @@ pub enum CancellationDeclaration {
 
 // ── ToolDescriptor ──────────────────────────────────────────────────
 
+/// Runtime-safe declaration for input-dependent auto-approval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InputSafetyDeclaration {
+    Always,
+    Never,
+    ReadOnlyShellCommand,
+}
+
 /// Tool Catalog 的 Published Language。
 ///
 /// 不包含 Tool 实例、来源 adapter、MCP server、函数指针、transport、client
@@ -216,6 +261,13 @@ pub struct ToolDescriptor {
     pub concurrency: ConcurrencyDeclaration,
     /// 取消声明。
     pub cancellation: CancellationDeclaration,
+    /// Runtime-owned timeout policy reads this value; dispatch does not enforce it.
+    pub timeout_secs: u64,
+    /// Value-only approval declarations (no executable Tool callback escapes Catalog).
+    pub read_only: bool,
+    pub input_safety: InputSafetyDeclaration,
+    /// Output JSON Schema used by presentation layers.
+    pub data_schema: serde_json::Value,
 }
 
 impl ToolDescriptor {
@@ -228,6 +280,17 @@ impl ToolDescriptor {
     pub fn is_cooperative_cancel(&self) -> bool {
         self.cancellation == CancellationDeclaration::Cooperative
     }
+
+    pub fn is_input_safe(&self, input: &serde_json::Value) -> bool {
+        match self.input_safety {
+            InputSafetyDeclaration::Always => true,
+            InputSafetyDeclaration::Never => false,
+            InputSafetyDeclaration::ReadOnlyShellCommand => input
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(crate::domain::shell_safety::is_readonly_command),
+        }
+    }
 }
 
 // ── ToolInvocation ──────────────────────────────────────────────────
@@ -235,18 +298,34 @@ impl ToolDescriptor {
 /// 工具调用请求。
 ///
 /// 不携带 RuntimeContext、Registry、Session、Store 或 MCP 类型。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ToolInvocation {
     pub tool_name: ToolName,
     pub input: serde_json::Value,
+    pub execution_scope: ExecutionScope,
+    pub authorization: crate::domain::AuthorizationContext,
 }
 
 impl ToolInvocation {
-    pub fn new(tool_name: impl Into<ToolName>, input: serde_json::Value) -> Self {
+    pub fn new(
+        tool_name: impl Into<ToolName>,
+        input: serde_json::Value,
+        execution_scope: ExecutionScope,
+    ) -> Self {
         Self {
             tool_name: tool_name.into(),
             input,
+            execution_scope,
+            authorization: crate::domain::AuthorizationContext::STANDARD,
         }
+    }
+
+    pub fn with_authorization(
+        mut self,
+        authorization: crate::domain::AuthorizationContext,
+    ) -> Self {
+        self.authorization = authorization;
+        self
     }
 }
 
@@ -381,6 +460,7 @@ pub enum ToolOutcome {
     Success(ToolSuccess),
     Failure(ToolFailure),
     Cancelled(ToolCancelled),
+    Suspended(ToolSuspension),
 }
 
 impl ToolOutcome {
@@ -499,6 +579,20 @@ impl ToolCatalogSnapshot {
         self.tools.iter().find(|d| d.name == *name)
     }
 
+    pub fn model_schemas(&self) -> Vec<serde_json::Value> {
+        self.tools
+            .iter()
+            .map(|tool| {
+                serde_json::json!({
+                    "name": tool.name.as_str(),
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
+                    "data_schema": tool.data_schema,
+                })
+            })
+            .collect()
+    }
+
     /// Snapshot 中工具数量。
     pub fn len(&self) -> usize {
         self.tools.len()
@@ -535,10 +629,28 @@ mod tests {
     // ── ToolName ────────────────────────────────────────────────────
 
     #[test]
+    fn tool_name_preserves_canonical_spelling_and_normalizes_identity() {
+        let name = ToolName::new("Grep");
+        assert_eq!(name.as_str(), "Grep");
+        assert_eq!(name.normalized(), "grep");
+        assert_eq!(name, ToolName::new("grep"));
+    }
+
+    #[test]
+    fn tool_name_serde_remains_a_canonical_string() {
+        let name = ToolName::new("Grep");
+        let encoded = serde_json::to_string(&name).unwrap();
+        assert_eq!(encoded, r#""Grep""#);
+        let decoded: ToolName = serde_json::from_str(r#""grep""#).unwrap();
+        assert_eq!(decoded.as_str(), "grep");
+        assert_eq!(decoded.normalized(), "grep");
+    }
+
+    #[test]
     fn test_tool_name_normalizes_to_lowercase() {
         let name = ToolName::new("Read");
         assert_eq!(name.normalized(), "read");
-        assert_eq!(name.as_str(), "read");
+        assert_eq!(name.as_str(), "Read");
     }
 
     #[test]
@@ -557,7 +669,7 @@ mod tests {
     #[test]
     fn test_tool_name_display() {
         let name = ToolName::new("Grep");
-        assert_eq!(format!("{name}"), "grep");
+        assert_eq!(format!("{name}"), "Grep");
     }
 
     // ── ToolCapabilities ───────────────────────────────────────────
@@ -641,6 +753,10 @@ mod tests {
             required_capabilities: ToolCapabilities::ReadWorkspace,
             concurrency: ConcurrencyDeclaration::safe(),
             cancellation: CancellationDeclaration::Cooperative,
+            timeout_secs: 120,
+            read_only: true,
+            input_safety: InputSafetyDeclaration::Always,
+            data_schema: serde_json::Value::Null,
         };
         assert!(desc.is_concurrency_safe());
         assert!(desc.is_cooperative_cancel());
@@ -656,19 +772,16 @@ mod tests {
                 | ToolCapabilities::WriteWorkspace,
             concurrency: ConcurrencyDeclaration::serialized(),
             cancellation: CancellationDeclaration::NonCooperative,
+            timeout_secs: 120,
+            read_only: false,
+            input_safety: InputSafetyDeclaration::Never,
+            data_schema: serde_json::Value::Null,
         };
         assert!(!desc.is_concurrency_safe());
         assert!(!desc.is_cooperative_cancel());
     }
 
     // ── ToolInvocation ─────────────────────────────────────────────
-
-    #[test]
-    fn test_tool_invocation_construction() {
-        let inv = ToolInvocation::new("Read", serde_json::json!({"path": "/tmp"}));
-        assert_eq!(inv.tool_name, ToolName::new("read"));
-        assert_eq!(inv.input["path"], "/tmp");
-    }
 
     // ── ToolErrorKind ──────────────────────────────────────────────
 
@@ -782,6 +895,10 @@ mod tests {
             required_capabilities: ToolCapabilities::ReadWorkspace,
             concurrency: ConcurrencyDeclaration::safe(),
             cancellation: CancellationDeclaration::Cooperative,
+            timeout_secs: 120,
+            read_only: true,
+            input_safety: InputSafetyDeclaration::Always,
+            data_schema: serde_json::Value::Null,
         };
         let desc2 = ToolDescriptor {
             name: ToolName::new("Bash"),
@@ -790,6 +907,10 @@ mod tests {
             required_capabilities: ToolCapabilities::ExecuteProcess,
             concurrency: ConcurrencyDeclaration::serialized(),
             cancellation: CancellationDeclaration::NonCooperative,
+            timeout_secs: 120,
+            read_only: false,
+            input_safety: InputSafetyDeclaration::Never,
+            data_schema: serde_json::Value::Null,
         };
         let snapshot = ToolCatalogSnapshot::new("main", "full", vec![desc1, desc2]);
 

@@ -310,8 +310,8 @@ pub enum ChatEvent {
     /// Legacy AskUser transport bridge. It remains reachable only until #878 switches production.
     AskUserBatch {
         items: Vec<AskUserQuestionItem>,
-        /// 回传每个问题的答案（顺序与 items 一致）。
-        reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
+        /// 回传回答或显式取消。
+        reply_tx: tokio::sync::oneshot::Sender<crate::AskUserReply>,
     },
     /// Agent progress 事件投影。
     AgentProgress {

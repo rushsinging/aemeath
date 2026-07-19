@@ -1,18 +1,18 @@
 mod bash_result;
 mod cwd;
-mod safety;
+
 mod stream;
 
 #[cfg(test)]
 mod tests;
+use crate::domain::shell_safety::{check_command_safety, check_shell_injection};
 use crate::domain::types::bash::{BashInput, BashResult};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use bash_result::{exit_status_description, preview};
 use cwd::{split_stdout_and_cwd, CWD_MARKER};
-use safety::{check_command_safety, check_shell_injection};
 
-pub use safety::is_readonly_command;
+pub use crate::domain::shell_safety::is_readonly_command;
 use serde_json::Value;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
@@ -56,6 +56,10 @@ impl TypedTool for BashTool {
     /// Override: Bash commands may run up to 600s (schema max).
     /// The default 120s outer timeout in agent.rs would kill long-running
     /// commands before the internal per-command timeout fires.
+    fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
+        crate::domain::published_language::CancellationDeclaration::Cooperative
+    }
+
     fn timeout_secs(&self) -> u64 {
         600
     }
