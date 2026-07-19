@@ -11,9 +11,10 @@ mod ports;
 pub use adapters::dispatcher::{Dispatcher, MAX_ATTEMPTS};
 pub use domain::invocation::*;
 pub use domain::{
-    classify_directive, ClassifyError, HookClass, HookCommand, HookDirective, HookExecution,
-    HookExecutionStatus, HookFailurePolicy, HookInvocation, HookMatcher, HookOutcome, HookPoint,
-    HookPointMetadata, HookReason, HookSubscription, ProtocolViolation, SubscriptionError,
+    classify_directive, ClassifyError, HookClass, HookCommand, HookDirective, HookDisplayMessage,
+    HookDisplayMessageKind, HookExecution, HookExecutionStatus, HookFailurePolicy, HookInvocation,
+    HookMatcher, HookOutcome, HookPoint, HookPointMetadata, HookReason, HookSubscription,
+    ProtocolViolation, SubscriptionError,
 };
 pub use ports::HookPort;
 
@@ -25,9 +26,9 @@ pub mod api {
     };
     pub use crate::domain::invocation::*;
     pub use crate::domain::{
-        classify_directive, ClassifyError, HookClass, HookDirective, HookExecution,
-        HookExecutionStatus, HookInvocation, HookOutcome, HookPoint, HookPointMetadata, HookReason,
-        ProtocolViolation,
+        classify_directive, ClassifyError, HookClass, HookDirective, HookDisplayMessage,
+        HookDisplayMessageKind, HookExecution, HookExecutionStatus, HookInvocation, HookOutcome,
+        HookPoint, HookPointMetadata, HookReason, ProtocolViolation,
     };
     pub use crate::ports::HookPort;
 

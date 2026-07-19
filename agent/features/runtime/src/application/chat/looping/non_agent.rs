@@ -3,6 +3,7 @@ use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
+use crate::application::tool_coordination::PreparedToolCall;
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
 use std::path::Path;
@@ -21,16 +22,16 @@ pub(super) async fn execute_non_agent<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    non_agent_calls: &[ToolCall],
+    non_agent_calls: &[PreparedToolCall],
     language: &str,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
-    let other_calls: Vec<&ToolCall> = non_agent_calls
+    let other_calls: Vec<&PreparedToolCall> = non_agent_calls
         .iter()
-        .filter(|c| c.name != "AskUserQuestion")
+        .filter(|prepared| prepared.call.name != "AskUserQuestion")
         .collect();
 
     if other_calls.is_empty() {
@@ -74,7 +75,7 @@ async fn execute_multiple_non_agent<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    other_calls: &[&ToolCall],
+    other_calls: &[&PreparedToolCall],
     language: &str,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
@@ -161,13 +162,13 @@ where
         .collect()
 }
 
-fn partition_calls(agent: &Agent, calls: &[&ToolCall]) -> (Vec<usize>, Vec<usize>) {
+fn partition_calls(agent: &Agent, calls: &[&PreparedToolCall]) -> (Vec<usize>, Vec<usize>) {
     let mut concurrent_positions = Vec::new();
     let mut sequential_positions = Vec::new();
     for (i, call) in calls.iter().enumerate() {
         let is_safe = agent
             .catalog
-            .find(&tools::ToolName::new(&call.name))
+            .find(&tools::ToolName::new(&call.call.name))
             .is_some_and(|descriptor| descriptor.is_concurrency_safe());
         if is_safe {
             concurrent_positions.push(i);
@@ -178,7 +179,8 @@ fn partition_calls(agent: &Agent, calls: &[&ToolCall]) -> (Vec<usize>, Vec<usize
     (concurrent_positions, sequential_positions)
 }
 
-fn cancelled_result(call: &ToolCall, language: &str) -> ToolExecution {
+fn cancelled_result(prepared: &PreparedToolCall, language: &str) -> ToolExecution {
+    let call = &prepared.call;
     let msg = match language {
         "zh" => "用户已取消",
         _ => "Cancelled by user",
@@ -193,25 +195,29 @@ async fn execute_one_non_agent<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    call: &ToolCall,
+    prepared: &PreparedToolCall,
     language: &str,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
-    let _ = hook_ui
-        .run_plain(
-            hook_runner,
-            HookEvent::PermissionRequest,
-            Some(&call.name),
-            HookData::Permission(hook::api::PermissionHookData {
-                tool_name: call.name.clone(),
-                permission_rule: "auto".to_string(),
-            }),
-            workspace_root,
-        )
-        .await;
+    let call = &prepared.call;
+    let authorization = prepared.authorization;
+    if authorization.enforce_permission_hooks {
+        let _ = hook_ui
+            .run_plain(
+                hook_runner,
+                HookEvent::PermissionRequest,
+                Some(&call.name),
+                HookData::Permission(hook::api::PermissionHookData {
+                    tool_name: call.name.clone(),
+                    permission_rule: "auto".to_string(),
+                }),
+                workspace_root,
+            )
+            .await;
+    }
     let owned_call = ToolCall {
         id: call.id.clone(),
         provider_id: call.provider_id.clone(),
@@ -227,20 +233,24 @@ where
         owned_call.index,
         owned_call.input.to_string().len(),
     );
-    let pre_results = hook_ui
-        .run_plain(
-            hook_runner,
-            HookEvent::PreToolUse,
-            Some(&owned_call.name),
-            HookData::Tool(ToolHookData {
-                tool_name: owned_call.name.clone(),
-                tool_input: owned_call.input.clone(),
-                tool_output: None,
-                is_error: None,
-            }),
-            workspace_root,
-        )
-        .await;
+    let pre_results = if authorization.enforce_permission_hooks {
+        hook_ui
+            .run_plain(
+                hook_runner,
+                HookEvent::PreToolUse,
+                Some(&owned_call.name),
+                HookData::Tool(ToolHookData {
+                    tool_name: owned_call.name.clone(),
+                    tool_input: owned_call.input.clone(),
+                    tool_output: None,
+                    is_error: None,
+                }),
+                workspace_root,
+            )
+            .await
+    } else {
+        Vec::new()
+    };
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
         log::debug!(target: crate::LOG_TARGET,
             "pretooluse timing blocked: kind=non_agent tool_name={} runtime_id={} provider_id={} exit_code={:?} error_present={}",
@@ -278,55 +288,54 @@ where
     // skip the channel setup to avoid unnecessary overhead.
     let is_bash = owned_call.name == "Bash";
 
-    let exec_results =
-        if is_bash {
-            // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
-            let (prog_tx, mut prog_rx) =
-                tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-            let streaming_ctx = agent.ctx.with_progress(Some(
-                crate::application::tool_execution_adapters::progress(prog_tx),
-            ));
-            let call_id = owned_call.id.clone();
-            let stream_sink = sink.clone();
-            let stream_context = context.clone();
-            let progress_log_context = logging::capture();
-            let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
-                while let Some(event) = prog_rx.recv().await {
-                    let _ = stream_sink
-                        .send_event(RuntimeStreamEvent::AgentProgress {
-                            context: stream_context.clone(),
-                            tool_id: call_id.clone(),
-                            event,
-                        })
-                        .await;
-                }
-            });
-
-            let results = vec![
-                agent
-                    .execute_one_with_ctx(&owned_call, &streaming_ctx)
-                    .await,
-            ];
-
-            // Drop the sender so the forwarding task can complete naturally.
-            drop(streaming_ctx);
-
-            // Flush any remaining progress events before proceeding.
-            // Abort the forwarding task if it doesn't complete within 500ms
-            // to prevent task/resource leaks.
-            let mut forward_handle = forward_handle;
-            tokio::select! {
-                _ = &mut forward_handle => {}
-                _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
-                    forward_handle.abort();
-                    let _ = forward_handle.await;
-                }
+    let tool_ctx = agent.ctx.with_authorization(authorization);
+    let exec_results = if is_bash {
+        // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
+        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
+        let streaming_ctx = tool_ctx.with_progress(Some(
+            crate::application::tool_execution_adapters::progress(prog_tx),
+        ));
+        let call_id = owned_call.id.clone();
+        let stream_sink = sink.clone();
+        let stream_context = context.clone();
+        let progress_log_context = logging::capture();
+        let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
+            while let Some(event) = prog_rx.recv().await {
+                let _ = stream_sink
+                    .send_event(RuntimeStreamEvent::AgentProgress {
+                        context: stream_context.clone(),
+                        tool_id: call_id.clone(),
+                        event,
+                    })
+                    .await;
             }
-            results
-        } else {
-            // Non-Bash tools: execute without progress streaming.
-            vec![agent.execute_one_with_ctx(&owned_call, &agent.ctx).await]
-        };
+        });
+
+        let results = vec![
+            agent
+                .execute_one_with_ctx(&owned_call, &streaming_ctx)
+                .await,
+        ];
+
+        // Drop the sender so the forwarding task can complete naturally.
+        drop(streaming_ctx);
+
+        // Flush any remaining progress events before proceeding.
+        // Abort the forwarding task if it doesn't complete within 500ms
+        // to prevent task/resource leaks.
+        let mut forward_handle = forward_handle;
+        tokio::select! {
+            _ = &mut forward_handle => {}
+            _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
+                forward_handle.abort();
+                let _ = forward_handle.await;
+            }
+        }
+        results
+    } else {
+        // Non-Bash tools: execute without progress streaming.
+        vec![agent.execute_one_with_ctx(&owned_call, &tool_ctx).await]
+    };
 
     let workspace = agent.workspace_persist.snapshot();
     let _ = sink
@@ -492,7 +501,14 @@ mod tests {
         });
         let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("safe_a", 0), call("safe_b", 1)];
-        let refs = calls.iter().collect::<Vec<_>>();
+        let prepared = calls
+            .into_iter()
+            .map(|call| PreparedToolCall {
+                call,
+                authorization: tools::AuthorizationContext::STANDARD,
+            })
+            .collect::<Vec<_>>();
+        let refs = prepared.iter().collect::<Vec<_>>();
 
         let (concurrent, sequential) = partition_calls(&agent, &refs);
 
@@ -513,7 +529,14 @@ mod tests {
         });
         let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("unsafe_a", 0), call("unsafe_b", 1)];
-        let refs = calls.iter().collect::<Vec<_>>();
+        let prepared = calls
+            .into_iter()
+            .map(|call| PreparedToolCall {
+                call,
+                authorization: tools::AuthorizationContext::STANDARD,
+            })
+            .collect::<Vec<_>>();
+        let refs = prepared.iter().collect::<Vec<_>>();
 
         let (concurrent, sequential) = partition_calls(&agent, &refs);
 
@@ -534,7 +557,14 @@ mod tests {
         });
         let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("safe", 0), call("unsafe", 1), call("safe", 2)];
-        let refs = calls.iter().collect::<Vec<_>>();
+        let prepared = calls
+            .into_iter()
+            .map(|call| PreparedToolCall {
+                call,
+                authorization: tools::AuthorizationContext::STANDARD,
+            })
+            .collect::<Vec<_>>();
+        let refs = prepared.iter().collect::<Vec<_>>();
 
         let (concurrent, sequential) = partition_calls(&agent, &refs);
 
@@ -547,7 +577,14 @@ mod tests {
         let registry = tools::composition::TestCatalogExecutionFactory::new();
         let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("missing", 0)];
-        let refs = calls.iter().collect::<Vec<_>>();
+        let prepared = calls
+            .into_iter()
+            .map(|call| PreparedToolCall {
+                call,
+                authorization: tools::AuthorizationContext::STANDARD,
+            })
+            .collect::<Vec<_>>();
+        let refs = prepared.iter().collect::<Vec<_>>();
 
         let (concurrent, sequential) = partition_calls(&agent, &refs);
 

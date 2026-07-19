@@ -5,6 +5,9 @@ pub mod chat;
 pub mod client;
 pub mod context_coordination;
 pub mod cost;
+pub mod hook_adapter;
+#[cfg(test)]
+mod hook_adapter_tests;
 pub mod interaction;
 pub mod loop_engine;
 pub mod model_invocation;

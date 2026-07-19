@@ -13,7 +13,9 @@
 
 use crate::domain::invocation::HookPoint;
 use crate::domain::outcome::{ClassifyError, HookDirective, HookReason, ProtocolViolation};
-use crate::domain::protocol::{classify_directive, default_true, truncate, OUTPUT_MAX_BYTES};
+use crate::domain::protocol::{
+    classify_directive, classify_output, default_true, truncate, OUTPUT_MAX_BYTES,
+};
 
 // ════════════════════════════════════════════════════════════
 // 真值表测试
@@ -773,6 +775,112 @@ fn test_invocation_point_roundtrip() {
             "HookInvocation 变体的 point() 不匹配"
         );
     }
+}
+
+// ════════════════════════════════════════════════════════════
+// classify_output：system_message 独立保留（#925 BC 展示消息）
+// ════════════════════════════════════════════════════════════
+
+/// `classify_output` 在 exit 0 + 空 stdout 时返回 `(Continue, None)`。
+#[test]
+fn test_classify_output_empty_stdout_no_system_message() {
+    let (directive, system_message) =
+        classify_output(HookPoint::PreToolUse, Some(0), "", "").expect("应为 Ok");
+    assert!(matches!(directive, HookDirective::Continue));
+    assert!(
+        system_message.is_none(),
+        "空 stdout 不应有 system_message，实际 = {system_message:?}"
+    );
+}
+
+/// `classify_output` 从 JSON `systemMessage` 单独保留系统消息，
+/// directive 仍为 Continue（systemMessage 不折叠进 directive）。
+#[test]
+fn test_classify_output_preserves_system_message_alone() {
+    let (directive, system_message) = classify_output(
+        HookPoint::PreToolUse,
+        Some(0),
+        r#"{"systemMessage":"watch out!"}"#,
+        "",
+    )
+    .expect("应为 Ok");
+    assert!(
+        matches!(directive, HookDirective::Continue),
+        "仅 systemMessage 不应改变 directive，实际 = {directive:?}"
+    );
+    assert_eq!(
+        system_message.as_deref(),
+        Some("watch out!"),
+        "systemMessage 应单独保留"
+    );
+}
+
+/// `classify_output` 同时保留 additionalContext（折叠进 directive）与
+/// systemMessage（独立返回），两者互不干扰。
+#[test]
+fn test_classify_output_preserves_both_context_and_system_message() {
+    let (directive, system_message) = classify_output(
+        HookPoint::PreToolUse,
+        Some(0),
+        r#"{"additionalContext":"ctx","systemMessage":"warn"}"#,
+        "",
+    )
+    .expect("应为 Ok");
+    assert!(matches!(
+        directive,
+        HookDirective::ContinueWithContext { ref context } if context == "ctx"
+    ));
+    assert_eq!(
+        system_message.as_deref(),
+        Some("warn"),
+        "systemMessage 应独立于 directive 保留"
+    );
+}
+
+/// `classify_output` 在 JSON decision:block 时仍保留 systemMessage（若存在）。
+#[test]
+fn test_classify_output_preserves_system_message_on_json_block() {
+    let (directive, system_message) = classify_output(
+        HookPoint::PreToolUse,
+        Some(0),
+        r#"{"decision":"block","reason":"denied","systemMessage":"notify"}"#,
+        "",
+    )
+    .expect("应为 Ok");
+    assert!(matches!(directive, HookDirective::Block { .. }));
+    assert_eq!(
+        system_message.as_deref(),
+        Some("notify"),
+        "JSON block 时 systemMessage 仍应保留"
+    );
+}
+
+/// `classify_output` 在非零 exit（未解析 JSON）时 system_message=None。
+#[test]
+fn test_classify_output_nonzero_exit_has_no_system_message() {
+    let (directive, system_message) =
+        classify_output(HookPoint::PreToolUse, Some(1), "", "boom").expect("应为 Ok");
+    assert!(matches!(directive, HookDirective::Block { .. }));
+    assert!(
+        system_message.is_none(),
+        "非零 exit 未解析 JSON，system_message 应为 None"
+    );
+}
+
+/// `classify_directive` 公共签名保持兼容：丢弃 system_message 只返回 directive。
+#[test]
+fn test_classify_directive_signature_unchanged() {
+    let d = classify_directive(
+        HookPoint::PreToolUse,
+        Some(0),
+        r#"{"systemMessage":"dropped"}"#,
+        "",
+    )
+    .expect("应为 Ok(Continue)");
+    assert!(
+        matches!(d, HookDirective::Continue),
+        "classify_directive 不受 systemMessage 影响，实际 = {d:?}"
+    );
 }
 
 // ════════════════════════════════════════════════════════════

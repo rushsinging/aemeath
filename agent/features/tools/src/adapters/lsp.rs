@@ -53,7 +53,10 @@ impl TypedTool for LspTool {
             .unwrap_or_else(|| detect_language(requested_path));
 
         let workspace = ctx.workspace_read();
-        let path = match workspace.resolve_file_path(std::path::Path::new(requested_path)) {
+        let path = match workspace.resolve_file_path_authorized(
+            std::path::Path::new(requested_path),
+            ctx.authorization().allow_outside_workspace,
+        ) {
             Ok(path) => path,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };

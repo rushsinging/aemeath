@@ -303,6 +303,7 @@ pub struct ToolInvocation {
     pub tool_name: ToolName,
     pub input: serde_json::Value,
     pub execution_scope: ExecutionScope,
+    pub authorization: crate::domain::AuthorizationContext,
 }
 
 impl ToolInvocation {
@@ -315,7 +316,16 @@ impl ToolInvocation {
             tool_name: tool_name.into(),
             input,
             execution_scope,
+            authorization: crate::domain::AuthorizationContext::STANDARD,
         }
+    }
+
+    pub fn with_authorization(
+        mut self,
+        authorization: crate::domain::AuthorizationContext,
+    ) -> Self {
+        self.authorization = authorization;
+        self
     }
 }
 

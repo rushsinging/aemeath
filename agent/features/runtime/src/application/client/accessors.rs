@@ -1,6 +1,6 @@
 //! AgentClientImpl / RuntimeHandle 结构体定义与公共访问器。
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::application::chat::ChatEventSinkHandle;
 use crate::ports::legacy::ChatRuntimeContext;
@@ -26,8 +26,6 @@ pub struct RuntimeHandle {
     pub cwd: std::path::PathBuf,
     pub resolved_model: ResolvedModel,
     pub session_id: String,
-    /// Context-owned capture-only facade; exposes no Task restore authority.
-    pub(crate) session_tasks: Arc<dyn context::LegacyTaskCapture>,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub _mcp_manager: Arc<McpConnectionManager>,
@@ -39,24 +37,6 @@ pub struct RuntimeHandle {
     /// 当前 active Run 的唯一注册表。同步 cancel_run(run_id) 在同一锁内校验 ID、
     /// 标记 Cancelling 并触发该 Run 的 token。
     pub(crate) active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
-    /// 会话历史活跃写入 backing——按 user turn 分段的 `ChatChain` 聚合。
-    ///
-    /// **Leased projection**: 此 chain 是 Runtime 对活跃 Run 的可变写入面，
-    /// 不是跨 BC 的唯一真相。权威态在 Context 的 `CanonicalSession`。
-    /// 持久化 / 给 LLM / TUI 均为派生投影（`messages_flat()` / `active_segments()`）。
-    ///
-    /// **#871 CM5 fix**: 此 backing 由 `SessionProjectionParticipant` 在
-    /// `resume_prepared` 的 exclusive gate 内、Config watch 发布前同步更新。
-    /// 释放 gate 后任何 shared observer 第一次读即看到新 chain。
-    pub(crate) current_chain: Arc<Mutex<context::session::ChatChain>>,
-    /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
-    ///
-    /// 由 participant 在 gate 内同步更新。
-    pub(crate) frozen_chats: Arc<Mutex<Vec<context::session::ChatSegment>>>,
-    /// 活跃链的 compact summary（走 system 通道注入）。
-    ///
-    /// 由 participant 在 gate 内同步更新。
-    pub(crate) active_summary: Arc<Mutex<Option<String>>>,
     /// Resume 标志：load_session 后设为 true，chat_impl 消费后重置为 false。
     ///
     /// loop-top idle 门据此在首次遇到 pending user turn 时强制 idle 等待，

@@ -287,7 +287,7 @@ impl AgentRunner for CliAgentRunner {
 
         let isolated_session_id = sdk::SessionId::new_v7().to_string();
         let isolated_context = crate::application::context_coordination::ContextCoordinator::new(
-            context::adapters::isolated_context(&isolated_session_id),
+            context::isolated_context(&isolated_session_id),
         );
         SubAgentRun {
             prompt,

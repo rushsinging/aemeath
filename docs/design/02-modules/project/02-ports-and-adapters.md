@@ -64,7 +64,7 @@ pub trait WorkspaceRead: Send + Sync {
 | `/abs/path` | `/abs/path`（原样） |
 | `relative/path` | `path_base.join("relative/path")` |
 
-> **Decision**：`resolve` 仅做纯路径拼接，供非文件操作兼容使用。文件/搜索 Tool **MUST** 使用 `resolve_file_path` / `resolve_search_path`：两者 lexical normalize 并强制最终路径位于 canonical workspace root；文件目标可尚不存在，此时 canonicalize 最近存在祖先后重接尾部；搜索目录必须已存在。该安全前置条件不接受 Policy/AllowAll 绕过。
+> **Decision**：Project 只拥有机械路径解析。`resolve_file_path_authorized` / `resolve_search_path_authorized` 接收调用方已计算的 `allow_outside_workspace`，执行 lexical normalize、canonicalize、symlink resolution 与存在性/目录检查；false 时附加 canonical workspace containment，true 时允许任意 OS 可访问路径。Project **NEVER** 读取 Config、Policy 或 `allow_all`。
 
 `in_worktree()` **MUST** 从已提交 WorkspaceState（例如非空 stack / 已验证 frame）纯读取，**NEVER** 临时 spawn git；NonGit 恒为 `false`。`current_branch()` 在 NonGit 返回 `Ok(None)`；Git identity 才调用 `GitWorktreeOps`，探测 / 命令失败返回结构化 `WorkspaceError`，**NEVER** 把失败伪装成 detached HEAD。
 

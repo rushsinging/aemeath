@@ -40,6 +40,26 @@ impl SessionRepository for Session {
     ) -> Result<context::domain::CompactOutcome, context::domain::ContextPortError> {
         unreachable!()
     }
+
+    async fn commit_manual_compaction(
+        &self,
+        _request: &context::domain::ManualCompactRequest,
+    ) -> Result<context::domain::CompactOutcome, context::domain::ContextPortError> {
+        Ok(context::domain::CompactOutcome::Committed(
+            context::domain::CompactResult {
+                summary: "manual".into(),
+                recent_messages: vec![],
+                source_revision: SessionRevision::new(1),
+            },
+        ))
+    }
+
+    async fn clear(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<(), context::domain::ContextPortError> {
+        Ok(())
+    }
 }
 
 struct FailingPrompt;

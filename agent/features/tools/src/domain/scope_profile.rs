@@ -98,6 +98,14 @@ impl RegistryScope {
         self.registrations.get(name)
     }
 
+    pub(crate) fn insert_or_replace(&mut self, spec: ToolRegistrationSpec) {
+        self.registrations.insert(spec.name.clone(), spec);
+    }
+
+    pub(crate) fn remove(&mut self, name: &ToolName) {
+        self.registrations.remove(name);
+    }
+
     /// Iterates validated registrations without exposing the scope from crate root.
     pub(crate) fn iter(&self) -> impl Iterator<Item = &ToolRegistrationSpec> {
         self.registrations.values()

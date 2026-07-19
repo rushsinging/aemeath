@@ -82,6 +82,24 @@ pub fn classify_directive(
     stdout: &str,
     stderr: &str,
 ) -> Result<HookDirective, ClassifyError> {
+    // 公共签名保持兼容：丢弃 system_message，只返回 directive。
+    classify_output(point, exit_code, stdout, stderr).map(|(directive, _system_message)| directive)
+}
+
+/// 将单次 hook 执行的原始结果分类为 directive，并**单独保留** system_message。
+///
+/// 与 [`classify_directive`] 的唯一区别：返回 `(directive, system_message)`，其中
+/// `system_message` 取自 JSON `systemMessage` 字段，与 directive 无关、独立保留
+/// （`additionalContext` 仍折叠进 directive，由 dispatcher 再展开为逐条
+/// [`HookDisplayMessage`](crate::domain::outcome::HookDisplayMessage)）。
+///
+/// 分类失败（`Err`）时不携带 system_message（ExecutionFailed 路径不展示消息）。
+pub(crate) fn classify_output(
+    point: HookPoint,
+    exit_code: Option<i32>,
+    stdout: &str,
+    stderr: &str,
+) -> Result<(HookDirective, Option<String>), ClassifyError> {
     let meta = point.metadata();
 
     // ── exit_code=None：进程未正常退出，缺少退出码 → MissingExitCode ──
@@ -91,19 +109,19 @@ pub fn classify_directive(
         None => return Err(ClassifyError::MissingExitCode),
     };
 
-    // ── 非零 exit → Block（能力校验后）──
+    // ── 非零 exit → Block（能力校验后）；未解析 JSON，无 system_message ──
     if code != 0 {
         let block_reason = HookReason::ExitCode {
             code,
             stderr: truncate(stderr.trim()),
         };
-        return enforce_block_permission(meta, block_reason);
+        return enforce_block_permission(meta, block_reason).map(|d| (d, None));
     }
 
     // ── exit 0 + 空 stdout → Continue ──
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
-        return Ok(HookDirective::Continue);
+        return Ok((HookDirective::Continue, None));
     }
 
     // ── exit 0 + 尝试解析 JSON；非法 JSON → typed InvalidJson ──
@@ -117,10 +135,14 @@ pub fn classify_directive(
         }
     };
 
+    // ── system_message 独立保留（不折叠进 directive）──
+    let system_message = json.system_message;
+
     // ── JSON decision:block → Block ──
     if json.decision.as_deref() == Some("block") {
         let reason = json.reason.unwrap_or_default();
-        return enforce_block_permission(meta, HookReason::JsonBlock { reason });
+        return enforce_block_permission(meta, HookReason::JsonBlock { reason })
+            .map(|d| (d, system_message));
     }
 
     // ── JSON continue:false → Block（Stop 语义） ──
@@ -130,7 +152,8 @@ pub fn classify_directive(
             HookReason::JsonContinueFalse {
                 stop_reason: json.stop_reason,
             },
-        );
+        )
+        .map(|d| (d, system_message));
     }
 
     // ── 提取 additional_context 与 updated_input，并按能力矩阵校验 ──
@@ -154,15 +177,16 @@ pub fn classify_directive(
         });
     }
 
-    match (context, updated_input) {
-        (Some(ctx), Some(inp)) => Ok(HookDirective::ContinueWithContextAndInput {
+    let directive = match (context, updated_input) {
+        (Some(ctx), Some(inp)) => HookDirective::ContinueWithContextAndInput {
             context: ctx,
             input: inp,
-        }),
-        (Some(ctx), None) => Ok(HookDirective::ContinueWithContext { context: ctx }),
-        (None, Some(inp)) => Ok(HookDirective::ContinueWithUpdatedInput { input: inp }),
-        (None, None) => Ok(HookDirective::Continue),
-    }
+        },
+        (Some(ctx), None) => HookDirective::ContinueWithContext { context: ctx },
+        (None, Some(inp)) => HookDirective::ContinueWithUpdatedInput { input: inp },
+        (None, None) => HookDirective::Continue,
+    };
+    Ok((directive, system_message))
 }
 
 /// 能力矩阵校验：Block 仅允许出现在可阻断 point。

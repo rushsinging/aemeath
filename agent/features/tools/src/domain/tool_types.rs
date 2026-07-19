@@ -112,15 +112,6 @@ mod tool_outcome_tests {
 #[allow(unused_imports)]
 pub use super::types;
 
-/// The outcome of evaluating a single tool call against policy.
-#[derive(Debug)]
-pub enum PolicyDecision {
-    /// The call is allowed; `input` has been normalised (paths resolved).
-    Allow(serde_json::Value),
-    /// The call is denied; `reason` explains why.
-    Deny { reason: String },
-}
-
 /// Tool execution result（执行态，非泛型）。
 ///
 /// 字段命名与 [`ToolOutcome`] 完全对齐：`text→LLM / data→TUI`。

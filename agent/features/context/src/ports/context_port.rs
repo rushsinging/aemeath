@@ -22,6 +22,13 @@ pub trait ContextPort: Send + Sync {
 
     async fn compact(&self, request: &CompactRequest) -> Result<CompactOutcome, ContextPortError>;
 
+    async fn manual_compact(
+        &self,
+        request: &ManualCompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError>;
+
+    async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError>;
+
     async fn append_and_persist(
         &self,
         append: &ContextAppend,

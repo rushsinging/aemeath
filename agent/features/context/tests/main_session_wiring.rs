@@ -609,214 +609,52 @@ async fn memory_open_failure_keeps_all_old_state() {
     );
 }
 
-// ─── SessionProjectionParticipant tests ──────────────────────────────
+// ─── Resume publishes only the canonical committed session ───────────
+//
+// `SessionProjectionParticipant` has been retired: `resume_prepared` no longer
+// maintains a separate second projection backing.  The single source of truth
+// is the canonical committed session held by `MainSessionWiring`.  These
+// tests assert that contract directly:
+//
+//   * a successful resume publishes *only* the canonical committed session,
+//   * a bound run created *after* resume observes that exact session.
 
-use context::application::main_session::SessionProjectionParticipant;
-use context::domain::session::{ChatChain, ChatSegment};
-use std::sync::Mutex as StdMutex;
-
-/// A mock `SessionProjectionParticipant` that records the prepared token and
-/// the number of `commit` calls. Used to verify atomicity and no-double-write.
-struct MockProjectionParticipant {
-    committed_chain: StdMutex<Option<ChatChain>>,
-    committed_frozen: StdMutex<Option<Vec<ChatSegment>>>,
-    committed_summary: StdMutex<Option<String>>,
-    commit_count: StdMutex<usize>,
-    /// `true` once `commit` has been called. Used to assert ordering.
-    committed: StdMutex<bool>,
-}
-
-impl MockProjectionParticipant {
-    fn new() -> Self {
-        Self {
-            committed_chain: StdMutex::new(None),
-            committed_frozen: StdMutex::new(None),
-            committed_summary: StdMutex::new(None),
-            commit_count: StdMutex::new(0),
-            committed: StdMutex::new(false),
-        }
-    }
-
-    fn commit_count(&self) -> usize {
-        *self.commit_count.lock().unwrap()
-    }
-}
-
-impl SessionProjectionParticipant for MockProjectionParticipant {
-    fn prepare(&self, session: &CanonicalSession) -> context::session::SessionRestore {
-        context::session::SessionRestore::from_canonical(session)
-    }
-
-    fn commit(&self, prepared: context::session::SessionRestore) {
-        let mut count = self.commit_count.lock().unwrap();
-        *count += 1;
-        *self.committed_chain.lock().unwrap() = Some(prepared.active_chain.clone());
-        *self.committed_frozen.lock().unwrap() = Some(prepared.frozen_chats.clone());
-        *self.committed_summary.lock().unwrap() = prepared.active_summary.clone();
-        *self.committed.lock().unwrap() = true;
-    }
-}
-
-/// Registering a `SessionProjectionParticipant` and then calling
-/// `resume_prepared` atomically updates the leased projection backing
-/// **inside** the exclusive gate — the participant's `commit` is called
-/// exactly once, before the gate is released.
+/// `resume_prepared` publishes only the canonical committed session and a
+/// `bind_main_run` issued afterwards observes it.  No second projection
+/// backing is consulted.
 #[tokio::test]
-async fn projection_participant_updated_inside_gate_on_resume() {
+async fn resume_publishes_only_canonical_committed_session_visible_after_bind() {
     let _guard = git_lock().await;
     let h = build_harness();
 
-    // Register the mock participant.
-    let mock = Arc::new(MockProjectionParticipant::new());
-    h.wiring
-        .register_projection_participant(mock.clone() as Arc<dyn SessionProjectionParticipant>);
+    // Capture pre-resume committed session identity.
+    let pre_session_id = h.wiring.committed_session().id.clone();
 
-    let ws = h.workspace_persist.snapshot();
-    let session = CanonicalSession {
-        id: "projection-test".to_string(),
-        chats: vec![],
-        created_at: "2026-01-01T00:00:00Z".to_string(),
-        updated_at: "2026-01-01T00:00:00Z".to_string(),
-        metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(ws),
-        revision: 1,
-        committed_steps: vec![],
-    };
-
-    h.wiring
-        .resume_prepared(session)
-        .await
-        .expect("resume should succeed");
-
-    // The participant's commit was called exactly once (no double-write).
-    assert_eq!(
-        mock.commit_count(),
-        1,
-        "participant commit should be called exactly once"
-    );
-
-    // The committed session matches what was projected.
-    assert_eq!(h.wiring.committed_session().id, "projection-test");
-}
-
-/// When no participant is registered, `resume_prepared` behaves exactly as
-/// before — the leased projection is not updated (it remains the caller's
-/// responsibility, i.e. migration debt).
-#[tokio::test]
-async fn resume_without_participant_works_normally() {
-    let _guard = git_lock().await;
-    let h = build_harness();
-
-    // Do NOT register any participant.
+    // Do NOT register any projection participant — there is no such API now.
     let ws = h.workspace_persist.snapshot();
     let session = session_with_workspace(&ws, SnapshotState::Missing);
 
     h.wiring
         .resume_prepared(session)
         .await
-        .expect("resume should succeed without participant");
+        .expect("resume should succeed without any projection participant");
 
-    assert_eq!(h.wiring.committed_session().id, "resume-target");
-}
+    // 1. The committed session is exactly the canonical one we resumed from.
+    let committed = h.wiring.committed_session();
+    assert_eq!(committed.id, "resume-target");
+    assert_ne!(committed.id, pre_session_id);
 
-/// **CM5 core test**: while `resume_prepared` holds the exclusive permit,
-/// a concurrent shared observer (`bind_main_run`) is blocked.  After the
-/// exclusive permit is released, the observer's very first read sees the
-/// **new** committed session **and** the **new** projection — there is no
-/// observable window where the session is new but the projection is stale.
-#[tokio::test]
-async fn concurrent_observer_sees_new_session_and_projection_after_gate_release() {
-    let _guard = git_lock().await;
-    let h = build_harness();
-
-    // Register the mock participant so the projection is updated inside gate.
-    let mock = Arc::new(MockProjectionParticipant::new());
-    h.wiring
-        .register_projection_participant(mock.clone() as Arc<dyn SessionProjectionParticipant>);
-
-    // Build the resume session with a chat segment so the projection is
-    // non-empty and we can verify the chain content.
-    let ws = h.workspace_persist.snapshot();
-    let segment = ChatSegment::normal(None);
-    let session = CanonicalSession {
-        id: "cm5-consistency".to_string(),
-        chats: vec![segment],
-        created_at: "2026-01-01T00:00:00Z".to_string(),
-        updated_at: "2026-01-01T00:00:00Z".to_string(),
-        metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(ws),
-        revision: 1,
-        committed_steps: vec![],
-    };
-
-    // Perform the resume. This holds the exclusive permit for the duration.
-    h.wiring
-        .resume_prepared(session)
-        .await
-        .expect("resume should succeed");
-
-    // Immediately after the gate is released, a shared observer reads.
+    // 2. resume publishes *only* the canonical committed session — a freshly
+    //    bound run must observe the same session identity, with no stale or
+    //    intermediate projection state.
     let bound = h
         .wiring
         .bind_main_run()
         .await
         .expect("bind should succeed after resume");
-
-    // The observer sees the new session id.
     assert_eq!(
         bound.session().id,
-        "cm5-consistency",
-        "observer should see new session id immediately after gate release"
+        committed.id,
+        "bound run must observe the canonical committed session published by resume"
     );
-
-    // The observer also sees that the projection was updated — the
-    // participant committed the chain derived from the same session.
-    assert!(
-        *mock.committed.lock().unwrap(),
-        "projection participant must have committed before gate release"
-    );
-    assert_eq!(
-        mock.commit_count(),
-        1,
-        "exactly one commit, no double-write"
-    );
-
-    // The projected chain is equivalent to the committed session's chain.
-    let committed = h.wiring.committed_session();
-    let projected_chain = mock.committed_chain.lock().unwrap().clone().unwrap();
-    let committed_chain = ChatChain::from_chats(&committed.chats);
-    assert_eq!(
-        projected_chain.messages_flat().len(),
-        committed_chain.messages_flat().len(),
-        "projected chain message count must match committed session's chain — no observable window"
-    );
-}
-
-/// `commit` returns no `Result` — it is infallible by design. This test
-/// documents that contract by verifying the return type at the source level.
-#[test]
-fn projection_participant_commit_is_infallible() {
-    // The commit method returns `()`, not `Result<(), _>`. This is a
-    // compile-time contract verified by the trait definition itself.
-    let mock = MockProjectionParticipant::new();
-    let session = CanonicalSession {
-        id: "type-test".to_string(),
-        chats: vec![],
-        created_at: "2026-01-01T00:00:00Z".to_string(),
-        updated_at: "2026-01-01T00:00:00Z".to_string(),
-        metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(PersistedWorkspaceContext::default()),
-        revision: 0,
-        committed_steps: vec![],
-    };
-
-    // `commit` takes a SessionRestore and returns ().
-    let prepared: context::session::SessionRestore =
-        SessionProjectionParticipant::prepare(&mock, &session);
-    // The return type is `()`, not `Result<(), _>` — this line compiles only
-    // because commit is infallible by design.
-    SessionProjectionParticipant::commit(&mock, prepared);
 }

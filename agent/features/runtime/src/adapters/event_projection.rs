@@ -1,12 +1,14 @@
 //! Runtime-owned projections to the SDK Published Language.
 
 use crate::application::chat::looping::RuntimeTurnContext;
-use crate::application::chat::{RuntimeHookEvent, RuntimeHookEventStatus};
+use crate::application::chat::{
+    RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookMessage, RuntimeHookMessageKind,
+};
 use crate::domain::agent_run::RunDomainEvent;
 use sdk::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
-    ChatEventContext, HookEventStatus, HookEventView, HookExecutionResultView, ToolCallStatusView,
-    ToolResultImage,
+    ChatEventContext, HookEventStatus, HookEventView, HookExecutionResultView, HookMessageKindView,
+    HookMessageView, ToolCallStatusView, ToolResultImage,
 };
 
 pub fn project_domain_event(event: RunDomainEvent) -> ChatEvent {
@@ -400,6 +402,9 @@ pub(crate) fn project_stream_event(
         crate::application::chat::RuntimeStreamEvent::HookEvent(event) => {
             ChatEvent::HookEvent(project_hook_event(event))
         }
+        crate::application::chat::RuntimeStreamEvent::HookMessage(message) => {
+            ChatEvent::HookMessage(project_hook_message(message))
+        }
         crate::application::chat::RuntimeStreamEvent::AskUserBatch { items, reply_tx } => {
             ChatEvent::AskUserBatch { items, reply_tx }
         }
@@ -502,12 +507,7 @@ pub(crate) fn project_stream_event(
 pub(crate) fn project_hook_event(event: RuntimeHookEvent) -> HookEventView {
     HookEventView {
         hook_name: event.hook_name,
-        status: match event.status {
-            RuntimeHookEventStatus::Running => HookEventStatus::Running,
-            RuntimeHookEventStatus::Succeeded => HookEventStatus::Succeeded,
-            RuntimeHookEventStatus::Blocked => HookEventStatus::Blocked,
-            RuntimeHookEventStatus::Failed => HookEventStatus::Failed,
-        },
+        status: hook_event_status_to_sdk(event.status),
         matcher: event.matcher,
         command: event.command,
         result: event.result.map(|result| HookExecutionResultView {
@@ -518,6 +518,33 @@ pub(crate) fn project_hook_event(event: RuntimeHookEvent) -> HookEventView {
             reason: result.reason,
             additional_context: result.additional_context,
         }),
+    }
+}
+
+pub(crate) fn project_hook_message(message: RuntimeHookMessage) -> HookMessageView {
+    HookMessageView {
+        point: format!("{:?}", message.point),
+        source: message.source,
+        execution_ordinal: message.execution_ordinal,
+        attempt: message.attempt,
+        kind: project_hook_message_kind(message.kind),
+        text: message.text,
+    }
+}
+
+fn project_hook_message_kind(kind: RuntimeHookMessageKind) -> HookMessageKindView {
+    match kind {
+        RuntimeHookMessageKind::AdditionalContext => HookMessageKindView::AdditionalContext,
+        RuntimeHookMessageKind::SystemMessage => HookMessageKindView::SystemMessage,
+    }
+}
+
+fn hook_event_status_to_sdk(status: RuntimeHookEventStatus) -> HookEventStatus {
+    match status {
+        RuntimeHookEventStatus::Running => HookEventStatus::Running,
+        RuntimeHookEventStatus::Succeeded => HookEventStatus::Succeeded,
+        RuntimeHookEventStatus::Blocked => HookEventStatus::Blocked,
+        RuntimeHookEventStatus::Failed => HookEventStatus::Failed,
     }
 }
 

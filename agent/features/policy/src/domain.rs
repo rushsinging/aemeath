@@ -1,11 +1,22 @@
 use sdk::ids::{RunId, RunStepId};
 use std::path::PathBuf;
-use tools::{ToolCapabilities, ToolCapability, ToolName};
+use tools::{AuthorizationContext, ToolCapabilities, ToolCapability, ToolName};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PolicyMode {
     #[default]
+    Standard,
     AllowAll,
+}
+
+impl From<share::config::PermissionModeConfig> for PolicyMode {
+    fn from(value: share::config::PermissionModeConfig) -> Self {
+        match value {
+            share::config::PermissionModeConfig::AllowAll => Self::AllowAll,
+            share::config::PermissionModeConfig::Ask
+            | share::config::PermissionModeConfig::AutoRead => Self::Standard,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -85,7 +96,7 @@ pub enum ApprovalSubject {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PolicyDecision {
-    Allow,
+    Allow(AuthorizationContext),
     Deny {
         reason: PolicyReason,
     },
@@ -93,6 +104,10 @@ pub enum PolicyDecision {
         reason: PolicyReason,
         subject: ApprovalSubject,
     },
+}
+
+pub trait PolicyModeSource: Send + Sync {
+    fn current_mode(&self) -> PolicyMode;
 }
 
 pub trait PolicyPort: Send + Sync {

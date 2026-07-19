@@ -21,25 +21,17 @@
 
 改落盘格式或路径时，**MUST** 兼顾已有数据的可读性，避免破坏现有 `~/.agents/` 下的用户数据。
 
-## Session 落盘策略（#636 / #680）
+## Session 落盘策略（#869 / #872）
 
-会话编排位于 `agent/features/runtime/src/application/chat/`，会话领域与持久化能力由 Context/Storage Published Language 提供（注意：Runtime 不拥有独立 Session 状态机）。落盘策略如下：
+Session schema 与编排归 Context Management；Storage 只发布 AtomicBlob 机制：
 
-- **turn-level save（核心）**：每轮 turn 完成进入 Idle 前，同步调用 `save_chain(&chain)`，保证已完成 turn 立即落盘。即使进程被 `kill -TERM` 或意外退出，最多丢失正在跑的那一轮。
-- **loop-exit save（兜底）**：`process_chat_loop` 返回最终 chain → spawn task 写回 `current_chain` → `save_session_from_handle` 落盘。
-- **SIGTERM/SIGHUP graceful shutdown**：TUI 主 loop（`apps/cli/src/tui/app/run_loop.rs`）与非交互模式（`apps/cli/src/chat/no_tui.rs`）注册了 `tokio::signal::unix` 监听 SIGTERM/SIGHUP，收到信号后设置 `should_exit`，让主 loop 走正常 cleanup 路径，触发最后一次 save。
-- **失败日志**：`save_session()` 失败时记录 `error!` 日志，不再静默忽略。
-- **MUST** 落盘忠实序列化 `ChatChain` 的 `active_segments()`（真实 segment 边界），**NEVER** 从扁平 messages 反构造单段。
-
-## SessionLoadError 错误分类（#636 D2）
-
-`business/session/storage.rs` 的 `load_session` 返回 `Result<Session, SessionLoadError>`，错误分类：
-
-- `NotFound { id }` —— session 文件不存在。CLI/TUI 收到 `SessionResumeFailed { kind: NotFound }`，提示「session 不存在，用 `/sessions` 查看」。
-- `Corrupt { id, parse_err, corrupt_path }` —— JSON 损坏且 `.bak` 回退失败；原文件已转存到 `{id}.json.corrupt` 供手工抢救。
-- `Io { id, source }` —— 底层 IO 错误（权限、磁盘）。
-
-错误通过 `ChatEvent::SessionResumeFailed` 回传前端，由 TUI/no_tui 分支展示。
+- **MUST** finalized RunStep 通过 `ContextPort::append_and_persist` 提交，Context 收集 Task / Workspace snapshot 后编码 canonical envelope。
+- **MUST** manual/automatic compact 与 reset 使用同一 canonical backing、mutation gate 和 AtomicBlob writer。
+- **MUST** 启动 resume 与运行期 `/resume` 通过 Context 的兼容 reader 读取 legacy wire，再由联合协调器发布 committed Session。
+- **NEVER** Runtime 持有可变 `ChatChain` 第二 backing、调用 `save_chain`，或在 loop 退出时重复落盘。
+- **NEVER** 新 writer 输出 top-level `messages` / `cwd`；它们只允许存在于 Context 的 legacy reader DTO。
+- **MUST** unknown future schema 原字节保留，禁止 fallback、quarantine 或覆写。
+- Session 物理数据使用 `StorageNamespace::Session`，由 `AtomicBlobSessionStore` 映射 primary / previous / quarantine 协议。
 
 ## Session Lock 文件（#636 D3）
 

@@ -67,6 +67,74 @@ pub(crate) fn request_log_context(
     })
 }
 
+/// 以语义所有权记录尚未绑定与当前 RunStep 已绑定的消息，禁止通过位置索引推断。
+#[derive(Default)]
+pub(crate) struct StepMessageOwnership {
+    pending: Vec<Message>,
+    active: Vec<Message>,
+}
+
+impl StepMessageOwnership {
+    pub(crate) fn new(pending: Vec<Message>) -> Self {
+        Self {
+            pending,
+            active: Vec::new(),
+        }
+    }
+
+    fn freeze(&mut self, inputs: &[LoopInput]) -> Vec<Message> {
+        let messages = if inputs.is_empty() {
+            std::mem::take(&mut self.pending)
+        } else {
+            inputs
+                .iter()
+                .map(|input| Message::user(input.text.clone()))
+                .collect()
+        };
+        self.active = messages.clone();
+        messages
+    }
+
+    fn record(&mut self, message: Message) {
+        self.active.push(message);
+    }
+
+    fn rollback_last(&mut self) -> Option<Message> {
+        self.active.pop()
+    }
+
+    fn finalized(&self) -> Vec<Message> {
+        self.active.clone()
+    }
+
+    fn committed(&mut self) {
+        self.active.clear();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_bind_pending(
+    pending: Vec<Message>,
+    inputs: &[LoopInput],
+) -> (Vec<Message>, Vec<Message>) {
+    let mut ownership = StepMessageOwnership::new(pending);
+    let frozen = ownership.freeze(inputs);
+    (frozen, ownership.finalized())
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_finalize_messages(
+    pending: Vec<Message>,
+    produced: Vec<Message>,
+) -> Vec<Message> {
+    let mut ownership = StepMessageOwnership::new(pending);
+    ownership.freeze(&[]);
+    for message in produced {
+        ownership.record(message);
+    }
+    ownership.finalized()
+}
+
 /// Main-chat adapter for the shared run loop.
 ///
 /// It owns no lifecycle state machine. `Run` is the only per-run state machine; this adapter
@@ -90,7 +158,8 @@ where
     pub(crate) context: &'a ContextCoordinator,
     pub(crate) context_request: Option<crate::ports::ContextRequest>,
     pub(crate) context_window: Option<crate::ports::ContextWindow>,
-    pub(crate) projection_start_index: usize,
+    /// 当前 RunStep 的显式消息所有权；历史长度不参与归属判断。
+    pub(crate) step_messages: StepMessageOwnership,
     pub(crate) messages: Vec<Message>,
     pub(crate) context_size: usize,
     pub(crate) workspace: &'a project::WorkspaceViews,
@@ -207,12 +276,7 @@ where
         let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
             return Ok(());
         };
-        let messages = self
-            .messages
-            .iter()
-            .skip(self.projection_start_index)
-            .cloned()
-            .collect();
+        let messages = self.step_messages.finalized();
         self.context
             .append_finalized(
                 request,
@@ -225,7 +289,7 @@ where
             )
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        self.projection_start_index = self.messages.len();
+        self.step_messages.committed();
         Ok(())
     }
 
@@ -308,7 +372,6 @@ where
                     memory.clone(),
                     Arc::new(tools::FixedGuidance {
                         language: language.to_string(),
-                        allow_all: false,
                     }),
                 )
                 .with_memory_context(
@@ -548,6 +611,7 @@ where
             })
             .await;
         self.messages.push(resp.assistant_message.clone());
+        self.step_messages.record(resp.assistant_message.clone());
         self.sink
             .send_event(RuntimeStreamEvent::TurnStarted {
                 messages: self.messages.clone(),
@@ -612,10 +676,14 @@ where
         .await
         {
             let blocked_assistant = self.messages.pop();
+            let blocked_step_assistant = self.step_messages.rollback_last();
             debug_assert!(blocked_assistant.is_some());
-            self.messages.push(Message::system_generated_user(format!(
+            debug_assert!(blocked_step_assistant.is_some());
+            let feedback = Message::system_generated_user(format!(
                 "<system-reminder>\n{feedback}\n</system-reminder>"
-            )));
+            ));
+            self.messages.push(feedback.clone());
+            self.step_messages.record(feedback);
             self.sink
                 .send_event(RuntimeStreamEvent::StopHookBlocked {
                     messages: self.messages.clone(),
@@ -645,15 +713,7 @@ where
     I: InputEventDrainPort,
 {
     fn freeze_step(&mut self, step_id: &RunStepId, inputs: &[LoopInput]) {
-        let pending_messages = if inputs.is_empty() {
-            self.messages[self.projection_start_index..].to_vec()
-        } else {
-            inputs
-                .iter()
-                .map(|input| Message::user(input.text.clone()))
-                .collect()
-        };
-        self.projection_start_index = self.messages.len();
+        let pending_messages = self.step_messages.freeze(inputs);
         if !inputs.is_empty() {
             self.messages.extend(pending_messages.clone());
         }
@@ -790,7 +850,7 @@ where
             agent.ctx.clone(),
         )
         .map_err(LoopEngineError::Adapter)?;
-        let all_results = execute_tool_round(
+        let (all_results, fuse_bypassed) = execute_tool_round(
             &self.turn_context,
             &raw_calls,
             self.tool_catalog,
@@ -846,9 +906,10 @@ where
         let has_task_mutation = all_results.iter().any(|result| {
             crate::application::chat::looping::events::is_task_store_mutation(&result.tool_name)
         });
-        self.messages.push(
-            tool_results_for_api(self.tool_result_materializer, all_results, self.session_id).await,
-        );
+        let tool_results =
+            tool_results_for_api(self.tool_result_materializer, all_results, self.session_id).await;
+        self.messages.push(tool_results.clone());
+        self.step_messages.record(tool_results);
         self.sink
             .send_event(RuntimeStreamEvent::PostToolExecutionSync {
                 messages: self.messages.clone(),
@@ -873,7 +934,11 @@ where
             &self.current_cwd(),
         )
         .await;
-        Ok(ToolStep::Continue)
+        Ok(if fuse_bypassed.is_empty() {
+            ToolStep::Continue
+        } else {
+            ToolStep::ContinueWithFuseBypass(fuse_bypassed)
+        })
     }
 
     async fn on_stuck(

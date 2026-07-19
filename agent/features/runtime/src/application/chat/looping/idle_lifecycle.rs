@@ -5,7 +5,7 @@ use crate::application::chat::looping::events::{ChatEventSink, RuntimeStreamEven
 use crate::application::chat::looping::input_gate::{
     event_kind_name, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
 };
-use context::session::ChatChain;
+use share::message::Message;
 use share::reasoning::ReasoningLevel;
 use workflow::api::ReasoningPort;
 
@@ -43,7 +43,8 @@ where
 }
 
 pub(crate) enum IdleResult {
-    Resumed(String),
+    Resumed(String, Vec<(sdk::InputId, Message)>),
+    ResetRequested,
     Shutdown,
     CommandRequested(PendingCommand),
 }
@@ -60,7 +61,7 @@ async fn await_idle_input<I: InputEventDrainPort>(
                 event_kind_name(&event)
             );
             pending.push(event);
-            IdleResult::Resumed(String::new())
+            IdleResult::Resumed(String::new(), Vec::new())
         }
         None => IdleResult::Shutdown,
     }
@@ -70,7 +71,6 @@ pub(crate) async fn idle_until_resume_or_shutdown<I, S>(
     input_events: &I,
     sink: &S,
     pending: &mut PendingInputBuffer,
-    chain: &mut ChatChain,
     task_access: &dyn task::TaskAccess,
 ) -> IdleResult
 where
@@ -79,25 +79,20 @@ where
 {
     loop {
         match await_idle_input(input_events, pending).await {
-            IdleResult::Resumed(_) => {
+            IdleResult::Resumed(_, _) => {
                 let segment_id = sdk::ChatId::new_v7().to_string();
-                let gate = apply_gate(
-                    GateKind::BeforeLlm,
-                    pending,
-                    sink,
-                    chain,
-                    &segment_id,
-                    task_access,
-                    true,
-                )
-                .await;
+                let gate = apply_gate(GateKind::BeforeLlm, pending, sink, task_access, true).await;
                 if let Some(command) = gate.pending_command {
                     return IdleResult::CommandRequested(command);
                 }
+                if gate.reset_requested {
+                    return IdleResult::ResetRequested;
+                }
                 if gate.appended_user_messages > 0 {
-                    return IdleResult::Resumed(segment_id);
+                    return IdleResult::Resumed(segment_id, gate.adopted_messages);
                 }
             }
+            IdleResult::ResetRequested => return IdleResult::ResetRequested,
             IdleResult::Shutdown => return IdleResult::Shutdown,
             IdleResult::CommandRequested(command) => return IdleResult::CommandRequested(command),
         }

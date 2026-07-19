@@ -45,14 +45,17 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
     }
     match parts[0] {
         "list" => {
-            let sessions = context::session::list_sessions().await;
+            let sessions = match context::list_session_entries().await {
+                Ok(sessions) => sessions,
+                Err(error) => return (format!("Failed to list sessions: {error}"), true),
+            };
             let mut lines = String::from("📋 Sessions\n\n");
             for (i, s) in sessions.iter().take(15).enumerate() {
                 lines.push_str(&format!(
                     "{}. {} ({} messages)\n",
                     i + 1,
                     s.id,
-                    s.messages.len()
+                    s.message_count
                 ));
             }
             if sessions.is_empty() {
@@ -69,12 +72,12 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
             if parts.len() < 3 {
                 return ("Usage: /session rename <id> <name>".to_string(), true);
             }
-            match context::session::update_session_metadata(
+            match context::update_session_metadata_entry(
                 parts[1],
-                Some(parts[2].to_string()),
-                None,
-                None,
-                None,
+                context::SessionMetadataUpdate {
+                    title: Some(parts[2..].join(" ")),
+                    ..Default::default()
+                },
             )
             .await
             {
@@ -96,27 +99,24 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
             if parts.len() < 2 {
                 return ("Usage: /session export <id>".to_string(), true);
             }
-            match context::session::load_session(parts[1]).await {
-                Ok(session) => match serde_json::to_string_pretty(&session) {
+            match context::export_session_bytes(parts[1]).await {
+                Ok(bytes) => match String::from_utf8(bytes) {
                     Ok(json) => (json, false),
-                    Err(e) => (format!("Failed to serialize session: {}", e), true),
+                    Err(e) => (format!("Failed to encode session export: {e}"), true),
                 },
-                Err(e) => (format!("Failed to load session: {}", e), true),
+                Err(e) => (format!("Failed to load session: {e}"), true),
             }
         }
         "import" => {
             if parts.len() < 2 {
                 return ("Usage: /session import <file>".to_string(), true);
             }
-            match tokio::fs::read_to_string(parts[1]).await {
-                Ok(content) => match serde_json::from_str::<context::session::Session>(&content) {
-                    Ok(session) => match context::session::save_session(&session).await {
-                        Ok(_) => (format!("Session {} imported", session.id), false),
-                        Err(e) => (format!("Failed to save imported session: {}", e), true),
-                    },
-                    Err(e) => (format!("Failed to parse session file: {}", e), true),
+            match tokio::fs::read(parts[1]).await {
+                Ok(content) => match context::import_session_bytes(&content).await {
+                    Ok(session) => (format!("Session {} imported", session.id), false),
+                    Err(e) => (format!("Failed to import session: {e}"), true),
                 },
-                Err(e) => (format!("Failed to read file: {}", e), true),
+                Err(e) => (format!("Failed to read file: {e}"), true),
             }
         }
         _ => (format!("Unknown session command: {}", parts[0]), true),
@@ -125,9 +125,8 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
 
 /// 执行 /memory 命令（非 remind 子命令）。
 ///
-/// #871：所有 memory 查询/变更均通过 `MemoryPort` API，不再直接打开
-/// `storage::MemoryStore`。调用方（loop_runner）负责通过 session-switch gate
-/// 捕获 `committed_memory` 后传入。
+/// #871/#900：所有 memory 查询/变更均通过 `MemoryPort` API；调用方
+///（loop_runner）负责通过 session-switch gate 捕获 `committed_memory` 后传入。
 pub async fn execute_memory(
     args: &str,
     port: &dyn MemoryPort,

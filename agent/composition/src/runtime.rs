@@ -15,33 +15,19 @@ pub(crate) async fn from_args_with_gateways(
     config: config::ConfigWiring,
 ) -> Result<AgentClientImpl, sdk::SdkError> {
     let identity = workspace.read().project_identity();
-    let memory_config = config.reader().committed_snapshot().memory().clone();
-    let legacy_base_dir = share::config::paths::global_memory_dir();
-    let dataset_adapter = Arc::new(
-        storage::FileSystemDatasetAdapter::new(&legacy_base_dir)
-            .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
-    );
     let project_key = memory_api::ProjectMemoryKey::derive(
         &identity.initial_cwd,
         identity.git_common_dir.as_deref(),
     )
     .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let store =
-        memory_api::AtomicDatasetMemoryStore::new(dataset_adapter.clone(), project_key.clone());
-    let reflection_history: Arc<dyn memory_api::ReflectionHistoryStore> = Arc::new(
-        memory_api::AtomicDatasetReflectionHistoryStore::new(dataset_adapter, project_key.clone()),
-    );
-    let legacy_factory = memory::FileLegacyMemorySourceFactory::new(legacy_base_dir);
-    let legacy = memory::LegacyMemorySourceFactory::create_for(&legacy_factory, &project_key);
-    let _main_memory: Arc<dyn memory_api::MemoryPort> = Arc::new(
-        memory_api::ProjectMemoryOpener::new(store, legacy)
-            .open(memory_api::MemoryPolicy {
-                max_entries: memory_config.max_entries,
-                similarity_threshold: memory_config.similarity_threshold,
-            })
-            .await
-            .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
-    );
+    let reflection_history: Arc<dyn memory_api::ReflectionHistoryStore> =
+        Arc::new(memory_api::AtomicDatasetReflectionHistoryStore::new(
+            Arc::new(
+                storage::FileSystemDatasetAdapter::new(share::config::paths::global_memory_dir())
+                    .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
+            ),
+            project_key,
+        ));
 
     let task_wiring = task::wire_task();
     let session_blob = storage::api::file_system_blob(share::config::paths::global_agents_dir())
@@ -99,7 +85,6 @@ pub(crate) async fn from_args_with_gateways(
         reflection_history,
         gateways.policy,
         task_wiring.access(),
-        context::compose_session_task_capture(task_wiring.persist()),
     );
     runtime::from_args_with_workspace(args, dependencies).await
 }

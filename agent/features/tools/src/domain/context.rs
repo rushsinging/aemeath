@@ -119,7 +119,33 @@ pub trait PlanModeState: Send + Sync {
 }
 pub trait Guidance: Send + Sync {
     fn language(&self) -> &str;
-    fn allow_all(&self) -> bool;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthorizationContext {
+    pub allow_outside_workspace: bool,
+    pub require_read_before_write: bool,
+    pub enforce_bash_safety: bool,
+    pub enforce_tool_fuse: bool,
+    pub enforce_permission_hooks: bool,
+}
+
+impl AuthorizationContext {
+    pub const STANDARD: Self = Self {
+        allow_outside_workspace: false,
+        require_read_before_write: true,
+        enforce_bash_safety: true,
+        enforce_tool_fuse: true,
+        enforce_permission_hooks: true,
+    };
+
+    pub const ALLOW_ALL: Self = Self {
+        allow_outside_workspace: true,
+        require_read_before_write: false,
+        enforce_bash_safety: false,
+        enforce_tool_fuse: false,
+        enforce_permission_hooks: false,
+    };
 }
 /// Read-only workspace capability available to every tool invocation.
 #[derive(Clone)]
@@ -147,6 +173,7 @@ pub struct ToolExecutionPorts {
     parent_session_id: Option<String>,
     reminders: Option<Arc<Mutex<SessionReminders>>>,
     guidance: Arc<dyn Guidance>,
+    authorization: AuthorizationContext,
 }
 impl ToolExecutionPorts {
     pub fn new(
@@ -169,6 +196,7 @@ impl ToolExecutionPorts {
             parent_session_id: None,
             reminders: None,
             guidance,
+            authorization: AuthorizationContext::STANDARD,
         }
     }
     pub fn with_agent(mut self, agent: Option<Arc<dyn AgentDispatch>>) -> Self {
@@ -241,6 +269,14 @@ impl ToolExecutionContext {
     pub fn guidance(&self) -> Arc<dyn Guidance> {
         self.ports.guidance.clone()
     }
+    pub fn authorization(&self) -> AuthorizationContext {
+        self.ports.authorization
+    }
+    pub fn with_authorization(&self, authorization: AuthorizationContext) -> Self {
+        let mut next = self.clone();
+        next.ports.authorization = authorization;
+        next
+    }
     pub fn with_progress(&self, p: Option<Arc<dyn ProgressSink>>) -> Self {
         let mut n = self.clone();
         n.ports.progress = p;
@@ -266,13 +302,9 @@ impl PlanModeState for FixedPlanMode {
 }
 pub struct FixedGuidance {
     pub language: String,
-    pub allow_all: bool,
 }
 impl Guidance for FixedGuidance {
     fn language(&self) -> &str {
         &self.language
-    }
-    fn allow_all(&self) -> bool {
-        self.allow_all
     }
 }

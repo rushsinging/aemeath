@@ -48,13 +48,29 @@ impl FeatureGateways {
         }
     }
 
-    pub fn wire_default() -> Self {
+    pub fn wire_default(policy: Arc<dyn policy::PolicyPort>) -> Self {
         Self::new(
             crate::tools::wire_tools(),
             crate::provider::wire_provider(),
-            Arc::new(policy::AllowAllPolicy),
+            policy,
         )
     }
+}
+
+struct ConfigPolicyModeSource {
+    reader: Arc<dyn config::ConfigReader>,
+}
+
+impl policy::PolicyModeSource for ConfigPolicyModeSource {
+    fn current_mode(&self) -> policy::PolicyMode {
+        self.reader.committed_snapshot().permission_mode().into()
+    }
+}
+
+fn configured_policy(config: &config::ConfigWiring) -> Arc<dyn policy::PolicyPort> {
+    Arc::new(policy::ConfiguredPolicy::new(ConfigPolicyModeSource {
+        reader: config.reader(),
+    }))
 }
 
 fn cli_config_input(args: &AgentArgs) -> config::CliConfigInput {
@@ -160,10 +176,27 @@ fn init_logging(
 }
 
 pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, SdkError> {
-    let gateways = FeatureGateways::wire_default();
-    build_agent_client_with_gateways(args, gateways).await
+    let cwd = args
+        .cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let workspace = project::wire_production_workspace(cwd.clone())
+        .map_err(|error| SdkError::Init(error.to_string()))?
+        .into_views();
+    let logging_output = args.logging_output;
+    let config = config::wire_project_config_with_cli(&cwd, cli_config_input(&args))
+        .await
+        .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    let gateways = FeatureGateways::wire_default(configured_policy(&config));
+    init_logging(&config.reader().committed_snapshot(), logging_output)
+        .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
+    let runtime_client =
+        crate::runtime::from_args_with_gateways(args, gateways, workspace, config).await?;
+    Ok(agent_client_from_runtime(runtime_client))
 }
 
+#[cfg(test)]
 async fn build_agent_client_with_gateways(
     args: AgentArgs,
     gateways: FeatureGateways,
@@ -188,7 +221,6 @@ async fn build_agent_client_with_gateways(
 }
 
 pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstrap, SdkError> {
-    let gateways = FeatureGateways::wire_default();
     let cwd = args
         .cwd
         .clone()
@@ -201,6 +233,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let config = config::wire_project_config_with_cli(&cwd, cli_config_input(&args))
         .await
         .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    let gateways = FeatureGateways::wire_default(configured_policy(&config));
     init_logging(&config.reader().committed_snapshot(), logging_output)
         .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =

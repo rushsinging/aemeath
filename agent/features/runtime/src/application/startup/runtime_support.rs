@@ -23,7 +23,7 @@ pub fn build_hook_runner(hooks: Option<&HooksConfig>, _cwd: &Path) -> HookRunner
 }
 
 pub fn start_session(resume_session_id: Option<String>) -> String {
-    let session_id = resume_session_id.unwrap_or_else(context::session::new_session_id);
+    let session_id = resume_session_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     log::info!(target: crate::LOG_TARGET, "session started");
     session_id
 }

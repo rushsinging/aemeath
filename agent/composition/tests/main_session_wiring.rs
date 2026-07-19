@@ -101,6 +101,27 @@ fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInput {
 
 // ─── Tests ───────────────────────────────────────────────────────────
 
+#[test]
+fn production_runtime_has_no_direct_active_memory_construction() {
+    let source = include_str!("../src/runtime.rs");
+
+    for forbidden in [
+        "AtomicDatasetMemoryStore",
+        "ProjectMemoryOpener",
+        "_main_memory",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "production runtime must open active Memory only through MainSession MemoryOpener; found {forbidden}"
+        );
+    }
+    assert_eq!(
+        source.matches("DatasetMemoryOpener::new").count(),
+        1,
+        "production runtime must provide exactly one active Memory opener to MainSession wiring"
+    );
+}
+
 /// The production wiring constructs a real `DatasetMemoryOpener` backed by
 /// the filesystem. A memory entry written through the committed `MemoryPort`
 /// must be retrievable — proving the opener is not a no-op.
@@ -211,7 +232,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
 
     let task_wiring = task::wire_task();
     let task_access = task_wiring.access();
-    let session_tasks = context::compose_session_task_capture(task_wiring.persist());
 
     // Construct the same production opener that Composition uses.
     let dataset_adapter = Arc::new(
@@ -257,7 +277,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         reflection_history,
         Arc::new(policy::AllowAllPolicy),
         task_access,
-        session_tasks,
     );
 
     let args = ChatBootstrapArgs {

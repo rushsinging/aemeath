@@ -113,7 +113,7 @@
 | `logging` | ∅ |
 | `utils` | ∅ |
 
-> **Memory BC 当前物理落点**：#895 已建立独立 `memory` crate 的 owner-owned PL/`MemoryPort`；#896 新增 Memory-owned `MemoryDatasetStore`、AtomicDataset integration adapter 与 `utils` key hash。`memory → storage` 只允许 adapter 消费 Storage crate-root OHS，domain/ports/service 的层间方向由 `check-cola-layer-purity.sh` 守卫；旧业务实现和生产消费者仍由 #883/#897/#900 迁移退役。
+> **Memory BC 当前物理落点**：#895 已建立独立 `memory` crate 的 owner-owned PL/`MemoryPort`；#896 新增 Memory-owned `MemoryDatasetStore`、AtomicDataset integration adapter 与 `utils` key hash；#900 删除 Composition 第二 active Memory open，并将 concrete dataset store / project opener / service 收回 crate 内。`memory → storage` 只允许 adapter 消费 Storage crate-root OHS，domain/ports/service 的层间方向由 `check-cola-layer-purity.sh` 守卫；正式 capability-first 唯一构造 Guard 与 stale root allowlist 清理由 #982/#1022 承接。
 >
 > **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）已位于独立 `agent/features/workflow` crate。Runtime 仅依赖 Workflow crate-root 窄 façade；Workflow 只依赖 Shared Kernel，不依赖 Runtime 或 Provider。
 
@@ -250,7 +250,7 @@
   - `ROOT_ACCESS_ALLOW.workflow = ∅`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` composition wiring 由函数调用规则允许，graph/node/config 不再作为 crate-root façade。
   - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, RuntimeBootstrapDependencies, UsageSink, from_args_with_workspace, resume_session_to_backing, ResumeError}`：Composition 注入唯一 `MainSessionWiring` 与 Provider/Tool/Task views；`UsageSink` 供 #931 bridge，实现细节仍私有。
   - `ROOT_ACCESS_ALLOW.context`：除既有 `compact/context_port/guidance/session/skill` 外，#871 登记 `MainSessionWiring`、gate/permit、projection participant、production factory/dependencies 与结构化错误；内部 application/adapters 路径仍禁止穿透。
-  - `ROOT_ACCESS_ALLOW.memory`：#871 登记 Memory-owned OHS/PL、project key、opener、legacy source factory、dataset adapter contract 与稳定错误/receipt；消费方只经 crate-root façade。
+  - `ROOT_ACCESS_ALLOW.memory`：#900 后生产消费只需 Memory-owned OHS/PL、project key、`DatasetMemoryOpener`、legacy source factory、Reflection history adapter 与稳定错误；concrete active dataset store、project opener 和 `MemoryService` 已收回 crate 内。脚本中的 stale 名称由 #982/#1022 统一收口，本 Issue 不修改 `.agents/hooks/**`。
   - `ROOT_ACCESS_ALLOW.tools`：在既有 Published Language 上新增 tools-owned `MemoryPortSource` 窄 seam，供已注册 `MemoryTool` 在 resume 后动态取得 committed MemoryPort。
   - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade加 `FileSystemBlobAdapter` / `FileSystemDatasetAdapter` 供唯一 Composition/Config production factory 装配；业务消费者仍只经 Storage OHS。
   - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities}`
@@ -572,8 +572,8 @@
 - **检查方式**：确认 Runtime 的 Main/Sub 入口调用唯一 `loop_engine::run_loop`，禁止旧 FSM；并扫描 `agent/features/runtime/src`、`agent/features/tools/src/adapters/agent_tool.rs` 与 `agent/features/tools/src/domain/types/agent.rs`，禁止恢复 Session token 槽或 `max_turns`。
 - **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
 
-- **#876 Context execution 边界**：`main_run_port.rs`、Sub `loop_run.rs` 与 `context_coordination.rs` 禁止引用 `context::session::*`、`ChatChain` / `ChatSegment`、`save_chain` 或 legacy compact helper；Main/Sub 必须各自经 `append_finalized` 接入 ContextPort 的唯一 finalized Step 提交。idle/session command 兼容路径不在本规则扫描范围，由 #872/#879 退役。
-- **故意违规验证**：向 Main/Sub execution path 临时加入 `ChatChain` 或 `save_chain` 标记时守卫必须阻断；移除后恢复通过。
+- **#872 Context 边界**：扫描整个 `agent/features/runtime/src` 的生产源码，禁止引用 `context::session::*`、`ChatChain` / `ChatSegment`、`current_chain` / `frozen_chats` / `active_summary`、`SessionProjectionParticipant`、`projection_start_index`、`save_chain` 或 legacy compact helper；测试路径由已登记的 `scope.runtime.shared-loop-tests` 排除。Main/Sub 仍必须各自经 `append_finalized` 接入 ContextPort，消息归属必须使用显式 Step ownership，idle compact/reset 经 ContextPort，resume 与 session commands 经 Context crate-root Published Language。
+- **故意违规验证**：`check-shared-run-loop-tests.sh` 在隔离副本向 Runtime 生产路径注入 `context::session::ChatChain`，断言单 Guard exit 2；移除探针后 clean pass。总编排同时执行该正反例脚本。白名单预算保持不变，不新增 migration exception。
 
 ## 23. check-run-control-boundary.sh
 
