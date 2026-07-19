@@ -281,8 +281,8 @@
 
 - **功能**：锁定 #903 pull-based `InvocationStream` 生产边界，防止 Provider/Runtime/Context 恢复 callback 驱动。
 - **守护**：生产代码禁止 `CallbackHandler`、`StreamHandler`、`RuntimeStreamHandler`、`stream_message_raw` 与 `.stream_message(...)`；Runtime 与 Context 的生产代码和测试替身均禁止引用迁移期 `LegacyStreamSink` / `legacy_stream_message`。
-- **正向约束**：`LlmProvider` 必须公开 `invocation_stream`；Runtime 通过 `InvocationEventReducer` 主动 poll 并投影事件。
-- **范围边界**：Provider 内部 decoder 与测试替身暂可使用明确命名的 legacy sink，不能成为跨 crate 生产入口。
+- **正向约束**：`LlmProvider` 必须公开 `invocation_stream`；Runtime 通过 `InvocationEventReducer` 主动 poll 并投影事件；Provider-private `InvocationSink` 不得进入 Runtime / Context。
+- **范围边界**：#907 已物理删除 legacy sink；Provider 内部 `InvocationSink` 是 crate-private decoder seam，只能在 Provider adapter 内存在，**NEVER** 作为跨 crate 生产入口。
 
 ### 6c. check-provider-http-attempt.sh
 

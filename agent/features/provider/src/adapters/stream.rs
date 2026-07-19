@@ -262,23 +262,26 @@ pub(crate) fn invocation_stream_from_decoder(
             let _ = sender.send(terminal);
         }));
     });
-    Box::pin(futures_util::stream::unfold(
-        (receiver, runtime, bridge_context),
-        |(receiver, runtime, bridge_context)| async move {
-            let blocking_runtime = runtime.clone();
-            let blocking_context = bridge_context.clone();
-            tokio::task::spawn_blocking(move || {
-                blocking_runtime.block_on(logging::instrument(blocking_context, async move {
-                    observe_bridge_context("consumer");
-                    receiver.recv().ok().map(|event| (event, receiver))
-                }))
-            })
-            .await
-            .ok()
-            .flatten()
-            .map(|(event, receiver)| (event, (receiver, runtime, bridge_context)))
-        },
-    ))
+    Box::pin(
+        futures_util::stream::unfold(
+            (receiver, runtime, bridge_context),
+            |(receiver, runtime, bridge_context)| async move {
+                let blocking_runtime = runtime.clone();
+                let blocking_context = bridge_context.clone();
+                tokio::task::spawn_blocking(move || {
+                    blocking_runtime.block_on(logging::instrument(blocking_context, async move {
+                        observe_bridge_context("consumer");
+                        receiver.recv().ok().map(|event| (event, receiver))
+                    }))
+                })
+                .await
+                .ok()
+                .flatten()
+                .map(|(event, receiver)| (event, (receiver, runtime, bridge_context)))
+            },
+        )
+        .fuse(),
+    )
 }
 
 struct InvocationEventHandler {
@@ -630,6 +633,10 @@ pub async fn parse_stream(
         stop_reason,
     })
 }
+
+#[cfg(test)]
+#[path = "stream_contract_tests.rs"]
+mod contract_tests;
 
 #[cfg(test)]
 mod tests {
