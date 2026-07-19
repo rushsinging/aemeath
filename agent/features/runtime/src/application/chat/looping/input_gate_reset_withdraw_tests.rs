@@ -7,9 +7,7 @@ use crate::application::chat::looping::events::RuntimeStreamEvent;
 use crate::application::chat::looping::input_gate::{
     run_loop_gate, EmptyQueueDrainPort, GateDecision, GateKind, PendingInputBuffer,
 };
-use context::session::ChatChain;
 use sdk::ChatInputEvent;
-use share::message::Message;
 use task::TaskAccess;
 
 /// #391 S1-3：idle gate 收到 Reset → 清空 messages + 发 SessionReset，保持 idle。
@@ -18,8 +16,6 @@ async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
     let mut buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::Reset]);
     let sink = TestSink::default();
-    let mut chain =
-        ChatChain::from_flat_messages(vec![Message::user("old1"), Message::user("resp1")]);
 
     let task_access = task::TaskStore::new();
     task_access
@@ -43,8 +39,6 @@ async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task_access,
         true, // idle
     )
@@ -56,18 +50,19 @@ async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
     );
     assert!(task_access.list_batches().is_empty());
     assert_eq!(outcome.decision, GateDecision::Proceed);
+    assert!(outcome.reset_requested, "idle Reset 应请求清空会话");
     assert!(
-        chain.is_empty(),
-        "idle Reset 应清空所有消息，实际 {:?}",
-        chain.messages_flat()
+        outcome.adopted_messages.is_empty(),
+        "idle Reset 清空后不应有 adopted 消息"
     );
-    let has_reset = sink
-        .events
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|e| matches!(e, RuntimeStreamEvent::SessionReset));
-    assert!(has_reset, "应发出 SessionReset 事件");
+    assert!(
+        sink.events
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|event| !matches!(event, RuntimeStreamEvent::SessionReset)),
+        "durable Context clear 成功前 gate 不得提前发 SessionReset"
+    );
 }
 
 /// #391 S1-3：busy gate 收到 Reset → 放回 buffer，messages 不变，等 idle 处理。
@@ -76,7 +71,6 @@ async fn test_busy_gate_reset_defers_to_buffer() {
     let mut buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::Reset]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(vec![Message::user("old1")]);
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
@@ -84,20 +78,18 @@ async fn test_busy_gate_reset_defers_to_buffer() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         false, // busy
     )
     .await;
 
-    assert_eq!(
-        chain.messages_flat().len(),
-        1,
-        "busy gate 不应清空 messages"
-    );
     assert_eq!(buffer.len(), 1, "Reset 应留在 buffer 等待 idle");
     assert_eq!(outcome.decision, GateDecision::Proceed);
+    assert!(!outcome.reset_requested, "busy gate 不应请求 reset");
+    assert!(
+        outcome.adopted_messages.is_empty(),
+        "busy gate 不应 adopt 消息"
+    );
     let has_reset = sink
         .events
         .lock()
@@ -116,7 +108,6 @@ async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
         ChatInputEvent::user_message("after-reset", Vec::new()),
     ]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(vec![Message::user("old1")]);
 
     let task_access = task::TaskStore::new();
     task_access
@@ -140,15 +131,17 @@ async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task_access,
         true, // idle
     )
     .await;
 
     assert_eq!(outcome.dropped_events, 1, "Reset 后的 UserMessage 应被丢弃");
-    assert!(chain.is_empty(), "Reset 清空后不应 append 后续消息");
+    assert!(outcome.reset_requested, "idle Reset 应请求清空会话");
+    assert!(
+        outcome.adopted_messages.is_empty(),
+        "Reset 清空后不应 adopt 后续消息"
+    );
 }
 
 /// #391 S3-3：WithdrawAll 非空 → 回滚已 append + 收集剩余 text + 发 Withdrawn。
@@ -161,7 +154,6 @@ async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
         ChatInputEvent::WithdrawAll,
     ]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(Vec::new());
 
     let task_access = task::TaskStore::new();
     task_access
@@ -185,8 +177,6 @@ async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task_access,
         true, // idle
     )
@@ -202,7 +192,10 @@ async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
         vec!["aaa".to_string(), "bbb".to_string()],
         "应收集所有 UserMessage text（含已 append 的）"
     );
-    assert!(chain.is_empty(), "WithdrawAll 应回滚已 append 的消息");
+    assert!(
+        outcome.adopted_messages.is_empty(),
+        "WithdrawAll 应回滚已 adopt 的消息"
+    );
     assert!(buffer.is_empty(), "buffer 应为空");
     assert_eq!(outcome.appended_user_messages, 0);
 }
@@ -213,7 +206,6 @@ async fn test_withdraw_all_empty_buffer_is_noop() {
     let mut buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::WithdrawAll]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(Vec::new());
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
@@ -221,8 +213,6 @@ async fn test_withdraw_all_empty_buffer_is_noop() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         true,
     )
@@ -236,6 +226,7 @@ async fn test_withdraw_all_empty_buffer_is_noop() {
         .any(|e| matches!(e, RuntimeStreamEvent::UserMessagesWithdrawn { .. }));
     assert!(!has_withdrawn, "无 UserMessage 时不应发 Withdrawn");
     assert_eq!(outcome.appended_user_messages, 0);
+    assert!(outcome.adopted_messages.is_empty());
 }
 
 /// #391 S3-3：busy gate 也立即处理 WithdrawAll（回滚 + 收集，不延迟）。
@@ -247,7 +238,6 @@ async fn test_busy_gate_withdraw_all_executes_immediately() {
         ChatInputEvent::WithdrawAll,
     ]);
     let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(vec![Message::user("existing")]);
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
@@ -255,8 +245,6 @@ async fn test_busy_gate_withdraw_all_executes_immediately() {
         &EmptyQueueDrainPort,
         &input,
         &sink,
-        &mut chain,
-        "seg",
         &task::TaskStore::new(),
         false, // busy
     )
@@ -272,12 +260,10 @@ async fn test_busy_gate_withdraw_all_executes_immediately() {
         vec!["queued".to_string()],
         "只撤回本批 UserMessage"
     );
-    // existing 保留（上一回合的），queued 被回滚
-    assert_eq!(
-        chain.messages_flat().len(),
-        1,
-        "queued 应被回滚，只保留 existing"
+    // queued 被回滚，无 adopted 消息
+    assert!(
+        outcome.adopted_messages.is_empty(),
+        "queued 应被回滚，无 adopted 消息"
     );
-    assert_eq!(chain.messages_flat()[0].text_content(), "existing");
     assert_eq!(outcome.appended_user_messages, 0);
 }

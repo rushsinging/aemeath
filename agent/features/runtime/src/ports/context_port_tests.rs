@@ -67,6 +67,21 @@ impl ContextPort for FakeContextPort {
         Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
     }
 
+    async fn manual_compact(
+        &self,
+        request: &ManualCompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        Ok(CompactOutcome::Committed(CompactResult {
+            summary: format!("manual summary for {}", request.session_id.as_str()),
+            recent_messages: vec![],
+            source_revision: SessionRevision::new(2),
+        }))
+    }
+
+    async fn clear_session(&self, _session_id: &SessionId) -> Result<(), ContextPortError> {
+        Ok(())
+    }
+
     async fn append_and_persist(
         &self,
         append: &ContextAppend,
@@ -85,4 +100,27 @@ async fn runtime_fake_compiles_against_context_owned_port() {
     let request = request();
     let window = FakeContextPort.build_window(&request).await.unwrap();
     assert!(window.messages.is_empty());
+
+    let manual = FakeContextPort
+        .manual_compact(&ManualCompactRequest {
+            session_id: request.session_id.clone(),
+            run_id: request.run_id.clone(),
+            system_prompt: request.system_prompt.clone(),
+            context_size: request.context_size,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        manual,
+        CompactOutcome::Committed(ref result)
+            if result.source_revision == SessionRevision::new(2)
+    ));
+
+    assert_eq!(
+        FakeContextPort
+            .clear_session(&request.session_id)
+            .await
+            .unwrap(),
+        ()
+    );
 }

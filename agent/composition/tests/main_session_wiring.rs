@@ -232,7 +232,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
 
     let task_wiring = task::wire_task();
     let task_access = task_wiring.access();
-    let session_tasks = context::compose_session_task_capture(task_wiring.persist());
 
     // Construct the same production opener that Composition uses.
     let dataset_adapter = Arc::new(
@@ -278,7 +277,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         reflection_history,
         Arc::new(policy::AllowAllPolicy),
         task_access,
-        session_tasks,
     );
 
     let args = ChatBootstrapArgs {

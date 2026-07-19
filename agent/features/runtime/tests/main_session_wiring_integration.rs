@@ -15,9 +15,9 @@
 
 use std::sync::Arc;
 
-use context::session::{save_session, ChatSegment, Session, SessionMetadata};
+use context::session::SessionMetadata;
 use context::MainSessionWiring;
-use runtime::{resume_session_to_backing, ResumeError};
+use runtime::resume_session_to_backing;
 use share::message::{Message, Role};
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -82,18 +82,18 @@ async fn make_wiring_and_workspace(
 }
 
 async fn seed_session(workspace: &project::WorkspaceViews, id: &str) {
-    let ws_ctx = workspace.persist().snapshot();
-    let cwd = workspace.read().initial_cwd().display().to_string();
-    let mut session = Session::new(id.to_string(), cwd);
-    let mut seg = ChatSegment::normal(None);
-    seg.messages = vec![
-        Message::user("hello from saved session"),
-        Message::placeholder(Role::Assistant),
-    ];
-    session.chats = vec![seg];
-    session.metadata = SessionMetadata::default();
-    session.workspace = Some(ws_ctx);
-    save_session(&session).await.expect("save seed session");
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "id": id,
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "messages": [Message::user("hello from saved session"), Message::placeholder(Role::Assistant)],
+        "metadata": SessionMetadata::default(),
+        "workspace": workspace.persist().snapshot(),
+    }))
+    .expect("encode legacy seed");
+    context::import_session_bytes(&bytes)
+        .await
+        .expect("import seed session");
 }
 
 // ─── Test 1: Startup resume truly restores ───────────────────────────
@@ -110,12 +110,12 @@ async fn startup_resume_truly_restores_messages() {
     let (wiring, workspace) = make_wiring_and_workspace(&temp).await;
     seed_session(&workspace, "resume-target-1").await;
 
-    let (restore, session_id) = resume_session_to_backing("resume-target-1", &wiring)
+    let projection = resume_session_to_backing("resume-target-1", &wiring)
         .await
         .expect("resume should succeed");
 
-    assert_eq!(session_id, "resume-target-1");
-    let messages = restore.active_chain.messages_flat();
+    assert_eq!(projection.session_id, "resume-target-1");
+    let messages = projection.messages;
     assert!(
         messages
             .iter()
@@ -141,20 +141,16 @@ async fn runtime_resume_is_equivalent_to_startup_resume() {
     // Both startup and runtime paths call the same `resume_session_to_backing`
     // helper. Calling it twice with the same session should produce identical
     // projections.
-    let (restore1, id1) = resume_session_to_backing("resume-target-2", &wiring)
+    let projection1 = resume_session_to_backing("resume-target-2", &wiring)
         .await
         .expect("first resume");
 
-    let (restore2, id2) = resume_session_to_backing("resume-target-2", &wiring)
+    let projection2 = resume_session_to_backing("resume-target-2", &wiring)
         .await
         .expect("second resume");
 
-    assert_eq!(id1, id2, "both resumes return the same session ID");
-    assert_eq!(
-        restore1.active_chain.messages_flat().len(),
-        restore2.active_chain.messages_flat().len(),
-        "both resumes produce the same number of messages"
-    );
+    assert_eq!(projection1.session_id, projection2.session_id);
+    assert_eq!(projection1.messages.len(), projection2.messages.len());
 }
 
 // ─── Test 3: Bound lease blocks resume until run ends ────────────────
@@ -191,7 +187,7 @@ async fn bound_lease_blocks_resume_until_dropped() {
     drop(bound);
 
     // Now resume should succeed (exclusive permit available).
-    let (_restore, _id) = resume_session_to_backing("resume-target-3", &wiring)
+    resume_session_to_backing("resume-target-3", &wiring)
         .await
         .expect("resume should succeed after bound is dropped");
 }
@@ -265,8 +261,8 @@ async fn resume_nonexistent_session_returns_load_error() {
     let result = resume_session_to_backing("does-not-exist", &wiring).await;
 
     assert!(
-        matches!(result, Err(ResumeError::Load(_))),
-        "nonexistent session should return Load error, got: {:?}",
+        matches!(result, Err(context::SessionManagementError::NotFound(_))),
+        "nonexistent session should return NotFound, got: {:?}",
         result
     );
 }
@@ -442,14 +438,10 @@ async fn cross_project_resume_committed_config_has_target_model_and_memory() {
     );
 }
 
-// ─── Test 8: Projection participant atomically updates backing inside gate ─
+// ─── Test 8: resume publishes only Context-owned projection ───────────
 
-/// When a `SessionProjectionParticipant` is registered, `resume_prepared`
-/// updates the leased projection backing **inside** the exclusive gate.
-/// The event chain returned by `resume_session_to_backing` is equivalent
-/// to the backing's chain — there is no observable window and no double-write.
 #[tokio::test]
-async fn projection_participant_event_chain_equivalent_to_backing() {
+async fn resume_projection_matches_committed_session() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let _env = EnvGuard::set(
         "AEMEATH_AGENTS_DIR",
@@ -460,72 +452,14 @@ async fn projection_participant_event_chain_equivalent_to_backing() {
     let (wiring, workspace) = make_wiring_and_workspace(&temp).await;
     seed_session(&workspace, "projection-equiv").await;
 
-    // Register a mock projection participant that records the committed chain.
-    use context::SessionProjectionParticipant;
-    use std::sync::Mutex;
-
-    struct RecordingParticipant {
-        committed_chain: Mutex<Option<context::session::ChatChain>>,
-        commit_count: std::sync::atomic::AtomicUsize,
-    }
-
-    impl SessionProjectionParticipant for RecordingParticipant {
-        fn prepare(
-            &self,
-            session: &context::domain::session::CanonicalSession,
-        ) -> context::session::SessionRestore {
-            context::session::SessionRestore::from_canonical(session)
-        }
-
-        fn commit(&self, prepared: context::session::SessionRestore) {
-            self.commit_count
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            *self.committed_chain.lock().unwrap() = Some(prepared.active_chain);
-        }
-    }
-
-    let recorder = Arc::new(RecordingParticipant {
-        committed_chain: Mutex::new(None),
-        commit_count: std::sync::atomic::AtomicUsize::new(0),
-    });
-    wiring
-        .register_projection_participant(recorder.clone() as Arc<dyn SessionProjectionParticipant>);
-
-    // Resume — this updates the backing inside the exclusive gate.
-    let (restore, _id) = resume_session_to_backing("projection-equiv", &wiring)
+    let projection = resume_session_to_backing("projection-equiv", &wiring)
         .await
         .expect("resume should succeed");
+    let bound = wiring.bind_main_run().await.expect("bind after resume");
 
-    // The participant was called exactly once (no double-write).
-    assert_eq!(
-        recorder
-            .commit_count
-            .load(std::sync::atomic::Ordering::SeqCst),
-        1,
-        "participant commit should be called exactly once — no double-write"
-    );
-
-    // The event chain (from restore) is equivalent to the backing's chain
-    // (from participant commit). Both derive from the same committed session.
-    let backing_chain = recorder
-        .committed_chain
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("participant should have committed a chain");
-
-    assert_eq!(
-        restore.active_chain.messages_flat().len(),
-        backing_chain.messages_flat().len(),
-        "event chain and backing chain must have the same message count — equivalence"
-    );
-
-    // Verify the chain contains the expected seeded message.
-    let messages = backing_chain.messages_flat();
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.text_content().contains("hello from saved session")),
-        "backing chain should contain the seeded message"
-    );
+    assert_eq!(projection.session_id, bound.session().id);
+    assert!(projection
+        .messages
+        .iter()
+        .any(|message| message.text_content().contains("hello from saved session")));
 }

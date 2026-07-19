@@ -28,15 +28,6 @@ pub type SwitchClientFn = Arc<
         + Sync,
 >;
 
-pub type SaveChainFn = Arc<
-    dyn Fn(
-            &context::session::ChatChain,
-        )
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>>
-        + Send
-        + Sync,
->;
-
 /// 单次 chat loop 的完整执行状态。
 ///
 /// 由 `chat_impl()` 从 `RuntimeHandle` 构造，按值传入 `process_chat_loop()`，
@@ -58,7 +49,9 @@ where
     pub system_blocks: Vec<provider::SystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,
-    pub chain: context::session::ChatChain,
+    /// 本轮 chat loop 的初始消息（来自 user_input）。Runtime 不再持有/回写
+    /// 会话链；历史由 Context backing 提供。
+    pub initial_messages: Vec<share::message::Message>,
     pub context_size: usize,
     pub workspace: project::WorkspaceViews,
     /// Context-owned Main Session coordinator. Used for:
@@ -86,16 +79,10 @@ where
     pub language: String,
     /// Workflow-owned Main adaptive reasoning capability。
     pub reasoning: Arc<dyn ReasoningPort>,
-    /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
-    pub frozen_chats: Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
-    /// 活跃链的 compact summary（走 system 通道注入）。
-    pub active_summary: Arc<std::sync::Mutex<Option<String>>>,
     /// 模型切换构建器（#567）。由 core 层注入，避免 business 层反向依赖 core。
     /// idle 分支收到 `SwitchModel` 事件时调用，从 config 解析 selection 字符串，
     /// 返回新 `LlmClient` + `ModelSwitchResult`；解析失败返回 `String` 错误信息。
     pub build_switched_client: SwitchClientFn,
-    /// 会话保存闭包（#688）。由 core 层注入，直接接受 chain 引用保存。
-    pub save_chain: SaveChainFn,
     /// 查询 reflection 历史（#899）。返回安全视图，不含正文。
     pub list_reflection_history: Arc<
         dyn Fn(

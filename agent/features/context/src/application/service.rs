@@ -4,7 +4,8 @@ use async_trait::async_trait;
 
 use crate::domain::{
     AppendReceipt, CompactOutcome, CompactRequest, CompactionDecision, ContextAppend,
-    ContextAppendError, ContextPortError, ContextRequest, ContextWindow, SystemBlock,
+    ContextAppendError, ContextPortError, ContextRequest, ContextWindow, ManualCompactRequest,
+    SessionId, SystemBlock,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
@@ -105,6 +106,17 @@ impl ContextPort for ContextApplicationService {
 
     async fn compact(&self, request: &CompactRequest) -> Result<CompactOutcome, ContextPortError> {
         self.session.commit_compaction(request).await
+    }
+
+    async fn manual_compact(
+        &self,
+        request: &ManualCompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        self.session.commit_manual_compaction(request).await
+    }
+
+    async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
+        self.session.clear(session_id).await
     }
 
     async fn append_and_persist(

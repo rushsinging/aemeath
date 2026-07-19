@@ -1,7 +1,5 @@
 mod agent_calls;
 mod ask_user;
-pub(crate) mod compact;
-mod compact_outcome;
 pub(crate) mod config_reload;
 mod events;
 mod finalize;
