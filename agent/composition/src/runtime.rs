@@ -125,6 +125,28 @@ pub(crate) async fn from_args_with_gateways(
     let wiring = context::wire_main_session(deps)
         .await
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+
+    // Preserve the injected legacy gateway seam until #914 retires it. Runtime
+    // receives only Catalog/Execution ports and never observes this registry.
+    struct WiringMemoryPortSource {
+        wiring: Arc<context::MainSessionWiring>,
+    }
+    impl tools::MemoryPortSource for WiringMemoryPortSource {
+        fn current(&self) -> Arc<dyn memory::MemoryPort> {
+            self.wiring.committed_memory()
+        }
+    }
+    let registry = gateways.tools.new_registry();
+    gateways.tools.register_all_tools(
+        &registry,
+        task_wiring.access(),
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        Arc::new(WiringMemoryPortSource {
+            wiring: wiring.clone(),
+        }),
+        workspace.control(),
+    );
+
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         workspace,
         wiring,
