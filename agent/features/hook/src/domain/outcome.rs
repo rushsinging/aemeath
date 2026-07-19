@@ -5,6 +5,8 @@
 
 use std::time::Duration;
 
+use crate::domain::invocation::HookPoint;
+
 // ─── HookDirective ────────────────────────────────────────────
 
 /// Hook directive——调用方解释并推进自己的聚合。
@@ -165,14 +167,56 @@ pub struct HookOutcome {
     pub executions: Vec<HookExecution>,
     /// 最终 directive。
     pub directive: HookDirective,
+    /// BC 保留的展示消息（按 executions 聚合顺序逐条保留，不合并、不丢失来源）。
+    ///
+    /// 与 `directive` 的聚合 context 不同：`messages` 按「每条 subscription 的每次成功
+    /// 执行」逐条保留 additionalContext / systemMessage，供调用方（Runtime / TUI）原样展示。
+    pub messages: Vec<HookDisplayMessage>,
 }
 
 impl HookOutcome {
-    /// 创建一个 Proceed（Continue）结果，无执行明细。
+    /// 创建一个 Proceed（Continue）结果，无执行明细、无展示消息。
     pub fn proceed() -> Self {
         Self {
             executions: Vec::new(),
             directive: HookDirective::Continue,
+            messages: Vec::new(),
         }
     }
+}
+
+// ─── HookDisplayMessage（BC 保留展示消息，#925）─────────────────
+
+/// Hook 展示消息种类。
+///
+/// 对应 Claude Code hook 协议的两个独立展示字段：
+/// - `AdditionalContext` ← JSON `additionalContext`（注入 LLM 对话流）；
+/// - `SystemMessage` ← JSON `systemMessage`（显示在 TUI）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HookDisplayMessageKind {
+    /// 额外上下文（JSON `additionalContext`）。
+    AdditionalContext,
+    /// 系统消息（JSON `systemMessage`，警告等，显示在 TUI）。
+    SystemMessage,
+}
+
+/// Hook BC 保留的展示消息。
+///
+/// 按「每条 subscription 的每次成功执行」逐条保留，不合并、不丢失来源，
+/// 供调用方（Runtime / TUI）原样展示。`source` 取 HookMatcher 的稳定非秘密值
+/// （`All`="*"，`ToolName(name)`=name），`execution_ordinal` 按 executions 聚合顺序递增。
+#[derive(Debug, Clone)]
+pub struct HookDisplayMessage {
+    /// 触发点。
+    pub point: HookPoint,
+    /// 来源（HookMatcher 稳定非秘密值：`All`="*"，`ToolName(name)`=name）。
+    pub source: String,
+    /// 执行序号（按 executions 聚合顺序，1-based）。
+    pub execution_ordinal: u32,
+    /// 该 subscription 内的成功 attempt 序号（含重试，1-based）。
+    pub attempt: u8,
+    /// 消息种类。
+    pub kind: HookDisplayMessageKind,
+    /// 消息文本。
+    pub text: String,
 }

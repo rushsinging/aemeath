@@ -28,6 +28,17 @@ pub(super) fn matcher_hits(matcher: &HookMatcher, invocation: &HookInvocation) -
     }
 }
 
+/// HookMatcher 的稳定非秘密来源值（用于展示消息的 `source` 字段）。
+///
+/// - `All` → `"*"`；
+/// - `ToolName(name)` → `name`（工具名是用户配置的稳定非秘密值）。
+pub(super) fn matcher_source(matcher: &HookMatcher) -> String {
+    match matcher {
+        HookMatcher::All => "*".to_string(),
+        HookMatcher::ToolName(name) => name.clone(),
+    }
+}
+
 /// 提取 invocation 携带的工具名（仅工具相关 point 有）。
 fn tool_name_of(invocation: &HookInvocation) -> Option<&str> {
     match invocation {
