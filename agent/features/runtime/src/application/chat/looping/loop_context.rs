@@ -71,8 +71,6 @@ where
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub policy: Arc<dyn policy::PolicyPort>,
     pub(crate) active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
-    /// Legacy 持久化兼容句柄（input_gate clear，#890/#891）。
-    pub task_store: Arc<storage::TaskStore>,
     /// Runtime/Tool 日常状态唯一来源（#889 low-privilege 端口）。
     pub task_access: Arc<dyn task::TaskAccess>,
     pub max_tool_concurrency: usize,

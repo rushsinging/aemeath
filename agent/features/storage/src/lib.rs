@@ -5,9 +5,7 @@ mod domain;
 #[cfg(test)]
 #[path = "domain_tests.rs"]
 mod domain_tests;
-mod memory_store;
 mod ports;
-mod task_store;
 
 pub mod api {
     pub use crate::{
@@ -50,13 +48,7 @@ pub use domain::{
     RecoveryDecision, SafePathSegment, StorageError, StorageErrorKind, StorageKey,
     StorageNamespace, TransactionDigest, TransactionScope, WriteOptions, WriteReceipt,
 };
-pub use memory_store::{
-    memory_base_dir, project_file_name, project_file_name_from_path, MemoryStore,
-};
 pub use ports::{AtomicBlobPort, AtomicDatasetPort};
-pub use task_store::{
-    Batch, BatchStatus, Task, TaskPriority, TaskSnapshot, TaskStatus, TaskStore, TaskStoreStats,
-};
 
 // ---------------------------------------------------------------------------
 // #[cfg(test)] 线程局部日志捕获器

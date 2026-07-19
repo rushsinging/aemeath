@@ -1,12 +1,12 @@
 //! TaskPort — Task BC 出站端口。
 //!
 //! 对应设计：`docs/design/02-modules/runtime/06-ports-and-adapters.md` §2。
-//! PL 类型细化由 #885 负责；此处复用已有 storage 类型。
+//! PL 类型由 Task BC 拥有；此过渡端口只引用 Task 发布语言。
 
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use storage::{Task, TaskSnapshot};
+use task::{Task, TaskSnapshot};
 
 // ─── Port trait ───
 

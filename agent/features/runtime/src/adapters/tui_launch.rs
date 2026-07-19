@@ -9,7 +9,6 @@ use std::sync::Arc;
 use hook::api::HookRunner;
 use provider::LlmClient;
 use provider::SystemBlock;
-use storage::TaskStore;
 use tools::{AgentRunner, ToolRegistry};
 
 /// TUI 启动所需的过渡上下文。
@@ -25,7 +24,6 @@ pub struct TuiLaunchContext {
     pub verbose: bool,
     pub agent_runner: Arc<dyn AgentRunner>,
     pub allow_all: bool,
-    pub task_store: Arc<TaskStore>,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,

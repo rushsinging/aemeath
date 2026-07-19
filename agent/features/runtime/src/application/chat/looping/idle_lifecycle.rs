@@ -71,7 +71,6 @@ pub(crate) async fn idle_until_resume_or_shutdown<I, S>(
     sink: &S,
     pending: &mut PendingInputBuffer,
     chain: &mut ChatChain,
-    task_store: &storage::TaskStore,
     task_access: &dyn task::TaskAccess,
 ) -> IdleResult
 where
@@ -88,7 +87,6 @@ where
                     sink,
                     chain,
                     &segment_id,
-                    task_store,
                     task_access,
                     true,
                 )
