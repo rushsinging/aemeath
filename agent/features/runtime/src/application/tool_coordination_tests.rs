@@ -299,12 +299,18 @@ fn restore_tool_call_order_uses_original_call_order() {
 /// based on the tool name.
 struct HookTestPolicy {
     eval_count: Mutex<usize>,
+    authorization: tools::AuthorizationContext,
 }
 
 impl HookTestPolicy {
     fn new() -> Self {
+        Self::with_authorization(tools::AuthorizationContext::STANDARD)
+    }
+
+    fn with_authorization(authorization: tools::AuthorizationContext) -> Self {
         Self {
             eval_count: Mutex::new(0),
+            authorization,
         }
     }
 
@@ -324,7 +330,7 @@ impl PolicyPort for HookTestPolicy {
                 reason: PolicyReason::RestrictedTool,
                 subject: ApprovalSubject::UserInteraction,
             },
-            _ => PolicyDecision::Allow(tools::AuthorizationContext::STANDARD),
+            _ => PolicyDecision::Allow(self.authorization),
         }
     }
 }
@@ -500,6 +506,33 @@ fn hook_directive_updated_input_valid_passes_schema_and_policy() {
         other => panic!("expected Ready, got {other:?}"),
     }
     // UpdatedInput must re-evaluate policy exactly once.
+    assert_eq!(policy.eval_count(), 1);
+}
+
+#[test]
+fn hook_directive_updated_input_preserves_policy_authorization() {
+    let catalog = build_catalog();
+    let policy = HookTestPolicy::with_authorization(tools::AuthorizationContext::ALLOW_ALL);
+    let original = call("Allowed", 0);
+
+    let outcome = apply_hook_directive_to_tool_call(
+        &original,
+        RuntimeHookDirective::UpdatedInput {
+            input: serde_json::json!({"path": "/tmp/file"}),
+        },
+        &catalog,
+        &policy,
+        &sdk::RunId::new_v7(),
+        &sdk::RunStepId::new_v7(),
+        &std::env::current_dir().unwrap(),
+    );
+
+    match outcome {
+        HookDirectiveOutcome::Ready { authorization, .. } => {
+            assert_eq!(authorization, tools::AuthorizationContext::ALLOW_ALL);
+        }
+        other => panic!("expected Ready, got {other:?}"),
+    }
     assert_eq!(policy.eval_count(), 1);
 }
 

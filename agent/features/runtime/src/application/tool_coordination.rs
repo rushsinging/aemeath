@@ -160,10 +160,10 @@ pub enum HookDirectiveOutcome {
     Ready {
         /// The call with validated, updated input.
         call: ToolCall,
-        /// Context string from `ContextAndInput` (preserved for caller injection).
-        context: Option<String>,
         /// Authorization returned by the mandatory post-update Policy evaluation.
         authorization: tools::AuthorizationContext,
+        /// Context string from `ContextAndInput` (preserved for caller injection).
+        context: Option<String>,
     },
     /// Continue with the original call unchanged.
     ///
