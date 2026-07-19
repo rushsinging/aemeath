@@ -137,6 +137,30 @@ fn stable_revision(hits: &[MemorySearchHit]) -> u64 {
     revision
 }
 
+pub struct CommittedMemoryRetrieveAdapter {
+    memory: Arc<std::sync::RwLock<Arc<dyn MemoryPort>>>,
+}
+
+impl CommittedMemoryRetrieveAdapter {
+    pub fn new(memory: Arc<std::sync::RwLock<Arc<dyn MemoryPort>>>) -> Self {
+        Self { memory }
+    }
+}
+
+#[async_trait]
+impl ContextMemorySource for CommittedMemoryRetrieveAdapter {
+    async fn materialize(&self, request: &ContextRequest) -> Result<MemoryMaterialization, String> {
+        let memory = self
+            .memory
+            .read()
+            .map_err(|error| error.to_string())?
+            .clone();
+        MemoryRetrieveAdapter::new(memory)
+            .materialize(request)
+            .await
+    }
+}
+
 /// Sub Run 或禁用 Memory 时使用的空注入 adapter。
 pub struct NoOpContextMemorySource;
 
@@ -265,6 +289,7 @@ mod tests {
             session_id: sdk::SessionId::new("session"),
             request_id: ContextRequestId::new("request"),
             run_id: RunId::new("run"),
+            step_id: sdk::RunStepId::new("step"),
             pending_messages: vec![Message::user("pending")],
             system_prompt: SystemPromptSpec::new("system"),
             model_id: "fake/model".into(),

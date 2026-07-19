@@ -9,14 +9,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::application::agent::{Agent, ToolCall};
-use crate::application::chat::looping::compact::auto_compact;
-use crate::application::chat::looping::compact_outcome::apply_compact_outcome;
 use crate::application::chat::looping::finalize::{
     finish_completed_loop, run_stop_hook_before_finish,
 };
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
-use crate::application::chat::looping::loop_phases::build_api_messages;
 use crate::application::chat::looping::post_batch::run_post_tool_batch;
 use crate::application::chat::looping::reflection::{
     should_run_turn_reflection, submit_interval_reflection,
@@ -30,12 +27,16 @@ use crate::application::chat::looping::{
     ChatEventSink, InputEventDrainPort, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
     RuntimeTurnContext,
 };
+use crate::application::context_coordination::ContextCoordinator;
 use crate::application::loop_engine::{
     split_input_events, LoopEngineError, LoopInput, ModelStep, RunLoopPort, ToolGuardDecision,
     ToolStep,
 };
 use crate::domain::agent_run::RunDomainEvent;
-use context::session::ChatChain;
+use crate::ports::{
+    CalendarDate, ContextRequest, ContextRequestId, Language as ContextLanguage, RunStepId,
+    SessionId, SystemPromptSpec, TaskReminderSnapshot,
+};
 use workflow::api::{ReasoningPort, ReasoningSignal};
 
 /// Aborts a spawned request companion task even when the invocation future is dropped.
@@ -45,6 +46,10 @@ impl Drop for AbortTaskOnDrop {
     fn drop(&mut self) {
         self.0.abort();
     }
+}
+
+fn request_context_size(request: Option<&ContextRequest>) -> usize {
+    request.map_or(1, |request| request.context_size.max(1))
 }
 
 pub(crate) fn request_log_context(
@@ -80,13 +85,17 @@ where
     pub(crate) tool_catalog: &'a Arc<dyn tools::ToolCatalogPort>,
     pub(crate) tool_execution: &'a Arc<dyn tools::ToolExecutionPort>,
     pub(crate) tool_context_binding: &'a Arc<dyn tools::ToolExecutionContextBindingPort>,
-    pub(crate) system_blocks: &'a [provider::SystemBlock],
     pub(crate) system_prompt_text: &'a str,
-    pub(crate) user_context: &'a str,
-    pub(crate) chain: &'a mut ChatChain,
+    pub(crate) config_snapshot: &'a share::config::domain::snapshot::ConfigSnapshot,
+    pub(crate) context: &'a ContextCoordinator,
+    pub(crate) context_request: Option<crate::ports::ContextRequest>,
+    pub(crate) context_window: Option<crate::ports::ContextWindow>,
+    pub(crate) projection_start_index: usize,
+    pub(crate) messages: Vec<Message>,
     pub(crate) context_size: usize,
     pub(crate) workspace: &'a project::WorkspaceViews,
     pub(crate) session_id: &'a str,
+    pub(crate) context_session_id: &'a str,
     pub(crate) read_files: &'a Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub(crate) session_reminders: &'a Arc<std::sync::Mutex<tools::SessionReminders>>,
     pub(crate) agent_runner: &'a Option<Arc<dyn tools::AgentRunner>>,
@@ -98,28 +107,19 @@ where
     pub(crate) max_tool_concurrency: usize,
     pub(crate) agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
     pub(crate) hook_runner: &'a hook::api::HookRunner,
-    pub(crate) memory_mode: crate::domain::agent_run::MemoryMode,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
     pub(crate) memory: &'a Arc<dyn memory::MemoryPort>,
     pub(crate) reflection_history: &'a Arc<dyn memory::api::ReflectionHistoryStore>,
     pub(crate) reflection_tasks: &'a crate::application::reflection::ReflectionTaskAdapter,
     pub(crate) language: &'a str,
-    pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
-    pub(crate) active_summary: &'a mut Option<String>,
-    pub(crate) active_summary_arc: &'a Arc<std::sync::Mutex<Option<String>>>,
     pub(crate) reasoning: &'a dyn ReasoningPort,
-    pub(crate) save_chain: &'a crate::application::chat::looping::loop_context::SaveChainFn,
     pub(crate) pending_input: &'a mut PendingInputBuffer,
     pub(crate) deferred_user_inputs: &'a mut VecDeque<sdk::ChatInputEvent>,
     pub(crate) cancel: CancellationToken,
     pub(crate) run_id: sdk::RunId,
     pub(crate) active_run: &'a dyn crate::domain::agent_run::ActiveRunPort,
     pub(crate) turn_count: usize,
-    pub(crate) segment_id: &'a str,
     pub(crate) turn_context: RuntimeTurnContext,
-    pub(crate) rollback_chain: ChatChain,
-    pub(crate) rollback_frozen_chats: Vec<context::session::ChatSegment>,
-    pub(crate) rollback_active_summary: Option<String>,
     pub(crate) last_total_tokens: &'a mut Option<u64>,
     pub(crate) task_reminder_state: &'a mut TaskReminderState,
     pub(crate) tool_identity:
@@ -133,10 +133,100 @@ where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
+    fn freeze_request(
+        &self,
+        step_id: &RunStepId,
+        pending_messages: Vec<Message>,
+    ) -> ContextRequest {
+        let task_reminder = self
+            .task_access
+            .reminder_snapshot()
+            .items
+            .iter()
+            .any(|item| {
+                matches!(
+                    item.status,
+                    task::TaskStatus::Pending | task::TaskStatus::InProgress
+                )
+            })
+            .then(|| "当前 task batch 仍有未完成任务；仅在与最新用户请求相关时继续。".to_string());
+        let raw_tool_schemas = self
+            .tool_catalog
+            .snapshot(
+                &tools::RegistryScopeName::new("main"),
+                &tools::ToolProfileName::new("main-full"),
+            )
+            .map(|snapshot| snapshot.model_schemas())
+            .unwrap_or_default();
+        let tool_schemas = raw_tool_schemas
+            .iter()
+            .filter_map(|schema| {
+                Some(crate::ports::ModelToolSchema {
+                    name: schema.get("name")?.as_str()?.to_string(),
+                    description: schema.get("description")?.as_str()?.to_string(),
+                    input_schema: schema.get("input_schema")?.clone(),
+                })
+            })
+            .collect::<Vec<_>>();
+        ContextRequest {
+            session_id: SessionId::new(self.context_session_id),
+            request_id: ContextRequestId::new(uuid::Uuid::now_v7().to_string()),
+            run_id: self.run_id.clone(),
+            step_id: step_id.clone(),
+            pending_messages,
+            system_prompt: SystemPromptSpec::new(self.system_prompt_text),
+            model_id: self.client.model_name().to_string(),
+            effective_reasoning: self.reasoning.current_requested_level(),
+            current_date: CalendarDate::new(chrono::Local::now().format("%Y-%m-%d").to_string()),
+            task_reminder: TaskReminderSnapshot {
+                text: task_reminder,
+            },
+            language: ContextLanguage::new(self.language),
+            agent_roles: std::collections::HashMap::new(),
+            config_snapshot: self.config_snapshot.clone(),
+            context_size: self.context_size,
+            max_output_tokens: self.client.default_scope().max_tokens() as usize,
+            last_api_input_tokens: *self.last_total_tokens,
+            tool_schemas,
+            tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(&raw_tool_schemas),
+            prev_system_tokens: None,
+            prev_tool_schema_tokens: None,
+        }
+    }
+
     /// 实时从 Project-owned `WorkspaceRead` 读取 `workspace_root`，避免 turn 内
     /// 切换 worktree 后使用过时路径。
     fn current_cwd(&self) -> PathBuf {
         self.workspace.read().current_workspace_root()
+    }
+
+    async fn persist_step(
+        &mut self,
+        cause: crate::ports::FinalizeCause,
+    ) -> Result<(), LoopEngineError> {
+        let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
+            return Ok(());
+        };
+        let messages = self
+            .messages
+            .iter()
+            .skip(self.projection_start_index)
+            .cloned()
+            .collect();
+        self.context
+            .append_finalized(
+                request,
+                request.step_id.clone(),
+                window.backing_revision,
+                cause,
+                messages,
+                vec![],
+                *self.last_total_tokens,
+            )
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        self.projection_start_index = self.messages.len();
+        Ok(())
     }
 
     async fn queue_busy_event(&mut self, event: sdk::ChatInputEvent) {
@@ -251,114 +341,61 @@ where
     }
 
     async fn rollback_cancelled(&mut self) {
-        *self.chain = self.rollback_chain.clone();
-        if let Ok(mut frozen) = self.frozen_chats.lock() {
-            *frozen = self.rollback_frozen_chats.clone();
-        }
-        *self.active_summary = self.rollback_active_summary.clone();
-        if let Ok(mut summary) = self.active_summary_arc.lock() {
-            *summary = self.rollback_active_summary.clone();
-        }
-        self.sink
-            .send_event(RuntimeStreamEvent::CompactRollback {
-                messages: self.chain.messages_flat(),
-            })
-            .await;
-        if let Err(error) = (self.save_chain)(self.chain).await {
-            log::error!(target: crate::LOG_TARGET, "cancel rollback save_chain failed: {error}");
-        }
         self.sink
             .send_event(RuntimeStreamEvent::Cancelled {
                 context: self.turn_context.clone(),
             })
             .await;
     }
-
-    async fn compact_impl(&mut self) {
-        let cleared = context::compact::microcompact_chain(self.chain);
-        if cleared > 0 {
-            self.sink
-                .send_event(RuntimeStreamEvent::MicrocompactDone {
-                    messages: self.chain.messages_flat(),
-                    cleared_count: cleared,
-                })
-                .await;
-        }
-        if let Some(outcome) = auto_compact(
-            self.sink,
-            &HookUi::new(self.sink.clone()),
-            self.hook_runner,
-            self.turn_count,
-            &self.chain.messages_flat(),
-            self.active_summary.as_deref(),
-            self.system_prompt_text,
-            self.context_size,
-            self.memory_config,
-            self.memory,
-            self.reflection_history,
-            self.reflection_tasks,
-            self.client,
-            self.language,
-            &self.current_cwd(),
-            &self.cancel,
-        )
-        .await
-        {
-            apply_compact_outcome(
-                self.sink,
-                outcome,
-                self.chain,
-                self.frozen_chats,
-                self.active_summary,
-                self.active_summary_arc,
-            )
-            .await;
-            // compact 后清空最近 usage；只有下一次 Provider 响应才能再次触发。
-            *self.last_total_tokens = None;
-        }
-    }
-
     async fn invoke_model_impl(
         &mut self,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
-        self.task_reminder_state
-            .update_from_messages(self.turn_count as u64, &self.chain.messages_flat());
-        let messages_for_api: Vec<Message> = build_api_messages(
-            self.user_context,
-            self.language,
-            self.task_reminder_state,
-            self.turn_count as u64,
-            &**self.task_access,
-            &self.chain.messages_flat(),
-        )
-        .await;
-        let tool_schemas = self
-            .tool_catalog
-            .snapshot(
-                &tools::RegistryScopeName::new("main"),
-                &tools::ToolProfileName::new("main-full"),
-            )
-            .map(|snapshot| snapshot.model_schemas())
-            .unwrap_or_default();
-        let mut effective_system_blocks = self.system_blocks.to_vec();
-        if self.memory_mode == crate::domain::agent_run::MemoryMode::Enabled {
-            effective_system_blocks.extend(
-                context::api::MemoryRetrieveAdapter::new(self.memory.clone())
-                    .materialize_provider_blocks(self.memory_config)
+        if self.context_window.is_none() {
+            if let Some(request) = &self.context_request {
+                let window = self
+                    .context
+                    .build_window(request)
                     .await
-                    .map_err(LoopEngineError::Adapter)?,
-            );
+                    .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+                self.context_window = Some(window);
+            }
         }
-        if let Some(summary) = self.active_summary.clone() {
-            effective_system_blocks.push(provider::SystemBlock {
-                block_type: "text".to_string(),
-                text: format!("<compact-summary>\n{summary}\n</compact-summary>"),
-                cache_control: None,
-            });
-        }
+        let window = self
+            .context_window
+            .clone()
+            .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
+        self.task_reminder_state
+            .update_from_messages(self.turn_count as u64, &window.messages);
+        let messages_for_api = window
+            .messages
+            .iter()
+            .map(Message::to_llm_view)
+            .collect::<Vec<_>>();
+        let tool_schemas = window
+            .tool_schemas
+            .iter()
+            .map(|schema| {
+                serde_json::json!({
+                    "name": schema.name,
+                    "description": schema.description,
+                    "input_schema": schema.input_schema,
+                })
+            })
+            .collect::<Vec<_>>();
+        let effective_system_blocks = window
+            .system_blocks
+            .iter()
+            .map(|block| {
+                if block.cacheable {
+                    provider::SystemBlock::cached(block.content.clone())
+                } else {
+                    provider::SystemBlock::dynamic(block.content.clone())
+                }
+            })
+            .collect::<Vec<_>>();
         log_llm_input(
             &messages_for_api,
-            self.chain.message_count(),
+            window.messages.len(),
             &effective_system_blocks,
             &tool_schemas,
         );
@@ -464,8 +501,10 @@ where
                     crate::application::model_invocation::RetryStep::Cancelled => {
                         return Err(LoopEngineError::Cancelled);
                     }
-                    crate::application::model_invocation::RetryStep::Compact
-                    | crate::application::model_invocation::RetryStep::Fail => {
+                    crate::application::model_invocation::RetryStep::Compact => {
+                        return Err(LoopEngineError::NeedsCompaction(error.to_string()));
+                    }
+                    crate::application::model_invocation::RetryStep::Fail => {
                         return Err(LoopEngineError::Adapter(error.to_string()));
                     }
                 },
@@ -493,13 +532,10 @@ where
             cache_creation_tokens: resp.usage.cache_creation_tokens.map(u64::from).unwrap_or(0),
             reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
             total_tokens: crate::application::token_usage::normalized_total_tokens(&resp.usage),
-            context_window: self.context_size as u64,
-            est_system_tokens: effective_system_blocks
-                .iter()
-                .map(|b| context::compact::estimate_tokens(&b.text))
-                .sum(),
-            est_tool_tokens: context::compact::estimate_tool_schemas_tokens(&tool_schemas),
-            est_message_tokens: context::compact::estimate_messages_tokens(&messages_for_api),
+            context_window: request_context_size(self.context_request.as_ref()) as u64,
+            est_system_tokens: window.token_estimation.system_tokens,
+            est_tool_tokens: window.token_estimation.tool_schema_tokens,
+            est_message_tokens: window.token_estimation.message_tokens,
             stop_reason: format!("{:?}", resp.stop_reason).to_lowercase(),
         };
 
@@ -511,11 +547,10 @@ where
                 elapsed_secs: api_elapsed,
             })
             .await;
-        self.chain
-            .push(resp.assistant_message.clone(), self.segment_id);
+        self.messages.push(resp.assistant_message.clone());
         self.sink
             .send_event(RuntimeStreamEvent::TurnStarted {
-                messages: self.chain.messages_flat(),
+                messages: self.messages.clone(),
             })
             .await;
 
@@ -554,7 +589,7 @@ where
                 self.reflection_tasks,
                 self.memory_config,
                 self.turn_count,
-                &self.chain.messages_flat(),
+                &self.messages,
                 self.client,
                 self.system_prompt_text,
                 self.language,
@@ -576,15 +611,14 @@ where
         )
         .await
         {
-            self.chain.push(
-                Message::system_generated_user(format!(
-                    "<system-reminder>\n{feedback}\n</system-reminder>"
-                )),
-                self.segment_id,
-            );
+            let blocked_assistant = self.messages.pop();
+            debug_assert!(blocked_assistant.is_some());
+            self.messages.push(Message::system_generated_user(format!(
+                "<system-reminder>\n{feedback}\n</system-reminder>"
+            )));
             self.sink
                 .send_event(RuntimeStreamEvent::StopHookBlocked {
-                    messages: self.chain.messages_flat(),
+                    messages: self.messages.clone(),
                 })
                 .await;
             return Ok((
@@ -610,6 +644,23 @@ where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
+    fn freeze_step(&mut self, step_id: &RunStepId, inputs: &[LoopInput]) {
+        let pending_messages = if inputs.is_empty() {
+            self.messages[self.projection_start_index..].to_vec()
+        } else {
+            inputs
+                .iter()
+                .map(|input| Message::user(input.text.clone()))
+                .collect()
+        };
+        self.projection_start_index = self.messages.len();
+        if !inputs.is_empty() {
+            self.messages.extend(pending_messages.clone());
+        }
+        self.context_request = Some(self.freeze_request(step_id, pending_messages));
+        self.context_window = None;
+    }
+
     async fn drain_input(&mut self) -> Result<Vec<LoopInput>, LoopEngineError> {
         let mut events = self.input_events.drain_input_events().await;
         if let Some(queued) = self.queue.drain_queued_input().await {
@@ -632,20 +683,49 @@ where
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-        let needed = super::super::compact::should_compact_now(
-            *self.last_total_tokens,
-            self.context_size,
-            self.chain.message_count(),
-        );
+        let request = self
+            .context_request
+            .as_ref()
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+        let window = self
+            .context
+            .build_window(request)
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        let needed = self
+            .context
+            .needs_compaction(request)
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        self.context_window = Some(window);
         Ok(needed)
     }
 
     async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {
-        // The existing compact helper is not cancellation-aware. Always return control to the
-        // engine; it performs the canonical post-compact cancellation transition and emits both
-        // CancellationRequested and Cancelled from the Run aggregate.
-        self.compact_impl().await;
-        Ok(())
+        let request = self
+            .context_request
+            .as_ref()
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+        let source_revision = self
+            .context_window
+            .as_ref()
+            .map(|window| window.backing_revision)
+            .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
+        match self
+            .context
+            .compact(request, source_revision)
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?
+        {
+            crate::ports::CompactOutcome::Committed(_) => {
+                *self.last_total_tokens = None;
+                self.context_window = None;
+                Ok(())
+            }
+            crate::ports::CompactOutcome::Skipped(reason) => Err(LoopEngineError::Adapter(
+                format!("Context compact 被跳过：{reason:?}"),
+            )),
+        }
     }
 
     async fn invoke_model(
@@ -653,6 +733,27 @@ where
         _cancel: &CancellationToken,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
         self.invoke_model_impl().await
+    }
+
+    async fn finalize_step(&mut self, step_id: &RunStepId) -> Result<(), LoopEngineError> {
+        let Some(request) = &self.context_request else {
+            return Ok(());
+        };
+        debug_assert_eq!(&request.step_id, step_id);
+        self.persist_step(crate::ports::FinalizeCause::Completed)
+            .await
+    }
+
+    async fn finalize_cancelled_step(
+        &mut self,
+        step_id: &RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        let Some(request) = &self.context_request else {
+            return Ok(());
+        };
+        debug_assert_eq!(&request.step_id, step_id);
+        self.persist_step(crate::ports::FinalizeCause::UserCancelledStep)
+            .await
     }
 
     async fn execute_tools(
@@ -745,13 +846,12 @@ where
         let has_task_mutation = all_results.iter().any(|result| {
             crate::application::chat::looping::events::is_task_store_mutation(&result.tool_name)
         });
-        self.chain.push(
+        self.messages.push(
             tool_results_for_api(self.tool_result_materializer, all_results, self.session_id).await,
-            self.segment_id,
         );
         self.sink
             .send_event(RuntimeStreamEvent::PostToolExecutionSync {
-                messages: self.chain.messages_flat(),
+                messages: self.messages.clone(),
             })
             .await;
         if has_task_mutation {
@@ -798,21 +898,15 @@ where
         for event in events {
             match event {
                 RunDomainEvent::Completed { .. } => {
-                    if let Err(error) = (self.save_chain)(self.chain).await {
-                        log::error!(target: crate::LOG_TARGET, "turn-level save_chain failed: {error}");
-                    }
                     self.project_done(AgentRunStatus::Completed).await;
                 }
                 RunDomainEvent::Failed { error, .. } => {
                     self.sink
                         .send_event(RuntimeStreamEvent::ApiError {
-                            messages: self.chain.messages_flat(),
+                            messages: self.messages.clone(),
                             error: error.clone(),
                         })
                         .await;
-                    if let Err(save_error) = (self.save_chain)(self.chain).await {
-                        log::error!(target: crate::LOG_TARGET, "api-error save_chain failed: {save_error}");
-                    }
                     self.project_done(AgentRunStatus::ApiError(error)).await;
                 }
                 RunDomainEvent::Cancelled { run_id, .. } => {

@@ -44,6 +44,8 @@ pub(crate) async fn from_args_with_gateways(
     );
 
     let task_wiring = task::wire_task();
+    let session_blob = storage::api::file_system_blob(share::config::paths::global_agents_dir())
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let deps = context::MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
@@ -56,6 +58,11 @@ pub(crate) async fn from_args_with_gateways(
             ),
             Arc::new(memory::FileLegacyMemorySourceFactory::new(
                 share::config::paths::global_memory_dir(),
+            )),
+        )),
+        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
+            Arc::new(context::adapters::AtomicBlobCanonicalSessionWriter::new(
+                session_blob,
             )),
         )),
     };

@@ -212,6 +212,9 @@ fn build_harness() -> Harness {
         }),
         initial_session,
         initial_memory,
+        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
+            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+        )),
     };
 
     let wiring = MainSessionWiring::build(builder);

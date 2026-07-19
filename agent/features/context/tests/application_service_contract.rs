@@ -92,6 +92,7 @@ fn request() -> ContextRequest {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: RunId::new("run"),
+        step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),

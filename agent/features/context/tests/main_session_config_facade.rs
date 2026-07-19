@@ -232,6 +232,9 @@ async fn build_facade_harness(
         }),
         initial_session,
         initial_memory,
+        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
+            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+        )),
     };
 
     let wiring = MainSessionWiring::build(builder);

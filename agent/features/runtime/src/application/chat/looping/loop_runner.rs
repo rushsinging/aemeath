@@ -56,7 +56,7 @@ where
                 tool_catalog,
                 tool_execution,
                 tool_context_binding,
-                system_blocks,
+                system_blocks: _,
                 system_prompt_text,
                 user_context,
                 mut chain,
@@ -82,7 +82,7 @@ where
                 active_summary: active_summary_arc,
                 reasoning,
                 build_switched_client,
-                save_chain,
+                save_chain: _,
                 list_reflection_history,
                 list_models,
                 list_reminders,
@@ -435,12 +435,6 @@ where
                 let turn_context = RuntimeTurnContext::new(chat_id.clone(), turn_id.clone());
                 sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
                     .await;
-                let rollback_chain = chain.clone();
-                let rollback_frozen_chats = frozen_chats
-                    .lock()
-                    .map(|frozen| frozen.clone())
-                    .unwrap_or_default();
-                let rollback_active_summary = active_summary.clone();
                 let started_at = Instant::now();
                 cwd = workspace.read().current_workspace_root();
 
@@ -469,21 +463,30 @@ where
                 )
                 .await;
 
-                let cancel = CancellationToken::new();
-                let mut run = Run::new(RunSpec::main(), None);
-                let memory_mode = run.spec().memory;
-                let bound_run = match wiring.bind_main_run().await {
+                let bound_main_run = match wiring.bind_main_run().await {
                     Ok(bound) => bound,
                     Err(error) => {
-                        log::error!(target: crate::LOG_TARGET, "bind run resources failed: {error}");
+                        log::error!(target: crate::LOG_TARGET, "main run bind failed: {error}");
                         continue;
                     }
                 };
-                let run_memory = bound_run.memory_arc();
-                let run_memory_config = bound_run.config().memory().clone();
+                let context_session_id = bound_main_run.session().id.clone();
+                let context = crate::application::context_coordination::ContextCoordinator::new(
+                    bound_main_run.context(),
+                );
+                let cancel = CancellationToken::new();
+                let mut run = Run::new(RunSpec::main(), None);
+                let run_memory = bound_main_run.memory_arc();
+                let run_memory_config = bound_main_run.config().memory().clone();
                 let run_id = run.id().clone();
                 active_run.activate(run_id.clone(), cancel.clone());
+                let combined_system_prompt = if user_context.is_empty() {
+                    system_prompt_text.clone()
+                } else {
+                    format!("{system_prompt_text}\n\n{user_context}")
+                };
                 let mut port = MainRunPort {
+                    messages: chain.messages_flat(),
                     sink: &sink,
                     queue: &queue,
                     input_events: &input_events,
@@ -491,13 +494,16 @@ where
                     tool_catalog: &tool_catalog,
                     tool_execution: &tool_execution,
                     tool_context_binding: &tool_context_binding,
-                    system_blocks: &system_blocks,
-                    system_prompt_text: &system_prompt_text,
-                    user_context: &user_context,
-                    chain: &mut chain,
+                    system_prompt_text: &combined_system_prompt,
+                    config_snapshot: bound_main_run.config(),
+                    context: &context,
+                    context_request: None,
+                    context_window: None,
+                    projection_start_index: chain.message_count().saturating_sub(1),
                     context_size,
                     workspace: &workspace,
                     session_id: &session_id,
+                    context_session_id: &context_session_id,
                     read_files: &read_files,
                     session_reminders: &session_reminders,
                     agent_runner: &agent_runner,
@@ -507,28 +513,19 @@ where
                     max_tool_concurrency,
                     agent_semaphore: &agent_semaphore,
                     hook_runner: &hook_runner,
-                    memory_mode,
                     memory_config: &run_memory_config,
                     memory: &run_memory,
                     reflection_history: &reflection_history,
                     reflection_tasks: &reflection_tasks,
                     language: &language,
-                    frozen_chats: &frozen_chats,
-                    active_summary: &mut active_summary,
-                    active_summary_arc: &active_summary_arc,
                     reasoning: reasoning.as_ref(),
-                    save_chain: &save_chain,
                     pending_input: &mut pending_input,
                     deferred_user_inputs: &mut deferred_user_inputs,
                     cancel: cancel.clone(),
                     run_id: run_id.clone(),
                     active_run: active_run.as_ref(),
                     turn_count,
-                    segment_id: &segment_id,
                     turn_context,
-                    rollback_chain,
-                    rollback_frozen_chats,
-                    rollback_active_summary,
                     last_total_tokens: &mut last_total_tokens,
                     task_reminder_state: &mut task_reminder_state,
                     tool_identity: &tool_identity,
@@ -545,6 +542,8 @@ where
                 if let Err(error) = run_result {
                     log::error!(target: crate::LOG_TARGET, "main shared run loop failed: {error}");
                 }
+                // Legacy idle/session adapter projection; execution persistence is Context-owned.
+                chain = context::session::ChatChain::from_flat_messages(port.messages.clone());
                 active_run.clear(&run_id);
             }
             // Session shutdown joins any accepted background reflection before resources
