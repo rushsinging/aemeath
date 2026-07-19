@@ -519,6 +519,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn allow_all_bypasses_soft_block_and_blocking_pre_tool_hook() {
+        let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
+        registry.register(UnsafeLifecycleTool);
+        let ctx = test_tool_context();
+        let agent = Agent::for_test(registry.as_ref(), ctx, 10);
+        let sink = RecordingSink::default();
+        let hook_ui = HookUi::new(sink.clone());
+        let mut events = std::collections::HashMap::new();
+        events.insert(
+            share::config::hooks::HookEvent::PreToolUse,
+            vec![share::config::hooks::HookEntry {
+                matcher: "UnsafeLifecycle".to_string(),
+                command: "exit 2".to_string(),
+                timeout: 5,
+            }],
+        );
+        let hook_runner = hook::api::HookRunner::new(share::config::hooks::HooksConfig { events });
+        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let workspace_root = std::env::current_dir().unwrap();
+        let call = lifecycle_call(0);
+        let ports = registry.build(agent.ctx.clone());
+
+        let (results, bypassed) = execute_tool_round(
+            &context,
+            std::slice::from_ref(&call),
+            &ports.catalog_port(),
+            &ports.execution(),
+            &policy::AllowAllPolicy,
+            &sdk::RunId::new_v7(),
+            &sdk::RunStepId::new_v7(),
+            &agent,
+            &sink,
+            &hook_ui,
+            &hook_runner,
+            &tokio_util::sync::CancellationToken::new(),
+            "en",
+            &workspace_root,
+            &[(
+                call.clone(),
+                ToolGuardDecision::SoftBlock {
+                    reason: "loop".to_string(),
+                },
+            )],
+        )
+        .await;
+
+        assert_eq!(bypassed, vec![call.id]);
+        assert_eq!(results.len(), 1);
+        assert!(
+            !results[0].outcome.is_error,
+            "AllowAll must execute the tool"
+        );
+    }
+
+    #[tokio::test]
     async fn test_non_concurrency_safe_tools_emit_running_after_previous_result() {
         let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
         registry.register(UnsafeLifecycleTool);

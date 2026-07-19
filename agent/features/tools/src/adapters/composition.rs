@@ -56,7 +56,9 @@ impl CatalogExecutionWiring {
         &self,
         manager: &crate::adapters::mcp_manager::McpConnectionManager,
     ) {
+        let registrations = manager.registration_specs().await;
         manager.register_tools(self.backing.registry()).await;
+        self.backing.sync_dynamic_membership(&registrations, &[]);
     }
 
     /// Conservative MCP/dynamic seam: callable registration alone never grants
