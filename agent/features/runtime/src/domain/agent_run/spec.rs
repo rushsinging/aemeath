@@ -31,6 +31,12 @@ pub enum ResourceMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryMode {
+    Enabled,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolScope {
     Full,
     Restricted,
@@ -52,6 +58,7 @@ pub struct RunSpec {
     pub events: EventRoute,
     pub context: ResourceMode,
     pub workspace: ResourceMode,
+    pub memory: MemoryMode,
     pub tools: ToolScope,
 }
 
@@ -74,6 +81,7 @@ impl RunSpec {
             events: EventRoute::Client,
             context: ResourceMode::Shared,
             workspace: ResourceMode::Shared,
+            memory: MemoryMode::Enabled,
             tools: ToolScope::Full,
         }
     }
@@ -88,6 +96,7 @@ impl RunSpec {
             events: EventRoute::ParentRun,
             context: ResourceMode::Isolated,
             workspace: ResourceMode::Isolated,
+            memory: MemoryMode::Disabled,
             tools: ToolScope::Restricted,
         }
     }
@@ -99,6 +108,14 @@ impl RunSpec {
     ) -> Result<Self, RunSpecError> {
         let _ = self;
         Ok(Self::sub(name, timeout))
+    }
+
+    pub fn with_memory_mode(mut self, memory: MemoryMode) -> Result<Self, RunSpecError> {
+        if self.kind == RunKind::Sub && memory == MemoryMode::Enabled {
+            return Err(RunSpecError::CapabilityEscalation);
+        }
+        self.memory = memory;
+        Ok(self)
     }
 
     pub fn with_tool_scope(mut self, tools: ToolScope) -> Result<Self, RunSpecError> {

@@ -405,7 +405,6 @@ impl RunLoopPort for SubAgentRun<'_> {
                 (self.log_request_messages)(turn_number, &self.messages);
                 self.log_input();
 
-                // Sub-runs receive the formal NoOp MemoryPort and do not inherit memory injection.
                 let effective_blocks = self.system_blocks.clone();
 
                 let messages_for_api = messages_for_llm(&self.messages);

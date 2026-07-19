@@ -16,7 +16,8 @@ pub trait ActiveRunPort: Send + Sync {
 pub use domain::Run;
 pub use event::{RunDomainEvent, RunId};
 pub use spec::{
-    EventRoute, InputMode, InteractionMode, ResourceMode, RunKind, RunSpec, RunSpecError, ToolScope,
+    EventRoute, InputMode, InteractionMode, MemoryMode, ResourceMode, RunKind, RunSpec,
+    RunSpecError, ToolScope,
 };
 pub use state::{
     DrainDecision, RunCancellationRequest, RunStatus, RunStep, RunStepCancellationRequest,
