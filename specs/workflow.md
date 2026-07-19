@@ -49,14 +49,12 @@ Release Gate issue 模板见仓库 `.github/ISSUE_TEMPLATE/`。
 
 ## 开发环境（Cargo build-dir / Git hooks / sccache）
 
-worktree 模式下 cargo 默认在每个 worktree 根建 `target/`，独立全量编译会迅速堆积到几十 GB。项目已配置三层治理（#1226）：
-
-- **工具链门禁**：开发环境 **MUST** 使用 Cargo 1.91+，由 `scripts/setup-dev-env.sh --check` 验证；这是 `build.build-dir` 的最低稳定版本，不改变 crate 的 Rust MSRV。
-- **按 worktree 隔离构建目录**：初始化脚本把 `core.hooksPath` 配为主 checkout `.cargo/hooks` 的绝对路径；`post-checkout` 生成 worktree-local `.cargo/config.toml`，将 `target-dir` 和 `build-dir` 设到 `~/.cache/aemeath-target/<分支标签>-<worktree 路径哈希>`，避免并行构建锁竞争及同分支 / detached HEAD 碰撞。
-- **sccache 跨 worktree 共享**：`~/.cargo/config.toml` 设 `rustc-wrapper = "sccache"`，对相同 rustc 输入按 content hash 复用编译结果，自带 LRU（默认 10G 上限）。**SHOULD** 安装 sccache（`brew install sccache`）。
-- **生命周期清理**：`scripts/clean-worktree-targets.sh [--dry-run] [--keep-current] [--yes] [--max-size-gb N]` 清理 worktree 内遗留 `target/`、失效 worktree 和非活跃 worktree 缓存；活跃缓存即使超预算也只告警，**NEVER** 在可能构建中自动删除。
-
-未安装 sccache 时编译仍可正常进行，仅失去跨 worktree 的编译结果复用；未初始化 `core.hooksPath` 时会退化为 worktree 内默认 `target/`，应重新运行 `scripts/setup-dev-env.sh`。
+- 开发环境 **MUST** 使用 Cargo 1.91+，并通过 `scripts/setup-dev-env.sh --check` 验证。
+- `core.hooksPath` **MUST** 配置为主 checkout `.cargo/hooks` 的绝对路径。
+- `post-checkout` **MUST** 生成 worktree-local `.cargo/config.toml`，将 `target-dir` 和 `build-dir` 设为 `~/.cache/aemeath-target/<分支标签>-<worktree 路径哈希>`。
+- 开发环境 **SHOULD** 安装 sccache，并在 `~/.cargo/config.toml` 配置 `rustc-wrapper = "sccache"`。
+- worktree 构建缓存 **MUST** 使用 `scripts/clean-worktree-targets.sh [--dry-run] [--keep-current] [--yes] [--max-size-gb N]` 清理。
+- 清理脚本 **NEVER** 自动删除活跃 worktree 的构建缓存。
 
 ## Git 工作流
 
