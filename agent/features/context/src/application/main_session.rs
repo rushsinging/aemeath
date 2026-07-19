@@ -14,7 +14,7 @@ use share::session_types::ProjectIdentity;
 use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidationError};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock as TokioRwLock};
 
-use crate::domain::session::{CanonicalSession, SessionRestore, SnapshotState};
+use crate::domain::session::{CanonicalSession, SnapshotState};
 use crate::ports::{ContextPort, MainContextFactory};
 
 // ─── SessionSwitchGate (existing) ────────────────────────────────────
@@ -78,39 +78,6 @@ pub struct SessionSwitchInProgress;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("Main Session 切换门禁已关闭")]
 pub struct SessionSwitchClosed;
-
-// ─── SessionProjectionParticipant ────────────────────────────────────
-
-/// Narrow participant protocol that lets Runtime / composition register a
-/// leased projection backing to be updated **atomically** inside the exclusive
-/// session-switch gate during [`MainSessionWiring::resume_prepared`].
-///
-/// **`prepare`** is a pure, infallible derivation from the committed
-/// [`CanonicalSession`]. It **MUST NOT** perform I/O or await — it runs in the
-/// fallible-prepare window only conceptually; since it cannot fail it serves
-/// as the pure token construction step.
-///
-/// **`commit`** is synchronous, infallible, and **MUST NOT await**. It is
-/// called inside the no-failure commit phase of `resume_prepared`, after
-/// Project / Task / Session / Memory commits and before the Config watch
-/// publish. This closes the CM5 observability window: the leased backing
-/// (`current_chain` / `frozen_chats` / `active_summary`) is atomically updated
-/// before the exclusive gate is released, so any shared observer that
-/// acquires a permit after the gate sees the new session **and** the new
-/// projection on its very first read.
-///
-/// If no participant is registered, `resume_prepared` behaves exactly as
-/// before — the projection rebuild remains the caller's responsibility (the
-/// migration-debt second backing).
-pub trait SessionProjectionParticipant: Send + Sync {
-    /// Pure, infallible derivation of the leased projection token from the
-    /// committed canonical session.
-    fn prepare(&self, session: &CanonicalSession) -> SessionRestore;
-
-    /// Sync, infallible, no-await publication of the prepared projection into
-    /// the leased backing.
-    fn commit(&self, prepared: SessionRestore);
-}
 
 // ─── MainSessionError ────────────────────────────────────────────────
 
@@ -371,13 +338,6 @@ pub struct MainSessionWiring {
     committed_memory: Arc<StdRwLock<Arc<dyn MemoryPort>>>,
     context: Arc<dyn ContextPort>,
     mutation_gate: Arc<tokio::sync::Mutex<()>>,
-
-    // ── Optional projection participant ──
-    //
-    // Registered by Runtime/composition so that `resume_prepared` can
-    // atomically update the leased projection (chain/frozen/summary) inside
-    // the exclusive gate. `None` until the participant is registered.
-    projection_participant: StdRwLock<Option<Arc<dyn SessionProjectionParticipant>>>,
 }
 
 impl std::fmt::Debug for MainSessionWiring {
@@ -431,7 +391,6 @@ impl MainSessionWiring {
             committed_memory,
             context,
             mutation_gate,
-            projection_participant: StdRwLock::new(None),
         }
     }
 
@@ -470,26 +429,6 @@ impl MainSessionWiring {
     /// an `Arc` clone.
     pub fn committed_config(&self) -> ConfigSnapshot {
         self.config_reader.committed_snapshot()
-    }
-
-    /// Registers a [`SessionProjectionParticipant`] so that future
-    /// [`Self::resume_prepared`] calls atomically update the leased projection
-    /// backing inside the exclusive gate.
-    ///
-    /// **Startup ordering**: call this **before** the first `resume_prepared`.
-    /// At bootstrap the `RuntimeHandle` is not yet constructed, so the caller
-    /// creates the projection backing (the three `Arc<Mutex<…>>` fields),
-    /// wraps them in a participant, registers it here, then calls
-    /// `resume_prepared`. After the gate is released the backing already
-    /// contains the resumed chain/frozen/summary.
-    ///
-    /// If called more than once, the most recent participant replaces the
-    /// previous one.
-    pub fn register_projection_participant(
-        &self,
-        participant: Arc<dyn SessionProjectionParticipant>,
-    ) {
-        *self.projection_participant.write().unwrap() = Some(participant);
     }
 
     /// Runs an async closure under a **shared** session-switch permit.
@@ -649,23 +588,6 @@ impl MainSessionWiring {
         let session_arc = Arc::new(session);
         *self.committed_session.write().unwrap() = Arc::clone(&session_arc);
         *self.committed_memory.write().unwrap() = Arc::clone(&new_memory);
-
-        // ── 5. Session projection participant commit ──
-        //
-        // If a Runtime/composition-owned participant is registered,
-        // synchronously update its leased projection (chain/frozen/summary)
-        // inside the exclusive gate. This closes the CM5 observability
-        // window: the leased backing is atomically updated before the gate
-        // is released, so any shared observer that acquires a permit after
-        // release sees the new session **and** the new projection on its
-        // very first read.
-        //
-        // `prepare` is pure + infallible (pure derivation from
-        // CanonicalSession). `commit` is sync + infallible + no-await.
-        if let Some(participant) = self.projection_participant.read().unwrap().as_ref() {
-            let prepared = participant.prepare(&session_arc);
-            participant.commit(prepared);
-        }
 
         // Config commit/watch last. commit_project updates the ConfigReader's
         // internal watch, so any future bind_main_run sees the new config.

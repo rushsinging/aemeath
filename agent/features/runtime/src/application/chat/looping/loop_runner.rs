@@ -5,8 +5,6 @@ use std::time::Instant;
 use sdk::ids::{ChatId, ChatTurnId};
 use tokio_util::sync::CancellationToken;
 
-use crate::application::chat::looping::compact::manual_compact;
-use crate::application::chat::looping::compact_outcome::apply_compact_outcome;
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::idle_lifecycle::{
     execute_set_thinking, idle_until_resume_or_shutdown, IdleResult,
@@ -31,9 +29,7 @@ use main_run_port::MainRunPort;
 /// Session actor for Main chat. The session itself only idles, accepts one real user input,
 /// creates one fresh `Run`, drives it to a terminal state through the shared engine, then idles
 /// again. `Run` is the only production state machine inside an active turn.
-pub async fn process_chat_loop<S, Q, I>(
-    ctx: ChatLoopContext<S, Q, I>,
-) -> context::session::ChatChain
+pub async fn process_chat_loop<S, Q, I>(ctx: ChatLoopContext<S, Q, I>)
 where
     S: ChatEventSink,
     Q: QueueDrainPort,
@@ -59,7 +55,7 @@ where
                 system_blocks: _,
                 system_prompt_text,
                 user_context,
-                mut chain,
+                initial_messages,
                 mut context_size,
                 workspace,
                 wiring,
@@ -78,28 +74,22 @@ where
                 memory: _,
                 reflection_history,
                 language,
-                frozen_chats,
-                active_summary: active_summary_arc,
                 reasoning,
                 build_switched_client,
-                save_chain: _,
                 list_reflection_history,
                 list_models,
                 list_reminders,
                 list_sessions,
             } = ctx;
             let mut client = client;
+            let mut messages = initial_messages;
             // Interval and PreCompact share this single session-scoped slot.
             let reflection_tasks =
                 crate::application::reflection::ReflectionTaskAdapter::production(
                     std::time::Duration::from_secs(120),
                 );
-            let hook_ui = HookUi::new(sink.clone());
+            let _hook_ui = HookUi::new(sink.clone());
             let mut cwd = workspace.read().current_workspace_root();
-            let mut active_summary = active_summary_arc
-                .lock()
-                .map(|value| value.clone())
-                .unwrap_or_default();
             let mut last_total_tokens = None;
             let mut turn_count = 0;
             let mut pending_input = PendingInputBuffer::default();
@@ -113,43 +103,41 @@ where
         ($cmd:expr) => {
             match $cmd {
                 PendingCommand::Compact => {
-                let bound_run = match wiring.bind_main_run().await {
-                    Ok(bound) => bound,
-                    Err(error) => {
-                        log::error!(target: crate::LOG_TARGET, "bind run resources failed: {error}");
-                        continue;
-                    }
-                };
-                let run_memory = bound_run.memory_arc();
-                let run_memory_config = bound_run.config().memory().clone();
-                if let Some(outcome) = manual_compact(
-                    &sink,
-                    &hook_ui,
-                    &hook_runner,
-                    turn_count,
-                    &chain.messages_flat(),
-                    active_summary.as_deref(),
-                    &system_prompt_text,
-                    context_size,
-                    &run_memory_config,
-                    &run_memory,
-                    &reflection_history,
-                    &reflection_tasks,
-                    &client,
-                    &language,
-                    &cwd,
-                )
-                .await
-                    {
-                        apply_compact_outcome(
-                            &sink,
-                            outcome,
-                            &mut chain,
-                            &frozen_chats,
-                            &mut active_summary,
-                            &active_summary_arc,
-                        )
-                        .await;
+                    let bound = match wiring.bind_main_run().await {
+                        Ok(bound) => bound,
+                        Err(error) => {
+                            sink.send_event(RuntimeStreamEvent::CommandResultText {
+                                text: format!("无法绑定当前 Session：{error}"),
+                                is_error: true,
+                            }).await;
+                            continue;
+                        }
+                    };
+                    let coordinator = crate::application::context_coordination::ContextCoordinator::new(bound.context());
+                    let request = crate::ports::ManualCompactRequest {
+                        session_id: crate::ports::SessionId::new(bound.session().id.clone()),
+                        run_id: sdk::RunId::new(uuid::Uuid::now_v7().to_string()),
+                        system_prompt: crate::ports::SystemPromptSpec::new(system_prompt_text.clone()),
+                        context_size,
+                    };
+                    match coordinator.manual_compact(&request).await {
+                        Ok(crate::ports::CompactOutcome::Committed(result)) => {
+                            messages = result.recent_messages.clone();
+                            sink.send_event(RuntimeStreamEvent::CompactFinished {
+                                messages: result.recent_messages,
+                            }).await;
+                        }
+                        Ok(crate::ports::CompactOutcome::Skipped(_)) => {
+                            sink.send_event(RuntimeStreamEvent::SystemMessage(
+                                "Not enough messages to compact.".to_string(),
+                            )).await;
+                        }
+                        Err(error) => {
+                            sink.send_event(RuntimeStreamEvent::CommandResultText {
+                                text: format!("Session compact 失败：{error}"),
+                                is_error: true,
+                            }).await;
+                        }
                     }
                     continue;
                 }
@@ -237,77 +225,46 @@ where
                     continue;
                 }
                 PendingCommand::ResumeSession { id } => {
-                    match context::session::load_session(&id).await {
-                        Ok(snapshot) => {
-                            let restore =
-                                context::session::SessionRestore::from_session(&snapshot);
-                            if restore.trimmed > 0 || restore.repaired > 0 {
-                                log::info!(
-                                    target: crate::LOG_TARGET,
-                                    "resume {}: trimmed={} repaired={}",
-                                    id,
-                                    restore.trimmed,
-                                    restore.repaired
-                                );
-                            }
-                            chain = restore.active_chain;
-                            active_summary = restore.active_summary.clone();
-                            if let Ok(mut guard) = active_summary_arc.lock() {
-                                *guard = restore.active_summary;
-                            }
-                            if let Ok(mut guard) = frozen_chats.lock() {
-                                *guard = restore.frozen_chats;
-                            }
+                    match crate::application::client::resume_helper::resume_session_to_backing(
+                        &id,
+                        &wiring,
+                    )
+                    .await
+                    {
+                        Ok(projection) => {
+                            messages = projection.messages.clone();
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::SessionResumed {
-                                    messages: chain.messages_flat(),
-                                    session_id: id.clone(),
+                                    messages: projection.messages,
+                                    session_id: projection.session_id,
                                     created_at: chrono::DateTime::parse_from_rfc3339(
-                                        &restore.created_at,
+                                        &projection.created_at,
                                     )
                                     .map(|dt| dt.timestamp_millis() as u64)
                                     .unwrap_or(0),
                                 })
                                 .await;
-                            if restore.trimmed > 0 || restore.repaired > 0 {
-                                log::info!(
-                                    target: crate::LOG_TARGET,
-                                    "resume {}: trimmed={} repaired={}",
-                                    id,
-                                    restore.trimmed,
-                                    restore.repaired
-                                );
-                            }
                         }
-                        Err(e) => {
-                            use context::session::SessionLoadError;
+                        Err(error) => {
                             use sdk::SessionResumeFailureKind;
-                            let (kind, message) = match &e {
-                                SessionLoadError::NotFound { .. } => (
-                                    SessionResumeFailureKind::NotFound,
-                                    format!("Session {id} 不存在，可用 `/sessions` 查看可用会话"),
-                                ),
-                                SessionLoadError::Corrupt {
-                                    parse_err,
-                                    corrupt_path,
-                                    ..
-                                } => (
-                                    SessionResumeFailureKind::Corrupt,
-                                    format!(
-                                        "Session {id} 损坏（{parse_err}），原文件已转存到 {}",
-                                        corrupt_path.display()
-                                    ),
-                                ),
-                                SessionLoadError::Io { source, .. } => (
-                                    SessionResumeFailureKind::Io,
-                                    format!("读取 session {id} 失败: {source}"),
-                                ),
+                            let kind = match error {
+                                context::SessionManagementError::NotFound(_) => {
+                                    SessionResumeFailureKind::NotFound
+                                }
+                                context::SessionManagementError::Corrupt(_)
+                                | context::SessionManagementError::UnsupportedFutureVersion(_) => {
+                                    SessionResumeFailureKind::Corrupt
+                                }
+                                context::SessionManagementError::Storage(_)
+                                | context::SessionManagementError::Resume(_) => {
+                                    SessionResumeFailureKind::Io
+                                }
                             };
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::SessionResumeFailed {
                                     kind,
                                     id: id.clone(),
-                                    message,
+                                    message: error.to_string(),
                                 })
                                 .await;
                         }
@@ -380,16 +337,16 @@ where
                         GateKind::BeforeLlm,
                         &mut pending_input,
                         &sink,
-                        &mut chain,
-                        &next_segment,
                         task_access.as_ref(),
                         true,
                     )
                     .await;
-                    if let Some(command) = gate.pending_command {
+                    if gate.reset_requested {
+                        IdleResult::ResetRequested
+                    } else if let Some(command) = gate.pending_command {
                         IdleResult::CommandRequested(command)
                     } else if gate.appended_user_messages > 0 {
-                        IdleResult::Resumed(next_segment)
+                        IdleResult::Resumed(next_segment, gate.adopted_messages)
                     } else {
                         continue;
                     }
@@ -400,16 +357,16 @@ where
                         GateKind::BeforeLlm,
                         &mut pending_input,
                         &sink,
-                        &mut chain,
-                        &next_segment,
                         task_access.as_ref(),
                         true,
                     )
                     .await;
-                    if let Some(command) = gate.pending_command {
+                    if gate.reset_requested {
+                        IdleResult::ResetRequested
+                    } else if let Some(command) = gate.pending_command {
                         IdleResult::CommandRequested(command)
                     } else if gate.appended_user_messages > 0 {
-                        IdleResult::Resumed(next_segment)
+                        IdleResult::Resumed(next_segment, gate.adopted_messages)
                     } else {
                         continue;
                     }
@@ -418,7 +375,6 @@ where
                         &input_events,
                         &sink,
                         &mut pending_input,
-                        &mut chain,
                         task_access.as_ref(),
                     )
                     .await
@@ -426,8 +382,39 @@ where
 
                 let segment_id = match idle_result {
                     IdleResult::Shutdown => break 'session,
+                    IdleResult::ResetRequested => {
+                        let bound = match wiring.bind_main_run().await {
+                            Ok(bound) => bound,
+                            Err(error) => {
+                                sink.send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("Session reset 失败：{error}"),
+                                    is_error: true,
+                                }).await;
+                                continue;
+                            }
+                        };
+                        let session_id = crate::ports::SessionId::new(bound.session().id.clone());
+                        let coordinator = crate::application::context_coordination::ContextCoordinator::new(bound.context());
+                        match coordinator.clear_session(&session_id).await {
+                            Ok(()) => {
+                                messages.clear();
+                                sink.send_event(RuntimeStreamEvent::SessionReset).await;
+                            }
+                            Err(error) => {
+                                sink.send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("Session reset 失败：{error}"),
+                                    is_error: true,
+                                }).await;
+                            }
+                        }
+                        continue;
+                    }
                     IdleResult::CommandRequested(command) => handle_pending_command!(command),
-                    IdleResult::Resumed(next_segment) => next_segment,
+                    IdleResult::Resumed(next_segment, adopted) => {
+                        // 新 Run 只取得本轮 adopted 输入；已提交历史由 Context backing 提供。
+                        messages = adopted.into_iter().map(|(_, message)| message).collect();
+                        next_segment
+                    }
                 };
 
                 turn_count += 1;
@@ -438,8 +425,8 @@ where
                 let started_at = Instant::now();
                 cwd = workspace.read().current_workspace_root();
 
-                let text = chain
-                    .last_message()
+                let text = messages
+                    .last()
                     .map(|message| message.text_content())
                     .unwrap_or_default();
                 let observation =
@@ -457,7 +444,7 @@ where
                     &mut config_snapshot,
                     turn_count,
                     &sink,
-                    &mut chain,
+                    &mut messages,
                     &language,
                     &segment_id,
                 )
@@ -486,7 +473,8 @@ where
                     format!("{system_prompt_text}\n\n{user_context}")
                 };
                 let mut port = MainRunPort {
-                    messages: chain.messages_flat(),
+                    messages: messages.clone(),
+                    step_messages: main_run_port::StepMessageOwnership::new(messages.clone()),
                     sink: &sink,
                     queue: &queue,
                     input_events: &input_events,
@@ -499,7 +487,6 @@ where
                     context: &context,
                     context_request: None,
                     context_window: None,
-                    projection_start_index: chain.message_count().saturating_sub(1),
                     context_size,
                     workspace: &workspace,
                     session_id: &session_id,
@@ -542,14 +529,13 @@ where
                 if let Err(error) = run_result {
                     log::error!(target: crate::LOG_TARGET, "main shared run loop failed: {error}");
                 }
-                // Legacy idle/session adapter projection; execution persistence is Context-owned.
-                chain = context::session::ChatChain::from_flat_messages(port.messages.clone());
+                // Runtime 不保留跨 Run 的语义消息；已提交历史只存在于 Context backing。
+                messages.clear();
                 active_run.clear(&run_id);
             }
             // Session shutdown joins any accepted background reflection before resources
             // (notably history persistence) are released.
             let _ = reflection_tasks.drain().await;
-            chain
         },
     )
     .await

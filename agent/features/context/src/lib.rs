@@ -8,7 +8,15 @@ pub mod application;
 pub mod domain;
 pub mod ports;
 
-pub use adapters::{compose_session_task_capture, LegacyTaskCapture};
+pub use adapters::{
+    delete_session_entry, export_session_bytes, import_session_bytes, isolated_context,
+    list_session_entries, update_session_metadata_entry,
+};
+#[cfg(any(test, feature = "dev"))]
+pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
+pub use domain::session::{
+    SessionListEntry, SessionManagementError, SessionMetadataUpdate, SessionResumeProjection,
+};
 
 // Main Session coordinator — cross-BC wiring for Runtime bootstrap.
 #[cfg(any(test, feature = "dev"))]
@@ -16,7 +24,7 @@ pub use application::test_support;
 pub use application::{
     wire_main_session, BoundMainRun, MainSessionDependencies, MainSessionError, MainSessionWiring,
     MainSessionWiringBuilder, OwnedSessionExclusivePermit, OwnedSessionSharedPermit,
-    SessionProjectionParticipant, SessionSwitchClosed, SessionSwitchGate, SessionSwitchInProgress,
+    SessionSwitchClosed, SessionSwitchGate, SessionSwitchInProgress,
 };
 
 pub mod api {
@@ -53,14 +61,8 @@ pub mod skill {
 }
 
 pub mod session {
-    pub use crate::adapters::session_search::search_sessions;
-    pub use crate::adapters::session_storage::{
-        delete_session, list_sessions, load_canonical_session, load_session, save_session,
-        update_session_metadata, SessionLoadError,
-    };
     pub use crate::domain::session::{
-        extract_project_name, new_session_id, now_iso, validate_session_id, CanonicalSession,
-        ChatChain, ChatSegment, PersistedWorkspaceContext, PersistedWorkspaceFrame, SegmentKind,
-        Session, SessionFilter, SessionMetadata, SessionRestore, SnapshotState,
+        CanonicalSession, PersistedWorkspaceContext, PersistedWorkspaceFrame, SessionMetadata,
+        SnapshotState,
     };
 }

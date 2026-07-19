@@ -41,9 +41,9 @@ if ! grep -q 'shared_run_loop(&mut run, &cancel, &mut self).await' "$SUB"; then
   exit 2
 fi
 
-if grep -nE 'context::session::|\bChatChain\b|\bChatSegment\b|save_chain|microcompact_(chain|messages)|compact_messages_with_llm' \
-    "$MAIN_PORT" "$SUB" "$CONTEXT_COORDINATION"; then
-  echo '{"decision":"block","reason":"Runtime Main/Sub execution path 必须只经 ContextPort 四方法协调，禁止 Session 内部类型、save callback 与 legacy compact helper。"}'
+if grep -RInE 'context::session::|\bChatChain\b|\bChatSegment\b|save_chain|current_chain|frozen_chats|active_summary|SessionProjectionParticipant|projection_start_index|microcompact_(chain|messages)|compact_messages_with_llm' \
+    agent/features/runtime/src --include='*.rs' --exclude='*_tests.rs'; then # guard-registry:scope.runtime.shared-loop-tests
+  echo '{"decision":"block","reason":"Runtime 生产代码必须只经 Context crate-root Published Language / ContextPort 使用 Session，禁止内部类型、第二投影 backing、save callback 与 legacy compact helper。"}'
   exit 2
 fi
 

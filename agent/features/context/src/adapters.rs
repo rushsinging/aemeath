@@ -8,9 +8,8 @@ pub mod memory_injection;
 pub mod prompt;
 mod prompt_source;
 pub(crate) mod session_legacy_workspace;
-pub(crate) mod session_search;
-pub(crate) mod session_storage;
-mod task_persistence;
+mod session_management;
+mod session_resume;
 
 pub use atomic_blob_session::AtomicBlobSessionStore;
 pub use canonical_session::{
@@ -23,7 +22,12 @@ pub use memory_injection::{
 };
 pub use prompt_source::BaselinePromptSource;
 pub use session_legacy_workspace::{decode as decode_session, LegacySessionDecoder};
-pub use task_persistence::{compose_session_task_capture, LegacyTaskCapture};
+pub use session_management::{delete as delete_session_entry, export as export_session_bytes};
+pub use session_management::{
+    import as import_session_bytes, list as list_session_entries,
+    load_canonical as load_canonical_session_entry,
+    update_metadata as update_session_metadata_entry,
+};
 
 pub fn isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextPort> {
     let repository = Arc::new(InMemorySessionRepository::new());
@@ -39,7 +43,3 @@ pub fn isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextPort> 
         Arc::new(NoOpContextMemorySource),
     ))
 }
-
-#[cfg(test)]
-#[path = "adapters/task_persistence_tests.rs"]
-mod task_persistence_tests;
