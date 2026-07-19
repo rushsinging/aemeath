@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use share::message::Message;
 use std::path::PathBuf;
-use storage::TaskSnapshot as LegacyTaskSnapshot;
 use task::TaskSnapshot;
 
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
@@ -106,11 +105,11 @@ struct LegacySession {
     updated_at: String,
     #[serde(default)]
     metadata: SessionMetadata,
-    /// The pre-#890 on-disk task image is the untyped storage DTO. It is upgraded
-    /// to the canonical [`TaskSnapshot`] during legacy decode; it is never stored
-    /// as the canonical type directly.
+    /// The pre-#890 on-disk task image remains opaque JSON here. It is upgraded
+    /// through the Task BC's versioned decoder and is never interpreted by
+    /// Context or Storage.
     #[serde(default)]
-    tasks: Option<LegacyTaskSnapshot>,
+    tasks: Option<Value>,
     #[serde(default)]
     cwd: Option<String>,
     #[serde(default)]
@@ -168,9 +167,7 @@ pub enum SessionCodecError {
 /// versioned V1 decode path, which is the single authority for interpreting
 /// legacy task wire data. Any incompatibility surfaces as a typed decode error
 /// rather than a silent, lossy field-by-field copy.
-fn upgrade_legacy_task_snapshot(
-    legacy: LegacyTaskSnapshot,
-) -> Result<TaskSnapshot, SessionCodecError> {
+fn upgrade_legacy_task_snapshot(legacy: Value) -> Result<TaskSnapshot, SessionCodecError> {
     let bytes = serde_json::to_vec(&legacy)
         .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))?;
     TaskSnapshot::decode(&bytes).map_err(|error| SessionCodecError::InvalidJson(error.to_string()))

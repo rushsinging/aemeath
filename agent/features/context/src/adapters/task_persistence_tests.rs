@@ -41,9 +41,9 @@ fn legacy_writer_captures_tool_created_state_from_the_shared_backing() {
         .expect("capture legacy session");
 
     let snapshot = session.tasks.expect("non-empty snapshot is written");
-    assert_eq!(snapshot.tasks.len(), 1);
-    assert_eq!(snapshot.tasks[0].subject, "created by tool");
-    assert_eq!(snapshot.batches.len(), 1);
+    assert_eq!(snapshot["tasks"].as_array().map(Vec::len), Some(1));
+    assert_eq!(snapshot["tasks"][0]["subject"], "created by tool");
+    assert_eq!(snapshot["batches"].as_array().map(Vec::len), Some(1));
 }
 
 #[test]
@@ -57,8 +57,8 @@ fn legacy_writer_records_empty_state_instead_of_none() {
         .expect("capture empty state");
 
     let snapshot = session.tasks.expect("captured empty is not missing");
-    assert!(snapshot.tasks.is_empty());
-    assert!(snapshot.batches.is_empty());
+    assert!(snapshot["tasks"].as_array().is_some_and(Vec::is_empty));
+    assert!(snapshot["batches"].as_array().is_some_and(Vec::is_empty));
 }
 
 #[test]

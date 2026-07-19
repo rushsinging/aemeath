@@ -5,7 +5,6 @@ set -euo pipefail
 # guard-registry:migration.runtime.application-from-args-to-adapters
 # guard-registry:migration.runtime.input-buffer-port-to-application
 # guard-registry:migration.runtime.legacy-port-to-application
-# guard-registry:migration.storage.transitional-business-modules
 
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
 # 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用
@@ -35,8 +34,8 @@ POLICY_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capab
 POLICY_PRODUCTION_ADAPTER = root / "agent/features/policy/src/adapters.rs"
 POLICY_FORBIDDEN_ADAPTER_TYPES = re.compile(r"\b(?:struct|enum)\s+(?:Deny|Approval|RequireApproval)\w*Policy\b")
 STORAGE_HEX_LAYERS = {"domain", "ports", "adapters"}
-STORAGE_TRANSITIONAL_MODULES = {"memory_store", "task_store"}
-STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway"}
+STORAGE_TRANSITIONAL_MODULES = set()
+STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway", "memory_store", "task_store"}
 PROJECT_HEX_LAYERS = {"domain", "adapters"}
 PROJECT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
 PROJECT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}

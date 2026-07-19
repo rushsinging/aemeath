@@ -100,7 +100,6 @@ pub(super) async fn chat_impl(
                 tool_result_materializer: inner.context.resources.tool_result_materializer.clone(),
                 policy: inner.context.resources.policy.clone(),
                 active_run: inner.active_run.clone(),
-                task_store: inner.context.resources.task_store.clone(),
                 task_access: inner.context.resources.task_access.clone(),
                 max_tool_concurrency: inner.max_tool_concurrency,
                 agent_semaphore: inner.context.resources.agent_semaphore.clone(),

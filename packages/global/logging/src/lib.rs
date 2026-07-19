@@ -5,7 +5,9 @@
 //! ## 文件路由
 //!
 //! 合法 target、owner、sink ID 与文件名由私有 `domain::routing::TargetCatalog` 唯一定义；
-//! `UnifiedLogger` 只消费 catalog。未知 target 写入 `aemeath.log` 并限频报告到 stderr。
+//! `UnifiedLogger` 只消费 catalog。未知 target 写入 `aemeath.log`。emergency 兜底（sink
+//! degrade / fallback）在 File 模式下写 `emergency.log`，**NEVER** 写 stderr——stderr 会
+//! 越过 TUI alternate screen 的双缓冲直接糊屏（见 #1215）。
 //! `panic.log` 由 panic hook 直写，不纳入 UnifiedLogger。
 
 mod adapters;

@@ -14,7 +14,6 @@ use crate::ports::legacy::ChatRuntimeContext;
 use crate::ports::legacy::ProviderInfoPort;
 use context::skill::{load_all_skills, Skill};
 use provider::SystemBlock;
-use storage::TaskStore;
 
 use super::{AgentClientImpl, RuntimeHandle};
 
@@ -262,8 +261,6 @@ pub async fn from_args_with_workspace(
     );
 
     // 11. Tooling
-    // Legacy store 仅供持久化兼容（snapshot/restore、input_gate clear，#891）。
-    let task_store = Arc::new(TaskStore::new());
     let skills_map = load_configured_skills(&cwd, Some(snapshot.skills()));
     if !skills_map.is_empty() {
         log::info!(target: crate::LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
@@ -417,7 +414,6 @@ pub async fn from_args_with_workspace(
             user_context: prompt_parts.claude_md,
             agent_runner,
             tool_result_materializer,
-            task_store,
             task_access,
             skills_map,
             hook_runner,
