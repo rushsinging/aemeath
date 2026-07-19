@@ -10,7 +10,14 @@ use std::sync::Mutex;
 use tools::{ToolCapabilities, ToolCapability, ToolName};
 
 /// Captured log lines (level + formatted message) for the policy target.
+///
+/// 全局共享：`log` facade 只接受一次 logger 注册，多个测试必须共享同一全局缓冲。
+/// 因此测试间 **MUST** 通过 `TEST_LOCK` 串行，避免并发 `evaluate` 交叉写入导致
+/// entry/exit 顺序错乱或 capability_count 跨测试污染（CI 多核并行下 flaky）。
 static CAPTURED: Mutex<Vec<(log::Level, String)>> = Mutex::new(Vec::new());
+
+/// 测试串行锁：两个测试都写全局 CAPTURED，必须互斥执行。
+static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Minimal `log::Log` implementation that records every record whose target
 /// equals the crate `LOG_TARGET`. This lets the tests observe exactly what the
@@ -59,6 +66,8 @@ fn make_request(tool: &str, caps: ToolCapabilities, workspace: &str) -> PolicyRe
 /// contain the tool name or the workspace path.
 #[test]
 fn evaluate_emits_entry_and_allow_exit_logging_only_mode_count_and_decision() {
+    // 全局 CAPTURED + 全局 logger 要求两个测试互斥执行。
+    let _test_guard = TEST_LOCK.lock().expect("TEST_LOCK poisoned");
     install_capturing_logger();
     CAPTURED.lock().expect("clear capture").clear();
 
@@ -131,6 +140,7 @@ fn evaluate_emits_entry_and_allow_exit_logging_only_mode_count_and_decision() {
 /// constant — a request with two capabilities must log `capability_count=2`.
 #[test]
 fn capability_count_reflects_request_requirements() {
+    let _test_guard = TEST_LOCK.lock().expect("TEST_LOCK poisoned");
     install_capturing_logger();
     CAPTURED.lock().expect("clear capture").clear();
 
