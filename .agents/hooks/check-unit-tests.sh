@@ -94,16 +94,22 @@ for package in "${packages[@]}"; do
   log="$log_dir/${package}.log"
   if [[ "$package" == "cli" ]]; then
     echo "==> cargo test -p cli --bin aemeath (timeout: ${crate_timeout_secs}s)"
-    if ! run_with_timeout "$package" cargo test -p cli --bin aemeath >"$log" 2>&1; then
-      rc=$?
+    set +e
+    run_with_timeout "$package" cargo test -p cli --bin aemeath >"$log" 2>&1
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ]; then
       echo "[hook] $package FAILED (rc=$rc); 完整日志: $log"
       grep -E 'error\[|error:|FAILED|panicked|failures:|^test .* FAILED' "$log" | head -n 40 || true
       exit "$rc"
     fi
   else
     echo "==> cargo test -p ${package} --lib (timeout: ${crate_timeout_secs}s)"
-    if ! run_with_timeout "$package" cargo test -p "$package" --lib >"$log" 2>&1; then
-      rc=$?
+    set +e
+    run_with_timeout "$package" cargo test -p "$package" --lib >"$log" 2>&1
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ]; then
       echo "[hook] $package FAILED (rc=$rc); 完整日志: $log"
       grep -E 'error\[|error:|FAILED|panicked|failures:|^test .* FAILED' "$log" | head -n 40 || true
       exit "$rc"

@@ -15,13 +15,8 @@
     "Stop": [
       {
         "matcher": "",
-        "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/check-architecture-guards.sh\"",
-        "timeout": 120
-      },
-      {
-        "matcher": "",
-        "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/check-unit-tests.sh\"",
-        "timeout": 600
+        "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/check-agent-stop.sh\"",
+        "timeout": 60
       }
     ]
   }

@@ -54,6 +54,7 @@ Release Gate issue 模板见仓库 `.github/ISSUE_TEMPLATE/`。
 
 - 开发环境 **MUST** 使用 Cargo 1.91+，并通过 `scripts/setup-dev-env.sh --check` 验证。
 - `core.hooksPath` **MUST** 配置为主 checkout `.cargo/hooks` 的绝对路径。
+- `pre-push` **MUST** 运行完整架构守卫与 workspace 单元测试；使用 `--no-verify` 绕过时，PR Test plan **MUST** 披露并补跑。
 - `post-checkout` **MUST** 生成 worktree-local `.cargo/config.toml`，将 `target-dir` 和 `build-dir` 设为 `~/.cache/aemeath-target/<分支标签>-<worktree 路径哈希>`。
 - 开发环境 **SHOULD** 安装 sccache，并在 `~/.cargo/config.toml` 配置 `rustc-wrapper = "sccache"`。
 - worktree 构建缓存 **MUST** 使用 `scripts/clean-worktree-targets.sh [--dry-run] [--keep-current] [--yes] [--max-size-gb N]` 清理。

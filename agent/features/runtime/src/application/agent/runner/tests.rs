@@ -14,6 +14,37 @@ use std::sync::Arc;
 use tools::AgentProgressKind;
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
+struct EmptySkillMaterializer;
+
+#[async_trait]
+impl tools::SkillMaterializationPort for EmptySkillMaterializer {
+    async fn materialize_available(
+        &self,
+        _query: tools::SkillMaterializationQuery,
+    ) -> Result<tools::SkillMaterializationSnapshot, tools::SkillError> {
+        Ok(tools::SkillMaterializationSnapshot::from_fragments(
+            Vec::new(),
+        ))
+    }
+}
+
+fn empty_skill_materializer() -> Arc<dyn tools::SkillMaterializationPort> {
+    Arc::new(EmptySkillMaterializer)
+}
+
+async fn wait_for_provider_call(calls: &std::sync::Mutex<usize>) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if *calls.lock().unwrap() >= 1 {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("sub-agent must reach provider before cancellation");
+}
+
 fn format_grouped_tool_summaries(tool_calls: &[crate::application::agent::ToolCall]) -> String {
     let mut counts: Vec<(&str, usize)> = Vec::new();
     for call in tool_calls {
@@ -67,7 +98,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
         tool_catalog: tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        skill_materializer: tools::composition::wire_skill_materialization(),
+        skill_materializer: empty_skill_materializer(),
         policy: Arc::new(policy::AllowAllPolicy),
     };
     let ctx_a = test_ctx();
@@ -463,19 +494,13 @@ async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
     let driver_registry = registry.clone();
     let driver_calls = calls.clone();
     let driver = tokio::spawn(async move {
-        loop {
-            if *driver_calls.lock().unwrap() >= 1 {
-                let ids = driver_registry.active_ids();
-                if let Some(run_id) = ids.first() {
-                    assert_eq!(
-                        driver_registry.cancel(run_id),
-                        sdk::CancelRunOutcome::Accepted
-                    );
-                    return;
-                }
-            }
-            tokio::task::yield_now().await;
-        }
+        wait_for_provider_call(driver_calls.as_ref()).await;
+        let ids = driver_registry.active_ids();
+        let run_id = ids.first().expect("active sub-run must be registered");
+        assert_eq!(
+            driver_registry.cancel(run_id),
+            sdk::CancelRunOutcome::Accepted
+        );
     });
 
     let result = runner
@@ -574,12 +599,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
     let canceller_calls = calls.clone();
     let canceller = tokio::spawn(async move {
         // 等 stream_message 真正开始阻塞后再取消，确保取消落在「调用进行中」。
-        loop {
-            if *canceller_calls.lock().unwrap() >= 1 {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
+        wait_for_provider_call(canceller_calls.as_ref()).await;
         cancel.cancel();
     });
 
@@ -902,7 +922,7 @@ fn test_runner(error: ProviderError) -> CliAgentRunner {
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
-        skill_materializer: tools::composition::wire_skill_materialization(),
+        skill_materializer: empty_skill_materializer(),
         policy: Arc::new(policy::AllowAllPolicy),
     }
 }
@@ -932,7 +952,7 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
-        skill_materializer: tools::composition::wire_skill_materialization(),
+        skill_materializer: empty_skill_materializer(),
         policy: Arc::new(policy::AllowAllPolicy),
     }
 }

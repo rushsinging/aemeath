@@ -6,7 +6,7 @@
 #   2. cargo-llvm-cov 0.8.7 (CI coverage.yml pins this version)
 #   3. Cargo 1.91+（build.build-dir）
 #   4. sccache (cross-worktree compile cache, wired as rustc-wrapper)
-#   5. git core.hooksPath = <主 checkout>/.cargo/hooks（绝对路径）
+#   5. git core.hooksPath = <主 checkout>/.cargo/hooks（绝对路径，含 pre-push 完整门禁）
 #   6. Verification summary
 #
 # Idempotent: re-running only fills gaps, never overwrites existing config.
@@ -180,7 +180,7 @@ else
     manual "core.hooksPath 应为 $expected_hooks（当前：${current_hooks:-unset}）"
   else
     git config core.hooksPath "$expected_hooks"
-    ok "core.hooksPath = $expected_hooks（post-checkout + pre-commit）"
+    ok "core.hooksPath = $expected_hooks（post-checkout + pre-commit + pre-push）"
   fi
 fi
 
