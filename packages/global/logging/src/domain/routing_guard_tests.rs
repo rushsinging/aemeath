@@ -163,20 +163,55 @@ fn scanner_accepts_cli_dollar_crate_target_inside_cli_scope() {
     .any(|v| v.kind == ViolationKind::WrongOwnerTarget));
 }
 
+/// Each scratch workspace owns a unique directory and removes it on drop.
+#[test]
+fn scratch_workspaces_are_unique_isolated_and_cleaned_up() {
+    let workspaces = std::thread::scope(|scope| {
+        let handles = (0..32)
+            .map(|index| {
+                scope.spawn(move || {
+                    let body = format!("pub const INDEX: usize = {index};\n");
+                    let workspace =
+                        scratch_workspace("packages/sdk", &[("src/lib.rs", body.as_str())]);
+                    (index, workspace)
+                })
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("create scratch workspace"))
+            .collect::<Vec<_>>()
+    });
+
+    let mut roots = std::collections::HashSet::new();
+    for (index, workspace) in &workspaces {
+        assert!(roots.insert(workspace.path().to_path_buf()));
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join("packages/sdk/src/lib.rs")).unwrap(),
+            format!("pub const INDEX: usize = {index};\n")
+        );
+    }
+
+    let paths = workspaces
+        .iter()
+        .map(|(_, workspace)| workspace.path().to_path_buf())
+        .collect::<Vec<_>>();
+    drop(workspaces);
+    assert!(paths.iter().all(|path| !path.exists()));
+}
+
 /// Build a throwaway workspace root containing only the supplied owner scope.
-fn scratch_workspace(owner_scope: &str, files: &[(&str, &str)]) -> PathBuf {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let root = std::env::temp_dir().join(format!("aemeath-guard-{stamp}"));
+fn scratch_workspace(owner_scope: &str, files: &[(&str, &str)]) -> tempfile::TempDir {
+    let workspace = tempfile::Builder::new()
+        .prefix("aemeath-guard-")
+        .tempdir()
+        .expect("create isolated guard workspace");
     for (name, body) in files {
-        let path = root.join(owner_scope).join(name);
+        let path = workspace.path().join(owner_scope).join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, body).unwrap();
     }
-    root
+    workspace
 }
 
 #[test]
@@ -190,7 +225,7 @@ fn workspace_scan_flags_missing_owner_constant() {
             "log::info!(target: crate::LOG_TARGET, \"x\");\n",
         )],
     );
-    let violations = inspect_workspace(&root).expect("scan scratch");
+    let violations = inspect_workspace(root.path()).expect("scan scratch");
     assert!(violations
         .iter()
         .any(|v| v.kind == ViolationKind::MissingOwnerConstant));
@@ -212,7 +247,7 @@ fn workspace_scan_flags_duplicate_owner_constant() {
             ),
         ],
     );
-    let violations = inspect_workspace(&root).expect("scan scratch");
+    let violations = inspect_workspace(root.path()).expect("scan scratch");
     assert!(violations
         .iter()
         .any(|v| v.kind == ViolationKind::DuplicateOwnerConstant));
@@ -228,11 +263,11 @@ fn workspace_scan_requires_a_constant_even_without_log_calls() {
         ],
     );
     std::fs::write(
-        root.join("Cargo.toml"),
+        root.path().join("Cargo.toml"),
         "[workspace]\nmembers = [\"agent/features/config\"]\n",
     )
     .unwrap();
-    let violations = inspect_workspace(&root).expect("scan scratch");
+    let violations = inspect_workspace(root.path()).expect("scan scratch");
     assert!(violations
         .iter()
         .any(|v| v.kind == ViolationKind::MissingOwnerConstant));
@@ -252,11 +287,11 @@ fn non_runtime_member_without_log_target_is_allowed() {
         &[("src/lib.rs", "pub fn helper() {}\n")],
     );
     std::fs::write(
-        root.join("Cargo.toml"),
+        root.path().join("Cargo.toml"),
         "[workspace]\nmembers = [\"packages/global/utils\"]\n",
     )
     .unwrap();
-    let violations = inspect_workspace(&root).expect("scan scratch");
+    let violations = inspect_workspace(root.path()).expect("scan scratch");
     assert!(
         !violations.iter().any(|v| {
             v.path.starts_with("packages/global/utils")
@@ -276,7 +311,7 @@ fn non_runtime_member_with_log_target_is_a_violation() {
             "pub(crate) const LOG_TARGET: &str = \"aemeath:utils\";\n",
         )],
     );
-    let violations = inspect_workspace(&root).expect("scan scratch");
+    let violations = inspect_workspace(root.path()).expect("scan scratch");
     assert!(
         violations
             .iter()
@@ -293,7 +328,7 @@ fn non_runtime_member_with_anonymous_keepalive_is_a_violation() {
         "packages/sdk",
         &[("src/lib.rs", "const _: &str = LOG_TARGET;\n")],
     );
-    let violations = inspect_workspace(&root).expect("scan scratch");
+    let violations = inspect_workspace(root.path()).expect("scan scratch");
     assert!(
         violations
             .iter()
@@ -316,7 +351,7 @@ fn pure_non_runtime_member_with_logging_dependency_is_a_violation() {
             ),
         ],
     );
-    let violations = inspect_workspace(&root).expect("scan scratch");
+    let violations = inspect_workspace(root.path()).expect("scan scratch");
     assert!(
         violations
             .iter()
@@ -337,7 +372,7 @@ fn logging_implementation_may_depend_on_log_without_defining_a_target() {
             ),
         ],
     );
-    let violations = inspect_workspace(&root).expect("scan scratch");
+    let violations = inspect_workspace(root.path()).expect("scan scratch");
     assert!(
         !violations
             .iter()
@@ -354,7 +389,7 @@ fn xtask_cli_output_without_target_is_allowed() {
         "tools/xtask",
         &[("src/main.rs", "fn main() { eprintln!(\"building\"); }\n")],
     );
-    let violations = inspect_workspace(&root).expect("scan scratch");
+    let violations = inspect_workspace(root.path()).expect("scan scratch");
     assert!(
         !violations
             .iter()
@@ -369,11 +404,11 @@ fn xtask_cli_output_without_target_is_allowed() {
 fn workspace_member_outside_owners_and_non_runtime_is_a_violation() {
     let root = scratch_workspace("mystery/crate", &[("src/lib.rs", "pub fn mystery() {}\n")]);
     std::fs::write(
-        root.join("Cargo.toml"),
+        root.path().join("Cargo.toml"),
         "[workspace]\nmembers = [\"mystery/crate\"]\n",
     )
     .unwrap();
-    let violations = inspect_workspace(&root).expect("scan scratch");
+    let violations = inspect_workspace(root.path()).expect("scan scratch");
     assert!(
         violations
             .iter()
