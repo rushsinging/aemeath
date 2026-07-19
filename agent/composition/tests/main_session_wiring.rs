@@ -15,8 +15,14 @@
 
 use std::sync::Arc;
 
+use context::context_port::ContextPort;
+use context::domain::{
+    ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause, RunStepId, SessionId,
+    SessionRevision,
+};
 use context::MainSessionDependencies;
-use sdk::ChatBootstrapArgs;
+use sdk::{ChatBootstrapArgs, RunId};
+use share::message::Message;
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -203,6 +209,88 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
         "filesystem-backed memory must persist entries: {:?}",
         entries
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn production_context_append_reopens_from_atomic_blob() {
+    let temp = tempfile::tempdir().expect("create temp root");
+    let root = temp.path().join("root");
+    std::fs::create_dir_all(&root).expect("create project root");
+    let _env = setup_agents_dir(&temp);
+
+    let workspace = project::wire_production_workspace(root.clone())
+        .expect("wire workspace")
+        .into_views();
+    let config = config::wire_project_config(&root)
+        .await
+        .expect("wire config");
+    let task_wiring = task::wire_task();
+    let dataset_adapter = Arc::new(
+        storage::FileSystemDatasetAdapter::new(share::config::paths::global_agents_dir())
+            .expect("create dataset adapter"),
+    );
+    let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
+        dataset_adapter,
+        Arc::new(memory::FileLegacyMemorySourceFactory::new(
+            share::config::paths::global_memory_dir(),
+        )),
+    ));
+    let session_blob = storage::api::file_system_blob(share::config::paths::global_agents_dir())
+        .expect("create session blob");
+    let writer = Arc::new(context::adapters::AtomicBlobCanonicalSessionWriter::new(
+        session_blob,
+    ));
+    let wiring = context::wire_main_session(MainSessionDependencies {
+        workspace,
+        task_persist: task_wiring.persist(),
+        config_reader: config.reader(),
+        config_participant: config.participant(),
+        memory_opener,
+        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(writer)),
+    })
+    .await
+    .expect("wire main session");
+
+    let bound = wiring.bind_main_run().await.expect("bind run");
+    let context: Arc<dyn ContextPort> = bound.context();
+    let session_id = bound.session().id.clone();
+    drop(bound);
+    let append = ContextAppend {
+        session_id: SessionId::new(&session_id),
+        expected_revision: SessionRevision::new(0),
+        run_id: RunId::new("production-run"),
+        step_id: RunStepId::new("production-step"),
+        source_request_id: ContextRequestId::new("production-request"),
+        finalize_cause: FinalizeCause::Completed,
+        messages: vec![Message::user("production durable fact")],
+        receipts: vec![],
+        api_input_tokens: Some(34),
+        fingerprint: ContentFingerprint::new("production-fingerprint"),
+    };
+    context
+        .append_and_persist(&append)
+        .await
+        .expect("persist production append");
+
+    let exported = context::export_session_bytes(&session_id)
+        .await
+        .expect("reopen canonical session bytes");
+    let reopened: serde_json::Value =
+        serde_json::from_slice(&exported).expect("decode canonical session envelope");
+    assert_eq!(reopened["id"], session_id);
+    assert_eq!(reopened["revision"], 1);
+    assert_eq!(reopened["committed_steps"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        reopened["committed_steps"][0]["fingerprint"],
+        "production-fingerprint"
+    );
+    let segments = reopened["chats"].as_array().expect("canonical chats array");
+    let messages = segments
+        .iter()
+        .flat_map(|segment| segment["messages"].as_array().into_iter().flatten())
+        .collect::<Vec<_>>();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["role"], "user");
 }
 
 /// The Runtime client's session id must match the wiring's committed session

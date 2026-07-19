@@ -14,11 +14,18 @@ use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
 use context::application::main_session::{
     MainSessionError, MainSessionWiring, MainSessionWiringBuilder,
 };
-use context::domain::session::{CanonicalSession, SnapshotState};
+use context::domain::session::{CanonicalSession, ChatChain, SnapshotState};
+use context::domain::{
+    ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause, RunStepId, SessionId,
+    SessionRevision,
+};
+use context::ports::ContextPort;
 use memory::{
     InMemoryMemory, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort, ProjectMemoryKey,
 };
 use project::wire_production_workspace;
+use sdk::RunId;
+use share::message::Message;
 use share::session_types::PersistedWorkspaceContext;
 use task::{
     BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPersist, TaskPriority, TaskSnapshot, TaskStore,
@@ -189,7 +196,7 @@ fn build_harness() -> Harness {
     // Capture workspace snapshot for the initial session.
     let ws_ctx = workspace_persist.snapshot();
     let initial_session = CanonicalSession {
-        id: "initial".to_string(),
+        id: SessionId::new("initial").to_string(),
         chats: vec![],
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -322,8 +329,66 @@ async fn successful_resume_commits_all_and_updates_committed_state() {
     assert_eq!(bound.config().revision(), post_config_revision);
 }
 
+#[tokio::test]
+async fn finalized_append_persists_and_is_visible_after_resume() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let bound = h.wiring.bind_main_run().await.expect("bind source run");
+    let context: Arc<dyn ContextPort> = bound.context();
+    let source_id = bound.session().id.clone();
+    let workspace = bound.session().workspace.clone();
+    drop(bound);
+
+    let append = ContextAppend {
+        session_id: SessionId::new(source_id.clone()),
+        expected_revision: SessionRevision::new(0),
+        run_id: RunId::new("run-persist"),
+        step_id: RunStepId::new("step-persist"),
+        source_request_id: ContextRequestId::new("request-persist"),
+        finalize_cause: FinalizeCause::Completed,
+        messages: vec![Message::user("durable fact")],
+        receipts: vec![],
+        api_input_tokens: Some(21),
+        fingerprint: ContentFingerprint::new("durable-fingerprint"),
+    };
+
+    let receipt = context
+        .append_and_persist(&append)
+        .await
+        .expect("append finalized step");
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+    let committed = h.wiring.committed_session();
+    assert_eq!(committed.revision, 1);
+    assert_eq!(committed.committed_steps.len(), 1);
+    assert_eq!(
+        ChatChain::from_chats(&committed.chats).messages().len(),
+        1,
+        "committed history must contain the finalized message"
+    );
+
+    let mut resumed = (*committed).clone();
+    resumed.workspace = workspace;
+    h.wiring
+        .resume_prepared(resumed)
+        .await
+        .expect("resume committed session");
+    let rebound = h.wiring.bind_main_run().await.expect("bind resumed run");
+    assert_eq!(rebound.session().id, source_id);
+    assert_eq!(rebound.session().revision, 1);
+    assert_eq!(
+        rebound.session().committed_steps[0].step_id,
+        RunStepId::new("step-persist").to_string()
+    );
+    assert_eq!(
+        ChatChain::from_chats(&rebound.session().chats)
+            .messages()
+            .len(),
+        1
+    );
+}
+
 /// Cross-project resume is allowed: a session whose workspace belongs to a
-/// different project can be resumed.  The canonical identity from
+/// different project can be resumed. The canonical identity from
 /// `prepare_restore` drives Config/Memory, not the live identity.
 #[tokio::test]
 async fn cross_project_resume_succeeds() {
