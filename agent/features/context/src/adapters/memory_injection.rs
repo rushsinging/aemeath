@@ -18,26 +18,10 @@ impl MemoryRetrieveAdapter {
         Self::with_clock(memory, Arc::new(system_now))
     }
 
-    /// Constructs the adapter with an injectable Unix-seconds clock.
-    pub fn with_clock(
-        memory: Arc<dyn MemoryPort>,
-        now: Arc<dyn Fn() -> u64 + Send + Sync>,
-    ) -> Self {
-        Self { memory, now }
-    }
-}
-
-fn system_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
-#[async_trait]
-impl ContextMemorySource for MemoryRetrieveAdapter {
-    async fn materialize(&self, request: &ContextRequest) -> Result<MemoryMaterialization, String> {
-        let config = request.config_snapshot.memory();
+    pub async fn materialize_config(
+        &self,
+        config: &share::config::MemoryConfig,
+    ) -> Result<MemoryMaterialization, String> {
         if !config.enabled || config.inject_count == 0 {
             return Ok(empty_materialization());
         }
@@ -73,6 +57,48 @@ impl ContextMemorySource for MemoryRetrieveAdapter {
                 cacheable: false,
             }],
         })
+    }
+
+    pub async fn materialize_provider_blocks(
+        &self,
+        config: &share::config::MemoryConfig,
+    ) -> Result<Vec<provider::SystemBlock>, String> {
+        Ok(self
+            .materialize_config(config)
+            .await?
+            .blocks
+            .into_iter()
+            .map(|block| {
+                if block.cacheable {
+                    provider::SystemBlock::cached(block.content)
+                } else {
+                    provider::SystemBlock::dynamic(block.content)
+                }
+            })
+            .collect())
+    }
+
+    /// Constructs the adapter with an injectable Unix-seconds clock.
+    pub fn with_clock(
+        memory: Arc<dyn MemoryPort>,
+        now: Arc<dyn Fn() -> u64 + Send + Sync>,
+    ) -> Self {
+        Self { memory, now }
+    }
+}
+
+fn system_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+#[async_trait]
+impl ContextMemorySource for MemoryRetrieveAdapter {
+    async fn materialize(&self, request: &ContextRequest) -> Result<MemoryMaterialization, String> {
+        self.materialize_config(request.config_snapshot.memory())
+            .await
     }
 }
 

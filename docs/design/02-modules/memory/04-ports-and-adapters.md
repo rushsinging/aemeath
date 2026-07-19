@@ -155,9 +155,9 @@ trait ReflectionHistoryStore: ReflectionHistoryQuery {
 2. **Sub 隔离**：Sub Run 装配 `NoOpMemory`（MemoryPort 的空实现），但 Reflection 在 Sub 中完全不触发——不需要 NoOpReflection。
 3. **演进独立**：检索升级（BM25/embedding）和 Reflection prompt 优化可以独立演进。
 
-## 4. NoOpMemory（Sub Run）
+## 4. NoOpMemory（`MemoryMode::Disabled`）
 
-Sub Run 装配 `NoOpMemory`——所有方法返回空值/空集合，不读写不报错：
+任何 Run 在 `RunSpec.memory = Disabled` 时装配 `NoOpMemory`——所有方法返回空值/空集合，不读写不报错：
 
 ```rust
 struct NoOpMemory;
@@ -183,10 +183,10 @@ impl MemoryPort for NoOpMemory {
 }
 ```
 
-- Sub 不读记忆（查询返回 `mode=Disabled` 的空 envelope，**NEVER** 冒充 BM25 / InjectionPriority 的普通空命中）。
-- Sub 不写记忆（mutation 返回显式 `NoOp` / `false` / 空结果，不伪报 `Added`）。
-- Sub 不触发 Reflection（Runtime 根据 `MemoryMode::Disabled` 跳过）。
-- Main 可通过 `share_memory` 参数显式给 Sub 开启注入；此时 **MUST** clone 父 Run 在 shared lease 下持有的同一 MemoryPort Arc，**NEVER** 为同一 ProjectIdentity 再打开第二个 service。
+- Disabled Run 不读记忆（查询返回 `mode=Disabled` 的空 envelope，**NEVER** 冒充 BM25 / InjectionPriority 的普通空命中）。
+- Disabled Run 不写记忆（mutation 返回显式 `NoOp` / `false` / 空结果，不伪报 `Added`）。
+- Disabled Run 不触发 Reflection（Runtime 根据 `RunSpec.memory == MemoryMode::Disabled` 跳过）。
+- 派生 Run 若显式启用 Memory，**MUST** clone 父 Run 在 shared lease 下持有的同一 MemoryPort Arc，**NEVER** 为同一 ProjectIdentity 再打开第二个 service。Main / Sub 角色 **NEVER** 成为 Loop 内的 Memory 分支条件。
 
 ## 5. Storage 边界
 
