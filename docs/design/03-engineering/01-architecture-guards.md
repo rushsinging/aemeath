@@ -488,24 +488,17 @@
 
 ## 17. check-log-target-prefix.sh
 
-- **功能**：扫描整个仓库的 `.rs` 生产代码，检查所有 `log::xxx!` 宏中的 `target:` 字符串字面量必须以 `aemeath:` 开头。
-- **守护**：日志架构统一——所有 log target 必须遵循 `aemeath:<domain>[:<crate>]` 命名约定，避免日志路由到错误的 target。
-- **检查方式**：
-  - 扫描全部 `.rs` 文件（排除 `target/`、`tests/`、`*test*.rs`、`packages/global/logging/src/`）；
-  - 匹配 `target:\s*"[^"]*"` 模式，筛选出不包含 `aemeath:` 的行；
-  - 引用常量（如 `target: LOG_TARGET`）不带引号，不会被匹配，自然放行。
-- **白名单**：无文件级白名单。
-- **例外**：`packages/global/logging/src/`（该目录的精确白名单校验由 Rust 测试 `domain/routing_guard.rs` 覆盖；#936 将其切换为消费唯一 TargetCatalog）。
-- **错误信息**：`log target must start with 'aemeath:' (or use LOG_TARGET constant)`。
-- **关联 Rust 守卫**：`packages/global/logging/src/domain/routing_guard.rs` 有同功能的 `cargo test` 守卫，使用精确白名单校验。
+- **功能**：运行 owner-aware Rust scanner，扫描全仓生产日志调用、crate-root target owner 与 TargetCatalog。
+- **守护**：调用方只能引用所属 owner 的唯一 target；Audit Usage Fact 名称 `aemeath:agent:audit` 与旧 `agent-audit.log` 不得进入 Diagnostic catalog，Audit 模块运行诊断使用 `aemeath:diagnostic:audit`。
+- **范围排除**：测试目录、`*test*.rs` 与 `cfg(test)` probe；登记为 `scope.logging.production-test-sources`，不属于迁移债务。
+- **关联 Rust 守卫**：`packages/global/logging/src/domain/routing_guard.rs` 消费唯一 TargetCatalog，并校验 owner、sink 与文件唯一性。
 
 ### 17a. check-logging-scope-context.sh
 
 - **功能**：扫描整个 `packages/global/logging/src` 的生产 Rust 文件，拒绝未登记的 `static`、`static mut`、`lazy_static!` 与 `thread_local!` 状态；`pub`、多行声明同样参与检查。
 - **守护**：新日志执行上下文只能通过不可变 `LogContext` 与 Tokio task-local scope 传播；禁止以改名或移动文件的方式恢复 Main/Sub 共享的进程级可变 current 状态。
-- **精确白名单**：`context.rs` 的 `SCOPED_CONTEXT / LEGACY_EXECUTION_CONTEXT / BOOT_TS / APP_VERSION / PID / TEST_LOCK`，以及 `file_sink.rs` 的 `UNKNOWN_TARGET_REPORTS / LOGGER`。其中 `LEGACY_EXECUTION_CONTEXT` 只为 #940 消费迁移及 #942 退役保留；白名单 **NEVER** 扩张，新增进程元数据必须有独立设计证据。
-- **故意违规证据**：在 `formatter.rs` 临时新增带 `pub(crate)`、多行声明且不使用 `CURRENT_*` 命名的 `ACTIVE_REQUEST` 后，单 Guard 以 exit 2 阻断；恢复后单 Guard clean pass。
-- **退出条件**：#942 删除 legacy setters 与 `LEGACY_EXECUTION_CONTEXT` 后，从精确白名单删除该项。
+- **精确白名单**：`context.rs` 的 `SCOPED_CONTEXT / BOOT_TS / APP_VERSION / PID`，以及 `file_sink.rs` 的 `UNKNOWN_TARGET_REPORTS / LOGGER`。仅允许 task-local owner 与不可变进程元数据；`LEGACY_EXECUTION_CONTEXT`、legacy setter/getter 与 formatter fallback 已由 #942 删除并由 Guard 拒绝回流。
+- **故意违规证据**：临时恢复未登记 static 或任一 retired legacy symbol，单 Guard 与总编排均必须 exit 2；恢复后 clean pass。
 
 ### 17b. check-logging-settings-injection.sh
 

@@ -1,12 +1,19 @@
 //! 真值表与能力矩阵参数化测试。
 //!
 //! 对应设计：`docs/design/02-modules/hook/README.md` §3 §5。
+//!
+//! #924 typed 协议分类：
+//! - 非法 JSON → typed `InvalidJson`；
+//! - 能力违规 → typed `Protocol` failure；
+//! - exit 1/2/127 → `Block`（阻塞 point）/ `Protocol{BlockOnNonBlocking}`（非阻塞 point）。
+//!
+//! `classify_directive` 返回 `Result<HookDirective, ClassifyError>`。
 
 #![cfg(test)]
 
 use crate::domain::invocation::HookPoint;
-use crate::domain::outcome::{HookDirective, HookReason};
-use crate::domain::protocol::classify_directive;
+use crate::domain::outcome::{ClassifyError, HookDirective, HookReason, ProtocolViolation};
+use crate::domain::protocol::{classify_directive, default_true, truncate, OUTPUT_MAX_BYTES};
 
 // ════════════════════════════════════════════════════════════
 // 真值表测试
@@ -18,8 +25,8 @@ fn test_classify_exit0_empty_stdout() {
     for point in all_points() {
         let d = classify_directive(point, Some(0), "", "");
         assert!(
-            matches!(d, HookDirective::Continue),
-            "{point:?}: exit 0 + 空 stdout 应返回 Continue，实际 = {d:?}"
+            matches!(d, Ok(HookDirective::Continue)),
+            "{point:?}: exit 0 + 空 stdout 应返回 Ok(Continue)，实际 = {d:?}"
         );
     }
 }
@@ -28,31 +35,75 @@ fn test_classify_exit0_empty_stdout() {
 #[test]
 fn test_classify_exit0_whitespace_stdout() {
     let d = classify_directive(HookPoint::PreToolUse, Some(0), "   \n  ", "");
-    assert!(matches!(d, HookDirective::Continue));
+    assert!(matches!(d, Ok(HookDirective::Continue)));
 }
 
 /// exit 0 + 合法 JSON（无特殊字段） → Continue。
 #[test]
 fn test_classify_exit0_plain_json() {
     let d = classify_directive(HookPoint::PreToolUse, Some(0), "{}", "");
-    assert!(matches!(d, HookDirective::Continue));
+    assert!(matches!(d, Ok(HookDirective::Continue)));
 }
 
 /// exit 0 + `{"continue":true}` → Continue。
 #[test]
 fn test_classify_exit0_json_continue_true() {
     let d = classify_directive(HookPoint::PreToolUse, Some(0), r#"{"continue": true}"#, "");
-    assert!(matches!(d, HookDirective::Continue));
+    assert!(matches!(d, Ok(HookDirective::Continue)));
 }
 
-/// exit 0 + 非法 JSON → Continue（不阻断，调用方记录 ExecutionFailed）。
+/// #924：exit 0 + 非法 JSON → typed `InvalidJson`。
 #[test]
-fn test_classify_exit0_invalid_json() {
+fn test_classify_exit0_invalid_json_is_typed_invalid_json() {
     let d = classify_directive(HookPoint::PreToolUse, Some(0), "not json", "");
     assert!(
-        matches!(d, HookDirective::Continue),
-        "非法 JSON 不应阻断，降级为 Continue"
+        matches!(d, Err(ClassifyError::InvalidJson { .. })),
+        "非法 JSON 应分类为 typed InvalidJson，实际 = {d:?}"
     );
+}
+
+/// exit_code=None（进程未正常退出）→ typed `MissingExitCode`。
+///
+/// 进程未正常退出时没有退出码，必须进入 ExecutionFailed 可重试路径，
+/// **不得**按空 stdout 误判为 Continue。
+#[test]
+fn test_classify_none_exit_code_is_missing_exit_code() {
+    for point in all_points() {
+        // 即使 stdout 为空也不得当 Continue。
+        let d = classify_directive(point, None, "", "");
+        assert!(
+            matches!(d, Err(ClassifyError::MissingExitCode)),
+            "{point:?}: exit_code=None 应分类为 typed MissingExitCode，实际 = {d:?}"
+        );
+    }
+}
+
+/// exit_code=None 即使带非空 stdout 仍为 `MissingExitCode`（退出码缺失优先于 stdout 解析）。
+#[test]
+fn test_classify_none_exit_code_with_stdout_still_missing() {
+    let d = classify_directive(
+        HookPoint::PreToolUse,
+        None,
+        r#"{"additionalContext":"x"}"#,
+        "",
+    );
+    assert!(
+        matches!(d, Err(ClassifyError::MissingExitCode)),
+        "exit_code=None 应优先于 stdout 解析为 MissingExitCode，实际 = {d:?}"
+    );
+}
+
+/// #924：非法 JSON 的 `raw` 携带触发解析失败的原始 stdout。
+#[test]
+fn test_classify_exit0_invalid_json_carries_raw() {
+    let d = classify_directive(HookPoint::PreToolUse, Some(0), "not json", "");
+    match d {
+        Err(ClassifyError::InvalidJson { raw, error }) => {
+            assert!(!raw.is_empty(), "raw 应携带原始 stdout");
+            assert!(!error.is_empty(), "error 应携带解析错误摘要");
+        }
+        other => panic!("期望 Err(InvalidJson)，实际 = {other:?}"),
+    }
 }
 
 /// exit 0 + `{"decision":"block"}` → Block（阻塞 point）。
@@ -63,7 +114,8 @@ fn test_classify_exit0_json_decision_block_on_blocking_point() {
         Some(0),
         r#"{"decision":"block","reason":"forbidden"}"#,
         "",
-    );
+    )
+    .expect("阻塞 point 的 JSON block 应为 Ok");
     assert!(matches!(
         d,
         HookDirective::Block {
@@ -80,7 +132,8 @@ fn test_classify_exit0_json_decision_block_no_reason() {
         Some(0),
         r#"{"decision":"block"}"#,
         "",
-    );
+    )
+    .expect("应为 Ok(Block)");
     assert!(matches!(
         d,
         HookDirective::Block {
@@ -97,7 +150,8 @@ fn test_classify_exit0_json_continue_false_on_blocking_point() {
         Some(0),
         r#"{"continue":false,"stopReason":"needs more work"}"#,
         "",
-    );
+    )
+    .expect("Stop 的 continue:false 应为 Ok(Block)");
     assert!(matches!(
         d,
         HookDirective::Block {
@@ -109,7 +163,8 @@ fn test_classify_exit0_json_continue_false_on_blocking_point() {
 /// exit 0 + `{"continue":false}` 无 stopReason → Block{stop_reason:None}。
 #[test]
 fn test_classify_exit0_json_continue_false_no_stop_reason() {
-    let d = classify_directive(HookPoint::Stop, Some(0), r#"{"continue":false}"#, "");
+    let d = classify_directive(HookPoint::Stop, Some(0), r#"{"continue":false}"#, "")
+        .expect("应为 Ok(Block)");
     assert!(matches!(
         d,
         HookDirective::Block {
@@ -118,10 +173,32 @@ fn test_classify_exit0_json_continue_false_no_stop_reason() {
     ));
 }
 
-/// 非零 exit → Block（阻塞 point）。
+/// #924：exit 1/2/127（任意非零）→ Block（阻塞 point）。
+#[test]
+fn test_classify_exit_codes_1_2_127_are_block() {
+    for code in [1, 2, 127] {
+        let d = classify_directive(HookPoint::PreToolUse, Some(code), "", "boom");
+        match d {
+            Ok(HookDirective::Block {
+                reason:
+                    HookReason::ExitCode {
+                        code: c,
+                        ref stderr,
+                    },
+            }) => {
+                assert_eq!(c, code, "exit {code} 应映射到 ExitCode{{code:{code}}}");
+                assert_eq!(stderr, "boom", "exit {code} 的 stderr 应原样保留");
+            }
+            other => panic!("exit {code} 在阻塞 point 应为 Ok(Block)，实际 = {other:?}"),
+        }
+    }
+}
+
+/// 非零 exit → Block（阻塞 point），携带 exit code 与 stderr。
 #[test]
 fn test_classify_nonzero_exit_on_blocking_point() {
-    let d = classify_directive(HookPoint::PreToolUse, Some(1), "", "error occurred");
+    let d = classify_directive(HookPoint::PreToolUse, Some(1), "", "error occurred")
+        .expect("阻塞 point 的非零 exit 应为 Ok(Block)");
     assert!(matches!(
         d,
         HookDirective::Block {
@@ -133,7 +210,7 @@ fn test_classify_nonzero_exit_on_blocking_point() {
 /// 非零 exit + 空 stderr → Block{stderr:""}。
 #[test]
 fn test_classify_nonzero_exit_empty_stderr() {
-    let d = classify_directive(HookPoint::PreToolUse, Some(2), "", "");
+    let d = classify_directive(HookPoint::PreToolUse, Some(2), "", "").expect("应为 Ok(Block)");
     assert!(matches!(
         d,
         HookDirective::Block {
@@ -150,7 +227,8 @@ fn test_classify_exit0_additional_context() {
         Some(0),
         r#"{"additionalContext":"extra info"}"#,
         "",
-    );
+    )
+    .expect("应为 Ok(ContinueWithContext)");
     assert!(matches!(
         d,
         HookDirective::ContinueWithContext { ref context }
@@ -166,7 +244,8 @@ fn test_classify_exit0_updated_input() {
         Some(0),
         r#"{"hookSpecificOutput":{"updatedInput":{"command":"ls -la"}}}"#,
         "",
-    );
+    )
+    .expect("应为 Ok(ContinueWithUpdatedInput)");
     assert!(matches!(
         d,
         HookDirective::ContinueWithUpdatedInput { ref input }
@@ -182,7 +261,8 @@ fn test_classify_exit0_context_and_input() {
         Some(0),
         r#"{"additionalContext":"ctx","hookSpecificOutput":{"updatedInput":{"x":1}}}"#,
         "",
-    );
+    )
+    .expect("应为 Ok(ContinueWithContextAndInput)");
     assert!(matches!(
         d,
         HookDirective::ContinueWithContextAndInput { ref context, ref input }
@@ -198,17 +278,18 @@ fn test_classify_block_priority_over_context() {
         Some(0),
         r#"{"decision":"block","reason":"denied","additionalContext":"ctx"}"#,
         "",
-    );
+    )
+    .expect("decision:block 应为 Ok");
     assert!(matches!(d, HookDirective::Block { .. }));
 }
 
 // ════════════════════════════════════════════════════════════
-// 非阻塞 point 的主动 Block 降级规则
+// 能力矩阵违规 → typed Protocol failure（#924）
 // ════════════════════════════════════════════════════════════
 
-/// 非零 exit 在非阻塞 point 上 → 降级为 Continue（协议错误）。
+/// #924：非零 exit 在非阻塞 point 上 → typed `Protocol{BlockOnNonBlocking}`。
 #[test]
-fn test_nonzero_exit_on_non_blocking_point_degrades_to_continue() {
+fn test_nonzero_exit_on_non_blocking_point_is_protocol_error() {
     for point in all_points() {
         let meta = point.metadata();
         if meta.can_block {
@@ -216,15 +297,20 @@ fn test_nonzero_exit_on_non_blocking_point_degrades_to_continue() {
         }
         let d = classify_directive(point, Some(1), "", "error");
         assert!(
-            matches!(d, HookDirective::Continue),
-            "{point:?}: 非阻塞 point 的非零 exit 应降级为 Continue"
+            matches!(
+                d,
+                Err(ClassifyError::Protocol {
+                    violation: ProtocolViolation::BlockOnNonBlocking
+                })
+            ),
+            "{point:?}: 非阻塞 point 的非零 exit 应为 typed Protocol{{BlockOnNonBlocking}}，实际 = {d:?}"
         );
     }
 }
 
-/// JSON decision:block 在非阻塞 point 上 → 降级为 Continue。
+/// #924：JSON decision:block 在非阻塞 point 上 → typed `Protocol{BlockOnNonBlocking}`。
 #[test]
-fn test_json_block_on_non_blocking_point_degrades_to_continue() {
+fn test_json_block_on_non_blocking_point_is_protocol_error() {
     for point in all_points() {
         let meta = point.metadata();
         if meta.can_block {
@@ -237,15 +323,20 @@ fn test_json_block_on_non_blocking_point_degrades_to_continue() {
             "",
         );
         assert!(
-            matches!(d, HookDirective::Continue),
-            "{point:?}: 非阻塞 point 的 JSON block 应降级为 Continue"
+            matches!(
+                d,
+                Err(ClassifyError::Protocol {
+                    violation: ProtocolViolation::BlockOnNonBlocking
+                })
+            ),
+            "{point:?}: 非阻塞 point 的 JSON block 应为 typed Protocol{{BlockOnNonBlocking}}，实际 = {d:?}"
         );
     }
 }
 
-/// JSON continue:false 在非阻塞 point 上 → 降级为 Continue。
+/// #924：JSON continue:false 在非阻塞 point 上 → typed `Protocol{BlockOnNonBlocking}`。
 #[test]
-fn test_json_continue_false_on_non_blocking_point_degrades_to_continue() {
+fn test_json_continue_false_on_non_blocking_point_is_protocol_error() {
     for point in all_points() {
         let meta = point.metadata();
         if meta.can_block {
@@ -253,15 +344,21 @@ fn test_json_continue_false_on_non_blocking_point_degrades_to_continue() {
         }
         let d = classify_directive(point, Some(0), r#"{"continue":false}"#, "");
         assert!(
-            matches!(d, HookDirective::Continue),
-            "{point:?}: 非阻塞 point 的 continue:false 应降级为 Continue"
+            matches!(
+                d,
+                Err(ClassifyError::Protocol {
+                    violation: ProtocolViolation::BlockOnNonBlocking
+                })
+            ),
+            "{point:?}: 非阻塞 point 的 continue:false 应为 typed Protocol{{BlockOnNonBlocking}}，实际 = {d:?}"
         );
     }
 }
 
-/// can_add_context=false 的 point 收到 additionalContext → 丢弃，返回 Continue。
+/// #924：can_add_context=false 的 point 收到 additionalContext
+/// → typed `Protocol{ContextOnNonContextual}`。
 #[test]
-fn test_context_on_no_context_point_is_dropped() {
+fn test_context_on_no_context_point_is_protocol_error() {
     let d = classify_directive(
         HookPoint::Stop,
         Some(0),
@@ -269,14 +366,20 @@ fn test_context_on_no_context_point_is_dropped() {
         "",
     );
     assert!(
-        matches!(d, HookDirective::Continue),
-        "Stop point 不支持 context，应丢弃"
+        matches!(
+            d,
+            Err(ClassifyError::Protocol {
+                violation: ProtocolViolation::ContextOnNonContextual
+            })
+        ),
+        "Stop point 不支持 context，应为 typed Protocol{{ContextOnNonContextual}}，实际 = {d:?}"
     );
 }
 
-/// can_modify_input=false 的 point 收到 updatedInput → 丢弃，返回 Continue。
+/// #924：can_modify_input=false 的 point 收到 updatedInput
+/// → typed `Protocol{UpdatedInputOnNonModifiable}`。
 #[test]
-fn test_updated_input_on_no_modify_point_is_dropped() {
+fn test_updated_input_on_no_modify_point_is_protocol_error() {
     let d = classify_directive(
         HookPoint::Stop,
         Some(0),
@@ -284,13 +387,18 @@ fn test_updated_input_on_no_modify_point_is_dropped() {
         "",
     );
     assert!(
-        matches!(d, HookDirective::Continue),
-        "Stop point 不支持 updatedInput，应丢弃"
+        matches!(
+            d,
+            Err(ClassifyError::Protocol {
+                violation: ProtocolViolation::UpdatedInputOnNonModifiable
+            })
+        ),
+        "Stop point 不支持 updatedInput，应为 typed Protocol{{UpdatedInputOnNonModifiable}}，实际 = {d:?}"
     );
 }
 
 /// can_add_context=true 但 can_modify_input=false 的 point（如 PreCompact）
-/// 收到 additionalContext → ContinueWithContext。
+/// 收到 additionalContext → ContinueWithContext（合法路径，应通过）。
 #[test]
 fn test_context_on_pre_compact_returns_context() {
     let d = classify_directive(
@@ -298,20 +406,30 @@ fn test_context_on_pre_compact_returns_context() {
         Some(0),
         r#"{"additionalContext":"ctx"}"#,
         "",
-    );
+    )
+    .expect("PreCompact 支持 context，应为 Ok(ContinueWithContext)");
     assert!(matches!(d, HookDirective::ContinueWithContext { .. }));
 }
 
-/// PreCompact 收到 updatedInput → 丢弃（can_modify_input=false）。
+/// #924：PreCompact 收到 updatedInput（can_modify_input=false）
+/// → typed `Protocol{UpdatedInputOnNonModifiable}`。
 #[test]
-fn test_updated_input_on_pre_compact_is_dropped() {
+fn test_updated_input_on_pre_compact_is_protocol_error() {
     let d = classify_directive(
         HookPoint::PreCompact,
         Some(0),
         r#"{"hookSpecificOutput":{"updatedInput":{"x":1}}}"#,
         "",
     );
-    assert!(matches!(d, HookDirective::Continue));
+    assert!(
+        matches!(
+            d,
+            Err(ClassifyError::Protocol {
+                violation: ProtocolViolation::UpdatedInputOnNonModifiable
+            })
+        ),
+        "PreCompact 不支持 updatedInput，应为 typed Protocol{{UpdatedInputOnNonModifiable}}，实际 = {d:?}"
+    );
 }
 
 // ════════════════════════════════════════════════════════════
@@ -432,6 +550,27 @@ fn test_metadata_observation_points_all_false() {
             "{point:?} 观察 point 应 can_modify_input=false"
         );
     }
+}
+
+// ════════════════════════════════════════════════════════════
+// protocol 辅助函数测试（自 protocol.rs inline tests 迁移）
+// ════════════════════════════════════════════════════════════
+
+#[test]
+fn test_truncate_short() {
+    assert_eq!(truncate("hello"), "hello");
+}
+
+#[test]
+fn test_truncate_long() {
+    let long = "x".repeat(OUTPUT_MAX_BYTES + 100);
+    let result = truncate(&long);
+    assert!(result.len() <= OUTPUT_MAX_BYTES);
+}
+
+#[test]
+fn test_default_true() {
+    assert!(default_true());
 }
 
 // ════════════════════════════════════════════════════════════
