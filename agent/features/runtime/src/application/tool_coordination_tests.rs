@@ -17,7 +17,7 @@ impl PolicyPort for RecordingPolicy {
             .lock()
             .unwrap()
             .push(request.tool_name().as_str().to_string());
-        if request.tool_name().as_str() == "denied" {
+        if request.tool_name().as_str() == "Denied" {
             PolicyDecision::Deny {
                 reason: PolicyReason::RestrictedTool,
             }
@@ -99,7 +99,7 @@ fn prepare_round_applies_guard_before_policy_and_preserves_positions() {
 
     assert_eq!(
         policy.names.lock().unwrap().as_slice(),
-        ["allowed", "denied"]
+        ["Allowed", "Denied"]
     );
     assert_eq!(prepared.executable.len(), 1);
     assert_eq!(prepared.executable[0].index, 0);
