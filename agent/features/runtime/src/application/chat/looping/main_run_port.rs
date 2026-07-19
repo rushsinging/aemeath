@@ -123,7 +123,7 @@ where
     pub(crate) last_total_tokens: &'a mut Option<u64>,
     pub(crate) task_reminder_state: &'a mut TaskReminderState,
     pub(crate) tool_identity:
-        &'a crate::application::chat::looping::tool_identity::ToolIdentityRegistry,
+        &'a crate::application::tool_coordination::identity::ToolIdentityRegistry,
     pub(crate) started_at: Instant,
 }
 
