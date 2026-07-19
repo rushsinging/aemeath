@@ -570,10 +570,10 @@ Policy v0.1.0 只生产 `AllowAll`，`Deny` / `RequireApproval` 仅为 Published
 | 行为 / 风险 | 必要层级 | 证据路径 | 结论 |
 |---|---|---|---|
 | `PolicyMode` 本期只暴露 `AllowAll`，Policy façade 保持窄且生产可达 | L0 / L3 | `agent/features/policy/tests/policy_contract.rs`；`check-cola-layer-purity.sh`、`check-crate-api-boundary.sh`、`check-production-reachability.sh` | 已覆盖 |
-| `PolicyRequest` 保留 Run、Step、Tool、capabilities、workspace，空 workspace 拒绝 | L1 / L3 | `agent/features/policy/tests/policy_contract.rs`；`agent/features/runtime/src/application/chat/looping/permissions_tests.rs` | 已覆盖 |
+| `PolicyRequest` 保留 Run、Step、Tool、capabilities、workspace，空 workspace 拒绝 | L1 / L3 | `agent/features/policy/tests/policy_contract.rs`；`agent/features/runtime/src/application/tool_coordination_tests.rs` | 已覆盖 |
 | `AllowAllPolicy` 对 Read / Edit / Bash 等合法请求始终返回 `Allow` | L3 | `agent/features/policy/tests/policy_contract.rs` | 已覆盖 |
 | Policy 日志只记录 mode、capability count、decision，不泄漏 Tool、路径或 ID | L1 | `agent/features/policy/src/adapters/adapters_tests.rs` | 已覆盖 |
-| Runtime 将 `Allow` 放入批准集，将 `Deny` / `RequireApproval` 映射为带原因的拒绝；未注册 Tool 与非法请求不调用 Policy | L2 | `agent/features/runtime/src/application/chat/looping/permissions_tests.rs` | 已覆盖 |
+| Runtime 将 `Allow` 放入批准集，将 `Deny` / `RequireApproval` 映射为带原因的拒绝；未注册 Tool 与非法请求不调用 Policy | L2 | `agent/features/runtime/src/application/tool_coordination_tests.rs` | 已覆盖 |
 | Composition 注入的同一 `Arc<dyn PolicyPort>` 同时到达 Main 与 Sub runner | L2 | `agent/features/runtime/src/application/client/from_args.rs`；`agent/features/runtime/src/application/startup/runtime_support.rs` | 已覆盖 |
 | `--yolo` 与 `--allow-all` 经过 CLI → SDK bootstrap 投影为同一兼容 ACL | L3 | `apps/cli/src/args.rs` | 已覆盖 |
 | 用户可感知的 Deny / Approval 旅程 | L4 | v0.1.0 生产 adapter 只返回 `Allow`；Deny / Approval 的规则、暂停恢复与 UI 明确属于 Future | 不适用，不伪造未来场景 |

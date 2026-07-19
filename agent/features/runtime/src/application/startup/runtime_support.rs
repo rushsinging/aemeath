@@ -44,6 +44,9 @@ pub fn build_agent_runner(
         crate::application::tool_result_materialization::ToolResultMaterializer,
     >,
     workspace: project::WorkspaceViews,
+    tool_catalog: Arc<dyn tools::ToolCatalogPort>,
+    tool_execution: Arc<dyn tools::ToolExecutionPort>,
+    tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
 ) -> Arc<agent_runner::CliAgentRunner> {
     let models_config = Arc::new(models.cloned().unwrap_or_default());
     let pool = build_llm_client_pool(agents, client.clone(), models_config.clone(), timeout_secs);
@@ -63,6 +66,9 @@ pub fn build_agent_runner(
         workspace: crate::application::tool_execution_adapters::RuntimeWorkspaceAccess::new(
             workspace,
         ),
+        tool_catalog,
+        tool_execution,
+        tool_context_binding,
         policy,
     })
 }
@@ -134,6 +140,7 @@ mod tests {
             .expect("wire test workspace")
             .into_views();
 
+        let tools = tools::composition::TestCatalogExecutionFactory::empty();
         let runner = build_agent_runner(
             None,
             None,
@@ -147,6 +154,9 @@ mod tests {
             Arc::new(tokio::sync::Semaphore::new(4)),
             crate::application::testing::test_tool_result_materializer(),
             workspace,
+            tools.catalog_port(),
+            tools.execution(),
+            tools.binding(),
         );
 
         assert!(

@@ -1,3 +1,5 @@
+use std::sync::{Arc, RwLock};
+
 use async_trait::async_trait;
 
 use crate::domain::{
@@ -9,6 +11,17 @@ pub mod context_port;
 pub mod session_snapshot_store;
 pub use context_port::ContextPort;
 pub use session_snapshot_store::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
+
+pub trait MainContextFactory: Send + Sync {
+    fn build(
+        &self,
+        session: Arc<RwLock<Arc<crate::domain::session::CanonicalSession>>>,
+        task_persist: Arc<dyn task::TaskPersist>,
+        workspace_persist: Arc<dyn project::WorkspacePersist>,
+        memory: Arc<RwLock<Arc<dyn memory::MemoryPort>>>,
+        mutation_gate: Arc<tokio::sync::Mutex<()>>,
+    ) -> Arc<dyn ContextPort>;
+}
 
 pub trait SessionDecoder: Send + Sync {
     fn decode(

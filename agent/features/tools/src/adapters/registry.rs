@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 use super::tool_registry::ToolRegistry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BuiltinRegistryScope {
+pub(crate) enum BuiltinRegistryScope {
     Main,
     SubAgent,
     /// Exact compatibility scope retained until #914.
@@ -36,7 +36,7 @@ impl BuiltinRegistryScope {
     }
 }
 
-fn profile_for(scope: BuiltinRegistryScope, main_parent: &ToolProfile) -> ToolProfile {
+pub(crate) fn profile_for(scope: BuiltinRegistryScope, main_parent: &ToolProfile) -> ToolProfile {
     let requested = match scope {
         BuiltinRegistryScope::Main | BuiltinRegistryScope::LegacyNoAgent => Caps::all(),
         BuiltinRegistryScope::SubAgent => {
@@ -65,7 +65,7 @@ fn belongs_to(scope: BuiltinRegistryScope, main: bool, sub: bool, no_agent: bool
     }
 }
 
-fn register_named_scope(
+pub(crate) fn register_named_scope(
     registry: &ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
@@ -271,7 +271,7 @@ fn register_named_scope(
 
     let built_scope = scope.build();
     debug_assert_eq!(built_scope.name().as_str(), selected_scope.name());
-    debug_assert_eq!(built_scope.len(), registry.len());
+    debug_assert!(registry.len() >= built_scope.len());
     debug_assert!(built_scope
         .iter()
         .all(|spec| built_scope.get(spec.name()).is_some()));
@@ -373,7 +373,7 @@ mod tests {
     fn names_for(scope: BuiltinRegistryScope) -> BTreeSet<String> {
         assembled_scope(scope)
             .iter()
-            .map(|spec| spec.name().as_str().to_owned())
+            .map(|spec| spec.name().normalized().to_owned())
             .collect()
     }
 

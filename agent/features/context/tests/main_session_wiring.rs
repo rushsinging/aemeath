@@ -212,6 +212,9 @@ fn build_harness() -> Harness {
         }),
         initial_session,
         initial_memory,
+        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
+            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+        )),
     };
 
     let wiring = MainSessionWiring::build(builder);
@@ -353,10 +356,22 @@ async fn cross_project_resume_succeeds() {
         "committed session should change after cross-project resume"
     );
 
-    // Committed memory changed (new Arc opened for the prepared identity).
+    // Committed memory changed (new Arc opened for the prepared identity), and
+    // the next Run captures that exact Arc under the shared lease.
+    let target_memory = h.wiring.committed_memory();
     assert!(
-        !Arc::ptr_eq(&h.wiring.committed_memory(), &pre_memory),
+        !Arc::ptr_eq(&target_memory, &pre_memory),
         "committed memory should be a new Arc"
+    );
+    let bound = h.wiring.bind_main_run().await.expect("bind target run");
+    assert!(
+        std::ptr::eq(bound.memory(), target_memory.as_ref()),
+        "bound run should capture the target project's committed Memory Arc"
+    );
+    assert_eq!(bound.session().id, h.wiring.committed_session().id);
+    assert_eq!(
+        bound.config().revision(),
+        h.config_service.committed_snapshot().revision()
     );
 
     // Config was committed (revision advances).

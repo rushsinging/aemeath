@@ -31,6 +31,7 @@ fn request() -> ContextRequest {
         session_id: SessionId::new("session-1"),
         request_id: ContextRequestId::new("request-1"),
         run_id: RunId::new("run-1"),
+        step_id: RunStepId::new("step-1"),
         pending_messages: vec![Message::user("hello")],
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
@@ -57,6 +58,7 @@ impl ContextPort for FakeContextPort {
         request: &ContextRequest,
     ) -> Result<ContextWindow, ContextPortError> {
         Ok(ContextWindow {
+            backing_revision: SessionRevision::new(3),
             system_blocks: vec![],
             messages: request.pending_messages.clone(),
             tool_schemas: request.tool_schemas.clone(),
@@ -105,6 +107,7 @@ async fn context_port_exposes_provider_neutral_four_method_contract() {
     assert!(matches!(
         port.compact(&CompactRequest {
             run_id: request.run_id.clone(),
+            source_revision: SessionRevision::new(3),
             source: request,
             trigger: CompactTrigger::Automatic,
         })

@@ -1,9 +1,10 @@
 use share::message::{ContentBlock, Message};
-use tools::{Tool, ToolExecutionContext, ToolRegistry};
-use tools::{ToolOutcome, ToolResult};
+use std::sync::Arc;
+use tools::{
+    ToolCatalogSnapshot, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
+    ToolInvocation, ToolOutcome,
+};
 
-/// 一次工具调用的完整结果。取代历史的 6 元组 `ToolResultTuple` / `UiToolResult`，
-/// 让管线全程按字段名访问而非位置取值。
 #[derive(Debug, Clone)]
 pub struct ToolExecution {
     pub call_id: sdk::ids::ToolCallId,
@@ -13,7 +14,6 @@ pub struct ToolExecution {
 }
 
 impl ToolExecution {
-    /// 从 `&ToolCall` + outcome 构造（调用方仍持有 `call` 时用）。
     pub fn new(call: &ToolCall, outcome: ToolOutcome) -> Self {
         Self {
             call_id: call.id.clone(),
@@ -23,7 +23,6 @@ impl ToolExecution {
         }
     }
 
-    /// 从已拆出的 owned 字段构造（并发闭包中 `call` 已被借用拆解时用）。
     pub fn from_parts(
         call_id: sdk::ids::ToolCallId,
         provider_id: String,
@@ -39,119 +38,74 @@ impl ToolExecution {
     }
 }
 
-pub struct Agent<'a> {
-    pub registry: &'a ToolRegistry,
+pub struct Agent {
+    pub catalog: ToolCatalogSnapshot,
+    pub execution: Arc<dyn ToolExecutionPort>,
     pub ctx: ToolExecutionContext,
     pub max_tool_concurrency: usize,
-    pub agent_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
-    pub workspace_persist: std::sync::Arc<dyn project::WorkspacePersist>,
-    /// Runtime-owned token for provider, hook, and loop infrastructure.
+    pub agent_semaphore: Arc<tokio::sync::Semaphore>,
+    pub workspace_persist: Arc<dyn project::WorkspacePersist>,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
 }
 
 pub use crate::domain::agent_run::ToolCall;
 
-fn tool_call_timeout_message(name: &str, timeout: u64, elapsed: std::time::Duration) -> String {
-    format!(
-        "tool.call execution timed out: tool={name}, timeout_secs={timeout}, elapsed_ms={}",
-        elapsed.as_millis()
-    )
-}
-
+#[cfg(test)]
 fn tool_call_cancelled_message(name: &str) -> String {
     format!("tool.call execution cancelled: tool={name}")
 }
 
+#[cfg(test)]
 async fn call_tool_with_timeout(
-    tool: std::sync::Arc<dyn Tool>,
+    tool: Arc<dyn tools::Tool>,
     name: &str,
     mut input: serde_json::Value,
     ctx: &ToolExecutionContext,
-) -> Result<ToolResult, String> {
+) -> Result<tools::ToolResult, String> {
     if ctx.cancellation().is_cancelled() {
         return Err(tool_call_cancelled_message(name));
     }
-
-    // 预校验 input 是否符合 schema（issue #430）：一次性收集全部参数错误
-    // （缺失/多余/类型/enum），返回结构化中文消息，加速模型纠正参数污染。
-    // 失败时不占用 Err 通道（保留给 timeout/cancel 等运行时故障）。
-    //
-    // 先剥离运行时元字段（phase 等，issue #491）：这些由系统提示要求 LLM
-    // 注入，供 reasoning graph 使用，不属于任何工具业务 schema，必须在
-    // 校验与派发前移除，否则严格 schema 工具会被误判为"多余字段"。
-    super::input_validation::strip_runtime_meta(&mut input);
-    if let Err(mismatch) =
-        super::input_validation::validate_tool_input(name, &tool.input_schema(), &input)
-    {
-        let message = super::input_validation::format_tool_input_error(&mismatch);
-        log::warn!(
-            target: crate::LOG_TARGET,
-            "tool input validation failed: tool={name}, message={message}"
-        );
-        return Ok(ToolResult {
+    tools::strip_runtime_meta(&mut input);
+    if let Err(mismatch) = tools::validate_tool_input(name, &tool.input_schema(), &input) {
+        let message = tools::format_tool_input_error(&mismatch);
+        return Ok(tools::ToolResult {
             text: message.clone(),
             data: serde_json::json!({ "status": "error", "message": message }),
             is_error: true,
+            error_kind: Some(tools::ToolErrorKind::InvalidInput),
             images: Vec::new(),
         });
     }
-
     let timeout = tool.timeout_secs();
-    let started = std::time::Instant::now();
     let cancellation = ctx.cancellation();
     tokio::select! {
-        _ = cancellation.cancelled() => {
-            let message = tool_call_cancelled_message(name);
-            log::debug!(target: crate::LOG_TARGET, "{message}");
-            Err(message)
-        }
-        result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout),
-            tool.call(input, ctx),
-        ) => {
-            match result {
-                Ok(result) => {
-                    log::debug!(target: crate::LOG_TARGET,
-                        "tool.call execution finished: tool={}, timeout_secs={}, elapsed_ms={}",
-                        name,
-                        timeout,
-                        started.elapsed().as_millis()
-                    );
-                    Ok(result)
-                }
-                Err(_) => {
-                    let elapsed = started.elapsed();
-                    let message = tool_call_timeout_message(name, timeout, elapsed);
-                    log::warn!(target: crate::LOG_TARGET, "{message}");
-                    Err(message)
-                }
-            }
+        _ = cancellation.cancelled() => Err(tool_call_cancelled_message(name)),
+        result = tokio::time::timeout(std::time::Duration::from_secs(timeout), tool.call(input, ctx)) => {
+            result.map_err(|_| format!("tool.call execution timed out: tool={name}, timeout_secs={timeout}"))
         }
     }
 }
 
-impl<'a> Agent<'a> {
+impl Agent {
     #[cfg(test)]
     pub(crate) fn for_test(
-        registry: &'a ToolRegistry,
+        factory: &tools::composition::TestCatalogExecutionFactory,
         ctx: ToolExecutionContext,
         max_tool_concurrency: usize,
     ) -> Self {
-        let workspace_persist = crate::application::testing::workspace_persist(&ctx);
+        let ports = factory.build(ctx.clone());
         Self {
-            registry,
+            catalog: ports.catalog(),
+            execution: ports.execution(),
+            workspace_persist: crate::application::testing::workspace_persist(&ctx),
             ctx,
             max_tool_concurrency,
-            agent_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
-            workspace_persist,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
             runtime_cancellation: tokio_util::sync::CancellationToken::new(),
         }
     }
 
-    pub fn extract_tool_calls_with_ids<F>(
-        message: &Message,
-        mut runtime_id_for_provider: F,
-    ) -> Vec<ToolCall>
+    pub fn extract_tool_calls_with_ids<F>(message: &Message, mut id_for: F) -> Vec<ToolCall>
     where
         F: FnMut(&str) -> sdk::ids::ToolCallId,
     {
@@ -161,7 +115,7 @@ impl<'a> Agent<'a> {
             .enumerate()
             .filter_map(|(index, block)| match block {
                 ContentBlock::ToolUse { id, name, input } => Some(ToolCall {
-                    id: runtime_id_for_provider(id),
+                    id: id_for(id),
                     provider_id: id.clone(),
                     name: name.clone(),
                     index,
@@ -173,161 +127,105 @@ impl<'a> Agent<'a> {
     }
 
     pub fn extract_tool_calls(message: &Message) -> Vec<ToolCall> {
-        Self::extract_tool_calls_with_ids(message, |provider_id| {
-            sdk::ids::ToolCallId::from_legacy_or_new(provider_id)
-        })
+        Self::extract_tool_calls_with_ids(message, sdk::ids::ToolCallId::from_legacy_or_new)
     }
 
-    pub async fn execute_tools(&self, tool_calls: &[ToolCall]) -> Vec<ToolExecution> {
-        let mut concurrent_calls: Vec<&ToolCall> = Vec::new();
-        let mut sequential_calls: Vec<&ToolCall> = Vec::new();
-
-        for call in tool_calls {
-            match self.registry.get(&call.name) {
-                Some(tool) if tool.is_concurrency_safe() => concurrent_calls.push(call),
-                _ => sequential_calls.push(call),
-            }
-        }
-
-        // Pre-allocate result slots and track original positions
-        // This ensures results are returned in original tool_calls order
-        let total_len = tool_calls.len();
-        let mut results: Vec<Option<ToolExecution>> = vec![None; total_len];
-        let mut concurrent_positions: Vec<usize> = Vec::new();
-        let mut sequential_positions: Vec<usize> = Vec::new();
-
-        // Track positions for each call
-        for (i, call) in tool_calls.iter().enumerate() {
-            match self.registry.get(&call.name) {
-                Some(tool) if tool.is_concurrency_safe() => {
-                    concurrent_positions.push(i);
-                }
-                _ => {
-                    sequential_positions.push(i);
-                }
-            }
-        }
-
-        // Execute concurrent-safe tools in parallel using join_all
-        if !concurrent_calls.is_empty() {
-            let semaphore =
-                std::sync::Arc::new(tokio::sync::Semaphore::new(self.max_tool_concurrency));
-
-            let futures: Vec<_> = concurrent_calls
-                .iter()
-                .zip(concurrent_positions.iter())
-                .filter_map(|(call, &pos)| {
-                    self.registry.get(&call.name).map(|tool| {
-                        let input = call.input.clone();
-                        let ctx = self.ctx.clone();
-                        let id = call.id.clone();
-                        let provider_id = call.provider_id.clone();
-                        let name = call.name.clone();
-                        let sem = semaphore.clone();
-
-                        async move {
-                            let _permit = sem.acquire().await.expect("semaphore closed");
-                            let outcome =
-                                match call_tool_with_timeout(tool, &name, input, &ctx).await {
-                                    Ok(result) => ToolOutcome::from_tool_result(result),
-                                    Err(message) => ToolOutcome::error(message),
-                                };
-                            (
-                                pos,
-                                ToolExecution::from_parts(id, provider_id, name, outcome),
-                            )
-                        }
-                    })
-                })
-                .collect();
-
-            let concurrent_results = futures::future::join_all(futures).await;
-            for (pos, execution) in concurrent_results {
-                results[pos] = Some(execution);
-            }
-        }
-
-        // Execute non-concurrent tools sequentially
-        for (call, &pos) in sequential_calls.iter().zip(sequential_positions.iter()) {
-            // Check for cancellation between sequential tool calls
-            if self.ctx.cancellation().is_cancelled() {
-                results[pos] = Some(ToolExecution::new(
-                    call,
-                    ToolOutcome::error("Cancelled by user"),
-                ));
-                continue;
-            }
-            if let Some(tool) = self.registry.get(&call.name) {
-                let outcome =
-                    match call_tool_with_timeout(tool, &call.name, call.input.clone(), &self.ctx)
-                        .await
-                    {
-                        Ok(result) => ToolOutcome::from_tool_result(result),
-                        Err(message) => ToolOutcome::error(message),
-                    };
-                results[pos] = Some(ToolExecution::new(call, outcome));
-            } else {
-                results[pos] = Some(ToolExecution::new(
-                    call,
-                    ToolOutcome::error(format!("unknown tool: {}", call.name)),
-                ));
-            }
-        }
-
-        // All slots should be filled by either concurrent or sequential execution.
-        // Use expect with a clear message instead of bare unwrap for debuggability.
-        results
-            .into_iter()
-            .enumerate()
-            .map(|(i, r)| {
-                r.unwrap_or_else(|| {
-                    panic!("agent::execute_tools: result slot {i} was not filled — this is a bug")
-                })
-            })
-            .collect()
+    fn is_concurrent(&self, call: &ToolCall) -> bool {
+        self.catalog
+            .find(&tools::ToolName::new(&call.name))
+            .is_some_and(|d| d.is_concurrency_safe())
     }
 
-    /// Execute a single tool call with a custom context (for streaming support).
-    ///
-    /// Mirrors the sequential path of `execute_tools` but allows the caller to
-    /// inject a modified `ToolExecutionContext` (e.g., with `progress_tx` set
-    /// for stdout streaming). Reuses `call_tool_with_timeout` for timeout/cancel.
+    async fn execute_call(&self, call: &ToolCall, ctx: &ToolExecutionContext) -> ToolExecution {
+        if ctx.cancellation().is_cancelled() {
+            return ToolExecution::new(
+                call,
+                ToolOutcome::error("tool execution cancelled by user"),
+            );
+        }
+        let Some(descriptor) = self.catalog.find(&tools::ToolName::new(&call.name)) else {
+            return ToolExecution::new(
+                call,
+                ToolOutcome::error(format!("unknown tool: {}", call.name)),
+            );
+        };
+        let mut input = call.input.clone();
+        tools::strip_runtime_meta(&mut input);
+        let invocation = ToolInvocation::new(call.name.as_str(), input, ctx.scope().clone());
+        let cancellation = ctx.cancellation();
+        let domain = tokio::select! {
+            _ = cancellation.cancelled() => ToolExecutionOutcome::cancelled("tool execution cancelled by user"),
+            result = tokio::time::timeout(
+                std::time::Duration::from_secs(descriptor.timeout_secs),
+                self.execution.execute(invocation, cancellation.as_ref()),
+            ) => match result {
+                Ok(outcome) => outcome,
+                Err(_) => ToolExecutionOutcome::failure(
+                    tools::ToolErrorKind::Internal,
+                    format!("tool.call execution timed out: tool={}, timeout_secs={}", call.name, descriptor.timeout_secs),
+                ),
+            }
+        };
+        ToolExecution::new(call, legacy_outcome(domain))
+    }
+
+    pub async fn execute_tools(&self, calls: &[ToolCall]) -> Vec<ToolExecution> {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_tool_concurrency));
+        let sequential = Arc::new(tokio::sync::Mutex::new(()));
+        let futures = calls.iter().enumerate().map(|(position, call)| {
+            let semaphore = semaphore.clone();
+            let sequential = sequential.clone();
+            async move {
+                if self.is_concurrent(call) {
+                    let _permit = semaphore.acquire().await.expect("tool semaphore closed");
+                    (position, self.execute_call(call, &self.ctx).await)
+                } else {
+                    let _serial = sequential.lock().await;
+                    (position, self.execute_call(call, &self.ctx).await)
+                }
+            }
+        });
+        let mut results = futures::future::join_all(futures).await;
+        results.sort_by_key(|(position, _)| *position);
+        results.into_iter().map(|(_, result)| result).collect()
+    }
+
     pub async fn execute_one_with_ctx(
         &self,
         call: &ToolCall,
         ctx: &ToolExecutionContext,
     ) -> ToolExecution {
-        if ctx.cancellation().is_cancelled() {
-            return ToolExecution::new(call, ToolOutcome::error("Cancelled by user"));
-        }
-        if let Some(tool) = self.registry.get(&call.name) {
-            let outcome =
-                match call_tool_with_timeout(tool, &call.name, call.input.clone(), ctx).await {
-                    Ok(result) => ToolOutcome::from_tool_result(result),
-                    Err(message) => ToolOutcome::error(message),
-                };
-            ToolExecution::new(call, outcome)
-        } else {
-            ToolExecution::new(
-                call,
-                ToolOutcome::error(format!("unknown tool: {}", call.name)),
-            )
-        }
+        self.execute_call(call, ctx).await
     }
 
-    /// Execute only the given tool calls (subset of all calls)
-    pub async fn execute_tools_filtered(&self, tool_calls: &[&ToolCall]) -> Vec<ToolExecution> {
-        let owned: Vec<ToolCall> = tool_calls
-            .iter()
-            .map(|c| ToolCall {
-                id: c.id.clone(),
-                provider_id: c.provider_id.clone(),
-                name: c.name.clone(),
-                index: c.index,
-                input: c.input.clone(),
-            })
-            .collect();
+    pub async fn execute_tools_filtered(&self, calls: &[&ToolCall]) -> Vec<ToolExecution> {
+        let owned = calls.iter().map(|call| (*call).clone()).collect::<Vec<_>>();
         self.execute_tools(&owned).await
+    }
+}
+
+pub(crate) fn legacy_outcome(outcome: ToolExecutionOutcome) -> ToolOutcome {
+    match outcome {
+        ToolExecutionOutcome::Success(success) => ToolOutcome::new(
+            success
+                .content
+                .into_iter()
+                .map(|block| block.text)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            success.data.unwrap_or(serde_json::Value::Null),
+            Vec::new(),
+        ),
+        ToolExecutionOutcome::Failure(failure) => ToolOutcome {
+            text: failure.safe_message,
+            data: failure.data.unwrap_or(serde_json::Value::Null),
+            is_error: true,
+            images: Vec::new(),
+        },
+        ToolExecutionOutcome::Cancelled(cancelled) => ToolOutcome::error(cancelled.reason),
+        ToolExecutionOutcome::Suspended(_) => {
+            ToolOutcome::error("tool execution suspended at an unsupported ordinary-execution seam")
+        }
     }
 }
 

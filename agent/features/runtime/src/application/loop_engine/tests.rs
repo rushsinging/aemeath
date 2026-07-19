@@ -11,6 +11,7 @@ use crate::domain::agent_run::{Run, RunDomainEvent, RunSpec, RunStatus};
 #[derive(Default)]
 struct ScriptedPort {
     model_steps: VecDeque<ModelStep>,
+    model_errors: VecDeque<LoopEngineError>,
     tool_steps: VecDeque<ToolStep>,
     calls: Vec<&'static str>,
     events: Vec<RunDomainEvent>,
@@ -19,6 +20,9 @@ struct ScriptedPort {
     cancelled_during_model: bool,
     block_model_forever: bool,
     block_compact_until_cancelled: bool,
+    cancelled_steps: Vec<sdk::RunStepId>,
+    finalized_steps: Vec<sdk::RunStepId>,
+    frozen_steps: Vec<sdk::RunStepId>,
     needs_compaction: bool,
     fail_emit_once: bool,
 }
@@ -28,6 +32,11 @@ impl RunLoopPort for ScriptedPort {
     async fn drain_input(&mut self) -> Result<Vec<LoopInput>, LoopEngineError> {
         self.calls.push("input");
         Ok(self.input_batches.pop_front().unwrap_or_default())
+    }
+
+    fn freeze_step(&mut self, step_id: &sdk::RunStepId, _inputs: &[LoopInput]) {
+        self.calls.push("freeze_step");
+        self.frozen_steps.push(step_id.clone());
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
@@ -56,10 +65,28 @@ impl RunLoopPort for ScriptedPort {
             cancel.cancelled().await;
             return Err(LoopEngineError::Cancelled);
         }
+        if let Some(error) = self.model_errors.pop_front() {
+            return Err(error);
+        }
         self.model_steps
             .pop_front()
             .map(|step| (step, StepTokenUsage::default()))
             .ok_or_else(|| LoopEngineError::Adapter("missing model step".to_string()))
+    }
+
+    async fn finalize_step(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
+        self.calls.push("finalize_step");
+        self.finalized_steps.push(step_id.clone());
+        Ok(())
+    }
+
+    async fn finalize_cancelled_step(
+        &mut self,
+        step_id: &sdk::RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        self.calls.push("finalize_cancelled_step");
+        self.cancelled_steps.push(step_id.clone());
+        Ok(())
     }
 
     async fn execute_tools(
@@ -205,6 +232,9 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
     run_loop(&mut run, &cancel, &mut port).await.unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
+    assert_eq!(port.frozen_steps.len(), 1);
+    assert_eq!(port.finalized_steps, port.frozen_steps);
+    assert_eq!(run.steps()[0].id(), &port.frozen_steps[0]);
     assert_eq!(run.steps().len(), 1);
     assert_eq!(
         run.steps()[0].invocation().unwrap().response(),
@@ -213,7 +243,16 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
     );
     assert_eq!(
         port.calls,
-        vec!["emit", "input", "needs_compaction", "emit", "model", "emit"]
+        vec![
+            "emit",
+            "input",
+            "freeze_step",
+            "needs_compaction",
+            "emit",
+            "model",
+            "finalize_step",
+            "emit",
+        ]
     );
     assert!(port
         .events
@@ -279,6 +318,65 @@ async fn engine_pauses_for_user_without_completing_the_run() {
 }
 
 #[tokio::test]
+async fn provider_context_too_long_compacts_then_rebuilds_before_reinvoking() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = ScriptedPort {
+        model_steps: VecDeque::from([ModelStep::Complete {
+            text: "done".to_string(),
+        }]),
+        model_errors: VecDeque::from([LoopEngineError::NeedsCompaction(
+            "provider context too long".to_string(),
+        )]),
+        ..Default::default()
+    };
+
+    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert_eq!(
+        port.calls,
+        vec![
+            "emit",
+            "input",
+            "freeze_step",
+            "needs_compaction",
+            "emit",
+            "model",
+            "compact",
+            "model",
+            "finalize_step",
+            "emit",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn provider_context_too_long_after_compaction_fails_without_looping() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = ScriptedPort {
+        model_errors: VecDeque::from([
+            LoopEngineError::NeedsCompaction("first".to_string()),
+            LoopEngineError::NeedsCompaction("second".to_string()),
+        ]),
+        ..Default::default()
+    };
+
+    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+
+    assert_eq!(run.status(), RunStatus::Failed);
+    assert_eq!(
+        port.calls.iter().filter(|call| **call == "compact").count(),
+        1
+    );
+    assert_eq!(
+        port.calls.iter().filter(|call| **call == "model").count(),
+        2
+    );
+}
+
+#[tokio::test]
 async fn engine_cancels_in_flight_compaction_and_emits_terminal_ack() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
@@ -325,6 +423,7 @@ async fn engine_cancels_in_flight_model_and_emits_terminal_ack() {
 
     assert_eq!(directive, LoopDirective::Terminal);
     assert_eq!(run.status(), RunStatus::Cancelled);
+    assert_eq!(port.cancelled_steps, port.frozen_steps);
     assert!(port
         .events
         .iter()

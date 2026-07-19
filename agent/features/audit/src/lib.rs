@@ -1,4 +1,5 @@
-pub(crate) const LOG_TARGET: &str = "aemeath:agent:audit";
+/// Audit 模块自身的运行诊断 target；Audit Usage Fact 使用独立 append store。
+pub(crate) const LOG_TARGET: &str = "aemeath:diagnostic:audit";
 
 mod adapters;
 mod application;

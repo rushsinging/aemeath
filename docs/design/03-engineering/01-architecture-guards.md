@@ -18,12 +18,12 @@
 │                             不可解析三类诊断                 │
 │                                                              │
 │ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 35 个守卫       │
+│   └─ check-architecture-guards.sh    串行执行 41 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（34 个独立脚本 + 1 个内联 `run_tui_single_source_structure_guard`，合计 35 个守卫）。下表才是真正的守卫集合；历史序号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用 40 个独立脚本守卫，并运行 1 个内联结构守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
 
 ## 守卫索引
 
@@ -65,6 +65,7 @@
 | 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` + 同步 `cancel_run(run_id)`；禁止恢复 `ChatInputEvent::Cancel` |
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
+| 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
@@ -488,24 +489,17 @@
 
 ## 17. check-log-target-prefix.sh
 
-- **功能**：扫描整个仓库的 `.rs` 生产代码，检查所有 `log::xxx!` 宏中的 `target:` 字符串字面量必须以 `aemeath:` 开头。
-- **守护**：日志架构统一——所有 log target 必须遵循 `aemeath:<domain>[:<crate>]` 命名约定，避免日志路由到错误的 target。
-- **检查方式**：
-  - 扫描全部 `.rs` 文件（排除 `target/`、`tests/`、`*test*.rs`、`packages/global/logging/src/`）；
-  - 匹配 `target:\s*"[^"]*"` 模式，筛选出不包含 `aemeath:` 的行；
-  - 引用常量（如 `target: LOG_TARGET`）不带引号，不会被匹配，自然放行。
-- **白名单**：无文件级白名单。
-- **例外**：`packages/global/logging/src/`（该目录的精确白名单校验由 Rust 测试 `domain/routing_guard.rs` 覆盖；#936 将其切换为消费唯一 TargetCatalog）。
-- **错误信息**：`log target must start with 'aemeath:' (or use LOG_TARGET constant)`。
-- **关联 Rust 守卫**：`packages/global/logging/src/domain/routing_guard.rs` 有同功能的 `cargo test` 守卫，使用精确白名单校验。
+- **功能**：运行 owner-aware Rust scanner，扫描全仓生产日志调用、crate-root target owner 与 TargetCatalog。
+- **守护**：调用方只能引用所属 owner 的唯一 target；Audit Usage Fact 名称 `aemeath:agent:audit` 与旧 `agent-audit.log` 不得进入 Diagnostic catalog，Audit 模块运行诊断使用 `aemeath:diagnostic:audit`。
+- **范围排除**：测试目录、`*test*.rs` 与 `cfg(test)` probe；登记为 `scope.logging.production-test-sources`，不属于迁移债务。
+- **关联 Rust 守卫**：`packages/global/logging/src/domain/routing_guard.rs` 消费唯一 TargetCatalog，并校验 owner、sink 与文件唯一性。
 
 ### 17a. check-logging-scope-context.sh
 
 - **功能**：扫描整个 `packages/global/logging/src` 的生产 Rust 文件，拒绝未登记的 `static`、`static mut`、`lazy_static!` 与 `thread_local!` 状态；`pub`、多行声明同样参与检查。
 - **守护**：新日志执行上下文只能通过不可变 `LogContext` 与 Tokio task-local scope 传播；禁止以改名或移动文件的方式恢复 Main/Sub 共享的进程级可变 current 状态。
-- **精确白名单**：`context.rs` 的 `SCOPED_CONTEXT / LEGACY_EXECUTION_CONTEXT / BOOT_TS / APP_VERSION / PID / TEST_LOCK`，以及 `file_sink.rs` 的 `UNKNOWN_TARGET_REPORTS / LOGGER`。其中 `LEGACY_EXECUTION_CONTEXT` 只为 #940 消费迁移及 #942 退役保留；白名单 **NEVER** 扩张，新增进程元数据必须有独立设计证据。
-- **故意违规证据**：在 `formatter.rs` 临时新增带 `pub(crate)`、多行声明且不使用 `CURRENT_*` 命名的 `ACTIVE_REQUEST` 后，单 Guard 以 exit 2 阻断；恢复后单 Guard clean pass。
-- **退出条件**：#942 删除 legacy setters 与 `LEGACY_EXECUTION_CONTEXT` 后，从精确白名单删除该项。
+- **精确白名单**：`context.rs` 的 `SCOPED_CONTEXT / BOOT_TS / APP_VERSION / PID`，以及 `file_sink.rs` 的 `UNKNOWN_TARGET_REPORTS / LOGGER`。仅允许 task-local owner 与不可变进程元数据；`LEGACY_EXECUTION_CONTEXT`、legacy setter/getter 与 formatter fallback 已由 #942 删除并由 Guard 拒绝回流。
+- **故意违规证据**：临时恢复未登记 static 或任一 retired legacy symbol，单 Guard 与总编排均必须 exit 2；恢复后 clean pass。
 
 ### 17b. check-logging-settings-injection.sh
 
@@ -578,6 +572,9 @@
 - **检查方式**：确认 Runtime 的 Main/Sub 入口调用唯一 `loop_engine::run_loop`，禁止旧 FSM；并扫描 `agent/features/runtime/src`、`agent/features/tools/src/adapters/agent_tool.rs` 与 `agent/features/tools/src/domain/types/agent.rs`，禁止恢复 Session token 槽或 `max_turns`。
 - **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
 
+- **#876 Context execution 边界**：`main_run_port.rs`、Sub `loop_run.rs` 与 `context_coordination.rs` 禁止引用 `context::session::*`、`ChatChain` / `ChatSegment`、`save_chain` 或 legacy compact helper；Main/Sub 必须各自经 `append_finalized` 接入 ContextPort 的唯一 finalized Step 提交。idle/session command 兼容路径不在本规则扫描范围，由 #872/#879 退役。
+- **故意违规验证**：向 Main/Sub execution path 临时加入 `ChatChain` 或 `save_chain` 标记时守卫必须阻断；移除后恢复通过。
+
 ## 23. check-run-control-boundary.sh
 
 - **位置**：`.agents/hooks/check-run-control-boundary.sh`。
@@ -588,6 +585,17 @@
 - **检查方式**：`grep -nE` 分别扫描上述两个文件，命中即输出对应说明并 `exit 1`。
 - **白名单**：无。
 - **失败模式**：`SDK run control Published Language must contain only pure value DTOs.` / `New run control APIs must not reach production AgentClient before #878 atomic cutover.`
+
+## 23a. check-tool-catalog-execution-boundary.sh
+
+- **位置**：`.agents/hooks/check-tool-catalog-execution-boundary.sh`；正反例脚本为 `check-tool-catalog-execution-boundary-tests.sh`。
+- **Runtime 生产边界**：扫描 `agent/features/runtime/src/**/*.rs` 的生产源码，禁止 `ToolRegistry`、`Arc<dyn Tool>`、`registry.get()`、`tool.call()` 与 `input_schema()` 直取。规则没有 composition/legacy 路径白名单；Composition 可通过 Tools 提供的窄 factory 装配双端口，但 Runtime 内仍存旧路径必须迁移或退役，不能以例外隐藏。
+- **Execution adapter 边界**：`tools/src/adapters/execution.rs` 禁止引用 `policy/hook/sdk/tui/runtime`，并禁止 `timeout`、`Semaphore`、`RunStep`、`approval`；这些编排职责归 Runtime。
+- **纯值 suspension / AskUser**：`tools/src/domain/suspension.rs` 禁止 tokio、Sender/Receiver、Mutex/RwLock/Arc、RuntimeHandle、request id 与 resume token；Tools AskUser 生产 adapter 禁止 `__ASK_USER__` / `__ASK_USER_SELECT__` 魔法协议及 oneshot/channel/waiter。Runtime-owned AskUser oneshot 明确不在该 Tools 扫描范围。
+- **façade 与 validator**：Tools crate-root 禁止公开 `ToolBacking` / `RegistryScopeBuilder` / `ToolRegistry` 和具体 `CatalogAdapter` / `ExecutionAdapter`；Catalog/Execution 只能经 composition factory 形成 trait-object 端口。schema validator 唯一实现必须位于 Tools；Runtime `input_validation.rs` 只允许兼容 re-export/phase peel，不得复制实现。
+- **排除语义**：只排除测试路径与精确 `#[cfg(test)]` item，不提供 migration exception、路径 allowlist 或 suppression。
+- **故意违规证据**：sanity 脚本先验证 Runtime-owned oneshot 正例，再分别注入 Runtime registry 直取、Execution→Hook、Suspension Sender、AskUser 魔法字符串、具体 adapter façade 与 Runtime schema copy；六类反例均必须由单 Guard 以 exit 2 拦截，恢复后 clean pass。
+- **失败模式**：逐项输出 `path:line: reason`，汇总后 exit 2。
 
 ## 24. check-config-reader-injection.sh
 

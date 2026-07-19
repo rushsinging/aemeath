@@ -53,6 +53,9 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
                 committed_steps: Vec::new(),
             },
             initial_memory: Arc::new(memory::api::NoOpMemory),
+            context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
+                Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+            )),
         },
     ))
 }
@@ -123,7 +126,7 @@ fn test_list_sessions() -> Arc<
 }
 
 use crate::application::testing::text_completion_stream;
-use ::tools::ToolRegistry;
+
 use async_trait::async_trait;
 use hook::api::HookRunner;
 use provider::{InvocationStream, LlmProvider, ProviderError, ProviderErrorKind, SystemBlock};
@@ -567,7 +570,9 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -685,7 +690,9 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -876,7 +883,9 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["final response"]),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -971,7 +980,9 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             TwoTurnProvider,
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -1142,7 +1153,9 @@ async fn test_continue_false_json_treated_as_block() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["first response", "second response"]),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -1266,7 +1279,9 @@ async fn test_stall_triggers_stop_hook_check() {
                 "final ok",
             ]),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -1429,7 +1444,9 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["turn one final", "turn two final"]),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -1594,7 +1611,9 @@ async fn test_stall_detector_resets_across_user_turns() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             IdenticalReplyProvider::new("Done.", per_turn_delay),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -1793,7 +1812,9 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -1917,7 +1938,9 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -2021,7 +2044,9 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -2102,7 +2127,9 @@ async fn test_stop_hook_block_limit_stops_loop() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"]),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -2289,7 +2316,9 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -2350,31 +2379,11 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         events.iter().any(|e| e == "Text:turn 2 final"),
         "重置 token 后回合 2 应正常调用 LLM 并完成: {events:?}"
     );
-    // 回滚断言（per-turn 基线语义，与重构前 per-`chat()` 一致）：cancel 把基线设在
-    // 「本回合用户消息已入、assistant 未产生」处，故取消只回滚本回合的 partial
-    // assistant/tool 输出，**保留本回合用户消息 "first"**。检查取消回滚那次
-    // MessagesSync（Cancelled 之前最近一次）应含 "first" 但不含任何 assistant 文本。
-    let cancelled_idx = events
-        .iter()
-        .position(|e| e == "Cancelled")
-        .expect("应有 Cancelled 事件");
-    let syncs_before_cancel = events[..cancelled_idx]
-        .iter()
-        .filter(|e| e.starts_with("CompactRollback"))
-        .count();
     assert!(
-        syncs_before_cancel >= 1,
-        "Cancelled 前应至少有一次 CompactRollback（回滚同步）: {events:?}"
-    );
-    let rollback_snapshot = &sink.synced_messages()[syncs_before_cancel - 1];
-    let rollback_texts: Vec<String> = rollback_snapshot.iter().map(|m| m.text_content()).collect();
-    assert!(
-        rollback_texts.iter().any(|t| t == "first"),
-        "per-turn 基线设在用户消息之后：回合 1 取消应保留本回合用户消息 'first': {rollback_texts:?}"
-    );
-    assert!(
-        rollback_texts.iter().all(|t| t != "turn 2 final"),
-        "回合 1 取消的回滚快照不应含回合 2 的 assistant 输出: {rollback_texts:?}"
+        events
+            .iter()
+            .all(|event| !event.starts_with("CompactRollback")),
+        "finalized partial Step 由 Context append 保存，取消不得恢复旧 rollback 路径: {events:?}"
     );
 }
 
@@ -2525,7 +2534,9 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -2574,52 +2585,11 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         "回合 2 进行中 cancel 应发出 Cancelled 事件: {events:?}"
     );
 
-    // 关键回归断言：回合 2 取消后第一次 CompactRollback（cancel_to_idle 内的回滚同步）
-    // 必须仍包含回合 1 的 user+assistant。pre-fix 用 loop_start_baseline=0 回滚 →
-    // 这两条被删除 → 断言失败；修复后 per-turn 基线保留它们 → 通过。
-    let cancelled_idx = events
-        .iter()
-        .position(|e| e == "Cancelled")
-        .expect("应有 Cancelled 事件");
-    // cancel_to_idle 先发 CompactRollback（回滚后）再发 Cancelled；取 Cancelled 之前最近一次
-    // CompactRollback 对应的快照即「取消回滚后的 messages」。
-    let _syncs = sink.synced_messages();
-    // 找到「取消回滚」那次 sync：它是 events 中 Cancelled 之前最后一个 CompactRollback。
-    let messages_sync_count_before_cancel = events[..cancelled_idx]
-        .iter()
-        .filter(|e| e.starts_with("CompactRollback"))
-        .count();
     assert!(
-        messages_sync_count_before_cancel >= 1,
-        "Cancelled 前应至少有一次 CompactRollback（回滚同步）: {events:?}"
-    );
-    // syncs 按时间顺序收集所有 sync 类事件（TurnStarted/PostToolExecutionSync/CompactRollback 等）的快照。
-    // cancel_to_idle 中 Cancelled 之前最后一次 sync 就是 CompactRollback（回滚后）。
-    // 但 syncs 也包含非 rollback 事件，需要找最后一个。由于 cancel 前最后一次 sync 必然是回滚，
-    // 直接取 syncs 中 Cancelled 前最后一次即可。
-    // syncs 的事件和 events 一一对应（所有 sync 类事件都同时 push 到 syncs 和 events）。
-    // 但 events 也包含非 sync 事件（如 Cancelled、Thinking 等），所以不能直接索引。
-    // 简化：syncs 的最后一个元素就是 cancel 前最后一次 sync 的快照。
-    let rollback_guard = sink.compact_rollback_snapshots.lock().unwrap();
-    let rollback_snapshot = rollback_guard
-        .last()
-        .expect("应至少有一次 CompactRollback 快照");
-    let texts: Vec<String> = rollback_snapshot.iter().map(|m| m.text_content()).collect();
-    assert!(
-        texts.iter().any(|t| t == "turn1-user"),
-        "回合 2 取消不得删除回合 1 的用户消息 'turn1-user': {texts:?}"
-    );
-    assert!(
-        texts.iter().any(|t| t == "turn 1 assistant"),
-        "回合 2 取消不得删除回合 1 的 assistant 响应 'turn 1 assistant': {texts:?}"
-    );
-    // 回合 2 的 partial 输出（用户消息 'turn2-user' 之后无 assistant，因 LLM 被取消）：
-    // 'turn2-user' 应被回滚（与重构前语义一致：保留用户消息这一点见下），实际本回合
-    // 用户消息也属当前回合内容、应回滚到 per-turn 基线之内。本回合用户消息保留与否取决于
-    // 捕获点：本实现把基线设在「用户消息已入、assistant 未产生」处，故回合 2 用户消息保留。
-    assert!(
-        texts.iter().any(|t| t == "turn2-user"),
-        "per-turn 基线设在用户消息之后：回合 2 取消应保留本回合用户消息 'turn2-user': {texts:?}"
+        events
+            .iter()
+            .all(|event| !event.starts_with("CompactRollback")),
+        "回合 2 取消应提交 finalized partial Step，禁止恢复旧 rollback 路径: {events:?}"
     );
 
     // cancel 后未退 loop：回合 3 正常完成，总计 2 个 DoneWithDuration。
@@ -2751,7 +2721,9 @@ async fn test_chat_impl_idle_until_first_input_event() {
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -2877,7 +2849,9 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -2974,7 +2948,9 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -3051,7 +3027,9 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         queue: SequenceQueueDrainPort::new(vec![None]),
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -3198,7 +3176,9 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
-        registry: Arc::new(ToolRegistry::new()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),

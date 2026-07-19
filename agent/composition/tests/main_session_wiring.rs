@@ -147,6 +147,9 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
+        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
+            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+        )),
     };
     let wiring = context::wire_main_session(deps)
         .await
@@ -235,6 +238,9 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
+        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
+            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+        )),
     };
     let wiring = context::wire_main_session(deps)
         .await
@@ -312,6 +318,9 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
+        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
+            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+        )),
     };
     let wiring = context::wire_main_session(deps)
         .await

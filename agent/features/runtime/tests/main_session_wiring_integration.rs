@@ -73,6 +73,9 @@ async fn make_wiring_and_workspace(
         task_wiring.persist(),
         config.reader(),
         config.participant(),
+        Arc::new(context::adapters::ProductionMainContextFactory::new(
+            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+        )),
     )
     .await;
     (wiring, workspace)
@@ -214,6 +217,9 @@ async fn config_query_and_writer_come_from_wiring() {
         task_wiring.persist(),
         config.reader(),
         config.participant(),
+        Arc::new(context::adapters::ProductionMainContextFactory::new(
+            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
+        )),
     )
     .await;
 

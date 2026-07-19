@@ -70,7 +70,7 @@ const OWNERS: &[(&str, OwnerRule)] = &[
     ),
     (
         "agent/features/audit",
-        OwnerRule::new("audit", "aemeath:agent:audit", "crate::LOG_TARGET"),
+        OwnerRule::new("audit", "aemeath:diagnostic:audit", "crate::LOG_TARGET"),
     ),
     (
         "agent/features/config",

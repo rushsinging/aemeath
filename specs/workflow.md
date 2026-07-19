@@ -47,6 +47,15 @@ Release Gate issue 模板见仓库 `.github/ISSUE_TEMPLATE/`。
 5. **必有收尾能力**：大型工作 **MUST** 覆盖 Guard + Verify、收尾退役、大文件拆分三类交付。
 6. **依赖顺序**：sub-issues **MUST** 按领域模型 → Port / PL → Adapter → 消费方 → Guard / 退役的方向拆分。依赖方向严格从内到外。
 
+## 开发环境（Cargo build-dir / Git hooks / sccache）
+
+- 开发环境 **MUST** 使用 Cargo 1.91+，并通过 `scripts/setup-dev-env.sh --check` 验证。
+- `core.hooksPath` **MUST** 配置为主 checkout `.cargo/hooks` 的绝对路径。
+- `post-checkout` **MUST** 生成 worktree-local `.cargo/config.toml`，将 `target-dir` 和 `build-dir` 设为 `~/.cache/aemeath-target/<分支标签>-<worktree 路径哈希>`。
+- 开发环境 **SHOULD** 安装 sccache，并在 `~/.cargo/config.toml` 配置 `rustc-wrapper = "sccache"`。
+- worktree 构建缓存 **MUST** 使用 `scripts/clean-worktree-targets.sh [--dry-run] [--keep-current] [--yes] [--max-size-gb N]` 清理。
+- 清理脚本 **NEVER** 自动删除活跃 worktree 的构建缓存。
+
 ## Git 工作流
 
 日常开发在 `main` 上进行；`release/vX.Y.Z` 分支仅在发版时从 `origin/main` 切出，用于版本发布与发版后的维护（hotfix）。

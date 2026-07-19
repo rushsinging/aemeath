@@ -8,9 +8,11 @@ cd "$ROOT"
 ENGINE="agent/features/runtime/src/application/loop_engine/engine.rs"
 MAIN="agent/features/runtime/src/application/chat/looping/loop_runner.rs"
 SUB="agent/features/runtime/src/application/agent/runner/loop_run.rs"
+MAIN_PORT="agent/features/runtime/src/application/chat/looping/main_run_port.rs"
+CONTEXT_COORDINATION="agent/features/runtime/src/application/context_coordination.rs"
 OLD_FSM="agent/features/runtime/src/application/chat/looping/state.rs"
 
-for path in "$ENGINE" "$MAIN" "$SUB"; do
+for path in "$ENGINE" "$MAIN" "$MAIN_PORT" "$SUB" "$CONTEXT_COORDINATION"; do
   if [ ! -f "$path" ]; then
     echo "{\"decision\":\"block\",\"reason\":\"共享 Loop Engine 守卫缺少文件：$path\"}"
     exit 2
@@ -36,6 +38,17 @@ fi
 
 if ! grep -q 'shared_run_loop(&mut run, &cancel, &mut self).await' "$SUB"; then
   echo '{"decision":"block","reason":"Sub Run 未调用共享 loop_engine::run_loop。"}'
+  exit 2
+fi
+
+if grep -nE 'context::session::|\bChatChain\b|\bChatSegment\b|save_chain|microcompact_(chain|messages)|compact_messages_with_llm' \
+    "$MAIN_PORT" "$SUB" "$CONTEXT_COORDINATION"; then
+  echo '{"decision":"block","reason":"Runtime Main/Sub execution path 必须只经 ContextPort 四方法协调，禁止 Session 内部类型、save callback 与 legacy compact helper。"}'
+  exit 2
+fi
+
+if ! grep -q 'append_finalized' "$MAIN_PORT" || ! grep -q 'append_finalized' "$SUB"; then
+  echo '{"decision":"block","reason":"Main/Sub execution path 必须各自接入唯一 finalized Step append。"}'
   exit 2
 fi
 

@@ -1,6 +1,5 @@
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 
-use super::super::common::typed_data;
 use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ToolDisplay, ToolDisplayEntry, ToolRenderPolicy,
 };
@@ -30,19 +29,14 @@ impl ToolDisplay for AskUserQuestionDisplay {
             result: ResultPolicy::Hidden, // answer is already echoed via App::append_user_echo
         }
     }
-    /// result 到达后，从 `AskUserQuestionResult.options` 读取选项数，
-    /// suffix 形如 ` (N options)`。
+    /// AskUser 的答案已由交互区域展示，header 不重复投影结果内容。
     fn format_header_line_with_result(
         &self,
         _input: &serde_json::Value,
-        result_payload: Option<&ToolResultPayload>,
+        _result_payload: Option<&ToolResultPayload>,
         _workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        // Issue #545: header 只显示 display_name + result suffix，不再带 question 预览。
-        let n = typed_data::<sdk::tool_result::AskUserQuestionResult>(result_payload)
-            .map(|r| r.options.len() as u64);
-        let suffix = n.map(|c| format!(" ({c} options)")).unwrap_or_default();
-        build_header_line(self.display_name(), "", &suffix)
+        build_header_line(self.display_name(), "", "")
     }
 }
 inventory::submit!(ToolDisplayEntry {

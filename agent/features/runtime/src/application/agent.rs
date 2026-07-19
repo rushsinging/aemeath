@@ -4,4 +4,5 @@ pub mod agent;
 pub mod input_validation;
 pub mod runner;
 
+pub(crate) use agent::legacy_outcome;
 pub use agent::{Agent, ToolCall, ToolExecution};

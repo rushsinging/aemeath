@@ -184,7 +184,7 @@ pub enum RuntimeStreamEvent {
     HookEvent(RuntimeHookEvent),
     AskUserBatch {
         items: Vec<sdk::AskUserQuestionItem>,
-        reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
+        reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,
     },
     AgentProgress {
         context: RuntimeTurnContext,
