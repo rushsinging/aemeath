@@ -63,7 +63,6 @@ pub(crate) fn production_execution_context(root: PathBuf) -> ToolExecutionContex
             Arc::new(memory::NoOpMemory),
             Arc::new(FixedGuidance {
                 language: "en".into(),
-                allow_all: false,
             }),
         ),
     )

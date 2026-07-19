@@ -78,11 +78,13 @@ impl TypedTool for BashTool {
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
         let command = args.command.as_str();
-        if let Some(reason) = check_command_safety(command) {
-            return TypedToolResult::error(format!("Command blocked ({reason}): {command}\nUse the dedicated tool requested by the error message, or ask the user to execute it manually if this is intentional."));
-        }
-        if let Some(reason) = check_shell_injection(command) {
-            return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
+        if ctx.authorization().enforce_bash_safety {
+            if let Some(reason) = check_command_safety(command) {
+                return TypedToolResult::error(format!("Command blocked ({reason}): {command}\nUse the dedicated tool requested by the error message, or ask the user to execute it manually if this is intentional."));
+            }
+            if let Some(reason) = check_shell_injection(command) {
+                return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
+            }
         }
         let timeout_ms = args.timeout.unwrap_or(120_000);
 

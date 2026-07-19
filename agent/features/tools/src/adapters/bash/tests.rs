@@ -11,7 +11,7 @@ use serde_json::json;
 use tempfile::tempdir;
 
 #[tokio::test]
-async fn bash_allow_all_does_not_bypass_shell_injection_guard() {
+async fn bash_allow_all_bypasses_shell_injection_guard() {
     let workspace = tempdir().unwrap();
     let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
         workspace.path().to_path_buf(),
@@ -20,11 +20,17 @@ async fn bash_allow_all_does_not_bypass_shell_injection_guard() {
     .build();
 
     let result = bash_tool(&ctx)
-        .call(json!({ "command": "echo $(rm -rf /tmp/never-run)" }), &ctx)
+        .call(
+            json!({ "command": "printf allowed >/dev/null & wait" }),
+            &ctx,
+        )
         .await;
 
-    assert!(result.is_error);
-    assert!(result.text.contains("blocked"));
+    assert!(
+        !result.is_error,
+        "allow-all bash should execute: {}",
+        result.text
+    );
 }
 
 #[tokio::test]

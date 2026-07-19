@@ -6,6 +6,7 @@ use crate::application::chat::looping::tools::{
 use crate::application::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
+use crate::application::tool_coordination::PreparedToolCall;
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
 use std::path::Path;
@@ -17,7 +18,7 @@ use tools::{ToolExecutionContext, ToolExecutionPort};
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_agent_calls<S>(
     context: &RuntimeTurnContext,
-    agent_approved: &[ToolCall],
+    agent_approved: &[PreparedToolCall],
     execution: &Arc<dyn ToolExecutionPort>,
     agent_ctx: &ToolExecutionContext,
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
@@ -34,14 +35,9 @@ where
     let agent_futures: Vec<_> = agent_approved
         .iter()
         .enumerate()
-        .map(|(position, call)| {
-            let call = ToolCall {
-                id: call.id.clone(),
-                provider_id: call.provider_id.clone(),
-                name: call.name.clone(),
-                index: call.index,
-                input: call.input.clone(),
-            };
+        .map(|(position, prepared)| {
+            let call = prepared.call.clone();
+            let authorization = prepared.authorization;
             let sink = sink.clone();
             let hook_ui = hook_ui.clone();
             let mut ag_ctx = agent_ctx.clone();
@@ -71,6 +67,7 @@ where
                     &workspace_persist,
                     &workspace_root,
                     &cancel,
+                    authorization,
                 )
                 .await;
                 drop(permit);
@@ -104,6 +101,7 @@ async fn execute_one_agent<S>(
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
     workspace_root: &Path,
     cancel: &CancellationToken,
+    authorization: tools::AuthorizationContext,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -116,20 +114,24 @@ where
         call.index,
         call.input.to_string().len(),
     );
-    let pre_results = hook_ui
-        .run_plain(
-            &hook_runner,
-            HookEvent::PreToolUse,
-            Some(&call.name),
-            HookData::Tool(ToolHookData {
-                tool_name: call.name.clone(),
-                tool_input: call.input.clone(),
-                tool_output: None,
-                is_error: None,
-            }),
-            workspace_root,
-        )
-        .await;
+    let pre_results = if authorization.enforce_permission_hooks {
+        hook_ui
+            .run_plain(
+                &hook_runner,
+                HookEvent::PreToolUse,
+                Some(&call.name),
+                HookData::Tool(ToolHookData {
+                    tool_name: call.name.clone(),
+                    tool_input: call.input.clone(),
+                    tool_output: None,
+                    is_error: None,
+                }),
+                workspace_root,
+            )
+            .await
+    } else {
+        Vec::new()
+    };
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
         log::debug!(target: crate::LOG_TARGET,
             "pretooluse timing blocked: kind=agent tool_name={} runtime_id={} provider_id={} exit_code={:?} error_present={}",
@@ -186,7 +188,8 @@ where
     let cancellation = ag_ctx.cancellation();
     let outcome = execution
         .execute(
-            tools::ToolInvocation::new("Agent", call.input.clone(), ag_ctx.scope().clone()),
+            tools::ToolInvocation::new("Agent", call.input.clone(), ag_ctx.scope().clone())
+                .with_authorization(authorization),
             cancellation.as_ref(),
         )
         .await;
@@ -354,9 +357,16 @@ mod tests {
         tokio::spawn(async move {
             let sink = NoopSink;
             let hook_ui = HookUi::new(sink.clone());
+            let prepared = calls
+                .into_iter()
+                .map(|call| PreparedToolCall {
+                    call,
+                    authorization: tools::AuthorizationContext::STANDARD,
+                })
+                .collect::<Vec<_>>();
             execute_agent_calls(
                 &RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn")),
-                &calls,
+                &prepared,
                 &execution,
                 &ctx,
                 &agent_semaphore,

@@ -6,8 +6,12 @@
 
 ## Policy（权限）
 
-- 权限 / 安全评估：`agent/features/policy/src/business/security.rs`。
-- 完整权限管控系统（PermissionEngine、AskMe / Auto / Plan / AllowAll 模式、audit/policy 域）仍在设计/实施中，设计依据见 `docs/snapshot/active.md` 的 #42 与 `docs/snapshot/specs/042-permission-control-system.md`、`047-ddd-redesign.md`。改动前先核对该 feature 当前状态，**NEVER** 把尚未落地的设计当作既成约束。
+- `PolicyPort`、`PolicyRequest/Decision/Mode` 位于 `agent/features/policy/src/domain.rs`；`ConfiguredPolicy` 位于 `adapters.rs`。
+- Config committed permission mode 是唯一模式真相；CLI yolo 只作为 Config override。
+- `AllowAll` **MUST** 放行所有授权性限制：项目外路径、read-before-write、Bash safety、Tool fuse 与 permission hooks；**NEVER** 增加敏感路径 hard deny。
+- `AuthorizationContext` 唯一定义在 Tools Published Language；Policy 构造、Runtime 逐调用传递、Tool/Project/Hook 只读消费。
+- **NEVER** 在 Runtime/Project/Tool/Hook 直接读取业务 `allow_all`，或恢复重复 PermissionMode/PolicyDecision。
+- Deny/RequireApproval 仍为 Future PL；v0.1.0 Ask/AutoRead 映射 Standard 约束，不伪造审批。
 
 ## Hook
 

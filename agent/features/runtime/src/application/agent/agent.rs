@@ -136,7 +136,12 @@ impl Agent {
             .is_some_and(|d| d.is_concurrency_safe())
     }
 
-    async fn execute_call(&self, call: &ToolCall, ctx: &ToolExecutionContext) -> ToolExecution {
+    async fn execute_call(
+        &self,
+        call: &ToolCall,
+        ctx: &ToolExecutionContext,
+        authorization: tools::AuthorizationContext,
+    ) -> ToolExecution {
         if ctx.cancellation().is_cancelled() {
             return ToolExecution::new(
                 call,
@@ -151,7 +156,8 @@ impl Agent {
         };
         let mut input = call.input.clone();
         tools::strip_runtime_meta(&mut input);
-        let invocation = ToolInvocation::new(call.name.as_str(), input, ctx.scope().clone());
+        let invocation = ToolInvocation::new(call.name.as_str(), input, ctx.scope().clone())
+            .with_authorization(authorization);
         let cancellation = ctx.cancellation();
         let domain = tokio::select! {
             _ = cancellation.cancelled() => ToolExecutionOutcome::cancelled("tool execution cancelled by user"),
@@ -170,18 +176,43 @@ impl Agent {
     }
 
     pub async fn execute_tools(&self, calls: &[ToolCall]) -> Vec<ToolExecution> {
+        let prepared = calls
+            .iter()
+            .cloned()
+            .map(
+                |call| crate::application::tool_coordination::PreparedToolCall {
+                    call,
+                    authorization: tools::AuthorizationContext::STANDARD,
+                },
+            )
+            .collect::<Vec<_>>();
+        self.execute_prepared_tools(&prepared).await
+    }
+
+    pub(crate) async fn execute_prepared_tools(
+        &self,
+        calls: &[crate::application::tool_coordination::PreparedToolCall],
+    ) -> Vec<ToolExecution> {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_tool_concurrency));
         let sequential = Arc::new(tokio::sync::Mutex::new(()));
-        let futures = calls.iter().enumerate().map(|(position, call)| {
+        let futures = calls.iter().enumerate().map(|(position, prepared)| {
+            let call = &prepared.call;
+            let authorization = prepared.authorization;
             let semaphore = semaphore.clone();
             let sequential = sequential.clone();
             async move {
                 if self.is_concurrent(call) {
                     let _permit = semaphore.acquire().await.expect("tool semaphore closed");
-                    (position, self.execute_call(call, &self.ctx).await)
+                    (
+                        position,
+                        self.execute_call(call, &self.ctx, authorization).await,
+                    )
                 } else {
                     let _serial = sequential.lock().await;
-                    (position, self.execute_call(call, &self.ctx).await)
+                    (
+                        position,
+                        self.execute_call(call, &self.ctx, authorization).await,
+                    )
                 }
             }
         });
@@ -195,7 +226,7 @@ impl Agent {
         call: &ToolCall,
         ctx: &ToolExecutionContext,
     ) -> ToolExecution {
-        self.execute_call(call, ctx).await
+        self.execute_call(call, ctx, ctx.authorization()).await
     }
 
     pub async fn execute_tools_filtered(&self, calls: &[&ToolCall]) -> Vec<ToolExecution> {

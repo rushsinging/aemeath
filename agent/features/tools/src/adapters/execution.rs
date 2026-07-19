@@ -132,7 +132,7 @@ impl ExecutionAdapter {
             None => return unavailable(&invocation),
         };
         let context = match self.contexts.resolve(&invocation.execution_scope) {
-            Some(context) => context,
+            Some(context) => context.with_authorization(invocation.authorization),
             None => {
                 return ToolExecutionOutcome::failure(
                     ToolErrorKind::ResourceUnavailable,
