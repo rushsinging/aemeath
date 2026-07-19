@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Git pre-push gate: run the complete local merge-readiness checks once per push.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT"
+
+export AEMEATH_PROJECT_DIR="$ROOT"
+"$ROOT/.agents/hooks/check-architecture-guards.sh" --full
+"$ROOT/.agents/hooks/check-unit-tests.sh"

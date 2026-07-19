@@ -7,7 +7,7 @@
 
 ## 概述
 
-架构守卫是仓库的"机械式宪法"——把 [依赖铁律](../01-system/05-dependency-rules.md)、[能力优先代码组织](../01-system/06-code-organization.md)、薄入口和单一真相等规则固化为可执行的静态检查。已启用但只反映迁移期实现的守卫 **MUST** 在本文单独标记，**NEVER** 冒充 Target 原则。所有守卫通过 `.agents/aemeath.json` 的 `Stop` 钩子触发，串联执行，**任一失败即阻断会话**。
+架构守卫是仓库的"机械式宪法"——把 [依赖铁律](../01-system/05-dependency-rules.md)、[能力优先代码组织](../01-system/06-code-organization.md)、薄入口和单一真相等规则固化为可执行的静态检查。已启用但只反映迁移期实现的守卫 **MUST** 在本文单独标记，**NEVER** 冒充 Target 原则。守卫由唯一编排器 `check-architecture-guards.sh` 按 profile 执行：`.agents/aemeath.json` 的 `Stop` 钩子调用 `--fast`，只运行无 Cargo 的即时静态守卫；Git `pre-push` 调用 `--full`，运行全部守卫后再执行单元测试。任一失败均阻断对应阶段。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -17,13 +17,17 @@
 │                             主工作区 / worktree / git 上下文 │
 │                             不可解析三类诊断                 │
 │                                                              │
-│ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 41 个守卫       │
-│   └─ check-unit-tests.sh            cargo test --lib         │
+│ Stop（任务结束，快速反馈）                                   │
+│   └─ check-agent-stop.sh                                    │
+│       └─ check-architecture-guards.sh --fast                │
+│                                                              │
+│ Git pre-push（完整合入前门禁）                               │
+│   ├─ check-architecture-guards.sh --full                    │
+│   └─ check-unit-tests.sh                                    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用 40 个独立脚本守卫，并运行 1 个内联结构守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
+`check-architecture-guards.sh` 本身**不是**守卫，而是 fast/full 的唯一编排真相。`--fast` 排除会调用 Cargo 的 Guard Registry、Cargo dependency graph、CLI metadata、log target Rust 测试与 production reachability，并并行等待其余无 Cargo 静态守卫；`--full` 按固定顺序串行执行全部独立脚本守卫及内联 TUI 结构守卫。下表才是真正的守卫集合；实际调用顺序和 profile 以该脚本为准。
 
 ## 守卫索引
 
@@ -611,7 +615,7 @@
 - **功能**：扫描 `agent/`、`apps/`、`packages/` 的 Rust 源码，拦截非 `cfg(test)` 的公开 `*_for_test` / `test_only` 入口、未保护的 `testing` / `fixture(s)` / `fake(s)` 模块，以及超过集中 baseline 的生产 `allow(dead_code)`。
 - **baseline**：`.agents/dead-code-baseline.json` 当前上限 10，记录 owner、原因和退出条件；历史清理由 #649/#947 承接，新增数量必须显式评审。
 - **public surface**：`source-guard <root> <output>` 可输出按路径和声明排序的 deterministic public surface，仅供 diff review，不承诺 crates.io semver。
-- **执行策略**：source guard 同时进入通用 Git pre-commit（仅 staged 路径命中时）与本地 Stop 守卫；#1018 实测热耗时约 3.1-6s，不新增在线 workflow。
+- **执行策略**：source guard 同时进入通用 Git pre-commit（仅 staged 路径命中时）与完整 pre-push profile；#1018 实测热耗时约 3.1-6s，不进入 Agent Stop 的快速 profile，也不新增在线 workflow。
 
 ### Git pre-commit（本地钩子，非架构守卫）
 
@@ -619,6 +623,13 @@
 - **行为**：对 staged Rust 执行 `cargo fmt` 并重新暂存；相关源码/守卫变更执行 source guard；TUI scenario/snapshot 变更只检查 `.snap.new` / `.pending-snap`。
 - **边界**：不执行 production reachability、workspace/all-target、Coverage、完整 P0 或任何依赖 GitHub 网络的 Issue 治理检查。
 - **绕过**：仅使用 Git 原生 `--no-verify`；PR Test plan 必须披露并补跑。
+
+### Git pre-push（本地完整门禁）
+
+- **位置**：`.cargo/hooks/pre-push`，与 pre-commit 共用 `core.hooksPath=.cargo/hooks`。
+- **行为**：先执行 `check-architecture-guards.sh --full`，成功后执行 `check-unit-tests.sh`；任一步失败立即阻止 push。
+- **边界**：不重复 all-target clippy、Coverage、TUI P0/P1 或依赖 GitHub 网络的 Issue 治理检查。
+- **绕过**：仅使用 Git 原生 `--no-verify`；PR Test plan 必须披露并手工补跑两个完整入口。
 
 ### #677 文档—代码双向校验（人工关键节点）
 
@@ -640,9 +651,15 @@
   4. 否则输出 "Edit/Write rejected: 在 main 工作区直接修改" 错误并以 exit 2 阻断。
 - **设计意图**：强制 [AGENTS.md](../../../AGENTS.md) §Git 工作流——所有代码 / 文档 / 配置修改都在独立 git worktree 中执行。
 
-### check-unit-tests.sh（Stop）
+### check-agent-stop.sh（Stop）
 
-- **触发**：`Stop` 钩子（无 matcher）。
+- **触发**：`.agents/aemeath.json` 的 `Stop` 钩子（无 matcher）。
+- **行为**：只转发到 `check-architecture-guards.sh --fast`；不运行任何 Cargo-backed 守卫或 crate 测试。
+- **设计意图**：保留会话结束时的即时架构反馈，同时把冷启动和重复编译成本收敛到一次 pre-push。
+
+### check-unit-tests.sh（pre-push）
+
+- **触发**：`.cargo/hooks/pre-push`，且仅在完整架构守卫通过后执行。
 - **行为**：
   1. 输出 hook 调试信息（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR` / `ROOT` / `PWD`）；
   2. 设置 `CARGO_TARGET_DIR=target/hook-tests`（隔离各 checkout 的 cargo 元数据，避免 stale path-dep 缓存）；
@@ -653,7 +670,7 @@
 
 ## 维护说明
 
-- **新增守卫**：在 `.agents/hooks/` 添加 `check-<name>.sh`，在 `check-architecture-guards.sh` 串行调用表中追加一行，并在本文档新增一节。
+- **新增守卫**：在 `.agents/hooks/` 添加 `check-<name>.sh`，在 `check-architecture-guards.sh` 的唯一编排表中登记 profile 与调用顺序，并在本文档新增一节。默认无 Cargo 的纯静态检查进入 `fast`；调用 Cargo、网络或完整测试的检查仅进入 `full`。
 - **调整白名单**：直接修改脚本中常量；**MUST** 在同一 PR 中同步本文档对应小节。
 - **清理 stale exception**：脚本自检会提示"exception list is stale"——按提示删除未命中的精确路径。
 - **冲突解决**：本文档与脚本不一致时，**以脚本为准**——脚本是运行时真相源；本文档跟随脚本迁移。
