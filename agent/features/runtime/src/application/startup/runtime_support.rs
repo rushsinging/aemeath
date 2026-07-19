@@ -134,6 +134,38 @@ mod tests {
     }
 
     #[test]
+    fn build_agent_runner_preserves_injected_policy_identity_for_sub_runs() {
+        let policy: Arc<dyn policy::PolicyPort> = Arc::new(policy::AllowAllPolicy);
+        let workspace = project::wire_production_workspace(std::env::temp_dir())
+            .expect("wire test workspace")
+            .into_views();
+
+        let tools = tools::composition::TestCatalogExecutionFactory::empty();
+        let runner = build_agent_runner(
+            None,
+            None,
+            Arc::new(LlmClient::new(String::new())),
+            HookRunner::empty(),
+            false,
+            30,
+            Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+            policy.clone(),
+            10,
+            Arc::new(tokio::sync::Semaphore::new(4)),
+            crate::application::testing::test_tool_result_materializer(),
+            workspace,
+            tools.catalog_port(),
+            tools.execution(),
+            tools.binding(),
+        );
+
+        assert!(
+            Arc::ptr_eq(&runner.policy, &policy),
+            "Sub Run runner 必须保留 Composition 注入的同一 PolicyPort 实例"
+        );
+    }
+
+    #[test]
     fn test_build_hook_runner_accepts_empty_config() {
         let hook_runner = build_hook_runner(None, Path::new("."));
 

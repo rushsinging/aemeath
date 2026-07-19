@@ -160,7 +160,7 @@ pub enum HookDirectiveOutcome {
     Ready {
         /// The call with validated, updated input.
         call: ToolCall,
-        /// Authorization returned by Policy for this updated invocation.
+        /// Authorization returned by the mandatory post-update Policy evaluation.
         authorization: tools::AuthorizationContext,
         /// Context string from `ContextAndInput` (preserved for caller injection).
         context: Option<String>,
@@ -211,14 +211,14 @@ impl std::fmt::Debug for HookDirectiveOutcome {
         match self {
             Self::Ready {
                 call,
-                authorization,
                 context,
+                authorization,
             } => f
                 .debug_struct("Ready")
                 .field("call_name", &call.name)
                 .field("call_index", &call.index)
-                .field("authorization", authorization)
                 .field("context", context)
+                .field("authorization", authorization)
                 .finish(),
             Self::Continue { call, context } => f
                 .debug_struct("Continue")
@@ -370,8 +370,8 @@ fn revalidate_updated_input(
     match policy.evaluate(&request) {
         PolicyDecision::Allow(authorization) => HookDirectiveOutcome::Ready {
             call: updated_call,
-            authorization,
             context,
+            authorization,
         },
         PolicyDecision::Deny { reason } => HookDirectiveOutcome::Denied {
             call: call.clone(),
