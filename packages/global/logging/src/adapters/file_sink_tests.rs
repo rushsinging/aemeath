@@ -106,3 +106,36 @@ fn unknown_target_reporting_is_limited() {
     assert!(should_report_unknown(&counter));
     assert!(!should_report_unknown(&counter));
 }
+
+#[test]
+fn file_emergency_appends_to_emergency_log_under_logs_dir() {
+    let dir = TestDir::new();
+    let emergency = FileEmergency::new(dir.0.to_path_buf());
+    emergency.write("first emergency line");
+    emergency.write("second emergency line");
+    let log_path = dir.0.join(EMERGENCY_LOG_FILE);
+    let content = fs::read_to_string(&log_path).unwrap();
+    assert!(content.contains("first emergency line"));
+    assert!(content.contains("second emergency line"));
+}
+
+#[test]
+fn file_emergency_creates_logs_dir_if_missing() {
+    let dir = TestDir::new();
+    let nested = dir.0.join("nested/deep");
+    let emergency = FileEmergency::new(nested.clone());
+    emergency.write("created on demand");
+    let content = fs::read_to_string(nested.join(EMERGENCY_LOG_FILE)).unwrap();
+    assert!(content.contains("created on demand"));
+}
+
+#[test]
+fn file_emergency_is_silent_when_logs_dir_unwritable() {
+    // 指向一个已存在的文件当作 logs_dir：emergency.log 会与之冲突，
+    // open 失败时 best-effort 吞掉，绝不 panic、绝不回退 stderr。
+    let dir = TestDir::new();
+    let blocking = dir.0.join("blocking-file");
+    fs::write(&blocking, b"").unwrap();
+    let emergency = FileEmergency::new(blocking);
+    emergency.write("must not panic and must not reach stderr");
+}
