@@ -6,7 +6,8 @@ use super::progress::build_tool_calls_progress_event;
 use super::*;
 use ::logging as scoped_logging;
 use async_trait::async_trait;
-use provider::{InvocationStream, LlmProvider, ProviderError, ProviderErrorKind, SystemBlock};
+use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
+use provider::{InvocationStream, ProviderError, ProviderErrorKind};
 use share::config::AgentRoleConfig;
 use share::message::Message;
 use std::sync::Arc;
@@ -43,15 +44,17 @@ fn format_grouped_tool_summaries(tool_calls: &[crate::application::agent::ToolCa
 async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_parent() {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let runner = CliAgentRunner {
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
-            ContextRecordingProvider { seen: seen.clone() },
-        ))),
-        pool: None,
+        factory: crate::application::testing::constant_factory(
+            crate::application::testing::binding_from_llm_provider(Arc::new(
+                ContextRecordingProvider { seen: seen.clone() },
+            )),
+        ),
+        api_timeout_secs: 30,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        agents_config: Arc::new(share::config::AgentsConfig::default()),
+        agents_config: test_agents_config(),
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
-        models_config: Arc::new(share::config::ModelsConfig::default()),
+        models_config: test_models_config(),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
@@ -609,7 +612,7 @@ async fn test_started_event_emitted_with_role_and_model() {
     use tokio::sync::mpsc;
     use tools::{AgentProgressEvent, AgentProgressKind};
 
-    let runner = test_runner(ProviderError::retryable(
+    let runner = test_runner(ProviderError::fatal(
         ProviderErrorKind::Network,
         "setup-only",
     ));
@@ -641,8 +644,7 @@ async fn test_started_event_emitted_with_role_and_model() {
     match ev.kind {
         AgentProgressKind::Started { role, model } => {
             assert_eq!(role.as_deref(), Some("coder"));
-            // model_spec="coder" 但 roles 配置无 "coder" → resolve_model_spec 原样返回
-            assert_eq!(model, "coder");
+            assert_eq!(model, "test-provider/test-model");
         }
         other => panic!("expected Started, got {other:?}"),
     }
@@ -653,7 +655,7 @@ async fn test_started_event_without_role_uses_main_agent_model() {
     use tokio::sync::mpsc;
     use tools::{AgentProgressEvent, AgentProgressKind};
 
-    let runner = test_runner(ProviderError::retryable(
+    let runner = test_runner(ProviderError::fatal(
         ProviderErrorKind::Network,
         "setup-only",
     ));
@@ -697,7 +699,7 @@ async fn test_started_event_without_role_uses_main_agent_model() {
 #[tokio::test]
 async fn test_started_event_not_emitted_without_progress_tx() {
     // progress_tx = None → 不会 emit（也不会 panic）
-    let runner = test_runner(ProviderError::retryable(
+    let runner = test_runner(ProviderError::fatal(
         ProviderErrorKind::Network,
         "setup-only",
     ));
@@ -814,17 +816,79 @@ fn test_tool_call_with_id(
     }
 }
 
+fn test_agents_config() -> Arc<share::config::AgentsConfig> {
+    let mut roles = std::collections::HashMap::new();
+    roles.insert(
+        "coder".to_string(),
+        AgentRoleConfig {
+            model: "test-provider/test-model".to_string(),
+            ..Default::default()
+        },
+    );
+    Arc::new(share::config::AgentsConfig {
+        roles,
+        ..Default::default()
+    })
+}
+
+fn test_models_config() -> Arc<share::config::ModelsConfig> {
+    let mut providers = std::collections::HashMap::new();
+    providers.insert(
+        "role-a".to_string(),
+        share::config::ProviderModelsConfig {
+            driver: "openai".to_string(),
+            models: vec![share::config::ModelEntryConfig {
+                id: "model-a".to_string(),
+                max_tokens: 8192,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    );
+    providers.insert(
+        "role-b".to_string(),
+        share::config::ProviderModelsConfig {
+            driver: "openai".to_string(),
+            models: vec![share::config::ModelEntryConfig {
+                id: "model-b".to_string(),
+                max_tokens: 8192,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    );
+    providers.insert(
+        "test-provider".to_string(),
+        share::config::ProviderModelsConfig {
+            driver: "openai".to_string(),
+            models: vec![share::config::ModelEntryConfig {
+                id: "test-model".to_string(),
+                max_tokens: 8192,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    );
+    Arc::new(share::config::ModelsConfig {
+        default: "test-provider/test-model".to_string(),
+        providers,
+        ..Default::default()
+    })
+}
+
 fn test_runner(error: ProviderError) -> CliAgentRunner {
     CliAgentRunner {
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
-            ErrorProvider { error },
-        ))),
-        pool: None,
+        factory: crate::application::testing::constant_factory(
+            crate::application::testing::binding_from_llm_provider(Arc::new(ErrorProvider {
+                error,
+            })),
+        ),
+        api_timeout_secs: 30,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        agents_config: Arc::new(share::config::AgentsConfig::default()),
+        agents_config: test_agents_config(),
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
-        models_config: Arc::new(share::config::ModelsConfig::default()),
+        models_config: test_models_config(),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
@@ -843,15 +907,17 @@ fn test_runner(error: ProviderError) -> CliAgentRunner {
 
 fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> CliAgentRunner {
     CliAgentRunner {
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
-            BlockingThenCancelledProvider { calls },
-        ))),
-        pool: None,
+        factory: crate::application::testing::constant_factory(
+            crate::application::testing::binding_from_llm_provider(Arc::new(
+                BlockingThenCancelledProvider { calls },
+            )),
+        ),
+        api_timeout_secs: 30,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        agents_config: Arc::new(share::config::AgentsConfig::default()),
+        agents_config: test_agents_config(),
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
-        models_config: Arc::new(share::config::ModelsConfig::default()),
+        models_config: test_models_config(),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
@@ -878,7 +944,7 @@ struct BlockingThenCancelledProvider {
 impl LlmProvider for BlockingThenCancelledProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::InvocationScope,
+        _scope: &InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -916,7 +982,7 @@ struct ContextRecordingProvider {
 impl LlmProvider for ContextRecordingProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::InvocationScope,
+        _scope: &InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -943,7 +1009,7 @@ struct ErrorProvider {
 impl LlmProvider for ErrorProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::InvocationScope,
+        _scope: &InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],

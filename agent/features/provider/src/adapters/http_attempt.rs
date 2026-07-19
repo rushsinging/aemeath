@@ -14,49 +14,20 @@ const REQUEST_ID_HEADERS: [&str; 4] = [
     "openai-request-id",
 ];
 
-/// What happens to a single HTTP attempt once it fails.
-///
-/// This drives both retry control flow *and* the diagnostic log level
-/// emitted for the attempt, so the two never drift apart: a driver that
-/// decides "I will retry" always logs at `Debug`, a driver that decides "I'm
-/// giving up on this path but falling back to a different one" always logs
-/// at `Warn`, and a truly terminal failure always logs at `Error`.
+/// Single-attempt disposition — the adapter makes exactly one request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AttemptDisposition {
-    /// Another attempt of the same request will be made.
-    RetryPlanned,
-    /// This request path is abandoned, but the driver is switching to a
-    /// different strategy (e.g. streaming failed, falling back to
-    /// non-streaming) rather than surfacing a hard error to the caller.
-    FallbackPlanned,
     /// No retry and no fallback: the error propagates to the caller.
     FinalFailure,
 }
 
 impl AttemptDisposition {
     pub(crate) fn retryable(self) -> bool {
-        matches!(self, Self::RetryPlanned)
+        false
     }
 
     pub(crate) fn log_level(self) -> log::Level {
-        match self {
-            Self::RetryPlanned => log::Level::Debug,
-            Self::FallbackPlanned => log::Level::Warn,
-            Self::FinalFailure => log::Level::Error,
-        }
-    }
-
-    /// Convenience for the common "retry while budget remains, otherwise
-    /// this is the final attempt" rule used by every retry-loop driver.
-    /// Drivers with different retry policies for a given failure kind
-    /// (e.g. only retrying `NetworkFailureKind::Timeout`) should not use
-    /// this and must compute their own disposition instead.
-    pub(crate) fn from_remaining(remaining: u32) -> Self {
-        if remaining > 0 {
-            Self::RetryPlanned
-        } else {
-            Self::FinalFailure
-        }
+        log::Level::Error
     }
 }
 
@@ -184,28 +155,7 @@ pub(crate) struct HttpAttemptContext<'a> {
     pub request_bytes: usize,
 }
 
-impl<'a> HttpAttemptContext<'a> {
-    /// Projects this attempt's safe (non-secret) metadata into an
-    /// [`ErrorLogContext`] for the narrow `error_log::log_stream_protocol_error`
-    /// API, so a driver logging a stream/protocol-level failure never has to
-    /// reassemble the context fields by hand.
-    pub(crate) fn error_log_context(&self, elapsed_ms: u128) -> ErrorLogContext<'a> {
-        ErrorLogContext {
-            driver: self.driver,
-            api: self.api,
-            provider: self.provider,
-            model: self.model,
-            method: self.method,
-            endpoint: self.endpoint,
-            attempt: self.attempt,
-            max_attempts: self.max_attempts,
-            elapsed_ms,
-            message_count: self.message_count,
-            tool_count: self.tool_count,
-            request_bytes: self.request_bytes,
-        }
-    }
-}
+impl<'a> HttpAttemptContext<'a> {}
 
 /// Captures every safe (non-secret) field the `error_log` module needs to
 /// emit an `llm_api_error` diagnostic record, so a migrated driver never has
@@ -461,34 +411,6 @@ impl HttpAttemptExecutor {
         })
     }
 
-    /// Cancellation-aware helper for reading a *successful* (2xx) response
-    /// body to completion and decoding it as JSON.
-    ///
-    /// `execute` only guards the pre-body network round trip
-    /// (`request.send()`); once a 2xx status is observed it hands the raw
-    /// `reqwest::Response` back to the caller, whose subsequent
-    /// `response.json().await` has no `cancel` awareness at all — a stalled
-    /// body then blocks forever regardless of cancellation. Every
-    /// non-stream driver must decode its success body through this helper
-    /// instead of calling `response.json()` directly, so cancellation
-    /// during a blocked body read always surfaces promptly as
-    /// [`SuccessBodyReadError::Cancelled`] (which callers map to
-    /// `LlmError::Cancelled`) with no handler output — never a generic,
-    /// unlogged hang.
-    pub(crate) async fn read_success_json<T>(
-        response: reqwest::Response,
-        cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<T, SuccessBodyReadError>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        tokio::select! {
-            biased;
-            _ = cancel.cancelled() => Err(SuccessBodyReadError::Cancelled),
-            result = response.json::<T>() => result.map_err(SuccessBodyReadError::Decode),
-        }
-    }
-
     async fn read_error_body(
         response: reqwest::Response,
         status: reqwest::StatusCode,
@@ -546,19 +468,6 @@ impl HttpAttemptExecutor {
         body.truncated = truncated;
         Ok(body)
     }
-}
-
-/// Result of [`HttpAttemptExecutor::read_success_json`].
-#[derive(Debug)]
-pub(crate) enum SuccessBodyReadError {
-    /// `cancel` fired while the body read was still in flight. Structurally
-    /// carries no diagnostic receipt — same rationale as
-    /// [`HttpAttemptFailure::Cancelled`]: this is caller-initiated, not an
-    /// error to log.
-    Cancelled,
-    /// The response body could not be decoded as the requested type once
-    /// fully read (malformed JSON, connection dropped mid-body, ...).
-    Decode(reqwest::Error),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -928,7 +837,7 @@ mod tests {
             kind,
             NetworkFailureKind::Timeout | NetworkFailureKind::Connect
         ));
-        failure.log(AttemptDisposition::RetryPlanned);
+        failure.log(AttemptDisposition::FinalFailure);
     }
 
     #[tokio::test]
@@ -1026,16 +935,6 @@ mod tests {
 
     #[test]
     fn attempt_disposition_controls_retryability_and_log_level() {
-        assert!(AttemptDisposition::RetryPlanned.retryable());
-        assert_eq!(
-            AttemptDisposition::RetryPlanned.log_level(),
-            log::Level::Debug
-        );
-        assert!(!AttemptDisposition::FallbackPlanned.retryable());
-        assert_eq!(
-            AttemptDisposition::FallbackPlanned.log_level(),
-            log::Level::Warn
-        );
         assert!(!AttemptDisposition::FinalFailure.retryable());
         assert_eq!(
             AttemptDisposition::FinalFailure.log_level(),

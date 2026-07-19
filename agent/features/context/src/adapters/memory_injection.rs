@@ -59,25 +59,6 @@ impl MemoryRetrieveAdapter {
         })
     }
 
-    pub async fn materialize_provider_blocks(
-        &self,
-        config: &share::config::MemoryConfig,
-    ) -> Result<Vec<provider::SystemBlock>, String> {
-        Ok(self
-            .materialize_config(config)
-            .await?
-            .blocks
-            .into_iter()
-            .map(|block| {
-                if block.cacheable {
-                    provider::SystemBlock::cached(block.content)
-                } else {
-                    provider::SystemBlock::dynamic(block.content)
-                }
-            })
-            .collect())
-    }
-
     /// Constructs the adapter with an injectable Unix-seconds clock.
     pub fn with_clock(
         memory: Arc<dyn MemoryPort>,

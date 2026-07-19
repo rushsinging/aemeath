@@ -1,18 +1,17 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use sdk::SdkError;
 
-use crate::adapters::runtime::LlmClientAdapter;
 use crate::application::prompt::build::{build_system_prompt_parts, PromptContext};
 use crate::application::startup::ChatBootstrapArgs;
 use crate::application::startup::{
-    self as bootstrap, build_agent_runner, build_hook_runner, resolve_api_key, resolve_base_url,
-    resolve_concurrency_limits, resolve_model_runtime_settings, spawn_mcp_connect,
+    build_agent_runner, build_hook_runner, resolve_concurrency_limits,
+    resolve_model_runtime_settings, spawn_mcp_connect,
 };
 use crate::ports::legacy::ChatRuntimeContext;
-use crate::ports::legacy::ProviderInfoPort;
+use crate::ports::{ProviderBuildSpec, ProviderFactory, RequestSystemBlock};
 use context::skill::{load_all_skills, Skill};
-use provider::SystemBlock;
 
 use super::{AgentClientImpl, RuntimeHandle};
 
@@ -20,7 +19,7 @@ use super::{AgentClientImpl, RuntimeHandle};
 pub struct RuntimeBootstrapDependencies {
     workspace: project::WorkspaceViews,
     wiring: Arc<context::MainSessionWiring>,
-    provider_gateway: Arc<dyn provider::LlmProviderGateway>,
+    provider_factory: Arc<dyn ProviderFactory>,
     _tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
     reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
     policy: Arc<dyn policy::PolicyPort>,
@@ -31,7 +30,7 @@ impl RuntimeBootstrapDependencies {
     pub fn new(
         workspace: project::WorkspaceViews,
         wiring: Arc<context::MainSessionWiring>,
-        provider_gateway: Arc<dyn provider::LlmProviderGateway>,
+        provider_factory: Arc<dyn ProviderFactory>,
         _tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
         reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
         policy: Arc<dyn policy::PolicyPort>,
@@ -40,7 +39,7 @@ impl RuntimeBootstrapDependencies {
         Self {
             workspace,
             wiring,
-            provider_gateway,
+            provider_factory,
             _tool_gateway,
             reflection_history,
             policy,
@@ -74,7 +73,7 @@ pub async fn from_args_with_workspace(
     let RuntimeBootstrapDependencies {
         workspace,
         wiring,
-        provider_gateway,
+        provider_factory,
         _tool_gateway: _,
         reflection_history,
         policy,
@@ -140,14 +139,17 @@ pub async fn from_args_with_workspace(
     let resolved_model = runtime_model.resolved_model().clone();
     let driver = resolved_model.driver.as_str();
     // 8. API key
-    let api_key = resolve_api_key(&resolved_model).ok_or_else(|| {
+    let api_key = non_empty_string(&resolved_model.source_config.api_key).ok_or_else(|| {
         SdkError::Init(
             "API key not set. Use --api-key, set provider-specific env var, set LLM_API_KEY, or configure in ~/.aemeath/config.json".to_string(),
         )
     })?;
 
     // 9. Base URL + model + runtime settings
-    let base_url = resolve_base_url(args.base_url.clone(), &resolved_model);
+    let base_url = args
+        .base_url
+        .clone()
+        .or_else(|| non_empty_string(&resolved_model.source_config.base_url));
     let model = resolved_model.model.id.clone();
     let runtime_settings = resolve_model_runtime_settings(
         runtime_model.max_tokens(),
@@ -164,21 +166,33 @@ pub async fn from_args_with_workspace(
         args.no_think
     );
 
-    // 10. LLM client
-    let client = Arc::new(
-        bootstrap::build_llm_client_with_gateway(
-            provider_gateway.as_ref(),
-            driver,
-            api_key,
-            base_url,
-            model.clone(),
-            &resolved_model,
-            &runtime_settings,
-            args.max_reasoning.as_deref(),
-            snapshot.api_timeout_secs(),
-        )
-        .map_err(|error| SdkError::Init(error.to_string()))?,
-    );
+    let spec = ProviderBuildSpec {
+        driver: driver.to_string(),
+        source_key: resolved_model.source_key.clone(),
+        api_style: resolved_model.model.api_style.clone(),
+        api_key,
+        base_url,
+        model: provider::ModelId {
+            provider: resolved_model.source_key.clone(),
+            model: model.clone(),
+        },
+        max_tokens: runtime_model.max_tokens(),
+        requested_reasoning: runtime_settings
+            .reasoning_effort
+            .as_deref()
+            .and_then(provider::ReasoningLevel::parse)
+            .unwrap_or(if runtime_settings.reasoning {
+                provider::ReasoningLevel::Medium
+            } else {
+                provider::ReasoningLevel::Off
+            }),
+        context_window: (resolved_model.model.context_window > 0)
+            .then_some(resolved_model.model.context_window),
+        timeout: Duration::from_secs(snapshot.api_timeout_secs()),
+    };
+    let binding = provider_factory
+        .build(spec)
+        .map_err(|error| SdkError::Init(error.to_string()))?;
 
     // 11. Tooling
     let skills_map = load_configured_skills(&cwd, Some(snapshot.skills()));
@@ -264,10 +278,10 @@ pub async fn from_args_with_workspace(
     let agent_runner = build_agent_runner(
         Some(snapshot.models()),
         Some(snapshot.agents()),
-        client.clone(),
+        provider_factory.clone(),
+        snapshot.api_timeout_secs(),
         hook_runner.clone(),
         runtime_settings.reasoning,
-        snapshot.api_timeout_secs(),
         active_run.clone(),
         policy.clone(),
         max_tool_concurrency,
@@ -280,11 +294,10 @@ pub async fn from_args_with_workspace(
     );
 
     // 18. Prompt bundle
-    let client_adapter = LlmClientAdapter::new(client.clone());
     let prompt_context = PromptContext::new(
         &cwd,
-        Some(client_adapter.provider_name()),
-        Some(client_adapter.model_name()),
+        Some(&binding.model.provider),
+        Some(&binding.model.model),
     );
     let prompt_parts =
         build_system_prompt_parts(&prompt_context, &hook_runner, snapshot.language()).await;
@@ -300,12 +313,12 @@ pub async fn from_args_with_workspace(
     )
     .await;
     let system_blocks = vec![
-        SystemBlock::cached(static_prompt),
-        SystemBlock::dynamic(prompt_parts.dynamic_part),
+        RequestSystemBlock::Cacheable(static_prompt),
+        RequestSystemBlock::Text(prompt_parts.dynamic_part),
     ];
-    let system_prompt_text: String = system_blocks
+    let system_prompt_text = system_blocks
         .iter()
-        .map(|b| b.text.as_str())
+        .map(RequestSystemBlock::text)
         .collect::<Vec<_>>()
         .join("\n\n");
 
@@ -325,7 +338,8 @@ pub async fn from_args_with_workspace(
     let memory_config = snapshot.memory().clone();
     let context = ChatRuntimeContext {
         resources: crate::application::resources::RuntimeResources {
-            client,
+            binding: Arc::new(binding.clone()),
+            provider_factory: provider_factory.clone(),
             tool_catalog,
             tool_execution,
             tool_context_binding,
@@ -351,7 +365,6 @@ pub async fn from_args_with_workspace(
     };
 
     // 21. 构建 handle
-    let current_client = context.resources.client.clone();
     let handle = RuntimeHandle {
         context,
         cwd,
@@ -360,7 +373,7 @@ pub async fn from_args_with_workspace(
         max_tool_concurrency,
         max_agent_concurrency,
         _mcp_manager: mcp_manager,
-        current_client: std::sync::RwLock::new(current_client),
+        current_binding: std::sync::RwLock::new(Arc::new(binding)),
         active_run,
         workspace,
         wiring: wiring.clone(),
@@ -382,6 +395,10 @@ pub async fn from_args_with_workspace(
 }
 
 // ─── 内部辅助 ───
+
+fn non_empty_string(value: &str) -> Option<String> {
+    (!value.is_empty()).then(|| value.to_string())
+}
 
 fn load_configured_skills(
     cwd: &std::path::Path,
@@ -524,7 +541,7 @@ mod tests {
         let dependencies = RuntimeBootstrapDependencies::new(
             workspace,
             wiring,
-            provider::wire_provider(),
+            Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
             tools::wire_tools(),
             Arc::new(TestReflectionHistory),
             Arc::new(policy::AllowAllPolicy),

@@ -361,7 +361,7 @@ fn revalidate_updated_input(
         ..call.clone()
     };
     match policy.evaluate(&request) {
-        PolicyDecision::Allow => HookDirectiveOutcome::Ready {
+        PolicyDecision::Allow(_) => HookDirectiveOutcome::Ready {
             call: updated_call,
             context,
         },

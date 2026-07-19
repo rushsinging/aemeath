@@ -23,6 +23,7 @@ pub mod event_sink;
 pub mod input_buffer;
 pub mod legacy;
 pub mod policy_port;
+pub mod provider_factory;
 pub mod provider_port;
 pub mod task_port;
 pub mod tool_port;
@@ -46,11 +47,13 @@ pub use policy_port::{
     ApprovalSubject, PolicyDecision, PolicyMode, PolicyPort, PolicyReason, PolicyRequest,
     PolicyRequestError,
 };
+pub use provider_factory::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
 pub use provider_port::{
     InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest, InvocationStream,
     ModelCapability, ModelId, ModelToolSchema, ProviderCompletion, ProviderContentBlock,
     ProviderError, ProviderErrorKind, ProviderPort, ProviderToolCall, ProviderToolCallId,
-    RawUsageSnapshot, ReasoningCapability, ReasoningLevel, ReasoningMappingKind, StopReason,
+    RawUsageSnapshot, ReasoningCapability, ReasoningLevel, ReasoningMappingKind,
+    RequestSystemBlock, StopReason,
 };
 pub use task_port::TaskPort;
 pub use tool_port::{

@@ -48,7 +48,7 @@ where
                 sink,
                 queue,
                 input_events,
-                client,
+                binding,
                 tool_catalog,
                 tool_execution,
                 tool_context_binding,
@@ -81,7 +81,7 @@ where
                 list_reminders,
                 list_sessions,
             } = ctx;
-            let mut client = client;
+            let mut binding = binding;
             let mut messages = initial_messages;
             // Interval and PreCompact share this single session-scoped slot.
             let reflection_tasks =
@@ -143,11 +143,9 @@ where
                 }
                 PendingCommand::SwitchModel { selection } => {
                     match (build_switched_client)(&selection).await {
-                        Ok((new_client, result)) => {
-                            reasoning.reset_default_level(
-                                new_client.default_scope().requested_reasoning(),
-                            );
-                            client = Arc::new(new_client);
+                        Ok((new_binding, result)) => {
+                            reasoning.reset_default_level(new_binding.requested_reasoning);
+                            binding = Arc::new(new_binding);
                             context_size = result.context_window;
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::ModelSwitched { result })
@@ -478,7 +476,7 @@ where
                     sink: &sink,
                     queue: &queue,
                     input_events: &input_events,
-                    client: &client,
+                    binding: &binding,
                     tool_catalog: &tool_catalog,
                     tool_execution: &tool_execution,
                     tool_context_binding: &tool_context_binding,

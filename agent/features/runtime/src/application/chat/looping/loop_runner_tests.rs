@@ -180,7 +180,8 @@ use crate::application::testing::text_completion_stream;
 
 use async_trait::async_trait;
 use hook::api::HookRunner;
-use provider::{InvocationStream, LlmProvider, ProviderError, ProviderErrorKind, SystemBlock};
+use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
+use provider::{InvocationStream, ProviderError, ProviderErrorKind};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use share::message::{Message, MessageSource, Role};
 use std::collections::{HashMap, VecDeque};
@@ -229,20 +230,24 @@ fn test_build_switched_client(
 ) -> std::pin::Pin<
     Box<
         dyn std::future::Future<
-                Output = std::result::Result<(provider::LlmClient, sdk::ModelSwitchResult), String>,
+                Output = std::result::Result<
+                    (crate::ports::ProviderBinding, sdk::ModelSwitchResult),
+                    String,
+                >,
             > + Send,
     >,
 > {
     let selection = selection.to_string();
     Box::pin(async move {
-        let client =
-            provider::LlmClient::from_provider(Arc::new(SequenceProvider::new(vec!["dummy"])));
+        let binding = crate::application::testing::test_binding(vec!["dummy"])
+            .as_ref()
+            .clone();
         let result = sdk::ModelSwitchResult {
             display_name: selection,
             context_window: 0,
             reasoning_active: None,
         };
-        Ok((client, result))
+        Ok((binding, result))
     })
 }
 
@@ -479,7 +484,7 @@ struct TwoTurnProvider;
 impl LlmProvider for TwoTurnProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::InvocationScope,
+        _scope: &InvocationScope,
         _system: &[SystemBlock],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -523,7 +528,7 @@ impl SequenceProvider {
 impl LlmProvider for SequenceProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::InvocationScope,
+        _scope: &InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -624,9 +629,9 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
-        ))),
+        )),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -741,9 +746,9 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
-        ))),
+        )),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -931,9 +936,9 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["final response"]),
-        ))),
+        )),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -1025,9 +1030,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         sink: sink.clone(),
         queue,
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
-            TwoTurnProvider,
-        ))),
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(TwoTurnProvider)),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -1195,9 +1198,9 @@ async fn test_continue_false_json_treated_as_block() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["first response", "second response"]),
-        ))),
+        )),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -1313,14 +1316,14 @@ async fn test_stall_triggers_stop_hook_check() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec![
                 "same output",
                 "same output",
                 "same output",
                 "final ok",
             ]),
-        ))),
+        )),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -1480,9 +1483,9 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["turn one final", "turn two final"]),
-        ))),
+        )),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -1569,7 +1572,7 @@ impl IdenticalReplyProvider {
 impl LlmProvider for IdenticalReplyProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::InvocationScope,
+        _scope: &InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -1644,9 +1647,9 @@ async fn test_stall_detector_resets_across_user_turns() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
             IdenticalReplyProvider::new("Done.", per_turn_delay),
-        ))),
+        )),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -1742,7 +1745,7 @@ impl RecordingProvider {
 impl LlmProvider for RecordingProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::InvocationScope,
+        _scope: &InvocationScope,
         _system: &[SystemBlock],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -1842,9 +1845,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
-            provider.clone(),
-        ))),
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -1965,9 +1966,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
-            provider.clone(),
-        ))),
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -2068,9 +2067,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
-            provider.clone(),
-        ))),
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -2148,9 +2145,9 @@ async fn test_stop_hook_block_limit_stops_loop() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"]),
-        ))),
+        )),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -2227,7 +2224,7 @@ impl CancellableThenNormalProvider {
 impl LlmProvider for CancellableThenNormalProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::InvocationScope,
+        _scope: &InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -2334,9 +2331,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
-            provider.clone(),
-        ))),
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -2424,7 +2419,7 @@ impl CompleteThenCancellableProvider {
 impl LlmProvider for CompleteThenCancellableProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::InvocationScope,
+        _scope: &InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -2549,9 +2544,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
-            provider.clone(),
-        ))),
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -2647,7 +2640,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
     impl LlmProvider for CountingProvider {
         async fn invocation_stream(
             &self,
-            _scope: &provider::InvocationScope,
+            _scope: &InvocationScope,
             _system: &[SystemBlock],
             _messages: &[Message],
             _tool_schemas: &[serde_json::Value],
@@ -2735,7 +2728,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -2858,9 +2851,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
-            provider.clone(),
-        ))),
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -2956,7 +2947,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -3032,7 +3023,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![None]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -3101,7 +3092,7 @@ impl ApiErrorThenNormalProvider {
 impl LlmProvider for ApiErrorThenNormalProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::InvocationScope,
+        _scope: &InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -3178,7 +3169,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),

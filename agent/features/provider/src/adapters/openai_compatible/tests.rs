@@ -41,8 +41,10 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
     );
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_openai_counting_server(leaked).await;
-    let client = crate::LlmClient::from_config(crate::LlmConfigOptions {
-        driver: crate::ProviderDriverKind::OpenAI.as_str().to_string(),
+    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptions {
+        driver: crate::composition::ProviderDriverKind::OpenAI
+            .as_str()
+            .to_string(),
         source_key: "openai".to_string(),
         api_style: None,
         api_key: "test-key".to_string(),
@@ -102,8 +104,10 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
     );
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_openai_counting_server(leaked).await;
-    let client = crate::LlmClient::from_config(crate::LlmConfigOptions {
-        driver: crate::ProviderDriverKind::OpenAI.as_str().to_string(),
+    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptions {
+        driver: crate::composition::ProviderDriverKind::OpenAI
+            .as_str()
+            .to_string(),
         source_key: "openai".to_string(),
         api_style: Some("responses".to_string()),
         api_key: "test-key".to_string(),

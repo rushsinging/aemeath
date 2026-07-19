@@ -6,7 +6,6 @@ mod message_conversion;
 #[cfg(test)]
 mod message_conversion_tests;
 mod message_helpers;
-mod non_stream;
 mod provider;
 mod reasoning;
 pub(crate) mod reasoning_normalizer;

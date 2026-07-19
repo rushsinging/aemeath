@@ -39,6 +39,10 @@ else:
     for child in sorted(src.iterdir()):
         if child.name.startswith("."):
             continue
+        # Test files (included via #[path = "..._tests.rs"] mod tests) are structural
+        # companions, not wiring modules; exempt them from the top-level allowlist.
+        if child.is_file() and (child.name.endswith("_tests.rs") or child.name.endswith("_test.rs")):
+            continue
         if child.is_dir():
             kind = "forbidden Hexagonal/COLA layer" if child.name in forbidden_layers else "unregistered directory"
             violations.append(
@@ -65,8 +69,11 @@ else:
     runtime_wiring = src / "runtime.rs"
     if runtime_wiring.is_file():
         text = runtime_wiring.read_text()
+        # #907: gateways.provider now carries Arc<dyn ProviderFactory> (Runtime-owned
+        # factory contract), consumed by RuntimeBootstrapDependencies. The old
+        # provider gateway is retired.
         required_patterns = {
-            "provider gateway forwarding": r"gateways\.provider",
+            "provider factory forwarding": r"gateways\.provider",
             "tool gateway forwarding": r"gateways\.tools",
             "policy gateway forwarding": r"gateways\.policy",
         }
@@ -83,17 +90,27 @@ else:
     runtime_bootstrap = root / "agent" / "features" / "runtime" / "src" / "application" / "client" / "from_args.rs"
     if runtime_bootstrap.is_file():
         text = runtime_bootstrap.read_text()
+        # #907: Runtime consumes ProviderFactory/ProviderBuildSpec injection and
+        # factory.build(spec); the old provider gateway / build_llm_client_with_gateway
+        # forward construction is forbidden.
         required_patterns = {
-            "injected provider gateway parameter": r"provider_gateway\s*:\s*Arc<dyn provider::LlmProviderGateway>",
-            "injected tool gateway parameter": r"tool_gateway\s*:\s*Arc<dyn tools::ToolCatalogGateway>",
-            "injected policy parameter": r"policy\s*:\s*Arc<dyn policy::PolicyPort>",
-            "provider gateway client construction": r"build_llm_client_with_gateway\s*\(\s*provider_gateway\.as_ref\(\)",
-            "tool factory construction": r"tools::composition::wire_builtin_catalog_execution\s*\(",
-        }
+            "injected ProviderFactory parameter": r"provider_factory\s*:\s*Arc<dyn\s+ProviderFactory>",
+            "ProviderBuildSpec construction": r"\bProviderBuildSpec\s*\{",
+            "factory.build consumption": r"provider_factory\s*\.build\s*\(",
+            "injected tool gateway parameter": r"_?tool_gateway\s*:\s*Arc<dyn\s+tools::ToolCatalogGateway>",        }
         for label, pattern in required_patterns.items():
             if not re.search(pattern, text, re.DOTALL):
                 violations.append(
                     f"{runtime_bootstrap.relative_to(root)}: missing {label}"
+                )
+        forbidden_patterns = {
+            "legacy provider gateway parameter": r"provider_gateway\s*:\s*Arc<dyn\s+provider::LlmProviderGateway>",
+            "legacy provider gateway client construction": r"build_llm_client_with_gateway\s*\(",
+        }
+        for label, pattern in forbidden_patterns.items():
+            if re.search(pattern, text, re.DOTALL):
+                violations.append(
+                    f"{runtime_bootstrap.relative_to(root)}: {label} is forbidden after #907 cutover"
                 )
 
 if violations:

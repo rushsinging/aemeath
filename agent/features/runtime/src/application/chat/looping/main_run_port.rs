@@ -149,7 +149,7 @@ where
     pub(crate) sink: &'a S,
     pub(crate) queue: &'a Q,
     pub(crate) input_events: &'a I,
-    pub(crate) client: &'a Arc<provider::LlmClient>,
+    pub(crate) binding: &'a Arc<crate::ports::ProviderBinding>,
     pub(crate) tool_catalog: &'a Arc<dyn tools::ToolCatalogPort>,
     pub(crate) tool_execution: &'a Arc<dyn tools::ToolExecutionPort>,
     pub(crate) tool_context_binding: &'a Arc<dyn tools::ToolExecutionContextBindingPort>,
@@ -244,7 +244,7 @@ where
             step_id: step_id.clone(),
             pending_messages,
             system_prompt: SystemPromptSpec::new(self.system_prompt_text),
-            model_id: self.client.model_name().to_string(),
+            model_id: self.binding.model.model.clone(),
             effective_reasoning: self.reasoning.current_requested_level(),
             current_date: CalendarDate::new(chrono::Local::now().format("%Y-%m-%d").to_string()),
             task_reminder: TaskReminderSnapshot {
@@ -254,7 +254,7 @@ where
             agent_roles: std::collections::HashMap::new(),
             config_snapshot: self.config_snapshot.clone(),
             context_size: self.context_size,
-            max_output_tokens: self.client.default_scope().max_tokens() as usize,
+            max_output_tokens: self.binding.max_tokens as usize,
             last_api_input_tokens: *self.last_total_tokens,
             tool_schemas,
             tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(&raw_tool_schemas),
@@ -393,7 +393,7 @@ where
             turns: self.turn_count,
             duration: self.started_at.elapsed(),
             role: None,
-            model: self.client.model_name().to_string(),
+            model: self.binding.model.model.clone(),
         }
     }
 
@@ -450,9 +450,9 @@ where
             .iter()
             .map(|block| {
                 if block.cacheable {
-                    provider::SystemBlock::cached(block.content.clone())
+                    provider::RequestSystemBlock::Cacheable(block.content.clone())
                 } else {
-                    provider::SystemBlock::dynamic(block.content.clone())
+                    provider::RequestSystemBlock::Text(block.content.clone())
                 }
             })
             .collect::<Vec<_>>();
@@ -463,14 +463,6 @@ where
             &tool_schemas,
         );
         let requested_reasoning = self.reasoning.current_requested_level();
-        let invocation_scope = self
-            .client
-            .invocation_scope(
-                self.client.default_scope().model(),
-                None,
-                requested_reasoning,
-            )
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
 
         let api_start = Instant::now();
         let mut coordinator =
@@ -478,8 +470,8 @@ where
         let resp = loop {
             let request_context = request_log_context(
                 &logging::capture(),
-                invocation_scope.model(),
-                self.client.provider_name(),
+                self.binding.model.model.as_str(),
+                self.binding.model.provider.as_str(),
                 "default",
             );
             let mut reducer = InvocationEventReducer::with_tool_identity(
@@ -490,16 +482,21 @@ where
             let response = logging::instrument(request_context.clone(), async {
                 let progress_handle = reducer.progress_handle();
                 let stream_cancel = self.cancel.clone();
+                let provider = self.binding.provider.clone();
+                let model = self.binding.model.clone();
+                let max_tokens = self.binding.max_tokens;
+                let request_tool_schemas = window.tool_schemas.clone();
                 let invocation_fut = async {
-                    let stream = self
-                        .client
-                        .invocation_stream(
-                            &invocation_scope,
-                            &effective_system_blocks,
-                            &messages_for_api,
-                            &tool_schemas,
-                            &stream_cancel,
-                        )
+                    let mut request = crate::ports::InvocationRequest::new(
+                        model,
+                        messages_for_api.clone(),
+                        crate::ports::InvocationOptions::new(max_tokens, requested_reasoning),
+                    );
+                    request.system = effective_system_blocks.clone();
+                    request.tools = request_tool_schemas;
+                    request.cancellation = stream_cancel.clone();
+                    let stream = provider
+                        .invoke(request, &stream_cancel)
                         .await
                         .map_err(|error| (error, false))?;
                     coordinator
@@ -589,10 +586,10 @@ where
         ));
 
         let token_usage = crate::application::loop_engine::StepTokenUsage {
-            input_tokens: resp.usage.input_tokens as u64,
-            output_tokens: resp.usage.output_tokens as u64,
-            cached_tokens: resp.usage.cached_tokens.map(u64::from).unwrap_or(0),
-            cache_creation_tokens: resp.usage.cache_creation_tokens.map(u64::from).unwrap_or(0),
+            input_tokens: resp.usage.input_tokens.unwrap_or(0) as u64,
+            output_tokens: resp.usage.output_tokens.unwrap_or(0) as u64,
+            cached_tokens: resp.usage.cache_read_tokens.map(u64::from).unwrap_or(0),
+            cache_creation_tokens: resp.usage.cache_write_tokens.map(u64::from).unwrap_or(0),
             reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
             total_tokens: crate::application::token_usage::normalized_total_tokens(&resp.usage),
             context_window: request_context_size(self.context_request.as_ref()) as u64,
@@ -604,9 +601,9 @@ where
 
         self.sink
             .send_event(RuntimeStreamEvent::Usage {
-                input: resp.usage.input_tokens,
-                output: resp.usage.output_tokens,
-                last_input: resp.usage.input_tokens,
+                input: resp.usage.input_tokens.unwrap_or(0),
+                output: resp.usage.output_tokens.unwrap_or(0),
+                last_input: resp.usage.input_tokens.unwrap_or(0),
                 elapsed_secs: api_elapsed,
             })
             .await;
@@ -621,7 +618,12 @@ where
         let calls = Agent::extract_tool_calls_with_ids(&resp.assistant_message, |provider_id| {
             self.tool_identity.runtime_id_for_provider(provider_id)
         });
-        log_llm_output_and_tool_calls(self.client.provider_name(), &resp, &calls, api_elapsed);
+        log_llm_output_and_tool_calls(
+            self.binding.model.provider.as_str(),
+            &resp,
+            &calls,
+            api_elapsed,
+        );
         if !calls.is_empty() {
             return Ok((
                 ModelStep::Tools {
@@ -654,7 +656,7 @@ where
                 self.memory_config,
                 self.turn_count,
                 &self.messages,
-                self.client,
+                self.binding,
                 self.system_prompt_text,
                 self.language,
                 self.memory,

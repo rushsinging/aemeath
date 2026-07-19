@@ -217,7 +217,7 @@ impl PolicyPort for HookTestPolicy {
                 reason: PolicyReason::RestrictedTool,
                 subject: ApprovalSubject::UserInteraction,
             },
-            _ => PolicyDecision::Allow,
+            _ => PolicyDecision::Allow(tools::AuthorizationContext::STANDARD),
         }
     }
 }

@@ -7,10 +7,12 @@ use std::sync::Arc;
 
 use context::skill::Skill;
 use hook::api::HookRunner;
-use provider::{LlmClient, SystemBlock};
+use provider::RequestSystemBlock;
 use share::config::MemoryConfig;
 use task::TaskAccess;
 use tools::{AgentRunner, ToolCatalogPort, ToolExecutionPort};
+
+use crate::ports::{ProviderBinding, ProviderFactory};
 
 /// Runtime 不变共享件——跨 session/loop/tool 传递的同一组资源。
 ///
@@ -20,7 +22,8 @@ use tools::{AgentRunner, ToolCatalogPort, ToolExecutionPort};
 #[derive(Clone)]
 pub struct RuntimeResources {
     // ── 服务句柄（Arc 共享）──
-    pub client: Arc<LlmClient>,
+    pub binding: Arc<ProviderBinding>,
+    pub provider_factory: Arc<dyn ProviderFactory>,
     pub tool_catalog: Arc<dyn ToolCatalogPort>,
     pub tool_execution: Arc<dyn ToolExecutionPort>,
     pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
@@ -40,7 +43,7 @@ pub struct RuntimeResources {
     pub policy: Arc<dyn policy::PolicyPort>,
 
     // ── 配置（值类型，session 期间不变）──
-    pub system_blocks: Vec<SystemBlock>,
+    pub system_blocks: Vec<RequestSystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,
     pub memory_config: MemoryConfig,
