@@ -118,6 +118,7 @@ run_tui_single_source_structure_guard
 "$HOOKS_DIR/check-config-adapter-boundary.sh"
 "$HOOKS_DIR/check-agent-client-trait-minimal.sh"
 "$HOOKS_DIR/check-shared-run-loop.sh"
+"$HOOKS_DIR/check-shared-run-loop-tests.sh"
 "$HOOKS_DIR/check-run-control-boundary.sh"
 "$HOOKS_DIR/check-tool-catalog-execution-boundary.sh"
 "$HOOKS_DIR/check-config-reader-injection.sh"

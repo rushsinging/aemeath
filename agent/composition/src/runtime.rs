@@ -99,7 +99,6 @@ pub(crate) async fn from_args_with_gateways(
         reflection_history,
         gateways.policy,
         task_wiring.access(),
-        context::compose_session_task_capture(task_wiring.persist()),
     );
     runtime::from_args_with_workspace(args, dependencies).await
 }

@@ -2,9 +2,71 @@
 //! runner file focused on the production code path.
 #![allow(clippy::type_complexity)]
 
+use super::loop_runner::main_run_port::{fixture_bind_pending, fixture_finalize_messages};
 use super::*;
 
-use context::session::ChatChain;
+fn assistant(text: &str) -> Message {
+    Message {
+        role: share::message::Role::Assistant,
+        content: vec![share::message::ContentBlock::Text {
+            text: text.to_string(),
+        }],
+        metadata: None,
+    }
+}
+
+#[test]
+fn empty_session_first_step_owns_user_then_assistant_without_loss() {
+    let user = Message::user("first");
+    let assistant = assistant("answer");
+    let finalized = fixture_finalize_messages(vec![user], vec![assistant]);
+    assert_eq!(finalized.len(), 2);
+    assert_eq!(finalized[0].text_content(), "first");
+    assert_eq!(finalized[1].text_content(), "answer");
+}
+
+#[test]
+fn tool_step_owns_user_assistant_and_tool_result_in_order() {
+    let finalized = fixture_finalize_messages(
+        vec![Message::user("use tool")],
+        vec![assistant("tool_use"), Message::user("tool_result")],
+    );
+    assert_eq!(
+        finalized
+            .iter()
+            .map(Message::text_content)
+            .collect::<Vec<_>>(),
+        vec!["use tool", "tool_use", "tool_result"]
+    );
+}
+
+#[test]
+fn finalized_projection_preserves_complete_turn_order() {
+    let finalized =
+        fixture_finalize_messages(vec![Message::user("question")], vec![assistant("final")]);
+    assert_eq!(finalized[0].role, share::message::Role::User);
+    assert_eq!(finalized[1].role, share::message::Role::Assistant);
+}
+
+#[test]
+fn historical_messages_do_not_determine_new_step_ownership() {
+    let history = [Message::user("old"), assistant("old answer")];
+    let new_user = Message::user("new first sentence");
+    let (pending, active) = fixture_bind_pending(vec![new_user], &[]);
+    assert_eq!(pending.len(), 1);
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].text_content(), "new first sentence");
+    assert!(active.iter().all(|message| !history
+        .iter()
+        .any(|old| { old.text_content() == message.text_content() })));
+}
+
+#[test]
+fn production_source_does_not_infer_message_ownership_by_index() {
+    let source = include_str!("main_run_port.rs");
+    let forbidden = ["projection", "start", "index"].concat();
+    assert!(!source.contains(&forbidden));
+}
 
 #[derive(Clone)]
 struct TestMemoryOpener;
@@ -32,7 +94,7 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
     let config = Arc::new(config::ConfigAppService::new(Some(
         &workspace.read().initial_cwd(),
     )));
-    let now = context::session::now_iso();
+    let now = chrono::Utc::now().to_rfc3339();
     Arc::new(context::MainSessionWiring::build(
         context::MainSessionWiringBuilder {
             workspace_read: workspace.read(),
@@ -42,7 +104,7 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
             config_participant: config,
             memory_opener: Box::new(TestMemoryOpener),
             initial_session: context::session::CanonicalSession {
-                id: context::session::new_session_id(),
+                id: uuid::Uuid::now_v7().to_string(),
                 chats: Vec::new(),
                 created_at: now.clone(),
                 updated_at: now,
@@ -53,22 +115,11 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
                 committed_steps: Vec::new(),
             },
             initial_memory: Arc::new(memory::api::NoOpMemory),
-            context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
-                Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-            )),
+            context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            ))),
         },
     ))
-}
-
-fn test_save_chain() -> Arc<
-    dyn Fn(
-            &context::session::ChatChain,
-        )
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>>
-        + Send
-        + Sync,
-> {
-    Arc::new(|_chain| Box::pin(async { Ok(()) }))
 }
 
 /// 测试用 reflection history 查询闭包（#899）。
@@ -577,7 +628,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(vec![]),
+        initial_messages: vec![],
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -595,11 +646,8 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         hook_runner: blocking_then_success_hook_runner(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -697,7 +745,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(vec![]),
+        initial_messages: vec![],
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -715,11 +763,8 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         hook_runner: blocking_then_success_hook_runner(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -890,7 +935,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(vec![]),
+        initial_messages: vec![],
         context_size: 200_000,
         wiring: test_wiring(),
         workspace,
@@ -906,11 +951,8 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         hook_runner: HookRunner::new(HooksConfig { events }),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -987,7 +1029,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(vec![]),
+        initial_messages: vec![],
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -1005,11 +1047,8 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -1160,7 +1199,7 @@ async fn test_continue_false_json_treated_as_block() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(vec![]),
+        initial_messages: vec![],
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -1178,11 +1217,8 @@ async fn test_continue_false_json_treated_as_block() {
         hook_runner: continue_false_then_allow_hook_runner(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -1286,7 +1322,7 @@ async fn test_stall_triggers_stop_hook_check() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(vec![]),
+        initial_messages: vec![],
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -1304,11 +1340,8 @@ async fn test_stall_triggers_stop_hook_check() {
         hook_runner: block_n_times_hook_runner(&counter_path, 3),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -1451,7 +1484,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(Vec::new()),
+        initial_messages: Vec::new(),
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -1469,11 +1502,8 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -1618,7 +1648,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(Vec::new()),
+        initial_messages: Vec::new(),
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -1636,11 +1666,8 @@ async fn test_stall_detector_resets_across_user_turns() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -1819,7 +1846,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(Vec::new()),
+        initial_messages: Vec::new(),
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -1837,11 +1864,8 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -1945,7 +1969,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(Vec::new()),
+        initial_messages: Vec::new(),
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -1963,11 +1987,8 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -2051,7 +2072,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(Vec::new()),
+        initial_messages: Vec::new(),
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -2069,11 +2090,8 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -2134,7 +2152,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(vec![]),
+        initial_messages: vec![],
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -2152,11 +2170,8 @@ async fn test_stop_hook_block_limit_stops_loop() {
         hook_runner: always_blocking_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -2323,7 +2338,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(Vec::new()),
+        initial_messages: Vec::new(),
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -2341,11 +2356,8 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -2541,7 +2553,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(Vec::new()),
+        initial_messages: Vec::new(),
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -2559,11 +2571,8 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -2728,7 +2737,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(Vec::new()),
+        initial_messages: Vec::new(),
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -2746,11 +2755,8 @@ async fn test_chat_impl_idle_until_first_input_event() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -2856,7 +2862,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(Vec::new()),
+        initial_messages: Vec::new(),
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -2874,11 +2880,8 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -2919,7 +2922,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
     let (input_tx, input_events) = ChannelInputEvents::new();
 
     // messages 模拟 resume 加载的历史：末条是 User（等待 assistant 回复）
-    let messages = ChatChain::from_flat_messages(vec![Message::user("unfinished question")]);
+    let messages = vec![Message::user("unfinished question")];
 
     // driver：先确认 loop 在 idle（无 LLM 调用），再投递新消息触发回合
     let driver_sink = sink.clone();
@@ -2955,7 +2958,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: messages, // 末条为 User，模拟 resume
+        initial_messages: messages, // 末条为 User，模拟 resume
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -2973,11 +2976,8 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(), // 正常场景
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -3011,7 +3011,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
 
-    let messages = ChatChain::from_flat_messages(vec![Message::user("hello")]);
+    let messages = vec![Message::user("hello")];
 
     // driver：等待 200ms 后关闭通道（不应有 LLM 响应产生）
     let _driver_sink = sink.clone();
@@ -3034,7 +3034,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: messages,
+        initial_messages: messages,
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -3052,11 +3052,8 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),
@@ -3183,7 +3180,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        chain: ChatChain::from_flat_messages(vec![]),
+        initial_messages: vec![],
         context_size: 200_000,
         wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
@@ -3201,11 +3198,8 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
         reflection_history: test_reflection_history_store(),
         language: "en".to_string(),
         list_reflection_history: test_reflection_history(),

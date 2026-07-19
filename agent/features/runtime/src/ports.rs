@@ -35,8 +35,9 @@ pub use context_port::{
     AppendReceipt, CalendarDate, CompactOutcome, CompactRequest, CompactResult, CompactSkipReason,
     CompactTrigger, CompactionDecision, ContentFingerprint, ContextAppend, ContextAppendError,
     ContextMessage, ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow,
-    DecisionReason, FinalizeCause, Language, RunStepId, SessionId, SessionRevision, StepReceipt,
-    SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, ToolOutcomeKind, Urgency,
+    DecisionReason, FinalizeCause, Language, ManualCompactRequest, RunStepId, SessionId,
+    SessionRevision, StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget,
+    ToolOutcomeKind, Urgency,
 };
 pub use event_sink::EventSink;
 pub use hook_port::{HookInvocation, HookOutcome, HookPoint, HookPort};

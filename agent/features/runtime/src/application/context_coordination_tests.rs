@@ -5,8 +5,8 @@ use crate::ports::{
     AppendReceipt, CalendarDate, CompactOutcome, CompactRequest, CompactResult, CompactSkipReason,
     CompactionDecision, ContentFingerprint, ContextAppend, ContextAppendError, ContextPort,
     ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
-    FinalizeCause, Language, SessionId, SessionRevision, SystemPromptSpec, TaskReminderSnapshot,
-    TokenBudget, Urgency,
+    FinalizeCause, Language, ManualCompactRequest, SessionId, SessionRevision, SystemPromptSpec,
+    TaskReminderSnapshot, TokenBudget, Urgency,
 };
 use async_trait::async_trait;
 use provider::ReasoningLevel;
@@ -69,6 +69,24 @@ impl ContextPort for RecordingPort {
         }))
     }
 
+    async fn manual_compact(
+        &self,
+        request: &ManualCompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        self.calls.lock().unwrap().push("manual_compact");
+        Ok(CompactOutcome::Committed(CompactResult {
+            summary: format!("manual summary for {}", request.session_id.as_str()),
+            recent_messages: vec![],
+            source_revision: SessionRevision::new(2),
+        }))
+    }
+
+    async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
+        self.calls.lock().unwrap().push("clear_session");
+        assert!(!session_id.as_str().is_empty());
+        Ok(())
+    }
+
     async fn append_and_persist(
         &self,
         append: &ContextAppend,
@@ -125,6 +143,34 @@ async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
     assert_eq!(
         *port.calls.lock().unwrap(),
         vec!["build_window", "needs_compaction", "compact"]
+    );
+}
+
+#[tokio::test]
+async fn coordinator_delegates_manual_compact_and_clear_session_to_port() {
+    let port = Arc::new(RecordingPort::default());
+    let coordinator = ContextCoordinator::new(port.clone());
+    let frozen = request();
+
+    let manual = coordinator
+        .manual_compact(&ManualCompactRequest {
+            session_id: frozen.session_id.clone(),
+            run_id: frozen.run_id.clone(),
+            system_prompt: frozen.system_prompt.clone(),
+            context_size: frozen.context_size,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        manual,
+        CompactOutcome::Committed(ref result) if result.source_revision == SessionRevision::new(2)
+    ));
+
+    coordinator.clear_session(&frozen.session_id).await.unwrap();
+
+    assert_eq!(
+        *port.calls.lock().unwrap(),
+        vec!["manual_compact", "clear_session"]
     );
 }
 
@@ -195,6 +241,15 @@ async fn skipped_compaction_is_returned_without_hidden_retry() {
         }
         async fn compact(&self, _: &CompactRequest) -> Result<CompactOutcome, ContextPortError> {
             Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
+        }
+        async fn manual_compact(
+            &self,
+            _: &ManualCompactRequest,
+        ) -> Result<CompactOutcome, ContextPortError> {
+            unreachable!()
+        }
+        async fn clear_session(&self, _: &SessionId) -> Result<(), ContextPortError> {
+            unreachable!()
         }
         async fn append_and_persist(
             &self,

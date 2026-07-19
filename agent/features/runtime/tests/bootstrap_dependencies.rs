@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use context::{compose_session_task_capture, LegacyTaskCapture};
 use runtime::RuntimeBootstrapDependencies;
 
 struct NoopReflectionHistory;
@@ -41,7 +40,6 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         .into_views();
     let task = task::wire_task();
     let access = task.access();
-    let capture: Arc<dyn LegacyTaskCapture> = compose_session_task_capture(task.persist());
     let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
         Arc::new(storage::FileSystemDatasetAdapter::new(temp.path()).unwrap()),
         Arc::new(memory::FileLegacyMemorySourceFactory::new(temp.path())),
@@ -69,10 +67,8 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         history.clone(),
         Arc::new(policy::AllowAllPolicy),
         access.clone(),
-        capture.clone(),
     );
 
     assert!(Arc::ptr_eq(&dependencies.reflection_history(), &history));
     assert!(Arc::ptr_eq(&dependencies.task_access(), &access));
-    assert!(Arc::ptr_eq(&dependencies.session_tasks(), &capture));
 }

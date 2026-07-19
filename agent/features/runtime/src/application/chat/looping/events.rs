@@ -1,7 +1,7 @@
-use context::session::PersistedWorkspaceContext;
 use provider::ReasoningLevel;
 use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
 use share::message::Message;
+use share::session_types::PersistedWorkspaceContext;
 use std::future::Future;
 use std::pin::Pin;
 use tools::{AgentProgressEvent, ImageData};

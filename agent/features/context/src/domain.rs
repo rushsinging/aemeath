@@ -160,6 +160,14 @@ pub struct CompactRequest {
 }
 
 #[derive(Debug, Clone)]
+pub struct ManualCompactRequest {
+    pub session_id: SessionId,
+    pub run_id: RunId,
+    pub system_prompt: SystemPromptSpec,
+    pub context_size: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct CompactResult {
     pub summary: String,
     pub recent_messages: Vec<ContextMessage>,

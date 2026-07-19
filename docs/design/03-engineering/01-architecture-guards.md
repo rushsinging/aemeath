@@ -572,8 +572,8 @@
 - **检查方式**：确认 Runtime 的 Main/Sub 入口调用唯一 `loop_engine::run_loop`，禁止旧 FSM；并扫描 `agent/features/runtime/src`、`agent/features/tools/src/adapters/agent_tool.rs` 与 `agent/features/tools/src/domain/types/agent.rs`，禁止恢复 Session token 槽或 `max_turns`。
 - **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
 
-- **#876 Context execution 边界**：`main_run_port.rs`、Sub `loop_run.rs` 与 `context_coordination.rs` 禁止引用 `context::session::*`、`ChatChain` / `ChatSegment`、`save_chain` 或 legacy compact helper；Main/Sub 必须各自经 `append_finalized` 接入 ContextPort 的唯一 finalized Step 提交。idle/session command 兼容路径不在本规则扫描范围，由 #872/#879 退役。
-- **故意违规验证**：向 Main/Sub execution path 临时加入 `ChatChain` 或 `save_chain` 标记时守卫必须阻断；移除后恢复通过。
+- **#872 Context 边界**：扫描整个 `agent/features/runtime/src` 的生产源码，禁止引用 `context::session::*`、`ChatChain` / `ChatSegment`、`current_chain` / `frozen_chats` / `active_summary`、`SessionProjectionParticipant`、`projection_start_index`、`save_chain` 或 legacy compact helper；测试路径由已登记的 `scope.runtime.shared-loop-tests` 排除。Main/Sub 仍必须各自经 `append_finalized` 接入 ContextPort，消息归属必须使用显式 Step ownership，idle compact/reset 经 ContextPort，resume 与 session commands 经 Context crate-root Published Language。
+- **故意违规验证**：`check-shared-run-loop-tests.sh` 在隔离副本向 Runtime 生产路径注入 `context::session::ChatChain`，断言单 Guard exit 2；移除探针后 clean pass。总编排同时执行该正反例脚本。白名单预算保持不变，不新增 migration exception。
 
 ## 23. check-run-control-boundary.sh
 
