@@ -99,7 +99,7 @@
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
-| `context` | `share`, `provider`, `storage`, `project`, `config`, `memory`, `task`, `sdk` |
+| `context` | `share`, `provider`, `storage`, `project`, `config`, `memory`, `task`, `tools`, `sdk` |
 | `memory` | `share`, `storage`, `utils` |
 | `provider` | `share` |
 | `tools` | `share`, `project`, `storage`, `memory`, `task` |
@@ -119,8 +119,7 @@
 
 - **例外 / 已批准跨 BC 依赖**：
   - `runtime/tools → {task,memory}`：分别消费 Task-owned `TaskAccess` 与 Memory-owned `MemoryPort` / `MemoryPortSource` Published Language；Task / Memory 反向依赖消费者仍被拒绝。
-  - `context → {project,config,memory,task}`：#871 Main Session 联合协调器消费各供应 BC 的窄 façade / PL；Context 不穿透其内部类型。
-  - `memory → share`：只消费 ConfigSnapshot 发布的 `MemoryConfig` 值类型，不依赖 Config service。
+  - `context → {project,config,memory,task,tools}`：#871 Main Session 联合协调器消费各供应 BC 的窄 façade / PL；#912 直接消费 Tools-owned `PromptFragment` 与 `SkillMaterializationPort`，Context 不穿透 adapter 或 Tool execution。  - `memory → share`：只消费 ConfigSnapshot 发布的 `MemoryConfig` 值类型，不依赖 Config service。
   - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。
   - `composition →` 全部 feature：唯一装配根。
 - **失败模式**：违反时输出 `{"decision":"block", "reason": "Cargo workspace dependency graph violates strict DDD boundaries: ..."}` 并以 exit code 2 退出。
@@ -251,7 +250,7 @@
   - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, RuntimeBootstrapDependencies, UsageSink, from_args_with_workspace, resume_session_to_backing, ResumeError}`：Composition 注入唯一 `MainSessionWiring` 与 Provider/Tool/Task views；`UsageSink` 供 #931 bridge，实现细节仍私有。
   - `ROOT_ACCESS_ALLOW.context`：除既有 `compact/context_port/guidance/session/skill` 外，#871 登记 `MainSessionWiring`、gate/permit、projection participant、production factory/dependencies 与结构化错误；内部 application/adapters 路径仍禁止穿透。
   - `ROOT_ACCESS_ALLOW.memory`：#900 后生产消费只需 Memory-owned OHS/PL、project key、`DatasetMemoryOpener`、legacy source factory、Reflection history adapter 与稳定错误；concrete active dataset store、project opener 和 `MemoryService` 已收回 crate 内。脚本中的 stale 名称由 #982/#1022 统一收口，本 Issue 不修改 `.agents/hooks/**`。
-  - `ROOT_ACCESS_ALLOW.tools`：在既有 Published Language 上新增 tools-owned `MemoryPortSource` 窄 seam，供已注册 `MemoryTool` 在 resume 后动态取得 committed MemoryPort。
+  - `ROOT_ACCESS_ALLOW.tools`：除最新统一授权与 Tool PL、`MemoryPortSource` 外，#912 登记 Skill-owned `PromptFragment`、Catalog/Materialization ports、query/snapshot/revision/source/cache/error PL；Context 与 Runtime 只能经 crate-root façade 消费，adapter 仍私有。
   - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade加 `FileSystemBlobAdapter` / `FileSystemDatasetAdapter` 供唯一 Composition/Config production factory 装配；业务消费者仍只经 Storage OHS。
   - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities}`
   - `POLICY_FORBIDDEN_PATHS` 禁止 Policy 的 `api/business/contract/core/gateway/capabilities` 文件与目录恢复

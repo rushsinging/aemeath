@@ -191,7 +191,7 @@ struct SkillMaterializationSnapshot {
 }
 ```
 
-Skill Materializer 负责异步读取、解析与验证 Skill，输出带单调 revision 的 PromptFragment 快照。Context Management 接收 Fragment 后决定注入位置、预算、去重、缓存分段和顺序。
+Skill Materializer 负责异步读取、解析与验证 Skill，输出带确定性内容 revision 的 PromptFragment 快照。Context Management 接收 Fragment 后决定注入位置、预算、去重、缓存分段和顺序。
 
 Skill 不是 Tool，不走 ToolExecutionPort；Context Management 不直接读取 Skill 文件或依赖其 adapter。
 

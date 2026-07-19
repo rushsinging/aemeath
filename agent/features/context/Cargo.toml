@@ -17,11 +17,11 @@ memory = { path = "../memory" }
 config = { path = "../config" }
 sdk = { path = "../../../packages/sdk" }
 provider = { path = "../provider" }
+tools = { path = "../tools" }
 log = "0.4"
 dirs = "6"
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yml = "0.0.12"
 inventory = { workspace = true }
 async-trait = { workspace = true }
 regex = "1"

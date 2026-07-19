@@ -48,13 +48,15 @@ agent/features/context/src/
 │   └── session_persistence.rs           #   canonical envelope load/save/recovery
 ├── ports/                              # 对外端口定义
 │   ├── context_port.rs                  #   ContextPort OHS（Context-owned 入站）
-│   └── session_snapshot_store.rs        #   Session snapshot 物理机制 seam
+│   ├── session_snapshot_store.rs        #   Session snapshot 物理机制 seam
+│   └── skill_query_factory.rs           #   Context-owned query factory（live WorkspaceRead snapshot）
 └── adapters/                           # 技术实现、外部 detail
     ├── atomic_blob_session.rs           #   Session → Storage AtomicBlob adapter
     ├── canonical_session.rs             #   canonical repository/writer
     ├── session_management.rs            #   list/export/import/metadata/delete façade
     ├── session_legacy_workspace.rs      #   legacy wire compatibility reader
-    └── ...                              #   Prompt/Memory/Skill adapters
+    ├── skill_prompt_source.rs           #   消费 Skill-owned port；scan / dedup / budget / render
+    └── ...                              #   其他 Prompt/Memory adapters
 ```
 
 各层的职责边界：

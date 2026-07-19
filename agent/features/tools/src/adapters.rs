@@ -2,6 +2,10 @@
 mod ask_user_tests;
 #[cfg(test)]
 mod catalog_execution_contract_tests;
+#[cfg(test)]
+mod skill_filesystem_tests;
+#[cfg(test)]
+mod skill_not_tool_contract_tests;
 
 /// business/mod.rs — 业务规则（规则专家）：各 Tool 的领域实现
 pub mod agent_tool;
@@ -33,6 +37,11 @@ pub mod plan_mode;
 // 同 list_mcp_resources：尚未注册的 MCP 资源读取 Tool，保留实现（refs #61 D3）。
 #[allow(dead_code)]
 pub mod read_mcp_resource;
+// Filesystem Skill adapter（Issue #912）：双端口实现已完成，但生产装配
+// （Composition Root）接线归 #913，故暂以 #[allow(dead_code)] 抑制非测试
+// 构建的未用告警。端口与 PL 类型已在 domain.rs / lib.rs 正式 re-export。
+#[allow(dead_code)]
+pub mod skill_filesystem;
 pub mod skill_tool;
 pub mod task_create;
 pub mod task_get;
