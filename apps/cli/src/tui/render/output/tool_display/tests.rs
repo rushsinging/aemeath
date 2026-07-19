@@ -96,6 +96,39 @@ fn test_format_tool_call_task_update_compact_hides_details() {
 }
 
 #[test]
+fn canonical_catalog_names_hit_specialized_displays() {
+    let (grep, grep_details) = format_tool_call(
+        "Grep",
+        r#"{"pattern":"tool_coordination","path":"docs/design"}"#,
+        None,
+        None,
+    );
+    assert_eq!(
+        line_to_string(&grep),
+        "Search /tool_coordination/, path=docs/design"
+    );
+    assert!(grep_details.is_empty());
+
+    let (agent, agent_details) = format_tool_call(
+        "Agent",
+        r#"{"description":"分析主工具编排","prompt":"只读分析三个文件"}"#,
+        None,
+        None,
+    );
+    assert_eq!(line_to_string(&agent), "Agent 分析主工具编排");
+    assert_eq!(agent_details, vec!["只读分析三个文件"]);
+
+    let (skill, skill_details) = format_tool_call(
+        "Skill",
+        r#"{"skill":"superpowers:writing-plans"}"#,
+        None,
+        None,
+    );
+    assert_eq!(line_to_string(&skill), "Skill superpowers:writing-plans");
+    assert!(skill_details.is_empty());
+}
+
+#[test]
 fn test_format_tool_call_uses_display_name_in_header() {
     // Bash → Run
     let (header, _) = format_tool_call("Bash", r#"{"command":"ls"}"#, None, None);

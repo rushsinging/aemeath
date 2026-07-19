@@ -112,9 +112,9 @@ impl crate::domain::ToolCatalogPort for CatalogAdapter {
             .iter()
             .filter(|spec| is_authorized(spec, profile))
             .filter_map(|spec| {
-                let tool = self.backing.registry().get(spec.name().as_str())?;
+                let tool = self.backing.registry().get(spec.name().normalized())?;
                 Some(ToolDescriptor {
-                    name: spec.name().clone(),
+                    name: crate::domain::published_language::ToolName::new(tool.name()),
                     description: tool.description().to_string(),
                     input_schema: tool.input_schema(),
                     required_capabilities: spec.required_capabilities(),

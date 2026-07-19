@@ -123,7 +123,11 @@ impl ExecutionAdapter {
                 "tool capabilities are not authorized by the selected profile",
             );
         }
-        let tool = match self.backing.registry().get(invocation.tool_name.as_str()) {
+        let tool = match self
+            .backing
+            .registry()
+            .get(invocation.tool_name.normalized())
+        {
             Some(tool) => tool,
             None => return unavailable(&invocation),
         };
