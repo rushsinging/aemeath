@@ -10,7 +10,7 @@ fi
 LOGGING_SRC="$ROOT/packages/global/logging/src"
 RUNTIME_SRC="$ROOT/agent/features/runtime/src"
 PROVIDER_SRC="$ROOT/agent/features/provider/src"
-STATIC_ALLOW='^(adapters/context\.rs:(SCOPED_CONTEXT|LEGACY_EXECUTION_CONTEXT|BOOT_TS|APP_VERSION|PID|TEST_LOCK)|adapters/file_sink\.rs:(UNKNOWN_TARGET_REPORTS|LOGGER))$'
+STATIC_ALLOW='^(adapters/context\.rs:(SCOPED_CONTEXT|BOOT_TS|APP_VERSION|PID)|adapters/file_sink\.rs:(UNKNOWN_TARGET_REPORTS|LOGGER))$'
 
 static_declarations="$(python3 - "$LOGGING_SRC" <<'PY'
 import pathlib
@@ -39,10 +39,11 @@ if [ -n "$static_violations" ] || [ -n "$macro_violations" ]; then
 fi
 
 # guard-registry:scope.logging.scope-context-tests
-legacy_consumers="$(grep -RInE '\b(set_session_id|set_current_(chat_id|turn|model|provider|request_id|role))[[:space:]]*\(' "$RUNTIME_SRC" "$PROVIDER_SRC" --include='*.rs' --exclude='*test*.rs' | grep -vE '/tests?/' || true)"
-if [ -n "$legacy_consumers" ]; then
-  printf '%s\n' "$legacy_consumers" >&2
-  echo "Logging scope context guard FAILED: Runtime/Provider production code must use immutable LogContext scopes, not legacy process-global setters (qualified, imported, or wrapped)." >&2
+LEGACY_SYMBOL_PATTERN='\b(LEGACY_EXECUTION_CONTEXT|legacy_snapshot|set_session_id|set_current_(chat_id|turn|model|provider|request_id|role))[[:space:]]*'
+legacy_symbols="$(grep -RInE "$LEGACY_SYMBOL_PATTERN" "$LOGGING_SRC" "$RUNTIME_SRC" "$PROVIDER_SRC" --include='*.rs' --exclude='*test*.rs' | grep -vE '/tests?/' || true)" # guard-registry:scope.logging.scope-context-tests
+if [ -n "$legacy_symbols" ]; then
+  printf '%s\n' "$legacy_symbols" >&2
+  echo "Logging scope context guard FAILED: legacy process-global context symbols are retired; use immutable LogContext scopes." >&2
   exit 2
 fi
 

@@ -113,4 +113,4 @@ MCP transport、JSON-RPC、认证和协议 DTO 是 Tool BC 的 adapter 私有实
 | 2026-07-16 | #972 v1：曾提议以私有 `capabilities/` 竖切组织 Tool、Skill、Command、MCP；该历史方案已被 v2 取代 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | #972 v2：确立 Hexagonal 默认，Target 改为 `domain ← application ← ports ← adapters`，MCP 归 `adapters/mcp/` | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | #993 完成过渡物理迁移：启用 `domain + adapters`、收窄 crate façade、将 `shared/tool` PL 类型迁入 `domain/types`；不代表 T1-T12 语义完成 | [#993](https://github.com/rushsinging/aemeath/issues/993) |
-| 2026-07-17 | #909 明确 RegistryScope、capability ToolProfile、只收缩约束与 `legacy-no-agent` 迁移语义；当前实现证据及 #911/#914 未完成项见 Migration Governance | [#909](https://github.com/rushsinging/aemeath/issues/909) |
+| 2026-07-17 | #909 明确 RegistryScope、capability ToolProfile、只收缩约束与 `legacy-no-agent` 迁移语义；实现进度统一见 Migration Governance | [#909](https://github.com/rushsinging/aemeath/issues/909) |

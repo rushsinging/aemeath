@@ -24,6 +24,7 @@ log = "0.4"
 async-trait = { workspace = true }
 
 [dev-dependencies]
+tools = { path = "../features/tools", features = ["test-harness"] }
 task = { path = "../features/task" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

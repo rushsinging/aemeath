@@ -188,6 +188,11 @@ impl BoundMainRun {
         &*self.memory
     }
 
+    /// Clones the exact Memory Arc captured by this shared lease.
+    pub fn memory_arc(&self) -> Arc<dyn MemoryPort> {
+        Arc::clone(&self.memory)
+    }
+
     /// The committed config snapshot backing the main run.
     pub fn config(&self) -> &ConfigSnapshot {
         &self.config

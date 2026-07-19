@@ -4,7 +4,26 @@ mod tests {
     use crate::application::chat::looping::permissions::evaluate_calls;
     use policy::{PolicyDecision, PolicyPort, PolicyReason, PolicyRequest};
     use std::sync::Mutex;
-    use tools::ToolRegistry;
+    use tools::{ToolCatalogSnapshot, ToolDescriptor, ToolName};
+
+    fn catalog(name: &str, capabilities: tools::ToolCapabilities) -> ToolCatalogSnapshot {
+        ToolCatalogSnapshot::new(
+            "main",
+            "main-full",
+            vec![ToolDescriptor {
+                name: ToolName::new(name),
+                description: String::new(),
+                input_schema: serde_json::json!({}),
+                required_capabilities: capabilities,
+                concurrency: tools::ConcurrencyDeclaration::default(),
+                cancellation: tools::CancellationDeclaration::NonCooperative,
+                timeout_secs: 120,
+                read_only: false,
+                input_safety: tools::InputSafetyDeclaration::Never,
+                data_schema: serde_json::Value::Null,
+            }],
+        )
+    }
 
     struct RecordingPolicy {
         seen: Mutex<Vec<(sdk::RunId, sdk::RunStepId, tools::ToolName)>>,
@@ -24,11 +43,7 @@ mod tests {
 
     #[test]
     fn evaluate_calls_uses_injected_policy_and_real_ids() {
-        let registry = ToolRegistry::new();
-        registry.declare_capabilities_for_test(
-            &tools::ToolName::new("Read"),
-            tools::ToolCapabilities::ReadWorkspace,
-        );
+        let catalog = catalog("Read", tools::ToolCapabilities::ReadWorkspace);
         let run_id = sdk::RunId::new_v7();
         let step_id = sdk::RunStepId::new_v7();
         let policy = RecordingPolicy {
@@ -45,7 +60,7 @@ mod tests {
 
         let (approved, denied) = evaluate_calls(
             &[call],
-            &registry,
+            &catalog,
             &policy,
             &run_id,
             &step_id,
@@ -62,11 +77,7 @@ mod tests {
 
     #[test]
     fn evaluate_calls_classifies_non_allow_decision_without_executing_tool() {
-        let registry = ToolRegistry::new();
-        registry.declare_capabilities_for_test(
-            &tools::ToolName::new("Edit"),
-            tools::ToolCapabilities::WriteWorkspace,
-        );
+        let catalog = catalog("Edit", tools::ToolCapabilities::WriteWorkspace);
         let policy = RecordingPolicy {
             seen: Mutex::new(Vec::new()),
             decision: PolicyDecision::Deny {
@@ -82,7 +93,7 @@ mod tests {
         };
         let (approved, denied) = evaluate_calls(
             &[call],
-            &registry,
+            &catalog,
             &policy,
             &sdk::RunId::new_v7(),
             &sdk::RunStepId::new_v7(),

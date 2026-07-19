@@ -82,7 +82,9 @@ where
     pub(crate) queue: &'a Q,
     pub(crate) input_events: &'a I,
     pub(crate) client: &'a Arc<provider::LlmClient>,
-    pub(crate) registry: &'a Arc<tools::ToolRegistry>,
+    pub(crate) tool_catalog: &'a Arc<dyn tools::ToolCatalogPort>,
+    pub(crate) tool_execution: &'a Arc<dyn tools::ToolExecutionPort>,
+    pub(crate) tool_context_binding: &'a Arc<dyn tools::ToolExecutionContextBindingPort>,
     pub(crate) system_prompt_text: &'a str,
     pub(crate) config_snapshot: &'a share::config::domain::snapshot::ConfigSnapshot,
     pub(crate) context: &'a ContextCoordinator,
@@ -148,10 +150,16 @@ where
                 )
             })
             .then(|| "当前 task batch 仍有未完成任务；仅在与最新用户请求相关时继续。".to_string());
-        let tool_schemas = self
-            .registry
-            .schemas_for(self.language)
-            .into_iter()
+        let raw_tool_schemas = self
+            .tool_catalog
+            .snapshot(
+                &tools::RegistryScopeName::new("main"),
+                &tools::ToolProfileName::new("main-full"),
+            )
+            .map(|snapshot| snapshot.model_schemas())
+            .unwrap_or_default();
+        let tool_schemas = raw_tool_schemas
+            .iter()
             .filter_map(|schema| {
                 Some(crate::ports::ModelToolSchema {
                     name: schema.get("name")?.as_str()?.to_string(),
@@ -180,9 +188,7 @@ where
             max_output_tokens: self.client.default_scope().max_tokens() as usize,
             last_api_input_tokens: *self.last_total_tokens,
             tool_schemas,
-            tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(
-                &self.registry.schemas_for(self.language),
-            ),
+            tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(&raw_tool_schemas),
             prev_system_tokens: None,
             prev_tool_schema_tokens: None,
         }
@@ -260,8 +266,9 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn make_agent<'b>(
-        registry: &'b Arc<tools::ToolRegistry>,
+    fn make_agent(
+        tool_catalog: &Arc<dyn tools::ToolCatalogPort>,
+        tool_execution: &Arc<dyn tools::ToolExecutionPort>,
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory: &Arc<dyn memory::MemoryPort>,
         language: &str,
@@ -273,9 +280,16 @@ where
         agent_semaphore: &Arc<tokio::sync::Semaphore>,
         session_id: &str,
         run_id: &sdk::RunId,
-    ) -> Agent<'b> {
+    ) -> Agent {
+        let catalog = tool_catalog
+            .snapshot(
+                &tools::RegistryScopeName::new("main"),
+                &tools::ToolProfileName::new("main-full"),
+            )
+            .unwrap_or_else(|_| tools::ToolCatalogSnapshot::new("main", "main-full", Vec::new()));
         Agent {
-            registry,
+            catalog,
+            execution: tool_execution.clone(),
             ctx: tools::ToolExecutionContext::new(
                 tools::ExecutionScope::builder(
                     run_id.to_string(),
@@ -301,8 +315,7 @@ where
                     Some(session_id.to_string()),
                     Some(session_reminders.clone()),
                 )
-                .with_agent(agent_runner.clone())
-                .with_catalog(Some(registry.clone() as Arc<dyn tools::CatalogQuery>)),
+                .with_agent(agent_runner.clone()),
             ),
             max_tool_concurrency,
             agent_semaphore: agent_semaphore.clone(),
@@ -758,7 +771,8 @@ where
         }
         let raw_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
         let agent = Self::make_agent(
-            self.registry,
+            self.tool_catalog,
+            self.tool_execution,
             self.agent_runner,
             self.memory,
             self.language,
@@ -771,10 +785,16 @@ where
             self.session_id,
             &self.run_id,
         );
+        let _binding = tools::ToolExecutionContextBindingGuard::bind(
+            (*self.tool_context_binding).clone(),
+            agent.ctx.clone(),
+        )
+        .map_err(LoopEngineError::Adapter)?;
         let all_results = execute_tool_round(
             &self.turn_context,
             &raw_calls,
-            self.registry,
+            self.tool_catalog,
+            self.tool_execution,
             self.policy,
             run_id,
             step_id,

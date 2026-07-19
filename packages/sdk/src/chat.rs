@@ -25,8 +25,17 @@ pub struct AskUserQuestionItem {
     pub options: Vec<OptionItem>,
     /// 是否多选。
     pub multi_select: bool,
+    /// 是否允许自由输入。
+    pub allow_free_input: bool,
     /// 默认值（用户跳过时使用）。
     pub default: Option<String>,
+}
+
+/// AskUser 批量交互的显式终结结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AskUserReply {
+    Answers(Vec<String>),
+    Cancelled,
 }
 
 /// 用户发送给 Agent 的一次 Chat 输入。

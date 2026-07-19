@@ -1,8 +1,16 @@
+#[cfg(test)]
+mod ask_user_tests;
+#[cfg(test)]
+mod catalog_execution_contract_tests;
+
 /// business/mod.rs — 业务规则（规则专家）：各 Tool 的领域实现
 pub mod agent_tool;
 pub mod ask_user;
 pub mod bash;
 pub mod brief;
+pub mod catalog;
+pub mod composition;
+pub mod execution;
 pub mod file_edit;
 pub mod file_read;
 pub mod file_write;
@@ -47,3 +55,6 @@ pub mod tool_registry;
 
 /// gateway/OHS：工具目录与注册接线
 pub mod wiring;
+
+#[cfg(feature = "test-harness")]
+pub mod test_harness;
