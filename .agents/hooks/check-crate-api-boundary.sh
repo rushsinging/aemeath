@@ -60,11 +60,12 @@ PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW
 # 只经 crate 根发布 Published Language，禁止恢复 tools::api。
 TOOLS_DOMAIN_FACADE = {
     "AgentDispatch", "AgentProgressEvent", "AgentProgressKind", "AgentRunRequest",
-    "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "CancellationDeclaration",
+    "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "AuthorizationContext",
+    "CancellationDeclaration",
     "CancellationSignal", "CatalogQuery", "ConcurrencyDeclaration", "ExecutionScope",
     "ExecutionScopeBuilder", "FixedGuidance", "FixedPlanMode", "Guidance", "ImageData",
     "InputSafetyDeclaration", "InvocationSource", "MemoryPortSource", "MutexReadSet",
-    "PlanModeState", "PolicyDecision", "ProfileExpansionError", "ProgressSink", "ReadSet",
+    "PlanModeState", "ProfileExpansionError", "ProgressSink", "ReadSet",
     "RegistryScopeName", "SessionReminder", "SessionReminders", "Tool", "ToolCapabilities",
     "ToolCapability", "ToolCatalogPort", "ToolCatalogSnapshot", "ToolDescriptor",
     "ToolErrorKind", "ToolExecutionContext", "ToolExecutionContextBindingGuard",
@@ -170,8 +171,9 @@ ROOT_ACCESS_ALLOW = {
         "from_args_with_workspace",
     },
       "policy": {
-          "AllowAllPolicy", "ApprovalSubject", "PolicyDecision", "PolicyMode", "PolicyPort",
-          "PolicyReason", "PolicyRequest", "PolicyRequestError",
+          "AllowAllPolicy", "ApprovalSubject", "AuthorizationContext", "ConfiguredPolicy",
+          "PolicyDecision", "PolicyMode", "PolicyModeSource", "PolicyPort", "PolicyReason",
+          "PolicyRequest", "PolicyRequestError", "StandardPolicy",
       },
     "workflow": set(),
     "project": PROJECT_ROOT_ACCESS_ALLOW,
