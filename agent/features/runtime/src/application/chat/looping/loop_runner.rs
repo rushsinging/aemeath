@@ -106,7 +106,7 @@ where
             let mut deferred_user_inputs = VecDeque::new();
             let mut task_reminder_state = TaskReminderState::new();
             let tool_identity =
-                crate::application::chat::looping::tool_identity::ToolIdentityRegistry::new();
+                crate::application::tool_coordination::identity::ToolIdentityRegistry::new();
             let mut config_snapshot =
                 crate::application::chat::looping::config_reload::init_snapshot_registry(&cwd);
             macro_rules! handle_pending_command {

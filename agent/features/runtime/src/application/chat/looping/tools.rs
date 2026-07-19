@@ -1,17 +1,14 @@
-// summary 已由 TUI 层从 input 参数组装，runtime 不再生成
 use crate::application::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::chat::looping::agent_calls::execute_agent_calls;
 use crate::application::chat::looping::ask_user::ask_user;
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::non_agent::execute_non_agent;
-use crate::application::chat::looping::permissions::evaluate_calls;
-use crate::application::chat::looping::tool_fuse::blocked_tool_execution;
 use crate::application::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
+use crate::application::tool_coordination::{prepare_tool_round, restore_tool_call_order};
 use hook::api::{HookData, ToolHookData};
 
-use crate::application::chat::looping::engine::DeniedCall;
 use sdk::ids::ToolCallId;
 use share::config::hooks::HookEvent;
 use std::path::Path;
@@ -59,40 +56,29 @@ where
                 .collect();
         }
     };
-    let (approved, denied) = evaluate_calls(
-        tool_calls,
+    let prepared = prepare_tool_round(
+        guarded_calls,
         &catalog,
         policy,
         run_id,
         step_id,
         workspace_root,
     );
-    let denied_results =
-        deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, workspace_root).await;
-
-    let guard_by_id: std::collections::HashMap<_, _> = guarded_calls
-        .iter()
-        .map(|(call, decision)| (call.id.clone(), decision))
-        .collect();
-    let mut fused_results = Vec::new();
-    let mut fuse_allowed = Vec::new();
-    for call in approved {
-        match guard_by_id.get(&call.id) {
-            Some(crate::application::loop_engine::ToolGuardDecision::SoftBlock { reason }) => {
-                send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Ready).await;
-                send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Running).await;
-                let execution = blocked_tool_execution(&call, reason);
-                send_tool_result(sink, context, &execution).await;
-                fused_results.push(execution);
-            }
-            Some(crate::application::loop_engine::ToolGuardDecision::Allow) | None => {
-                fuse_allowed.push(call)
-            }
-        }
-    }
+    let denied_results = deny_tool_calls(
+        &prepared.denied,
+        sink,
+        context,
+        hook_ui,
+        hook_runner,
+        workspace_root,
+    )
+    .await;
+    let approved = prepared.executable;
+    let fused_results =
+        publish_guard_blocked(prepared.guard_blocked, tool_calls, sink, context).await;
 
     let (agent_approved, non_agent_approved): (Vec<ToolCall>, Vec<ToolCall>) =
-        fuse_allowed.into_iter().partition(|c| c.name == "Agent");
+        approved.into_iter().partition(|c| c.name == "Agent");
 
     // AskUser must cross the same execution port as every production tool.
     // Only a typed Suspended outcome enters Runtime's existing waiter; every
@@ -156,18 +142,39 @@ where
     )
     .await;
 
-    ask_user_results
+    let results = ask_user_results
         .into_iter()
         .chain(ask_user_terminal)
         .chain(non_agent_results)
         .chain(agent_results)
         .chain(fused_results)
         .chain(denied_results)
-        .collect()
+        .collect();
+    restore_tool_call_order(tool_calls, results)
+}
+
+async fn publish_guard_blocked<S>(
+    blocked: Vec<ToolExecution>,
+    calls: &[ToolCall],
+    sink: &S,
+    context: &RuntimeTurnContext,
+) -> Vec<ToolExecution>
+where
+    S: ChatEventSink,
+{
+    for execution in &blocked {
+        let Some(call) = calls.iter().find(|call| call.id == execution.call_id) else {
+            continue;
+        };
+        send_tool_call_status(sink, context, call, RuntimeToolCallStatus::Ready).await;
+        send_tool_call_status(sink, context, call, RuntimeToolCallStatus::Running).await;
+        send_tool_result(sink, context, execution).await;
+    }
+    blocked
 }
 
 async fn deny_tool_calls<S>(
-    denied: &[DeniedCall],
+    denied: &[crate::application::tool_coordination::DeniedToolCall],
     sink: &S,
     context: &RuntimeTurnContext,
     hook_ui: &HookUi<S>,
@@ -182,15 +189,15 @@ where
         log::warn!(
             target: crate::LOG_TARGET,
             "tool call denied by policy: name={}, reason={}, runtime_id={}, provider_id={}",
-            call.name, call.reason, call.id, call.provider_id,
+            call.call.name, call.reason, call.call.id, call.call.provider_id,
         );
         let _ = hook_ui
             .run_plain(
                 hook_runner,
                 HookEvent::PermissionDenied,
-                Some(&call.name),
+                Some(&call.call.name),
                 HookData::Permission(hook::api::PermissionHookData {
-                    tool_name: call.name.clone(),
+                    tool_name: call.call.name.clone(),
                     permission_rule: "deny".to_string(),
                 }),
                 workspace_root,
@@ -198,14 +205,14 @@ where
             .await;
         // 发送 ToolCall 事件，让 pending 占位行获取 LLM 的 tool_use_id，
         // 后续 ToolResult 中的 mark_tool_header_done 才能精确匹配（Bug #52）。
-        let call_id = sdk::ids::ToolCallId::from_legacy_or_new(&call.id);
+        let call_id = call.call.id.clone();
         let _ = sink
             .send_event(RuntimeStreamEvent::ToolCallUpdate {
                 context: context.clone(),
                 id: call_id.clone(),
-                provider_id: None,
-                name: call.name.clone(),
-                index: 0,
+                provider_id: Some(call.call.provider_id.clone()),
+                name: call.call.name.clone(),
+                index: call.call.index,
                 arguments_delta: None,
                 arguments: None,
                 status: RuntimeToolCallStatus::Ready,
@@ -223,8 +230,8 @@ where
         };
         let execution = ToolExecution::from_parts(
             call_id,
-            call.provider_id.clone(),
-            call.name.clone(),
+            call.call.provider_id.clone(),
+            call.call.name.clone(),
             outcome,
         );
         send_tool_result(sink, context, &execution).await;
