@@ -20,9 +20,9 @@ pub use spec::{
     RunSpecError, ToolScope,
 };
 pub use state::{
-    DrainDecision, RunCancellationRequest, RunStatus, RunStep, RunStepCancellationRequest,
-    RunStepId, RunStepStatus, RunTerminationRequest, RunTransition, RunTransitionError,
-    RunTransitionReason,
+    DrainDecision, InteractionContinuation, PendingInteraction, RunCancellationRequest, RunStatus,
+    RunStep, RunStepCancellationRequest, RunStepId, RunStepStatus, RunTerminationRequest,
+    RunTransition, RunTransitionError, RunTransitionReason,
 };
 pub use step::{ModelInvocation, RunToolCall, ToolCall, ToolCallStatus};
 

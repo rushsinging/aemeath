@@ -1,8 +1,171 @@
 use super::*;
+use sdk::InteractionRequestId;
 use std::time::Duration;
 
 fn run() -> Run {
     Run::new(RunSpec::new("main", Duration::ZERO), None)
+}
+
+fn tool_continuation(provider_id: &str) -> InteractionContinuation {
+    InteractionContinuation::CompleteToolCall(sdk::ids::ToolCallId::from_legacy_or_new(provider_id))
+}
+
+#[test]
+fn pending_interaction_enters_awaiting_user_and_emits_request_identity() {
+    let mut run = run_at_status(RunStatus::ExecutingTools);
+    let request_id = InteractionRequestId::new_v7();
+    let continuation = tool_continuation("call-1");
+
+    run.begin_interaction(request_id.clone(), continuation.clone())
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::AwaitingUser);
+    assert_eq!(
+        run.pending_interaction(),
+        Some(&PendingInteraction {
+            request_id: request_id.clone(),
+            continuation,
+        })
+    );
+    assert!(run.events().iter().any(|event| matches!(
+        event,
+        RunDomainEvent::AwaitingUser {
+            request_id: emitted,
+            ..
+        } if emitted == &request_id
+    )));
+}
+
+#[test]
+fn run_rejects_second_pending_interaction_without_overwriting_first() {
+    let mut run = run_at_status(RunStatus::ExecutingTools);
+    let first = InteractionRequestId::new_v7();
+    let second = InteractionRequestId::new_v7();
+    run.begin_interaction(first.clone(), tool_continuation("call-1"))
+        .unwrap();
+
+    assert_eq!(
+        run.begin_interaction(second, tool_continuation("call-2")),
+        Err(RunTransitionError::InteractionAlreadyPending(first.clone()))
+    );
+    assert_eq!(
+        run.pending_interaction().map(|pending| &pending.request_id),
+        Some(&first)
+    );
+}
+
+#[test]
+fn completing_interaction_requires_matching_id_and_clears_exactly_once() {
+    let mut run = run_at_status(RunStatus::ExecutingTools);
+    let request_id = InteractionRequestId::new_v7();
+    let stale_id = InteractionRequestId::new_v7();
+    let continuation = InteractionContinuation::ContinueAfterHardPause;
+    run.begin_interaction(request_id.clone(), continuation.clone())
+        .unwrap();
+
+    assert_eq!(
+        run.complete_interaction(&stale_id),
+        Err(RunTransitionError::InteractionRequestMismatch {
+            expected: request_id.clone(),
+            received: stale_id,
+        })
+    );
+    assert_eq!(run.status(), RunStatus::AwaitingUser);
+    assert!(run.pending_interaction().is_some());
+
+    assert_eq!(run.complete_interaction(&request_id).unwrap(), continuation);
+    assert_eq!(run.status(), RunStatus::ExecutingTools);
+    assert!(run.pending_interaction().is_none());
+    assert_eq!(
+        run.complete_interaction(&request_id),
+        Err(RunTransitionError::NoPendingInteraction)
+    );
+}
+
+#[test]
+fn cancelling_interaction_clears_pending_without_emitting_resumed() {
+    let mut run = run_at_status(RunStatus::ExecutingTools);
+    let request_id = InteractionRequestId::new_v7();
+    let continuation = tool_continuation("call-cancel");
+    run.begin_interaction(request_id.clone(), continuation.clone())
+        .unwrap();
+    run.drain_events();
+
+    assert_eq!(run.cancel_interaction(&request_id).unwrap(), continuation);
+
+    assert_eq!(run.status(), RunStatus::AwaitingUser);
+    assert!(run.pending_interaction().is_none());
+    assert!(!run
+        .events()
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Resumed { .. })));
+}
+
+#[test]
+fn interaction_continuation_exhaustively_restores_its_origin_phase() {
+    let call_id = sdk::ids::ToolCallId::from_legacy_or_new("call-1");
+    let cases = [
+        (
+            RunStatus::ExecutingTools,
+            InteractionContinuation::CompleteToolCall(call_id.clone()),
+            RunStatus::ExecutingTools,
+        ),
+        (
+            RunStatus::AwaitingToolApproval,
+            InteractionContinuation::ContinueToolApproval(call_id),
+            RunStatus::AwaitingToolApproval,
+        ),
+        (
+            RunStatus::ApplyingResponse,
+            InteractionContinuation::ContinuePlanApproval,
+            RunStatus::PreparingContext,
+        ),
+        (
+            RunStatus::ExecutingTools,
+            InteractionContinuation::ContinueAfterHardPause,
+            RunStatus::ExecutingTools,
+        ),
+    ];
+
+    for (initial, continuation, expected) in cases {
+        let mut run = run_at_status(initial);
+        let request_id = InteractionRequestId::new_v7();
+        run.begin_interaction(request_id.clone(), continuation)
+            .unwrap();
+        run.complete_interaction(&request_id).unwrap();
+        assert_eq!(run.status(), expected);
+    }
+}
+
+#[test]
+fn run_control_clears_pending_interaction_before_terminal_or_step_finalization() {
+    let mut terminated = run_at_status(RunStatus::ExecutingTools);
+    let termination_request = InteractionRequestId::new_v7();
+    terminated
+        .begin_interaction(
+            termination_request,
+            InteractionContinuation::ContinueAfterHardPause,
+        )
+        .unwrap();
+    assert_eq!(
+        terminated.request_termination(
+            sdk::RunTerminationReason::UserExit,
+            sdk::ControlDeadline::from_unix_millis(10),
+        ),
+        RunTerminationRequest::Accepted
+    );
+    assert!(terminated.pending_interaction().is_none());
+
+    let mut cancelled = run_at_status(RunStatus::ExecutingTools);
+    let step_id = cancelled.active_step_id().unwrap();
+    cancelled
+        .begin_interaction(InteractionRequestId::new_v7(), tool_continuation("call-2"))
+        .unwrap();
+    assert_eq!(
+        cancelled.request_step_cancellation(&step_id),
+        RunStepCancellationRequest::Accepted
+    );
+    assert!(cancelled.pending_interaction().is_none());
 }
 
 #[test]

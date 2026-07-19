@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 功能：检查 AgentClient trait 只开放 chat/cancel 与明确登记的 Config control-plane 方法。
-# 作用：守住窄 façade；内容流仍走 ChatInputEvent/ChatEvent，Config 只交换 SDK DTO。
-#       #700 唯一例外是同步、out-of-band 的 cancel_run(run_id)，用于即时触发 per-Run scope。
+# 功能：检查 AgentClient trait 只开放 chat/cancel、Runtime-owned interaction 命令与明确登记的 Config control-plane 方法。
+# 作用：守住窄 façade；内容流仍走 ChatInputEvent/ChatEvent，Interaction reply/cancel 只交换 SDK 纯值。
+#       #700 唯一 Run control 例外是同步、out-of-band 的 cancel_run(run_id)。
 # 例外：cancel_run 必须按 RunId 定位，不允许扩展为无标识的会话级取消。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -52,7 +52,10 @@ trait_body = text[start:end]
 methods = re.findall(r'(?:async\s+)?fn\s+(\w+)', trait_body)
 
 # 允许的方法
-ALLOWED = {"chat", "cancel_run", "config_view", "update_config"}
+ALLOWED = {
+    "chat", "cancel_run", "config_view", "update_config",
+    "reply_interaction", "cancel_interaction",
+}
 
 violations = [m for m in methods if m not in ALLOWED]
 
@@ -61,9 +64,8 @@ if violations:
     print(json.dumps({
         "decision": "block",
         "reason": (
-            f"AgentClient trait 仅允许 chat/cancel_run 与 Config control-plane 的 config_view/update_config。\n"
-            f"内容输入与结果回传请走 ChatInputEvent/ChatEvent；取消仅允许同步 per-Run 入口。\n"
-            f"违规方法: {violations}\n"
+            f"AgentClient trait 仅允许 chat/cancel_run、Runtime-owned interaction commands 与 Config control-plane。\n"
+            f"内容输入与结果回传请走 ChatInputEvent/ChatEvent；interaction command 只允许 SDK 纯值。\n"            f"违规方法: {violations}\n"
             f"文件: {path}"
         )
     }, ensure_ascii=False))
