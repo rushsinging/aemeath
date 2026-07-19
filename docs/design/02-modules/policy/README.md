@@ -67,3 +67,5 @@ Policy 保持单能力扁平 `domain.rs + adapters.rs`：domain 定义 Request/D
 - L3：动态 Config 更新、Main/Sub/MCP 同一授权契约。
 - L4：CLI/config AllowAll 读取项目外 hook 结果并执行原 safety 会拒绝的操作。
 - L0：守卫禁止重复权限类型、Tool-local allow_all 与 Project 自主授权。
+
+#1062 的完整行为—测试矩阵、L0～L5 适用性与覆盖率信号统一记录在[测试架构与覆盖率治理 §11.8](../../03-engineering/04-testing-and-coverage.md#118-1062-policy-l0l5-覆盖证据)。
