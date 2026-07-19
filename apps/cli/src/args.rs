@@ -190,11 +190,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn yolo_and_allow_all_alias_map_to_same_acl_flag() {
+    fn yolo_and_allow_all_alias_project_same_runtime_bootstrap_acl() {
         let yolo = Cli::try_parse_from(["aemeath", "--yolo"]).unwrap();
         let alias = Cli::try_parse_from(["aemeath", "--allow-all"]).unwrap();
-        assert!(yolo.run_args.allow_all);
-        assert!(alias.run_args.allow_all);
+
+        let yolo_bootstrap = sdk::ChatBootstrapArgs::from(Args::from(yolo.run_args));
+        let alias_bootstrap = sdk::ChatBootstrapArgs::from(Args::from(alias.run_args));
+
+        assert!(yolo_bootstrap.allow_all);
+        assert!(alias_bootstrap.allow_all);
     }
 
     #[test]
