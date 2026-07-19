@@ -12,9 +12,9 @@ pub use domain::types;
 // Published language: shared-kernel tool types, DTOs, and ports.
 pub use domain::{
     AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal,
-    AgentRunner, AgentToolCallProgress, CancellationSignal, CatalogQuery, ExecutionScope,
-    ExecutionScopeBuilder, FixedGuidance, FixedPlanMode, Guidance, ImageData, InvocationSource,
-    MemoryPortSource, MutexReadSet, PlanModeState, PolicyDecision, ProfileExpansionError,
+    AgentRunner, AgentToolCallProgress, AuthorizationContext, CancellationSignal, CatalogQuery,
+    ExecutionScope, ExecutionScopeBuilder, FixedGuidance, FixedPlanMode, Guidance, ImageData,
+    InvocationSource, MemoryPortSource, MutexReadSet, PlanModeState, ProfileExpansionError,
     ProgressSink, ReadSet, RegistryScopeName, SessionReminder, SessionReminders, Tool,
     ToolCapabilities, ToolCapability, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionContext,
     ToolExecutionOutcome, ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider,

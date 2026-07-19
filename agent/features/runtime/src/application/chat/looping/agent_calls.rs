@@ -18,6 +18,7 @@ use tools::{ToolExecutionContext, ToolRegistry};
 pub(crate) async fn execute_agent_calls<S>(
     context: &RuntimeTurnContext,
     agent_approved: &[ToolCall],
+    authorization_by_id: &std::collections::HashMap<sdk::ToolCallId, tools::AuthorizationContext>,
     registry: &Arc<ToolRegistry>,
     agent_ctx: &ToolExecutionContext,
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
@@ -44,7 +45,11 @@ where
             };
             let sink = sink.clone();
             let hook_ui = hook_ui.clone();
-            let mut ag_ctx = agent_ctx.clone();
+            let authorization = authorization_by_id
+                .get(&call.id)
+                .copied()
+                .unwrap_or(tools::AuthorizationContext::STANDARD);
+            let mut ag_ctx = agent_ctx.with_authorization(authorization);
             let agent_semaphore = agent_semaphore.clone();
             let workspace_persist = workspace_persist.clone();
             let hook_runner = hook_runner.clone();
@@ -71,6 +76,7 @@ where
                     &workspace_persist,
                     &workspace_root,
                     &cancel,
+                    authorization,
                 )
                 .await;
                 drop(permit);
@@ -104,6 +110,7 @@ async fn execute_one_agent<S>(
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
     workspace_root: &Path,
     cancel: &CancellationToken,
+    authorization: tools::AuthorizationContext,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -116,20 +123,24 @@ where
         call.index,
         call.input.to_string().len(),
     );
-    let pre_results = hook_ui
-        .run_plain(
-            &hook_runner,
-            HookEvent::PreToolUse,
-            Some(&call.name),
-            HookData::Tool(ToolHookData {
-                tool_name: call.name.clone(),
-                tool_input: call.input.clone(),
-                tool_output: None,
-                is_error: None,
-            }),
-            workspace_root,
-        )
-        .await;
+    let pre_results = if authorization.enforce_permission_hooks {
+        hook_ui
+            .run_plain(
+                &hook_runner,
+                HookEvent::PreToolUse,
+                Some(&call.name),
+                HookData::Tool(ToolHookData {
+                    tool_name: call.name.clone(),
+                    tool_input: call.input.clone(),
+                    tool_output: None,
+                    is_error: None,
+                }),
+                workspace_root,
+            )
+            .await
+    } else {
+        Vec::new()
+    };
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
         log::debug!(target: crate::LOG_TARGET,
             "pretooluse timing blocked: kind=agent tool_name={} runtime_id={} provider_id={} exit_code={:?} error_present={}",
@@ -347,9 +358,14 @@ mod tests {
         tokio::spawn(async move {
             let sink = NoopSink;
             let hook_ui = HookUi::new(sink.clone());
+            let authorization_by_id = calls
+                .iter()
+                .map(|call| (call.id.clone(), tools::AuthorizationContext::STANDARD))
+                .collect();
             execute_agent_calls(
                 &RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn")),
                 &calls,
+                &authorization_by_id,
                 &registry,
                 &ctx,
                 &agent_semaphore,

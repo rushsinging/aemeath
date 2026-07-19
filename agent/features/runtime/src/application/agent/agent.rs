@@ -179,11 +179,23 @@ impl<'a> Agent<'a> {
     }
 
     pub async fn execute_tools(&self, tool_calls: &[ToolCall]) -> Vec<ToolExecution> {
-        let mut concurrent_calls: Vec<&ToolCall> = Vec::new();
-        let mut sequential_calls: Vec<&ToolCall> = Vec::new();
+        let authorized: Vec<_> = tool_calls
+            .iter()
+            .cloned()
+            .map(|call| (call, tools::AuthorizationContext::STANDARD))
+            .collect();
+        self.execute_authorized_tools(&authorized).await
+    }
+
+    pub async fn execute_authorized_tools(
+        &self,
+        tool_calls: &[(ToolCall, tools::AuthorizationContext)],
+    ) -> Vec<ToolExecution> {
+        let mut concurrent_calls: Vec<&(ToolCall, tools::AuthorizationContext)> = Vec::new();
+        let mut sequential_calls: Vec<&(ToolCall, tools::AuthorizationContext)> = Vec::new();
 
         for call in tool_calls {
-            match self.registry.get(&call.name) {
+            match self.registry.get(&call.0.name) {
                 Some(tool) if tool.is_concurrency_safe() => concurrent_calls.push(call),
                 _ => sequential_calls.push(call),
             }
@@ -197,7 +209,7 @@ impl<'a> Agent<'a> {
         let mut sequential_positions: Vec<usize> = Vec::new();
 
         // Track positions for each call
-        for (i, call) in tool_calls.iter().enumerate() {
+        for (i, (call, _)) in tool_calls.iter().enumerate() {
             match self.registry.get(&call.name) {
                 Some(tool) if tool.is_concurrency_safe() => {
                     concurrent_positions.push(i);
@@ -216,10 +228,10 @@ impl<'a> Agent<'a> {
             let futures: Vec<_> = concurrent_calls
                 .iter()
                 .zip(concurrent_positions.iter())
-                .filter_map(|(call, &pos)| {
+                .filter_map(|((call, authorization), &pos)| {
                     self.registry.get(&call.name).map(|tool| {
                         let input = call.input.clone();
-                        let ctx = self.ctx.clone();
+                        let ctx = self.ctx.with_authorization(*authorization);
                         let id = call.id.clone();
                         let provider_id = call.provider_id.clone();
                         let name = call.name.clone();
@@ -248,7 +260,9 @@ impl<'a> Agent<'a> {
         }
 
         // Execute non-concurrent tools sequentially
-        for (call, &pos) in sequential_calls.iter().zip(sequential_positions.iter()) {
+        for ((call, authorization), &pos) in
+            sequential_calls.iter().zip(sequential_positions.iter())
+        {
             // Check for cancellation between sequential tool calls
             if self.ctx.cancellation().is_cancelled() {
                 results[pos] = Some(ToolExecution::new(
@@ -258,13 +272,18 @@ impl<'a> Agent<'a> {
                 continue;
             }
             if let Some(tool) = self.registry.get(&call.name) {
-                let outcome =
-                    match call_tool_with_timeout(tool, &call.name, call.input.clone(), &self.ctx)
-                        .await
-                    {
-                        Ok(result) => ToolOutcome::from_tool_result(result),
-                        Err(message) => ToolOutcome::error(message),
-                    };
+                let ctx = self.ctx.with_authorization(*authorization);
+                let outcome = match call_tool_with_timeout(
+                    tool,
+                    &call.name,
+                    call.input.clone(),
+                    &ctx,
+                )
+                .await
+                {
+                    Ok(result) => ToolOutcome::from_tool_result(result),
+                    Err(message) => ToolOutcome::error(message),
+                };
                 results[pos] = Some(ToolExecution::new(call, outcome));
             } else {
                 results[pos] = Some(ToolExecution::new(
@@ -317,17 +336,22 @@ impl<'a> Agent<'a> {
 
     /// Execute only the given tool calls (subset of all calls)
     pub async fn execute_tools_filtered(&self, tool_calls: &[&ToolCall]) -> Vec<ToolExecution> {
-        let owned: Vec<ToolCall> = tool_calls
+        let owned: Vec<(ToolCall, tools::AuthorizationContext)> = tool_calls
             .iter()
-            .map(|c| ToolCall {
-                id: c.id.clone(),
-                provider_id: c.provider_id.clone(),
-                name: c.name.clone(),
-                index: c.index,
-                input: c.input.clone(),
+            .map(|c| {
+                (
+                    ToolCall {
+                        id: c.id.clone(),
+                        provider_id: c.provider_id.clone(),
+                        name: c.name.clone(),
+                        index: c.index,
+                        input: c.input.clone(),
+                    },
+                    tools::AuthorizationContext::STANDARD,
+                )
             })
             .collect();
-        self.execute_tools(&owned).await
+        self.execute_authorized_tools(&owned).await
     }
 }
 

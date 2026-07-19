@@ -14,6 +14,7 @@ pub(crate) async fn ask_user<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
+    authorization_by_id: &std::collections::HashMap<sdk::ToolCallId, tools::AuthorizationContext>,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
 where
@@ -30,6 +31,13 @@ where
 
     // 对每个 call 运行 PermissionRequest hook（保持现有逻辑不变）
     for call in &ask_calls {
+        let authorization = authorization_by_id
+            .get(&call.id)
+            .copied()
+            .unwrap_or(tools::AuthorizationContext::STANDARD);
+        if !authorization.enforce_permission_hooks {
+            continue;
+        }
         let _ = hook_ui
             .run_plain(
                 hook_runner,

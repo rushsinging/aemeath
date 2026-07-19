@@ -48,17 +48,17 @@ impl TypedTool for FileEditTool {
             }
         };
         let requested_path = args.file_path.as_str();
-        let path = match ctx
-            .workspace_read()
-            .resolve_file_path(std::path::Path::new(requested_path))
-        {
+        let path = match ctx.workspace_read().resolve_file_path_authorized(
+            std::path::Path::new(requested_path),
+            ctx.authorization().allow_outside_workspace,
+        ) {
             Ok(path) => path,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
         let file_path = path.to_string_lossy().into_owned();
         let has_read_evidence = ctx.read_set().contains(requested_path)
             || ctx.read_set().contains(path.to_string_lossy().as_ref());
-        if path.exists() && !has_read_evidence {
+        if ctx.authorization().require_read_before_write && path.exists() && !has_read_evidence {
             return TypedToolResult::error(format!(
                 "You must read {} before editing it. Use the Read tool first.",
                 path.display()

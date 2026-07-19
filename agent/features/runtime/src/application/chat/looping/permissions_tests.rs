@@ -33,7 +33,7 @@ mod tests {
         let step_id = sdk::RunStepId::new_v7();
         let policy = RecordingPolicy {
             seen: Mutex::new(Vec::new()),
-            decision: PolicyDecision::Allow,
+            decision: PolicyDecision::Allow(tools::AuthorizationContext::STANDARD),
         };
         let call = ToolCall {
             provider_id: "provider-read".into(),

@@ -57,9 +57,10 @@ pub enum ToolGuardDecision {
     SoftBlock { reason: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolStep {
     Continue,
+    ContinueWithFuseBypass(Vec<sdk::ToolCallId>),
     AwaitUser,
 }
 
@@ -370,12 +371,8 @@ where
                         }
                     }
                 }
-                for (call, decision) in &guarded_calls {
-                    let status = match decision {
-                        ToolGuardDecision::Allow => ToolCallStatus::Ready,
-                        ToolGuardDecision::SoftBlock { .. } => ToolCallStatus::Cancelled,
-                    };
-                    run.advance_tool_call(&step_id, &call.id, status)?;
+                for (call, _) in &guarded_calls {
+                    run.advance_tool_call(&step_id, &call.id, ToolCallStatus::Ready)?;
                 }
                 run.transition(RunTransition::ToolsApproved)?;
                 for (call, decision) in &guarded_calls {
@@ -414,13 +411,21 @@ where
                 if handle_interrupt(run, cancel, port).await? {
                     return Ok(LoopDirective::Terminal);
                 }
+                let fuse_bypassed = match &tool_step {
+                    ToolStep::ContinueWithFuseBypass(ids) => ids.as_slice(),
+                    ToolStep::Continue | ToolStep::AwaitUser => &[],
+                };
                 for (call, decision) in &guarded_calls {
-                    if matches!(decision, ToolGuardDecision::Allow) {
-                        run.advance_tool_call(&step_id, &call.id, ToolCallStatus::Success)?;
-                    }
+                    let bypassed = fuse_bypassed.contains(&call.id);
+                    let status = if matches!(decision, ToolGuardDecision::Allow) || bypassed {
+                        ToolCallStatus::Success
+                    } else {
+                        ToolCallStatus::Cancelled
+                    };
+                    run.advance_tool_call(&step_id, &call.id, status)?;
                 }
                 match tool_step {
-                    ToolStep::Continue => {
+                    ToolStep::Continue | ToolStep::ContinueWithFuseBypass(_) => {
                         run.complete_step(&step_id)?;
                         run.transition(RunTransition::ToolsCompleted)?;
                     }

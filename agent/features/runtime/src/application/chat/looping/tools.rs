@@ -36,7 +36,7 @@ pub(crate) async fn execute_tool_round<S>(
     language: &str,
     workspace_root: &Path,
     guarded_calls: &[(ToolCall, crate::application::loop_engine::ToolGuardDecision)],
-) -> Vec<ToolExecution>
+) -> (Vec<ToolExecution>, Vec<ToolCallId>)
 where
     S: ChatEventSink,
 {
@@ -50,6 +50,23 @@ where
     );
     let denied_results =
         deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, workspace_root).await;
+    let authorization_by_id: std::collections::HashMap<_, _> = approved
+        .iter()
+        .map(|(call, authorization)| (call.id.clone(), *authorization))
+        .collect();
+
+    let fuse_bypassed: Vec<_> = guarded_calls
+        .iter()
+        .filter_map(|(call, decision)| {
+            (matches!(
+                decision,
+                crate::application::loop_engine::ToolGuardDecision::SoftBlock { .. }
+            ) && authorization_by_id
+                .get(&call.id)
+                .is_some_and(|authorization| !authorization.enforce_tool_fuse))
+            .then_some(call.id.clone())
+        })
+        .collect();
 
     let guard_by_id: std::collections::HashMap<_, _> = guarded_calls
         .iter()
@@ -57,9 +74,11 @@ where
         .collect();
     let mut fused_results = Vec::new();
     let mut fuse_allowed = Vec::new();
-    for call in approved {
+    for (call, authorization) in approved {
         match guard_by_id.get(&call.id) {
-            Some(crate::application::loop_engine::ToolGuardDecision::SoftBlock { reason }) => {
+            Some(crate::application::loop_engine::ToolGuardDecision::SoftBlock { reason })
+                if authorization.enforce_tool_fuse =>
+            {
                 send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Ready).await;
                 send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Running).await;
                 let execution = blocked_tool_execution(&call, reason);
@@ -67,6 +86,9 @@ where
                 fused_results.push(execution);
             }
             Some(crate::application::loop_engine::ToolGuardDecision::Allow) | None => {
+                fuse_allowed.push(call)
+            }
+            Some(crate::application::loop_engine::ToolGuardDecision::SoftBlock { .. }) => {
                 fuse_allowed.push(call)
             }
         }
@@ -81,6 +103,7 @@ where
         hook_ui,
         hook_runner,
         &non_agent_approved,
+        &authorization_by_id,
         workspace_root,
     )
     .await;
@@ -91,6 +114,7 @@ where
         hook_ui,
         hook_runner,
         &non_agent_approved,
+        &authorization_by_id,
         language,
         workspace_root,
     )
@@ -98,6 +122,7 @@ where
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,
+        &authorization_by_id,
         registry,
         &agent.ctx,
         &agent.agent_semaphore,
@@ -110,13 +135,16 @@ where
     )
     .await;
 
-    ask_user_results
-        .into_iter()
-        .chain(non_agent_results)
-        .chain(agent_results)
-        .chain(fused_results)
-        .chain(denied_results)
-        .collect()
+    (
+        ask_user_results
+            .into_iter()
+            .chain(non_agent_results)
+            .chain(agent_results)
+            .chain(fused_results)
+            .chain(denied_results)
+            .collect(),
+        fuse_bypassed,
+    )
 }
 
 async fn deny_tool_calls<S>(

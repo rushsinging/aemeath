@@ -27,7 +27,31 @@ fn test_start_line_of_match_error_when_missing() {
 }
 
 #[tokio::test]
-async fn file_edit_without_prior_read_is_rejected_even_when_allow_all() {
+async fn file_read_outside_workspace_is_allowed_when_allow_all() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let path = outside.path().join("outside.txt");
+    tokio::fs::write(&path, "outside\n").await.unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+
+    let result = crate::adapters::file_read::FileReadTool
+        .call(serde_json::json!({ "file_path": path }), &ctx)
+        .await;
+
+    assert!(
+        !result.is_error,
+        "allow-all read should succeed: {}",
+        result.text
+    );
+    assert!(result.text.contains("outside"));
+}
+
+#[tokio::test]
+async fn file_edit_without_prior_read_is_allowed_when_allow_all() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sample.rs");
     tokio::fs::write(&path, "one\ntwo\n").await.unwrap();
@@ -47,11 +71,14 @@ async fn file_edit_without_prior_read_is_rejected_even_when_allow_all() {
         )
         .await;
 
-    assert!(result.is_error);
-    assert!(result.text.contains("must read"));
+    assert!(
+        !result.is_error,
+        "allow-all edit should succeed: {}",
+        result.text
+    );
     assert_eq!(
         tokio::fs::read_to_string(&path).await.unwrap(),
-        "one\ntwo\n"
+        "one\nTWO\n"
     );
 }
 

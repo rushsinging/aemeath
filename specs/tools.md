@@ -19,6 +19,8 @@
 - `ExecutionScope` 是固定八字段纯值对象：run/parent id、workspace id/root 快照、invocation source、registry scope、profile、deadline；**NEVER** 放入 registry/store/channel/token/semaphore 或 Project wiring。
 - `ToolExecutionContext` 只含私有 `scope + ports`。文件工具只经 `WorkspaceRead` 解析路径；`WorkspaceControl` 仅允许 Bash、EnterWorktree、ExitWorktree 使用，accessor 保持 crate-private。
 - `WorkspaceViews` 必须在 Runtime adapter 转换；Tools domain 禁止 Tokio channel/token/semaphore。Memory 能力直接使用 #897 发布的正式 `MemoryPort`；不得恢复 legacy compatibility bridge。
+- `AuthorizationContext` 是 Tools-owned 的逐调用纯值 PL；Policy 构造、Runtime 注入。File/Glob/Grep/LSP、Write/Edit、Bash **MUST** 只消费该值，**NEVER** 直接读取 Config/allow_all。
+- AllowAll 下项目外路径、read-before-write 与 Bash safety **MUST** 放行；Standard 保持现有约束。
 - #910 不代表 #911 Catalog/Execution 双 adapter、#877 typed suspension、#912 完整 Runtime scope ownership 已完成。
 
 ## MCP 工具

@@ -208,7 +208,6 @@ where
                     memory.clone(),
                     Arc::new(tools::FixedGuidance {
                         language: language.to_string(),
-                        allow_all: false,
                     }),
                 )
                 .with_memory_context(
@@ -673,7 +672,7 @@ where
             self.session_id,
             &self.run_id,
         );
-        let all_results = execute_tool_round(
+        let (all_results, fuse_bypassed) = execute_tool_round(
             &self.turn_context,
             &raw_calls,
             self.registry,
@@ -756,7 +755,11 @@ where
             &self.current_cwd(),
         )
         .await;
-        Ok(ToolStep::Continue)
+        Ok(if fuse_bypassed.is_empty() {
+            ToolStep::Continue
+        } else {
+            ToolStep::ContinueWithFuseBypass(fuse_bypassed)
+        })
     }
 
     async fn on_stuck(

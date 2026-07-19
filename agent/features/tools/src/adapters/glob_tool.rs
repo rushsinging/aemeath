@@ -52,10 +52,10 @@ impl TypedTool for GlobTool {
         };
         let pattern = args.pattern.as_str();
         let base_dir = match args.path.as_deref() {
-            Some(path) => match ctx
-                .workspace_read()
-                .resolve_search_path(std::path::Path::new(path))
-            {
+            Some(path) => match ctx.workspace_read().resolve_search_path_authorized(
+                std::path::Path::new(path),
+                ctx.authorization().allow_outside_workspace,
+            ) {
                 Ok(path) => path,
                 Err(error) => return TypedToolResult::error(error.to_string()),
             },

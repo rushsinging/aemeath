@@ -21,6 +21,8 @@
 
 - Runtime 自行持有 `WorkspacePersist` 与并发 semaphore；二者 **NEVER** 流入 Tools domain 或 `ToolExecutionContext`。Composition 的 `WorkspaceViews` 只在 `application/tool_execution_adapters.rs` 转成窄 live capabilities。
 - #910 当前仅完成 scope/context 结构与资源 ACL；#911 双 Tool adapter、#877 typed suspension、#912 Runtime scope ownership 仍未完成，不能据此宣称 Target 完成。
+- Runtime **MUST** 对每个 ToolCall 恰好调用一次 PolicyPort，并将返回的 AuthorizationContext 逐调用传入 Main/Sub/MCP Tool；**NEVER** 先因 Tool fuse 或 permission Hook 丢弃 AllowAll 可放行的调用。
+- Tool fuse、PermissionRequest/PermissionDenied 与 PreToolUse 的授权性阻断 **MUST** 服从同一 AuthorizationContext。
 
 ## token budget / 压缩 / 成本
 

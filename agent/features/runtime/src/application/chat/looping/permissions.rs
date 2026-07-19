@@ -1,6 +1,6 @@
 use crate::application::agent::ToolCall;
 use policy::{PolicyDecision, PolicyPort, PolicyRequest};
-use tools::{ToolName, ToolRegistry};
+use tools::{AuthorizationContext, ToolName, ToolRegistry};
 
 use super::engine::DeniedCall;
 
@@ -11,7 +11,7 @@ pub(crate) fn evaluate_calls(
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     workspace_root: &std::path::Path,
-) -> (Vec<ToolCall>, Vec<DeniedCall>) {
+) -> (Vec<(ToolCall, AuthorizationContext)>, Vec<DeniedCall>) {
     let mut approved = Vec::with_capacity(tool_calls.len());
     let mut denied = Vec::new();
 
@@ -37,7 +37,7 @@ pub(crate) fn evaluate_calls(
             }
         };
         match policy.evaluate(&request) {
-            PolicyDecision::Allow => approved.push(call.clone()),
+            PolicyDecision::Allow(authorization) => approved.push((call.clone(), authorization)),
             PolicyDecision::Deny { reason } => {
                 denied.push(denied_call(call, &format!("{reason:?}")));
             }

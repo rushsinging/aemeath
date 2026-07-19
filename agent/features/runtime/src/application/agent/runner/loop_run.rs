@@ -592,35 +592,53 @@ impl RunLoopPort for SubAgentRun<'_> {
                 if calls.is_empty() {
                     return Ok(ToolStep::Continue);
                 }
-                let allowed: Vec<_> = calls
-                    .iter()
-                    .filter_map(|(call, decision)| {
-                        matches!(decision, ToolGuardDecision::Allow).then_some(call.clone())
-                    })
-                    .collect();
-                let mut results: Vec<_> = calls
-                    .iter()
-                    .filter_map(|(call, decision)| match decision {
-                        ToolGuardDecision::SoftBlock { reason } => Some(
-                            crate::application::chat::looping::tool_fuse::blocked_tool_execution(
-                                call, reason,
-                            ),
-                        ),
-                        ToolGuardDecision::Allow => None,
-                    })
-                    .collect();
-
+                let all_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
                 let (approved, denied) =
                     crate::application::chat::looping::permissions::evaluate_calls(
-                        &allowed,
+                        &all_calls,
                         self.agent.registry,
                         self.policy.as_ref(),
                         run_id,
                         step_id,
                         &self.agent.ctx.workspace_read().current_workspace_root(),
                     );
+                let authorization_by_id: std::collections::HashMap<_, _> = approved
+                    .iter()
+                    .map(|(call, authorization)| (call.id.clone(), *authorization))
+                    .collect();
+                let fuse_bypassed: Vec<_> = calls
+                    .iter()
+                    .filter_map(|(call, decision)| {
+                        (matches!(decision, ToolGuardDecision::SoftBlock { .. })
+                            && authorization_by_id
+                                .get(&call.id)
+                                .is_some_and(|authorization| !authorization.enforce_tool_fuse))
+                        .then_some(call.id.clone())
+                    })
+                    .collect();
+                let mut results: Vec<_> = calls
+                    .iter()
+                    .filter_map(|(call, decision)| match decision {
+                        ToolGuardDecision::SoftBlock { reason }
+                            if authorization_by_id
+                                .get(&call.id)
+                                .is_none_or(|authorization| authorization.enforce_tool_fuse) =>
+                        {
+                            Some(
+                                crate::application::chat::looping::tool_fuse::blocked_tool_execution(
+                                    call, reason,
+                                ),
+                            )
+                        }
+                        ToolGuardDecision::SoftBlock { .. } | ToolGuardDecision::Allow => None,
+                    })
+                    .collect();
+                let approved: Vec<_> = approved
+                    .into_iter()
+                    .filter(|(call, _)| !results.iter().any(|result| result.call_id == call.id))
+                    .collect();
                 results.extend(denied.into_iter().filter_map(|denied| {
-                    allowed
+                    all_calls
                         .iter()
                         .find(|call| call.id.to_string() == denied.id)
                         .map(|call| {
@@ -630,13 +648,14 @@ impl RunLoopPort for SubAgentRun<'_> {
                             )
                         })
                 }));
-                let allowed = approved;
-
-                let all_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
                 self.log_tool_calls(&all_calls);
                 let call_info = self.build_call_info(&all_calls);
+                let approved_calls: Vec<_> = approved
+                    .iter()
+                    .map(|(call, _)| call.clone())
+                    .collect();
                 if let Some(ref sink) = self.progress_sink {
-                    sink.emit(build_tool_calls_progress_event(turn_number, &allowed));
+                    sink.emit(build_tool_calls_progress_event(turn_number, &approved_calls));
                 }
 
                 let cancellation = self.agent.ctx.cancellation();
@@ -644,7 +663,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                     _ = cancellation.cancelled() => {
                         return Err(LoopEngineError::Cancelled);
                     }
-                    executed = self.agent.execute_tools(&allowed) => executed,
+                    executed = self.agent.execute_authorized_tools(&approved) => executed,
                 };
                 results.append(&mut executed);
                 let mut by_id: std::collections::HashMap<_, _> = results
@@ -665,7 +684,11 @@ impl RunLoopPort for SubAgentRun<'_> {
                     &self.session_id,
                 )
                 .await;
-                Ok(ToolStep::Continue)
+                Ok(if fuse_bypassed.is_empty() {
+                    ToolStep::Continue
+                } else {
+                    ToolStep::ContinueWithFuseBypass(fuse_bypassed)
+                })
             },
         )
         .await

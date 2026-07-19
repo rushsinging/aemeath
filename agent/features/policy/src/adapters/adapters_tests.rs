@@ -69,7 +69,10 @@ fn evaluate_emits_entry_and_allow_exit_logging_only_mode_count_and_decision() {
         "/top/secret/workspace",
     );
 
-    assert_eq!(AllowAllPolicy.evaluate(&request), PolicyDecision::Allow);
+    assert_eq!(
+        AllowAllPolicy.evaluate(&request),
+        PolicyDecision::Allow(tools::AuthorizationContext::ALLOW_ALL)
+    );
 
     let lines = CAPTURED.lock().expect("read capture").clone();
     assert!(
@@ -143,7 +146,10 @@ fn capability_count_reflects_request_requirements() {
         "/workspace",
     );
 
-    assert_eq!(AllowAllPolicy.evaluate(&request), PolicyDecision::Allow);
+    assert_eq!(
+        AllowAllPolicy.evaluate(&request),
+        PolicyDecision::Allow(tools::AuthorizationContext::ALLOW_ALL)
+    );
 
     let joined = CAPTURED
         .lock()

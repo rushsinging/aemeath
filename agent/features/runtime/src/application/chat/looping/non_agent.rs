@@ -22,6 +22,7 @@ pub(super) async fn execute_non_agent<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
+    authorization_by_id: &std::collections::HashMap<sdk::ToolCallId, tools::AuthorizationContext>,
     language: &str,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
@@ -48,6 +49,7 @@ where
             hook_ui,
             hook_runner,
             other_calls[0],
+            authorization_by_id,
             language,
             workspace_root,
         )
@@ -61,6 +63,7 @@ where
         hook_ui,
         hook_runner,
         &other_calls,
+        authorization_by_id,
         language,
         workspace_root,
     )
@@ -75,6 +78,7 @@ async fn execute_multiple_non_agent<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     other_calls: &[&ToolCall],
+    authorization_by_id: &std::collections::HashMap<sdk::ToolCallId, tools::AuthorizationContext>,
     language: &str,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
@@ -109,6 +113,7 @@ where
                         &hook_ui,
                         &hook_runner,
                         call,
+                        authorization_by_id,
                         language,
                         &workspace_root,
                     )
@@ -138,6 +143,7 @@ where
                 hook_ui,
                 hook_runner,
                 call,
+                authorization_by_id,
                 language,
                 workspace_root,
             )
@@ -195,24 +201,31 @@ async fn execute_one_non_agent<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     call: &ToolCall,
+    authorization_by_id: &std::collections::HashMap<sdk::ToolCallId, tools::AuthorizationContext>,
     language: &str,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
-    let _ = hook_ui
-        .run_plain(
-            hook_runner,
-            HookEvent::PermissionRequest,
-            Some(&call.name),
-            HookData::Permission(hook::api::PermissionHookData {
-                tool_name: call.name.clone(),
-                permission_rule: "auto".to_string(),
-            }),
-            workspace_root,
-        )
-        .await;
+    let authorization = authorization_by_id
+        .get(&call.id)
+        .copied()
+        .unwrap_or(tools::AuthorizationContext::STANDARD);
+    if authorization.enforce_permission_hooks {
+        let _ = hook_ui
+            .run_plain(
+                hook_runner,
+                HookEvent::PermissionRequest,
+                Some(&call.name),
+                HookData::Permission(hook::api::PermissionHookData {
+                    tool_name: call.name.clone(),
+                    permission_rule: "auto".to_string(),
+                }),
+                workspace_root,
+            )
+            .await;
+    }
     let owned_call = ToolCall {
         id: call.id.clone(),
         provider_id: call.provider_id.clone(),
@@ -228,20 +241,24 @@ where
         owned_call.index,
         owned_call.input.to_string().len(),
     );
-    let pre_results = hook_ui
-        .run_plain(
-            hook_runner,
-            HookEvent::PreToolUse,
-            Some(&owned_call.name),
-            HookData::Tool(ToolHookData {
-                tool_name: owned_call.name.clone(),
-                tool_input: owned_call.input.clone(),
-                tool_output: None,
-                is_error: None,
-            }),
-            workspace_root,
-        )
-        .await;
+    let pre_results = if authorization.enforce_permission_hooks {
+        hook_ui
+            .run_plain(
+                hook_runner,
+                HookEvent::PreToolUse,
+                Some(&owned_call.name),
+                HookData::Tool(ToolHookData {
+                    tool_name: owned_call.name.clone(),
+                    tool_input: owned_call.input.clone(),
+                    tool_output: None,
+                    is_error: None,
+                }),
+                workspace_root,
+            )
+            .await
+    } else {
+        Vec::new()
+    };
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
         log::debug!(target: crate::LOG_TARGET,
             "pretooluse timing blocked: kind=non_agent tool_name={} runtime_id={} provider_id={} exit_code={:?} error_present={}",
@@ -279,55 +296,54 @@ where
     // skip the channel setup to avoid unnecessary overhead.
     let is_bash = owned_call.name == "Bash";
 
-    let exec_results =
-        if is_bash {
-            // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
-            let (prog_tx, mut prog_rx) =
-                tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-            let streaming_ctx = agent.ctx.with_progress(Some(
-                crate::application::tool_execution_adapters::progress(prog_tx),
-            ));
-            let call_id = owned_call.id.clone();
-            let stream_sink = sink.clone();
-            let stream_context = context.clone();
-            let progress_log_context = logging::capture();
-            let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
-                while let Some(event) = prog_rx.recv().await {
-                    let _ = stream_sink
-                        .send_event(RuntimeStreamEvent::AgentProgress {
-                            context: stream_context.clone(),
-                            tool_id: call_id.clone(),
-                            event,
-                        })
-                        .await;
-                }
-            });
-
-            let results = vec![
-                agent
-                    .execute_one_with_ctx(&owned_call, &streaming_ctx)
-                    .await,
-            ];
-
-            // Drop the sender so the forwarding task can complete naturally.
-            drop(streaming_ctx);
-
-            // Flush any remaining progress events before proceeding.
-            // Abort the forwarding task if it doesn't complete within 500ms
-            // to prevent task/resource leaks.
-            let mut forward_handle = forward_handle;
-            tokio::select! {
-                _ = &mut forward_handle => {}
-                _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
-                    forward_handle.abort();
-                    let _ = forward_handle.await;
-                }
+    let tool_ctx = agent.ctx.with_authorization(authorization);
+    let exec_results = if is_bash {
+        // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
+        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
+        let streaming_ctx = tool_ctx.with_progress(Some(
+            crate::application::tool_execution_adapters::progress(prog_tx),
+        ));
+        let call_id = owned_call.id.clone();
+        let stream_sink = sink.clone();
+        let stream_context = context.clone();
+        let progress_log_context = logging::capture();
+        let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
+            while let Some(event) = prog_rx.recv().await {
+                let _ = stream_sink
+                    .send_event(RuntimeStreamEvent::AgentProgress {
+                        context: stream_context.clone(),
+                        tool_id: call_id.clone(),
+                        event,
+                    })
+                    .await;
             }
-            results
-        } else {
-            // Non-Bash tools: execute without progress streaming.
-            vec![agent.execute_one_with_ctx(&owned_call, &agent.ctx).await]
-        };
+        });
+
+        let results = vec![
+            agent
+                .execute_one_with_ctx(&owned_call, &streaming_ctx)
+                .await,
+        ];
+
+        // Drop the sender so the forwarding task can complete naturally.
+        drop(streaming_ctx);
+
+        // Flush any remaining progress events before proceeding.
+        // Abort the forwarding task if it doesn't complete within 500ms
+        // to prevent task/resource leaks.
+        let mut forward_handle = forward_handle;
+        tokio::select! {
+            _ = &mut forward_handle => {}
+            _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
+                forward_handle.abort();
+                let _ = forward_handle.await;
+            }
+        }
+        results
+    } else {
+        // Non-Bash tools: execute without progress streaming.
+        vec![agent.execute_one_with_ctx(&owned_call, &tool_ctx).await]
+    };
 
     let workspace = agent.workspace_persist.snapshot();
     let _ = sink
