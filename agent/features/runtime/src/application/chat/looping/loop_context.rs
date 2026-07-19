@@ -11,7 +11,7 @@ use tools::{ToolCatalogPort, ToolExecutionPort};
 use workflow::api::ReasoningPort;
 
 /// 模型切换构建器类型（#567）：接受 selection 字符串，async 返回
-/// `(LlmClient, ModelSwitchResult)` 或 `String` 错误。
+/// `(ProviderBinding, ModelSwitchResult)` 或 `String` 错误。
 pub type SwitchClientFn = Arc<
     dyn Fn(
             &str,
@@ -19,7 +19,7 @@ pub type SwitchClientFn = Arc<
             Box<
                 dyn std::future::Future<
                         Output = std::result::Result<
-                            (provider::LlmClient, sdk::ModelSwitchResult),
+                            (crate::ports::ProviderBinding, sdk::ModelSwitchResult),
                             String,
                         >,
                     > + Send,
@@ -42,11 +42,11 @@ where
     pub sink: S,
     pub queue: Q,
     pub input_events: I,
-    pub client: Arc<provider::LlmClient>,
+    pub binding: Arc<crate::ports::ProviderBinding>,
     pub tool_catalog: Arc<dyn ToolCatalogPort>,
     pub tool_execution: Arc<dyn ToolExecutionPort>,
     pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
-    pub system_blocks: Vec<provider::SystemBlock>,
+    pub system_blocks: Vec<provider::RequestSystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,
     /// 本轮 chat loop 的初始消息（来自 user_input）。Runtime 不再持有/回写
@@ -81,7 +81,7 @@ where
     pub reasoning: Arc<dyn ReasoningPort>,
     /// 模型切换构建器（#567）。由 core 层注入，避免 business 层反向依赖 core。
     /// idle 分支收到 `SwitchModel` 事件时调用，从 config 解析 selection 字符串，
-    /// 返回新 `LlmClient` + `ModelSwitchResult`；解析失败返回 `String` 错误信息。
+    /// 返回新 `ProviderBinding` + `ModelSwitchResult`；解析失败返回 `String` 错误信息。
     pub build_switched_client: SwitchClientFn,
     /// 查询 reflection 历史（#899）。返回安全视图，不含正文。
     pub list_reflection_history: Arc<

@@ -65,7 +65,7 @@ pub(super) async fn chat_impl(
             sink,
             queue: RuntimeQueueDrainPort::new(queue_drain),
             input_events: RuntimeInputEventDrainPort::new(input_events),
-            client: inner.context.resources.client.clone(),
+            binding: inner.context.resources.binding.clone(),
             tool_catalog: inner.context.resources.tool_catalog.clone(),
             tool_execution: inner.context.resources.tool_execution.clone(),
             tool_context_binding: inner.context.resources.tool_context_binding.clone(),
@@ -92,22 +92,20 @@ pub(super) async fn chat_impl(
             reflection_history: inner.context.resources.reflection_history.clone(),
             language: inner.context.resources.language.clone(),
             reasoning: workflow::adaptive_reasoning(
-                inner
-                    .context
-                    .resources
-                    .client
-                    .default_scope()
-                    .requested_reasoning(),
+                inner.context.resources.binding.requested_reasoning,
             ),
             build_switched_client: {
                 let config_query = inner.config_query.clone();
+                let provider_factory = inner.context.resources.provider_factory.clone();
                 std::sync::Arc::new(move |selection: &str| {
                     let selection = selection.to_string();
                     let config_query = config_query.clone();
+                    let provider_factory = provider_factory.clone();
                     Box::pin(async move {
-                        super::trait_model::build_llm_client_for_switch(
+                        super::trait_model::build_provider_binding_for_switch(
                             &selection,
                             config_query.as_ref(),
+                            provider_factory.as_ref(),
                         )
                         .await
                     })

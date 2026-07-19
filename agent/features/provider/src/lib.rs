@@ -10,23 +10,33 @@ mod domain;
 mod ports;
 pub mod published_language;
 
-pub use adapters::client::{LlmClient, LlmConfigOptions};
-pub use adapters::openai_compatible::ReasoningConfig;
-pub use adapters::pool::LlmClientPool;
-pub use adapters::transport::{wire_provider, DefaultLlmProviderGateway, LlmProviderGateway};
-pub use domain::capability::{ProviderDriverKind, ReasoningLevel};
-pub use domain::invoke::{
-    ApiError, CacheControl, ContentBlockPayload, CreateMessageRequest, DeltaPayload, DeltaUsage,
-    InvocationScope, MessageDeltaPayload, MessageStartPayload, StopReason, StreamEvent,
-    StreamResponse, SystemBlock, Usage,
-};
-pub use ports::{LegacyStreamSink, LlmProvider};
+pub(crate) use domain::capability::ProviderDriverKind;
+pub use domain::capability::ReasoningLevel;
+pub(crate) use domain::invoke::InvocationScope;
+
+/// Composition Root 专用构造面；业务消费者不得引用。
+pub mod composition {
+    pub use crate::adapters::client::{LlmClient, LlmConfigOptions};
+    pub use crate::domain::capability::ProviderDriverKind;
+    pub use crate::domain::invoke::{InvocationScope, SystemBlock};
+    pub use crate::ports::LlmProvider;
+    pub use crate::LlmError;
+}
+/// Test-only concrete Provider compatibility surface for migration fixtures.
+#[cfg(feature = "test-harness")]
+pub mod test_harness {
+    pub use crate::adapters::client::LlmClient;
+    pub use crate::domain::invoke::{InvocationScope, SystemBlock};
+    pub use crate::ports::LlmProvider;
+}
+
 pub use published_language::{
     CancellationSignal, CapabilityFingerprint, InvocationDelta, InvocationEvent, InvocationOptions,
     InvocationRequest, InvocationStream, ModelCapability, ModelId, ModelToolSchema,
     ProviderCompletion, ProviderContentBlock, ProviderError, ProviderErrorKind, ProviderStopReason,
     ProviderToolCall, ProviderToolCallId, RawUsageSnapshot, ReasoningCapability,
-    ReasoningMappingKind, RequestedInvocationOptions, ResolvedInvocationOptions,
+    ReasoningMappingKind, RequestSystemBlock, RequestedInvocationOptions,
+    ResolvedInvocationOptions,
 };
 
 /// Provider HTTP 超时常量。

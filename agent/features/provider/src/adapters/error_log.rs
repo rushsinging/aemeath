@@ -1,10 +1,6 @@
 //! Provider-owned LLM API error diagnostic payload and sanitization.
 //!
 //! This module intentionally exposes a narrow logging surface:
-//! - [`log_stream_protocol_error`] is the only entry point any driver should
-//!   call directly. It covers stream/protocol-level failures (SSE parsing,
-//!   schema drift, truncated upstream output, ...) that never touch HTTP
-//!   transport at all, so `HttpAttemptExecutor` cannot see them.
 //! - [`log_network_error`] and [`log_http_error`] back
 //!   `HttpAttemptFailure::log` (see `http_attempt.rs`) and exist purely to
 //!   serve that single call site. No other adapter may call them — drivers
@@ -86,25 +82,6 @@ pub(crate) fn log_http_error(
     record.response_truncated = body.truncated();
     record.body_preview = Some(sanitize_preview(body.text()));
     record.body_read_error = body.read_error().map(redact_text);
-    record.log(level);
-}
-
-/// Stream/protocol-level failure diagnostics (SSE parsing, schema drift,
-/// truncated upstream output, ...). These never touch HTTP transport, so
-/// `HttpAttemptExecutor` cannot observe or log them itself. This is the
-/// narrow `error_log` API drivers should call directly.
-pub(crate) fn log_stream_protocol_error(
-    context: ErrorLogContext<'_>,
-    body: &str,
-    retryable: bool,
-    fallback_planned: bool,
-    level: log::Level,
-) {
-    let mut record = LlmApiErrorRecord::new(&context, "stream_protocol_error");
-    record.retryable = retryable;
-    record.partial_output = true;
-    record.fallback_planned = fallback_planned;
-    record.body_preview = Some(sanitize_preview(body));
     record.log(level);
 }
 

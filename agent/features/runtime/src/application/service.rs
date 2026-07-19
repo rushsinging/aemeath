@@ -46,7 +46,6 @@ mod tests {
     use crate::application::chat::request::ChatLaunchOptions;
     use async_trait::async_trait;
     use hook::api::HookRunner;
-    use provider::LlmClient;
     use share::config::MemoryConfig;
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -171,7 +170,10 @@ mod tests {
     fn runtime_context() -> ChatRuntimeContext {
         ChatRuntimeContext {
             resources: crate::application::resources::RuntimeResources {
-                client: Arc::new(LlmClient::new(String::new())),
+                binding: crate::application::testing::test_binding(Vec::new()),
+                provider_factory: crate::application::testing::constant_factory(
+                    crate::application::testing::test_binding(Vec::new()),
+                ),
                 tool_catalog: tools::composition::TestCatalogExecutionFactory::empty()
                     .catalog_port(),
                 tool_execution: tools::composition::TestCatalogExecutionFactory::empty()

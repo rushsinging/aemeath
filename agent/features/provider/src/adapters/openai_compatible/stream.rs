@@ -2,8 +2,8 @@
 
 use super::reasoning_normalizer::{self, ReasoningDeltaNormalizer};
 use super::usage::parse_chat_usage;
+use crate::adapters::stream::InvocationSink;
 use crate::domain::invoke::StreamResponse;
-use crate::ports::LegacyStreamSink;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
 use std::io;
@@ -49,7 +49,7 @@ fn format_stream_snapshot(
 /// 解析 OpenAI 风格的 SSE 流
 pub(crate) async fn parse_openai_stream(
     response: reqwest::Response,
-    handler: &mut dyn LegacyStreamSink,
+    handler: &mut dyn InvocationSink,
     cancel: &CancellationToken,
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
@@ -93,21 +93,21 @@ pub(crate) async fn parse_openai_stream(
                 return Err(crate::LlmError::Cancelled);
             }
             _ = tokio::time::sleep(STREAM_IDLE_TIMEOUT) => {
-                let snapshot = format_stream_snapshot(
-                    &current_text, reasoning_normalizer.accumulated(), &current_tool_calls,
-                );
-                log::warn!(target: crate::LOG_TARGET,
-                    "[openai-compat stream] idle timeout: no data for {}s — {snapshot}",
-                    STREAM_IDLE_TIMEOUT.as_secs(),
-                );
-                handler.on_error(&format!(
-                    "Stream idle timeout: no data for {}s — {snapshot}",
-                    STREAM_IDLE_TIMEOUT.as_secs(),
-                ));
-                return Err(crate::LlmError::Stream(format!(
-                    "Stream idle timeout: no data received for {}s", STREAM_IDLE_TIMEOUT.as_secs()
-                )));
-            }
+                              let snapshot = format_stream_snapshot(
+                                  &current_text, reasoning_normalizer.accumulated(), &current_tool_calls,
+                              );
+                              log::warn!(target: crate::LOG_TARGET,
+                                  "[openai-compat stream] idle timeout: no data for {}s — {snapshot}",
+                                  STREAM_IDLE_TIMEOUT.as_secs(),
+                              );
+                              handler.on_diagnostic(&format!(
+                                  "Stream idle timeout: no data for {}s — {snapshot}",
+                                  STREAM_IDLE_TIMEOUT.as_secs(),
+                              ));
+                              return Err(crate::LlmError::Stream(format!(
+                                  "Stream idle timeout: no data received for {}s", STREAM_IDLE_TIMEOUT.as_secs()
+                              )));
+                          }
             result = lines.next_line() => {
                 match result {
                     Ok(Some(line)) => line,
@@ -155,7 +155,7 @@ pub(crate) async fn parse_openai_stream(
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("Unknown error");
-            handler.on_error(error_msg);
+            handler.on_diagnostic(error_msg);
             return Err(crate::LlmError::Api {
                 error_type: "api_error".to_string(),
                 message: error_msg.to_string(),
@@ -211,7 +211,7 @@ pub(crate) async fn parse_openai_stream(
                             // 归一化：处理 snapshot / 重复片段
                             let result = reasoning_normalizer.process(reasoning);
                             if !result.delta.is_empty() {
-                                handler.on_thinking(result.delta);
+                                handler.emit_thinking(result.delta);
                             }
                             log::debug!(target: crate::LOG_TARGET,
                                 "[reasoning chunk] idx={} dedup_action={:?} \
@@ -230,7 +230,7 @@ pub(crate) async fn parse_openai_stream(
                                 "[content chunk] idx={} content_chars={} content_bytes={}",
                                 chunk_index, content.chars().count(), content.len(),
                             );
-                            handler.on_text(content);
+                            handler.emit_text(content);
                             current_text.push_str(content);
                         }
                     }
@@ -271,7 +271,7 @@ pub(crate) async fn parse_openai_stream(
                                             "[openai-compat stream] tool_use_start: name={} id={} index={}",
                                             name, entry.0, index,
                                         );
-                                        handler.on_tool_use_start(name, Some(&entry.0), index);
+                                        handler.emit_tool_use_start(name, Some(&entry.0), index);
                                     }
                                 }
                                 if let Some(args) =
@@ -288,7 +288,7 @@ pub(crate) async fn parse_openai_stream(
                                     // Notify handler with accumulated arguments for
                                     // real-time UI updates (e.g. showing file path).
                                     if !entry.1.is_empty() {
-                                        handler.on_tool_arguments_delta(
+                                        handler.emit_tool_arguments_delta(
                                             index,
                                             &entry.1,
                                             Some(&entry.0),
@@ -416,7 +416,6 @@ pub(crate) async fn parse_openai_stream(
             content: content_blocks,
             metadata: None,
         },
-        usage,
         stop_reason,
     })
 }

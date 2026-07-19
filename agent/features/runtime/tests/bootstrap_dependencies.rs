@@ -1,6 +1,45 @@
 use std::sync::Arc;
 
-use runtime::RuntimeBootstrapDependencies;
+struct TestProviderFactory;
+
+impl runtime::ports::ProviderFactory for TestProviderFactory {
+    fn build(
+        &self,
+        spec: runtime::ports::ProviderBuildSpec,
+    ) -> Result<runtime::ports::ProviderBinding, provider::ProviderError> {
+        struct UnusedPort;
+        #[async_trait::async_trait]
+        impl runtime::ports::ProviderPort for UnusedPort {
+            fn capabilities(
+                &self,
+                _model: &provider::ModelId,
+            ) -> Result<provider::ModelCapability, provider::ProviderError> {
+                Err(provider::ProviderError::fatal(
+                    provider::ProviderErrorKind::ModelUnavailable,
+                    "unused test provider",
+                ))
+            }
+
+            async fn invoke(
+                &self,
+                _request: provider::InvocationRequest,
+                _cancellation: &dyn provider::CancellationSignal,
+            ) -> Result<provider::InvocationStream, provider::ProviderError> {
+                Err(provider::ProviderError::fatal(
+                    provider::ProviderErrorKind::UpstreamUnavailable,
+                    "unused test provider",
+                ))
+            }
+        }
+        Ok(runtime::ports::ProviderBinding {
+            provider: Arc::new(UnusedPort),
+            model: spec.model,
+            max_tokens: spec.max_tokens,
+            requested_reasoning: spec.requested_reasoning,
+            context_window: spec.context_window,
+        })
+    }
+}
 
 struct NoopReflectionHistory;
 
@@ -59,10 +98,10 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
 
     let history: Arc<dyn memory::ReflectionHistoryStore> = Arc::new(NoopReflectionHistory);
 
-    let dependencies = RuntimeBootstrapDependencies::new(
+    let dependencies = runtime::RuntimeBootstrapDependencies::new(
         workspace,
         wiring,
-        provider::wire_provider(),
+        Arc::new(TestProviderFactory),
         tools::wire_tools(),
         history.clone(),
         Arc::new(policy::AllowAllPolicy),

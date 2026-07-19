@@ -63,10 +63,12 @@ pub enum RunDomainEvent {
     AwaitingUser {
         run_id: RunId,
         parent_run_id: Option<RunId>,
+        request_id: sdk::InteractionRequestId,
     },
     Resumed {
         run_id: RunId,
         parent_run_id: Option<RunId>,
+        request_id: sdk::InteractionRequestId,
     },
     StuckDetected {
         run_id: RunId,

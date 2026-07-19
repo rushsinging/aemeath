@@ -6,6 +6,10 @@ use crate::{
     CancelRunOutcome, ChatRequest, ChatStream, ConfigUpdate, ConfigUpdateResult, ConfigView, RunId,
 };
 
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;
+
 /// Agent Runtime 的统一客户端 trait。
 ///
 /// #567 后 trait 只有 `chat()`——所有交互通过事件流：
@@ -15,6 +19,24 @@ use crate::{
 pub trait AgentClient: Send + Sync + 'static {
     /// 同步、幂等地打断指定 Run。返回前 Runtime 已进入 Cancelling 并触发 cancellation scope。
     fn cancel_run(&self, run_id: &RunId) -> CancelRunOutcome;
+
+    /// 完成 Runtime-owned interaction waiter。
+    fn reply_interaction(
+        &self,
+        _request_id: &crate::InteractionRequestId,
+        _reply: crate::InteractionReply,
+    ) -> crate::InteractionCommandOutcome {
+        crate::InteractionCommandOutcome::NotFound
+    }
+
+    /// 取消 Runtime-owned interaction waiter。
+    fn cancel_interaction(
+        &self,
+        _request_id: &crate::InteractionRequestId,
+        _reason: crate::InteractionCancelReason,
+    ) -> crate::InteractionCommandOutcome {
+        crate::InteractionCommandOutcome::NotFound
+    }
 
     /// 查询当前已提交配置的 SDK 投影。
     async fn config_view(&self) -> Result<ConfigView, super::SdkError> {

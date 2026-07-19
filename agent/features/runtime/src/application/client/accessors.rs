@@ -31,7 +31,7 @@ pub struct RuntimeHandle {
     pub _mcp_manager: Arc<McpConnectionManager>,
 
     // ─── 可切换的客户端（switch_model 更新此处） ───
-    pub(crate) current_client: std::sync::RwLock<Arc<provider::LlmClient>>,
+    pub(crate) current_binding: std::sync::RwLock<Arc<crate::ports::ProviderBinding>>,
 
     // ─── SDK 状态 ───
     /// 当前 active Run 的唯一注册表。同步 cancel_run(run_id) 在同一锁内校验 ID、
@@ -92,7 +92,7 @@ impl AgentClientImpl {
                 &self.resolved_model().model.name,
                 &self.resolved_model().model.id,
             ),
-            client: self.inner.current_client.read().unwrap().clone(),
+            binding: self.inner.current_binding.read().unwrap().clone(),
             tool_catalog: ctx.resources.tool_catalog,
             tool_execution: ctx.resources.tool_execution,
             system_blocks: ctx.resources.system_blocks,

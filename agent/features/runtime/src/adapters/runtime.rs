@@ -5,19 +5,8 @@
 //! depend on upstream runtime/provider/hook crates.
 
 pub use share::adapter::hook::HookRunnerAdapter;
-pub use share::adapter::provider::LlmClientAdapter;
 
-use crate::ports::legacy::{HookNotificationPort, ProviderInfoPort};
-
-impl ProviderInfoPort for LlmClientAdapter<provider::LlmClient> {
-    fn provider_name(&self) -> &str {
-        self.0.provider_name()
-    }
-
-    fn model_name(&self) -> &str {
-        self.0.model_name()
-    }
-}
+use crate::ports::legacy::HookNotificationPort;
 
 #[async_trait::async_trait]
 impl HookNotificationPort for HookRunnerAdapter<hook::api::HookRunner> {

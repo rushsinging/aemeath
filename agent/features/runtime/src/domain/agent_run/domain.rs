@@ -5,9 +5,9 @@ use crate::domain::agent_run::ToolCall;
 use super::event::{RunDomainEvent, RunId};
 use super::spec::RunSpec;
 use super::state::{
-    DrainDecision, RunCancellationRequest, RunStatus, RunStep, RunStepCancellationRequest,
-    RunStepId, RunStepStatus, RunTerminationRequest, RunTransition, RunTransitionError,
-    RunTransitionReason,
+    DrainDecision, InteractionContinuation, PendingInteraction, RunCancellationRequest, RunStatus,
+    RunStep, RunStepCancellationRequest, RunStepId, RunStepStatus, RunTerminationRequest,
+    RunTransition, RunTransitionError, RunTransitionReason,
 };
 use super::step::{ModelInvocation, RunToolCall, ToolCallStatus};
 
@@ -18,6 +18,7 @@ pub struct Run {
     parent_id: Option<RunId>,
     status: RunStatus,
     termination: Option<(sdk::RunTerminationReason, sdk::ControlDeadline)>,
+    pending_interaction: Option<PendingInteraction>,
     steps: Vec<RunStep>,
     started_at: Option<Instant>,
     events: Vec<RunDomainEvent>,
@@ -35,6 +36,7 @@ impl Run {
             parent_id,
             status: RunStatus::Created,
             termination: None,
+            pending_interaction: None,
             steps: Vec::new(),
             started_at: None,
             events: Vec::new(),
@@ -59,6 +61,101 @@ impl Run {
 
     pub fn steps(&self) -> &[RunStep] {
         &self.steps
+    }
+
+    pub fn pending_interaction(&self) -> Option<&PendingInteraction> {
+        self.pending_interaction.as_ref()
+    }
+
+    pub fn begin_interaction(
+        &mut self,
+        request_id: sdk::InteractionRequestId,
+        continuation: InteractionContinuation,
+    ) -> Result<(), RunTransitionError> {
+        if self.rejects_controlled_work() {
+            return Err(RunTransitionError::RunNotActive(self.status));
+        }
+        if let Some(pending) = &self.pending_interaction {
+            return Err(RunTransitionError::InteractionAlreadyPending(
+                pending.request_id.clone(),
+            ));
+        }
+        let allowed = matches!(
+            (&continuation, self.status),
+            (
+                InteractionContinuation::CompleteToolCall(_)
+                    | InteractionContinuation::ContinueAfterHardPause,
+                RunStatus::ExecutingTools
+            ) | (
+                InteractionContinuation::ContinueToolApproval(_),
+                RunStatus::AwaitingToolApproval
+            ) | (
+                InteractionContinuation::ContinuePlanApproval,
+                RunStatus::ApplyingResponse
+            )
+        );
+        if !allowed {
+            return Err(RunTransitionError::RunNotActive(self.status));
+        }
+        self.pending_interaction = Some(PendingInteraction {
+            request_id: request_id.clone(),
+            continuation,
+        });
+        self.apply_state_transition(RunStatus::AwaitingUser, RunTransitionReason::AwaitUser);
+        self.events.push(RunDomainEvent::AwaitingUser {
+            run_id: self.id.clone(),
+            parent_run_id: self.parent_id.clone(),
+            request_id,
+        });
+        Ok(())
+    }
+
+    pub fn complete_interaction(
+        &mut self,
+        request_id: &sdk::InteractionRequestId,
+    ) -> Result<InteractionContinuation, RunTransitionError> {
+        let pending = self
+            .pending_interaction
+            .as_ref()
+            .ok_or(RunTransitionError::NoPendingInteraction)?;
+        if &pending.request_id != request_id {
+            return Err(RunTransitionError::InteractionRequestMismatch {
+                expected: pending.request_id.clone(),
+                received: request_id.clone(),
+            });
+        }
+        let pending = self.pending_interaction.take().expect("checked above");
+        self.apply_state_transition(
+            pending.continuation.resume_status(),
+            RunTransitionReason::UserResumed,
+        );
+        self.events.push(RunDomainEvent::Resumed {
+            run_id: self.id.clone(),
+            parent_run_id: self.parent_id.clone(),
+            request_id: request_id.clone(),
+        });
+        Ok(pending.continuation)
+    }
+
+    pub fn cancel_interaction(
+        &mut self,
+        request_id: &sdk::InteractionRequestId,
+    ) -> Result<InteractionContinuation, RunTransitionError> {
+        let pending = self
+            .pending_interaction
+            .as_ref()
+            .ok_or(RunTransitionError::NoPendingInteraction)?;
+        if &pending.request_id != request_id {
+            return Err(RunTransitionError::InteractionRequestMismatch {
+                expected: pending.request_id.clone(),
+                received: request_id.clone(),
+            });
+        }
+        Ok(self
+            .pending_interaction
+            .take()
+            .expect("checked above")
+            .continuation)
     }
 
     pub fn events(&self) -> &[RunDomainEvent] {
@@ -171,16 +268,6 @@ impl Run {
         if transition == RunTransition::Start {
             self.started_at = Some(Instant::now());
             self.events.push(RunDomainEvent::Started {
-                run_id: self.id.clone(),
-                parent_run_id: self.parent_id.clone(),
-            });
-        } else if next == RunStatus::AwaitingUser {
-            self.events.push(RunDomainEvent::AwaitingUser {
-                run_id: self.id.clone(),
-                parent_run_id: self.parent_id.clone(),
-            });
-        } else if transition == RunTransition::UserResumed {
-            self.events.push(RunDomainEvent::Resumed {
                 run_id: self.id.clone(),
                 parent_run_id: self.parent_id.clone(),
             });
@@ -420,6 +507,7 @@ impl Run {
         if !step.is_active() {
             return RunStepCancellationRequest::NoActiveStep;
         }
+        self.pending_interaction = None;
         step.status = RunStepStatus::Cancelling;
         self.apply_state_transition(
             RunStatus::CancellingStep,
@@ -502,6 +590,7 @@ impl Run {
             return RunTerminationRequest::AlreadyTerminating;
         }
         self.termination = Some((run_reason, deadline));
+        self.pending_interaction = None;
         self.apply_state_transition(
             RunStatus::Terminating,
             RunTransitionReason::TerminationRequested,
@@ -545,6 +634,7 @@ impl Run {
         if self.status == RunStatus::Cancelling {
             return RunCancellationRequest::AlreadyCancelling;
         }
+        self.pending_interaction = None;
         self.apply_state_transition(
             RunStatus::Cancelling,
             RunTransitionReason::InterruptRequested,

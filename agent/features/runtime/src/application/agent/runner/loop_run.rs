@@ -5,15 +5,19 @@ use super::logging::{
 use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use crate::application::agent::Agent;
+use crate::application::chat::looping::InvocationResponse;
 use crate::application::context_coordination::ContextCoordinator;
 use crate::application::loop_engine::{
     run_loop as shared_run_loop, LoopEngineError, ModelStep, RunLoopPort, ToolGuardDecision,
     ToolStep,
 };
 use crate::domain::agent_run::{Run, RunDomainEvent, RunSpec};
+use crate::ports::{
+    InvocationOptions, InvocationRequest, ModelToolSchema, ProviderBinding, ReasoningLevel,
+    StopReason,
+};
 use async_trait::async_trait;
-use provider::LlmClient;
-use provider::{StopReason, SystemBlock};
+use provider::RequestSystemBlock;
 use share::message::Message;
 use share::string_idx::slice_head;
 use std::sync::Arc;
@@ -117,8 +121,9 @@ pub(super) struct SubAgentRun<'a> {
     pub prompt: &'a str,
     pub system: String,
     pub progress_sink: Option<Arc<dyn tools::ProgressSink>>,
-    pub client: Arc<LlmClient>,
-    pub invocation_scope: provider::InvocationScope,
+    pub binding: Arc<ProviderBinding>,
+    pub max_tokens: u32,
+    pub level: ReasoningLevel,
     pub hook_runner: hook::api::HookRunner,
     pub sub_schemas: Vec<serde_json::Value>,
     pub messages: Vec<Message>,
@@ -126,7 +131,7 @@ pub(super) struct SubAgentRun<'a> {
     pub context: ContextCoordinator,
     pub context_request: Option<crate::ports::ContextRequest>,
     pub context_window: Option<crate::ports::ContextWindow>,
-    pub system_blocks: Vec<SystemBlock>,
+    pub system_blocks: Vec<RequestSystemBlock>,
     pub log_request_messages: Box<dyn Fn(usize, &[Message]) + Send + Sync + 'a>,
     pub agent: Agent,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
@@ -160,7 +165,7 @@ impl<'a> SubAgentRun<'a> {
             pending_messages: self.messages[self.committed_message_count..].to_vec(),
             system_prompt: crate::ports::SystemPromptSpec::new(&self.system),
             model_id: self.model_name_for_log.clone(),
-            effective_reasoning: self.invocation_scope.effective_reasoning(),
+            effective_reasoning: self.level,
             current_date: crate::ports::CalendarDate::new(
                 chrono::Local::now().format("%Y-%m-%d").to_string(),
             ),
@@ -171,7 +176,7 @@ impl<'a> SubAgentRun<'a> {
                 share::config::Config::default(),
             ),
             context_size: self.ctx_context_size,
-            max_output_tokens: self.invocation_scope.max_tokens() as usize,
+            max_output_tokens: self.max_tokens as usize,
             last_api_input_tokens: self.last_total_tokens,
             tool_schemas: vec![],
             tool_schema_tokens: 0,
@@ -292,21 +297,23 @@ impl<'a> SubAgentRun<'a> {
         log::debug!(target: crate::LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
     }
 
-    fn progress_api_ok(&self, turn_number: usize, resp: &provider::StreamResponse) {
+    fn progress_api_ok(&self, turn_number: usize, resp: &InvocationResponse) {
         (self.progress)(
             Some(turn_number),
             &format!(
                 "API ok: in={} out={} stop={:?}",
-                resp.usage.input_tokens, resp.usage.output_tokens, resp.stop_reason
+                resp.usage.input_tokens.unwrap_or(0),
+                resp.usage.output_tokens.unwrap_or(0),
+                resp.stop_reason
             ),
         );
     }
 
-    fn log_output(&self, resp: &provider::StreamResponse) {
+    fn log_output(&self, resp: &InvocationResponse) {
         let mut data = build_json_logger_output_data(
             resp,
             self.start_time.elapsed().as_secs_f64(),
-            self.client.provider_name(),
+            &self.binding.model.provider,
         );
         if let serde_json::Value::Object(ref mut map) = data {
             map.insert(
@@ -321,7 +328,7 @@ impl<'a> SubAgentRun<'a> {
         log::debug!(target: crate::LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
     }
 
-    fn send_text_progress(&self, turn: usize, resp: &provider::StreamResponse) {
+    fn send_text_progress(&self, turn: usize, resp: &InvocationResponse) {
         if let Some(ref sink) = self.progress_sink {
             let text = resp.assistant_message.text_content();
             let trimmed = text.trim();
@@ -506,7 +513,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                     let request_context = sub_request_log_context(
                         &logging::capture(),
                         &self.model_name_for_log,
-                        self.client.provider_name(),
+                        &self.binding.model.provider,
                         &self.role_name_for_log,
                     );
                     let response = logging::instrument(request_context, async {
@@ -514,29 +521,48 @@ impl RunLoopPort for SubAgentRun<'_> {
                             crate::application::chat::looping::InvocationEventReducer::new(
                                 SubAgentEventSink,
                             );
-                        match self
-                            .client
-                            .invocation_stream(
-                                &self.invocation_scope,
-                                &effective_blocks,
-                                &messages_for_api,
-                                &self.sub_schemas,
-                                &self.runtime_cancellation,
-                            )
-                            .await
-                        {
-                            Ok(stream) => {
-                                coordinator
-                                    .pull_stream(
-                                        stream,
-                                        &self.runtime_cancellation,
-                                        false,
-                                        |event| reducer.apply(event),
-                                    )
-                                    .await
+                        let provider = self.binding.provider.clone();
+                        let model = self.binding.model.clone();
+                        let max_tokens = self.max_tokens;
+                        let level = self.level;
+                        let system = effective_blocks.clone();
+                        let messages = messages_for_api.clone();
+                        let tools = self.sub_schemas.clone();
+                        let cancellation = self.runtime_cancellation.clone();
+                        let invocation_fut = async {
+                            let tool_schemas = tools
+                                .iter()
+                                .filter_map(|schema| {
+                                    Some(ModelToolSchema {
+                                        name: schema.get("name")?.as_str()?.to_string(),
+                                        description: schema
+                                            .get("description")?
+                                            .as_str()?
+                                            .to_string(),
+                                        input_schema: schema.get("input_schema")?.clone(),
+                                    })
+                                })
+                                .collect::<Vec<_>>();
+                            let mut request = InvocationRequest::new(
+                                model,
+                                messages,
+                                InvocationOptions::new(max_tokens, level),
+                            );
+                            request.system = system;
+                            request.tools = tool_schemas;
+                            request.cancellation = cancellation.clone();
+                            match provider.invoke(request, &cancellation).await {
+                                Ok(stream) => {
+                                    coordinator
+                                        .pull_stream(stream, &cancellation, false, |event| {
+                                            reducer.apply(event)
+                                        })
+                                        .await
+                                }
+                                Err(error) => Err((error, false)),
                             }
-                            Err(error) => Err((error, false)),
-                        }
+                        };
+                        invocation_fut.await
                     })
                     .await;
 
@@ -584,12 +610,12 @@ impl RunLoopPort for SubAgentRun<'_> {
                 self.progress_api_ok(turn_number, &resp);
 
                 let usage = StepTokenUsage {
-                    input_tokens: resp.usage.input_tokens as u64,
-                    output_tokens: resp.usage.output_tokens as u64,
-                    cached_tokens: resp.usage.cached_tokens.map(u64::from).unwrap_or(0),
+                    input_tokens: resp.usage.input_tokens.unwrap_or(0) as u64,
+                    output_tokens: resp.usage.output_tokens.unwrap_or(0) as u64,
+                    cached_tokens: resp.usage.cache_read_tokens.map(u64::from).unwrap_or(0),
                     cache_creation_tokens: resp
                         .usage
-                        .cache_creation_tokens
+                        .cache_write_tokens
                         .map(u64::from)
                         .unwrap_or(0),
                     reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
@@ -617,7 +643,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                 self.send_text_progress(turn_number, &resp);
 
                 let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
-                if resp.stop_reason == StopReason::MaxTokens {
+                if resp.stop_reason == StopReason::MaxOutputTokens {
                     log::warn!(
                         target: crate::LOG_TARGET,
                         "turn {}: 模型响应触发 max_tokens 限制，注入分块提示",

@@ -4,6 +4,7 @@
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
 use crate::domain::compact::{sanitize_tool_pairs, CompactStage};
+use async_trait::async_trait;
 use share::message::{ContentBlock, Message, Role};
 use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
@@ -69,6 +70,28 @@ fn emit_progress_chunk(
     if let Some(p) = progress {
         p.emit(stage, Some(current), Some(total));
     }
+}
+
+/// Context-owned external-detail port for generating LLM text during compaction.
+///
+/// The implementor (typically a runtime adapter wrapping a `ProviderPort`)
+/// invokes the LLM with the supplied request messages and returns the full
+/// text output. Context retains ownership of prompt construction, map-reduce
+/// orchestration, summary parsing, cancellation propagation, and fallback.
+///
+/// This trait is the sole boundary through which compact logic reaches an LLM;
+/// production code must not depend on a concrete Provider construction handle.
+#[async_trait]
+pub trait CompactGenerator: Send + Sync {
+    /// Generate the full text output for the given request messages.
+    ///
+    /// Returns the concatenated text content on success, or an error message
+    /// describing the failure. Cancellation is cooperative via `cancel`.
+    async fn generate(
+        &self,
+        request: Vec<Message>,
+        cancel: &CancellationToken,
+    ) -> Result<String, String>;
 }
 
 /// compact 结果：summary 走 system 通道，recent_messages 作为新链的消息。
@@ -457,7 +480,7 @@ pub async fn compact_messages_with_llm(
     messages: &[Message],
     previous_summary: Option<&str>,
     context_size: usize,
-    client: Option<&provider::LlmClient>,
+    generator: Option<&dyn CompactGenerator>,
     progress: Option<&dyn CompactProgressFn>,
     cancel: &CancellationToken,
 ) -> Option<CompactResult> {
@@ -477,11 +500,11 @@ pub async fn compact_messages_with_llm(
 
     // 尝试 LLM 摘要，失败则回退到本地
     let early_tokens = crate::domain::token_budget::estimate_messages_tokens(early_messages);
-    let summary = match client {
-        Some(client) => {
+    let summary = match generator {
+        Some(generator) => {
             if early_tokens > COMPACT_CHUNK_TARGET_TOKENS {
                 match compact_messages_map_reduce(
-                    client,
+                    generator,
                     early_messages,
                     previous_summary,
                     progress,
@@ -496,7 +519,7 @@ pub async fn compact_messages_with_llm(
             } else {
                 emit_progress(progress, CompactStage::Summarizing);
                 match llm_compact(
-                    client,
+                    generator,
                     early_messages,
                     previous_summary,
                     context_size,
@@ -526,37 +549,13 @@ pub async fn compact_messages_with_llm(
     })
 }
 
-/// 底层 LLM 调用：发送 request 消息列表，流式收集文本并解析 `<summary>` 标签。
+/// 底层 LLM 调用：通过 `CompactGenerator` 发送 request 消息列表，收集文本并解析 `<summary>` 标签。
 async fn llm_generate(
-    client: &provider::LlmClient,
+    generator: &dyn CompactGenerator,
     request: Vec<Message>,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
-    use futures_util::StreamExt;
-
-    let mut stream = client
-        .invocation_stream(client.default_scope(), &[], &request, &[], cancel)
-        .await
-        .map_err(|error| format!("LLM call failed: {error}"))?;
-    let full_text = loop {
-        match stream.next().await {
-            Some(provider::InvocationEvent::Completed(completion)) => {
-                break completion
-                    .output
-                    .iter()
-                    .filter_map(|block| match block {
-                        provider::ProviderContentBlock::Text(text) => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<String>();
-            }
-            Some(provider::InvocationEvent::Failed(error)) => {
-                return Err(format!("LLM call failed: {error}"));
-            }
-            Some(provider::InvocationEvent::Delta(_)) => {}
-            None => return Err("LLM stream ended without terminal event".to_string()),
-        }
-    };
+    let full_text = generator.generate(request, cancel).await?;
     let summary = parse_compact_response(&full_text);
     if summary.is_empty() {
         return Err("LLM returned empty summary".into());
@@ -566,14 +565,14 @@ async fn llm_generate(
 
 /// 调用 LLM 对 early_messages 生成单次压缩摘要。
 async fn llm_compact(
-    client: &provider::LlmClient,
+    generator: &dyn CompactGenerator,
     early_messages: &[Message],
     previous_summary: Option<&str>,
     context_size: usize,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
     let request = build_compact_request(early_messages, previous_summary, context_size);
-    llm_generate(client, request, cancel).await
+    llm_generate(generator, request, cancel).await
 }
 
 /// 将消息列表按 token 预算分块（不拆分单条消息）。
@@ -606,7 +605,7 @@ fn split_messages_into_chunks(messages: &[Message], target_tokens: usize) -> Vec
 /// 1. map: 按 token 预算分 N 块，每块独立调用 `llm_compact`。
 /// 2. reduce: 把 N 个子摘要合并，再次调用 LLM 生成连贯的最终摘要。
 async fn compact_messages_map_reduce(
-    client: &provider::LlmClient,
+    generator: &dyn CompactGenerator,
     early_messages: &[Message],
     previous_summary: Option<&str>,
     progress: Option<&dyn CompactProgressFn>,
@@ -630,7 +629,7 @@ async fn compact_messages_map_reduce(
     for (i, chunk) in chunks.iter().enumerate() {
         emit_progress_chunk(progress, CompactStage::Summarizing, i + 1, total_chunks);
         let summary = llm_compact(
-            client,
+            generator,
             chunk,
             (i == 0).then_some(previous_summary).flatten(),
             context_size,
@@ -663,7 +662,7 @@ async fn compact_messages_map_reduce(
         "{COMPACT_PROMPT}\n\n以下是对话的多个分段摘要，请合并为一份连贯的最终摘要：\n\n<sub-summaries>\n{combined}\n</sub-summaries>\n\nWrite your summary inside <summary> tags."
     );
 
-    llm_generate(client, vec![Message::user(prompt)], cancel).await
+    llm_generate(generator, vec![Message::user(prompt)], cancel).await
 }
 
 #[cfg(test)]
