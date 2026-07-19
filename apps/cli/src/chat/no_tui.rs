@@ -156,6 +156,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::TurnChanged(_)
         | sdk::ChatEvent::CurrentTurnChanged(_)
         | sdk::ChatEvent::HookEvent(_)
+        | sdk::ChatEvent::HookMessage(_)
         | sdk::ChatEvent::WorkingDirectoryChanged { .. }
         | sdk::ChatEvent::ConfigChanged { .. }
         | sdk::ChatEvent::ConfigReloaded { .. }

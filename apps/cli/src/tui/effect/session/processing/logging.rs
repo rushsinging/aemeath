@@ -219,6 +219,15 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             event.hook_name,
             event.status
         ),
+        sdk::ChatEvent::HookMessage(message) => crate::tui::log_trace!(
+            "{} hook_message point={} source={} ordinal={} attempt={} kind={:?}",
+            stage,
+            message.point,
+            message.source,
+            message.execution_ordinal,
+            message.attempt,
+            message.kind
+        ),
         sdk::ChatEvent::AskUserBatch { items, .. } => {
             crate::tui::log_trace!("{} ask_user_batch count={}", stage, items.len())
         }

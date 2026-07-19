@@ -10,8 +10,8 @@ pub use crate::chat_event::{
 pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultImage};
 pub use crate::chat_view::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, HookEventStatus,
-    HookEventView, HookExecutionResultView, OptionItem, WorkspaceContextView,
-    WorkspaceStackEntryView,
+    HookEventView, HookExecutionResultView, HookMessageKindView, HookMessageView, OptionItem,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
 
 /// AskUserQuestion 批量事件中的单个问题项。
