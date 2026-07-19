@@ -435,10 +435,10 @@
       },
       "classification": "scope_exclusion",
       "owner": "logging",
-      "reason": "Registered process metadata statics are explicit owners",
-      "tracking_issue": 937,
+      "reason": "Only task-local scope and immutable process metadata statics are explicit owners",
+      "tracking_issue": 942,
       "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
+      "exit_condition": "permanent while process metadata remains immutable and execution context remains task-local",
       "status": "active"
     },
     {

@@ -1,6 +1,7 @@
-//! # 日志文件职责
+//! # 诊断日志职责
 //!
-//! 所有日志（诊断 + 审计）统一走 `log::log!` → `UnifiedLogger::log()` → `format_diag_json_line`。
+//! DiagnosticRecord 走 `log::log!` → `UnifiedLogger::log()` → `format_diag_json_line`。
+//! Audit Event 与 Usage Fact 使用 Audit 自有契约和 sink，绝不进入该管线。
 //!
 //! ## 文件路由
 //!
@@ -12,11 +13,8 @@ mod adapters;
 mod domain;
 
 pub use adapters::{
-    app_version, boot_ts, capture, current_chat_id, current_model, current_provider,
-    current_request_id, current_role, current_turn, instrument, is_rotated_log_path, rotated_path,
-    session_id, set_app_version, set_boot_ts, set_current_chat_id, set_current_model,
-    set_current_provider, set_current_request_id, set_current_role, set_current_turn,
-    set_session_id, spawn_instrumented, timestamp_local_rfc3339, timestamp_rfc3339, within,
+    app_version, boot_ts, capture, instrument, is_rotated_log_path, rotated_path, set_app_version,
+    set_boot_ts, spawn_instrumented, timestamp_local_rfc3339, timestamp_rfc3339, within,
     UnifiedLogger,
 };
 pub use domain::{FieldPatch, LogContext, LogContextPatch, LoggingOutputMode, LoggingSettings};

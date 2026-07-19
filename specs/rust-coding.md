@@ -45,38 +45,16 @@
 
 ### 日志文件路由
 
-UnifiedLogger 按 `record.target()` 前缀路由到对应文件：
+UnifiedLogger 使用 `packages/global/logging/src/domain/routing.rs` 的 TargetCatalog 作为唯一真相，按 `record.target()` 的最长合法前缀路由。调用方 **MUST** 引用所属 crate root 的唯一 `LOG_TARGET`，**NEVER** 硬编码 target 字符串。
 
-| 文件 | target 前缀 | 来源 crate |
-|------|-------------|------------|
-| `aemeath.log` | 兜底（无匹配前缀） | shared/composition |
-| `runtime.log` | `runtime::` | runtime |
-| `provider.log` | `provider::` | provider |
-| `tools.log` | `tools::` | tools |
-| `prompt.log` | `prompt::` | prompt |
-| `tui.log` | `cli::` | cli/tui |
-| `hook.log` | `hook::` | hook |
-
-原始记录文件（静态方法直写）：
-- `input.log` — 用户输入 + LLM 输入（`log_input` / `log_user_input`）
-- `output.log` — LLM 输出（`log_output`）
-
-审计文件：
-- `audit.log` — 权限/行为审计（`audit`，预留）
-
-特殊文件：
-- `panic.log` — panic_hook 直写，不纳入 UnifiedLogger
+Audit Event / Usage Fact 不属于 DiagnosticRecord，走 Audit 自有 append store；Audit 模块自身运行诊断使用 `aemeath:diagnostic:audit` → `audit-diagnostic.log`。`panic.log` 由 panic hook 直写，不纳入 UnifiedLogger。
 
 ### Log 规范
 
 > **日志 level 等级选择**：见 `specs/logging.md` 的「日志级别策略」章节（5 级定义 + per-layer 细则）。选择 `trace/debug/info/warn/error` 时 **MUST** 对照该章节。
 
-- **MUST** 所有 `log::xxx!` 调用显式指定 `target:` 参数，格式为 `target: "crate_name::module"`。
-  - 例：`log::info!(target: "runtime::loop_runner", "...")`
-  - 例：`log::debug!(target: "provider::client", "...")`
-- **NEVER** 在生产代码中使用裸 `log::xxx!` 调用（不带 `target:`）。
-- **MUST** TUI 层使用 `crate::tui::log_xxx!` 宏（自动设置 `target: "cli::tui"`）。
-- **SHOULD** target 前缀与 crate 名一致（runtime crate 用 `runtime::`，provider crate 用 `provider::`，以此类推）。
+- **MUST** 所有 `log::xxx!` 调用显式指定 `target: crate::LOG_TARGET`（或该 owner 唯一注册的专用常量）。
+- **NEVER** 在生产代码中使用裸 `log::xxx!` 调用、字符串 target 或跨 owner target。
 - 架构守卫（`packages/global/logging/src/domain/routing_guard.rs`）在 CI 中扫描全仓库确保合规。
 
 ## 测试规范

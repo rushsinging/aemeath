@@ -57,11 +57,11 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | `input.log` | LLM 输入合并到 `agent-provider.log`，用 `event_type="llm_input"` 区分 | `agent-provider.log` |
 | `output.log` | LLM 输出合并到 `agent-provider.log`，用 `event_type="llm_output"` 区分 | `agent-provider.log` |
 | `tool.log` | tool 日志已路由到 `agent-tools.log`（`aemeath:agent:tools`） | `agent-tools.log` |
-| `audit.log` | 审计已路由到 `agent-audit.log`（`aemeath:agent:audit`） | `agent-audit.log` |
+| `audit.log` / `agent-audit.log` | Audit Fact 不能伪装成 DiagnosticRecord | Audit 自有 Usage append store；模块运行诊断使用 `audit-diagnostic.log` |
 
 ## 14 字段 schema
 
-所有日志（诊断 + 审计）统一使用 14 个字段，compact JSON Lines 格式。所有日志统一走 `log::log!` → `UnifiedLogger::log()` → `format_diag_json_line`。
+所有 DiagnosticRecord 使用 14 个字段和 compact JSON Lines 格式，统一走 `log::log!` → `UnifiedLogger::log()` → `format_diag_json_line`。Audit Event / Usage Fact 使用 Audit 自有 PL 与 append store，**NEVER** 进入该管线。Audit 模块自身的运行故障是普通诊断，使用 `aemeath:diagnostic:audit`。
 
 | # | 字段 | 类型 | 格式 | 来源 | 示例 |
 |---|------|------|------|------|------|
@@ -69,13 +69,13 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 2 | `boot_ts` | string \| null | 本地时间 RFC3339 | `context::boot_ts()`（`init_logging` 时一次性设置） | `"2026-06-17T14:00:00.000+08:00"` |
 | 3 | `pid` | number | 进程 pid | `context::pid()`（`std::process::id()` 惰性初始化） | `73576` |
 | 4 | `ver` | string \| null | semver | `context::app_version()`（`init_logging` 时一次性设置） | `"0.8.2"` |
-| 5 | `session` | string | UUID，未设置时 `"-"` | `context::session_id()` | `"a1b2c3d4-..."` |
-| 6 | `chat` | string | UUID，未设置时 `"-"` | `context::current_chat_id()` | `"e5f6g7h8-..."` |
-| 7 | `turn` | number \| null | usize | `context::current_turn()` | `5` |
-| 8 | `request_id` | string \| null | UUID，每次 LLM 请求生成 | `context::current_request_id()` | `"i9j0k1l2-..."` |
-| 9 | `model` | string | 模型 ID，未设置时 `"-"` | `context::current_model()` | `"claude-sonnet-4-20250514"` |
-| 10 | `provider` | string \| null | provider 名称 | `context::current_provider()` | `"claude"` |
-| 11 | `role` | string \| null | 消息角色 | `context::current_role()` | `"default"` / `"sub-agent-1"` |
+| 5 | `session` | string | UUID，未设置时 `"-"` | scope-local `LogContext.session_id` | `"a1b2c3d4-..."` |
+| 6 | `chat` | string | UUID，未设置时 `"-"` | scope-local `LogContext.chat_id` | `"e5f6g7h8-..."` |
+| 7 | `turn` | number \| null | usize | scope-local `LogContext.turn` | `5` |
+| 8 | `request_id` | string \| null | UUID，每次 LLM 请求生成 | scope-local `LogContext.request_id` | `"i9j0k1l2-..."` |
+| 9 | `model` | string | 模型 ID，未设置时 `"-"` | scope-local `LogContext.model` | `"claude-sonnet-4-20250514"` |
+| 10 | `provider` | string \| null | provider 名称 | scope-local `LogContext.provider` | `"claude"` |
+| 11 | `role` | string \| null | 消息角色 | scope-local `LogContext.role` | `"default"` / `"sub-agent-1"` |
 | 12 | `level` | string | 日志级别 | `record.level()` | `"INFO"` |
 | 13 | `target` | string | 日志 target（`aemeath:` 前缀） | `record.target()` | `"aemeath:agent:runtime"` |
 | 14 | `msg` | string \| null | 日志消息（诊断行为自由文本，或结构化 JSON payload） | `record.args()` | `"compact triggered"` |

@@ -34,7 +34,7 @@ pub fn format_diag_json_line(record: &Record) -> String {
 /// 拆分目的是让测试不必构造 `log::Record`（`Record::builder().args(format_args!(...))`
 /// 会产生借用临时值的错误）。
 pub fn format_diag_json_line_from_parts(level: &str, target: &str, msg: &str) -> String {
-    let resolved = log_context::scoped_context().unwrap_or_else(legacy_context_snapshot);
+    let resolved = log_context::scoped_context().unwrap_or_default();
     format_diag_json_line_with_context(level, target, msg, &resolved)
 }
 
@@ -62,10 +62,6 @@ pub(crate) fn format_diag_json_line_with_context(
         "msg": msg,
     });
     serde_json::to_string(&line).unwrap_or_default()
-}
-
-fn legacy_context_snapshot() -> LogContext {
-    log_context::legacy_snapshot()
 }
 
 #[cfg(test)]
@@ -126,15 +122,11 @@ mod tests {
         assert_eq!(value["role"], "role-scope");
     }
 
-    #[tokio::test]
-    async fn empty_scoped_context_does_not_fall_back_to_legacy_values() {
-        log_context::set_current_role("legacy-role".to_string());
-
-        let line = log_context::instrument(crate::domain::LogContext::default(), async {
-            format_diag_json_line_from_parts("INFO", "aemeath:shared", "empty-scope")
-        })
-        .await;
+    #[test]
+    fn missing_scope_uses_empty_context() {
+        let line = format_diag_json_line_from_parts("INFO", "aemeath:shared", "no-scope");
         let value: Value = serde_json::from_str(&line).expect("valid json");
+        assert_eq!(value["session"], "-");
         assert_eq!(value["role"], Value::Null);
     }
 
