@@ -6,7 +6,7 @@ set -euo pipefail
 # 作用：固化 feature 依赖方向（cli→{composition,sdk}；runtime→全部 supporting；
 #       supporting→share；share/sdk→∅），默认拒绝未声明的业务依赖，防双向/横向乱依赖。
 # 例外（白名单内已批准）：runtime/tools→task（Task-owned OHS/PL）；
-#       context→{project,config,memory,task}（#871 Main Session 联合协调消费供应方 façade/PL）；
+#       context→{project,config,memory,task,tools}（#871 联合协调 + #912 Skill-owned OHS/PL）；
 #       runtime/tools→memory（#871 消费 Memory-owned OHS/PL）；
 #       memory→share（消费 ConfigSnapshot 发布的 MemoryConfig PL）；
 #       tools→{project,storage}（§6.4.7 横向依赖登记）；composition→全部 feature（唯一装配根）。
@@ -34,7 +34,7 @@ business_allow = {
     "share": {"logging", "utils"},
     "project": {"share"},
     "policy": {"share", "sdk", "tools"},
-    "context": {"share", "provider", "storage", "project", "config", "memory", "task", "sdk"},
+    "context": {"share", "provider", "storage", "project", "config", "memory", "task", "tools", "sdk"},
     "memory": {"share", "storage", "utils"},
     "provider": {"share", "logging"},
     # Approved horizontal dependencies: tools -> project/storage, Memory/Task-owned OHS/PL.
@@ -82,12 +82,12 @@ def run_sanity() -> None:
         {
             "runtime": {"task", "memory"},
             "tools": {"task", "memory"},
-            "context": {"project", "config", "memory", "task"},
+            "context": {"project", "config", "memory", "task", "tools"},
             "memory": {"share"},
         },
         workspace,
     ):
-        raise AssertionError("sanity allow failed: approved #871/#890 supplier façade and PL edges")
+        raise AssertionError("sanity allow failed: approved #871/#890/#912 supplier façade and PL edges")
     if not validate_edges({"task": {"runtime"}}, workspace):
         raise AssertionError("sanity block failed: Task must not depend on Runtime consumer")
     if not validate_edges({"cli": {"runtime"}}, workspace):

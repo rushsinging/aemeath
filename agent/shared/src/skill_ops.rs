@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-// 目录遍历 loader（含 fs IO）已归位 prompt domain（`prompt::skill::loader`，refs #61 D2）。
-// 本模块仅保留 `Skill` DTO 与单文件 parser（被 tools/runtime/prompt 多 crate 依赖的契约）。
+// Legacy DTO retained only for the #914 SkillTool compatibility path.
+// New Skill Catalog / Materialization consumers use the Tools-owned Published Language.
 
 /// A skill definition loaded from a markdown file with YAML frontmatter
 #[derive(Debug, Clone, Serialize, Deserialize)]

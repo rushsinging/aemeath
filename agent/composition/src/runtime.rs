@@ -46,11 +46,17 @@ pub(crate) async fn from_args_with_gateways(
                 share::config::paths::global_memory_dir(),
             )),
         )),
-        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::AtomicBlobCanonicalSessionWriter::new(
-                session_blob,
-            )),
-        )),
+        context_factory: Arc::new(
+            context::adapters::ProductionMainContextFactory::new(Arc::new(
+                context::adapters::AtomicBlobCanonicalSessionWriter::new(session_blob),
+            ))
+            .with_skill_supplier(
+                tools::composition::wire_skill_materialization(),
+                Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
+                    workspace.read(),
+                )),
+            ),
+        ),
     };
     let wiring = context::wire_main_session(deps)
         .await

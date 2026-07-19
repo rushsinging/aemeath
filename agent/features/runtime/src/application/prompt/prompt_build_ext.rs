@@ -1,10 +1,9 @@
 //! Prompt 构建辅助函数（从 CLI setup.rs 迁移）。
 
 use crate::application::startup as bootstrap;
-use context::skill::Skill;
 use hook::api::HookRunner;
 use share::config::domain::snapshot::ConfigSnapshot;
-use share::i18n::prompt::sections::{agent_roles_footer, agent_roles_header, skills_header};
+use share::i18n::prompt::sections::{agent_roles_footer, agent_roles_header};
 
 pub async fn build_static_prompt(
     cwd: &std::path::Path,
@@ -13,9 +12,7 @@ pub async fn build_static_prompt(
     config_file: Option<&ConfigSnapshot>,
     hook_runner: &HookRunner,
     prompt_parts: crate::application::prompt::build::SystemPromptParts,
-    skills: &tokio::sync::Mutex<std::collections::HashMap<String, Skill>>,
 ) -> String {
-    let skills_guard = skills.lock().await;
     let guidance_config = config_file
         .map(|snap| snap.models().guidance.clone())
         .unwrap_or_default();
@@ -35,36 +32,12 @@ pub async fn build_static_prompt(
 
     let mut prompt = prompt_parts.static_part;
     prompt.push_str(context::guidance::universal_execution_discipline(language));
-    append_skills(&mut prompt, &skills_guard, language);
     append_agent_roles(&mut prompt, config_file, language);
     if !model_guidance.is_empty() {
         prompt.push_str("\n\n");
         prompt.push_str(&model_guidance);
     }
     prompt
-}
-
-fn append_skills(
-    prompt: &mut String,
-    skills_guard: &std::collections::HashMap<String, Skill>,
-    lang: &str,
-) {
-    if skills_guard.is_empty() {
-        return;
-    }
-    let skill_list: Vec<String> = skills_guard
-        .values()
-        .map(|s| {
-            let alias_str = if s.aliases.is_empty() {
-                String::new()
-            } else {
-                format!(" (aliases: /{})", s.aliases.join(", /"))
-            };
-            format!("- `{}{}`: {}", s.name, alias_str, s.description)
-        })
-        .collect();
-    let header = skills_header(lang);
-    prompt.push_str(&format!("{}{}", header, skill_list.join("\n")));
 }
 
 fn append_agent_roles(prompt: &mut String, config_file: Option<&ConfigSnapshot>, lang: &str) {

@@ -76,7 +76,7 @@ impl ContextPromptSource for FakePrompt {
     async fn materialize(
         &self,
         _request: &ContextRequest,
-    ) -> Result<PromptMaterialization, String> {
+    ) -> Result<PromptMaterialization, context::ports::PromptMaterializationError> {
         Ok(PromptMaterialization {
             cacheable: vec![block("system_prompt"), block("user_guidance")],
             uncached: vec![block("current_date"), block("git_context")],

@@ -106,12 +106,7 @@ impl AgentClientImpl {
             max_agent_concurrency: self.max_agent_concurrency(),
             agent_semaphore: ctx.resources.agent_semaphore,
             memory_config: super::mapping::memory_config_to_sdk(ctx.resources.memory_config),
-            skills_map: ctx
-                .resources
-                .skills_map
-                .into_iter()
-                .map(|(name, skill)| (name, super::mapping::skill_to_sdk(skill)))
-                .collect(),
+            skills_map: ctx.resources.skills_map,
             hook_runner: ctx.resources.hook_runner,
             session_reminders: Arc::new(std::sync::Mutex::new(tools::SessionReminders::new())),
             workspace_root: self.inner.cwd.clone(),

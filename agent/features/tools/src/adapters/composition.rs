@@ -94,7 +94,6 @@ pub(crate) fn wire_catalog_execution(
 
 pub fn wire_builtin_catalog_execution(
     task_access: Arc<dyn task::TaskAccess>,
-    skills: Arc<tokio::sync::Mutex<HashMap<String, share::skill_ops::Skill>>>,
     memory_source: Arc<dyn crate::domain::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
 ) -> Result<CatalogExecutionWiring, ToolBackingError> {
@@ -106,7 +105,9 @@ pub fn wire_builtin_catalog_execution(
         let scope = register_named_scope(
             &registry,
             task_access.clone(),
-            skills.clone(),
+            // Skill is no longer a tool for Main/Sub (#912); the empty map is
+            // never accessed because Skill is only registered for LegacyNoAgent.
+            Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             memory_source.clone(),
             workspace_control.clone(),
             scope_kind,
@@ -121,4 +122,34 @@ pub fn wire_builtin_catalog_execution(
         profiles.insert(profile_name, profile);
     }
     wire_catalog_execution(registry, scopes, profiles)
+}
+
+/// Production Skill Catalog / Materialization wiring over one stateless adapter.
+pub struct SkillWiring {
+    catalog: Arc<dyn crate::domain::SkillCatalogPort>,
+    materializer: Arc<dyn crate::domain::SkillMaterializationPort>,
+}
+
+impl SkillWiring {
+    pub fn catalog(&self) -> Arc<dyn crate::domain::SkillCatalogPort> {
+        self.catalog.clone()
+    }
+
+    pub fn materializer(&self) -> Arc<dyn crate::domain::SkillMaterializationPort> {
+        self.materializer.clone()
+    }
+}
+
+/// Assemble both Skill ports over the same stateless filesystem adapter.
+pub fn wire_skills() -> SkillWiring {
+    let adapter = Arc::new(super::skill_filesystem::FilesystemSkillAdapter::default());
+    SkillWiring {
+        catalog: adapter.clone(),
+        materializer: adapter,
+    }
+}
+
+/// Compatibility factory for callers that only consume materialization.
+pub fn wire_skill_materialization() -> Arc<dyn crate::domain::SkillMaterializationPort> {
+    wire_skills().materializer()
 }

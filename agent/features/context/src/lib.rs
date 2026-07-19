@@ -10,7 +10,7 @@ pub mod ports;
 
 pub use adapters::{
     delete_session_entry, export_session_bytes, import_session_bytes, isolated_context,
-    list_session_entries, update_session_metadata_entry,
+    isolated_context_with_skill, list_session_entries, update_session_metadata_entry,
 };
 #[cfg(any(test, feature = "dev"))]
 pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
@@ -50,13 +50,6 @@ pub mod guidance {
     pub use crate::adapters::prompt::{
         assess_guidance, init_guidance_dir, resolve_guidance, resolve_guidance_async,
         universal_execution_discipline, GuidanceAssessment, InstructionsLoadedHook,
-    };
-}
-
-pub mod skill {
-    pub use crate::adapters::prompt::{
-        builtin_commit_skill, load_all_skills, load_all_skills_cached, load_and_filter_skills,
-        load_skills_from_dir, parse_skill, read_skill_content, Skill,
     };
 }
 

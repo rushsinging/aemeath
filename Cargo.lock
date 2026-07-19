@@ -488,13 +488,13 @@ dependencies = [
  "sdk",
  "serde",
  "serde_json",
- "serde_yml",
  "share",
  "storage",
  "task",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tools",
  "uuid",
 ]
 
@@ -3801,6 +3801,8 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
+ "serde_yml",
+ "sha2",
  "share",
  "syn 2.0.119",
  "task",

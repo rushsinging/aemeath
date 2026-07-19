@@ -30,6 +30,8 @@ bitflags = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v7"] }
 htmd = "0.5"
 scraper = "0.27"
+sha2 = { workspace = true }
+serde_yml = "0.0.12"
 
 [build-dependencies]
 syn = { version = "2", features = ["full", "parsing", "extra-traits"] }

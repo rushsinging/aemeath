@@ -211,10 +211,13 @@ pub(crate) fn register_named_scope(
             access: task_access.clone()
         }
     );
+    // Skill is NOT a Tool (Issue #912): it is surfaced via the Skill
+    // materialization port, never as a catalog/execution entry. Retained for
+    // LegacyNoAgent only until #914 retires that compatibility scope.
     builtin!(
         "Skill",
         Caps::empty(),
-        [true, true, true],
+        [false, false, true],
         skill_tool::SkillTool {
             skills: skills.clone()
         }
@@ -399,7 +402,6 @@ mod tests {
         "TaskListComplete",
         "TaskGet",
         "TaskStop",
-        "Skill",
         "Memory",
         "AskUserQuestion",
         "Brief",
@@ -419,7 +421,6 @@ mod tests {
         "LSP",
         "WebFetch",
         "WebSearch",
-        "Skill",
         "Memory",
         "Brief",
         "ToolSearch",
