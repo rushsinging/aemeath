@@ -1,10 +1,9 @@
 {
   "version": 1,
   "budgets": {
-    "repository_migration_debt": 7,
+    "repository_migration_debt": 6,
     "modules": {
       "runtime": 5,
-      "storage": 1,
       "tui": 1
     }
   },
@@ -135,22 +134,6 @@
       "tracking_issue": 879,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove after supplier adapters implement consumer-owned ports and Composition wires them",
-      "status": "active"
-    },
-    {
-      "id": "migration.storage.transitional-business-modules",
-      "guard": "check-cola-layer-purity.sh",
-      "module": "storage",
-      "scope": {
-        "kind": "symbol",
-        "value": "STORAGE_TRANSITIONAL_MODULES"
-      },
-      "classification": "migration_exception",
-      "owner": "storage",
-      "reason": "memory_store and task_store are transitional business modules and are not Storage Target structure",
-      "tracking_issue": 883,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove after Task and Memory business models migrate out of Storage",
       "status": "active"
     },
     {

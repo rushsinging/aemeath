@@ -13,6 +13,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 const UNKNOWN_TARGET_REPORT_LIMIT: usize = 3;
 static UNKNOWN_TARGET_REPORTS: AtomicUsize = AtomicUsize::new(0);
 
+/// emergency 兜底专用的日志文件名。TUI（alternate screen）下 stderr 越过双缓冲直接糊屏，
+/// 因此 File 模式的兜底 **NEVER** 走 stderr，统一落到 `<logs_dir>/emergency.log`。
+const EMERGENCY_LOG_FILE: &str = "emergency.log";
+
 struct SinkEntry {
     #[cfg_attr(not(test), allow(dead_code))]
     path: PathBuf,
@@ -40,6 +44,42 @@ impl EmergencyWriter for DirectStderr {
     }
 }
 
+/// 把 emergency 兜底写入 `<logs_dir>/emergency.log` 的 writer。
+///
+/// 设计目标：TUI alternate screen 下 stderr 会越过 ratatui 双缓冲直接糊屏（见 #1215），
+/// 因此 File 模式（含 TUI）的兜底 **NEVER** 走 stderr。打开失败时 best-effort 静默丢弃，
+/// **绝不**回退 stderr——宁可丢一行兜底日志，也不污染用户屏幕。
+struct FileEmergency {
+    path: PathBuf,
+}
+
+impl FileEmergency {
+    fn new(logs_dir: PathBuf) -> Self {
+        Self {
+            path: logs_dir.join(EMERGENCY_LOG_FILE),
+        }
+    }
+}
+
+impl EmergencyWriter for FileEmergency {
+    fn write(&self, message: &str) {
+        if let Some(parent) = self.path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+        {
+            Ok(mut file) => {
+                let _ = writeln!(file, "{message}");
+                let _ = file.flush();
+            }
+            Err(_) => { /* 静默，绝不回退 stderr */ }
+        }
+    }
+}
+
 /// The process-wide logger. Each file sink owns a separate lifecycle mutex.
 pub struct UnifiedLogger {
     sinks: HashMap<DiagnosticSinkId, SinkEntry>,
@@ -53,7 +93,15 @@ static LOGGER: OnceLock<&'static UnifiedLogger> = OnceLock::new();
 impl UnifiedLogger {
     /// Installs the global logger. Failure to open one sink degrades only that sink.
     pub fn init(settings: LoggingSettings) -> io::Result<()> {
-        let emergency: Arc<dyn EmergencyWriter> = Arc::new(DirectStderr::new());
+        // emergency 兜底按 output_mode 选择：File 模式（含 TUI）落 emergency.log，
+        // 避免 stderr 越过 alternate screen 糊屏（#1215）；Stderr 模式（no-tui -v）
+        // 保留实时 stderr 语义。
+        let emergency: Arc<dyn EmergencyWriter> = match settings.output_mode() {
+            LoggingOutputMode::File => {
+                Arc::new(FileEmergency::new(settings.logs_dir().to_path_buf()))
+            }
+            LoggingOutputMode::Stderr => Arc::new(DirectStderr::new()),
+        };
         let logger = Self::build(settings, emergency)?;
         let max_level = logger.filter.filter();
         let leaked: &'static UnifiedLogger = Box::leak(Box::new(logger));

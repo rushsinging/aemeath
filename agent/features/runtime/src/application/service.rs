@@ -52,7 +52,6 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    use storage::TaskStore;
     use tools::{AgentRunRequest, AgentRunner, ToolRegistry};
 
     #[derive(Default)]
@@ -181,7 +180,6 @@ mod tests {
                 policy: Arc::new(policy::AllowAllPolicy),
                 tool_result_materializer:
                     crate::application::testing::test_tool_result_materializer(),
-                task_store: Arc::new(TaskStore::new()),
                 task_access: Arc::new(task::TaskStore::new()),
                 skills_map: HashMap::new(),
                 hook_runner: HookRunner::empty(),
