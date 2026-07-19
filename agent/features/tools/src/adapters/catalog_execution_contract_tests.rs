@@ -116,7 +116,16 @@ async fn run_contract(factory: ContractFactory) {
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["counting", "suspend"]
+        vec!["Counting", "Suspend"]
+    );
+    assert_eq!(
+        snapshot
+            .model_schemas()
+            .iter()
+            .filter_map(|schema| schema.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>(),
+        vec!["Counting", "Suspend"],
+        "Catalog 注入模型的 schema 必须保留工具 canonical 名称"
     );
     assert!(ports
         .catalog
@@ -131,7 +140,7 @@ async fn run_contract(factory: ContractFactory) {
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["counting"]
+        vec!["Counting"]
     );
     assert!(ports
         .execution
