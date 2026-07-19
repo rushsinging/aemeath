@@ -99,6 +99,47 @@ fn adapter_factory() -> FactoryFuture {
 }
 
 #[tokio::test]
+async fn dynamic_mcp_style_tool_enters_main_catalog_and_receives_invocation_authorization() {
+    let ports = adapter_factory().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    ports.registry.register_with_capabilities(
+        CountingNamedTool {
+            name: "mcp__demo__read",
+            calls: calls.clone(),
+        },
+        ToolCapabilities::ReadWorkspace,
+    );
+    ports.backing.sync_dynamic_membership(
+        &[ToolRegistrationSpec::new(
+            "mcp__demo__read",
+            ToolCapabilities::ReadWorkspace,
+        )],
+        &[],
+    );
+
+    let catalog = ports
+        .catalog
+        .snapshot(
+            &RegistryScopeName::new("main"),
+            &ToolProfileName::new("full"),
+        )
+        .unwrap();
+    assert!(catalog.find(&ToolName::new("mcp__demo__read")).is_some());
+
+    let outcome = ports
+        .execution
+        .execute(
+            invocation(&ports.scope, "mcp__demo__read", json!({"value":"ok"}))
+                .with_authorization(crate::AuthorizationContext::ALLOW_ALL),
+            &ManualCancellation::default(),
+        )
+        .await;
+
+    assert!(outcome.is_success());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn catalog_execution_adapter_satisfies_contract() {
     run_contract(adapter_factory).await;
 }
@@ -116,7 +157,16 @@ async fn run_contract(factory: ContractFactory) {
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["counting", "suspend"]
+        vec!["Counting", "Suspend"]
+    );
+    assert_eq!(
+        snapshot
+            .model_schemas()
+            .iter()
+            .filter_map(|schema| schema.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>(),
+        vec!["Counting", "Suspend"],
+        "Catalog 注入模型的 schema 必须保留工具 canonical 名称"
     );
     assert!(ports
         .catalog
@@ -131,7 +181,7 @@ async fn run_contract(factory: ContractFactory) {
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["counting"]
+        vec!["Counting"]
     );
     assert!(ports
         .execution
@@ -503,7 +553,6 @@ fn context_for_run_and_profile(run_id: &str, profile: &str) -> ToolExecutionCont
         Arc::new(memory::NoOpMemory),
         Arc::new(FixedGuidance {
             language: "en".into(),
-            allow_all: true,
         }),
     );
     ToolExecutionContext::new(scope, ports)

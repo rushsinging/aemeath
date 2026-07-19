@@ -373,7 +373,7 @@ mod tests {
     fn names_for(scope: BuiltinRegistryScope) -> BTreeSet<String> {
         assembled_scope(scope)
             .iter()
-            .map(|spec| spec.name().as_str().to_owned())
+            .map(|spec| spec.name().normalized().to_owned())
             .collect()
     }
 

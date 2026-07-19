@@ -19,6 +19,7 @@
 
 - Project 发布彼此独立的 `WorkspaceRead` / `WorkspaceControl` / `WorkspacePersist`。不得用聚合 wrapper 向所有 Tool 广播三种能力：文件 Tool 只拿 Read；Bash、EnterWorktree、ExitWorktree 构造时才拿 Control；Runtime 自行持有 Persist。
 - `WorkspaceViews` 是 composition wiring 形态，只能由 Runtime adapter 转成消费能力，**NEVER** 出现在 Tools domain。
+- 路径解析是机械能力：authorized 方法显式接收 `allow_outside_workspace`；Project **NEVER** 读取 Config/Policy/allow_all 或自行决定授权。false 执行 canonical workspace containment，true 允许任意 OS 可访问路径。
 
 ## 架构边界：git 出站端口
 

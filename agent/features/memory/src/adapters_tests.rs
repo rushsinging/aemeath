@@ -1,10 +1,11 @@
-use async_trait::async_trait;
-use memory::{
-    AtomicDatasetMemoryStore, LegacyMemoryLayer, LegacyMemoryMember, LegacyMemorySource,
-    LegacyMemorySourceError, MemoryCategory, MemoryCommitVisibility, MemoryDataset,
-    MemoryDatasetStore, MemoryEntry, MemoryId, MemoryLayer, MemoryOpenerError, MemoryPolicy,
-    MemoryPort, MemorySource, MemoryStorageErrorKind, ProjectMemoryKey, ProjectMemoryOpener,
+use super::{map_storage_error, AtomicDatasetMemoryStore, ProjectMemoryOpener};
+use crate::{
+    LegacyMemoryLayer, LegacyMemoryMember, LegacyMemorySource, LegacyMemorySourceError,
+    MemoryCategory, MemoryCommitVisibility, MemoryDataset, MemoryDatasetStore, MemoryEntry,
+    MemoryError, MemoryId, MemoryLayer, MemoryOpenerError, MemoryPolicy, MemoryPort, MemorySource,
+    MemoryStorageErrorKind, ProjectMemoryKey,
 };
+use async_trait::async_trait;
 use std::sync::Arc;
 use storage::api as storage_api;
 
@@ -65,12 +66,12 @@ fn storage_error_acl_maps_only_memory_owned_error_kinds() {
     ];
     for (storage_kind, expected) in cases {
         let error = storage_api::StorageError::new(storage_kind, "redacted by ACL");
-        assert_eq!(memory::map_storage_error(&error), expected);
+        assert_eq!(map_storage_error(&error), expected);
     }
 }
 
 #[test]
-fn adapter_is_public_memory_owned_store() {
+fn adapter_is_memory_owned_store() {
     fn assert_store<T: MemoryDatasetStore<Revision = storage_api::DatasetRevision>>() {}
     assert_store::<AtomicDatasetMemoryStore>();
 }
@@ -158,7 +159,7 @@ async fn stale_revision_rejects_layer_generation() {
         .unwrap_err();
     assert_eq!(
         error,
-        memory::MemoryError::Storage {
+        MemoryError::Storage {
             kind: MemoryStorageErrorKind::ConcurrentWrite
         }
     );

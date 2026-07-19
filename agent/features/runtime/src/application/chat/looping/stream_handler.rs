@@ -1,7 +1,7 @@
 use crate::application::chat::looping::events::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
-use crate::application::chat::looping::tool_identity::ToolIdentityRegistry;
+use crate::application::tool_coordination::identity::ToolIdentityRegistry;
 use provider::{InvocationDelta, InvocationEvent};
 use share::message::{ContentBlock, Message, Role};
 use std::sync::{Arc, Mutex};

@@ -66,8 +66,8 @@ impl ProjectMemoryKey {
     /// Returns the cwd-derived file stem used by the legacy memory file layout
     /// (e.g. `Users-guoyuqi-work-aemeath`). This is **not** a filesystem path —
     /// it is a sanitized, opaque identifier derived from the original cwd at
-    /// key-derivation time, matching the naming used by the predecessor
-    /// `MemoryStore` (`_global.json` / `{stem}.json` / `{stem}_archive.json`).
+    /// key-derivation time, matching the predecessor flat-file layout
+    /// (`_global.json` / `{stem}.json` / `{stem}_archive.json`).
     pub(crate) fn legacy_project_name(&self) -> &str {
         &self.legacy_project_name
     }

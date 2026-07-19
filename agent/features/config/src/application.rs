@@ -211,17 +211,17 @@ async fn load_config(
             chain.push(patch);
         }
     }
+    if let Some(store) = native_store {
+        if let Some(patch) = store.read_override(project_key).await? {
+            chain.push(patch);
+        }
+    }
     let env_patch = EnvAdapter::read(env_source);
     if !env_patch.is_empty() {
         chain.push(env_patch);
     }
     if !cli_patch.is_empty() {
         chain.push(cli_patch.clone());
-    }
-    if let Some(store) = native_store {
-        if let Some(patch) = store.read_override(project_key).await? {
-            chain.push(patch);
-        }
     }
     let config = chain.merge(Config::default());
     ConfigValidator::validate(&config)?;
@@ -388,16 +388,23 @@ impl ProjectConfigParticipant for ConfigAppService {
         &self,
         command: ConfigUpdate,
     ) -> Result<PreparedConfigUpdate, ConfigUpdateError> {
-        let active = self.active.read().unwrap();
-        let base = active.config.clone();
-        let project_key = active
-            .location
-            .as_ref()
-            .map(|location| location.key().to_string())
-            .unwrap_or_else(|| "global".to_string());
-        drop(active);
+        let (base, project_key) = {
+            let active = self.active.read().unwrap();
+            (
+                active.config.clone(),
+                active
+                    .location
+                    .as_ref()
+                    .map(|location| location.key().to_string())
+                    .unwrap_or_else(|| "global".to_string()),
+            )
+        };
         let (field, override_patch) = patch_for_update(command)?;
         let config = share::config::domain::merge::apply_patch(base, override_patch.clone());
+        let env_patch = EnvAdapter::read(self.env_source.as_ref());
+        let config = share::config::domain::merge::apply_patch(config, env_patch);
+        let cli_patch = self.inner.read().await.cli_patch.clone();
+        let config = share::config::domain::merge::apply_patch(config, cli_patch);
         ConfigValidator::validate(&config)
             .map_err(|error| ConfigUpdateError::Invalid(format!("{error:?}")))?;
         let _ = encode_native_patch(&override_patch)
@@ -640,7 +647,63 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn complete_priority_contract_uses_runtime_override_last() {
+    async fn env_permission_override_remains_above_dynamic_local_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let service =
+            ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+                .with_native_store(NativeConfigStore::new(storage))
+                .with_env_source(std::sync::Arc::new(FakeEnv(
+                    std::collections::HashMap::from([(
+                        "AEMEATH_PERMISSION_MODE".into(),
+                        "allow_all".into(),
+                    )]),
+                )));
+        service.load().await.unwrap();
+
+        service
+            .update(ConfigUpdate::SetPermissionMode {
+                mode: share::config::PermissionModeConfig::Ask,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            service.committed_snapshot().permission_mode(),
+            share::config::PermissionModeConfig::AllowAll
+        );
+    }
+
+    #[tokio::test]
+    async fn cli_permission_override_remains_highest_after_dynamic_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let service =
+            ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+                .with_native_store(NativeConfigStore::new(storage));
+        service
+            .set_cli_patch(crate::CliArgsAdapter::read(&crate::CliConfigInput {
+                allow_all: true,
+                ..Default::default()
+            }))
+            .await;
+        service.load().await.unwrap();
+
+        service
+            .update(ConfigUpdate::SetPermissionMode {
+                mode: share::config::PermissionModeConfig::Ask,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            service.committed_snapshot().permission_mode(),
+            share::config::PermissionModeConfig::AllowAll
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_priority_contract_uses_cli_over_env_over_local_over_global() {
         let dir = tempfile::tempdir().unwrap();
         let global = dir.path().join("global.json");
         std::fs::write(&global, r#"{"model":{"name":"global"}}"#).unwrap();
@@ -680,7 +743,7 @@ mod tests {
 
         service.load().await.unwrap();
 
-        assert_eq!(service.committed_snapshot().model_name(), "runtime");
+        assert_eq!(service.committed_snapshot().model_name(), "cli");
     }
 
     #[tokio::test]

@@ -18,34 +18,70 @@ use std::fmt;
 
 // ── ToolName ────────────────────────────────────────────────────────
 
-/// 规范化逻辑键：在同一 Registry Scope 内唯一。
+/// 工具名称：保留 canonical 协议拼写，同时以 ASCII 小写键比较与哈希。
 ///
-/// 规范化策略与 `ToolRegistry` 的 `normalize_key` 一致（ASCII 小写），
-/// 保证注册与查找的 key 统一。MCP 限定名（`mcp__server__tool`）的
-/// 跨段语义不受影响。
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ToolName(String);
+/// canonical 名称用于模型 schema、Runtime/SDK 事件与 TUI；normalized key
+/// 用于 Registry Scope、Profile 与 Execution 查询。MCP 限定名的跨段语义不变。
+#[derive(Debug, Clone)]
+pub struct ToolName {
+    canonical: String,
+    normalized: String,
+}
 
 impl ToolName {
-    /// 从任意字符串构造，内部存储规范化后的值。
     pub fn new(name: impl Into<String>) -> Self {
-        Self(name.into().to_ascii_lowercase())
+        let canonical = name.into();
+        let normalized = canonical.to_ascii_lowercase();
+        Self {
+            canonical,
+            normalized,
+        }
     }
 
-    /// 规范化（ASCII 小写）后的名称。
     pub fn normalized(&self) -> &str {
-        &self.0
+        &self.normalized
     }
 
-    /// 原始值（已规范化，等价于 `normalized`）。
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.canonical
+    }
+}
+
+impl PartialEq for ToolName {
+    fn eq(&self, other: &Self) -> bool {
+        self.normalized == other.normalized
+    }
+}
+
+impl Eq for ToolName {}
+
+impl std::hash::Hash for ToolName {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.normalized.hash(state);
     }
 }
 
 impl fmt::Display for ToolName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.canonical)
+    }
+}
+
+impl serde::Serialize for ToolName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.canonical)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ToolName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(Self::new)
     }
 }
 
@@ -267,6 +303,7 @@ pub struct ToolInvocation {
     pub tool_name: ToolName,
     pub input: serde_json::Value,
     pub execution_scope: ExecutionScope,
+    pub authorization: crate::domain::AuthorizationContext,
 }
 
 impl ToolInvocation {
@@ -279,7 +316,16 @@ impl ToolInvocation {
             tool_name: tool_name.into(),
             input,
             execution_scope,
+            authorization: crate::domain::AuthorizationContext::STANDARD,
         }
+    }
+
+    pub fn with_authorization(
+        mut self,
+        authorization: crate::domain::AuthorizationContext,
+    ) -> Self {
+        self.authorization = authorization;
+        self
     }
 }
 
@@ -583,10 +629,28 @@ mod tests {
     // ── ToolName ────────────────────────────────────────────────────
 
     #[test]
+    fn tool_name_preserves_canonical_spelling_and_normalizes_identity() {
+        let name = ToolName::new("Grep");
+        assert_eq!(name.as_str(), "Grep");
+        assert_eq!(name.normalized(), "grep");
+        assert_eq!(name, ToolName::new("grep"));
+    }
+
+    #[test]
+    fn tool_name_serde_remains_a_canonical_string() {
+        let name = ToolName::new("Grep");
+        let encoded = serde_json::to_string(&name).unwrap();
+        assert_eq!(encoded, r#""Grep""#);
+        let decoded: ToolName = serde_json::from_str(r#""grep""#).unwrap();
+        assert_eq!(decoded.as_str(), "grep");
+        assert_eq!(decoded.normalized(), "grep");
+    }
+
+    #[test]
     fn test_tool_name_normalizes_to_lowercase() {
         let name = ToolName::new("Read");
         assert_eq!(name.normalized(), "read");
-        assert_eq!(name.as_str(), "read");
+        assert_eq!(name.as_str(), "Read");
     }
 
     #[test]
@@ -605,7 +669,7 @@ mod tests {
     #[test]
     fn test_tool_name_display() {
         let name = ToolName::new("Grep");
-        assert_eq!(format!("{name}"), "grep");
+        assert_eq!(format!("{name}"), "Grep");
     }
 
     // ── ToolCapabilities ───────────────────────────────────────────

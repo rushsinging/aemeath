@@ -13,10 +13,10 @@ use crate::PreparedWorkspaceRestore;
 
 const MAX_PATH_DEPTH: usize = 64;
 
-fn resolve_path_within_workspace(
+fn resolve_path(
     path: &Path,
     path_base: &Path,
-    workspace_root: &Path,
+    workspace_root: Option<&Path>,
     must_exist: bool,
 ) -> Result<PathBuf, WorkspaceError> {
     if path.components().count() > MAX_PATH_DEPTH {
@@ -29,10 +29,6 @@ fn resolve_path_within_workspace(
         path_base.join(path)
     };
     let lexical = lexical_normalize(&joined);
-    let workspace = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| lexical_normalize(workspace_root));
-
     let resolved = if must_exist {
         lexical
             .canonicalize()
@@ -40,12 +36,16 @@ fn resolve_path_within_workspace(
     } else {
         canonicalize_existing_ancestor(&lexical)
     };
-
-    if !resolved.starts_with(&workspace) {
-        return Err(WorkspaceError::PathOutsideWorkspaceRoot {
-            path: resolved,
-            root: workspace,
-        });
+    if let Some(workspace_root) = workspace_root {
+        let workspace = workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| lexical_normalize(workspace_root));
+        if !resolved.starts_with(&workspace) {
+            return Err(WorkspaceError::PathOutsideWorkspaceRoot {
+                path: resolved,
+                root: workspace,
+            });
+        }
     }
     Ok(resolved)
 }
@@ -192,11 +192,41 @@ impl WorkspaceRead for WorkspaceService {
     }
     fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         let state = self.lock();
-        resolve_path_within_workspace(path, &state.path_base, &state.workspace_root, false)
+        resolve_path(path, &state.path_base, Some(&state.workspace_root), false)
+    }
+    fn resolve_file_path_authorized(
+        &self,
+        path: &Path,
+        allow_outside_workspace: bool,
+    ) -> Result<PathBuf, WorkspaceError> {
+        let state = self.lock();
+        resolve_path(
+            path,
+            &state.path_base,
+            (!allow_outside_workspace).then_some(state.workspace_root.as_path()),
+            false,
+        )
     }
     fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         let state = self.lock();
-        resolve_path_within_workspace(path, &state.path_base, &state.workspace_root, true)
+        resolve_path(path, &state.path_base, Some(&state.workspace_root), true)
+    }
+    fn resolve_search_path_authorized(
+        &self,
+        path: &Path,
+        allow_outside_workspace: bool,
+    ) -> Result<PathBuf, WorkspaceError> {
+        let state = self.lock();
+        let resolved = resolve_path(
+            path,
+            &state.path_base,
+            (!allow_outside_workspace).then_some(state.workspace_root.as_path()),
+            true,
+        )?;
+        if !resolved.is_dir() {
+            return Err(WorkspaceError::NotDirectory(resolved));
+        }
+        Ok(resolved)
     }
     fn in_worktree(&self) -> bool {
         self.lock().worktree_kind == WorktreeKind::Linked
@@ -334,6 +364,17 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path.canonicalize().unwrap()
+    }
+
+    #[test]
+    fn resolve_file_path_allows_path_outside_workspace_when_authorized() {
+        let root = unique_temp_dir("resolve_authorized_root");
+        let outside = unique_temp_dir("resolve_authorized_outside").join("outside.rs");
+        let service = WorkspaceService::with_git(root, Arc::new(FakeGit::default()));
+
+        let result = service.resolve_file_path_authorized(&outside, true);
+
+        assert_eq!(result.unwrap(), outside);
     }
 
     #[test]

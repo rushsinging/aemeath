@@ -194,6 +194,11 @@ impl TestToolExecutionContextBuilder {
         self
     }
     pub(crate) fn build(self) -> ToolExecutionContext {
+        let authorization = if self.allow_all {
+            crate::AuthorizationContext::ALLOW_ALL
+        } else {
+            crate::AuthorizationContext::STANDARD
+        };
         let workspace = FakeWorkspace::new(self.root);
         let scope = ExecutionScope::builder(
             "test-run",
@@ -209,11 +214,10 @@ impl TestToolExecutionContextBuilder {
             Arc::new(memory::NoOpMemory),
             Arc::new(FixedGuidance {
                 language: "en".into(),
-                allow_all: self.allow_all,
             }),
         )
         .with_agent(self.agent)
         .with_progress(self.progress);
-        ToolExecutionContext::new(scope, ports)
+        ToolExecutionContext::new(scope, ports).with_authorization(authorization)
     }
 }

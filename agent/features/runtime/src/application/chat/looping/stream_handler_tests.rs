@@ -1,6 +1,6 @@
 use super::events::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use super::stream_handler::{should_emit_model_stream_waiting, InvocationEventReducer};
-use super::tool_identity::ToolIdentityRegistry;
+use crate::application::tool_coordination::identity::ToolIdentityRegistry;
 use provider::{
     InvocationDelta, InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderStopReason,
     ProviderToolCall, ProviderToolCallId, ReasoningLevel,

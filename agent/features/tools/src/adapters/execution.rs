@@ -123,12 +123,16 @@ impl ExecutionAdapter {
                 "tool capabilities are not authorized by the selected profile",
             );
         }
-        let tool = match self.backing.registry().get(invocation.tool_name.as_str()) {
+        let tool = match self
+            .backing
+            .registry()
+            .get(invocation.tool_name.normalized())
+        {
             Some(tool) => tool,
             None => return unavailable(&invocation),
         };
         let context = match self.contexts.resolve(&invocation.execution_scope) {
-            Some(context) => context,
+            Some(context) => context.with_authorization(invocation.authorization),
             None => {
                 return ToolExecutionOutcome::failure(
                     ToolErrorKind::ResourceUnavailable,

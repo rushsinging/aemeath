@@ -732,51 +732,33 @@ impl RunLoopPort for SubAgentRun<'_> {
                 if calls.is_empty() {
                     return Ok(ToolStep::Continue);
                 }
-                let allowed: Vec<_> = calls
+                let prepared = crate::application::tool_coordination::prepare_tool_round(
+                    calls,
+                    &self.agent.catalog,
+                    self.policy.as_ref(),
+                    run_id,
+                    step_id,
+                    &self.agent.ctx.workspace_read().current_workspace_root(),
+                );
+                let allowed_calls = prepared
+                    .executable
                     .iter()
-                    .filter_map(|(call, decision)| {
-                        matches!(decision, ToolGuardDecision::Allow).then_some(call.clone())
-                    })
-                    .collect();
-                let mut results: Vec<_> = calls
-                    .iter()
-                    .filter_map(|(call, decision)| match decision {
-                        ToolGuardDecision::SoftBlock { reason } => Some(
-                            crate::application::chat::looping::tool_fuse::blocked_tool_execution(
-                                call, reason,
-                            ),
-                        ),
-                        ToolGuardDecision::Allow => None,
-                    })
-                    .collect();
-
-                let (approved, denied) =
-                    crate::application::chat::looping::permissions::evaluate_calls(
-                        &allowed,
-                        &self.agent.catalog,
-                        self.policy.as_ref(),
-                        run_id,
-                        step_id,
-                        &self.agent.ctx.workspace_read().current_workspace_root(),
-                    );
-                results.extend(denied.into_iter().filter_map(|denied| {
-                    allowed
-                        .iter()
-                        .find(|call| call.id.to_string() == denied.id)
-                        .map(|call| {
-                            crate::application::agent::ToolExecution::new(
-                                call,
-                                tools::ToolOutcome::error(denied.reason),
-                            )
-                        })
-                }));
-                let allowed = approved;
-
+                    .map(|prepared| prepared.call.clone())
+                    .collect::<Vec<_>>();
+                let fuse_bypassed = prepared.fuse_bypassed;
+                let executable = prepared.executable;
+                let mut results = prepared.guard_blocked;
+                results.extend(
+                    prepared
+                        .denied
+                        .into_iter()
+                        .map(crate::application::tool_coordination::denied_tool_execution),
+                );
                 let all_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
                 self.log_tool_calls(&all_calls);
                 let call_info = self.build_call_info(&all_calls);
                 if let Some(ref sink) = self.progress_sink {
-                    sink.emit(build_tool_calls_progress_event(turn_number, &allowed));
+                    sink.emit(build_tool_calls_progress_event(turn_number, &allowed_calls));
                 }
 
                 let cancellation = self.agent.ctx.cancellation();
@@ -784,17 +766,12 @@ impl RunLoopPort for SubAgentRun<'_> {
                     _ = cancellation.cancelled() => {
                         return Err(LoopEngineError::Cancelled);
                     }
-                    executed = self.agent.execute_tools(&allowed) => executed,
+                    executed = self.agent.execute_prepared_tools(&executable) => executed,
                 };
                 results.append(&mut executed);
-                let mut by_id: std::collections::HashMap<_, _> = results
-                    .into_iter()
-                    .map(|result| (result.call_id.clone(), result))
-                    .collect();
-                let results: Vec<_> = calls
-                    .iter()
-                    .filter_map(|(call, _)| by_id.remove(&call.id))
-                    .collect();
+                let results = crate::application::tool_coordination::restore_tool_call_order(
+                    &all_calls, results,
+                );
                 self.progress_tools_done(turn_number, results.len());
                 self.log_result_summaries(turn_number, &results, &call_info);
                 self.log_tool_results(turn_number, &results, &call_info);
@@ -805,7 +782,11 @@ impl RunLoopPort for SubAgentRun<'_> {
                     &self.session_id,
                 )
                 .await;
-                Ok(ToolStep::Continue)
+                Ok(if fuse_bypassed.is_empty() {
+                    ToolStep::Continue
+                } else {
+                    ToolStep::ContinueWithFuseBypass(fuse_bypassed)
+                })
             },
         )
         .await

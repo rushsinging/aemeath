@@ -24,16 +24,17 @@ pub use domain::types;
 // Published language: shared-kernel tool types, DTOs, and ports.
 pub use domain::{
     AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal,
-    AgentRunner, AgentToolCallProgress, CancellationDeclaration, CancellationSignal, CatalogQuery,
-    ConcurrencyDeclaration, ExecutionScope, ExecutionScopeBuilder, FixedGuidance, FixedPlanMode,
-    Guidance, ImageData, InputSafetyDeclaration, InvocationSource, MemoryPortSource, MutexReadSet,
-    PlanModeState, PolicyDecision, ProfileExpansionError, ProgressSink, ReadSet, RegistryScopeName,
-    SessionReminder, SessionReminders, Tool, ToolCapabilities, ToolCapability, ToolCatalogPort,
-    ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind, ToolExecutionContext,
-    ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort, ToolExecutionOutcome,
-    ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider, ToolName, ToolOutcome,
-    ToolProfile, ToolProfileName, ToolResult, ToolSuspension, TypedTool, TypedToolAdapter,
-    TypedToolResult, UserInteractionSpec, UserOption, UserQuestion, WorkspaceReadAccess,
+    AgentRunner, AgentToolCallProgress, AuthorizationContext, CancellationDeclaration,
+    CancellationSignal, CatalogQuery, ConcurrencyDeclaration, ExecutionScope,
+    ExecutionScopeBuilder, FixedGuidance, FixedPlanMode, Guidance, ImageData,
+    InputSafetyDeclaration, InvocationSource, MemoryPortSource, MutexReadSet, PlanModeState,
+    ProfileExpansionError, ProgressSink, ReadSet, RegistryScopeName, SessionReminder,
+    SessionReminders, Tool, ToolCapabilities, ToolCapability, ToolCatalogPort, ToolCatalogSnapshot,
+    ToolDescriptor, ToolErrorKind, ToolExecutionContext, ToolExecutionContextBindingGuard,
+    ToolExecutionContextBindingPort, ToolExecutionOutcome, ToolExecutionPort, ToolExecutionPorts,
+    ToolInvocation, ToolListProvider, ToolName, ToolOutcome, ToolProfile, ToolProfileName,
+    ToolResult, ToolSuspension, TypedTool, TypedToolAdapter, TypedToolResult, UserInteractionSpec,
+    UserOption, UserQuestion, WorkspaceReadAccess,
 };
 
 // Schema validator (moved from runtime).
