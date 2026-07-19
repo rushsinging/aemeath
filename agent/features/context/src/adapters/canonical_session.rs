@@ -49,11 +49,32 @@ impl CanonicalSessionWriter for NoOpCanonicalSessionWriter {
 
 pub struct ProductionMainContextFactory {
     writer: Arc<dyn CanonicalSessionWriter>,
+    /// 可选注入的 Skill supplier port 与 Context-owned query factory。
+    /// 注入后 `build` 组装 `SkillPromptSource`；否则退回 `BaselinePromptSource`。
+    /// Composition 后续注入真实 `FilesystemSkillAdapter` + `WorkspaceSkillQueryFactory`。
+    skill_supplier: Option<Arc<dyn tools::SkillMaterializationPort>>,
+    query_factory: Option<Arc<dyn crate::ports::SkillQueryFactory>>,
 }
 
 impl ProductionMainContextFactory {
     pub fn new(writer: Arc<dyn CanonicalSessionWriter>) -> Self {
-        Self { writer }
+        Self {
+            writer,
+            skill_supplier: None,
+            query_factory: None,
+        }
+    }
+
+    /// 注入 Skill supplier port 与 Context-owned query factory，使 `build`
+    /// 组装 `SkillPromptSource`（Issue #912）。
+    pub fn with_skill_supplier(
+        mut self,
+        supplier: Arc<dyn tools::SkillMaterializationPort>,
+        query_factory: Arc<dyn crate::ports::SkillQueryFactory>,
+    ) -> Self {
+        self.skill_supplier = Some(supplier);
+        self.query_factory = Some(query_factory);
+        self
     }
 }
 
@@ -66,6 +87,16 @@ impl MainContextFactory for ProductionMainContextFactory {
         memory: Arc<RwLock<Arc<dyn memory::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort> {
+        let prompt: Arc<dyn crate::ports::ContextPromptSource> =
+            match (&self.skill_supplier, &self.query_factory) {
+                (Some(supplier), Some(factory)) => {
+                    Arc::new(crate::adapters::SkillPromptSource::new(
+                        Arc::clone(supplier),
+                        Arc::clone(factory),
+                    ))
+                }
+                _ => Arc::new(crate::adapters::BaselinePromptSource),
+            };
         Arc::new(crate::application::ContextApplicationService::new(
             Arc::new(CanonicalSessionRepository::new(
                 session,
@@ -74,7 +105,7 @@ impl MainContextFactory for ProductionMainContextFactory {
                 Arc::clone(&self.writer),
                 mutation_gate,
             )),
-            Arc::new(crate::adapters::BaselinePromptSource),
+            prompt,
             Arc::new(crate::adapters::CommittedMemoryRetrieveAdapter::new(memory)),
         ))
     }

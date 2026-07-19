@@ -11,7 +11,6 @@ use crate::application::startup::{
 };
 use crate::ports::legacy::ChatRuntimeContext;
 use crate::ports::{ProviderBuildSpec, ProviderFactory, RequestSystemBlock};
-use context::skill::{load_all_skills, Skill};
 
 use super::{AgentClientImpl, RuntimeHandle};
 
@@ -195,11 +194,6 @@ pub async fn from_args_with_workspace(
         .map_err(|error| SdkError::Init(error.to_string()))?;
 
     // 11. Tooling
-    let skills_map = load_configured_skills(&cwd, Some(snapshot.skills()));
-    if !skills_map.is_empty() {
-        log::info!(target: crate::LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
-    }
-    let skills = Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
     // MemoryPortSource: delegates to wiring.committed_memory() at execution
     // time so resume swaps are transparent to the already-registered tool.
     let memory_source: Arc<dyn tools::MemoryPortSource> = {
@@ -217,7 +211,6 @@ pub async fn from_args_with_workspace(
     };
     let tool_wiring = tools::composition::wire_builtin_catalog_execution(
         task_access.clone(),
-        skills.clone(),
         memory_source,
         workspace.control(),
     )
@@ -225,6 +218,50 @@ pub async fn from_args_with_workspace(
     let tool_catalog = tool_wiring.catalog();
     let tool_execution = tool_wiring.execution();
     let tool_context_binding = tool_wiring.binding();
+    let available_tools = tool_catalog
+        .snapshot(
+            &tools::RegistryScopeName::new("main"),
+            &tools::ToolProfileName::new("main-full"),
+        )
+        .map_err(|error| SdkError::Init(error.to_string()))?
+        .tools
+        .iter()
+        .map(|descriptor| descriptor.name.as_str().to_string())
+        .collect();
+    let skill_wiring = tools::composition::wire_skills();
+    let skill_query =
+        tools::SkillQuery::new(cwd.clone(), snapshot.skills().dirs.clone(), available_tools);
+    let descriptors = skill_wiring.catalog().list(skill_query.clone());
+    let materialized = skill_wiring
+        .materializer()
+        .materialize_available(tools::SkillMaterializationQuery::new(
+            skill_query.project_root,
+            skill_query.extra_dirs,
+            skill_query.available_tools,
+        ))
+        .await
+        .map_err(|error| SdkError::Init(error.to_string()))?;
+    let fragments = materialized
+        .fragments()
+        .iter()
+        .map(|fragment| (fragment.stable_key(), fragment))
+        .collect::<std::collections::HashMap<_, _>>();
+    let skills_map = descriptors
+        .into_iter()
+        .filter_map(|descriptor| {
+            let fragment = fragments.get(descriptor.name())?;
+            Some((
+                descriptor.name().to_string(),
+                sdk::SkillView {
+                    name: descriptor.name().to_string(),
+                    aliases: descriptor.aliases().to_vec(),
+                    description: Some(descriptor.description().to_string()),
+                    content: fragment.content().to_string(),
+                    source: Some(descriptor.source().path.clone()),
+                },
+            ))
+        })
+        .collect();
     let mcp_manager = spawn_mcp_connect(&tool_wiring, &cwd).await;
 
     // 12. Hook runner
@@ -309,7 +346,6 @@ pub async fn from_args_with_workspace(
         Some(&snapshot),
         &hook_runner,
         prompt_parts.clone(),
-        &skills,
     )
     .await;
     let system_blocks = vec![
@@ -398,14 +434,6 @@ pub async fn from_args_with_workspace(
 
 fn non_empty_string(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
-}
-
-fn load_configured_skills(
-    cwd: &std::path::Path,
-    skills_config: Option<&share::config::SkillsConfig>,
-) -> std::collections::HashMap<String, Skill> {
-    let dirs = skills_config.map(|c| c.dirs.clone()).unwrap_or_default();
-    load_all_skills(cwd, &dirs)
 }
 
 #[cfg(test)]

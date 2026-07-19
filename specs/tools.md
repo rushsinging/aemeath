@@ -11,8 +11,8 @@
 - #911 已把生产 Runtime 切到 Catalog / Execution 双端口：Runtime 不再取得 `ToolRegistry` 或 `Tool` 实例。两端由 `agent/features/tools/src/adapters/composition.rs` 的窄 factory 基于同一个私有 `ToolBacking` 装配；具体 backing、registry 与 adapter 不从 crate root 暴露。
 - Catalog 按 Scope/Profile 投影 schema；Execution 在调用时复验 Tool 存在性、Scope/Profile 授权并执行。schema 校验实现唯一归 Tools：`agent/features/tools/src/domain/schema_validator.rs`；Runtime 的 `application/agent/input_validation.rs` 仅保留兼容 re-export / phase peel，不得复制规则。
 - `RegistryScope` / `ToolProfile` 与“只收缩”规则：`agent/features/tools/src/domain/scope_profile.rs`。Main 是 `all()` baseline；Sub 必须由 Main 经 `derive_restricted` 构造。内置工具名称、required capabilities、Scope 成员关系与 factory 的单一规格在 `agent/features/tools/src/adapters/registry.rs`。
-- `ToolRegistry` 当前仍是 Tools adapter 内部 backing；`legacy-no-agent`、历史 `register_all_tools*`、内部 Profile/Registry 与 `SkillTool` 的最终物理退役属于 #914，不能把 #911 解读为这些旧实现已清零。
-- 异步 trait 方法使用 `async_trait`（见 `rust-coding.md`）。
+- `ToolRegistry` 当前仍是 Tools adapter 内部 backing；#912 已让正式 Main/Sub Catalog 与 Execution 不再发布或执行 Skill，并以 Skill-owned Catalog/Materialization 双端口接入 Context。`legacy-no-agent`、历史 `register_all_tools*`、内部 Profile/Registry 与 `SkillTool` 文件的最终物理退役仍属于 #914。
+- Skill Published Language 与端口位于 `agent/features/tools/src/domain/{skill_pl,skill_ports}.rs`；filesystem adapter 每次按 query 的 project/config/tool snapshot 物化，返回确定性内容 revision。Context 直接复用唯一 `PromptFragment`，不读取 Skill 文件。
 
 ## ExecutionScope、资源与 suspension
 

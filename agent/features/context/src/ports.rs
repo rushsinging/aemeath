@@ -10,6 +10,7 @@ use crate::domain::{
 
 pub mod context_port;
 pub mod session_snapshot_store;
+pub use crate::domain::PromptMaterializationError;
 pub use context_port::ContextPort;
 pub use session_snapshot_store::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
 
@@ -63,9 +64,23 @@ pub struct PromptMaterialization {
     pub revision: u64,
 }
 
+/// Context-owned 查询工厂：为每次 `materialize(request)` 从 request/config
+/// 与 live Project `WorkspaceRead` 快照构造 `tools::SkillMaterializationQuery`，
+/// 从而不捕获启动 cwd（worktree 切换后仍读取当前 workspace root）。
+///
+/// 生产实现持有 `Arc<dyn WorkspaceRead>`，每次调用读取
+/// `current_workspace_root()`；测试可注入确定性 fake。
+pub trait SkillQueryFactory: Send + Sync {
+    /// 由 request/config 与注入的 workspace 快照推导物化查询。
+    fn materialize_query(&self, request: &ContextRequest) -> tools::SkillMaterializationQuery;
+}
+
 #[async_trait]
 pub trait ContextPromptSource: Send + Sync {
-    async fn materialize(&self, request: &ContextRequest) -> Result<PromptMaterialization, String>;
+    async fn materialize(
+        &self,
+        request: &ContextRequest,
+    ) -> Result<PromptMaterialization, PromptMaterializationError>;
 }
 
 #[derive(Debug, Clone)]

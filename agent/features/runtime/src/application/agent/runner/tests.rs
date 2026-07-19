@@ -67,6 +67,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
         tool_catalog: tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: tools::composition::TestCatalogExecutionFactory::empty().binding(),
+        skill_materializer: tools::composition::wire_skill_materialization(),
         policy: Arc::new(policy::AllowAllPolicy),
     };
     let ctx_a = test_ctx();
@@ -901,6 +902,7 @@ fn test_runner(error: ProviderError) -> CliAgentRunner {
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
+        skill_materializer: tools::composition::wire_skill_materialization(),
         policy: Arc::new(policy::AllowAllPolicy),
     }
 }
@@ -930,6 +932,7 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
+        skill_materializer: tools::composition::wire_skill_materialization(),
         policy: Arc::new(policy::AllowAllPolicy),
     }
 }
