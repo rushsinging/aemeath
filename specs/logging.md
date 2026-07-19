@@ -45,7 +45,8 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 17 | `aemeath:agent:memory` | `agent-memory.log` | `agent/features/memory` | Memory 诊断 |
 | 18 | `aemeath:agent:task` | `agent-task.log` | `agent/features/task` | Task 诊断 |
 | 19 | `aemeath:llm-api-error` | `llm-api-error.log` | `agent/features/provider` | 脱敏后的 LLM API 失败诊断 |
-| — | 兜底 | `aemeath.log` | 未注册 target | 硬兜底并限频 direct stderr 报告 |
+| — | 兜底 | `aemeath.log` | 未注册 target | 硬兜底，写入 `aemeath.log`（**NEVER** 写 stderr） |
+| — | emergency | `emergency.log` | logging 自身 | File 模式下 sink degrade / fallback 的兜底输出（**NEVER** 写 stderr，避免污染 TUI alternate screen，见 #1215） |
 | — | `panic.log` | `panic.log` | panic_hook.rs 直写 | panic 信息（不纳入 UnifiedLogger） |
 
 ### 已废弃文件

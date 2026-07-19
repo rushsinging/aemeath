@@ -107,7 +107,6 @@ AEMEATH_LOG_LEVEL=aemeath:tui=debug,aemeath:agent:runtime=trace  # per-target
 |---|---|---|
 | `HOME` | 用户主目录 | 全局 |
 | `AEMEATH_AGENTS_DIR` | 运行时根目录 | `config/adapters/paths.rs` |
-| `AEMEATH_LOG_STDERR` | 日志输出到 stderr（CLI 模式） | `logging_setup.rs` |
 | `AEMEATH_VERSION` | 版本号（编译期注入） | `build.rs` |
 
 ## Provider 默认值

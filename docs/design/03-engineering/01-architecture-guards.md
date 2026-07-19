@@ -510,8 +510,8 @@
 ### 17b. check-logging-settings-injection.sh
 
 - **功能**：扫描 Logging、Runtime 与全仓初始化调用，锁定 ConfigSnapshot → LoggingSettings 的单向注入。
-- **守护**：`packages/global/logging/src` 生产代码不得读取 env；Runtime 不得调用 `UnifiedLogger::init`、构造 `LoggingSettings`、恢复 `init_logging` 或读取 `AEMEATH_LOG_STDERR`；`UnifiedLogger::init` 的唯一生产调用点必须是 `agent/composition/src/logging_setup.rs`。
-- **白名单**：无路径排除或 migration exception；Config `EnvAdapter` 仍是 `AEMEATH_LOG_LEVEL` 的唯一业务 env reader，Composition 仅映射系统输出模式 `AEMEATH_LOG_STDERR`。
+- **守护**：`packages/global/logging/src` 生产代码不得读取 env；Runtime 不得调用 `UnifiedLogger::init`、构造 `LoggingSettings` 或恢复 `init_logging`；`UnifiedLogger::init` 的唯一生产调用点必须是 `agent/composition/src/app.rs::init_logging`。日志输出模式（File/Stderr）由 CLI typed bootstrap 输入注入，**NEVER** 经 env 旁路（#941 已删除 `AEMEATH_LOG_STDERR`，防回归断言见 `agent/features/config/src/adapters.rs`）。
+- **白名单**：无路径排除或 migration exception；Config `EnvAdapter` 仍是 `AEMEATH_LOG_LEVEL` 的唯一业务 env reader。
 - **故意违规证据**：临时在 Logging formatter 恢复 `std::env::var("AEMEATH_LOG_LEVEL")` 后单 Guard 以 exit 2 阻断；恢复后单 Guard clean pass。
 
 ## 18. no_mod_rs.sh
