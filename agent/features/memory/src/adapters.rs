@@ -1,3 +1,4 @@
+use crate::service::MemoryService;
 use crate::*;
 use async_trait::async_trait;
 use std::{
@@ -6,6 +7,10 @@ use std::{
     sync::{Arc, RwLock},
 };
 use storage::api as storage_api;
+
+#[cfg(test)]
+#[path = "adapters_tests.rs"]
+mod tests;
 
 const ACTIVE_MEMBER: &str = "active";
 const ARCHIVE_MEMBER: &str = "archive";
@@ -28,7 +33,7 @@ const REFLECTION_HISTORY_CAS_ATTEMPTS: usize = 8;
 ///
 /// Legacy-file discovery and migration are intentionally outside this adapter;
 /// legacy classification remains follow-up work.
-pub struct AtomicDatasetMemoryStore {
+pub(crate) struct AtomicDatasetMemoryStore {
     storage: Arc<dyn storage_api::AtomicDatasetPort>,
     global: storage_api::DatasetKey,
     project: storage_api::DatasetKey,
@@ -415,7 +420,7 @@ impl ReflectionHistoryStore for AtomicDatasetReflectionHistoryStore {
     }
 }
 
-pub struct ProjectMemoryOpener {
+pub(crate) struct ProjectMemoryOpener {
     store: AtomicDatasetMemoryStore,
     legacy: Arc<dyn LegacyMemorySource>,
 }
@@ -526,7 +531,7 @@ impl MemoryOpener for DatasetMemoryOpener {
     }
 }
 
-/// Fixed segments used by the predecessor `MemoryStore` file layout.
+/// Fixed segments used by the predecessor flat-file layout.
 const LEGACY_GLOBAL_STEM: &str = "_global";
 const LEGACY_ARCHIVE_SUFFIX: &str = "_archive";
 const LEGACY_FILE_EXT: &str = ".json";
