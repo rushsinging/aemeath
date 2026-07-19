@@ -3,12 +3,17 @@
 //! 对应设计：`docs/design/02-modules/hook/README.md` §5。
 //! 将单次 hook 执行的原始结果（exit code + stdout JSON）分类为 directive，
 //! 并依据能力矩阵校验非阻塞 point 的 Block。
+//!
+//! #924 typed 分类：`classify_directive` 返回 `Result<HookDirective, ClassifyError>`。
+//! - exit 0 + 非法 JSON → `Err(InvalidJson)`；
+//! - 能力矩阵违规 → `Err(Protocol{...})`；
+//! - exit 1/2/127（任意非零）→ 阻塞 point `Ok(Block)`，非阻塞 point `Err(Protocol{BlockOnNonBlocking})`。
 
 use crate::domain::invocation::HookPoint;
-use crate::domain::outcome::{HookDirective, HookReason};
+use crate::domain::outcome::{ClassifyError, HookDirective, HookReason, ProtocolViolation};
 
 /// stdout/stderr 大小上限（字节）。超出部分截断。
-const OUTPUT_MAX_BYTES: usize = 8192;
+pub(crate) const OUTPUT_MAX_BYTES: usize = 8192;
 
 /// Hook stdout 的 JSON 输出（exit 0 时 stdout 可包含此 JSON）。
 ///
@@ -39,12 +44,12 @@ struct HookJsonOutput {
     hook_specific_output: Option<serde_json::Value>,
 }
 
-fn default_true() -> bool {
+pub(crate) fn default_true() -> bool {
     true
 }
 
 /// 截断超长输出。
-fn truncate(text: &str) -> String {
+pub(crate) fn truncate(text: &str) -> String {
     if text.len() <= OUTPUT_MAX_BYTES {
         text.to_string()
     } else {
@@ -54,54 +59,61 @@ fn truncate(text: &str) -> String {
 
 /// 将单次 hook 执行的原始结果分类为 directive。
 ///
-/// # 真值表
+/// # 真值表（#924 typed 分类）
 ///
-/// | exit_code | stdout | → directive |
+/// | exit_code | stdout | → `Result` |
 /// |---|---|---|
-/// | 0 | 空 | Continue |
-/// | 0 | 合法 JSON | 解析 directive（decision/context/updatedInput） |
-/// | 0 | 非法 JSON | `ExecutionFailed`（由调用方降级处理） |
-/// | 非零 | 任意 | `Block{ ExitCode{code, stderr} }` |
-/// | None | — | `ExecutionFailed`（进程未正常退出） |
+/// | 0 | 空 | `Ok(Continue)` |
+/// | 0 | 合法 JSON | `Ok(directive)`（decision/context/updatedInput） |
+/// | 0 | 非法 JSON | `Err(InvalidJson)` |
+/// | 1 / 2 / 127 等任意非零 | 任意 | 阻塞 point `Ok(Block)`；非阻塞 point `Err(Protocol{BlockOnNonBlocking})` |
+/// | None | 任意 | `Err(MissingExitCode)`（进程未正常退出，进入 ExecutionFailed 可重试） |
 ///
-/// # 能力矩阵校验
+/// # 能力矩阵校验（设计 §3）
 ///
-/// - `can_block=false` 的 point 收到 Block → 协议错误，降级为 Continue；
-/// - `can_modify_input=false` 的 point 收到 UpdatedInput → 协议错误，丢弃；
-/// - `can_add_context=false` 的 point 收到 Context → 协议错误，丢弃。
+/// - `can_block=false` 收到 Block → `Err(Protocol{BlockOnNonBlocking})`；
+/// - `can_modify_input=false` 收到 UpdatedInput → `Err(Protocol{UpdatedInputOnNonModifiable})`；
+/// - `can_add_context=false` 收到 Context → `Err(Protocol{ContextOnNonContextual})`。
 ///
-/// 协议错误不改变 directive 语义，调用方继续推进。
+/// 分类失败（`Err`）对应 ExecutionFailed 路径，可重试；业务 Block 永不重试。
 pub fn classify_directive(
     point: HookPoint,
     exit_code: Option<i32>,
     stdout: &str,
     stderr: &str,
-) -> HookDirective {
+) -> Result<HookDirective, ClassifyError> {
     let meta = point.metadata();
 
-    // ── 非零 exit → Block ──
-    if let Some(code) = exit_code {
-        if code != 0 {
-            let block_reason = HookReason::ExitCode {
-                code,
-                stderr: truncate(stderr.trim()),
-            };
-            return enforce_block_permission(meta, block_reason);
-        }
+    // ── exit_code=None：进程未正常退出，缺少退出码 → MissingExitCode ──
+    // 必须优先于 stdout 解析：不得按空 stdout 误判为 Continue。
+    let code = match exit_code {
+        Some(c) => c,
+        None => return Err(ClassifyError::MissingExitCode),
+    };
+
+    // ── 非零 exit → Block（能力校验后）──
+    if code != 0 {
+        let block_reason = HookReason::ExitCode {
+            code,
+            stderr: truncate(stderr.trim()),
+        };
+        return enforce_block_permission(meta, block_reason);
     }
 
     // ── exit 0 + 空 stdout → Continue ──
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
-        return HookDirective::Continue;
+        return Ok(HookDirective::Continue);
     }
 
-    // ── exit 0 + 尝试解析 JSON ──
+    // ── exit 0 + 尝试解析 JSON；非法 JSON → typed InvalidJson ──
     let json: HookJsonOutput = match serde_json::from_str(trimmed) {
         Ok(j) => j,
-        Err(_) => {
-            // 非法 JSON 不阻断流程；调用方记录 ExecutionFailed。
-            return HookDirective::Continue;
+        Err(e) => {
+            return Err(ClassifyError::InvalidJson {
+                raw: truncate(trimmed),
+                error: e.to_string(),
+            });
         }
     };
 
@@ -121,65 +133,51 @@ pub fn classify_directive(
         );
     }
 
-    // ── 提取 additional_context 与 updated_input ──
-    let context = if meta.can_add_context {
-        json.additional_context
-    } else {
-        None
-    };
+    // ── 提取 additional_context 与 updated_input，并按能力矩阵校验 ──
+    // 违规优先级：Block（上方已校验）> UpdatedInput > Context，
+    // 与设计 §3 能力矩阵列举顺序一致。
+    let context = json.additional_context;
+    let updated_input = json
+        .hook_specific_output
+        .as_ref()
+        .and_then(|h| h.get("updatedInput"))
+        .cloned();
 
-    let updated_input = if meta.can_modify_input {
-        json.hook_specific_output
-            .as_ref()
-            .and_then(|h| h.get("updatedInput"))
-            .cloned()
-    } else {
-        None
-    };
+    if updated_input.is_some() && !meta.can_modify_input {
+        return Err(ClassifyError::Protocol {
+            violation: ProtocolViolation::UpdatedInputOnNonModifiable,
+        });
+    }
+    if context.is_some() && !meta.can_add_context {
+        return Err(ClassifyError::Protocol {
+            violation: ProtocolViolation::ContextOnNonContextual,
+        });
+    }
 
     match (context, updated_input) {
-        (Some(ctx), Some(inp)) => HookDirective::ContinueWithContextAndInput {
+        (Some(ctx), Some(inp)) => Ok(HookDirective::ContinueWithContextAndInput {
             context: ctx,
             input: inp,
-        },
-        (Some(ctx), None) => HookDirective::ContinueWithContext { context: ctx },
-        (None, Some(inp)) => HookDirective::ContinueWithUpdatedInput { input: inp },
-        (None, None) => HookDirective::Continue,
+        }),
+        (Some(ctx), None) => Ok(HookDirective::ContinueWithContext { context: ctx }),
+        (None, Some(inp)) => Ok(HookDirective::ContinueWithUpdatedInput { input: inp }),
+        (None, None) => Ok(HookDirective::Continue),
     }
 }
 
-/// 能力矩阵校验：非阻塞 point 收到 Block 时降级为 Continue。
+/// 能力矩阵校验：Block 仅允许出现在可阻断 point。
+///
+/// - `can_block=true` → `Ok(Block)`（业务 Block，永不重试）；
+/// - `can_block=false` → `Err(Protocol{BlockOnNonBlocking})`（协议级故障，可重试）。
 fn enforce_block_permission(
     meta: crate::domain::metadata::HookPointMetadata,
     reason: HookReason,
-) -> HookDirective {
+) -> Result<HookDirective, ClassifyError> {
     if meta.can_block {
-        HookDirective::Block { reason }
+        Ok(HookDirective::Block { reason })
     } else {
-        // 非阻塞 point 的 Block → 协议错误，降级为 Continue。
-        // 调用方可通过日志记录该协议违规。
-        HookDirective::Continue
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_truncate_short() {
-        assert_eq!(truncate("hello"), "hello");
-    }
-
-    #[test]
-    fn test_truncate_long() {
-        let long = "x".repeat(OUTPUT_MAX_BYTES + 100);
-        let result = truncate(&long);
-        assert!(result.len() <= OUTPUT_MAX_BYTES);
-    }
-
-    #[test]
-    fn test_default_true() {
-        assert!(default_true());
+        Err(ClassifyError::Protocol {
+            violation: ProtocolViolation::BlockOnNonBlocking,
+        })
     }
 }

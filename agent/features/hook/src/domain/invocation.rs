@@ -119,6 +119,37 @@ impl HookInvocation {
             Self::TeammateIdle(_) => HookPoint::TeammateIdle,
         }
     }
+
+    /// 将一次 UpdatedInput 的值**整体替换**到本 invocation 对应的可修改 payload 字段，
+    /// 再由调用方重新序列化传给下一条 subscription（设计 §10「UpdatedInput 串联」）。
+    ///
+    /// 仅对 `can_modify_input=true` 的 point 生效；其余变体（含不可修改 point）
+    /// 由 `classify_directive` 提前拒绝，不会进入本方法。被替换的字段：
+    /// - `PreToolUse.tool_input`（`serde_json::Value`，整体替换）；
+    /// - `UserPromptSubmit.prompt` / `PermissionRequest.permission_rule` /
+    ///   `Elicitation.elicitation_text` / `UserPromptExpansion.expanded_input`
+    ///   （`String`：JSON 字符串直接取内串，其它形态取其 JSON 文本表示）。
+    ///
+    /// **NEVER** 仅往 enum JSON 顶层插键——payload 结构位置必须保持稳定。
+    pub(crate) fn apply_updated_input(&mut self, input: &serde_json::Value) {
+        match self {
+            Self::PreToolUse(i) => i.tool_input = input.clone(),
+            Self::UserPromptSubmit(i) => i.prompt = json_value_to_string(input),
+            Self::PermissionRequest(i) => i.permission_rule = json_value_to_string(input),
+            Self::Elicitation(i) => i.elicitation_text = json_value_to_string(input),
+            Self::UserPromptExpansion(i) => i.expanded_input = json_value_to_string(input),
+            // 不可修改 point：classify_directive 已拒绝，理论不可达。
+            _ => {}
+        }
+    }
+}
+
+/// 将 JSON 值规约为字符串：字符串取内串，其余取 JSON 文本表示。
+fn json_value_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
 }
 
 // ─── Typed Input Structs ──────────────────────────────────────
