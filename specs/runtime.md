@@ -21,7 +21,7 @@
 - Catalog 提供 schema/并发/timeout 描述；Execution 复验存在性、Scope/Profile、schema 后调用 Tool。schema 所有权归 Tools，Runtime 的 `application/agent/input_validation.rs` 仅为兼容 re-export / phase peel。
 - Runtime 自行持有 `WorkspacePersist`、并发 semaphore、timeout、Policy/Hook、取消实现与 interaction waiter；这些 **NEVER** 流入 Tools domain。`WorkspaceViews` 只在 `application/tool_execution_adapters.rs` 转成窄 live capabilities，`ExecutionScope` 只传纯值快照。
 - Tools 返回 typed `ToolSuspension`；Runtime 在 `application/suspension_mapping.rs` 映射为现有 AskUser 交互值并拥有等待。#911 只完成 suspension 边界和映射 seam；#877/#878 的完整 Interaction identity、continuation、`AwaitingUser` / resume / cancel 状态机仍未完成，旧 Runtime-owned AskUser oneshot 仍是兼容生产路径。
-- #912/#913 的 Runtime/Composition ownership 与完整装配收口仍未完成；#914 负责旧内部 Registry/Profile/SkillTool 的最终物理退役。MCP Ready 生命周期与 Catalog revision 也不属于 #911。
+- #912 已完成 Skill ownership 与 Main/Sub 装配：正式 Tool Catalog/Execution 不含 Skill；Main/Sub Context 都经 Skill-owned materialization 和 live WorkspaceRead snapshot 注入 PromptFragment。#913 的其余 Runtime/Composition ownership 收口仍未完成；#914 负责旧内部 Registry/Profile/legacy-no-agent/SkillTool 文件的最终物理退役。MCP Ready 生命周期与 Catalog revision 也不属于 #912。
 
 ## token budget / 压缩 / 成本
 

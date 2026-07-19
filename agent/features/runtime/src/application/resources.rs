@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use context::skill::Skill;
 use hook::api::HookRunner;
 use provider::{LlmClient, SystemBlock};
 use share::config::MemoryConfig;
@@ -44,7 +43,7 @@ pub struct RuntimeResources {
     pub system_prompt_text: String,
     pub user_context: String,
     pub memory_config: MemoryConfig,
-    pub skills_map: HashMap<String, Skill>,
+    pub skills_map: HashMap<String, sdk::SkillView>,
     pub context_size: usize,
     pub allow_all: bool,
     /// Language code for prompt/reminder text selection (`"en"` / `"zh"`).

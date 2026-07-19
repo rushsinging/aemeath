@@ -45,13 +45,6 @@ pub mod guidance {
     };
 }
 
-pub mod skill {
-    pub use crate::adapters::prompt::{
-        builtin_commit_skill, load_all_skills, load_all_skills_cached, load_and_filter_skills,
-        load_skills_from_dir, parse_skill, read_skill_content, Skill,
-    };
-}
-
 pub mod session {
     pub use crate::adapters::session_search::search_sessions;
     pub use crate::adapters::session_storage::{

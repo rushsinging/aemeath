@@ -1,9 +1,7 @@
 use sdk::{
     ConfigField, ConfigUpdateResult, ConfigView, MemoryConfigView, ReflectionConfigView,
-    SessionSummary, SkillView, WorkspaceContextView, WorkspaceStackEntryView,
+    SessionSummary, WorkspaceContextView, WorkspaceStackEntryView,
 };
-
-use context::skill::Skill;
 
 pub(crate) fn config_snapshot_to_sdk(
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
@@ -50,16 +48,6 @@ pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> Memor
             interval_turns: config.reflection.interval_turns,
             auto_apply_suggestions: config.reflection.auto_apply_suggestions,
         },
-    }
-}
-
-pub(crate) fn skill_to_sdk(skill: Skill) -> SkillView {
-    SkillView {
-        name: skill.name,
-        aliases: skill.aliases,
-        description: Some(skill.description),
-        content: skill.content,
-        source: Some(skill.source_path.display().to_string()),
     }
 }
 

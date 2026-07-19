@@ -50,12 +50,12 @@ agent/features/context/src/
 │   ├── context_port.rs                  #   ContextPort OHS（Context-owned 入站）
 │   ├── guidance_source_port.rs          #   GuidanceSourcePort（Context-owned 出站 seam）
 │   ├── memory_port.rs                   #   MemoryPort（Memory-owned OHS 消费签名）
-│   └── skill_materialization_port.rs    #   SkillMaterializationPort（Skill-owned OHS 消费签名）
+│   └── skill_query_factory.rs           #   Context-owned query factory（live WorkspaceRead snapshot）
 └── adapters/                           # 技术实现、外部 detail
     ├── session_storage.rs               #   Session 持久化 adapter
     ├── guidance_source.rs               #   GuidanceSourcePort 实现（文件 I/O）
     ├── memory_injection.rs              #   MemoryPort integration adapter（render / placement / dedup）
-    └── skill_loader.rs                  #   SkillMaterializationPort 实现
+    └── skill_prompt_source.rs           #   消费 Skill-owned port；scan / dedup / budget / render
 ```
 
 各层的职责边界：

@@ -69,6 +69,7 @@ pub fn build_agent_runner(
         tool_catalog,
         tool_execution,
         tool_context_binding,
+        skill_materializer: tools::composition::wire_skill_materialization(),
         policy,
     })
 }

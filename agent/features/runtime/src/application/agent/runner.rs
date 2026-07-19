@@ -38,6 +38,9 @@ pub struct CliAgentRunner {
     pub tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     pub tool_execution: Arc<dyn tools::ToolExecutionPort>,
     pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
+    /// Skill materializer shared with sub-run isolated contexts so that
+    /// sub-agents materialize the configured skill set into their prompt.
+    pub skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
     pub policy: Arc<dyn policy::PolicyPort>,
 }
 
