@@ -1,9 +1,0 @@
-# Cargo project-local configuration.
-# target-dir 不再在此固定，改为由 .cargo/set-target.sh 按当前 git 分支动态设置
-# CARGO_TARGET_DIR，避免多个 worktree/分支共享同一份 target 导致相互污染。
-#
-# 注意：direnv（.envrc）对 LLM 的 Bash 工具（非交互 shell）不生效，set-target.sh
-# 当前只覆盖交互终端。LLM 环境 的 CARGO_TARGET_DIR 注入需由 aemeath 宿主在执行
-# Bash 工具时按 worktree 分支设置（见 #1221 配套讨论）。cargo config.toml 的
-# build.target-dir 不支持 ~ / env 展开，无法在此可移植地表达动态路径。
-

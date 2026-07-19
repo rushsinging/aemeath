@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# 清理 worktree 开发模式下的 cargo target 产物堆积（#1226）。
+# 清理 worktree 开发模式下的 Cargo target 产物（#1226）。
 #
-# 三类清理：
-#   1. 各 worktree 内的 target/（cargo 默认产物，可随时重建）
-#   2. 僵尸 worktree（gitdir 失效或分支已合并进 main）
-#   3. ~/.cache/aemeath-target/ 中不活跃分支的按分支缓存
+# 默认策略：
+#   1. 删除各 checkout/worktree 内遗留的 target/
+#   2. prune Git 已失效的 worktree 元数据
+#   3. 删除 ~/.cache/aemeath-target 中不属于活跃 worktree 的新格式缓存
+#      （旧版分支名缓存无法可靠反查来源，只报告为 legacy/unmanaged）
+#   4. 报告共享缓存是否超过预算；绝不为满足预算删除活跃 worktree 缓存
 #
 # 用法：
-#   ./scripts/clean-worktree-targets.sh            # 交互确认后清理
-#   ./scripts/clean-worktree-targets.sh --dry-run  # 只列出待删项，不执行
-#   ./scripts/clean-worktree-targets.sh --yes      # 跳过确认直接清理
-#   ./scripts/clean-worktree-targets.sh --keep-current  # 保留当前 worktree 的 target
-#
-# --keep-current 同时保留 main 与当前所在 worktree 的 target，便于继续开发。
+#   ./scripts/clean-worktree-targets.sh
+#   ./scripts/clean-worktree-targets.sh --dry-run
+#   ./scripts/clean-worktree-targets.sh --yes
+#   ./scripts/clean-worktree-targets.sh --keep-current
+#   ./scripts/clean-worktree-targets.sh --max-size-gb 50
 
 set -euo pipefail
 
@@ -20,9 +21,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly SHARED_CACHE="${HOME}/.cache/aemeath-target"
 
+# shellcheck source=../.cargo/lib.sh
+source "$ROOT/.cargo/lib.sh"
+
 DRY_RUN=0
 ASSUME_YES=0
 KEEP_CURRENT=0
+MAX_SIZE_GB=50
 
 usage() {
   sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -34,88 +39,125 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=1; shift ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     --keep-current) KEEP_CURRENT=1; shift ;;
+    --max-size-gb)
+      [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || { echo "--max-size-gb 需要非负整数" >&2; exit 1; }
+      MAX_SIZE_GB="$2"; shift 2 ;;
     -h|--help) usage 0 ;;
     *) echo "unknown arg: $1" >&2; usage 1 ;;
   esac
 done
 
-# 进入主工作区以执行 git worktree 命令。
 cd "$ROOT"
 
 human_size() {
-  if [[ ! -d "$1" ]]; then return; fi
-  # du -sh 在 macOS/BSD 与 GNU 行为一致 enough。
+  [[ -e "$1" ]] || return 0
   du -sh "$1" 2>/dev/null | awk '{print $1}'
+}
+
+dir_size_kb() {
+  [[ -d "$1" ]] || { echo 0; return; }
+  du -sk "$1" 2>/dev/null | awk '{print $1}'
 }
 
 run_rm() {
   local target="$1"
   if [[ $DRY_RUN -eq 1 ]]; then
     echo "  [dry-run] would remove: $target"
+  elif rm -rf "$target" 2>/dev/null || rm -rf "$target" 2>/dev/null; then
+    echo "  removed: $target"
   else
-    # best-effort：macOS APFS 偶发 "Directory not empty"（并发写/FS 延迟），重试一次后仍失败则跳过。
-    if rm -rf "$target" 2>/dev/null; then
-      echo "  removed: $target"
-    elif rm -rf "$target" 2>/dev/null; then
-      echo "  removed (retry): $target"
-    else
-      echo "  WARN: failed to remove (in use?): $target" >&2
-    fi
+    echo "  WARN: failed to remove (in use?): $target" >&2
   fi
 }
 
-current_worktree=""
-if [[ $KEEP_CURRENT -eq 1 ]]; then
-  current_worktree="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-fi
+mapfile_compat() {
+  local line
+  while IFS= read -r line; do ACTIVE_WORKTREES+=("$line"); done
+}
 
-echo "==> 1/3 清理 worktree 内 target/"
-reclaimed_worktree=0
-while IFS= read -r line; do
-  # git worktree list 输出：<path> <sha> [<branch>]
-  wt_path="$(printf '%s' "$line" | awk '{print $1}')"
-  [[ -n "$wt_path" ]] || continue
+ACTIVE_WORKTREES=()
+mapfile_compat < <(git worktree list --porcelain | awk '/^worktree / {sub(/^worktree /, ""); print}')
+current_worktree="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+
+echo "==> 1/4 清理 checkout/worktree 内遗留 target/"
+for wt_path in "${ACTIVE_WORKTREES[@]}"; do
   target="$wt_path/target"
   [[ -d "$target" ]] || continue
   if [[ $KEEP_CURRENT -eq 1 && "$wt_path" == "$current_worktree" ]]; then
     echo "  keep (current): $target ($(human_size "$target"))"
     continue
   fi
-  echo "  target: $target ($(human_size "$target"))"
+  echo "  legacy target: $target ($(human_size "$target"))"
   run_rm "$target"
-  reclaimed_worktree=1
-done < <(git worktree list --porcelain | awk '/^worktree / {print $2}')
+done
 
 echo
-echo "==> 2/3 清理僵尸 worktree（gitdir 失效）"
-git worktree prune --dry-run 2>/dev/null | while IFS= read -r stale; do
-  echo "  stale: $stale"
-done
+echo "==> 2/4 清理失效 worktree 元数据"
 if [[ $DRY_RUN -eq 1 ]]; then
-  git worktree prune --dry-run >/dev/null 2>&1 || true
+  git worktree prune --dry-run 2>/dev/null || true
 else
   git worktree prune
   echo "  pruned stale worktrees"
 fi
 
 echo
-echo "==> 3/3 清理共享缓存 $SHARED_CACHE 中不活跃分支"
+echo "==> 3/4 清理非活跃 worktree 缓存"
+ACTIVE_KEYS=()
+for wt_path in "${ACTIVE_WORKTREES[@]}"; do
+  ACTIVE_KEYS+=("$(worktree_cache_key "$wt_path")")
+done
+
+is_active_key() {
+  local candidate="$1" key
+  for key in "${ACTIVE_KEYS[@]}"; do
+    [[ "$candidate" == "$key" ]] && return 0
+  done
+  return 1
+}
+
+ORPHANS=()
 if [[ -d "$SHARED_CACHE" ]]; then
-  if [[ $DRY_RUN -eq 1 ]]; then
-    du -sh "$SHARED_CACHE"/* 2>/dev/null | sort -rh || true
-  else
-    if [[ $ASSUME_YES -ne 1 ]]; then
-      echo "  共享缓存内容："
-      du -sh "$SHARED_CACHE"/* 2>/dev/null | sort -rh || true
-      printf "  清空整个共享缓存？(y/N) "
-      read -r answer
-      [[ "$answer" == "y" || "$answer" == "Y" ]] || { echo "  跳过共享缓存清理"; exit 0; }
+  shopt -s nullglob
+  for cache_dir in "$SHARED_CACHE"/*; do
+    [[ -d "$cache_dir" ]] || continue
+    cache_key="$(basename "$cache_dir")"
+    if is_active_key "$cache_key"; then
+      echo "  keep (active): $cache_key ($(human_size "$cache_dir"))"
+    elif [[ "$cache_key" =~ -[0-9a-f]{16}$ ]]; then
+      ORPHANS+=("$cache_dir")
+      echo "  orphan: $cache_key ($(human_size "$cache_dir"))"
+    else
+      echo "  keep (legacy/unmanaged): $cache_key ($(human_size "$cache_dir"))"
     fi
-    rm -rf "${SHARED_CACHE:?}"/*
-    echo "  cleared $SHARED_CACHE"
-  fi
+  done
+  shopt -u nullglob
 else
   echo "  (共享缓存目录不存在，跳过)"
+fi
+
+if [[ ${#ORPHANS[@]} -gt 0 ]]; then
+  if [[ $DRY_RUN -eq 0 && $ASSUME_YES -ne 1 ]]; then
+    printf "  删除以上 %d 个孤儿缓存？(y/N) " "${#ORPHANS[@]}"
+    read -r answer
+    if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
+      echo "  跳过孤儿缓存清理"
+      ORPHANS=()
+    fi
+  fi
+  for cache_dir in "${ORPHANS[@]}"; do run_rm "$cache_dir"; done
+else
+  echo "  no orphan caches"
+fi
+
+echo
+echo "==> 4/4 检查共享缓存预算"
+size_kb="$(dir_size_kb "$SHARED_CACHE")"
+limit_kb=$((MAX_SIZE_GB * 1024 * 1024))
+if (( size_kb > limit_kb )); then
+  echo "  WARN: 共享缓存约 $((size_kb / 1024 / 1024)) GiB，超过预算 ${MAX_SIZE_GB} GiB。" >&2
+  echo "  活跃 worktree 缓存不会自动删除；请移除不用的 worktree 后重新运行清理。" >&2
+else
+  echo "  within budget: $(human_size "$SHARED_CACHE") / ${MAX_SIZE_GB}G"
 fi
 
 if [[ $DRY_RUN -eq 1 ]]; then

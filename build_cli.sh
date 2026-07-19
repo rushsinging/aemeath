@@ -4,11 +4,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# Set per-branch CARGO_TARGET_DIR to keep worktree builds isolated in ~/.cache.
-if [ -f ".cargo/set-target.sh" ]; then
-    source ".cargo/set-target.sh"
-fi
-
 echo "[hook-env] AEMEATH_PROJECT_DIR=${AEMEATH_PROJECT_DIR:-<unset>}"
 echo "[hook-env] CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-<unset>}"
 echo "[hook-env] PWD=$PWD"
@@ -26,9 +21,8 @@ fi
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 BIN_NAME="aemeath"
 
-# Use the target dir resolved from cargo metadata (set by .cargo/set-target.sh
-# or by CARGO_TARGET_DIR from the caller). Resolve it from cargo itself so the
-# install path can never drift from the actual build output.
+# Use the target dir resolved from cargo metadata. Resolve it from Cargo itself
+# so the install path can never drift from the generated worktree config.
 TARGET_DIR="$(cargo metadata --format-version 1 --no-deps \
     | python3 -c 'import sys, json; print(json.load(sys.stdin)["target_directory"])')"
 
