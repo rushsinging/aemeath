@@ -1,5 +1,29 @@
 pub use sdk::RunStepId;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingInteraction {
+    pub request_id: sdk::InteractionRequestId,
+    pub continuation: InteractionContinuation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InteractionContinuation {
+    CompleteToolCall(sdk::ids::ToolCallId),
+    ContinueToolApproval(sdk::ids::ToolCallId),
+    ContinuePlanApproval,
+    ContinueAfterHardPause,
+}
+
+impl InteractionContinuation {
+    pub fn resume_status(&self) -> RunStatus {
+        match self {
+            Self::CompleteToolCall(_) | Self::ContinueAfterHardPause => RunStatus::ExecutingTools,
+            Self::ContinueToolApproval(_) => RunStatus::AwaitingToolApproval,
+            Self::ContinuePlanApproval => RunStatus::PreparingContext,
+        }
+    }
+}
+
 use super::step::{ModelInvocation, RunToolCall, ToolCallStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,6 +227,15 @@ pub enum RunTransitionError {
     IllegalToolCallTransition {
         from: ToolCallStatus,
         to: ToolCallStatus,
+    },
+    #[error("Run 已有待处理交互：{0}")]
+    InteractionAlreadyPending(sdk::InteractionRequestId),
+    #[error("Run 当前没有待处理交互")]
+    NoPendingInteraction,
+    #[error("交互请求不匹配：expected={expected}, received={received}")]
+    InteractionRequestMismatch {
+        expected: sdk::InteractionRequestId,
+        received: sdk::InteractionRequestId,
     },
 }
 

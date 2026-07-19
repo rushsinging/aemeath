@@ -62,7 +62,7 @@
 | 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
 | 19a | `check-config-adapter-boundary.sh` | 配置架构 | Config application 禁止直接 fs/JSON 解析；adapter stub/TODO 禁止回流 |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
-| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` + 同步 `cancel_run(run_id)`；禁止恢复 `ChatInputEvent::Cancel` |
+| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()`、同步 `cancel_run(run_id)`、Runtime-owned `reply_interaction` / `cancel_interaction` 与 Config control-plane；禁止恢复 `ChatInputEvent::Cancel` |
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
@@ -559,7 +559,7 @@
 
 | # | 规则 | 理由 |
 |---|---|---|
-| 21.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只允许 `chat()`、同步 `cancel_run(run_id)` 与 Config control-plane 的 `config_view()` / `update_config()` | Chat data plane 仍走事件流；Config 查询/更新只交换 SDK 纯值 DTO，禁止把 Config service/reader/watch 暴露给交付层 |
+| 21.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只允许 `chat()`、同步 `cancel_run(run_id)`、Runtime-owned `reply_interaction()` / `cancel_interaction()` 与 Config control-plane 的 `config_view()` / `update_config()` | Chat data plane 仍走事件流；interaction 与 Config 命令只交换 SDK 纯值 DTO，禁止把 waiter/channel、Config service/reader/watch 暴露给交付层 |
 
 > 该 allow set 仍是窄 façade；后续 interaction/run-control 扩容按对应 leaf 同步更新并提供故意违规证据。
 

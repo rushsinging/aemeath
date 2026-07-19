@@ -1,4 +1,11 @@
-//! Stream parsing utilities for Anthropic API format
+//! Stream parsing utilities for Anthropic API format.
+//!
+//! Internal decoders emit `InvocationDelta` events through the crate-private
+//! [`InvocationSink`] trait; the [`InvocationEventHandler`] converts those
+//! deltas into a pull-based `InvocationStream` of `InvocationEvent`s. The
+//! decoder-side helper methods (`on_text`, `on_tool_use_start`, …) keep the
+//! per-driver call sites unchanged while routing every emission through the
+//! unified [`InvocationSink::on_delta`] entry point.
 
 use crate::domain::invoke::*;
 use crate::{
@@ -14,20 +21,80 @@ use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
 
-// Re-export LegacyStreamSink from provider module
-pub use crate::ports::LegacyStreamSink;
+/// Provider 内部 decoder 用来发射流式 delta 的内部接收器。
+///
+/// 此 trait **不**对外暴露——它只在 Provider crate 内部被 SSE/NDJSON decoder
+/// 与 `InvocationStream` 构造器共享。Runtime/Context 与测试替身不得依赖。
+/// 旧 sink 迁移桥已物理清零（#907）；本 trait 是 decoder 与
+/// pull-based `InvocationStream` 之间的唯一内部契约。
+pub(crate) trait InvocationSink: Send {
+    /// 推入一个流式增量；Runtime 通过 `InvocationStream` 收到同样的事件。
+    fn on_delta(&mut self, delta: InvocationDelta);
+
+    /// 推入原始 SSE/NDJSON 行——仅供内部 usage 提取使用，不出现在
+    /// `InvocationStream` 上。
+    fn on_raw_line(&mut self, _line: &str) {}
+
+    /// 流式中途诊断消息（idle timeout、retry/retry-able 等）；记录到 provider
+    /// 日志，不作为 Runtime 事件。
+    fn on_diagnostic(&mut self, message: &str) {
+        log::warn!(target: crate::LOG_TARGET, "[provider stream] {}", message);
+    }
+
+    /// 流式 block 完成诊断；记录到 provider 调试日志。
+    fn on_block_complete(&mut self, full_text: &str) {
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[provider stream] block complete ({}B)",
+            full_text.len()
+        );
+    }
+
+    fn emit_text(&mut self, text: &str) {
+        self.on_delta(InvocationDelta::Text(text.to_string()));
+    }
+
+    fn emit_thinking(&mut self, text: &str) {
+        self.on_delta(InvocationDelta::Thinking {
+            thinking: text.to_string(),
+            signature: None,
+        });
+    }
+
+    fn emit_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
+        self.on_delta(InvocationDelta::ToolCallStarted {
+            index,
+            provider_id: provider_id.map(|id| ProviderToolCallId(id.to_string())),
+            name: name.to_string(),
+        });
+    }
+
+    fn emit_tool_arguments_delta(
+        &mut self,
+        index: usize,
+        _name: &str,
+        provider_id: Option<&str>,
+        partial_args: &str,
+    ) {
+        self.on_delta(InvocationDelta::ToolArgumentsDelta {
+            index,
+            provider_id: provider_id.map(|id| ProviderToolCallId(id.to_string())),
+            partial_json: partial_args.to_string(),
+        });
+    }
+}
 
 const INVOCATION_STREAM_CAPACITY: usize = 1;
 
 #[derive(Clone, Copy)]
-pub(crate) enum LegacyStreamDecoder {
+pub(crate) enum InvocationDecoder {
     Anthropic,
     OpenAiChat,
     OpenAiResponses,
     Ollama,
 }
 
-impl LegacyStreamDecoder {
+impl InvocationDecoder {
     fn raw_usage_from_line(self, line: &str) -> Option<RawUsageSnapshot> {
         match self {
             Self::Anthropic => anthropic_raw_usage_from_line(line),
@@ -101,11 +168,11 @@ pub(crate) fn parse_invocation_stream(
     effective_reasoning: ReasoningLevel,
     cancel: CancellationToken,
 ) -> InvocationStream {
-    invocation_stream_from_legacy_decoder(
+    invocation_stream_from_decoder(
         response,
         effective_reasoning,
         cancel,
-        LegacyStreamDecoder::Anthropic,
+        InvocationDecoder::Anthropic,
     )
 }
 
@@ -129,11 +196,11 @@ fn bridge_context_observations(
 #[cfg(not(test))]
 fn observe_bridge_context(_stage: &'static str) {}
 
-pub(crate) fn invocation_stream_from_legacy_decoder(
+pub(crate) fn invocation_stream_from_decoder(
     response: Response,
     effective_reasoning: ReasoningLevel,
     cancel: CancellationToken,
-    decoder: LegacyStreamDecoder,
+    decoder: InvocationDecoder,
 ) -> InvocationStream {
     let (sender, receiver) = std::sync::mpsc::sync_channel(INVOCATION_STREAM_CAPACITY);
     let runtime = tokio::runtime::Handle::current();
@@ -152,10 +219,10 @@ pub(crate) fn invocation_stream_from_legacy_decoder(
                 usage.clone(),
             );
             let result = match decoder {
-                LegacyStreamDecoder::Anthropic => {
+                InvocationDecoder::Anthropic => {
                     parse_stream(response, &mut handler, &producer_cancel).await
                 }
-                LegacyStreamDecoder::OpenAiChat => {
+                InvocationDecoder::OpenAiChat => {
                     crate::adapters::openai_compatible::parse_openai_stream(
                         response,
                         &mut handler,
@@ -163,7 +230,7 @@ pub(crate) fn invocation_stream_from_legacy_decoder(
                     )
                     .await
                 }
-                LegacyStreamDecoder::OpenAiResponses => {
+                InvocationDecoder::OpenAiResponses => {
                     crate::adapters::openai_compatible::parse_responses_stream(
                         response,
                         &mut handler,
@@ -171,7 +238,7 @@ pub(crate) fn invocation_stream_from_legacy_decoder(
                     )
                     .await
                 }
-                LegacyStreamDecoder::Ollama => {
+                InvocationDecoder::Ollama => {
                     crate::adapters::ollama::stream::parse_ollama_stream(
                         response,
                         &mut handler,
@@ -217,7 +284,7 @@ pub(crate) fn invocation_stream_from_legacy_decoder(
 struct InvocationEventHandler {
     sender: std::sync::mpsc::SyncSender<InvocationEvent>,
     cancel: CancellationToken,
-    decoder: LegacyStreamDecoder,
+    decoder: InvocationDecoder,
     usage: std::sync::Arc<std::sync::Mutex<RawUsageSnapshot>>,
 }
 
@@ -225,7 +292,7 @@ impl InvocationEventHandler {
     fn new(
         sender: std::sync::mpsc::SyncSender<InvocationEvent>,
         cancel: CancellationToken,
-        decoder: LegacyStreamDecoder,
+        decoder: InvocationDecoder,
         usage: std::sync::Arc<std::sync::Mutex<RawUsageSnapshot>>,
     ) -> Self {
         Self {
@@ -244,20 +311,10 @@ impl InvocationEventHandler {
     }
 }
 
-impl LegacyStreamSink for InvocationEventHandler {
-    fn on_text(&mut self, text: &str) {
-        self.send_delta(InvocationDelta::Text(text.to_string()));
+impl InvocationSink for InvocationEventHandler {
+    fn on_delta(&mut self, delta: InvocationDelta) {
+        self.send_delta(delta);
     }
-
-    fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
-        self.send_delta(InvocationDelta::ToolCallStarted {
-            index,
-            provider_id: provider_id.map(|id| ProviderToolCallId(id.to_string())),
-            name: name.to_string(),
-        });
-    }
-
-    fn on_error(&mut self, _error: &str) {}
 
     fn on_raw_line(&mut self, line: &str) {
         if let Some(latest) = self.decoder.raw_usage_from_line(line) {
@@ -266,27 +323,6 @@ impl LegacyStreamSink for InvocationEventHandler {
                 .expect("usage lock poisoned")
                 .merge_reported(latest);
         }
-    }
-
-    fn on_thinking(&mut self, text: &str) {
-        self.send_delta(InvocationDelta::Thinking {
-            thinking: text.to_string(),
-            signature: None,
-        });
-    }
-
-    fn on_tool_arguments_delta(
-        &mut self,
-        index: usize,
-        _name: &str,
-        provider_id: Option<&str>,
-        partial_args: &str,
-    ) {
-        self.send_delta(InvocationDelta::ToolArgumentsDelta {
-            index,
-            provider_id: provider_id.map(|id| ProviderToolCallId(id.to_string())),
-            partial_json: partial_args.to_string(),
-        });
     }
 }
 
@@ -347,7 +383,7 @@ fn provider_error_from_legacy(error: crate::LlmError) -> ProviderError {
 /// Parse Anthropic-style SSE stream
 pub async fn parse_stream(
     response: Response,
-    handler: &mut dyn LegacyStreamSink,
+    handler: &mut dyn InvocationSink,
     cancel: &CancellationToken,
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
@@ -392,7 +428,7 @@ pub async fn parse_stream(
                 return Err(crate::LlmError::Cancelled);
             }
             _ = tokio::time::sleep(remaining) => {
-                handler.on_error(&format!("Stream idle timeout: no data for {}s", STREAM_IDLE_TIMEOUT.as_secs()));
+                handler.on_diagnostic(&format!("Stream idle timeout: no data for {}s", STREAM_IDLE_TIMEOUT.as_secs()));
                 return Err(crate::LlmError::Stream(format!(
                     "Stream idle timeout: no data received for {}s", STREAM_IDLE_TIMEOUT.as_secs()
                 )));
@@ -447,14 +483,14 @@ pub async fn parse_stream(
                         current_tool_id = id;
                         current_tool_name = name.clone();
                         current_tool_json.clear();
-                        handler.on_tool_use_start(&name, Some(&current_tool_id), tool_index);
+                        handler.emit_tool_use_start(&name, Some(&current_tool_id), tool_index);
                         tool_index += 1;
                     }
                     ContentBlockPayload::Thinking { thinking } => {
                         current_thinking = thinking.clone();
                         current_signature.clear();
                         if !thinking.is_empty() {
-                            handler.on_thinking(&thinking);
+                            handler.emit_thinking(&thinking);
                         }
                     }
                     ContentBlockPayload::Unknown => {
@@ -465,13 +501,13 @@ pub async fn parse_stream(
             StreamEvent::ContentBlockDelta { delta, .. } => {
                 match delta {
                     DeltaPayload::TextDelta { text } => {
-                        handler.on_text(&text);
+                        handler.emit_text(&text);
                         current_text.push_str(&text);
                     }
                     DeltaPayload::InputJsonDelta { partial_json } => {
                         current_tool_json.push_str(&partial_json);
                         if !current_tool_name.is_empty() {
-                            handler.on_tool_arguments_delta(
+                            handler.emit_tool_arguments_delta(
                                 tool_index.saturating_sub(1),
                                 &current_tool_name,
                                 Some(&current_tool_id),
@@ -481,7 +517,7 @@ pub async fn parse_stream(
                     }
                     DeltaPayload::ThinkingDelta { thinking } => {
                         current_thinking.push_str(&thinking);
-                        handler.on_thinking(&thinking);
+                        handler.emit_thinking(&thinking);
                     }
                     DeltaPayload::SignatureDelta { signature } => {
                         current_signature.push_str(&signature);
@@ -573,7 +609,7 @@ pub async fn parse_stream(
                 }
             }
             StreamEvent::Error { error } => {
-                handler.on_error(&error.message);
+                handler.on_diagnostic(&error.message);
                 return Err(crate::LlmError::Api {
                     error_type: error.error_type,
                     message: error.message,
@@ -591,16 +627,13 @@ pub async fn parse_stream(
             content: content_blocks,
             metadata: None,
         },
-        usage,
         stop_reason,
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        bridge_context_observations, invocation_stream_from_legacy_decoder, LegacyStreamDecoder,
-    };
+    use super::{bridge_context_observations, invocation_stream_from_decoder, InvocationDecoder};
     use crate::domain::invoke::StreamEvent;
     use crate::ReasoningLevel;
     use futures_util::StreamExt;
@@ -646,11 +679,11 @@ mod tests {
                 let response = reqwest::get(format!("http://{address}/{request_id}"))
                     .await
                     .expect("fixture response");
-                let mut stream = invocation_stream_from_legacy_decoder(
+                let mut stream = invocation_stream_from_decoder(
                     response,
                     ReasoningLevel::Off,
                     CancellationToken::new(),
-                    LegacyStreamDecoder::Anthropic,
+                    InvocationDecoder::Anthropic,
                 );
                 while stream.next().await.is_some() {}
                 context

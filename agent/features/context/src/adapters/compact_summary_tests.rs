@@ -220,3 +220,75 @@ async fn second_compact_fallback_preserves_previous_summary() {
         "second compact must retain the previous active summary"
     );
 }
+
+/// Mock `CompactGenerator` that returns a canned response regardless of input.
+struct MockGenerator {
+    text: String,
+}
+
+#[async_trait::async_trait]
+impl CompactGenerator for MockGenerator {
+    async fn generate(
+        &self,
+        _request: Vec<Message>,
+        _cancel: &CancellationToken,
+    ) -> Result<String, String> {
+        Ok(format!("<summary>{}</summary>", self.text))
+    }
+}
+
+#[tokio::test]
+async fn compact_with_generator_uses_llm_summary() {
+    let messages = (0..10)
+        .map(|index| Message::user(format!("message-{index}")))
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+
+    let generator = MockGenerator {
+        text: "LLM summary of early conversation".to_string(),
+    };
+
+    let result =
+        compact_messages_with_llm(&messages, None, 100_000, Some(&generator), None, &cancel)
+            .await
+            .expect("compact should run");
+
+    // The summary should come from the generator, not the fallback text.
+    assert_eq!(result.summary, "LLM summary of early conversation");
+    assert!(!result.summary.contains("deterministic fallback"));
+}
+
+#[tokio::test]
+async fn compact_falls_back_when_generator_errors() {
+    let messages = (0..10)
+        .map(|index| Message::user(format!("message-{index}")))
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+
+    struct FailingGenerator;
+    #[async_trait::async_trait]
+    impl CompactGenerator for FailingGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, String> {
+            Err("simulated LLM failure".to_string())
+        }
+    }
+
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&FailingGenerator),
+        None,
+        &cancel,
+    )
+    .await
+    .expect("compact should still run with fallback");
+
+    // Fallback summary should contain the deterministic-fallback marker.
+    assert!(result.summary.contains("## User Requests"));
+    assert!(result.summary.contains("deterministic fallback"));
+}

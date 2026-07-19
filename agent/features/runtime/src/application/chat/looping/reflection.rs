@@ -6,9 +6,10 @@ use crate::application::reflection::{
     run_complete_reflection, ReflectionRunMode, ReflectionTaskAdapter, ReflectionTaskRequest,
     ReflectionTaskSubmitOutcome, ReflectionTaskTrigger,
 };
+use crate::ports::ProviderBinding;
 use memory::api::{MemoryPort, ReflectionEngine, ReflectionHistoryStore, ReflectionPromptPort};
 
-use provider::StopReason;
+use provider::ProviderStopReason;
 
 /// Legacy/manual PL runner retained for internal compatibility. Automatic
 /// triggers use the non-blocking submit functions below.
@@ -17,7 +18,7 @@ pub async fn run_reflection(
     config: &share::config::MemoryConfig,
     turn_count: usize,
     messages: &[share::message::Message],
-    client: &provider::LlmClient,
+    binding: &ProviderBinding,
     system_prompt_text: &str,
     lang: &str,
     memory: &dyn MemoryPort,
@@ -27,7 +28,10 @@ pub async fn run_reflection(
         ReflectionRunMode::Interval { turn_count },
         config,
         messages,
-        client,
+        binding.provider.as_ref(),
+        &binding.model,
+        binding.max_tokens,
+        binding.requested_reasoning,
         system_prompt_text,
         lang,
         memory,
@@ -48,7 +52,7 @@ pub(crate) fn submit_interval_reflection(
     config: &share::config::MemoryConfig,
     turn_count: usize,
     messages: &[share::message::Message],
-    client: &Arc<provider::LlmClient>,
+    binding: &Arc<ProviderBinding>,
     system_prompt_text: &str,
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
@@ -59,7 +63,7 @@ pub(crate) fn submit_interval_reflection(
         ReflectionTaskTrigger::Interval { turn_count },
         config,
         messages.to_vec(),
-        client,
+        binding,
         system_prompt_text,
         lang,
         memory,
@@ -73,7 +77,7 @@ fn submit(
     trigger: ReflectionTaskTrigger,
     config: &share::config::MemoryConfig,
     messages: Vec<share::message::Message>,
-    client: &Arc<provider::LlmClient>,
+    binding: &Arc<ProviderBinding>,
     system_prompt_text: &str,
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
@@ -82,7 +86,10 @@ fn submit(
     adapter.submit_complete(
         ReflectionTaskRequest::new(trigger, messages),
         config.clone(),
-        Arc::clone(client),
+        Arc::clone(&binding.provider),
+        binding.model.clone(),
+        binding.max_tokens,
+        binding.requested_reasoning,
         system_prompt_text.to_owned(),
         lang.to_owned(),
         Arc::clone(memory),
@@ -95,7 +102,7 @@ pub(crate) fn should_run_turn_reflection(
     config: &share::config::MemoryConfig,
     turn_count: usize,
     has_tool_calls: bool,
-    stop_reason: &StopReason,
+    stop_reason: &ProviderStopReason,
     before_finish_gate_continue: bool,
 ) -> bool {
     if before_finish_gate_continue
@@ -105,7 +112,7 @@ pub(crate) fn should_run_turn_reflection(
     {
         return false;
     }
-    if has_tool_calls && stop_reason != &StopReason::EndTurn {
+    if has_tool_calls && stop_reason != &ProviderStopReason::EndTurn {
         return false;
     }
     turn_count.is_multiple_of(config.reflection.interval_turns)

@@ -1,5 +1,6 @@
 //! 流式响应解析：解析 Ollama 原生 `/api/chat` NDJSON 流。
 
+use crate::adapters::stream::InvocationSink;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
 use std::io;
@@ -10,7 +11,6 @@ use tokio_util::sync::CancellationToken;
 use super::STREAM_IDLE_TIMEOUT;
 use crate::adapters::openai_compatible::reasoning_normalizer::ReasoningDeltaNormalizer;
 use crate::domain::invoke::StreamResponse;
-use crate::ports::LegacyStreamSink;
 
 /// Parse ollama's native `/api/chat` NDJSON stream.
 ///
@@ -19,7 +19,7 @@ use crate::ports::LegacyStreamSink;
 /// Tool calls typically arrive in the final `done:true` chunk for qwen3-style models.
 pub(crate) async fn parse_ollama_stream(
     response: reqwest::Response,
-    handler: &mut dyn LegacyStreamSink,
+    handler: &mut dyn InvocationSink,
     cancel: &CancellationToken,
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
@@ -47,11 +47,11 @@ pub(crate) async fn parse_ollama_stream(
                 return Err(crate::LlmError::Cancelled);
             }
             _ = tokio::time::sleep(STREAM_IDLE_TIMEOUT) => {
-                handler.on_error(&format!("Ollama stream idle timeout: no data for {}s", STREAM_IDLE_TIMEOUT.as_secs()));
-                return Err(crate::LlmError::Stream(format!(
-                    "Ollama stream idle timeout: no data for {}s — model may have stalled", STREAM_IDLE_TIMEOUT.as_secs()
-                )));
-            }
+                              handler.on_diagnostic(&format!("Ollama stream idle timeout: no data for {}s", STREAM_IDLE_TIMEOUT.as_secs()));
+                              return Err(crate::LlmError::Stream(format!(
+                                  "Ollama stream idle timeout: no data for {}s — model may have stalled", STREAM_IDLE_TIMEOUT.as_secs()
+                              )));
+                          }
             result = lines.next_line() => {
                 match result.map_err(|e| crate::LlmError::Stream(e.to_string()))? {
                     Some(line) => line,
@@ -77,7 +77,7 @@ pub(crate) async fn parse_ollama_stream(
 
         // Stream-level error (ollama surfaces errors with an "error" key)
         if let Some(error) = chunk.get("error").and_then(|e| e.as_str()) {
-            handler.on_error(error);
+            handler.on_diagnostic(error);
             return Err(crate::LlmError::Api {
                 error_type: "ollama_error".to_string(),
                 message: error.to_string(),
@@ -90,7 +90,7 @@ pub(crate) async fn parse_ollama_stream(
                 if !thinking.is_empty() {
                     let result = reasoning_normalizer.process(thinking);
                     if !result.delta.is_empty() {
-                        handler.on_thinking(result.delta);
+                        handler.emit_thinking(result.delta);
                     }
                     log::trace!(target: crate::LOG_TARGET,
                         "[ollama stream] reasoning dedup_action={:?} \
@@ -106,7 +106,7 @@ pub(crate) async fn parse_ollama_stream(
             // Content delta
             if let Some(content) = message.get("content").and_then(|v| v.as_str()) {
                 if !content.is_empty() {
-                    handler.on_text(content);
+                    handler.emit_text(content);
                     current_text.push_str(content);
                 }
             }
@@ -185,7 +185,7 @@ pub(crate) async fn parse_ollama_stream(
     }
 
     for (idx, (id, name, input)) in final_tool_calls.into_iter().enumerate() {
-        handler.on_tool_use_start(&name, Some(&id), idx);
+        handler.emit_tool_use_start(&name, Some(&id), idx);
         content_blocks.push(ContentBlock::ToolUse { id, name, input });
     }
 
@@ -204,7 +204,6 @@ pub(crate) async fn parse_ollama_stream(
             content: content_blocks,
             metadata: None,
         },
-        usage,
         stop_reason,
     })
 }

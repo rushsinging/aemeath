@@ -32,6 +32,13 @@ if ! grep -q 'scope: &InvocationScope' agent/features/provider/src/ports.rs; the
   fail=1
 fi
 
+# #907: Provider 内部保留 LlmProvider trait 作为 driver 实现契约；
+#       对外只经 provider::composition 暴露构造面、经 Published Language 暴露调用语义。
+if ! grep -qE 'pub trait LlmProvider' agent/features/provider/src/ports.rs; then
+  echo 'agent/features/provider/src/ports.rs: Provider must keep internal LlmProvider trait' >&2
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   exit 2
 fi

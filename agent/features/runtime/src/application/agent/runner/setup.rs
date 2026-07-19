@@ -1,9 +1,11 @@
 use super::loop_run::SubAgentRun;
 use super::CliAgentRunner;
 use crate::application::agent::Agent;
+use crate::ports::{ModelId, ProviderBinding, ProviderBuildSpec};
 use async_trait::async_trait;
-use provider::SystemBlock;
+use provider::RequestSystemBlock;
 use share::message::Message;
+use std::sync::Arc;
 use tools::{AgentProgressEvent, AgentProgressKind};
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
@@ -28,47 +30,43 @@ impl AgentRunner for CliAgentRunner {
         let role = self.resolve_role(model_spec);
         let resolved_spec = self.resolve_model_spec(model_spec);
 
-        // Clients only own immutable transport/defaults. Every sub Run receives an independent scope.
-        let client = match (&self.pool, &resolved_spec) {
-            (Some(pool), Some(spec)) => match pool.get_isolated_client(spec) {
-                Ok(client) => std::sync::Arc::new(client),
-                Err(error) => {
-                    return tools::AgentRunTerminal::Failed { error };
-                }
-            },
-            _ => self.client.clone(),
+        // Resolve the model config from ModelsConfig to build a ProviderBuildSpec.
+        // Unknown models fail closed — no silent fallback to a default client.
+        let model_lookup = resolved_spec
+            .as_deref()
+            .or_else(|| {
+                let default = self.models_config.default.as_str();
+                (!default.is_empty()).then_some(default)
+            })
+            .and_then(|spec| self.models_config.find_model(spec));
+
+        let (source_key, source_config, model_entry) = match model_lookup {
+            Some(found) => found,
+            None => {
+                return tools::AgentRunTerminal::Failed {
+                    error: format!(
+                        "unknown model for sub-agent (spec={:?}); no matching entry in models config",
+                        resolved_spec
+                    ),
+                };
+            }
         };
 
         let max_tokens_override = Self::role_max_tokens_override(role);
 
         // Determine reasoning for this sub-agent: role config > model config > default
         let role_reasoning = role.and_then(|r| r.reasoning);
-        let model_entry = resolved_spec.as_deref().and_then(|spec| {
-            // Try find_model to get the ModelEntryConfig for reasoning lookup
-            let query = if spec.contains('/') {
-                spec.to_string()
-            } else {
-                format!("{}/{}", self.client.provider_name(), spec)
-            };
-            self.models_config.find_model(&query)
-        });
-        let context_size = model_entry
-            .as_ref()
-            .map(|(_, _, entry)| entry.context_window)
-            .filter(|size| *size > 0)
-            .unwrap_or(200_000);
-        let model_reasoning = model_entry
-            .as_ref()
-            .and_then(|(_, _, entry)| entry.reasoning);
+        let model_reasoning = model_entry.reasoning;
         // 模型配置的固定推理档位（"off".."max"），优先级高于 reasoning bool。
         let model_effort = model_entry
-            .as_ref()
-            .and_then(|(_, _, entry)| entry.reasoning_effort.as_deref())
+            .reasoning_effort
+            .as_deref()
             .and_then(provider::ReasoningLevel::parse);
         let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
-        // effort 存在时取显式档位（clamp 到 provider 上限），否则沿用 bool→Medium/Off。
+        // The provider adapter clamps the requested level to the model capability
+        // during invoke, so we pass the unclamped level here.
         let level = match model_effort {
-            Some(effort) => effort.clamped_to(client.max_reasoning_level()),
+            Some(effort) => effort,
             None => {
                 if reasoning {
                     provider::ReasoningLevel::Medium
@@ -77,18 +75,46 @@ impl AgentRunner for CliAgentRunner {
                 }
             }
         };
-        let invocation_scope = match client.invocation_scope(
-            client.default_scope().model(),
-            max_tokens_override,
-            level,
-        ) {
-            Ok(scope) => scope,
+
+        let context_size = if model_entry.context_window > 0 {
+            model_entry.context_window
+        } else {
+            200_000
+        };
+
+        // Construct ProviderBuildSpec from the resolved model config and build a binding.
+        let max_tokens = max_tokens_override
+            .filter(|tokens| *tokens > 0)
+            .or_else(|| (model_entry.max_tokens > 0).then_some(model_entry.max_tokens))
+            .unwrap_or(8192);
+        let build_spec = ProviderBuildSpec {
+            driver: source_config.driver.clone(),
+            source_key: source_key.clone(),
+            api_style: model_entry.api_style.clone(),
+            api_key: source_config.api_key.clone(),
+            base_url: if source_config.base_url.is_empty() {
+                None
+            } else {
+                Some(source_config.base_url.clone())
+            },
+            model: ModelId {
+                provider: source_key.clone(),
+                model: model_entry.id.clone(),
+            },
+            max_tokens,
+            requested_reasoning: level,
+            context_window: (model_entry.context_window > 0).then_some(model_entry.context_window),
+            timeout: std::time::Duration::from_secs(self.api_timeout_secs),
+        };
+        let binding: Arc<ProviderBinding> = match self.factory.build(build_spec) {
+            Ok(binding) => Arc::new(binding),
             Err(error) => {
                 return tools::AgentRunTerminal::Failed {
                     error: error.to_string(),
                 };
             }
         };
+        let max_tokens = binding.max_tokens;
         let session_id = identity
             .parent_run_id()
             .map(ToString::to_string)
@@ -105,18 +131,18 @@ impl AgentRunner for CliAgentRunner {
         let role_name = model_spec.map(str::to_string).unwrap_or_else(|| {
             resolved_spec
                 .clone()
-                .unwrap_or_else(|| client.model_name().to_string())
+                .unwrap_or_else(|| binding.model.model.clone())
         });
         let model_name = resolved_spec
             .clone()
-            .unwrap_or_else(|| client.model_name().to_string());
+            .unwrap_or_else(|| binding.model.model.clone());
         let sub_run_id = sdk::RunId::new_v7();
         let sub_run_context = super::loop_run::sub_run_log_context(
             &logging::capture(),
             &session_id,
             sub_run_id.as_ref(),
             &model_name,
-            client.provider_name(),
+            &binding.model.provider,
             &role_name,
         );
 
@@ -198,8 +224,9 @@ impl AgentRunner for CliAgentRunner {
         let sub_schemas = sub_catalog.model_schemas();
         let messages = vec![Message::user(prompt)];
         // For sub-agents, use the system prompt as a single cached block
-        let system_blocks = vec![SystemBlock::cached(system.clone())];
-        let client_for_log = client.clone();
+        let system_blocks = vec![RequestSystemBlock::Cacheable(system.clone())];
+        let provider_name_for_log = binding.model.provider.clone();
+        let model_name_for_log_closure = model_name_for_log.clone();
         let role_name_for_request_log = role_name_for_log.clone();
         let model_name_for_request_log = model_name_for_log.clone();
         let schema_count = sub_schemas.len();
@@ -220,8 +247,8 @@ impl AgentRunner for CliAgentRunner {
                 "[subagent_llm_request] session={}, turn={}, provider={}, model={}, role={}, model_spec={}, messages={}, tools={}, latest_roles={}",
                 session_id_for_log,
                 turn,
-                client_for_log.provider_name(),
-                client_for_log.model_name(),
+                provider_name_for_log,
+                model_name_for_log_closure,
                 role_name_for_request_log,
                 model_name_for_request_log,
                 messages.len(),
@@ -293,8 +320,9 @@ impl AgentRunner for CliAgentRunner {
             prompt,
             system,
             progress_sink,
-            client,
-            invocation_scope,
+            binding,
+            max_tokens,
+            level,
             hook_runner,
             sub_schemas,
             messages,
@@ -336,7 +364,7 @@ impl AgentRunner for CliAgentRunner {
         system: &str,
         cancellation: std::sync::Arc<dyn tools::CancellationSignal>,
     ) -> String {
-        use futures::StreamExt;
+        use crate::ports::{InvocationOptions, InvocationRequest};
 
         let runtime_cancellation = tokio_util::sync::CancellationToken::new();
         let _signal_propagation = super::loop_run::CancellationPropagationGuard::new(
@@ -344,23 +372,64 @@ impl AgentRunner for CliAgentRunner {
             runtime_cancellation.clone(),
         );
 
-        let system_blocks = vec![SystemBlock::cached(system.to_string())];
-        let messages = vec![Message::user(prompt)];
+        // Resolve the default model for the simple completion path.
+        let default_spec = {
+            let d = self.models_config.default.as_str();
+            (!d.is_empty()).then_some(d)
+        };
+        let model_lookup = default_spec.and_then(|spec| self.models_config.find_model(spec));
+        let (source_key, source_config, model_entry) = match model_lookup {
+            Some(found) => found,
+            None => return "LLM error: no default model configured".to_string(),
+        };
+        let max_tokens = if model_entry.max_tokens > 0 {
+            model_entry.max_tokens
+        } else {
+            8192
+        };
+        let build_spec = ProviderBuildSpec {
+            driver: source_config.driver.clone(),
+            source_key: source_key.clone(),
+            api_style: model_entry.api_style.clone(),
+            api_key: source_config.api_key.clone(),
+            base_url: if source_config.base_url.is_empty() {
+                None
+            } else {
+                Some(source_config.base_url.clone())
+            },
+            model: ModelId {
+                provider: source_key.clone(),
+                model: model_entry.id.clone(),
+            },
+            max_tokens,
+            requested_reasoning: provider::ReasoningLevel::Off,
+            context_window: (model_entry.context_window > 0).then_some(model_entry.context_window),
+            timeout: std::time::Duration::from_secs(self.api_timeout_secs),
+        };
+        let binding = match self.factory.build(build_spec) {
+            Ok(binding) => binding,
+            Err(error) => return format!("LLM error: {error}"),
+        };
 
-        let mut stream = match self
-            .client
-            .invocation_stream(
-                self.client.default_scope(),
-                &system_blocks,
-                &messages,
-                &[],
-                &runtime_cancellation,
-            )
+        let system_blocks = vec![RequestSystemBlock::Cacheable(system.to_string())];
+        let messages = vec![Message::user(prompt)];
+        let mut request = InvocationRequest::new(
+            binding.model.clone(),
+            messages,
+            InvocationOptions::new(binding.max_tokens, binding.requested_reasoning),
+        );
+        request.system = system_blocks;
+        request.cancellation = runtime_cancellation.clone();
+
+        let mut stream = match binding
+            .provider
+            .invoke(request, &runtime_cancellation)
             .await
         {
             Ok(stream) => stream,
             Err(error) => return format!("LLM error: {error}"),
         };
+        use futures::StreamExt;
         while let Some(event) = stream.next().await {
             match event {
                 provider::InvocationEvent::Completed(completion) => {

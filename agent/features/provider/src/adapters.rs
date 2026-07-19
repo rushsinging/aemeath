@@ -7,9 +7,7 @@ pub(crate) mod http_attempt;
 pub(crate) mod json_recovery;
 mod ollama;
 pub(crate) mod openai_compatible;
-pub(crate) mod pool;
 pub(crate) mod stream;
-pub(crate) mod transport;
 
 pub(crate) use anthropic::AnthropicProvider;
 pub(crate) use ollama::OllamaProvider;

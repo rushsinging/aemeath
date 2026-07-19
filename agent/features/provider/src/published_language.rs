@@ -492,6 +492,22 @@ pub struct ModelToolSchema {
     pub input_schema: serde_json::Value,
 }
 
+impl ModelToolSchema {
+    /// 渲染为完整的 tool 定义 JSON 对象
+    /// `{ "name", "description", "input_schema" }`。
+    ///
+    /// provider-internal helper：Composition adapter 和各 driver 共用它，
+    /// 保证 tool wire shape 一致，且避免在 Composition（不直接依赖 serde_json）
+    /// 里手写 JSON 拼装。
+    pub fn to_tool_definition(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.input_schema,
+        })
+    }
+}
+
 // ─── InvocationOptions ──────────────────────────────────
 
 /// 同一进程内检测 capability 变化的指纹；NEVER 持久化或跨构建比较。
@@ -578,6 +594,35 @@ impl InvocationOptions {
     }
 }
 
+// ─── System Blocks (provider-neutral) ──────────────────
+
+/// Provider-neutral system prompt 块。
+///
+/// Runtime 构造的 system prompt 内容，区分可缓存（静态、稳定）与动态文本。
+/// `Cacheable` 表示该块适合 prompt caching；是否真正命中缓存由 provider 决定。
+/// driver/adapter 负责转换到 vendor wire DTO（如 Anthropic 的 `SystemBlock`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestSystemBlock {
+    /// 动态文本块，不参与 prompt caching。
+    Text(String),
+    /// 静态文本块，建议 provider 应用 prompt caching（如 Anthropic ephemeral）。
+    Cacheable(String),
+}
+
+impl RequestSystemBlock {
+    /// 块的文本内容。
+    pub fn text(&self) -> &str {
+        match self {
+            RequestSystemBlock::Text(t) | RequestSystemBlock::Cacheable(t) => t,
+        }
+    }
+
+    /// 是否建议 provider 缓存。
+    pub fn is_cacheable(&self) -> bool {
+        matches!(self, RequestSystemBlock::Cacheable(_))
+    }
+}
+
 // ─── InvocationRequest ──────────────────────────────────
 
 /// 一次 LLM 调用请求。
@@ -587,8 +632,15 @@ impl InvocationOptions {
 pub struct InvocationRequest {
     /// 目标模型。
     pub model: ModelId,
+    /// Runtime-owned cancellation token for this invocation.
+    ///
+    /// The Provider adapter uses the same token for stream establishment and the
+    /// returned producer lifetime, so cancellation remains live after `invoke` returns.
+    pub cancellation: tokio_util::sync::CancellationToken,
     /// 本轮上下文窗口消息。
     pub messages: Vec<Message>,
+    /// 本轮 system prompt 块（provider-neutral）。
+    pub system: Vec<RequestSystemBlock>,
     /// 模型可见 tool schema 列表。
     pub tools: Vec<ModelToolSchema>,
     /// 调用选项。
@@ -596,11 +648,13 @@ pub struct InvocationRequest {
 }
 
 impl InvocationRequest {
-    /// 构造一个最小请求（无 tools）。
+    /// 构造一个最小请求（无 system、无 tools）。
     pub fn new(model: ModelId, messages: Vec<Message>, options: InvocationOptions) -> Self {
         Self {
             model,
+            cancellation: tokio_util::sync::CancellationToken::new(),
             messages,
+            system: Vec::new(),
             tools: Vec::new(),
             options,
         }
@@ -826,6 +880,30 @@ mod tests {
             InvocationOptions::new(8192, ReasoningLevel::Off),
         );
         assert!(req.tools.is_empty());
+    }
+
+    #[test]
+    fn invocation_request_new_has_empty_system() {
+        let req = InvocationRequest::new(
+            ModelId {
+                provider: "test".to_string(),
+                model: "m".to_string(),
+            },
+            Vec::new(),
+            InvocationOptions::new(8192, ReasoningLevel::Off),
+        );
+        assert!(req.system.is_empty());
+    }
+
+    #[test]
+    fn request_system_block_exposes_text_and_cacheable_flag() {
+        let dynamic = RequestSystemBlock::Text("dynamic".to_string());
+        assert_eq!(dynamic.text(), "dynamic");
+        assert!(!dynamic.is_cacheable());
+
+        let cached = RequestSystemBlock::Cacheable("static".to_string());
+        assert_eq!(cached.text(), "static");
+        assert!(cached.is_cacheable());
     }
 
     #[test]

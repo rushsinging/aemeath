@@ -32,12 +32,6 @@ pub trait ChatRuntimePort {
     ) -> Result<TuiChatOutcome, String>;
 }
 
-/// Provider 信息端口——core/ 层通过此 trait 查询当前 LLM client 的元数据。
-pub trait ProviderInfoPort: Send + Sync {
-    fn provider_name(&self) -> &str;
-    fn model_name(&self) -> &str;
-}
-
 /// Hook 通知端口——core/ 层通过此 trait 发送 hook 通知，不直接依赖 hook::HookRunner。
 #[async_trait]
 pub trait HookNotificationPort: Send + Sync {

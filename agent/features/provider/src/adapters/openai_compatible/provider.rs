@@ -10,7 +10,6 @@ pub struct OpenAICompatibleProvider {
     pub(super) model: String,
     pub(super) user_agent: String,
     pub(super) http: reqwest::Client,
-    pub(super) max_retries: u32,
     pub(super) reasoning_config: Option<ReasoningConfig>,
     pub(super) driver: Box<dyn ChatApiDriver + Send + Sync>,
 }
@@ -56,7 +55,6 @@ impl OpenAICompatibleProvider {
             http: build_streaming_http_client_builder(timeout_secs)
                 .build()
                 .expect("failed to create HTTP client"),
-            max_retries: 10,
             reasoning_config,
             driver,
         }
