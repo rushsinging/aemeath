@@ -25,7 +25,16 @@ fn ask_user_parses_validated_input_directly_into_pure_suspension() {
         Some("second")
     );
     assert!(spec.questions[0].allow_multi);
+    assert!(!spec.questions[0].allow_free_input);
     assert_eq!(spec.questions[0].default.as_deref(), Some("A"));
+}
+
+#[test]
+fn ask_user_output_schema_matches_runtime_answer_payload() {
+    let schema = AskUserQuestionTool.data_schema();
+    assert_eq!(schema["properties"]["text"]["type"], "string");
+    assert_eq!(schema["required"], serde_json::json!(["text"]));
+    assert!(schema["properties"].get("question_type").is_none());
 }
 
 #[test]

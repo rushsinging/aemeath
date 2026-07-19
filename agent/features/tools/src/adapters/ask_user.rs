@@ -82,6 +82,7 @@ fn parse_interaction(input: &Value) -> Result<UserInteractionSpec, String> {
         args.question,
         options,
         args.multi_select.unwrap_or(false),
+        args.allow_free_input.unwrap_or(true),
         args.default,
     )]))
 }

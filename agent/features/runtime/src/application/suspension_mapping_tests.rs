@@ -10,6 +10,7 @@ fn maps_user_interaction_fields_losslessly_in_stable_order() {
                 tools::UserOption::new("beta", Some("second choice".to_string())),
             ],
             true,
+            false,
             Some("beta".to_string()),
         ),
         tools::UserQuestion::new(
@@ -19,6 +20,7 @@ fn maps_user_interaction_fields_losslessly_in_stable_order() {
                 Some("third choice".to_string()),
             )],
             false,
+            true,
             None,
         ),
     ]));
@@ -36,6 +38,7 @@ fn maps_user_interaction_fields_losslessly_in_stable_order() {
         Some("second choice")
     );
     assert!(items[0].multi_select);
+    assert!(!items[0].allow_free_input);
     assert_eq!(items[0].default.as_deref(), Some("beta"));
 
     assert_eq!(items[1].question, "Second");
@@ -45,5 +48,6 @@ fn maps_user_interaction_fields_losslessly_in_stable_order() {
         Some("third choice")
     );
     assert!(!items[1].multi_select);
+    assert!(items[1].allow_free_input);
     assert_eq!(items[1].default, None);
 }

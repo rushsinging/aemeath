@@ -67,14 +67,25 @@ fn adapter_factory() -> FactoryFuture {
             ToolProfile::baseline(ToolCapabilities::all()),
         );
         profiles.insert(
+            ToolProfileName::new("read-only"),
+            ToolProfile::derive_restricted(
+                profiles.get(&ToolProfileName::new("full")).unwrap(),
+                ToolCapabilities::ReadWorkspace,
+            )
+            .unwrap(),
+        );
+        profiles.insert(
             ToolProfileName::new("none"),
             ToolProfile::baseline(ToolCapabilities::empty()),
         );
         let backing = ToolBacking::try_new(registry.clone(), scopes, profiles).unwrap();
         let contexts = Arc::new(BoundExecutionContexts::new());
-        let context = context();
+        let context = context_for_profile("full");
         let scope = context.scope().clone();
         contexts.bind(context).expect("bind context");
+        contexts
+            .bind(context_for_run_and_profile("restricted-run", "read-only"))
+            .expect("bind restricted context");
         ContractPorts {
             catalog: Arc::new(CatalogAdapter::new(backing.clone())),
             execution: Arc::new(ExecutionAdapter::new(backing.clone(), contexts.clone())),
@@ -112,6 +123,48 @@ async fn run_contract(factory: ContractFactory) {
         .snapshot(&scope_name, &none)
         .unwrap()
         .is_empty());
+    let read_only = ToolProfileName::new("read-only");
+    let restricted = ports.catalog.snapshot(&scope_name, &read_only).unwrap();
+    assert_eq!(
+        restricted
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["counting"]
+    );
+    assert!(ports
+        .execution
+        .execute(
+            invocation_for_run_and_profile(
+                &ports.scope,
+                "restricted-run",
+                "Counting",
+                json!({"value":"restricted"}),
+                "read-only",
+            ),
+            &ManualCancellation::default(),
+        )
+        .await
+        .is_success());
+    let restricted_suspend = ports
+        .execution
+        .execute(
+            invocation_for_run_and_profile(
+                &ports.scope,
+                "restricted-run",
+                "Suspend",
+                json!({}),
+                "read-only",
+            ),
+            &ManualCancellation::default(),
+        )
+        .await;
+    assert!(matches!(
+        restricted_suspend,
+        ExecutionOutcome::Failure(ref failure)
+            if failure.kind == crate::domain::published_language::ToolErrorKind::Unauthorized
+    ));
 
     let cancellation = ManualCancellation::default();
     let outcome = ports
@@ -122,7 +175,7 @@ async fn run_contract(factory: ContractFactory) {
         )
         .await;
     assert_unavailable(outcome);
-    assert_eq!(ports.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(ports.calls.load(Ordering::SeqCst), 1);
 
     // MCP Ready conservative seam: registry-only dynamic registration cannot
     // grant scope membership or profile authorization.
@@ -160,7 +213,7 @@ async fn run_contract(factory: ContractFactory) {
     assert!(
         matches!(outcome, ExecutionOutcome::Failure(ref f) if f.kind == crate::domain::published_language::ToolErrorKind::Unauthorized)
     );
-    assert_eq!(ports.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(ports.calls.load(Ordering::SeqCst), 1);
 
     let outcome = ports
         .execution
@@ -172,7 +225,7 @@ async fn run_contract(factory: ContractFactory) {
     assert!(
         matches!(outcome, ExecutionOutcome::Failure(ref f) if f.kind == crate::domain::published_language::ToolErrorKind::InvalidInput)
     );
-    assert_eq!(ports.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(ports.calls.load(Ordering::SeqCst), 1);
 
     assert!(ports
         .execution
@@ -182,7 +235,7 @@ async fn run_contract(factory: ContractFactory) {
         )
         .await
         .is_success());
-    assert_eq!(ports.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(ports.calls.load(Ordering::SeqCst), 2);
 
     let suspended = ports
         .execution
@@ -214,7 +267,7 @@ async fn run_contract(factory: ContractFactory) {
         .unwrap()
         .find(&ToolName::new("Counting"))
         .is_none());
-    assert_eq!(ports.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(ports.calls.load(Ordering::SeqCst), 2);
 
     ports.contexts.unbind(ports.scope.run_id());
     let cancelled = ManualCancellation::cancelled();
@@ -227,6 +280,24 @@ async fn run_contract(factory: ContractFactory) {
 
 fn invocation(scope: &ExecutionScope, name: &str, input: Value) -> ToolInvocation {
     ToolInvocation::new(name, input, scope.clone())
+}
+
+fn invocation_for_run_and_profile(
+    scope: &ExecutionScope,
+    run_id: &str,
+    name: &str,
+    input: Value,
+    profile: &str,
+) -> ToolInvocation {
+    let altered = ExecutionScope::builder(
+        run_id,
+        scope.workspace_id().clone(),
+        scope.workspace_root().to_path_buf(),
+    )
+    .registry_scope(scope.registry_scope().clone())
+    .profile(ToolProfileName::new(profile))
+    .build();
+    ToolInvocation::new(name, input, altered)
 }
 
 fn invocation_with_profile(
@@ -316,6 +387,7 @@ impl TypedTool for SuspendingTool {
                 "continue?",
                 vec![crate::domain::UserOption::title_only("yes")],
                 false,
+                true,
                 None,
             )]),
         )))
@@ -393,14 +465,18 @@ impl WorkspaceRead for FakeWorkspace {
     }
 }
 
-fn context() -> ToolExecutionContext {
+fn context_for_profile(profile: &str) -> ToolExecutionContext {
+    context_for_run_and_profile("contract-run", profile)
+}
+
+fn context_for_run_and_profile(run_id: &str, profile: &str) -> ToolExecutionContext {
     let workspace = Arc::new(FakeWorkspace::new());
     let scope = ExecutionScope::builder(
-        "contract-run",
+        run_id,
         workspace.workspace_id(),
         workspace.current_workspace_root(),
     )
-    .profile(ToolProfileName::new("full"))
+    .profile(ToolProfileName::new(profile))
     .build();
     let ports = ToolExecutionPorts::new(
         Arc::new(ManualCancellation::default()),

@@ -55,7 +55,15 @@ impl TestCatalogExecutionFactory {
     }
 
     pub fn register<T: TypedTool + 'static>(&self, tool: T) {
-        let spec = ToolRegistrationSpec::new(tool.name(), ToolCapabilities::empty());
+        self.register_with_capabilities(tool, ToolCapabilities::ReadWorkspace);
+    }
+
+    pub fn register_with_capabilities<T: TypedTool + 'static>(
+        &self,
+        tool: T,
+        required_capabilities: ToolCapabilities,
+    ) {
+        let spec = ToolRegistrationSpec::new(tool.name(), required_capabilities);
         self.registry.register(tool);
         self.registrations.lock().push(spec);
     }
@@ -86,10 +94,12 @@ impl TestCatalogExecutionFactory {
                     .expect("test tools must have unique normalized names");
             }
             scopes.insert(candidate_scope, scope.build());
-            profiles.insert(
-                candidate_profile,
-                ToolProfile::baseline(ToolCapabilities::all()),
-            );
+            let allowed = if candidate_profile.as_str() == "sub-agent-restricted" {
+                ToolCapabilities::ReadWorkspace
+            } else {
+                ToolCapabilities::all()
+            };
+            profiles.insert(candidate_profile, ToolProfile::baseline(allowed));
         }
         let wiring = wire_catalog_execution(self.registry.clone(), scopes, profiles)
             .expect("test catalog/execution wiring");

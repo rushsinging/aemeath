@@ -19,6 +19,7 @@ pub(crate) async fn ask_user<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     suspended_calls: &[(&ToolCall, ToolSuspension)],
+    cancel: &tokio_util::sync::CancellationToken,
     workspace_root: &Path,
 ) -> Vec<ToolExecution>
 where
@@ -53,39 +54,66 @@ where
         .collect();
 
     // 创建单个 oneshot channel，发送单个 AskUserBatch 事件
-    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<Vec<String>>();
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<sdk::AskUserReply>();
     let _ = sink
         .send_event(RuntimeStreamEvent::AskUserBatch { items, reply_tx })
         .await;
 
-    // 等待用户回答所有问题
-    let answers: Vec<String> = reply_rx.await.unwrap_or_default();
+    let reply = tokio::select! {
+        _ = cancel.cancelled() => sdk::AskUserReply::Cancelled,
+        reply = reply_rx => reply.unwrap_or(sdk::AskUserReply::Cancelled),
+    };
 
-    // 收到答案后，逐个 send_tool_result 回传；
-    // 答案数量不匹配时用 default 值填充。
-    // AskUser currently publishes one question per call; keeping the answer
-    // cursor explicit also makes ordering deterministic if the PL later grows.
+    let answers = match reply {
+        sdk::AskUserReply::Answers(answers) => answers,
+        sdk::AskUserReply::Cancelled => {
+            let mut results = Vec::with_capacity(suspended_calls.len());
+            for (call, _) in suspended_calls {
+                let result =
+                    ToolExecution::new(call, ToolOutcome::error("用户取消了 AskUserQuestion"));
+                send_tool_result(sink, context, &result).await;
+                results.push(result);
+            }
+            return results;
+        }
+    };
+
+    // Each suspended call owns one or more ordered questions. Consume exactly
+    // that call's answer slice, applying defaults without crossing call IDs.
     let mut answer_index = 0;
     let mut ask_user_results = Vec::new();
     for (call, suspension) in suspended_calls {
         let ToolSuspension::UserInteraction(spec) = suspension;
-        let question = spec
-            .questions
-            .first()
-            .expect("AskUser suspension must contain one question");
-        let default = question.default.clone().unwrap_or_default();
-        let answer = answers
-            .get(answer_index)
-            .cloned()
-            .filter(|answer| !answer.is_empty())
-            .unwrap_or(default);
-        answer_index += spec.questions.len();
+        if spec.questions.is_empty() {
+            let result = ToolExecution::new(
+                call,
+                ToolOutcome::error("AskUser suspension contains no questions"),
+            );
+            send_tool_result(sink, context, &result).await;
+            ask_user_results.push(result);
+            continue;
+        }
 
+        let call_answers = spec
+            .questions
+            .iter()
+            .enumerate()
+            .map(|(offset, question)| {
+                answers
+                    .get(answer_index + offset)
+                    .cloned()
+                    .filter(|answer| !answer.is_empty())
+                    .or_else(|| question.default.clone())
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        answer_index += spec.questions.len();
+        let text = call_answers.join("\n");
         let result = ToolExecution::new(
             call,
             ToolOutcome::new(
-                answer.clone(),
-                serde_json::json!({ "text": answer }),
+                text.clone(),
+                serde_json::json!({ "text": text }),
                 Vec::new(),
             ),
         );
@@ -110,7 +138,24 @@ mod tests {
     #[derive(Clone)]
     struct ReplyingSink {
         items: Arc<Mutex<Vec<sdk::AskUserQuestionItem>>>,
-        answers: Vec<String>,
+        reply: sdk::AskUserReply,
+    }
+
+    #[derive(Clone)]
+    struct CancellingSink {
+        cancel: tokio_util::sync::CancellationToken,
+    }
+
+    impl ChatEventSink for CancellingSink {
+        fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
+            Box::pin(async move {
+                if matches!(event, RuntimeStreamEvent::AskUserBatch { .. }) {
+                    self.cancel.cancel();
+                }
+            })
+        }
+
+        fn try_send_event(&self, _event: RuntimeStreamEvent) {}
     }
 
     impl ChatEventSink for ReplyingSink {
@@ -118,7 +163,7 @@ mod tests {
             Box::pin(async move {
                 if let RuntimeStreamEvent::AskUserBatch { items, reply_tx } = event {
                     *self.items.lock().unwrap() = items;
-                    let _ = reply_tx.send(self.answers.clone());
+                    let _ = reply_tx.send(self.reply.clone());
                 }
             })
         }
@@ -148,12 +193,14 @@ mod tests {
                     Some("first description".to_string()),
                 )],
                 true,
+                false,
                 Some("one".to_string()),
             )])),
             ToolSuspension::UserInteraction(UserInteractionSpec::new(vec![UserQuestion::new(
                 "Second typed question",
                 vec![UserOption::title_only("two")],
                 false,
+                true,
                 Some("fallback".to_string()),
             )])),
         ];
@@ -163,11 +210,12 @@ mod tests {
         ];
         let sink = ReplyingSink {
             items: Arc::new(Mutex::new(Vec::new())),
-            answers: vec![String::new(), "selected two".to_string()],
+            reply: sdk::AskUserReply::Answers(vec![String::new(), "selected two".to_string()]),
         };
         let hook_ui = HookUi::new(sink.clone());
         let hook_runner = hook::api::HookRunner::new(Default::default());
         let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let cancel = tokio_util::sync::CancellationToken::new();
 
         let results = ask_user(
             &context,
@@ -175,6 +223,7 @@ mod tests {
             &hook_ui,
             &hook_runner,
             &suspended_calls,
+            &cancel,
             &std::env::current_dir().unwrap(),
         )
         .await;
@@ -188,12 +237,96 @@ mod tests {
             Some("first description")
         );
         assert!(items[0].multi_select);
+        assert!(!items[0].allow_free_input);
         assert_eq!(items[0].default.as_deref(), Some("one"));
         assert_eq!(items[1].id, calls[1].id.to_string());
         assert_eq!(items[1].question, "Second typed question");
         assert!(!items[1].multi_select);
+        assert!(items[1].allow_free_input);
         assert_eq!(items[1].default.as_deref(), Some("fallback"));
         assert_eq!(results[0].outcome.text, "one");
         assert_eq!(results[1].outcome.text, "selected two");
+    }
+
+    #[tokio::test]
+    async fn cancellation_terminates_each_original_tool_call_as_error() {
+        let calls = [call("first-call", 0), call("second-call", 1)];
+        let suspension =
+            ToolSuspension::UserInteraction(UserInteractionSpec::new(vec![UserQuestion::new(
+                "Continue?",
+                vec![],
+                false,
+                true,
+                None,
+            )]));
+        let suspended_calls = vec![(&calls[0], suspension.clone()), (&calls[1], suspension)];
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let sink = CancellingSink {
+            cancel: cancel.clone(),
+        };
+        let hook_ui = HookUi::new(sink.clone());
+        let hook_runner = hook::api::HookRunner::new(Default::default());
+        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+
+        let results = ask_user(
+            &context,
+            &sink,
+            &hook_ui,
+            &hook_runner,
+            &suspended_calls,
+            &cancel,
+            &std::env::current_dir().unwrap(),
+        )
+        .await;
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|result| result.outcome.is_error));
+        assert!(results
+            .iter()
+            .all(|result| result.outcome.text.contains("取消")));
+    }
+
+    #[tokio::test]
+    async fn multiple_questions_are_consumed_without_crossing_tool_calls() {
+        let calls = [call("multi-call", 0), call("next-call", 1)];
+        let suspensions = [
+            ToolSuspension::UserInteraction(UserInteractionSpec::new(vec![
+                UserQuestion::new("First", vec![], false, true, None),
+                UserQuestion::new("Second", vec![], false, true, None),
+            ])),
+            ToolSuspension::UserInteraction(UserInteractionSpec::new(vec![UserQuestion::new(
+                "Third",
+                vec![],
+                false,
+                true,
+                None,
+            )])),
+        ];
+        let suspended_calls = vec![
+            (&calls[0], suspensions[0].clone()),
+            (&calls[1], suspensions[1].clone()),
+        ];
+        let sink = ReplyingSink {
+            items: Arc::new(Mutex::new(Vec::new())),
+            reply: sdk::AskUserReply::Answers(vec!["A".into(), "B".into(), "C".into()]),
+        };
+        let hook_ui = HookUi::new(sink.clone());
+        let hook_runner = hook::api::HookRunner::new(Default::default());
+        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let cancel = tokio_util::sync::CancellationToken::new();
+
+        let results = ask_user(
+            &context,
+            &sink,
+            &hook_ui,
+            &hook_runner,
+            &suspended_calls,
+            &cancel,
+            &std::env::current_dir().unwrap(),
+        )
+        .await;
+
+        assert_eq!(results[0].outcome.text, "A\nB");
+        assert_eq!(results[1].outcome.text, "C");
     }
 }

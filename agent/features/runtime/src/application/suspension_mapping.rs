@@ -23,6 +23,7 @@ pub fn user_interaction_items(
                     })
                     .collect(),
                 multi_select: question.allow_multi,
+                allow_free_input: question.allow_free_input,
                 default: question.default.clone(),
             })
             .collect(),

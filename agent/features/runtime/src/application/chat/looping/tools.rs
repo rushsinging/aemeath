@@ -126,6 +126,7 @@ where
         hook_ui,
         hook_runner,
         &ask_user_suspensions,
+        cancel,
         workspace_root,
     )
     .await;

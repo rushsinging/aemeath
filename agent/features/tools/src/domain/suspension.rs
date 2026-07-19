@@ -49,6 +49,7 @@ pub struct UserQuestion {
     pub prompt: String,
     pub options: Vec<UserOption>,
     pub allow_multi: bool,
+    pub allow_free_input: bool,
     pub default: Option<String>,
 }
 
@@ -57,12 +58,14 @@ impl UserQuestion {
         prompt: impl Into<String>,
         options: Vec<UserOption>,
         allow_multi: bool,
+        allow_free_input: bool,
         default: Option<String>,
     ) -> Self {
         Self {
             prompt: prompt.into(),
             options,
             allow_multi,
+            allow_free_input,
             default,
         }
     }
