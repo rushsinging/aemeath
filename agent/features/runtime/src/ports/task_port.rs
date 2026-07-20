@@ -12,7 +12,7 @@ use task::{Task, TaskSnapshot};
 
 /// Task BC 的出站端口。
 ///
-/// Sub Run 使用独立实例（`TaskStore::new()`），不共享父 Run 的 Task 状态。
+/// Sub Run 若需要 Task 能力，必须使用独立 wiring 的 `TaskAccess` view，不共享父 Run 状态。
 ///
 /// 此 trait 收敛了 `core/port.rs` 中已有的 `TaskStorePort`，后续 #885 迁移时
 /// 统一到此处，删除旧 `TaskStorePort`。

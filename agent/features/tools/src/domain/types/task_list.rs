@@ -1,12 +1,11 @@
 //! Typed result for the `task_list` tool (non-core tool).
 
 use serde::{Deserialize, Serialize};
-use share::task::types::Task;
 
 /// Typed result returned by the `task_list` tool.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskListResult {
-    pub tasks: Vec<Task>,
+    pub tasks: Vec<task::TaskView>,
 }
 
 /// Typed input for the `task_list` tool.
@@ -22,19 +21,5 @@ pub struct TaskListInput {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::types::ToolSchema;
-
-    #[test]
-    fn task_list_schema_does_not_publish_session_id() {
-        let schema = TaskListInput::data_schema();
-        let properties = schema["properties"]
-            .as_object()
-            .expect("task list schema properties");
-        assert!(!properties.contains_key("session_id"));
-        assert!(!properties.contains_key("sessionId"));
-        assert!(properties.contains_key("status"));
-        assert!(properties.contains_key("priority"));
-    }
-}
+#[path = "task_list_tests.rs"]
+mod tests;

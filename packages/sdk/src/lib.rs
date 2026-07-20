@@ -43,8 +43,12 @@ pub use chat::{
     UserInput, WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
-pub use commands::builtin_commands;
-pub use commands::{ContextEstimate, ModelSwitchResult};
+pub use commands::{
+    ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
+    CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
+    CommandRoute, CommandRouterPort, CommandTarget, ContextEstimate, ModelSwitchResult,
+    ParsedArguments, PromptCommand, SlashInput, SnapshotQueryCommand, SnapshotQueryTarget,
+};
 pub use config_view::{
     ConfigChangeCause, ConfigChangedEvent, ConfigField, ConfigUpdate, ConfigUpdateResult,
     ConfigView, PermissionModeView,

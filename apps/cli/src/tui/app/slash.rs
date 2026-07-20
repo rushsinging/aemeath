@@ -1,5 +1,5 @@
 mod dialog;
-mod help;
+pub mod help;
 mod help_display;
 mod reflection;
 mod suggestions;
@@ -7,15 +7,11 @@ mod suggestions;
 use crate::tui::app::UiEvent;
 use crate::tui::effect::effect::Effect;
 
-/// 内置命令名常量（不再依赖 runtime::api）
-mod cmd {
-    pub const EXIT: &str = "exit";
-    pub const QUIT: &str = "quit";
-    pub const CLEAR: &str = "clear";
-    pub const COMPACT: &str = "compact";
-    pub const HELP: &str = "help";
-    pub const USAGE: &str = "usage";
-    pub const REFLECT: &str = "reflect";
+pub(crate) fn resolve_slash_for_delivery(
+    router: &dyn sdk::CommandRouterPort,
+    input: &str,
+) -> Result<sdk::CommandRoute, sdk::CommandParseError> {
+    router.resolve(sdk::SlashInput::new(input))
 }
 
 impl super::App {
@@ -26,23 +22,55 @@ impl super::App {
         input: &str,
         ui_tx: Option<tokio::sync::mpsc::Sender<UiEvent>>,
     ) -> Option<String> {
-        let parts: Vec<&str> = input.split_whitespace().collect();
-        let cmd = *parts.first().unwrap_or(&"");
-        let has_args = parts.len() > 1;
+        let route = match self.command_router.as_deref() {
+            Some(router) => match resolve_slash_for_delivery(router, input) {
+                Ok(route) => route,
+                Err(error) => {
+                    self.append_error_notice(error.to_string());
+                    return None;
+                }
+            },
+            None => {
+                self.append_error_notice("Command router unavailable.");
+                return None;
+            }
+        };
+        let command = match &route {
+            sdk::CommandRoute::PromptInjection(command) => command.command.as_str(),
+            sdk::CommandRoute::SnapshotQuery { command, .. } => command.command.as_str(),
+            sdk::CommandRoute::ApplicationControl { command, .. } => command.command.as_str(),
+        };
+        let arguments = match &route {
+            sdk::CommandRoute::PromptInjection(command) => command.arguments.as_slice(),
+            sdk::CommandRoute::SnapshotQuery { command, .. } => command.arguments.as_slice(),
+            sdk::CommandRoute::ApplicationControl { command, .. } => command.arguments.as_slice(),
+        };
+        let has_args = !arguments.is_empty();
+        let args = arguments.join(" ");
 
-        if cmd == "/model" && !has_args {
+        if command == "model" && !has_args {
             return self.open_model_selection_dialog();
         }
 
-        match cmd {
-            cmd if cmd == format!("/{}", cmd::EXIT) || cmd == format!("/{}", cmd::QUIT) => {
-                self.layout.request_exit()
+        match command {
+            command if matches!(route, sdk::CommandRoute::PromptInjection(_)) => {
+                let Some(skill) = self.find_skill_by_alias(command) else {
+                    self.append_error_notice(format!("Prompt command unavailable: /{command}"));
+                    return None;
+                };
+                let mut content = skill.content.clone();
+                if !args.is_empty() {
+                    content = format!("{content}\n\nArguments: {args}");
+                }
+                self.append_system_notice(format!("[skill: {}]", skill.name));
+                return Some(content);
             }
-            cmd if cmd == format!("/{}", cmd::CLEAR) => {
+            "exit" => self.layout.request_exit(),
+            "clear" => {
                 self.clear_conversation().await;
                 self.append_system_notice("[conversation cleared]");
             }
-            cmd if cmd == format!("/{}", cmd::COMPACT) => {
+            "compact" => {
                 // #497 子 issue 0：走 runtime 事件流（ChatInputEvent::Compact →
                 // manual_compact），不再直接调 compact_messages().await。
                 // spinner / 进度 Gauge / 结果回显全部由 runtime 的
@@ -53,8 +81,8 @@ impl super::App {
                     self.append_system_notice("[compact skipped: chat loop not running]");
                 }
             }
-            cmd if cmd == format!("/{}", cmd::HELP) => self.show_slash_help(),
-            cmd if cmd == format!("/{}", cmd::USAGE) => {
+            "help" => self.show_slash_help(),
+            "usage" => {
                 let usage = &self.model.conversation.runtime.usage;
                 let total = usage.input_tokens + usage.output_tokens;
                 self.append_system_notice(format!(
@@ -65,21 +93,20 @@ impl super::App {
                     sdk::format_tokens(total)
                 ));
             }
-            "/save" => {
+            "save" => {
                 if let Some(tx) = ui_tx.clone() {
                     self.execute_effect(Effect::SaveSession { notify: true }, &tx)
                         .await;
                 }
             }
-            "/context" => {
+            "context" => {
                 // #567: EstimateContext 变体已删除，改为本地渲染消息计数。
                 self.append_system_notice(format!(
                     "Messages: {}",
                     self.model.conversation.timeline.items().len()
                 ));
             }
-            cmd if cmd == format!("/{}", cmd::REFLECT) => {
-                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+            "reflect" => {
                 let effects = self.handle_reflect_command(&args);
                 if let Some(tx) = ui_tx.clone() {
                     for effect in effects {
@@ -87,9 +114,9 @@ impl super::App {
                     }
                 }
             }
-            "/memory" | "/mem"
+            "memory"
                 if matches!(
-                    parts.get(1).copied(),
+                    arguments.first().map(String::as_str),
                     Some("remind" | "reminder" | "reminders")
                 ) =>
             {
@@ -97,17 +124,17 @@ impl super::App {
                     self.execute_effect(Effect::FetchMemoryList, &tx).await;
                 }
             }
-            "/update" => {
+            "update" => {
                 if let Some(tx) = ui_tx.clone() {
                     self.execute_effect(Effect::RunSelfUpdate, &tx).await;
                 }
             }
-            "/paste" => {
+            "paste" => {
                 if let Some(tx) = ui_tx.clone() {
                     self.execute_effect(Effect::ReadClipboardImage, &tx).await;
                 }
             }
-            "/images" => {
+            "images" => {
                 let spans = &self.model.input.document.image_spans;
                 if spans.is_empty() {
                     self.append_system_notice("No pending images.");
@@ -122,11 +149,11 @@ impl super::App {
                     self.append_system_notice(text);
                 }
             }
-            "/clear-images" => {
+            "clear-images" => {
                 self.model.input.document.remove_all_images();
                 self.append_system_notice("[pending images cleared]");
             }
-            "/version" => {
+            "version" => {
                 let info = format!(
                     "aemeath v{}
 
@@ -138,7 +165,7 @@ Build info:
                 );
                 self.append_system_notice(&info);
             }
-            "/doctor" => {
+            "doctor" => {
                 let view = &self.config_view;
                 let home = dirs::home_dir();
                 let info = format!(
@@ -161,13 +188,13 @@ Build info:
                 );
                 self.append_system_notice(&info);
             }
-            "/rewind" => {
+            "rewind" => {
                 // /rewind <N> → 触发 compact（保留 N 条消息的语义通过 compact 实现）
                 if self.chat.input_event_tx.is_some() {
                     self.chat.push_input_event(sdk::ChatInputEvent::Compact);
                 }
             }
-            "/cost" => {
+            "cost" => {
                 // #567: QueryCost 变体已删除，改为本地从 model 状态渲染。
                 let usage = &self.model.conversation.runtime.usage;
                 let total = usage.input_tokens + usage.output_tokens;
@@ -179,7 +206,7 @@ Build info:
                     sdk::format_tokens(total)
                 ));
             }
-            "/status" => {
+            "status" => {
                 // #567: QueryStatus 变体已删除，改为本地渲染状态信息。
                 let view = &self.config_view;
                 self.append_system_notice(format!(
@@ -187,7 +214,7 @@ Build info:
                     view.model_name, view.permission_mode, self.chat.is_processing,
                 ));
             }
-            "/config" => {
+            "config" => {
                 // #567: QueryConfig 变体已删除，改为本地从 config_view 渲染。
                 let view = &self.config_view;
                 self.append_system_notice(format!(
@@ -202,7 +229,7 @@ Build info:
                     view.logging_level,
                 ));
             }
-            "/stats" => {
+            "stats" => {
                 // #567: QueryStats 变体已删除，改为本地从 model 状态渲染。
                 let usage = &self.model.conversation.runtime.usage;
                 self.append_system_notice(format!(
@@ -212,22 +239,22 @@ Build info:
                     sdk::format_tokens(usage.input_tokens + usage.output_tokens)
                 ));
             }
-            "/init" => {
-                let force = parts.get(1).map(|p| *p == "force").unwrap_or(false);
+            "init" => {
+                let force = arguments.first().is_some_and(|p| p == "force");
                 if self.chat.input_event_tx.is_some() {
                     self.chat
                         .push_input_event(sdk::ChatInputEvent::InitProject { force });
                 }
             }
-            "/session" => {
-                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+            "session" => {
+                let args = args.clone();
                 if self.chat.input_event_tx.is_some() {
                     self.chat
                         .push_input_event(sdk::ChatInputEvent::ManageSession { args });
                 }
             }
-            "/resume" => {
-                if let Some(id) = parts.get(1) {
+            "resume" => {
+                if let Some(id) = arguments.first() {
                     if self.chat.input_event_tx.is_some() {
                         self.chat
                             .push_input_event(sdk::ChatInputEvent::ResumeSession {
@@ -236,19 +263,19 @@ Build info:
                     }
                 }
             }
-            cmd if cmd == "/model" && has_args => {
+            "model" if has_args => {
                 // /model <name> — 解析参数并走 SwitchModel 事件流
-                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+                let args = args.clone();
                 if let Some(prompt) = self.handle_model_with_args(&args).await {
                     return Some(prompt);
                 }
             }
             // /memory 的 remind 子命令已被上面截胡
             // 非 remind 子命令走事件流
-            "/memory" => {
-                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+            "memory" => {
+                let args = args.clone();
                 // 排除 remind 子命令（已被上面截胡）
-                let first_arg = parts.get(1).copied().unwrap_or("");
+                let first_arg = arguments.first().map(String::as_str).unwrap_or("");
                 if first_arg != "remind"
                     && first_arg != "reminder"
                     && first_arg != "reminders"
@@ -258,24 +285,7 @@ Build info:
                         .push_input_event(sdk::ChatInputEvent::ManageMemory { args });
                 }
             }
-            _ => {
-                // Skill alias lookup
-                let cmd_name = cmd.trim_start_matches('/');
-                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
-                if let Some(skill) = self.find_skill_by_alias(cmd_name) {
-                    let mut content = skill.content.clone();
-                    if !args.is_empty() {
-                        content = format!(
-                            "{content}
-
-Arguments: {args}"
-                        );
-                    }
-                    self.append_system_notice(format!("[skill: {}]", skill.name));
-                    return Some(content);
-                }
-                self.append_error_notice(format!("Unknown command: {cmd}"));
-            }
+            _ => self.append_error_notice(format!("Unsupported command route: /{command}")),
         }
         None
     }

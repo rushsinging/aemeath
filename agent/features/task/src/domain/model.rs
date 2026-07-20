@@ -543,6 +543,95 @@ impl Task {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskView {
+    #[serde(
+        serialize_with = "serialize_task_id",
+        deserialize_with = "deserialize_task_id"
+    )]
+    id: TaskId,
+    subject: String,
+    description: String,
+    status: TaskStatus,
+    #[serde(
+        serialize_with = "serialize_task_ids",
+        deserialize_with = "deserialize_task_ids"
+    )]
+    blocked_by: Vec<TaskId>,
+    priority: TaskPriority,
+    created_at: u64,
+    updated_at: u64,
+    session_id: Option<String>,
+    batch: BatchId,
+}
+
+impl From<&Task> for TaskView {
+    fn from(task: &Task) -> Self {
+        Self {
+            id: task.id,
+            subject: task.subject.clone(),
+            description: task.description.clone(),
+            status: task.status,
+            blocked_by: task.blocked_by.clone(),
+            priority: task.priority,
+            created_at: task.created_at,
+            updated_at: task.updated_at,
+            session_id: task.session_id.clone(),
+            batch: task.batch,
+        }
+    }
+}
+
+fn serialize_task_id<S>(id: &TaskId, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&id.to_string())
+}
+
+fn deserialize_task_id<'de, D>(deserializer: D) -> Result<TaskId, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let value = String::deserialize(deserializer)?;
+    value
+        .parse::<u64>()
+        .map(TaskId::new)
+        .map_err(D::Error::custom)
+}
+
+fn serialize_task_ids<S>(ids: &[TaskId], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeSeq;
+
+    let mut sequence = serializer.serialize_seq(Some(ids.len()))?;
+    for id in ids {
+        sequence.serialize_element(&id.to_string())?;
+    }
+    sequence.end()
+}
+
+fn deserialize_task_ids<'de, D>(deserializer: D) -> Result<Vec<TaskId>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    Vec::<String>::deserialize(deserializer)?
+        .into_iter()
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map(TaskId::new)
+                .map_err(D::Error::custom)
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Batch {
     id: BatchId,

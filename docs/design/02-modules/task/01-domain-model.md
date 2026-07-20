@@ -27,7 +27,7 @@
 | `tags` | `Vec<String>` | 分类标签 |
 | `batch` | `BatchId` | 所属 Batch ID |
 
-> **边界决策（#885）**：Task 不拥有 `owner` / assignee 字段。任务分配和当前执行者属于 Agent Runtime 的执行绑定语义，应由 Runtime-owned `TaskAssignment { task_id, agent_id }`（或等价模型）关联 Task Published Language 与 Runtime `AgentId`。Task BC **NEVER** 引用 Agent 身份，也不把该绑定写入 Task Snapshot。现有 Tool/Storage 的 `owner: String` 仅为 legacy DTO 字段，由 #889 停止消费、#891 最终删除。
+> **边界决策（#885/#891）**：Task 不拥有 `owner` / assignee 字段。任务分配和当前执行者属于 Agent Runtime 的执行绑定语义，应由 Runtime-owned `TaskAssignment { task_id, agent_id }`（或等价模型）关联 Task Published Language 与 Runtime `AgentId`。Task BC **NEVER** 引用 Agent 身份，也不把该绑定写入 Task Snapshot。#891 已删除 Shared/Tools legacy `owner` DTO；Tool result 由 Task-owned `TaskView` 发布。
 
 ### 1.2 不变量
 

@@ -33,6 +33,15 @@ impl App {
         self.skills = skills;
     }
 
+    pub fn set_commands(
+        &mut self,
+        catalog: std::sync::Arc<dyn sdk::CommandCatalogPort>,
+        router: std::sync::Arc<dyn sdk::CommandRouterPort>,
+    ) {
+        self.command_catalog = Some(catalog);
+        self.command_router = Some(router);
+    }
+
     /// Find a skill by its name or alias
     pub(crate) fn find_skill_by_alias(&self, alias: &str) -> Option<&sdk::SkillView> {
         self.skills

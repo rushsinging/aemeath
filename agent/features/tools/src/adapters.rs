@@ -13,6 +13,7 @@ pub mod ask_user;
 pub mod bash;
 pub mod brief;
 pub mod catalog;
+pub mod command;
 pub mod composition;
 pub mod execution;
 pub mod file_edit;

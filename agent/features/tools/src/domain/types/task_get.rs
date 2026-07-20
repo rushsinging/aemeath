@@ -1,16 +1,19 @@
 //! Typed result for the `task_get` tool (non-core tool).
 
 use serde::{Deserialize, Serialize};
-use share::task::types::Task;
 
 /// Typed result returned by the `task_get` tool.
 ///
-/// Re-uses the canonical `crate::domain::types::task::Task` type so task results stay
-/// interoperable with the rest of the task subsystem.
+/// Uses the Task-owned stable output view so Tool wire compatibility does not
+/// depend on a duplicate Shared Kernel DTO.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskGetResult {
-    pub task: Task,
+    pub task: task::TaskView,
 }
+
+#[cfg(test)]
+#[path = "task_get_tests.rs"]
+mod tests;
 
 /// Typed input for the `task_get` tool.
 ///

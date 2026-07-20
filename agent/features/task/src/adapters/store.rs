@@ -1,12 +1,12 @@
 use std::sync::{Mutex, MutexGuard};
 
-use super::{TaskAccess, TaskPersist};
-use crate::business::{
+use crate::domain::{
     Batch, BatchCreateSpec, BatchId, PreparedTaskRestore, Task, TaskCommandError,
     TaskCommandResult, TaskCreateSpec, TaskId, TaskLifecycleSnapshot, TaskPriority,
     TaskReminderSnapshot, TaskRevision, TaskSnapshot, TaskSnapshotValidationError, TaskStatus,
     TaskStoreState, TaskStoreStats,
 };
+use crate::{TaskAccess, TaskPersist};
 
 /// Task BC 的内存事务 backing。
 ///

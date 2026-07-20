@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Task persistence authority is confined to Context and Composition.
-# Runtime and Tools may consume TaskAccess only.
+# Runtime and Tools may consume injected TaskAccess only.
+# guard-registry:policy.task.access-persistence-split
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
@@ -14,7 +15,7 @@ import sys
 
 root = Path.cwd()
 forbidden = re.compile(
-    r"\b(TaskPersist|PreparedTaskRestore|TaskRestoreAdapter|TaskSnapshotSource|SessionTaskAdapters|TaskWiring|wire_task)\b"
+    r"\b(TaskStore|TaskPersist|PreparedTaskRestore|TaskRestoreAdapter|TaskSnapshotSource|SessionTaskAdapters|TaskWiring|wire_task)\b"
 )
 violations = []
 for crate in ("runtime", "tools"):
@@ -39,7 +40,7 @@ for crate in ("runtime", "tools"):
 
 if violations:
     reason = (
-        "Task persistence authority must stay in Context/Composition; Runtime and Tools may only use TaskAccess:\n"
+        "Task backing/persistence authority must stay in Task/Context/Composition; Runtime and Tools may only use injected TaskAccess:\n"
         + "\n".join(violations)
     )
     print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
@@ -47,6 +48,7 @@ if violations:
 
 # Sanity: the detector must reject every protected capability and leave TaskAccess alone.
 for probe in (
+    "let _ = task::TaskStore::new();",
     "use task::TaskPersist;",
     "let _: task::PreparedTaskRestore;",
     "let _ = TaskRestoreAdapter::new(port);",

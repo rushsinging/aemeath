@@ -187,7 +187,7 @@ mod tests {
                 policy: Arc::new(policy::AllowAllPolicy),
                 tool_result_materializer:
                     crate::application::testing::test_tool_result_materializer(),
-                task_access: Arc::new(task::TaskStore::new()),
+                task_access: task::wire_task().access(),
                 skills_map: HashMap::new(),
                 hook_runner: HookRunner::empty(),
                 memory_config: MemoryConfig::default(),

@@ -206,9 +206,6 @@ impl AgentRunner for CliAgentRunner {
             );
         };
         // Build a fresh sub-agent registry with all tools except Agent (prevent recursion)
-        // Sub Run 用独立的 task::TaskStore access，不共享父 Run 的 Task 状态（#889）。
-        let sub_task_access: std::sync::Arc<dyn task::TaskAccess> =
-            std::sync::Arc::new(task::TaskStore::new());
         let sub_workspace = self.workspace.derive_isolated();
         let sub_catalog = match self.tool_catalog.snapshot(
             &tools::RegistryScopeName::new("sub-agent"),
@@ -283,7 +280,6 @@ impl AgentRunner for CliAgentRunner {
             .with_catalog(catalog)
             .with_progress(request_progress),
         );
-        let _ = sub_task_access;
         let agent = Agent {
             catalog: sub_catalog,
             execution: self.tool_execution.clone(),

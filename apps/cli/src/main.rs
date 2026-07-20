@@ -2,6 +2,8 @@ pub(crate) const LOG_TARGET: &str = "aemeath:tui";
 
 mod args;
 mod chat;
+#[cfg(test)]
+mod command_contract_tests;
 mod panic_hook;
 mod session_lock;
 mod subcommand;

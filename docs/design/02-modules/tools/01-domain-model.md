@@ -298,7 +298,11 @@ enum SnapshotQueryTarget {
     Provider,
     Config,
     Audit,
+    ApplicationShell,
 }
+
+// ApplicationShell 只标识 CLI/TUI/未来 Server 自身拥有的只读交付能力，
+// 例如 help、pending images、version 与 doctor；它不得被用来包装目标 BC 业务查询。
 
 enum ApplicationControlTarget {
     Runtime,
@@ -308,6 +312,7 @@ enum ApplicationControlTarget {
     Project,
     Config,
     ApplicationVersionControl,
+    ApplicationShell,
 }
 
 struct PromptCommand {
