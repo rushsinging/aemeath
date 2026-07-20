@@ -702,13 +702,13 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 | MemoryPort / NoOp / opener / history adapter 的稳定边界、ACL 与持久化 | L3 | `agent/features/memory/tests/{memory_port_contract,noop_memory_contract,opener_seam_contract,reflection_history_adapter,reflection_error_boundary}.rs` | 已覆盖 Disabled NoOp、typed query/mutation、history reopen/upsert/corruption、history query 仅安全摘要。history CAS retry、opener 错误矩阵与完整 shared contract 仍由 #1299 补齐。 |
 | Main Session 同一 active Arc、Context 只读注入、Sub Disabled / Shared、Reflection 端到端生命周期 | L4 | `agent/composition/src/memory.rs` 的 `main_views_share_the_active_arc`、`prepare_does_not_change_active_until_install`、`preparing_the_active_identity_reuses_arc_without_opening`、`sub_disabled_is_noop_and_shared_reuses_active_without_opening`；`agent/composition/tests/main_session_wiring.rs`；`agent/features/context/src/adapters/memory_injection.rs` 测试；`agent/features/runtime/src/application/chat/looping/pre_compact_trigger_tests.rs`；`agent/features/runtime/tests/reflection_teardown.rs` | #1284 证明 compact 成功后的冻结 snapshot 才提交 PreCompact；#1285 证明 grace deadline 后 cancel 并等待 terminal completion。submit_complete Running→terminal history、busy skip 不写 history 与 resume 后 Context adapter 边界仍由 #1299 补齐。 |
 | L0 production reachability、all-target clippy、public/test-only API、architecture guards | L0 | `cargo run -p xtask -- production-reachability .`；`cargo clippy --workspace --all-targets -- -D warnings`；`.agents/hooks/check-architecture-guards.sh --full` | 2026-07-20 在 `89ac5d7e` 上通过；Rust `pub` API 不因零 workspace 调用自动判定 dead code，`for_complete_reflection` 当前无调用者、且 production adapter stub 不承载端到端提交，已作为死代码/接线风险由 #1299 承接。 |
-| 真实 PTY / 平台 / 安装路径 | L5 | `apps/cli/tests/pty_smoke.rs`；`scripts/check-slow-test-matrix.sh` | 显式传入 worktree-local `AEMEATH_PTY_BIN` 后 PTY smoke 通过。慢速矩阵脚本硬编码 `$ROOT/target/debug/aemeath`，与 worktree Cargo target-dir 不兼容，首次失败保留并由 #1298 承接。 |
+| 真实 PTY / 平台 / 安装路径 | L5 | `apps/cli/tests/pty_smoke.rs`；`scripts/check-slow-test-matrix.sh` | 显式传入 worktree-local `AEMEATH_PTY_BIN` 后 PTY smoke 通过。慢速矩阵脚本硬编码 `$ROOT/target/debug/aemeath`，与 worktree Cargo target-dir 不兼容；该全局入口缺陷已移至 #1050 的子项 #1298，不阻断 #1060。 |
 
 确定性与组织：#1283/#1284/#1285 的新增测试均使用外置 integration 或 owning module 测试文件；无 `mod.rs`、`include!` 或生产 test-only API。Reflection task 测试使用 cancellation token、Notify 和 bounded timeout，不以短 sleep 证明状态。
 
 覆盖率信号（2026-07-20，`./scripts/coverage.sh`，commit `89ac5d7e`）：Memory regions/functions/lines **87.27% / 84.42% / 87.09%**；Runtime **71.66% / 71.10% / 72.11%**；workspace **77.77% / 78.99% / 78.07%**。原始命令行摘要已回写 #1060 comment；统一工具当前不生成 changed-lines 指标。Runtime 低于 workspace / Memory 的覆盖率仅作风险信号，不能替代上述行为矩阵，#1299 负责以行为缺口补证而非以百分比追数。
 
-当前结论：#851 的初始业务叶子已关闭，已合入的 #1283/#1284/#1285 修复了审查发现的三项业务缺口；但 #1299 的分层测试缺口与 #1298 的慢速矩阵入口缺陷均有 owner 且仍开放。因此 #1060 / #851 暂不满足关闭条件，待两个承接项完成、复核 L0-L5 证据后再给出最终验收结论。
+当前结论：#851 的初始业务叶子已关闭，已合入的 #1283/#1284/#1285 修复了审查发现的三项业务缺口；#1299 的分层测试缺口有 owner 且仍开放，故 #1060 / #851 暂不满足关闭条件。#1298 已移至慢速矩阵 owner #1050，作为 L5 入口缺陷不再阻断本能力审查；待 #1299 完成后复核 L0-L5 证据再给出最终验收结论。
 
 ## 12. 相关文档
 
@@ -720,6 +720,7 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1060 调整慢速矩阵缺陷归属：#1298 移至 #1050，L5 PTY 直接验证保留为通过；#1060 仅由能力内测试缺口 #1299 阻断 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#1050](https://github.com/rushsinging/aemeath/issues/1050)、[#1298](https://github.com/rushsinging/aemeath/issues/1298)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
 | 2026-07-20 | #1060 初次 Memory / Reflection L0–L5 审查经独立复核后修正证据路径：`policy.rs` 无直接单元测试；same-Arc / Sub Disabled 正确证据在 `composition/src/memory.rs`；`for_complete_reflection` 零调用者与 Runtime 覆盖率风险均由 #1299 承接 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
 | 2026-07-20 | #1060 完成 Memory / Reflection 初次 L0–L5 审查：记录 Memory/Runtime coverage、#1283/#1284/#1285 合入证据与 PTY worktree binary 首次失败；事务/history 相邻测试由 #1299、慢速矩阵路径修复由 #1298 承接，#851 暂不关闭 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#851](https://github.com/rushsinging/aemeath/issues/851)、[#1298](https://github.com/rushsinging/aemeath/issues/1298)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
 | 2026-07-14 | 初稿：定义六层测试模型、目录组织、覆盖率、生产可达性、dead-code 与 CI 治理 | [#677](https://github.com/rushsinging/aemeath/issues/677)、[#1006](https://github.com/rushsinging/aemeath/issues/1006) |
