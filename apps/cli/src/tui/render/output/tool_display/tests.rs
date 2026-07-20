@@ -533,6 +533,42 @@ fn enter_worktree_error_with_branch_shows_requested_branch() {
 }
 
 #[test]
+fn enter_worktree_error_with_typed_content_uses_requested_target() {
+    let payload = ToolResultPayload::new(
+        "failed to enter worktree".to_string(),
+        serde_json::json!({
+            "branch": "actual/result",
+            "path_base": "/repo",
+            "workspace_root": "/repo/.worktrees/actual-result",
+            "guidance": "Use the worktree"
+        }),
+        true,
+        0,
+    );
+
+    for (raw_input, expected) in [
+        (
+            r#"{"branch":"requested/branch","path":".worktrees/requested"}"#,
+            "Enter Worktree branch=requested/branch",
+        ),
+        (
+            r#"{"branch":" \t ","path":".worktrees/requested"}"#,
+            "Enter Worktree path=.worktrees/requested",
+        ),
+    ] {
+        let (header, _) = format_tool_call("EnterWorktree", raw_input, Some(&payload), None);
+        let text = line_to_string(&header);
+
+        assert_eq!(text, expected);
+        assert!(!text.contains("actual/result"), "header: {text}");
+        assert!(
+            !text.contains("/repo/.worktrees/actual-result"),
+            "header: {text}"
+        );
+    }
+}
+
+#[test]
 fn enter_worktree_in_flight_shows_requested_branch() {
     let (header, _) = format_tool_call(
         "EnterWorktree",
