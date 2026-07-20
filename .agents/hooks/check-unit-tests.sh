@@ -10,6 +10,19 @@ if [ -n "${AEMEATH_PROJECT_DIR:-}" ] && [ ! -d "${AEMEATH_PROJECT_DIR}/.agents/h
 fi
 cd "$ROOT"
 
+# Git exports repository-local variables while invoking hooks. Cargo and test
+# subprocesses must not inherit them: real-git fixtures target foreign temporary
+# repositories and Git gives these variables precedence over their explicit cwd.
+git_local_env_names="$(git rev-parse --local-env-vars)"
+while IFS= read -r git_local_env; do
+  if [ -n "$git_local_env" ]; then
+    unset "$git_local_env" || {
+      echo "failed to clear Git hook environment variable: $git_local_env" >&2
+      exit 1
+    }
+  fi
+done <<<"$git_local_env_names"
+
 echo "[hook-env] AEMEATH_PROJECT_DIR=${AEMEATH_PROJECT_DIR:-<unset>}"
 echo "[hook-env] CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-<unset>}"
 echo "[hook-env] ROOT=$ROOT"

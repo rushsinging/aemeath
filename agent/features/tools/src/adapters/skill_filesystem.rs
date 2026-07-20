@@ -276,64 +276,136 @@ struct Frontmatter {
 
 // ── 内部：发现（目录遍历） ─────────────────────────────────────────────
 
-/// 扫描一个根目录：顶层 `.md` 文件直接解析；子目录若含 `skills/` 子目录
-/// 则按 skill package 命名空间扫描，否则按普通 skill 目录扫描。
+/// 扫描一个 Skill 根目录：
+/// - 根目录直接 `.md` 保留为历史扁平兼容入口；
+/// - 普通子目录只识别 `<name>/SKILL.md`；
+/// - package 子目录只识别 `<package>/skills/<name>/SKILL.md`。
+/// - 子目录同时含 `SKILL.md` 与 `skills/` 时，直接入口优先。
 ///
-/// **目录不存在视为空（非错误）**；只有已扫描到的文件读取 / 解析失败才
-/// 产生 typed [`SkillError`]。
+/// 子目录中的其他 Markdown 是 Skill 资源，绝不作为独立入口解析。
+/// **目录不存在视为空（非错误）**；真实入口的读取 / 解析失败产生 typed
+/// [`SkillError`]。
 fn scan_dir(dir: &Path, kind: SkillSourceKind, out: &mut Vec<Result<RawSkill, SkillError>>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return, // 目录不存在视为空（非错误）
+    let Some(entries) = read_skill_directory(dir, out) else {
+        return;
     };
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                push_read_error(dir, error, out);
+                continue;
+            }
+        };
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "md") {
+        let Some(metadata) = discovered_metadata(&path, out) else {
+            continue;
+        };
+        if metadata.is_file() && path.extension().is_some_and(|extension| extension == "md") {
+            // 历史兼容：仅 Skill 根目录的直接 Markdown 文件仍是入口。
             out.push(parse_skill_file(&path, kind).map(|raw| apply_namespace(raw, None)));
-        } else if path.is_dir() {
+        } else if metadata.is_dir() {
+            if scan_skill_entry(&path, kind, None, out) {
+                continue;
+            }
             let skills_child = path.join("skills");
-            if skills_child.is_dir() {
-                // skill package：<pkg>/skills/... → 命名空间前缀
-                let pkg = path.file_name().map(|n| n.to_string_lossy().to_string());
-                scan_subdir(&skills_child, kind, pkg.as_deref(), out);
-            } else {
-                // 普通 skill 目录：<dir>/<name>/SKILL.md
-                scan_subdir(&path, kind, None, out);
+            match std::fs::metadata(&skills_child) {
+                Ok(metadata) if metadata.is_dir() => {
+                    let namespace = path.file_name().map(|name| name.to_string_lossy());
+                    scan_skill_directories(&skills_child, kind, namespace.as_deref(), out);
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => push_read_error(&skills_child, error, out),
             }
         }
     }
 }
 
-/// 扫描目录的直接 `.md` 文件与一层子目录中的 `.md` 文件；可选命名空间。
-fn scan_subdir(
+fn scan_skill_directories(
     dir: &Path,
     kind: SkillSourceKind,
     namespace: Option<&str>,
     out: &mut Vec<Result<RawSkill, SkillError>>,
 ) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
+    let Some(entries) = read_skill_directory(dir, out) else {
+        return;
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_some_and(|e| e == "md") {
-            out.push(parse_skill_file(&path, kind).map(|raw| apply_namespace(raw, namespace)));
-        } else if path.is_dir() {
-            // 再向下一层：扫描子-子目录中的 `.md` 文件。
-            if let Ok(sub_entries) = std::fs::read_dir(&path) {
-                for sub_entry in sub_entries.flatten() {
-                    let sub_path = sub_entry.path();
-                    if sub_path.extension().is_some_and(|e| e == "md") {
-                        out.push(
-                            parse_skill_file(&sub_path, kind)
-                                .map(|raw| apply_namespace(raw, namespace)),
-                        );
-                    }
-                }
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                push_read_error(dir, error, out);
+                continue;
             }
+        };
+        let path = entry.path();
+        let Some(metadata) = discovered_metadata(&path, out) else {
+            continue;
+        };
+        if metadata.is_dir() {
+            scan_skill_entry(&path, kind, namespace, out);
         }
     }
+}
+
+fn scan_skill_entry(
+    skill_dir: &Path,
+    kind: SkillSourceKind,
+    namespace: Option<&str>,
+    out: &mut Vec<Result<RawSkill, SkillError>>,
+) -> bool {
+    let entry = skill_dir.join("SKILL.md");
+    match std::fs::symlink_metadata(&entry) {
+        Ok(metadata) if metadata.is_file() || metadata.file_type().is_symlink() => {
+            out.push(parse_skill_file(&entry, kind).map(|raw| apply_namespace(raw, namespace)));
+            true
+        }
+        Ok(_) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            push_read_error(&entry, error, out);
+            true
+        }
+    }
+}
+
+fn read_skill_directory(
+    dir: &Path,
+    out: &mut Vec<Result<RawSkill, SkillError>>,
+) -> Option<std::fs::ReadDir> {
+    match std::fs::read_dir(dir) {
+        Ok(entries) => Some(entries),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            push_read_error(dir, error, out);
+            None
+        }
+    }
+}
+
+fn discovered_metadata(
+    path: &Path,
+    out: &mut Vec<Result<RawSkill, SkillError>>,
+) -> Option<std::fs::Metadata> {
+    match std::fs::metadata(path) {
+        Ok(metadata) => Some(metadata),
+        Err(error) => {
+            push_read_error(path, error, out);
+            None
+        }
+    }
+}
+
+fn push_read_error(
+    path: &Path,
+    error: std::io::Error,
+    out: &mut Vec<Result<RawSkill, SkillError>>,
+) {
+    out.push(Err(SkillError::read_failed(
+        path.to_string_lossy(),
+        error.to_string(),
+    )));
 }
 
 /// 应用命名空间前缀（skill package）。原 name 进入 aliases。

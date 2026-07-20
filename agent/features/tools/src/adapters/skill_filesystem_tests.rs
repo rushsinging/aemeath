@@ -77,6 +77,11 @@ fn write_skill(dir: &std::path::Path, file: &str, name: &str, desc: &str, body: 
     write!(f, "---\nname: {name}\ndescription: {desc}\n---\n{body}").unwrap();
 }
 
+fn write_standard_skill(root: &std::path::Path, dir_name: &str, desc: &str, body: &str) {
+    let dir = root.join(dir_name);
+    write_skill(&dir, "SKILL.md", dir_name, desc, body);
+}
+
 /// Write a skill with arbitrary extra frontmatter lines (e.g.
 /// `requires_tools`, `fallback_for`).
 fn write_skill_fm(
@@ -94,6 +99,253 @@ fn write_skill_fm(
         "---\nname: {name}\ndescription: {desc}\n{extra_fm}---\n{body}"
     )
     .unwrap();
+}
+
+// ── standard SKILL.md entry discovery ──────────────────────────────────
+
+#[tokio::test]
+async fn resource_markdown_beside_skill_entry_is_not_parsed_as_a_skill() {
+    let project = fresh_project("resource_markdown");
+    let root = agents_skills_dir(&project);
+    write_standard_skill(&root, "promptfolio-summarize", "portrait", "skill body");
+    std::fs::write(
+        root.join("promptfolio-summarize")
+            .join("analysis-prompt.md"),
+        "# Conversation Analysis Guidelines\n\nResource content without frontmatter.",
+    )
+    .unwrap();
+
+    let adapter = FilesystemSkillAdapter::new(fresh_global("resource_markdown"));
+    let snapshot = adapter
+        .materialize_available(mat_query(project))
+        .await
+        .expect("ordinary Markdown resources must not break Skill materialization");
+    let keys: Vec<&str> = snapshot
+        .fragments()
+        .iter()
+        .map(|fragment| fragment.stable_key())
+        .collect();
+
+    assert!(
+        keys.contains(&"promptfolio-summarize"),
+        "entry missing: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&"analysis-prompt"),
+        "resource leaked: {keys:?}"
+    );
+}
+
+#[tokio::test]
+async fn catalog_ignores_resource_markdown_beside_skill_entry() {
+    let project = fresh_project("catalog_resource_markdown");
+    let root = agents_skills_dir(&project);
+    write_standard_skill(&root, "demo", "demo", "skill body");
+    write_skill(
+        &root.join("demo"),
+        "reference.md",
+        "reference",
+        "resource",
+        "resource body",
+    );
+
+    let adapter = FilesystemSkillAdapter::new(fresh_global("catalog_resource_markdown"));
+    let names: Vec<String> = adapter
+        .list(catalog_query(project))
+        .iter()
+        .map(|descriptor| descriptor.name().to_owned())
+        .collect();
+
+    assert!(
+        names.contains(&"demo".to_owned()),
+        "entry missing: {names:?}"
+    );
+    assert!(
+        !names.contains(&"reference".to_owned()),
+        "resource leaked into Catalog: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn malformed_skill_entry_returns_typed_parse_error_for_skill_md() {
+    let project = fresh_project("malformed_skill_entry");
+    let entry = agents_skills_dir(&project).join("broken").join("SKILL.md");
+    std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
+    std::fs::write(&entry, "# missing frontmatter").unwrap();
+
+    let adapter = FilesystemSkillAdapter::new(fresh_global("malformed_skill_entry"));
+    let error = adapter
+        .materialize_available(mat_query(project))
+        .await
+        .expect_err("a malformed SKILL.md must remain a typed error");
+    assert!(
+        matches!(error, SkillError::ParseFailed { ref path, .. } if path.ends_with("SKILL.md")),
+        "unexpected error: {error:?}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unreadable_skill_entry_returns_typed_read_error_for_skill_md() {
+    use std::os::unix::fs::symlink;
+
+    let project = fresh_project("unreadable_skill_entry");
+    let skill_dir = agents_skills_dir(&project).join("broken");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    let entry = skill_dir.join("SKILL.md");
+    symlink(skill_dir.join("missing-target.md"), &entry).unwrap();
+
+    let adapter = FilesystemSkillAdapter::new(fresh_global("unreadable_skill_entry"));
+    let error = adapter
+        .materialize_available(mat_query(project))
+        .await
+        .expect_err("an unreadable SKILL.md must remain a typed error");
+    assert!(
+        matches!(error, SkillError::ReadFailed { ref path, .. } if path.ends_with("SKILL.md")),
+        "unexpected error: {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn markdown_named_directory_at_skill_root_is_not_a_flat_entry() {
+    let project = fresh_project("markdown_named_directory");
+    std::fs::create_dir_all(agents_skills_dir(&project).join("notes.md")).unwrap();
+
+    let adapter = FilesystemSkillAdapter::new(fresh_global("markdown_named_directory"));
+    let snapshot = adapter
+        .materialize_available(mat_query(project))
+        .await
+        .expect("a directory named *.md is not a flat Skill entry");
+
+    assert!(
+        !snapshot
+            .fragments()
+            .iter()
+            .any(|fragment| fragment.stable_key() == "notes"),
+        "Markdown-named directory leaked into materialization"
+    );
+}
+
+#[tokio::test]
+async fn invalid_skill_root_returns_typed_read_error() {
+    let project = fresh_project("invalid_skill_root");
+    let global = fresh_global("invalid_skill_root");
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    std::fs::write(&global, "not a directory").unwrap();
+
+    let adapter = FilesystemSkillAdapter::new(global.clone());
+    let error = adapter
+        .materialize_available(mat_query(project))
+        .await
+        .expect_err("a non-directory Skill root must not be treated as empty");
+
+    assert!(
+        matches!(error, SkillError::ReadFailed { ref path, .. } if path == &global.to_string_lossy()),
+        "unexpected error: {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn package_skill_entry_keeps_namespace() {
+    let project = fresh_project("package_skill_entry");
+    let package_root = agents_skills_dir(&project)
+        .join("superpowers")
+        .join("skills");
+    write_standard_skill(&package_root, "brainstorming", "brainstorm", "package body");
+    std::fs::write(
+        package_root.join("brainstorming").join("reference.md"),
+        "# Package resource without frontmatter",
+    )
+    .unwrap();
+
+    let adapter = FilesystemSkillAdapter::new(fresh_global("package_skill_entry"));
+    let snapshot = adapter
+        .materialize_available(mat_query(project))
+        .await
+        .expect("package SKILL.md must materialize");
+    assert!(
+        snapshot
+            .fragments()
+            .iter()
+            .any(|fragment| fragment.stable_key() == "superpowers:brainstorming"),
+        "namespaced package Skill missing"
+    );
+}
+
+#[tokio::test]
+async fn direct_skill_entry_takes_precedence_over_nested_skills_directory() {
+    let project = fresh_project("direct_entry_precedence");
+    let root = agents_skills_dir(&project);
+    write_standard_skill(&root, "demo", "direct entry", "direct body");
+    write_standard_skill(
+        &root.join("demo").join("skills"),
+        "nested",
+        "nested resource",
+        "nested body",
+    );
+
+    let adapter = FilesystemSkillAdapter::new(fresh_global("direct_entry_precedence"));
+    let snapshot = adapter
+        .materialize_available(mat_query(project))
+        .await
+        .expect("the direct SKILL.md must define a standard Skill");
+    let keys: Vec<&str> = snapshot
+        .fragments()
+        .iter()
+        .map(|fragment| fragment.stable_key())
+        .collect();
+
+    assert!(keys.contains(&"demo"), "direct entry missing: {keys:?}");
+    assert!(
+        !keys.contains(&"demo:nested"),
+        "resource directory was misclassified as a package: {keys:?}"
+    );
+}
+
+#[tokio::test]
+async fn resource_markdown_does_not_change_materialization_revision() {
+    let project = fresh_project("resource_revision");
+    let root = agents_skills_dir(&project);
+    write_standard_skill(&root, "demo", "demo", "stable body");
+    let adapter = FilesystemSkillAdapter::new(fresh_global("resource_revision"));
+    let before = adapter
+        .materialize_available(mat_query(project.clone()))
+        .await
+        .unwrap();
+
+    std::fs::write(root.join("demo").join("notes.md"), "ordinary resource").unwrap();
+    let after = adapter
+        .materialize_available(mat_query(project))
+        .await
+        .expect("resource Markdown must be ignored");
+
+    assert_eq!(before.revision(), after.revision());
+}
+
+#[tokio::test]
+async fn flat_markdown_at_skill_root_remains_compatible() {
+    let project = fresh_project("flat_compatibility");
+    write_skill(
+        &agents_skills_dir(&project),
+        "legacy.md",
+        "legacy",
+        "legacy flat entry",
+        "legacy body",
+    );
+
+    let adapter = FilesystemSkillAdapter::new(fresh_global("flat_compatibility"));
+    let snapshot = adapter
+        .materialize_available(mat_query(project))
+        .await
+        .expect("root-level flat Markdown remains a compatibility entry");
+
+    assert!(
+        snapshot
+            .fragments()
+            .iter()
+            .any(|fragment| fragment.stable_key() == "legacy"),
+        "flat compatibility entry missing"
+    );
 }
 
 // ── discovery & catalog ────────────────────────────────────────────────
