@@ -7,6 +7,7 @@
 //! affects identity semantics. Serialization is custom to preserve the
 //! single-string wire format.
 
+use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -51,6 +52,20 @@ fn cache(uuid: Uuid) -> String {
 /// single-string wire format by serializing only the UUID.
 macro_rules! impl_id_type {
     ($ty:ident) => {
+        impl JsonSchema for $ty {
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                stringify!($ty).into()
+            }
+
+            fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
+                json_schema!({
+                    "type": "string",
+                    "format": "uuid",
+                    "x-aemeath-uuid-version": 7
+                })
+            }
+        }
+
         impl PartialEq for $ty {
             fn eq(&self, other: &Self) -> bool {
                 self.0 == other.0

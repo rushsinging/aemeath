@@ -25,11 +25,7 @@ pub(super) async fn list_reflection_history_impl(
         .list(limit)
         .await
         .map_err(|error| SdkError::Internal(format!("List reflection history failed: {error}")))?;
-    Ok(records
-        .iter()
-        .map(memory::api::ReflectionRecord::safe_summary)
-        .map(summary_to_sdk)
-        .collect())
+    Ok(records.into_iter().map(summary_to_sdk).collect())
 }
 
 fn summary_to_sdk(summary: ReflectionSafeSummary) -> ReflectionHistoryView {

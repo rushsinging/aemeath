@@ -11,8 +11,8 @@ pub mod api {
         DatasetReadOutcome, DatasetRevision, DeleteOptions, DeleteOutcome, Durability, Generation,
         PreviousPolicy, PromoteOutcome, QuarantineOutcome, QuarantineReason, QuarantineReceipt,
         ReadOutcome, SafeOpenOptions, SafePathSegment, SafeStorageDir, SafeStorageEntry,
-        SafeStorageFileType, SafeStorageRoot, StorageError, StorageErrorKind, StorageKey,
-        StorageNamespace, TransactionScope, WriteOptions, WriteReceipt,
+        SafeStorageFileType, SafeStorageRoot, StorageEntry, StorageError, StorageErrorKind,
+        StorageKey, StorageNamespace, TransactionScope, WriteOptions, WriteReceipt,
     };
 
     pub fn file_system_blob(
@@ -42,7 +42,7 @@ pub use domain::{
     DatasetMember, DatasetRead, DatasetReadOutcome, DatasetRevision, DeleteOptions, DeleteOutcome,
     DigestObservation, Durability, Generation, JournalPhase, PreviousPolicy, PromoteOutcome,
     QuarantineDisposition, QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome,
-    RecoveryDecision, SafePathSegment, StorageError, StorageErrorKind, StorageKey,
+    RecoveryDecision, SafePathSegment, StorageEntry, StorageError, StorageErrorKind, StorageKey,
     StorageNamespace, TransactionDigest, TransactionScope, WriteOptions, WriteReceipt,
 };
 pub use ports::{AtomicBlobPort, AtomicDatasetPort};

@@ -52,10 +52,10 @@ pub const ReflectionOutput: ReflectionOutput = ReflectionOutput {
 
 #[derive(Debug, Error)]
 pub enum ReflectionError {
-    #[error("failed to parse reflection JSON: {0}")]
-    Parse(#[from] serde_json::Error),
-    #[error("reflection response could not be parsed as JSON (first 200 chars): {0}")]
-    Unparseable(String),
+    #[error("reflection response JSON is invalid")]
+    Parse,
+    #[error("reflection response could not be parsed as JSON")]
+    Unparseable,
     #[error("invalid reflection memory suggestion: {0}")]
     InvalidSuggestion(String),
     #[error(transparent)]
@@ -232,10 +232,6 @@ impl ReflectionRecord {
 pub struct ReflectionEngine;
 
 impl ReflectionEngine {
-    fn preview(text: &str) -> String {
-        text.chars().take(200).collect()
-    }
-
     fn extract_json_object(text: &str) -> Option<&str> {
         let start = text.find('{')?;
         let mut depth = 0usize;
@@ -355,7 +351,7 @@ impl ReflectionPromptPort for ReflectionEngine {
     fn parse_output(&self, raw: &str) -> ReflectionResult<ReflectionOutput> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
-            return Err(ReflectionError::Unparseable(String::new()));
+            return Err(ReflectionError::Unparseable);
         }
 
         let fenced = trimmed
@@ -369,10 +365,11 @@ impl ReflectionPromptPort for ReflectionEngine {
             // Preserve serde's structural error for JSON-looking, incomplete input.
             trimmed
         } else {
-            return Err(ReflectionError::Unparseable(Self::preview(trimmed)));
+            return Err(ReflectionError::Unparseable);
         };
 
-        let output: ReflectionOutput = serde_json::from_str(source)?;
+        let output: ReflectionOutput =
+            serde_json::from_str(source).map_err(|_| ReflectionError::Parse)?;
         for (index, suggestion) in output.suggested_memories.iter().enumerate() {
             if suggestion.content.trim().is_empty() {
                 return Err(ReflectionError::InvalidSuggestion(format!(
@@ -579,15 +576,15 @@ mod tests {
     fn distinguishes_empty_unparseable_and_malformed_json() {
         assert!(matches!(
             engine().parse_output("  "),
-            Err(ReflectionError::Unparseable(_))
+            Err(ReflectionError::Unparseable)
         ));
         assert!(matches!(
             engine().parse_output("no json here"),
-            Err(ReflectionError::Unparseable(_))
+            Err(ReflectionError::Unparseable)
         ));
         assert!(matches!(
             engine().parse_output("{\"deviations\": [}"),
-            Err(ReflectionError::Parse(_))
+            Err(ReflectionError::Parse)
         ));
     }
 

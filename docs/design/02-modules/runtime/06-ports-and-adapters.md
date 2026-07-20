@@ -270,7 +270,7 @@ submit(trigger, owned message snapshot)
 ```
 
 - `Manual` 只表示 Runtime 显式执行 trigger；它不建立同步路径，也不能绕过 slot。
-- `/reflect [limit]` 是独立的只读 control/query：Runtime 调用 Memory-owned `ReflectionHistoryQuery::list(limit)` 并投影 safe SDK view；它 **NEVER** submit job、调用 Provider 或 apply Memory。
+- `/reflect [limit]` 是独立的只读 control/query：Runtime 调用 Memory-owned `ReflectionHistoryQuery::list(limit)` 取得安全摘要，并仅映射为 SDK view；它 **NEVER** submit job、调用 Provider 或 apply Memory。
 - 后台完成**不主动**经 `EventSink` / SDK 向 TUI 投影 `ReflectionOutput`、formatted content 或完成正文。只有用户显式 `/reflect [limit]` 时才返回 newest-first 的安全 metadata/count 视图。
 - completion 与日志只能含 trigger、status、error category、token/count、duration、record id 等 metadata；**NEVER** 含 prompt、消息、Memory content、provider raw response、parsed/formatted output 或正文截断。
 - Run teardown 必须 drain 该 Run 的 Reflection slot；到结束 deadline 仍未完成时 cancel，并等待 cancellation/timeout 终态清槽后再释放 Run lease，**NEVER** 留下 detached job。adapter 自身的执行 timeout 同样只产出安全终态 metadata。
@@ -464,7 +464,9 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口仍由 #1289 承接 | #1285/#1289 |
+| 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口由 #1289（归 #860）承接 | #1285/#1289/#860 |
+| 2026-07-20 | #1284 接通 compact 成功后的 PreCompact 冻结快照单槽提交；Manual 显式入口与有界 teardown/cancel 分别由 #1289/#1285 承接 | #1284/#1289/#1285 |
+| 2026-07-20 | #1283 将 Reflection history query 收窄为 Memory 直接返回安全摘要，Runtime 只映射 SDK view，完整 record 不越过 query 边界 | #1283 |
 | 2026-07-19 | #907 补入 Runtime-owned `ProviderFactory` / `ProviderBinding` / `ProviderBuildSpec` 契约定义；明确 Runtime Main/Sub/Reflection/Compact 只依赖这三个 port 与 PL，Composition 独占 `provider::composition` 构造面；#1142 resolver `build_window` 接线仍延期 | [#907](https://github.com/rushsinging/aemeath/issues/907) |
 | 2026-07-18 | #899 完成 Reflection 三 trigger Runtime 单槽异步、busy skip、静默完成、Memory-owned history append/query、`/reflect [limit]` 只读安全投影及 Run teardown drain/cancel timeout | #899 |
 | 2026-07-11 | 初稿：入站端口、出站端口签名、RuntimeContext 按 RunSpec 装配、Composition Root、ACL、实现缺口 | #761 |

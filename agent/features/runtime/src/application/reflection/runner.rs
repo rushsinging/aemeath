@@ -28,12 +28,14 @@ pub struct CompleteReflectionResult {
 
 #[derive(Debug, Error)]
 pub enum ReflectionError {
-    #[error("reflection LLM call failed: {0}")]
-    LlmCall(String),
+    #[error("reflection LLM call failed")]
+    LlmCall,
+    #[error("reflection history write failed")]
+    HistoryWrite,
     #[error("reflection LLM returned an empty response")]
     EmptyResponse,
-    #[error("reflection response could not be parsed: {0}")]
-    Unparseable(String),
+    #[error("reflection response could not be parsed")]
+    Unparseable,
     #[error("reflection response contains an invalid suggestion")]
     InvalidSuggestion,
 }
@@ -43,12 +45,10 @@ pub type ReflectionResult<T> = Result<T, ReflectionError>;
 impl ReflectionError {
     fn category(&self) -> ReflectionErrorCategory {
         match self {
-            Self::LlmCall(detail) if detail == "reflection history write failed" => {
-                ReflectionErrorCategory::History
-            }
-            Self::LlmCall(_) => ReflectionErrorCategory::LlmCall,
+            Self::HistoryWrite => ReflectionErrorCategory::History,
+            Self::LlmCall => ReflectionErrorCategory::LlmCall,
             Self::EmptyResponse => ReflectionErrorCategory::EmptyResponse,
-            Self::Unparseable(_) => ReflectionErrorCategory::Parse,
+            Self::Unparseable => ReflectionErrorCategory::Parse,
             Self::InvalidSuggestion => ReflectionErrorCategory::InvalidSuggestion,
         }
     }
@@ -242,9 +242,7 @@ impl ReflectionTaskAdapter {
     /// than permanently binding the session's initial client.
     pub fn production(timeout: std::time::Duration) -> Self {
         Self::new(timeout, |_request, _cancel| async {
-            Err(ReflectionError::LlmCall(
-                "production reflection requires submit_complete".into(),
-            ))
+            Err(ReflectionError::LlmCall)
         })
     }
 
@@ -284,9 +282,10 @@ impl ReflectionTaskAdapter {
                     timestamp,
                     request.trigger.memory_trigger(),
                 );
-                history.append(&running).await.map_err(|_| {
-                    ReflectionError::LlmCall("reflection history write failed".into())
-                })?;
+                history
+                    .append(&running)
+                    .await
+                    .map_err(|_| ReflectionError::HistoryWrite)?;
                 execute_and_record(
                     request,
                     &config,
@@ -667,7 +666,7 @@ async fn execute_and_record(
             history
                 .upsert(&record)
                 .await
-                .map_err(|_| ReflectionError::LlmCall("reflection history write failed".into()))?;
+                .map_err(|_| ReflectionError::HistoryWrite)?;
             result.record_id = Some(id);
             Ok(result)
         }
@@ -682,7 +681,7 @@ async fn execute_and_record(
             history
                 .upsert(&record)
                 .await
-                .map_err(|_| ReflectionError::LlmCall("reflection history write failed".into()))?;
+                .map_err(|_| ReflectionError::HistoryWrite)?;
             Err(ReflectionError::EmptyResponse)
         }
         Err(error) => {
@@ -694,9 +693,7 @@ async fn execute_and_record(
                 started.elapsed().as_millis() as u64,
             );
             if history.upsert(&record).await.is_err() {
-                return Err(ReflectionError::LlmCall(
-                    "reflection history write failed".into(),
-                ));
+                return Err(ReflectionError::HistoryWrite);
             }
             Err(error)
         }
@@ -752,7 +749,7 @@ pub async fn run_complete_reflection(
             memory::api::ReflectionError::InvalidSuggestion(_) => {
                 ReflectionError::InvalidSuggestion
             }
-            _ => ReflectionError::Unparseable("invalid reflection response".to_string()),
+            _ => ReflectionError::Unparseable,
         })?;
 
     let mut formatted_content = reflection.format_output(&output, lang);
@@ -842,7 +839,7 @@ async fn call_llm_for_reflection(
     let mut stream = provider
         .invoke(request, &cancel)
         .await
-        .map_err(|error| ReflectionError::LlmCall(error.to_string()))?;
+        .map_err(|_| ReflectionError::LlmCall)?;
     while let Some(event) = stream.next().await {
         match event {
             provider::InvocationEvent::Completed(completion) => {
@@ -866,15 +863,13 @@ async fn call_llm_for_reflection(
                     usage.output_tokens.unwrap_or(0),
                 ));
             }
-            provider::InvocationEvent::Failed(error) => {
-                return Err(ReflectionError::LlmCall(error.to_string()));
+            provider::InvocationEvent::Failed(_error) => {
+                return Err(ReflectionError::LlmCall);
             }
             provider::InvocationEvent::Delta(_) => {}
         }
     }
-    Err(ReflectionError::LlmCall(
-        "provider stream ended without terminal event".to_string(),
-    ))
+    Err(ReflectionError::LlmCall)
 }
 
 #[cfg(test)]
@@ -1033,7 +1028,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(matches!(error, ReflectionError::Unparseable(_)));
+        assert!(matches!(error, ReflectionError::Unparseable));
         let rendered = error.to_string();
         assert!(!rendered.contains("not json"));
         assert!(!rendered.contains("first 200"));
@@ -1042,7 +1037,7 @@ mod tests {
     #[test]
     fn safe_log_helper_never_contains_raw_model_text() {
         let secret = "SECRET-provider-raw-response";
-        let error = ReflectionError::Unparseable("invalid reflection response".into());
+        let error = ReflectionError::Unparseable;
         let metadata = ReflectionTaskMetadata {
             error_category: Some(error.category()),
             input_tokens: 3,
@@ -1108,7 +1103,7 @@ mod task_adapter_tests {
         async fn list(
             &self,
             _limit: usize,
-        ) -> Result<Vec<memory::api::ReflectionRecord>, memory::api::MemoryError> {
+        ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError> {
             panic!("disabled reflection must not query history")
         }
     }
@@ -1266,7 +1261,7 @@ mod task_adapter_tests {
                     *attempts += 1;
                     match *attempts {
                         1 | 3 => Ok(successful_payload()),
-                        2 => Err(ReflectionError::LlmCall("expected failure".into())),
+                        2 => Err(ReflectionError::LlmCall),
                         _ => unreachable!(),
                     }
                 }

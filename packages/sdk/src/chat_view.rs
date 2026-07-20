@@ -1,5 +1,6 @@
 //! TUI 可展示视图：进度 / Hook / Workspace / 选项。
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
 
@@ -133,7 +134,7 @@ impl std::fmt::Display for AgentProgressEventView {
 }
 
 /// workspace 栈条目视图。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceStackEntryView {
     pub path_base: PathBuf,
     #[serde(alias = "working_root")]
@@ -141,7 +142,7 @@ pub struct WorkspaceStackEntryView {
 }
 
 /// TUI 可展示的 workspace 上下文视图。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceContextView {
     pub path_base: PathBuf,
     #[serde(alias = "working_root")]
@@ -180,7 +181,7 @@ pub struct HookEventView {
 }
 
 /// Hook 面向展示层的消息类别。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HookMessageKindView {
     AdditionalContext,
@@ -188,7 +189,7 @@ pub enum HookMessageKindView {
 }
 
 /// Hook 面向展示层的结构化消息。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct HookMessageView {
     pub point: String,
     pub source: String,
