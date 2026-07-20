@@ -9,11 +9,13 @@ pub struct TaskStopTool {
     pub access: Arc<dyn TaskAccess>,
 }
 
+#[cfg(test)]
+#[path = "task_stop_tests.rs"]
+mod tests;
+
 fn parse_task_id(value: &str) -> Result<TaskId, String> {
-    value
-        .parse::<u64>()
-        .map(TaskId::new)
-        .map_err(|_| format!("Task ID must be a decimal number: {value}"))
+    TaskId::parse_tool_input(value)
+        .map_err(|_| format!("Task ID must be a non-zero decimal number: {value}"))
 }
 
 #[async_trait]

@@ -4,6 +4,14 @@ use crate::{
 };
 
 #[test]
+fn task_id_tool_input_rejects_zero_and_malformed_values() {
+    assert_eq!(TaskId::parse_tool_input("1").unwrap(), TaskId::new(1));
+    for value in ["", "0", "-1", " 1", "001", "18446744073709551616"] {
+        assert!(TaskId::parse_tool_input(value).is_err(), "{value}");
+    }
+}
+
+#[test]
 fn ids_specs_and_priority_validate_values() {
     assert_eq!(TaskId::new(7).to_string(), "7");
     assert_eq!(BatchId::new(9).get(), 9);

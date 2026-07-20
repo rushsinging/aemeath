@@ -9,6 +9,10 @@ pub struct TaskListTool {
     pub access: Arc<dyn TaskAccess>,
 }
 
+#[cfg(test)]
+#[path = "task_list_tests.rs"]
+mod tests;
+
 fn parse_priority(value: &str) -> Option<TaskPriority> {
     match value.to_ascii_lowercase().as_str() {
         "low" => Some(TaskPriority::Low),

@@ -136,7 +136,7 @@ pub use domain::{
     detect_batch_all_completed, detect_interrupted_batch, detect_stale_batches, Batch,
     BatchCreateSpec, BatchId, BatchStatus, InterruptedBatchInfo, PreparedTaskRestore,
     StaleBatchInfo, Task, TaskAccess, TaskCommandError, TaskCommandResult, TaskCreateSpec,
-    TaskEvent, TaskId, TaskLifecycleSnapshot, TaskPersist, TaskPriority, TaskPriorityStats,
-    TaskReminderItem, TaskReminderSnapshot, TaskRevision, TaskSnapshot,
+    TaskEvent, TaskId, TaskIdParseError, TaskLifecycleSnapshot, TaskPersist, TaskPriority,
+    TaskPriorityStats, TaskReminderItem, TaskReminderSnapshot, TaskRevision, TaskSnapshot,
     TaskSnapshotValidationError, TaskStatus, TaskStoreStats, TaskView,
 };
