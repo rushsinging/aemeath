@@ -38,6 +38,37 @@ const HELPER_RESULT: &str = "AEMEATH_DATASET_CHILD_RESULT";
 const FAULT_POINT: &str = "AEMEATH_STORAGE_DATASET_FAULT_POINT";
 const FAULT_ABORT: &str = "AEMEATH_STORAGE_DATASET_FAULT_ABORT";
 
+fn wait_for_path(path: &Path, message: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !path.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(path.exists(), "{message}");
+}
+
+fn wait_for_child(child: &mut std::process::Child, message: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().expect("poll child") {
+            assert!(status.success(), "{message}: {status}");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    panic!("{message}: child timed out");
+}
+
+fn wait_for_reader(reader: std::thread::JoinHandle<()>, message: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !reader.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(reader.is_finished(), "{message}: reader timed out");
+    reader.join().expect(message);
+}
+
 fn unique_root(case: &str) -> PathBuf {
     std::env::temp_dir().join(format!("aemeath-dataset-crash-{case}-{}", Uuid::new_v4()))
 }
@@ -296,11 +327,7 @@ fn locked_child(root: &Path) -> (std::process::Child, PathBuf, PathBuf) {
         .stdout(Stdio::null())
         .spawn()
         .expect("lock child must launch");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !ready.exists() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(ready.exists(), "child must acquire the real OS lock");
+    wait_for_path(&ready, "child must acquire the real OS lock");
     (child, ready, release)
 }
 
@@ -309,29 +336,31 @@ fn same_dataset_is_serialized_across_processes() {
     let root = unique_root("same-lock");
     let (mut child, _, release) = locked_child(&root);
     let done = root.join("same-lock-done");
-    let started = root.join("same-lock-started");
+    let lock_attempt = root.join("same-lock-attempt");
     let root_for_read = root.clone();
     let done_for_read = done.clone();
-    let started_for_read = started.clone();
+    let lock_attempt_for_read = lock_attempt.clone();
     let reader = std::thread::spawn(move || {
-        std::fs::write(started_for_read, b"started").expect("signal reader start");
-        runtime()
-            .block_on(adapter(&root_for_read).read_manifest(&key()))
-            .expect("read after lock release");
+        std::env::set_var(
+            "AEMEATH_STORAGE_DATASET_LOCK_ATTEMPT",
+            &lock_attempt_for_read,
+        );
+        let result = runtime().block_on(adapter(&root_for_read).read_manifest(&key()));
+        std::env::remove_var("AEMEATH_STORAGE_DATASET_LOCK_ATTEMPT");
+        result.expect("read after lock release");
         std::fs::write(done_for_read, b"done").expect("signal reader completion");
     });
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !started.exists() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(started.exists(), "same-dataset reader must start");
+    wait_for_path(
+        &lock_attempt,
+        "same-dataset reader must reach the lock attempt",
+    );
     assert!(
         !done.exists(),
         "same dataset must remain blocked while the helper owns its lock"
     );
     std::fs::write(release, b"release").expect("release dataset lock");
-    assert!(child.wait().expect("wait child").success());
-    reader.join().expect("join same-dataset reader");
+    wait_for_child(&mut child, "dataset lock helper must exit after release");
+    wait_for_reader(reader, "same-dataset reader must finish after release");
     assert!(done.exists(), "same dataset must finish after lock release");
     std::fs::remove_dir_all(root).expect("cleanup");
 }
@@ -340,11 +369,22 @@ fn same_dataset_is_serialized_across_processes() {
 fn different_datasets_do_not_block_each_other() {
     let root = unique_root("different-lock");
     let (mut child, _, release) = locked_child(&root);
-    runtime()
-        .block_on(adapter(&root).read_manifest(&key_named("conversation-2")))
-        .expect("independent dataset read must finish while another dataset is locked");
+    let done = root.join("different-lock-done");
+    let root_for_read = root.clone();
+    let reader = std::thread::spawn(move || {
+        runtime()
+            .block_on(adapter(&root_for_read).read_manifest(&key_named("conversation-2")))
+            .expect("independent dataset read must finish while another dataset is locked");
+        std::fs::write(done, b"done").expect("signal independent read completion");
+    });
+    let independent_done = root.join("different-lock-done");
+    wait_for_path(
+        &independent_done,
+        "different dataset must complete before the held lock is released",
+    );
     std::fs::write(release, b"release").expect("release dataset lock");
-    assert!(child.wait().expect("wait child").success());
+    wait_for_child(&mut child, "dataset lock helper must exit after release");
+    wait_for_reader(reader, "different-dataset reader must finish");
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 

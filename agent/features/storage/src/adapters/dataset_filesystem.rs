@@ -36,18 +36,21 @@ use crate::{
 
 // ---- 私有、仅供 crash 测试驱动的故障注入接缝（不对外导出） ----
 
+#[cfg(any(test, feature = "test-fault-injection"))]
 const FAULT_POINT_ENV: &str = "AEMEATH_STORAGE_DATASET_FAULT_POINT";
+#[cfg(any(test, feature = "test-fault-injection"))]
 const FAULT_ABORT_ENV: &str = "AEMEATH_STORAGE_DATASET_FAULT_ABORT";
 
 /// 受测的 post-Prepared 故障点。
 enum FaultPoint {
     AfterPrepared,
-    AfterMemberPublish(String),
+    AfterMemberPublish(#[allow(dead_code)] String),
     PromoteAfterPrepared,
     PromoteAfterPrimaryToSwap,
     PromoteAfterPreviousToPrimary,
 }
 
+#[cfg(any(test, feature = "test-fault-injection"))]
 fn fault_requested(point: &FaultPoint) -> bool {
     let Some(requested) = std::env::var_os(FAULT_POINT_ENV) else {
         return false;
@@ -66,6 +69,7 @@ fn fault_requested(point: &FaultPoint) -> bool {
 
 /// 在 post-Prepared 故障点触发注入。命中且设置了 `FAULT_ABORT` → 直接 abort；
 /// 否则返回一个普通 I/O 错误，由提交路径转化为 committed `RecoveryPending` 收据。
+#[cfg(any(test, feature = "test-fault-injection"))]
 fn inject_post_prepared_fault(point: &FaultPoint) -> Result<(), StorageError> {
     if !fault_requested(point) {
         return Ok(());
@@ -77,6 +81,11 @@ fn inject_post_prepared_fault(point: &FaultPoint) -> Result<(), StorageError> {
         StorageErrorKind::Io,
         "注入的数据集事务故障（post-Prepared）",
     ))
+}
+
+#[cfg(not(any(test, feature = "test-fault-injection")))]
+fn inject_post_prepared_fault(_point: &FaultPoint) -> Result<(), StorageError> {
+    Ok(())
 }
 
 /// 受约束目录内的多成员数据集事务 adapter。
@@ -122,6 +131,10 @@ impl FileSystemDatasetAdapter {
             .open_with(LOCK_FILE, &options)
             .map_err(proto::map_io)?
             .into_std();
+        #[cfg(feature = "test-fault-injection")]
+        if let Some(marker) = std::env::var_os("AEMEATH_STORAGE_DATASET_LOCK_ATTEMPT") {
+            std::fs::write(marker, b"attempt").map_err(proto::map_io)?;
+        }
         lock.lock_exclusive().map_err(proto::map_lock_io)?;
         Ok(lock)
     }

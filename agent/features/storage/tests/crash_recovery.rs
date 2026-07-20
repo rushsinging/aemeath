@@ -8,6 +8,37 @@ use storage::{
 };
 use uuid::Uuid;
 
+fn wait_for_path(path: &std::path::Path, message: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !path.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(path.exists(), "{message}");
+}
+
+fn wait_for_child(child: &mut std::process::Child, message: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().expect("poll child") {
+            assert!(status.success(), "{message}: {status}");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    panic!("{message}: child timed out");
+}
+
+fn wait_for_reader(reader: std::thread::JoinHandle<()>, message: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !reader.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(reader.is_finished(), "{message}: reader timed out");
+    reader.join().expect(message);
+}
+
 fn root(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("aemeath-storage-{label}-{}", Uuid::new_v4()))
 }
@@ -337,7 +368,7 @@ fn os_lock_serializes_another_process_for_same_key() {
     let lock = root.join("session/session-1.lock");
     let ready = root.join("ready");
     let release = root.join("release");
-    let reader_started = root.join("reader-started");
+    let lock_attempt = root.join("reader-lock-attempt");
     let done = root.join("done");
     let mut child = Command::new(std::env::current_exe().unwrap())
         .arg("--exact")
@@ -350,37 +381,29 @@ fn os_lock_serializes_another_process_for_same_key() {
         .stdout(Stdio::null())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !ready.exists() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(ready.exists(), "helper must acquire the lock");
+    wait_for_path(&ready, "helper must acquire the lock");
 
     let root_for_read = root.clone();
     let done_for_read = done.clone();
-    let started_for_read = reader_started.clone();
+    let lock_attempt_for_read = lock_attempt.clone();
     let reader = std::thread::spawn(move || {
+        std::env::set_var("AEMEATH_STORAGE_BLOB_LOCK_ATTEMPT", &lock_attempt_for_read);
         let adapter = FileSystemBlobAdapter::new(&root_for_read).unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        std::fs::write(started_for_read, b"started").unwrap();
-        runtime
-            .block_on(adapter.read(&key(), Generation::Primary))
-            .unwrap();
+        let result = runtime.block_on(adapter.read(&key(), Generation::Primary));
+        std::env::remove_var("AEMEATH_STORAGE_BLOB_LOCK_ATTEMPT");
+        result.unwrap();
         std::fs::write(done_for_read, b"done").unwrap();
     });
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !reader_started.exists() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(reader_started.exists(), "reader thread must start");
+    wait_for_path(&lock_attempt, "reader must reach the same-key lock attempt");
     assert!(
         !done.exists(),
         "same-key read must remain blocked while the helper owns the lock"
     );
 
     std::fs::write(&release, b"release").unwrap();
-    assert!(child.wait().unwrap().success());
-    reader.join().unwrap();
+    wait_for_child(&mut child, "lock helper must exit after release");
+    wait_for_reader(reader, "same-key reader must finish after release");
     assert!(
         done.exists(),
         "same-key read must finish after lock release"

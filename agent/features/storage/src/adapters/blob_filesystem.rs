@@ -32,6 +32,7 @@ enum FaultPoint {
     Cleanup,
 }
 
+#[cfg(any(test, feature = "test-fault-injection"))]
 fn inject_fault(point: FaultPoint) -> Result<(), StorageError> {
     let requested = std::env::var_os("AEMEATH_STORAGE_FAULT_POINT");
     let name = match point {
@@ -62,6 +63,11 @@ fn inject_fault(point: FaultPoint) -> Result<(), StorageError> {
         StorageErrorKind::Io,
         format!("injected storage fault: {name}"),
     ))
+}
+
+#[cfg(not(any(test, feature = "test-fault-injection")))]
+fn inject_fault(_point: FaultPoint) -> Result<(), StorageError> {
+    Ok(())
 }
 
 pub struct FileSystemBlobAdapter {
@@ -112,6 +118,10 @@ impl FileSystemBlobAdapter {
             .open_with(&lock_name, &options)
             .map_err(map_io)?
             .into_std();
+        #[cfg(feature = "test-fault-injection")]
+        if let Some(marker) = std::env::var_os("AEMEATH_STORAGE_BLOB_LOCK_ATTEMPT") {
+            std::fs::write(marker, b"attempt").map_err(map_io)?;
+        }
         lock.lock_exclusive().map_err(map_lock_io)?;
         Ok(lock)
     }
