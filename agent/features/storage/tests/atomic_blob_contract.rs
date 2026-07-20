@@ -128,6 +128,101 @@ async fn assert_generation(
     assert_eq!(read.bytes(), expected);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn list_primary_hides_protocol_files_and_rejects_symlink_entries() {
+    let root = unique_root("list-primary-protocol");
+    let outside = unique_root("list-primary-outside");
+    std::fs::create_dir_all(root.join("session")).expect("create namespace directory");
+    std::fs::create_dir_all(&outside).expect("create outside directory");
+    std::fs::write(root.join("session/visible"), b"visible").expect("write primary");
+    for name in [
+        "visible.previous",
+        "visible.previous.next",
+        "visible.journal",
+        "visible.lock",
+        "visible.promoted",
+        "visible.quarantine.evidence",
+        ".stage-nonce",
+        ".journal-nonce",
+    ] {
+        std::fs::write(root.join("session").join(name), b"protocol").expect("write protocol file");
+    }
+    std::fs::create_dir_all(root.join("session/nested")).expect("create nested directory");
+    let outside_file = outside.join("escape");
+    std::fs::write(&outside_file, b"outside").expect("write outside file");
+    symlink(&outside_file, root.join("session/unsafe")).expect("create symlink");
+
+    let adapter = FileSystemBlobAdapter::new(&root).expect("adapter root should initialize");
+    let error = adapter
+        .list_primary(StorageNamespace::Session)
+        .await
+        .expect_err("symlink entry must fail closed");
+    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+    std::fs::remove_file(root.join("session/unsafe")).expect("remove symlink");
+
+    let entries = adapter
+        .list_primary(StorageNamespace::Session)
+        .await
+        .expect("list primary after removing symlink");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].key().segments()[0].as_str(), "visible");
+
+    std::fs::remove_dir_all(root).expect("remove test root");
+    std::fs::remove_dir_all(outside).expect("remove outside root");
+}
+
+#[tokio::test]
+async fn list_primary_returns_only_top_level_primary_entries_for_namespace() {
+    let root = unique_root("list-primary");
+    let adapter = FileSystemBlobAdapter::new(&root).expect("adapter root should initialize");
+    let first = StorageKey::new(
+        StorageNamespace::Session,
+        vec![SafePathSegment::from_str("first").expect("valid entry")],
+    )
+    .expect("valid first key");
+    let second = StorageKey::new(
+        StorageNamespace::Session,
+        vec![SafePathSegment::from_str("second").expect("valid entry")],
+    )
+    .expect("valid second key");
+
+    adapter
+        .write_atomic(&first, b"first", WriteOptions::new(Durability::BestEffort))
+        .await
+        .expect("write first");
+    adapter
+        .write_atomic(
+            &first,
+            b"first-next",
+            WriteOptions::new(Durability::BestEffort),
+        )
+        .await
+        .expect("replace first");
+    adapter
+        .write_atomic(
+            &second,
+            b"second",
+            WriteOptions::new(Durability::BestEffort),
+        )
+        .await
+        .expect("write second");
+
+    let entries = adapter
+        .list_primary(StorageNamespace::Session)
+        .await
+        .expect("list primary");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].key(), &first);
+    assert_eq!(entries[0].generation(), Generation::Primary);
+    assert_eq!(entries[0].size_bytes(), b"first-next".len());
+    assert_eq!(entries[1].key(), &second);
+    assert_eq!(entries[1].generation(), Generation::Primary);
+    assert_eq!(entries[1].size_bytes(), b"second".len());
+
+    std::fs::remove_dir_all(root).expect("remove test root");
+}
+
 #[tokio::test]
 async fn filesystem_adapter_satisfies_atomic_blob_contract() {
     let root = unique_root("contract");

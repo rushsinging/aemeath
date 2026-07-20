@@ -10,8 +10,8 @@ mod tests;
 
 pub use atomic_blob::{
     BlobRead, CommitWarning, DeleteOptions, DeleteOutcome, Generation, PromoteOutcome,
-    QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome, TransactionScope,
-    WriteOptions, WriteReceipt,
+    QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome, StorageEntry,
+    TransactionScope, WriteOptions, WriteReceipt,
 };
 pub(crate) use atomic_dataset::revision_member_digest;
 pub use atomic_dataset::{
