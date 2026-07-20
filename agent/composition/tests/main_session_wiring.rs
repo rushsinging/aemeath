@@ -284,13 +284,15 @@ async fn production_context_append_reopens_from_atomic_blob() {
         reopened["committed_steps"][0]["fingerprint"],
         "production-fingerprint"
     );
-    let segments = reopened["chats"].as_array().expect("canonical chats array");
-    let messages = segments
-        .iter()
-        .flat_map(|segment| segment["messages"].as_array().into_iter().flatten())
-        .collect::<Vec<_>>();
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0]["role"], "user");
+    let slices = reopened["run_slices"]
+        .as_array()
+        .expect("canonical run_slices array");
+    assert_eq!(slices.len(), 1);
+    let outcome = slices[0]["steps"][0]["outcome"]
+        .as_array()
+        .expect("finalized compatibility outcome");
+    assert_eq!(outcome.len(), 1);
+    assert_eq!(outcome[0]["role"], "user");
 }
 
 /// The Runtime client's session id must match the wiring's committed session

@@ -1,7 +1,7 @@
 //! Canonical Session 恢复投影。
 
 use super::message_integrity::{check_message_integrity, deep_clean_messages, sanitize_messages};
-use crate::domain::session::{CanonicalSession, ChatChain};
+use crate::domain::session::CanonicalSession;
 use share::message::Message;
 
 #[derive(Debug, Clone)]
@@ -14,7 +14,8 @@ pub struct SessionRestore {
 
 impl SessionRestore {
     pub fn from_canonical(session: &CanonicalSession) -> Self {
-        let mut messages = ChatChain::from_chats(&session.chats).messages();
+        // CanonicalSession applies the active compact marker before integrity repair.
+        let mut messages = session.structured_messages();
         let trimmed = {
             let before = messages.len();
             sanitize_messages(&mut messages);
@@ -33,3 +34,7 @@ impl SessionRestore {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "restore_tests.rs"]
+mod tests;
