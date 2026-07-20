@@ -1,9 +1,10 @@
 //! 项目上下文。
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// 项目上下文快照（Copy 语义，零开销）。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct ProjectContext {
     /// 当前工作目录。
     pub cwd: String,
