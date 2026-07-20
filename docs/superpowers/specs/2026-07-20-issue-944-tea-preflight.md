@@ -28,22 +28,22 @@
 
 | Target | Current 证据 | #944 处置 | 明确承接 |
 |---|---|---|---|
-| 六 Context 私有并经 root reducer 唯一写入 | `TuiModel` 只有公开 `conversation/diagnostic/input/session`；Config / Workspace 混入 Conversation runtime；41 处非 reducer `apply()` | 建立六 Context 根结构、访问器、统一 `AgentIntent` 和 reducer dispatch；测试/构造仅走明确 test fixture | #947 删除剩余旧调用点与兼容字段 |
-| ACL 只产 Intent，reducer只产 Change | `AgentEventMapping` 含 `effects`，`root_reducer` 直接透传；`update_ui` 在 reducer 后直接写 Model | 定义 `ModelChange` / `TuiUpdateResult` 仅表达 Change 与 dirty；Coordinator 从 Change 唯一导出 Effect | #943 清除 mapper SDK DTO；#947 删除 update_ui |
-| Interaction 持 request id/body/draft/phase，TUI 无 sender | `AskUserBatch` 持 sender，InputState 亦持 reply sender；仅 legacy AskUser block | 定义 TUI-owned InteractionState、四 body typed draft、可恢复 phase 与 conflict；root reducer 只接受纯值 Intent | #943 转换 SDK request DTO；#947 删除 sender；#878/#1246 接 Runtime waiter |
-| interaction result不改变Run | 旧 `update_ui` 直接 spinner / processing 操作；Run 状态为 chat-based模型 | 建立 RunProjection 状态变迁与 Interaction result Change 分离；只有 Run lifecycle Intent 改 Run 状态 | #943 传递 Run lifecycle；#945 取消 effect；#947 删除旧 spinner |
-| Workspace snapshot / metadata revision 防陈旧 | `WorkingDirectoryChanged` 同步 git，Workspace 状态落 Conversation runtime | 设 WorkspaceProjection，snapshot apply 产生 metadata Effect；只在 root+revision 匹配时 apply metadata | #943 转纯 snapshot；#947 删除同步 git |
-| ViewState只存瞬时交互态 | App/ViewState 含 spinner 镜像，Model 核心字段公开 | 将业务状态归 Model Change；ViewState仅维护 animation/scroll/selection/cache | #742 / #946 / #947 继续收口 |
+| 六 Context 私有并经 root reducer 唯一写入 | `TuiModel` 只有公开 `conversation/diagnostic/input/session`；Config / Workspace 混入 Conversation runtime；41 处非 reducer `apply()` | #944 建立六 Context 根、私有 accessor、AgentIntent 和唯一 reducer，并删除旧调用点与兼容字段 | #943 后续接入 DTO |
+| ACL 只产 Intent，reducer只产 Change | `AgentEventMapping` 含 `effects`，`root_reducer` 直接透传；`update_ui` 在 reducer 后直接写 Model | #944 建立 Intent→Change→Effect 消费面，删除 `update_ui` 双路径 | #943 清除 mapper SDK DTO |
+| Interaction 持 request id/body/draft/phase，TUI 无 sender | `AskUserBatch` 持 sender，InputState 亦持 reply sender；仅 legacy AskUser block | #944 建立 sender-free InteractionState、四 body typed draft、可恢复 phase 与 conflict，并删除 legacy sender | #943 转换 SDK request DTO；#878/#1246 接 Runtime waiter |
+| interaction result不改变Run | 旧 `update_ui` 直接 spinner / processing 操作；Run 状态为 chat-based模型 | #944 建立 RunProjection 状态变迁与 Interaction result Change 分离，并删除旧 spinner / processing 旁路 | #943 传递 lifecycle DTO；#878/#1246 Runtime control |
+| Workspace snapshot / metadata revision 防陈旧 | `WorkingDirectoryChanged` 同步 git，Workspace 状态落 Conversation runtime | #944 建立 WorkspaceProjection + metadata Effect，并删除同步 git | #943 转纯 snapshot |
+| ViewState只存瞬时交互态 | App/ViewState 含 spinner 镜像，Model 核心字段公开 | #944 将业务状态归 Model Change，ViewState仅维护 animation/scroll/selection/cache，并删除镜像 | #742 / #946 消费收敛后的边界 |
 
 ## Guard 与白名单预算
 
 | Guard | 当前基线 | #944 目标 | 允许保留 / 删除责任 |
 |---|---:|---:|---|
-| `check-tui-tea-purity.sh` migration exception | 1 | 1 | `app/slash.rs` 仍由 #947 处理；不新增 |
+| `check-tui-tea-purity.sh` migration exception | 1 | 1 | `app/slash.rs` 一并由 #944 退役；不新增 |
 | `check-tui-effect-boundary.sh` path exception | 0 | 0 | 新 reducer / model 不得引入副作用 |
 | `check-tui-model-view-boundaries.sh` explicit allowlist | 0 | 0 | 增加正向结构断言，不添加白名单 |
-| `check-render-pure.sh` scope exclusion | 1 | 1 | display bridge 由 #947 删除 |
-| inline TUI structure guard exclusion | 1 | 1 | 不增加 |
+| `check-render-pure.sh` scope exclusion | 1 | 0 | #944 删除 display bridge 后清理 |
+| inline TUI structure guard exclusion | 1 | 0 | #944 分解 / 删除旧旁路后清理 |
 
 ## 测试矩阵
 
@@ -58,4 +58,4 @@
 
 ## 结论
 
-#944 现已满足启动条件。实现必须先以失败测试锁定 Context 私有性、Intent→Change→Effect 与 Interaction/Run 分离；每个阶段保持旧 App 路径可运行，但不得新增 sender、第二状态源或新的非 reducer mutation。旧路径的物理删除只能留给 #947。
+#944 现已满足启动条件，并在同一交付中承担原 #947 的 legacy retirement。实现必须先以失败测试锁定 Context 私有性、Intent→Change→Effect 与 Interaction/Run 分离；每个阶段不得新增 sender、第二状态源或新的非 reducer mutation，最终必须删除旧路径而非保留兼容双轨。

@@ -20,12 +20,13 @@ TuiMsg::Ui(UiEvent)                 # #943 之后为纯 TUI DTO
 
 `AgentIntent` 是六 Context 的闭合分发容器：Conversation、Input、Diagnostic、Session、Config、Workspace。root reducer 是唯一生产 mutation façade；Context model 的内部字段私有，只暴露只读 projection。
 
-## 约束与非范围
+## 约束与收拢范围
 
-- 本 Issue不转换 `sdk::ChatEvent`，不保留或删除任何 sender；#943 / #947 各自负责。
-- 本 Issue不执行 Runtime waiter、Main suspension 或新 Run control；#878/#1246 负责。
-- 本 Issue建立 `RequestRunCancellation` / Interaction command Effect 的纯结构和 result Intent；#945 实现唯一 CancelRun effect 的生产入口，#943 提供 SDK lifecycle DTO。
-- 所有旧 `update_ui` 旁路的物理删除由 #947；过渡适配仅能调用 root reducer，禁止新增第二条 mutation 路径。
+- #944 在本次交付中一并完成原 #947 的 legacy `AskUserBatch` / sender / `update_ui` / 同步 git / Render 旁路 / spinner 第二状态源 / dead-code / cache 收口；不再把这些路径留给单独代码 Issue。
+- #943 在 #944 提供的纯 TUI Intent / Model / reducer 消费面完成后接入 SDK→TUI ACL；#944 不复制 `sdk::ChatEvent` 转换逻辑。
+- #944 不实现 Runtime waiter、Main suspension 或新 Run control；#878/#1246 负责 Runtime 生产切线。
+- #944 建立并接线 `RequestRunCancellation` / Interaction command Effect 与 result Intent；#945 可在该统一边界上追加专门取消行为，但不得恢复并行入口。
+- Guard 与架构测试随 #944 同步收紧；不保留白名单例外或第二条 mutation 路径。
 
 ## 文件边界
 
@@ -80,12 +81,14 @@ TuiMsg::Ui(UiEvent)                 # #943 之后为纯 TUI DTO
 3. 移除 ViewState 中业务 phase / run active 镜像；只保留 animation frame 等视觉事实。
 4. 写 Guard 与故意违规探针：非 reducer model write、update I/O、ViewState import render、Context public mutable accessor 均 exit 2。
 
-### Task 6：治理与验收
+### Task 6：legacy retirement、Guard、治理与验收
 
-1. 更新 Migration Governance O6，逐项记录 #944 已对齐与 #943/#947/#878/#1246 的未闭合责任。
-2. 回填 #944 的文档—代码差异、Guard 预算和 L0–L4 证据。
-3. 依次执行定向 root / conversation / interaction / coordinator / workspace 测试、全 workspace 测试、fmt、clippy、architecture guards 与 diff check。
-4. 请求独立 code review；发现 sender、旁路 mutation 或重复状态源时，在进入 PR 前修复或拆 Issue。
+1. 删除 `update_ui` / `ui_event.rs`、legacy AskUser sender / registry、effect-side mapper、同步 git 和所有非 reducer Model 写入；删除旧 `chats` / Chat 术语、重复 DTO / `InputRenderModel` / `follow_tail_hint`、no-op event/effect 与临时 `allow(dead_code)`。
+2. 闭合 queued message、collapse、四类 Interaction block、bounded BlockCache / cache-version 与 ViewState→Render 单向边界。
+3. 收紧 TUI-local Guard，逐项制造 SDK DTO / sender / ACL Effect / update I/O / 非 reducer mutation / ViewState import Render / 未映射 event 的违规，确认单 Guard 与总编排 exit 2；不增加白名单。
+4. 更新 Migration Governance O6，逐项记录 #944 已对齐与 #943/#878/#1246 的未闭合责任；#947 标记为范围已收拢的历史追踪。
+5. 回填 #944 的文档—代码差异、Guard 预算和 L0–L4 证据；请求独立 code review。
+6. 依次执行定向 root / conversation / interaction / coordinator / workspace 测试、全 workspace 测试、fmt、clippy、architecture guards 与 diff check。
 
 ## 验收命令
 
