@@ -70,6 +70,7 @@
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
+| 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
@@ -599,6 +600,16 @@
 - **排除语义**：只排除测试路径与精确 `#[cfg(test)]` item，不提供 migration exception、路径 allowlist 或 suppression。
 - **故意违规证据**：sanity 脚本先验证 Runtime-owned oneshot 正例，再分别注入 Runtime registry 直取、Execution→Hook、Suspension Sender、AskUser 魔法字符串、具体 adapter façade 与 Runtime schema copy；六类反例均必须由单 Guard 以 exit 2 拦截，恢复后 clean pass。
 - **失败模式**：逐项输出 `path:line: reason`，汇总后 exit 2。
+
+## 23b. check-command-catalog-boundary.sh
+
+- **位置**：`.agents/hooks/check-command-catalog-boundary.sh`。
+- **唯一所有者**：`CommandDescriptor`、`CommandRoute`、`CommandCatalogPort`、`CommandRouterPort`、`SlashInput` 与 `CommandParseError` 只能定义在 Tools `domain/command_{pl,ports}.rs`；SDK 直接 re-export，不复制 DTO。
+- **交付边界**：SDK/CLI/TUI/no-TUI 禁止恢复 `builtin_commands()`、`SLASH_HELP_LINES`、`is_exit_command` 或 `parse_reflection_history_command`；发现、帮助、补全和解析必须消费注入的 Catalog/Router。
+- **Runtime 边界**：Runtime 可消费 typed route，但不得定义第二套 Command Catalog/Router PL。
+- **白名单**：无；仅排除测试路径。
+- **故意违规证据**：在临时副本分别加入 SDK `builtin_commands()`、no-TUI 独立 parser 与 Runtime `CommandRoute`，单 Guard 和总编排均须 exit 2；恢复后 clean pass。
+- **失败模式**：输出命中路径后以 exit 2 阻断。
 
 ## 24. check-config-reader-injection.sh
 

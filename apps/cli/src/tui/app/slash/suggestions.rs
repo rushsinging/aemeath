@@ -22,7 +22,27 @@ impl super::super::App {
             })
             .collect();
 
-        let commands = sdk::builtin_commands();
+        let commands = self
+            .command_catalog
+            .as_deref()
+            .map(|catalog| {
+                catalog
+                    .list()
+                    .into_iter()
+                    .map(|command| {
+                        (
+                            command.name.as_str().to_string(),
+                            command.description,
+                            command
+                                .aliases
+                                .into_iter()
+                                .map(|alias| alias.as_str().to_string())
+                                .collect(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let ctx = SuggestionContext {
             input,

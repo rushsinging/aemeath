@@ -58,6 +58,8 @@ pub struct App {
     pub view_state: AppViewState,
     // 业务数据（非 UI 状态）
     pub skills: std::collections::HashMap<String, sdk::SkillView>,
+    pub command_catalog: Option<Arc<dyn sdk::CommandCatalogPort>>,
+    pub command_router: Option<Arc<dyn sdk::CommandRouterPort>>,
     pub agent_client: Option<Arc<dyn sdk::AgentClient>>,
     /// 缓存的配置视图（由 runtime 推送，TUI 只读）
     pub config_view: sdk::ConfigView,
@@ -175,6 +177,7 @@ impl App {
         // 启动横幅纳入单一真相源 ConversationModel，经 document 渲染。
         model_state.conversation.seed_banner();
 
+        let command_wiring = composition::tools::wire_commands().ok();
         Self {
             output_area,
             input_area: InputArea::new(),
@@ -197,6 +200,8 @@ impl App {
             model: model_state,
             view_state: AppViewState::default(),
             skills: std::collections::HashMap::new(),
+            command_catalog: command_wiring.as_ref().map(|wiring| wiring.catalog()),
+            command_router: command_wiring.map(|wiring| wiring.router()),
             config_view: sdk::ConfigView::default(),
             agent_client: None,
         }
