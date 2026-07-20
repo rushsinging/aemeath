@@ -1,5 +1,37 @@
 use super::*;
 use share::session_types::WorktreeKind;
+use std::sync::Mutex;
+
+type EnterArgs = (Option<PathBuf>, Option<String>, Option<String>);
+
+#[derive(Default)]
+struct RecordingWorkspaceControl {
+    enter_args: Mutex<Option<EnterArgs>>,
+}
+
+impl WorkspaceControl for RecordingWorkspaceControl {
+    fn change_directory(&self, _path: PathBuf) -> Result<(), project::WorkspaceError> {
+        Err(project::WorkspaceError::UnsupportedForNonGit)
+    }
+
+    fn switch_to(&self, _path: PathBuf) -> Result<(), project::WorkspaceError> {
+        Err(project::WorkspaceError::UnsupportedForNonGit)
+    }
+
+    fn enter(
+        &self,
+        path: Option<PathBuf>,
+        branch: Option<String>,
+        base: Option<String>,
+    ) -> Result<project::WorkspaceFrame, project::WorkspaceError> {
+        *self.enter_args.lock().expect("recording control lock") = Some((path, branch, base));
+        Err(project::WorkspaceError::UnsupportedForNonGit)
+    }
+
+    fn exit(&self) -> Result<project::WorkspaceFrame, project::WorkspaceError> {
+        Err(project::WorkspaceError::UnsupportedForNonGit)
+    }
+}
 
 /// Build an isolated real-git command without mutating process-wide env/cwd.
 fn test_git_command(path: &Path) -> std::process::Command {
@@ -62,6 +94,32 @@ fn init_main_repo(path: &Path) {
     assert!(status.success(), "git commit 退出码非 0");
 }
 
+fn run_git(path: &Path, args: &[&str]) {
+    let status = test_git_command(path)
+        .args(args)
+        .current_dir(path)
+        .status()
+        .unwrap_or_else(|error| panic!("git {args:?} spawn 失败: {error}"));
+    assert!(status.success(), "git {args:?} 退出码非 0");
+}
+
+fn git_stdout(path: &Path, args: &[&str]) -> String {
+    let output = test_git_command(path)
+        .args(args)
+        .current_dir(path)
+        .output()
+        .unwrap_or_else(|error| panic!("git {args:?} spawn 失败: {error}"));
+    assert!(
+        output.status.success(),
+        "git {args:?} 退出码非 0: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("git 输出必须是 UTF-8")
+        .trim()
+        .to_string()
+}
+
 fn enter_tool(ctx: &ToolExecutionContext) -> EnterWorktreeTool {
     EnterWorktreeTool {
         control: crate::adapters::test_support_tests::production_workspace_control(ctx),
@@ -96,12 +154,48 @@ fn test_enter_worktree_schema() {
     assert_eq!(schema["type"], "object");
     assert_eq!(schema["properties"]["path"]["type"], "string");
     assert_eq!(schema["properties"]["branch"]["type"], "string");
-    assert!(schema["properties"].get("base").is_none());
+    assert_eq!(schema["properties"]["base"]["type"], "string");
+    assert_eq!(schema["properties"]["base"]["nullable"], true);
+    let path_description = schema["properties"]["path"]["description"]
+        .as_str()
+        .expect("path description");
+    assert!(path_description.contains("必须省略"));
+    assert!(path_description.contains("禁止传空字符串"));
+    let base_description = schema["properties"]["base"]["description"]
+        .as_str()
+        .expect("base description");
+    assert!(base_description.contains("默认 main"));
     // 全 Option 字段：生成的 schema 不含 required 键（或为空数组）。
     assert!(schema
         .get("required")
         .and_then(|v| v.as_array())
         .is_none_or(|arr| arr.is_empty()));
+}
+
+#[tokio::test]
+async fn enter_worktree_normalizes_blank_path_and_preserves_base_for_project() {
+    let temp = tempfile::tempdir().expect("temp workspace");
+    let ctx = build_ctx(temp.path().to_path_buf());
+    let control = Arc::new(RecordingWorkspaceControl::default());
+    let tool = EnterWorktreeTool {
+        control: control.clone(),
+    };
+
+    let _result = tool
+        .call(
+            serde_json::json!({
+                "branch": "fix/example",
+                "path": " \t\n",
+                "base": "",
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert_eq!(
+        *control.enter_args.lock().expect("recording control lock"),
+        Some((None, Some("fix/example".into()), Some(String::new())))
+    );
 }
 
 #[test]
@@ -347,6 +441,7 @@ async fn enter_worktree_with_branch_creates_linked_and_consistent_state() {
     let ctx = build_ctx(tmp.path().to_path_buf());
     let main_canonical = tmp.path().canonicalize().unwrap();
     let expected_wt = main_canonical.join(".worktrees").join("feature-x");
+    let main_commit = git_stdout(tmp.path(), &["rev-parse", "main"]);
 
     // Pre-state：primary、空栈
     let before = crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
@@ -376,6 +471,11 @@ async fn enter_worktree_with_branch_creates_linked_and_consistent_state() {
     assert_eq!(data.path_base, expected_wt);
     assert_eq!(data.workspace_root, expected_wt);
     assert_eq!(data.branch, "feature-x");
+    assert_eq!(
+        git_stdout(&expected_wt, &["rev-parse", "HEAD"]),
+        main_commit,
+        "base 省略时新 worktree 必须从 main 创建"
+    );
 
     // snapshot：context_stack len=1、kind=Linked，path 指向 linked worktree
     let snapshot =
@@ -408,6 +508,80 @@ async fn enter_worktree_with_branch_creates_linked_and_consistent_state() {
 
     // 不应触碰初始 pre-state（防止 snapshot 不一致回归）。
     assert_eq!(before.path_base, main_canonical.display().to_string());
+}
+
+#[tokio::test]
+async fn enter_worktree_with_blank_path_and_base_derives_path_from_branch() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_main_repo(tmp.path());
+    let ctx = build_ctx(tmp.path().to_path_buf());
+    let expected_wt = tmp
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join(".worktrees")
+        .join("fix-example");
+
+    let result = enter_tool(&ctx)
+        .call(
+            serde_json::json!({
+                "branch": "fix/example",
+                "path": "",
+                "base": "",
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "EnterWorktree 必须成功: {}", result.text);
+    let data = result.data.expect("成功必须返回 data");
+    assert_eq!(data.path_base, expected_wt);
+    assert_eq!(data.workspace_root, expected_wt);
+    assert_eq!(data.branch, "fix/example");
+}
+
+#[tokio::test]
+async fn enter_worktree_with_explicit_base_starts_at_base_commit() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_main_repo(tmp.path());
+    run_git(tmp.path(), &["switch", "-c", "base/unique"]);
+    std::fs::write(tmp.path().join("base-only.txt"), "base-only\n").unwrap();
+    run_git(tmp.path(), &["add", "base-only.txt"]);
+    run_git(tmp.path(), &["commit", "-m", "base-only"]);
+    let base_commit = git_stdout(tmp.path(), &["rev-parse", "HEAD"]);
+    run_git(tmp.path(), &["switch", "main"]);
+    assert_ne!(
+        git_stdout(tmp.path(), &["rev-parse", "HEAD"]),
+        base_commit,
+        "测试前置条件：base ref 必须领先 main"
+    );
+
+    let ctx = build_ctx(tmp.path().to_path_buf());
+    let expected_wt = tmp
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join(".worktrees")
+        .join("from-explicit-base");
+    let result = enter_tool(&ctx)
+        .call(
+            serde_json::json!({
+                "branch": "from-explicit-base",
+                "base": "base/unique",
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "EnterWorktree 必须成功: {}", result.text);
+    let data = result.data.expect("成功必须返回 data");
+    assert_eq!(data.path_base, expected_wt);
+    assert_eq!(data.branch, "from-explicit-base");
+    assert_eq!(
+        git_stdout(&expected_wt, &["rev-parse", "HEAD"]),
+        base_commit,
+        "显式 base 必须跨 Tool → Project → Git 到达 worktree HEAD"
+    );
 }
 
 /// ExitWorktreeTool 空输入 pop 回 primary：data/read/snapshot 回到原根，

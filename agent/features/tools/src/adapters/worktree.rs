@@ -79,24 +79,27 @@ impl TypedTool for EnterWorktreeTool {
             }
         };
 
-        let display_target = args.path.clone().unwrap_or_else(|| {
-            args.branch
-                .clone()
-                .map(|branch| format!("branch {branch}"))
-                .unwrap_or_else(|| {
-                    if ctx.guidance().language() == "zh" {
-                        "未指定目标".to_string()
-                    } else {
-                        "(unspecified)".to_string()
-                    }
-                })
-        });
+        let path = args
+            .path
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from);
+        let display_target = path
+            .as_ref()
+            .map(|value| value.display().to_string())
+            .unwrap_or_else(|| {
+                args.branch
+                    .clone()
+                    .map(|branch| format!("branch {branch}"))
+                    .unwrap_or_else(|| {
+                        if ctx.guidance().language() == "zh" {
+                            "未指定目标".to_string()
+                        } else {
+                            "(unspecified)".to_string()
+                        }
+                    })
+            });
 
-        match self.control.enter(
-            args.path.as_ref().map(PathBuf::from),
-            args.branch.clone(),
-            None,
-        ) {
+        match self.control.enter(path, args.branch.clone(), args.base) {
             Ok(_frame) => {
                 let path_base = ctx.workspace_read().current_path_base();
                 let workspace_root = ctx.workspace_read().current_workspace_root();
