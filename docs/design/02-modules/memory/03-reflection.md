@@ -181,27 +181,25 @@ fn recent_messages_summary(messages: &[Message], max_chars: usize) -> String;
 ## 6. Output 解析
 
 ```rust
-fn parse_output(raw: &str) -> Result<ReflectionOutput, serde_json::Error>;
+fn parse_output(raw: &str) -> Result<ReflectionOutput, ReflectionError>;
 ```
 
 - LLM 返回纯 JSON 文本。
 - 使用 serde 反序列化为 `ReflectionOutput`。
-- 解析失败返回 `ReflectionError::Unparseable`，只携带稳定的安全类别/固定描述；**NEVER** 附带 raw response、prompt、对话或 Reflection 正文。
+- JSON 结构错误返回 `ReflectionError::Parse`，非 JSON 或无可提取对象返回 `ReflectionError::Unparseable`；两者只携带稳定的安全类别/固定描述，**NEVER** 附带 raw response、prompt、对话或 Reflection 正文。
 
 ### ReflectionError
 
 ```rust
 enum ReflectionError {
-    Parse(serde_json::Error),              // JSON 解析失败
-    Memory(MemoryError),                   // MemoryPort 操作失败
-    Apply(String),                         // apply 流程失败
-    LlmCall(String),                       // LLM 调用失败（由 Runtime 设置）
-    EmptyResponse,                         // LLM 返回空响应
-    Unparseable(String),                   // 响应无法解析为 JSON
+    Parse,                                // JSON 解析失败，不携带原文
+    Memory(MemoryError),                  // MemoryPort 操作失败
+    InvalidSuggestion(String),            // suggestion 违反领域约束
+    Unparseable,                          // 响应无法解析为 JSON，不携带原文
 }
 ```
 
-**注意**：`LlmCall` 和 `EmptyResponse` 由 Runtime 侧设置——Memory BC 的 `parse_output` 和 `apply` 不会产生这些错误。错误类型统一在 `ReflectionError` 中，但产生源区分清楚。
+**注意**：Memory 的 `ReflectionError` 只表达 parse、领域约束和 Memory 操作失败，且 Display **NEVER** 附带 raw response、prompt、对话或正文。LLM 调用、空响应与执行期 apply 失败由 Runtime 的执行错误与安全类别表达，不能回流为 Memory parse 错误。
 
 ## 7. Apply 流程
 
@@ -273,7 +271,7 @@ PreCompact 在 compact 前把所选 `messages` clone 为 owned snapshot，但只
 
 `ReflectionRecord` 是 Memory-owned 持久化事实，包含 trigger、状态、可选 parsed output / apply result、错误类别、token usage 与 duration。Runtime 接受任务后先通过 `ReflectionHistoryStore::append` 写入 `Running`，成功、失败、partial apply、timeout 或 cancel 后以同 id `upsert` 终态；adapter 使用 project-scoped durable dataset，append/upsert/query 均由 Memory 拥有。
 
-`/reflect [limit]` 只调用 `ReflectionHistoryQuery::list(limit)`，按 newest-first 返回至多 `limit` 条，再投影为 `ReflectionSafeSummary`：id、时间、trigger、状态、deviation/suggestion/outdated 数量、apply 状态、错误类别、token 计数与耗时。该查询**不运行 Reflection、不 apply、也不返回 output 正文**。
+`/reflect [limit]` 只调用 `ReflectionHistoryQuery::list(limit)`，该 query 已按 newest-first 返回至多 `limit` 条 `ReflectionSafeSummary`；Runtime/SDK 仅映射其交付 DTO：id、时间、trigger、status、deviation/suggestion/outdated 数量、apply 状态、错误类别、token 计数与耗时。该查询**不运行 Reflection、不 apply、也不返回 output 正文**。
 
 ### 8.3 安全日志
 
@@ -304,6 +302,7 @@ struct ReflectionConfig {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1283 将 parse 错误收窄为不含模型原文的稳定类别，且 `ReflectionHistoryQuery` 仅发布安全摘要；完整 record 保持在 Memory adapter 内部 | #1283 |
 | 2026-07-19 | #900 将旧 `MemoryStore` apply 示例更新为当前 Run shared lease 捕获的同一 `MemoryPort::apply_reflection`，保留 `ReflectionEngine` 作为无状态 prompt/parse 领域服务 | #900 |
 | 2026-07-18 | #899 完成三 trigger Runtime 单槽异步、busy skip、静默完成、Memory-owned history append/query 持久化、`/reflect [limit]` 只读安全摘要、安全日志与 Run teardown drain/cancel timeout | #899 |
 | 2026-07-12 | 初稿：ReflectionEngine 领域服务、MemorySuggestion、触发条件、prompt/output/apply、职责边界 | #789 |
