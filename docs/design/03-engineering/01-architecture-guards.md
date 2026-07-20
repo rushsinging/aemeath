@@ -661,12 +661,13 @@
 
 - **触发**：`.cargo/hooks/pre-push`，且仅在完整架构守卫通过后执行。
 - **行为**：
-  1. 输出 hook 调试信息（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR` / `ROOT` / `PWD`）；
-  2. 设置 `CARGO_TARGET_DIR=target/hook-tests`（隔离各 checkout 的 cargo 元数据，避免 stale path-dep 缓存）；
-  3. 对 11 个 crate 顺序跑 `cargo test --lib`（`cli` 用 `cargo test -p cli --bin aemeath`）；
-  4. 每个 crate 默认最多运行 180 秒，可用 `AEMEATH_UNIT_TEST_TIMEOUT_SECS` 调整；超时会终止并回收该 cargo 进程组、输出 crate 名与上限并返回 124；
-  5. 任一 crate 超时或测试失败后立即退出，**NEVER** 继续执行后续 crate。
-- **被测 crates**：`share, runtime, project, policy, context, provider, tools, storage, hook, audit, cli`。
+  1. 清除 Git Hook 注入的 repository-local 环境变量，避免 `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` 等污染 Cargo 测试中的临时仓库；
+  2. 输出 hook 调试信息（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR` / `ROOT` / `PWD`）；
+  3. 设置 `CARGO_TARGET_DIR=target/hook-tests`（隔离各 checkout 的 cargo 元数据，避免 stale path-dep 缓存）；
+  4. 对 12 个 crate 顺序跑 `cargo test --lib`（`cli` 用 `cargo test -p cli --bin aemeath`）；
+  5. 每个 crate 默认最多运行 180 秒，可用 `AEMEATH_UNIT_TEST_TIMEOUT_SECS` 调整；超时会终止并回收该 cargo 进程组、输出 crate 名与上限并返回 124；
+  6. 任一 crate 超时或测试失败后立即退出，**NEVER** 继续执行后续 crate。
+- **被测 crates**：`share, workflow, runtime, project, policy, context, provider, tools, storage, hook, audit, cli`。
 
 ## 维护说明
 
