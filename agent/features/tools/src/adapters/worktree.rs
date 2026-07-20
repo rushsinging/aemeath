@@ -92,10 +92,11 @@ impl TypedTool for EnterWorktreeTool {
                 })
         });
 
-        match self
-            .control
-            .enter(args.path.as_ref().map(PathBuf::from), args.branch.clone())
-        {
+        match self.control.enter(
+            args.path.as_ref().map(PathBuf::from),
+            args.branch.clone(),
+            None,
+        ) {
             Ok(_frame) => {
                 let path_base = ctx.workspace_read().current_path_base();
                 let workspace_root = ctx.workspace_read().current_workspace_root();

@@ -374,7 +374,7 @@ fn enter_with_stale_stack_clears_only_after_negative_probe() {
         worktree_kind: WorktreeKind::Primary,
     });
 
-    enter(&mut state, &git, Some(target), None).unwrap();
+    enter(&mut state, &git, Some(target), None, None).unwrap();
 
     assert_eq!(state.stack.len(), 1, "残栈清理后只压入当前 frame");
     assert_eq!(state.stack[0].workspace_root, PathBuf::from("/repo"));
@@ -394,7 +394,7 @@ fn enter_when_stale_stack_probe_fails_keeps_state_unchanged() {
     };
     state.stack.push(frame.clone());
 
-    let result = enter(&mut state, &git, Some("/target".into()), None);
+    let result = enter(&mut state, &git, Some("/target".into()), None, None);
 
     assert_eq!(
         result,
@@ -418,7 +418,7 @@ fn enter_rejects_nested_when_in_worktree() {
         worktree_kind: WorktreeKind::Primary,
     });
     assert!(matches!(
-        enter(&mut s, &git, Some("/other".into()), None),
+        enter(&mut s, &git, Some("/other".into()), None, None),
         Err(WorkspaceError::NestedWorktree {
             current_workspace_root,
             current_path_base,
@@ -518,13 +518,82 @@ fn switch_to_succeeds_same_repo() {
 }
 
 #[test]
+fn validate_in_repo_reports_invalid_probe_instead_of_repo_mismatch_for_non_git_target() {
+    let target = unique_temp_dir("non_git_target");
+    let mut git = FakeGit::default();
+    git.toplevel.insert(target.clone(), target.clone());
+    git.non_git.insert(target.clone());
+    let state = st("/repo");
+
+    let result = validate_in_repo(&state, &git, &target);
+
+    assert_eq!(
+        result,
+        Err(WorkspaceError::GitProbeFailed(
+            crate::GitProbeError::InvalidOutput
+        ))
+    );
+}
+
+#[test]
 fn enter_missing_path_and_branch_errors() {
     let git = FakeGit::default();
     let mut s = st("/repo");
     assert_eq!(
-        enter(&mut s, &git, None, None),
+        enter(&mut s, &git, None, None, None),
         Err(WorkspaceError::MissingPathAndBranch)
     );
+}
+
+#[test]
+fn resolve_worktree_path_treats_empty_path_as_missing() {
+    let state = st("/repo");
+
+    let resolved =
+        resolve_worktree_path(&state, Some(PathBuf::new()), Some("feature/path contract")).unwrap();
+
+    assert_eq!(
+        resolved,
+        PathBuf::from("/repo/.worktrees/feature-path-contract")
+    );
+}
+
+#[test]
+fn resolve_worktree_base_defaults_for_missing_or_blank_values() {
+    assert_eq!(resolve_worktree_base(None), DEFAULT_WORKTREE_BASE);
+    assert_eq!(resolve_worktree_base(Some("")), DEFAULT_WORKTREE_BASE);
+    assert_eq!(resolve_worktree_base(Some(" \t\n ")), DEFAULT_WORKTREE_BASE);
+}
+
+#[test]
+fn resolve_worktree_base_preserves_explicit_value() {
+    assert_eq!(resolve_worktree_base(Some(" release/v2 ")), " release/v2 ");
+}
+
+#[test]
+fn enter_rejects_primary_target_as_not_linked_and_keeps_state_unchanged() {
+    let target = unique_temp_dir("primary_target");
+    let common = PathBuf::from("/repo/.git");
+    let mut git = FakeGit::default();
+    git.toplevel.insert(target.clone(), target.clone());
+    git.common_dir.insert(target.clone(), common);
+
+    let mut state = st("/repo");
+    let before = snapshot(&state);
+
+    let result = enter(&mut state, &git, Some(target.clone()), None, None);
+
+    assert_eq!(
+        result,
+        Err(WorkspaceError::NotLinkedWorktree {
+            path: target.clone()
+        })
+    );
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("不是 linked worktree"));
+    assert_eq!(snapshot(&state), before);
 }
 
 #[test]
@@ -562,7 +631,7 @@ fn enter_happy_path_pushes_frame_and_swaps_cwd() {
 
     // Pass the temp dir as an absolute path → resolve_worktree_path returns it directly,
     // target.exists() is true → worktree_add is NOT called.
-    let frame = enter(&mut s, &git, Some(canonical_tmp.clone()), None).unwrap();
+    let frame = enter(&mut s, &git, Some(canonical_tmp.clone()), None, None).unwrap();
 
     // Returned frame holds the PRE-change state.
     assert_eq!(frame.path_base, saved_path_base);
@@ -612,7 +681,7 @@ fn enter_rejects_non_git_identity() {
     let mut s = st("/repo");
     s.worktree_kind = WorktreeKind::NonGit;
     assert_eq!(
-        enter(&mut s, &git, Some("/repo/wt".into()), None),
+        enter(&mut s, &git, Some("/repo/wt".into()), None, None),
         Err(WorkspaceError::UnsupportedForNonGit)
     );
     assert!(git.added.lock().unwrap().is_empty());
@@ -645,7 +714,7 @@ fn enter_promotes_worktree_kind_to_linked_and_captures_previous() {
     let mut s = st("/repo");
     s.worktree_kind = WorktreeKind::Primary;
 
-    let frame = enter(&mut s, &git, Some(canonical_tmp.clone()), None).unwrap();
+    let frame = enter(&mut s, &git, Some(canonical_tmp.clone()), None, None).unwrap();
 
     assert_eq!(
         frame.worktree_kind,
