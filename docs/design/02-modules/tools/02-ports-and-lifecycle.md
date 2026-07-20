@@ -193,6 +193,13 @@ struct SkillMaterializationSnapshot {
 
 Skill Materializer 负责异步读取、解析与验证 Skill，输出带确定性内容 revision 的 PromptFragment 快照。Context Management 接收 Fragment 后决定注入位置、预算、去重、缓存分段和顺序。
 
+文件系统 adapter 的入口契约：
+
+- 标准 Skill 只识别 `<skill-dir>/SKILL.md`；同目录其他 Markdown 是资源，不参与 Catalog、Materialization 或 revision；
+- package 只识别 `<package>/skills/<skill>/SKILL.md`，并应用 package namespace；
+- 为兼容历史布局，只有 skills 根目录的直接 `*.md` 可继续作为扁平入口，禁止递归泛化；
+- 真实入口存在但读取、frontmatter 或 YAML 损坏时返回 typed `SkillError`，资源文件不进入 parser。
+
 Skill 不是 Tool，不走 ToolExecutionPort；Context Management 不直接读取 Skill 文件或依赖其 adapter。
 
 ## 7. Slash Command 端口
