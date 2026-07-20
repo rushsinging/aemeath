@@ -503,6 +503,22 @@
       "introduced_baseline": "v0.1.0",
       "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
       "status": "active"
+    },
+    {
+      "id": "scope.command.tests-and-owner-filter",
+      "guard": "check-command-catalog-boundary.sh",
+      "module": "tools",
+      "scope": {
+        "kind": "pattern",
+        "value": "Command boundary test exclusions and unique owner filter"
+      },
+      "classification": "scope_exclusion",
+      "owner": "tools",
+      "reason": "Command boundary scans production definitions and excludes tests while selecting the single Tools owner path",
+      "tracking_issue": 913,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while the textual boundary guard excludes tests and filters the unique owner path",
+      "status": "active"
     }
   ]
 }

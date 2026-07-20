@@ -20,7 +20,8 @@
 - `ToolExecutionContext` 只含私有 `scope + ports`。文件工具只经 `WorkspaceRead` 解析路径；`WorkspaceControl` 仅允许 Bash、EnterWorktree、ExitWorktree 使用，accessor 保持 crate-private。
 - `WorkspaceViews` 必须在 Runtime adapter 转换；Runtime 自持 `WorkspacePersist`、并发 semaphore、timeout、Policy/Hook 与等待机制，Tools domain 禁止 Tokio channel/token/semaphore。Memory 能力直接使用正式 `MemoryPort`，不得恢复 legacy compatibility bridge。
 - AskUser adapter 只解析并返回纯值 `ToolSuspension::UserInteraction`：`agent/features/tools/src/domain/suspension.rs`、`agent/features/tools/src/adapters/ask_user.rs`。request id、waiter、continuation、await/resume 与取消归 Runtime；#911 只完成 typed suspension 边界及生产映射，不代表 #877/#878 的完整 Interaction 状态机完成。
-- #912/#913 的 Runtime/Composition ownership 与装配收口仍未完成。
+- Command Published Language 与端口位于 `agent/features/tools/src/domain/{command_pl,command_ports}.rs`；唯一生产 adapter 位于 `adapters/command.rs`，由 `tools::composition::wire_commands` 装配。SDK 只 re-export，CLI/TUI/no-TUI **NEVER** 定义第二份 Descriptor、Catalog 或 parser。
+- #912/#913 的 Skill materialization 与 Command Catalog/Router 边界已切线；#914 继续承接旧 Registry/Profile/SkillTool 物理退役。
 
 ## MCP 工具
 

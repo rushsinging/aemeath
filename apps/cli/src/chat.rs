@@ -56,12 +56,16 @@ pub(crate) async fn run_chat(args: Args) {
             if should_emit_quiet_cli_diagnostic_log(quiet) {
                 crate::tui::log_info!("quiet chat started: session={session_id}");
             }
-            crate::chat::no_tui::run_no_tui_chat(bootstrap.client, session_id)
-                .await
-                .unwrap_or_else(|e| {
-                    eprintln!("Error: {e}");
-                    std::process::exit(1);
-                });
+            crate::chat::no_tui::run_no_tui_chat(
+                bootstrap.client,
+                session_id,
+                bootstrap.command_router,
+            )
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            });
             return;
         }
 
@@ -70,6 +74,7 @@ pub(crate) async fn run_chat(args: Args) {
         app.agent_client = Some(bootstrap.client.clone());
         app.session.memory_config = bootstrap.memory_config;
         app.set_skills(bootstrap.skills_map);
+        app.set_commands(bootstrap.command_catalog, bootstrap.command_router);
 
         // 在 run() 之前设置启动上下文（替代 18 参数注入）
         app.status_bar.set_permission_mode(if bootstrap.allow_all {

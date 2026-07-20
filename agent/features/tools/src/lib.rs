@@ -10,8 +10,8 @@ mod domain;
 /// remain private; production business code consumes the returned ports.
 pub mod composition {
     pub use crate::adapters::composition::{
-        wire_builtin_catalog_execution, wire_skill_materialization, wire_skills,
-        CatalogExecutionWiring, SkillWiring,
+        wire_builtin_catalog_execution, wire_commands, wire_skill_materialization, wire_skills,
+        CatalogExecutionWiring, CommandWiring, SkillWiring,
     };
     #[cfg(feature = "test-harness")]
     pub use crate::adapters::composition::{
@@ -25,20 +25,23 @@ pub use domain::types;
 // Published language: shared-kernel tool types, DTOs, and ports.
 pub use domain::{
     AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal,
-    AgentRunner, AgentToolCallProgress, AuthorizationContext, CacheHint, CancellationDeclaration,
-    CancellationSignal, CatalogQuery, ConcurrencyDeclaration, ExecutionScope,
-    ExecutionScopeBuilder, FixedGuidance, FixedPlanMode, Guidance, ImageData,
-    InputSafetyDeclaration, InvocationSource, MemoryPortSource, MutexReadSet, PlanModeState,
-    ProfileExpansionError, ProgressSink, PromptFragment, ReadSet, RegistryScopeName,
-    SessionReminder, SessionReminders, SkillCatalogPort, SkillDescriptor, SkillError,
-    SkillMaterializationPort, SkillMaterializationQuery, SkillMaterializationRevision,
-    SkillMaterializationSnapshot, SkillQuery, SkillSource, SkillSourceKind, Tool, ToolCapabilities,
-    ToolCapability, ToolCatalogPort, ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind,
-    ToolExecutionContext, ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort,
-    ToolExecutionOutcome, ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider,
-    ToolName, ToolOutcome, ToolProfile, ToolProfileName, ToolResult, ToolSuspension, TypedTool,
-    TypedToolAdapter, TypedToolResult, UserInteractionSpec, UserOption, UserQuestion,
-    WorkspaceReadAccess,
+    AgentRunner, AgentToolCallProgress, ApplicationControlCommand, ApplicationControlTarget,
+    AuthorizationContext, CacheHint, CancellationDeclaration, CancellationSignal, CatalogQuery,
+    CommandArgumentSchema, CommandCatalogPort, CommandCompletion, CommandDescriptor,
+    CommandMechanism, CommandName, CommandParseError, CommandRoute, CommandRouterPort,
+    CommandTarget, ConcurrencyDeclaration, ExecutionScope, ExecutionScopeBuilder, FixedGuidance,
+    FixedPlanMode, Guidance, ImageData, InputSafetyDeclaration, InvocationSource, MemoryPortSource,
+    MutexReadSet, ParsedArguments, PlanModeState, ProfileExpansionError, ProgressSink,
+    PromptCommand, PromptFragment, ReadSet, RegistryScopeName, SessionReminder, SessionReminders,
+    SkillCatalogPort, SkillDescriptor, SkillError, SkillMaterializationPort,
+    SkillMaterializationQuery, SkillMaterializationRevision, SkillMaterializationSnapshot,
+    SkillQuery, SkillSource, SkillSourceKind, SlashInput, SnapshotQueryCommand,
+    SnapshotQueryTarget, Tool, ToolCapabilities, ToolCapability, ToolCatalogPort,
+    ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind, ToolExecutionContext,
+    ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort, ToolExecutionOutcome,
+    ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider, ToolName, ToolOutcome,
+    ToolProfile, ToolProfileName, ToolResult, ToolSuspension, TypedTool, TypedToolAdapter,
+    TypedToolResult, UserInteractionSpec, UserOption, UserQuestion, WorkspaceReadAccess,
 };
 
 // Schema validator (moved from runtime).

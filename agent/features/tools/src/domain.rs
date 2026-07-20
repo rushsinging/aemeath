@@ -4,6 +4,8 @@
 //! exposing tool execution internals.
 
 pub mod agent_port;
+pub mod command_pl;
+pub mod command_ports;
 pub mod context;
 pub mod memory_source;
 pub mod ports;
@@ -29,6 +31,13 @@ mod scope_profile_tests;
 mod skill_pl_tests;
 
 pub use agent_port::{AgentDispatch, AgentRunRequest, AgentRunTerminal, AgentRunner};
+pub use command_pl::{
+    ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCompletion,
+    CommandDescriptor, CommandMechanism, CommandName, CommandParseError, CommandRoute,
+    CommandTarget, ParsedArguments, PromptCommand, SlashInput, SnapshotQueryCommand,
+    SnapshotQueryTarget,
+};
+pub use command_ports::{CommandCatalogPort, CommandRouterPort};
 pub use context::{
     AuthorizationContext, CancellationSignal, ExecutionScope, ExecutionScopeBuilder, FixedGuidance,
     FixedPlanMode, Guidance, InvocationSource, MutexReadSet, PlanModeState, ProgressSink, ReadSet,

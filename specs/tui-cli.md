@@ -17,7 +17,7 @@
   - 内置工具显示：`apps/cli/src/tui/render/output/tool_display/tool_impls.rs`。
   - 任务类工具显示：`apps/cli/src/tui/render/output/tool_display/task_impls.rs`。
 - 新增工具的展示样式：在对应 `*_impls.rs` 用 `inventory::submit!(ToolDisplayEntry { ... })` 声明，无需改渲染主循环。
-- 注意：这套 `inventory` 仅控制**显示**。slash 命令的注册是另一套机制（`CommandDescriptor`），见 `runtime.md`。
+- 注意：这套 `inventory` 仅控制**显示**。slash 命令由 Tools-owned `CommandDescriptor` / `CommandCatalogPort` / `CommandRouterPort` 注册和解析，经 SDK/Composition 注入；CLI/TUI/no-TUI **NEVER** 维护静态命令清单或独立业务 parser。
 
 ## ToolRenderPolicy 系统
 
