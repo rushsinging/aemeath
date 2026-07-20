@@ -53,9 +53,6 @@ pub(crate) use {
 };
 
 pub use self::app::App;
-pub use self::render::input::input_area::InputArea;
-pub use self::render::output_area::OutputArea;
-pub use self::render::status::StatusBar;
 
 #[cfg(test)]
 mod tests {

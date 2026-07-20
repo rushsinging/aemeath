@@ -65,7 +65,10 @@ mod tests {
 
         app.handle_resize(80, 24);
 
-        assert_eq!(crate::tui::InputArea::input_content_width(80), 78);
+        assert_eq!(
+            crate::tui::render::input::input_area::InputArea::input_content_width(80),
+            78
+        );
     }
 
     #[test]

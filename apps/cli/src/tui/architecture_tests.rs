@@ -47,6 +47,24 @@ fn production_source(source: &str) -> String {
 }
 
 #[test]
+fn test_tui_facade_reexports_only_app_entrypoint() {
+    let tui_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui.rs");
+    let source = fs::read_to_string(&tui_root).expect("read tui facade");
+
+    assert!(
+        source.contains("pub use self::app::App;"),
+        "tui facade must publish the App entrypoint"
+    );
+    let reexports_render = source.lines().any(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("pub use ") && trimmed.contains("render")
+    });
+    assert!(
+        !reexports_render,
+        "tui facade must not re-export render widgets; they are internal implementation details"
+    );
+}
+#[test]
 fn test_adapter_and_view_assembler_production_do_not_depend_on_render_modules() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let checked_dirs = [root.join("adapter"), root.join("view_assembler")];
