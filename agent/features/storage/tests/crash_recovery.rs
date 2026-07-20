@@ -312,6 +312,8 @@ fn helper_process_holds_real_os_lock() {
     }
     let path = std::env::var_os("AEMEATH_STORAGE_LOCK_PATH").unwrap();
     let ready = std::env::var_os("AEMEATH_STORAGE_LOCK_READY").unwrap();
+    let release =
+        std::path::PathBuf::from(std::env::var_os("AEMEATH_STORAGE_LOCK_RELEASE").unwrap());
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -321,7 +323,11 @@ fn helper_process_holds_real_os_lock() {
         .unwrap();
     fs2::FileExt::lock_exclusive(&file).unwrap();
     std::fs::write(ready, b"ready").unwrap();
-    std::thread::sleep(Duration::from_millis(350));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !release.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(release.exists(), "parent must release the helper lock");
 }
 
 #[test]
@@ -330,6 +336,9 @@ fn os_lock_serializes_another_process_for_same_key() {
     std::fs::create_dir_all(root.join("session")).unwrap();
     let lock = root.join("session/session-1.lock");
     let ready = root.join("ready");
+    let release = root.join("release");
+    let reader_started = root.join("reader-started");
+    let done = root.join("done");
     let mut child = Command::new(std::env::current_exe().unwrap())
         .arg("--exact")
         .arg("helper_process_holds_real_os_lock")
@@ -337,6 +346,7 @@ fn os_lock_serializes_another_process_for_same_key() {
         .env("AEMEATH_STORAGE_LOCK_HELPER", "1")
         .env("AEMEATH_STORAGE_LOCK_PATH", &lock)
         .env("AEMEATH_STORAGE_LOCK_READY", &ready)
+        .env("AEMEATH_STORAGE_LOCK_RELEASE", &release)
         .stdout(Stdio::null())
         .spawn()
         .unwrap();
@@ -346,14 +356,35 @@ fn os_lock_serializes_another_process_for_same_key() {
     }
     assert!(ready.exists(), "helper must acquire the lock");
 
-    let started = Instant::now();
-    let adapter = FileSystemBlobAdapter::new(&root).unwrap();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    runtime
-        .block_on(adapter.read(&key(), Generation::Primary))
-        .unwrap();
-    assert!(started.elapsed() >= Duration::from_millis(250));
+    let root_for_read = root.clone();
+    let done_for_read = done.clone();
+    let started_for_read = reader_started.clone();
+    let reader = std::thread::spawn(move || {
+        let adapter = FileSystemBlobAdapter::new(&root_for_read).unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        std::fs::write(started_for_read, b"started").unwrap();
+        runtime
+            .block_on(adapter.read(&key(), Generation::Primary))
+            .unwrap();
+        std::fs::write(done_for_read, b"done").unwrap();
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !reader_started.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(reader_started.exists(), "reader thread must start");
+    assert!(
+        !done.exists(),
+        "same-key read must remain blocked while the helper owns the lock"
+    );
+
+    std::fs::write(&release, b"release").unwrap();
     assert!(child.wait().unwrap().success());
+    reader.join().unwrap();
+    assert!(
+        done.exists(),
+        "same-key read must finish after lock release"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 

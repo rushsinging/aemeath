@@ -642,6 +642,34 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 覆盖率与 production reachability 独立判定。首次失败不得被重跑成功覆盖；flaky 必须修复确定性或登记阻断。只有行为矩阵无未解释空白、关键缺口已补齐或有 owner 的原生 Issue 承接、全部适用门禁通过且父项治理事实已同步，才可给出 #848 的 Storage 测试完整性结论。
 
+#### 11.9.5 #1057 实施结果与行为—证据矩阵
+
+| 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
+|---|---|---|---|
+| SafePath、StorageKey、DatasetKey 的合法/非法等价类与策略不变量 | L1 | `agent/features/storage/src/domain/domain_tests.rs` | 已覆盖；补齐单字符、大小写/下划线、Unicode 与 `Display`，空键、namespace durability/previous policy、digest/revision/recovery 决策保持单元证据 |
+| SafeStorageRoot capability-root、no-follow、普通文件与目录枚举 | L3 | `agent/features/storage/tests/safe_storage_root_contract.rs` | #1057 补齐；覆盖缺失 root、多段幂等目录、中间 symlink、create/open、missing/directory target、typed 排序/过滤及路径不泄漏 |
+| AtomicBlob 整值替换、显式代际、promote/quarantine/delete | L2-L3 | `atomic_blob_contract.rs`、`crash_recovery.rs` | 完整；旧/新 primary、previous、指定代 quarantine、跨 reopen promote 幂等、并发 writer 与协议 symlink 均可追溯 |
+| Blob 提交点、durability、fault matrix 与 typed corruption | L1-L4 | `domain/domain_tests.rs`、`crash_recovery.rs` | 完整；Prepared/Committed digest 分支、提交前 Err、提交后 warning、abort/reopen 与 corruption quarantine 均覆盖 |
+| AtomicDataset manifest、revision、CAS、完整替换与 previous | L1-L3 | `domain/domain_tests.rs`、`atomic_dataset_contract.rs` | 完整；canonical revision、重复 member、omitted delete、stale CAS、显式 previous、promote/quarantine 均覆盖 |
+| Dataset Prepared、roll-forward、完整代可见性与 corruption 优先级 | L2-L4 | `atomic_dataset_crash.rs` | 完整；member 中途发布、journal/member/revision 矛盾、partial quarantine fail-closed 与 promote crash matrix 均覆盖 |
+| 相同 key/dataset 跨进程串行、不同 dataset 独立 | L4 | `crash_recovery.rs`、`atomic_dataset_crash.rs` | #1057 修复确定性；ready/release 有界握手替代 `sleep + elapsed` 业务断言，墙钟只保留等待上限 |
+| Context Session、Memory dataset、Audit append primitive、Runtime Tool Result、Composition wiring | L3-L4 | `context/tests/session_snapshot_store_contract.rs`、`memory/src/adapters_tests.rs`、`audit/tests/append_store_contract.rs`、`runtime/tests/tool_result_blob_contract.rs`、`composition/tests/main_session_wiring.rs` | 已覆盖；#1057 增加 Session durability、promote、delete-all 相邻映射证据 |
+| 测试 owning-layer、test-only API 与生产可达性 | L0 | Storage `*_tests.rs`、production reachability、source/architecture guards | #1057 收口；移除生产文件 inline test，domain/adapter/façade 测试外置；删除只为测试存在的 `SafePathSegment::name` API；日志捕获器安装失败不再静默 |
+| crate-root / `storage::api` 重复 façade 与文档 `list_primary` 漂移 | L0-L3 | [#1263](https://github.com/rushsinging/aemeath/issues/1263) | 结构性缺口已由原生 sub-issue 承接并设置为 #1057 blocked-by；跨 Context/Config/Runtime/Memory/Composition，不在测试审查 PR 强行迁移 |
+| 真终端、网络、安装与发布资产 | L5 | 不适用说明 | Storage 机制不依赖终端/网络/发布资产；真实子进程 crash 与 OS lock 已由隔离 process harness 覆盖，无新增 L5 |
+
+测试组织与确定性结论：Storage domain 测试迁入 `src/domain/` owner，Blob/Dataset adapter 与 crate façade 日志测试外置；未新增 `mod.rs`、`include!`、万能 `test_utils` 或生产 test-only API。SafeStorageRoot 文件测试均使用 RAII 唯一目录。跨进程锁不再用固定等待时长判断成功。
+
+验证证据（2026-07-20）：
+
+- `cargo fmt --all -- --check`、`cargo check -p storage`、`cargo test -p storage --all-targets` 通过。
+- Context Session、Runtime Tool Result、Memory、Audit append、Composition Main Session 定向测试通过。
+- `cargo run -p xtask -- production-reachability .`、`cargo clippy --workspace --all-targets -- -D warnings`、全部 architecture guards 通过。
+- 独立 `cargo test --workspace` 两次均在 Runtime 测试进程超过 10 分钟未结束；首次结果未被隐藏，也未以重跑成功冒充通过。`cargo test --workspace --no-run` 通过，已确认卡住进程不属于 Storage 变更路径。
+- workspace `./scripts/coverage.sh` 同样因 Runtime 测试进程超过 10 分钟未完成；改用同版本工具执行 `cargo llvm-cov --manifest-path agent/features/storage/Cargo.toml --all-targets --summary-only`，Storage regions/functions/lines 为 `83.52% / 91.81% / 86.98%`。初始文档基线为 `75.28% / 69.26% / 76.39%`；口径分别记录，不把百分比当作行为正确证明。
+
+最终结论：Storage 机制测试的 L0～L4 缺口已按最低充分层闭合，L5 不适用；公开面/list 契约漂移由 #1263 继续阻断 #1057，因此 #1057 与父项 #848 暂不满足关闭条件。
+
 ## 12. 相关文档
 
 - [01-architecture-guards.md](01-architecture-guards.md)：架构守卫注册表与例外治理
@@ -660,4 +688,5 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 | 2026-07-17 | 登记 #884 Tool Result 的 L1/L3/L4 覆盖：Config policy、Unicode materialization、写失败 fallback、AtomicBlob adapter contract、Main/Sub 共享入口与旧 `.txt` 引用兼容边界 | [#884](https://github.com/rushsinging/aemeath/issues/884) |
 | 2026-07-17 | 登记 #983 AtomicDataset 的 L0–L5 覆盖：纯规则、adapter 协作、公共 port contract、Prepared/roll-forward/corruption fault matrix 与真实进程 abort/OS lock；Memory 集成 deferred 至 #896 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
 | 2026-07-19 | 完成 #1062 Policy 测试审查：登记 Standard/AllowAll Config 映射、五维授权上下文、Runtime 单次评估与 fuse、Main/Sub 同实例注入、CLI ACL、L4 授权旅程及 L5 不适用理由 | [#1062](https://github.com/rushsinging/aemeath/issues/1062)、[#1221](https://github.com/rushsinging/aemeath/issues/1221) |
+| 2026-07-20 | 完成 #1057 Storage 根因级测试审查：补齐 SafeStorageRoot、Session 相邻映射、owning-layer 与锁确定性；记录 Storage 覆盖率和 workspace Runtime 卡住事实；公开面/list 契约漂移由 #1263 承接 | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#1263](https://github.com/rushsinging/aemeath/issues/1263) |
 | 2026-07-20 | 冻结 #1057 Storage 根因级测试审查计划：按八个稳定行为单元建立 L0～L5 矩阵，优先修复 owning-layer、日志测试设施、墙钟锁断言与 SafeStorageRoot 契约根因，再复核 Blob/Dataset、消费方边界、公开面和 Guard | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#848](https://github.com/rushsinging/aemeath/issues/848) |

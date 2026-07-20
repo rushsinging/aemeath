@@ -263,6 +263,7 @@ fn lock_child_holds_dataset_os_lock() {
     }
     let root = PathBuf::from(std::env::var_os(HELPER_ROOT).expect("child root"));
     let ready = PathBuf::from(std::env::var_os(HELPER_READY).expect("ready path"));
+    let release = PathBuf::from(std::env::var_os(HELPER_RESULT).expect("release path"));
     let lock = dataset_dir(&root, "conversation-1").join("dataset.lock");
     std::fs::create_dir_all(lock.parent().expect("lock parent")).expect("create dataset dir");
     let file = OpenOptions::new()
@@ -274,11 +275,16 @@ fn lock_child_holds_dataset_os_lock() {
         .expect("open lock file");
     file.lock_exclusive().expect("acquire child lock");
     std::fs::write(ready, b"ready").expect("signal lock acquisition");
-    std::thread::sleep(Duration::from_millis(700));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !release.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(release.exists(), "parent must release the dataset lock");
 }
 
-fn locked_child(root: &Path) -> (std::process::Child, PathBuf) {
+fn locked_child(root: &Path) -> (std::process::Child, PathBuf, PathBuf) {
     let ready = root.join("lock-ready");
+    let release = root.join("lock-release");
     let child = Command::new(std::env::current_exe().expect("test executable"))
         .arg("--exact")
         .arg("lock_child_holds_dataset_os_lock")
@@ -286,6 +292,7 @@ fn locked_child(root: &Path) -> (std::process::Child, PathBuf) {
         .env(HELPER_MODE, "lock")
         .env(HELPER_ROOT, root)
         .env(HELPER_READY, &ready)
+        .env(HELPER_RESULT, &release)
         .stdout(Stdio::null())
         .spawn()
         .expect("lock child must launch");
@@ -294,34 +301,49 @@ fn locked_child(root: &Path) -> (std::process::Child, PathBuf) {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(ready.exists(), "child must acquire the real OS lock");
-    (child, ready)
+    (child, ready, release)
 }
 
 #[test]
 fn same_dataset_is_serialized_across_processes() {
     let root = unique_root("same-lock");
-    let (mut child, _) = locked_child(&root);
-    let started = Instant::now();
-    runtime()
-        .block_on(adapter(&root).read_manifest(&key()))
-        .expect("read after lock release");
-    assert!(started.elapsed() >= Duration::from_millis(550));
+    let (mut child, _, release) = locked_child(&root);
+    let done = root.join("same-lock-done");
+    let started = root.join("same-lock-started");
+    let root_for_read = root.clone();
+    let done_for_read = done.clone();
+    let started_for_read = started.clone();
+    let reader = std::thread::spawn(move || {
+        std::fs::write(started_for_read, b"started").expect("signal reader start");
+        runtime()
+            .block_on(adapter(&root_for_read).read_manifest(&key()))
+            .expect("read after lock release");
+        std::fs::write(done_for_read, b"done").expect("signal reader completion");
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !started.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(started.exists(), "same-dataset reader must start");
+    assert!(
+        !done.exists(),
+        "same dataset must remain blocked while the helper owns its lock"
+    );
+    std::fs::write(release, b"release").expect("release dataset lock");
     assert!(child.wait().expect("wait child").success());
+    reader.join().expect("join same-dataset reader");
+    assert!(done.exists(), "same dataset must finish after lock release");
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 
 #[test]
 fn different_datasets_do_not_block_each_other() {
     let root = unique_root("different-lock");
-    let (mut child, _) = locked_child(&root);
-    let started = Instant::now();
+    let (mut child, _, release) = locked_child(&root);
     runtime()
         .block_on(adapter(&root).read_manifest(&key_named("conversation-2")))
-        .expect("independent dataset read");
-    assert!(
-        started.elapsed() < Duration::from_millis(300),
-        "a per-dataset lock must not become a root-wide lock"
-    );
+        .expect("independent dataset read must finish while another dataset is locked");
+    std::fs::write(release, b"release").expect("release dataset lock");
     assert!(child.wait().expect("wait child").success());
     std::fs::remove_dir_all(root).expect("cleanup");
 }
