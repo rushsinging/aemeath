@@ -259,6 +259,7 @@ fn build_compact_test_port<'a>(
         reasoning: harness.reasoning.as_ref(),
         pending_input: &mut harness.pending_input,
         deferred_user_inputs: &mut harness.deferred_user_inputs,
+        stop_hook_feedback: None,
         cancel: CancellationToken::new(),
         run_id: RunId::new("run"),
         active_run: harness.active_run.as_ref(),

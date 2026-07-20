@@ -506,6 +506,7 @@ where
                     reasoning: reasoning.as_ref(),
                     pending_input: &mut pending_input,
                     deferred_user_inputs: &mut deferred_user_inputs,
+                    stop_hook_feedback: None,
                     cancel: cancel.clone(),
                     run_id: run_id.clone(),
                     active_run: active_run.as_ref(),
