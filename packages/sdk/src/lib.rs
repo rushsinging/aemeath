@@ -27,6 +27,7 @@ pub mod tool_result;
 pub mod tui;
 pub mod types;
 pub mod update;
+pub mod wire;
 
 pub mod ids;
 pub mod interaction;
