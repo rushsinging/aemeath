@@ -336,6 +336,7 @@ Out-of-scope 必须保留精确 owner：#947 承接 TUI slash I/O 全 Effect 化
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1263 以 Context Session 列举为真实消费者冻结并实现 `AtomicBlobPort::list_primary(StorageNamespace)` 与 opaque `StorageEntry`：只返回 namespace 顶层 primary regular blob，按 segment 排序，隐藏协议文件、symlink 与嵌套目录；`StorageKey` 保持至少一个 segment、不可充当目录 prefix。双 façade / adapter 构造权收口继续由 #1263/#950 承接。 | [#1263](https://github.com/rushsinging/aemeath/issues/1263) |
 | 2026-07-20 | #1266 收紧 filesystem Skill 发现：标准目录与 package 仅解析 `SKILL.md`，直接入口优先于同目录 `skills/`；其他 Markdown 资源不进入 Catalog、Materialization 或 revision；真实入口损坏继续返回 typed error。skills 根目录直接 `*.md` 由 Tools filesystem adapter 暂保留历史兼容，退役前必须另立迁移 Issue 并完成真实使用方审计 | [#1266](https://github.com/rushsinging/aemeath/issues/1266) |
 | 2026-07-20 | #1057 完成 Storage 根因级测试审查：补齐 SafeStorageRoot 全公开面路径安全契约、Session durability/promote/delete 相邻映射、domain/adapter/façade owning-layer 外置与 ready/release 锁确定性；production reachability、all-target clippy、架构守卫通过，Storage 定向 coverage 为 regions/functions/lines `83.52% / 91.81% / 86.98%`；workspace 测试/coverage 的 Runtime 卡住首次事实保留；双 façade 与 `list_primary` 漂移由 #1263 承接并阻断关闭 | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#1263](https://github.com/rushsinging/aemeath/issues/1263) |
 | 2026-07-20 | 冻结 #1057 Storage 根因级测试审查计划：七个业务叶子关闭后，以行为—风险矩阵复核 L0～L5；先治理 owning-layer、日志测试设施与墙钟锁断言，再补 SafeStorageRoot/Blob/Dataset/消费方边界缺口并收口公开面、过渡 Guard 与父项证据 | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#848](https://github.com/rushsinging/aemeath/issues/848) |
