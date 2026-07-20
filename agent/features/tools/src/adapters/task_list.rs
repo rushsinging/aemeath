@@ -3,7 +3,7 @@ use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use task::{TaskAccess, TaskPriority, TaskStatus};
+use task::{TaskAccess, TaskPriority, TaskStatus, TaskView};
 
 pub struct TaskListTool {
     pub access: Arc<dyn TaskAccess>,
@@ -16,34 +16,6 @@ fn parse_priority(value: &str) -> Option<TaskPriority> {
         "high" => Some(TaskPriority::High),
         "urgent" | "critical" => Some(TaskPriority::Urgent),
         _ => None,
-    }
-}
-
-/// Temporary anti-corruption mapping while tool results retain the legacy wire DTO.
-fn to_legacy_task(task: &task::Task) -> share::task::types::Task {
-    use share::task::types::{TaskPriority as LegacyPriority, TaskStatus as LegacyStatus};
-    share::task::types::Task {
-        id: task.id().to_string(),
-        subject: task.subject().to_owned(),
-        description: task.description().to_owned(),
-        status: match task.status() {
-            TaskStatus::Pending => LegacyStatus::Pending,
-            TaskStatus::InProgress => LegacyStatus::InProgress,
-            TaskStatus::Completed => LegacyStatus::Completed,
-            TaskStatus::Deleted => LegacyStatus::Deleted,
-        },
-        owner: None,
-        blocked_by: task.blocked_by().iter().map(ToString::to_string).collect(),
-        priority: match task.priority() {
-            TaskPriority::Low => LegacyPriority::Low,
-            TaskPriority::Normal => LegacyPriority::Normal,
-            TaskPriority::High => LegacyPriority::High,
-            TaskPriority::Urgent => LegacyPriority::Urgent,
-        },
-        created_at: task.created_at(),
-        updated_at: task.updated_at(),
-        session_id: task.session_id().map(str::to_owned),
-        batch: task.batch().get(),
     }
 }
 
@@ -113,7 +85,7 @@ impl TypedTool for TaskListTool {
         TypedToolResult::success(
             message,
             TaskListResult {
-                tasks: tasks.iter().map(to_legacy_task).collect(),
+                tasks: tasks.iter().map(TaskView::from).collect(),
             },
         )
     }

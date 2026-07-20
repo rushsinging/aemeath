@@ -574,7 +574,7 @@ mod tests {
             tools::wire_tools(),
             Arc::new(TestReflectionHistory),
             policy.clone(),
-            Arc::new(task::TaskStore::new()),
+            task_wiring.access(),
         );
         let client = from_args_with_workspace(args, dependencies)
             .await

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# guard-registry:policy.task.crate-root-facade
 set -euo pipefail
 
 # 功能：检查未迁移 feature 访问只经 `<feature>::api`，并锁定已迁移 feature 的
@@ -26,6 +27,7 @@ FEATURE_CRATES = {
     "provider",
     "tools",
     "storage",
+    "task",
     "hook",
     "audit",
     "update",
@@ -200,6 +202,16 @@ ROOT_ACCESS_ALLOW = {
         "OwnedSessionExclusivePermit", "OwnedSessionSharedPermit", "SessionSwitchClosed",
         "SessionSwitchGate", "SessionSwitchInProgress",
     },
+    "task": {
+        "Batch", "BatchCreateSpec", "BatchId", "BatchStatus", "InterruptedBatchInfo",
+        "PreparedTaskRestore", "StaleBatchInfo", "Task", "TaskAccess", "TaskCommandError",
+        "TaskCommandResult", "TaskCreateSpec", "TaskEvent", "TaskId", "TaskLifecycleSnapshot",
+        "TaskPersist", "TaskPriority", "TaskPriorityStats", "TaskReminderItem",
+        "TaskReminderSnapshot", "TaskRevision", "TaskSnapshot", "TaskSnapshotCodecError",
+        "TaskSnapshotValidationError", "TaskStatus", "TaskStore", "TaskStoreStats", "TaskView",
+        "TaskWiring", "detect_batch_all_completed", "detect_interrupted_batch",
+        "detect_stale_batches", "wire_task",
+    },
     "memory": {
         "AtomicDatasetMemoryStore", "CompactResult", "DatasetMemoryOpener",
         "FileLegacyMemorySourceFactory", "InMemoryMemory", "LegacyMemoryLayer",
@@ -212,22 +224,14 @@ ROOT_ACCESS_ALLOW = {
         "MemorySource", "MemoryStats", "MemoryStorageErrorKind", "ProjectMemoryKey",
         "ReflectionApplyResult", "ReflectionOutput", "WriteResult", "map_storage_error",
     },
-    # Storage 的 #991 过渡 façade；最终随 #880/#983/#883/#884 收敛。
+    # Storage publishes only generic persistence mechanisms after #883/#884.
     "storage": {
-        "Batch",
-        "BatchStatus",
-        "MemoryStore",
         "SafeOpenOptions",
         "SafePathSegment",
         "SafeStorageDir",
         "SafeStorageEntry",
         "SafeStorageFileType",
         "SafeStorageRoot",
-        "Task",
-        "TaskPriority",
-        "TaskSnapshot",
-        "TaskStatus",
-        "TaskStore",
         "FileSystemBlobAdapter",
         "FileSystemDatasetAdapter",
         "memory_base_dir",
@@ -366,7 +370,7 @@ def check_cross_crate_line(
             continue
         if segment in ROOT_ACCESS_ALLOW.get(target, set()):
             continue
-        if target in {"audit", "policy", "provider", "project", "runtime", "tools"}:
+        if target in {"audit", "policy", "provider", "project", "runtime", "task", "tools"}:
             violations.append(
                 f"cross-feature access to {target}::{segment} is forbidden; use the registered {target} crate-root facade"
             )
@@ -397,7 +401,7 @@ def check_cross_crate_line(
                 continue
             if item_name in ROOT_ACCESS_ALLOW.get(target, set()):
                 continue
-            if target in {"audit", "policy", "provider", "project", "runtime", "tools"}:
+            if target in {"audit", "policy", "provider", "project", "runtime", "task", "tools"}:
                 violations.append(
                     f"cross-feature braced import from {target} exposes {item_name}; use the registered {target} crate-root facade"
                 )
@@ -551,8 +555,7 @@ def run_sanity() -> None:
         ("provider", "use crate::adapters::client::LlmClient;"),
         ("share", "pub use storage::contract::StorageConfig;"),
         ("sdk", "pub use project::ProjectContext;"),
-        ("runtime", "use storage::{MemoryStore, TaskStore};"),
-    ]
+        ("runtime", "use task::TaskAccess;"),    ]
     blocked = [
         ("runtime", "use provider::api::LlmClient;"),
         ("runtime", "use provider::core::client::LlmClient;"),
@@ -560,7 +563,7 @@ def run_sanity() -> None:
         ("tools", "let _ = project::business::worktree::enter_worktree(args);"),
         ("runtime", "use storage::memory_store::MemoryStore;"),
         ("runtime", "use storage::HistoryManager;"),
-    ]
+        ("runtime", "use task::adapters::TaskStore;"),    ]
     for current, line in allowed:
         if check_cross_crate_line(current, line):
             raise AssertionError(f"sanity allow failed: {line}")

@@ -4,11 +4,12 @@
 //! port or public restore capability is introduced here. #890 may publish and
 //! wire the persistence boundary separately.
 
-use super::{TaskAccess, TaskPersist, TaskStore};
-use crate::business::{
+use super::TaskStore;
+use crate::domain::{
     BatchCreateSpec, BatchId, TaskCreateSpec, TaskId, TaskPriority, TaskRevision, TaskSnapshot,
     TaskSnapshotValidationError, TaskStatus,
 };
+use crate::{TaskAccess, TaskPersist};
 
 fn batch_spec(name: &str) -> BatchCreateSpec {
     BatchCreateSpec::try_new(name.into()).unwrap()
