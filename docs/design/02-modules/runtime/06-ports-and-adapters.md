@@ -464,6 +464,7 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1284 接通 compact 成功后的 PreCompact 冻结快照单槽提交；Manual 显式入口与有界 teardown/cancel 分别由 #1289/#1285 承接 | #1284/#1289/#1285 |
 | 2026-07-19 | #907 补入 Runtime-owned `ProviderFactory` / `ProviderBinding` / `ProviderBuildSpec` 契约定义；明确 Runtime Main/Sub/Reflection/Compact 只依赖这三个 port 与 PL，Composition 独占 `provider::composition` 构造面；#1142 resolver `build_window` 接线仍延期 | [#907](https://github.com/rushsinging/aemeath/issues/907) |
 | 2026-07-18 | #899 完成 Reflection 三 trigger Runtime 单槽异步、busy skip、静默完成、Memory-owned history append/query、`/reflect [limit]` 只读安全投影及 Run teardown drain/cancel timeout | #899 |
 | 2026-07-11 | 初稿：入站端口、出站端口签名、RuntimeContext 按 RunSpec 装配、Composition Root、ACL、实现缺口 | #761 |
