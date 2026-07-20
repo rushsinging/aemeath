@@ -302,6 +302,7 @@ struct ReflectionConfig {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口由 #1289（归 #860）承接 | #1285/#1289/#860 |
 | 2026-07-20 | #1284 接通 compact 成功后的 PreCompact 冻结快照提交；Manual 显式入口拆分至 #1289 | #1284/#1289 |
 | 2026-07-20 | #1283 将 parse 错误收窄为不含模型原文的稳定类别，且 `ReflectionHistoryQuery` 仅发布安全摘要；完整 record 保持在 Memory adapter 内部 | #1283 |
 | 2026-07-19 | #900 将旧 `MemoryStore` apply 示例更新为当前 Run shared lease 捕获的同一 `MemoryPort::apply_reflection`，保留 `ReflectionEngine` 作为无状态 prompt/parse 领域服务 | #900 |

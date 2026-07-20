@@ -464,6 +464,7 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口由 #1289（归 #860）承接 | #1285/#1289/#860 |
 | 2026-07-20 | #1284 接通 compact 成功后的 PreCompact 冻结快照单槽提交；Manual 显式入口与有界 teardown/cancel 分别由 #1289/#1285 承接 | #1284/#1289/#1285 |
 | 2026-07-20 | #1283 将 Reflection history query 收窄为 Memory 直接返回安全摘要，Runtime 只映射 SDK view，完整 record 不越过 query 边界 | #1283 |
 | 2026-07-19 | #907 补入 Runtime-owned `ProviderFactory` / `ProviderBinding` / `ProviderBuildSpec` 契约定义；明确 Runtime Main/Sub/Reflection/Compact 只依赖这三个 port 与 PL，Composition 独占 `provider::composition` 构造面；#1142 resolver `build_window` 接线仍延期 | [#907](https://github.com/rushsinging/aemeath/issues/907) |

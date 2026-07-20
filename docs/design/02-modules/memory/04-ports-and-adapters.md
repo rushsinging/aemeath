@@ -326,6 +326,7 @@ Target 要求机械守卫证明：production Memory wiring 只由 Composition Ro
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口由 #1289（归 #860）承接 | #1285/#1289/#860 |
 | 2026-07-20 | #1284 接通 PreCompact 的 compact-success 冻结快照提交；Manual 显式入口与 teardown 收口由 #1289/#1285 承接 | #1284/#1289/#1285 |
 | 2026-07-20 | #1283 将 `ReflectionHistoryQuery` 收窄为仅返回 `ReflectionSafeSummary`，完整 record 不跨 Memory query 边界 | #1283 |
 | 2026-07-19 | #900 删除 Composition 第二 active Memory open，将 concrete dataset store/project opener/service 收回 Memory crate 内，生产仅经 Main Session `DatasetMemoryOpener` 返回 `MemoryPort` | #900 |
