@@ -68,8 +68,10 @@ Created
 - `ProviderCompletion` 包含完整 output、stop reason、final usage snapshot 与 effective reasoning；
 - 完成与失败互斥且恰有一个；显式取消、consumer drop、背压与 producer 异常都统一为 `Failed(ProviderError)`，取消使用 `ProviderErrorKind::Cancelled`；
 - 首个终态后必须结束，禁止再产出任何事件；
-- consumer drop 等价于取消意图，adapter 应停止继续读取和缓冲；若使用 channel，producer 必须持有 bounded send permit，或使用不依赖 receiver 存活的独立终态状态，保证失败可观察，禁止仅依赖向已关闭 channel 发送终态；
+- consumer drop 表达取消意图，adapter 必须停止继续读取和缓冲；当前 bridge 使用容量为 1 的同步通道，receiver drop 会让下一次 delta/terminal send 失败并触发 invocation-local cancellation。若未来替换 channel，仍必须保持有界背压与 drop-cancels-producer 契约；
 - `ProviderToolCallStart.id` 是 invocation-scoped 内置 `ProviderToolCallId`；adapter 必须先按稳定 stream index 建立该 ID，待 provider id 到达后再绑定，禁止直接把 provider id 当作领域身份。
+
+> **测试证据（#1061）**：`agent/features/provider/src/adapters/stream_contract_tests.rs` 以同一共享契约覆盖 Anthropic、OpenAI Chat、OpenAI Responses 与 Ollama decoder：wire 顺序、恰好一个终结、终结后 `None`、取消映射 `Failed(Cancelled)`，以及 consumer drop 取消 invocation-local producer。各 driver 的单请求 HTTP fixture 继续证明一次 invoke 只发一次上游请求并保留 usage；Composition/Runtime 相邻测试覆盖 scope 翻译、reasoning clamp 与调用入口。
 
 ### 3.2 可见内容与重复调用
 

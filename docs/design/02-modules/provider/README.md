@@ -120,7 +120,23 @@ Provider 发布原始 usage；Runtime 将其关联到 Model Invocation 并发出
 | [01-domain-model-and-acl.md](01-domain-model-and-acl.md) | 调用边界语言、模型能力、reasoning clamp、driver 与双向 ACL、不变量 |
 | [02-ports-stream-and-client-scope.md](02-ports-stream-and-client-scope.md) | ProviderPort、流式与错误语义、取消、重试边界、不可变 transport/invocation scope |
 
-## 8. 相关文档
+## 8. 测试完整性矩阵（#1061）
+
+| 行为 / 风险 | 必要层 | 证据 | 结论 |
+|---|---|---|---|
+| PL 值对象、resolver、usage `None`/`Some(0)`、错误分类 | L1/L3 | `published_language.rs` 单元测试；`tests/crate_root_facade.rs` 仅经 crate-root 复核完整公开值与边界语义 | 闭合 |
+| Invocation Scope 不可变、Main/Sub 配置隔离 | L0/L2/L4 | `check-provider-invocation-scope.sh`；Provider scope 单测；Composition/Runtime 的 factory、scope 翻译与并发消费测试 | 闭合 |
+| Pull stream 顺序、单终结、终结后结束、取消与 drop | L2/L3/L4 | `adapters/stream_contract_tests.rs` 共享 decoder contract；各 driver 单请求 fixture；Runtime reducer/attempt 场景 | 闭合 |
+| Driver ACL、未知/非法组合 fail-closed | L0/L1/L2 | `domain/capability.rs`；Composition factory tests；`check-provider-driver-acl.sh` 与 construction ownership Guard | 闭合 |
+| 单 attempt HTTP、错误/Retry-After、敏感 body 清洗 | L0/L1/L2 | `http_attempt.rs` / `error_log.rs` 测试；三个 driver HTTP fixtures；`check-provider-http-attempt.sh` | 闭合 |
+| Retry/fallback 所有权、usage/capability clamp | L0-L4 | Runtime attempt tests；Provider usage/capability tests；`check-provider-retry-ownership.sh` / `check-provider-usage-capability.sh` | 闭合；resolver 生产接线明确延期 #1142 |
+| 真进程、平台、安装或发布资产 | L5 | Provider 能力均可由进程内 HTTP/stream harness 覆盖，不承担 PTY、安装或发布资产职责 | 不适用 |
+
+覆盖率百分比只作为风险信号，不替代上述矩阵。PR #1259 的 CI（cargo-llvm-cov 0.8.7）记录 Provider：regions `6469/8064`（80.22%）、functions `491/593`（82.80%）、lines `4747/5793`（81.94%）；workspace 对照为 77.99% / 78.63% / 78.02%。当前统一 coverage 脚本只输出 workspace/per-crate summary，不产出 changed-lines 指标，因此该项明确记为工具链暂不提供，而非以 workspace 百分比替代。未覆盖分支主要集中在真实上游异常组合、超时防御和日志降级路径；关键 HTTP 分类、stream 生命周期、取消、consumer drop、四类 decoder 与 ACL 已有行为矩阵证据。
+
+L0 复核同时通过 Provider `--no-default-features` / `--all-features` check、all-features/all-targets clippy 与 all-features tests；Provider 唯一 feature 是 test-only `test-harness`，无平台专属 `cfg`，故无需额外 OS matrix。crate-root public surface 由 `check-crate-api-boundary.sh`、`check-provider-construction-ownership.sh` 与 `tests/crate_root_facade.rs` 共同锁定，test-only surface 仅在显式 feature 下出现。#1061 其余定向证据包括 `cargo test -p provider`、Provider production/all-targets clippy、架构守卫和 workspace 格式门禁；新增共享契约针对历史重复 driver 断言与 consumer-drop 空白，不批量搬迁无关旧测试。
+
+## 9. 相关文档
 
 - Agent Runtime 领域模型：[../runtime/01-domain-model.md](../runtime/01-domain-model.md)
 - Agent Runtime 端口与装配：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
@@ -128,10 +144,11 @@ Provider 发布原始 usage；Runtime 将其关联到 Model Invocation 并发出
 - 统一语言：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
 - 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
-## 修改历史
+## 10. 修改历史
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1061 完成 #852 的 L0-L4 测试完整性复核：新增四 decoder 共享 stream contract，覆盖顺序、单终结、终结后结束、取消和 consumer drop；补 crate-root PL 契约与 Guard 收紧；L5 明确不适用 | [#1061](https://github.com/rushsinging/aemeath/issues/1061) |
 | 2026-07-19 | #907 完成 Provider Adapter 最终收口：Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderBinding` / `ProviderFactory` / `ProviderPort` 与 PL；`provider::composition` 构造面独占于 Composition Root（零白名单 Guard `check-provider-construction-ownership.sh` 锁定）；P1（Runtime 退出具体 client/pool）、P5（wire DTO 收窄到 driver adapter）与 P12（构造点集中到 Composition Root）关闭；旧 `LegacyStreamSink` / gateway callback / pool / setter restore 物理清零；Provider 内部 `InvocationSink`（`pub(crate)`）确认为私有 decoder seam 非 legacy；#905 已关闭，P6/P7/P9 关闭；#1142 resolver `build_window` 接线仍延期，不冒充完成 | [#907](https://github.com/rushsinging/aemeath/issues/907) |
 | 2026-07-16 | #1033 交付 crate-private `HttpAttemptExecutor`：单 attempt 机械 send/cancel/status、安全 headers、16KiB bounded error body、typed transport failure 分类与单一 diagnostic；Anthropic/OpenAI-compatible/Ollama 全量迁入；跨调用 retry/fallback 仍是 P6/P7 迁移债，不冒充 Runtime 已完整拥有该所有权 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-16 | 文档审查：明确后续承接边界——pull-based `InvocationStream`（P4）由 [#903](https://github.com/rushsinging/aemeath/issues/903) 承接；跨调用 retry/backoff（P6）、stream→non-stream fallback（P7）与错误分类统一（P9）由 [#905](https://github.com/rushsinging/aemeath/issues/905) 承接 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |

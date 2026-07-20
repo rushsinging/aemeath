@@ -27,7 +27,8 @@ report \
   grep -RInE 'shared_client_lock|set_(max_tokens|reasoning_level)|current_reasoning_level' \
   agent/features/runtime/src --include='*.rs'
 
-if ! grep -q 'scope: &InvocationScope' agent/features/provider/src/ports.rs; then
+if ! grep -qE '^[[:space:]]*async fn invocation_stream[[:space:]]*\(' agent/features/provider/src/ports.rs ||
+  ! grep -qE '^[[:space:]]*scope:[[:space:]]*&InvocationScope,' agent/features/provider/src/ports.rs; then
   echo 'agent/features/provider/src/ports.rs: LlmProvider::invocation_stream must require &InvocationScope' >&2
   fail=1
 fi

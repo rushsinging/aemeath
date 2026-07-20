@@ -9,11 +9,14 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 
 新建 issue 时 **SHOULD** 使用 `.github/ISSUE_TEMPLATE/bug.yml` 或 `feature.yml`，以保证 `kind:*`、`area:*`、`priority:*` 标签由 `.github/workflows/auto-labeler.yml` 一致地应用。创建 PR 时 **SHOULD** 使用 `.github/pull_request_template.md` 填写 Summary、Refs、Breaking change、Test plan。
 
-1. **阅读 Issue**：用 `gh issue view <编号> --repo rushsinging/aemeath` 拉取 issue 标题、labels、完整 body。
+1. **阅读 Issue 并建立门禁清单**：用 `gh issue view <编号> --repo rushsinging/aemeath` 拉取 issue 标题、labels、完整 body。
    - **MUST** 检查 issue 是否关联 milestone。未关联 milestone 的 issue **MUST** 先提醒用户关联，**NEVER** 在无 milestone 的情况下直接开 worktree 修改。
+   - **MUST** 识别 issue body 中全部 checklist / check 项，并将其作为开发、验证和 PR 前的门禁清单；**NEVER** 只读取标题或验收摘要后跳过清单。
 2. **定位问题并给出方案**：阅读相关源码，定位根因，**MUST** 向用户输出可执行的修复/实现方案（含改动范围、根因分析、验证计划）。方案 **MUST** 包含测试策略——按 `docs/design/03-engineering/04-testing-and-coverage.md` 的 L0-L5 六层模型选择覆盖证据；bug 修复 MUST 先写复现测试，feature 实现 MUST 先写 TDD 测试。复杂改动 **MUST** 调用 `superpowers:writing-plans` 制定详细计划。
 3. **等待用户明确同意**：在获得用户的明确书面同意（如"同意"、"开始改"）前，**NEVER** 调用 Edit/Write/Bash 等会修改文件或系统状态的工具。
-4. **执行与验证**：在 worktree 中实施，worktree **MUST** 基于 `origin/main` 最新 commit 创建。通过编译、测试、clippy 验证后 PR 合入 `main`。
+4. **执行与验证**：在 worktree 中实施，worktree **MUST** 基于 `origin/main` 最新 commit 创建。实施过程中 **MUST** 逐项执行并持续核验门禁清单；通过编译、测试、clippy 验证后 PR 合入 `main`。
+   - 完成开发及创建 PR 前，**MUST** 确认所有 check 项均已完成；无法完成或不适用的项目 **MUST** 在 issue 或 PR 中记录可验证的合理理由、影响和后续处理。
+   - 存在未完成且无合理理由的 check 项时，**NEVER** 宣称完成或创建 PR。
 5. **用户确认后关闭 Issue**：agent **NEVER** 自行关闭 issue。
 
 修复 bug 或实现 feature 时，**MUST** 做根因层面的修正（fact-check），而不是只做最小化补丁绕过症状。
@@ -51,6 +54,7 @@ Release Gate issue 模板见仓库 `.github/ISSUE_TEMPLATE/`。
 
 - 开发环境 **MUST** 使用 Cargo 1.91+，并通过 `scripts/setup-dev-env.sh --check` 验证。
 - `core.hooksPath` **MUST** 配置为主 checkout `.cargo/hooks` 的绝对路径。
+- `pre-push` **MUST** 运行完整架构守卫与 workspace 单元测试；使用 `--no-verify` 绕过时，PR Test plan **MUST** 披露并补跑。
 - `post-checkout` **MUST** 生成 worktree-local `.cargo/config.toml`，将 `target-dir` 和 `build-dir` 设为 `~/.cache/aemeath-target/<分支标签>-<worktree 路径哈希>`。
 - 开发环境 **SHOULD** 安装 sccache，并在 `~/.cargo/config.toml` 配置 `rustc-wrapper = "sccache"`。
 - worktree 构建缓存 **MUST** 使用 `scripts/clean-worktree-targets.sh [--dry-run] [--keep-current] [--yes] [--max-size-gb N]` 清理。

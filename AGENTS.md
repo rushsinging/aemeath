@@ -53,7 +53,7 @@
 
 以下内容已按渐进式披露原则移至 `specs/workflow.md`，**涉及对应场景时 MUST 加载**：
 
-- **Bug / Feature 执行流程**（issue → 方案 → 确认 → worktree → PR → 关闭）
+- **Bug / Feature 执行流程**（issue → checklist 门禁 → 方案 → 确认 → worktree → PR → 关闭；所有 check 必须完成或记录合理理由）
 - **Milestone / Release Gate 管理**（版本验收、收尾退役、大文件拆分）
 - **大型工作的拆分与跟踪**（GitHub Sub-issues 原生层级）
 - **Git 工作流**（main 开发、release 发版、PR 策略、squash / merge commit）

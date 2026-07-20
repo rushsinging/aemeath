@@ -33,10 +33,15 @@ report \
   grep -RInE '\b(LegacyStreamSink|legacy_stream_message)\b' \
     agent/features/runtime/src agent/features/context/src --include='*.rs'
 
-if ! grep -q 'async fn invocation_stream' agent/features/provider/src/ports.rs; then
+if ! grep -qE '^[[:space:]]*async fn invocation_stream[[:space:]]*\(' agent/features/provider/src/ports.rs; then
   echo 'agent/features/provider/src/ports.rs: LlmProvider must expose invocation_stream' >&2
   fail=1
 fi
+
+report \
+  "Provider-private InvocationSink must not escape into Runtime or Context." \
+  grep -RInE '\bInvocationSink\b' \
+    agent/features/runtime/src agent/features/context/src --include='*.rs'
 
 if [ "$fail" -ne 0 ]; then
   exit 2

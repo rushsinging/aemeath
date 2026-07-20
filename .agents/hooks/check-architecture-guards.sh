@@ -80,51 +80,96 @@ run_tui_single_source_structure_guard() {
   return "$fail"
 }
 
+mode="${1:---full}"
+case "$mode" in
+  --fast|--full) ;;
+  *)
+    echo "Usage: $0 [--fast|--full]" >&2
+    exit 2
+    ;;
+esac
+
+fast_pids=()
+fast_names=()
+
+run_guard() {
+  local profile="$1"
+  shift
+
+  if [ "$mode" = "--fast" ]; then
+    if [ "$profile" = "fast" ]; then
+      "$@" &
+      fast_pids+=("$!")
+      fast_names+=("$1")
+    fi
+    return
+  fi
+
+  "$@"
+}
+
+wait_for_fast_guards() {
+  local index status=0
+  for index in "${!fast_pids[@]}"; do
+    if ! wait "${fast_pids[$index]}"; then
+      echo "[architecture] fast guard failed: ${fast_names[$index]}" >&2
+      status=1
+    fi
+  done
+  return "$status"
+}
+
 echo "[hook-env] AEMEATH_PROJECT_DIR=${AEMEATH_PROJECT_DIR:-<unset>}"
 echo "[hook-env] CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-<unset>}"
 echo "[hook-env] ROOT=$ROOT"
-"$HOOKS_DIR/check-guard-registry.sh"
-"$HOOKS_DIR/check-cargo-dependency-graph.sh"
-"$HOOKS_DIR/check-cli-thin-entry.sh"
-"$HOOKS_DIR/check-share-no-upstream-deps.sh"
-"$HOOKS_DIR/check-share-minimal-kernel.sh"
-"$HOOKS_DIR/check-composition-layout.sh"
-"$HOOKS_DIR/check-cola-layer-purity.sh"
-"$HOOKS_DIR/check-crate-api-boundary.sh"
-"$HOOKS_DIR/check-task-persistence-capability.sh"
-"$HOOKS_DIR/check-provider-invocation-scope.sh"
-"$HOOKS_DIR/check-provider-pull-stream.sh"
-"$HOOKS_DIR/check-provider-http-attempt.sh"
-"$HOOKS_DIR/check-provider-retry-ownership.sh"
-"$HOOKS_DIR/check-provider-usage-capability.sh"
-"$HOOKS_DIR/check-provider-driver-acl.sh"
-"$HOOKS_DIR/check-context-architecture.sh"
-"$HOOKS_DIR/check-forbidden-imports.sh"
-"$HOOKS_DIR/check-tui-tea-purity.sh"
-"$HOOKS_DIR/check-tui-toplevel-layout.sh"
-"$HOOKS_DIR/check-tui-effect-boundary.sh"
-"$HOOKS_DIR/check-tui-model-view-boundaries.sh"
-run_tui_single_source_structure_guard
-"$HOOKS_DIR/check-tui-output-legacy-guards.sh"
-"$HOOKS_DIR/check-tui-block-nesting.sh"
-"$HOOKS_DIR/check-render-pure.sh"
-"$HOOKS_DIR/check-render-isolation.sh"
-"$HOOKS_DIR/check-unsafe-text-ops.sh"
-"$HOOKS_DIR/check-log-target-prefix.sh"
-"$HOOKS_DIR/check-logging-scope-context.sh"
-"$HOOKS_DIR/check-logging-settings-injection.sh"
-"$HOOKS_DIR/no_mod_rs.sh"
-"$HOOKS_DIR/check-config-env-guard.sh"
-"$HOOKS_DIR/check-config-adapter-boundary.sh"
-"$HOOKS_DIR/check-agent-client-trait-minimal.sh"
-"$HOOKS_DIR/check-shared-run-loop.sh"
-"$HOOKS_DIR/check-shared-run-loop-tests.sh"
-"$HOOKS_DIR/check-run-control-boundary.sh"
-"$HOOKS_DIR/check-tool-catalog-execution-boundary.sh"
-"$HOOKS_DIR/check-unified-authorization.sh"
-"$HOOKS_DIR/check-config-reader-injection.sh"
-"$HOOKS_DIR/check-config-workflow-boundary.sh"
-"$HOOKS_DIR/check-production-reachability.sh"
-"$HOOKS_DIR/check-no-inline-tests.sh"
+echo "[hook-env] ARCHITECTURE_GUARD_MODE=$mode"
+run_guard full "$HOOKS_DIR/check-guard-registry.sh"
+run_guard full "$HOOKS_DIR/check-cargo-dependency-graph.sh"
+run_guard full "$HOOKS_DIR/check-cli-thin-entry.sh"
+run_guard fast "$HOOKS_DIR/check-share-no-upstream-deps.sh"
+run_guard fast "$HOOKS_DIR/check-share-minimal-kernel.sh"
+run_guard fast "$HOOKS_DIR/check-composition-layout.sh"
+run_guard fast "$HOOKS_DIR/check-cola-layer-purity.sh"
+run_guard fast "$HOOKS_DIR/check-crate-api-boundary.sh"
+run_guard fast "$HOOKS_DIR/check-task-persistence-capability.sh"
+run_guard fast "$HOOKS_DIR/check-provider-invocation-scope.sh"
+run_guard fast "$HOOKS_DIR/check-provider-pull-stream.sh"
+run_guard fast "$HOOKS_DIR/check-provider-http-attempt.sh"
+run_guard fast "$HOOKS_DIR/check-provider-retry-ownership.sh"
+run_guard fast "$HOOKS_DIR/check-provider-usage-capability.sh"
+run_guard fast "$HOOKS_DIR/check-provider-driver-acl.sh"
+run_guard fast "$HOOKS_DIR/check-provider-construction-ownership.sh"
+run_guard fast "$HOOKS_DIR/check-context-architecture.sh"
+run_guard fast "$HOOKS_DIR/check-forbidden-imports.sh"
+run_guard fast "$HOOKS_DIR/check-tui-tea-purity.sh"
+run_guard fast "$HOOKS_DIR/check-tui-toplevel-layout.sh"
+run_guard fast "$HOOKS_DIR/check-tui-effect-boundary.sh"
+run_guard fast "$HOOKS_DIR/check-tui-model-view-boundaries.sh"
+run_guard fast run_tui_single_source_structure_guard
+run_guard fast "$HOOKS_DIR/check-tui-output-legacy-guards.sh"
+run_guard fast "$HOOKS_DIR/check-tui-block-nesting.sh"
+run_guard fast "$HOOKS_DIR/check-render-pure.sh"
+run_guard fast "$HOOKS_DIR/check-render-isolation.sh"
+run_guard fast "$HOOKS_DIR/check-unsafe-text-ops.sh"
+run_guard full "$HOOKS_DIR/check-log-target-prefix.sh"
+run_guard fast "$HOOKS_DIR/check-logging-scope-context.sh"
+run_guard fast "$HOOKS_DIR/check-logging-settings-injection.sh"
+run_guard fast "$HOOKS_DIR/no_mod_rs.sh"
+run_guard fast "$HOOKS_DIR/check-config-env-guard.sh"
+run_guard fast "$HOOKS_DIR/check-config-adapter-boundary.sh"
+run_guard fast "$HOOKS_DIR/check-agent-client-trait-minimal.sh"
+run_guard fast "$HOOKS_DIR/check-shared-run-loop.sh"
+run_guard fast "$HOOKS_DIR/check-shared-run-loop-tests.sh"
+run_guard fast "$HOOKS_DIR/check-run-control-boundary.sh"
+run_guard fast "$HOOKS_DIR/check-tool-catalog-execution-boundary.sh"
+run_guard fast "$HOOKS_DIR/check-unified-authorization.sh"
+run_guard fast "$HOOKS_DIR/check-config-reader-injection.sh"
+run_guard fast "$HOOKS_DIR/check-config-workflow-boundary.sh"
+run_guard full "$HOOKS_DIR/check-production-reachability.sh"
+run_guard fast "$HOOKS_DIR/check-no-inline-tests.sh"
 
-echo "All architecture guards passed."
+if [ "$mode" = "--fast" ]; then
+  wait_for_fast_guards
+fi
+
+echo "All ${mode#--} architecture guards passed."
