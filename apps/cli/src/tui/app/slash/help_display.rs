@@ -1,7 +1,11 @@
-use super::help::SLASH_HELP_LINES;
+use super::help::command_help_lines;
 
 impl super::super::App {
     pub(super) fn show_slash_help(&mut self) {
-        self.append_system_notice(SLASH_HELP_LINES.join("\n"));
+        let Some(catalog) = self.command_catalog.as_deref() else {
+            self.append_error_notice("Command catalog unavailable.");
+            return;
+        };
+        self.append_system_notice(command_help_lines(catalog).join("\n"));
     }
 }

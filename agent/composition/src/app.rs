@@ -23,6 +23,8 @@ pub struct AgentClientBootstrap {
     pub thinking: bool,
     pub memory_config: MemoryConfigView,
     pub skills_map: HashMap<String, SkillView>,
+    pub command_catalog: Arc<dyn sdk::CommandCatalogPort>,
+    pub command_router: Arc<dyn sdk::CommandRouterPort>,
 }
 
 pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
@@ -239,6 +241,8 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config).await?;
     let launch = runtime_client.tui_launch_context();
+    let command_wiring = crate::tools::wire_commands_with_skills(&launch.skills_map)
+        .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
     let thinking = launch.binding.requested_reasoning != provider::ReasoningLevel::Off;
     let client = agent_client_from_runtime(runtime_client);
     let cwd = launch.workspace_root.clone();
@@ -253,6 +257,8 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         thinking,
         memory_config: launch.memory_config,
         skills_map: launch.skills_map,
+        command_catalog: command_wiring.catalog(),
+        command_router: command_wiring.router(),
     })
 }
 

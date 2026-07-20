@@ -539,7 +539,7 @@ pub(super) fn assert_task_access_contract(
 
 #[test]
 fn task_store_satisfies_task_access_contract() {
-    use crate::business::TaskStoreState;
+    use crate::domain::TaskStoreState;
     use crate::{TaskId, TaskStore};
 
     let access = TaskStore::new();

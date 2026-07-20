@@ -153,3 +153,244 @@ pub fn wire_skills() -> SkillWiring {
 pub fn wire_skill_materialization() -> Arc<dyn crate::domain::SkillMaterializationPort> {
     wire_skills().materializer()
 }
+
+/// Production Command Catalog / Router wiring over one immutable adapter.
+pub struct CommandWiring {
+    catalog: Arc<dyn crate::domain::CommandCatalogPort>,
+    router: Arc<dyn crate::domain::CommandRouterPort>,
+}
+
+impl CommandWiring {
+    pub fn catalog(&self) -> Arc<dyn crate::domain::CommandCatalogPort> {
+        self.catalog.clone()
+    }
+
+    pub fn router(&self) -> Arc<dyn crate::domain::CommandRouterPort> {
+        self.router.clone()
+    }
+}
+
+pub fn wire_commands(
+    extensions: Vec<crate::domain::CommandDescriptor>,
+) -> Result<CommandWiring, crate::domain::CommandParseError> {
+    let mut descriptors = builtin_command_descriptors()?;
+    descriptors.extend(extensions);
+    let adapter = Arc::new(super::command::CommandAdapter::try_new(descriptors)?);
+    Ok(CommandWiring {
+        catalog: adapter.clone(),
+        router: adapter,
+    })
+}
+
+fn builtin_command_descriptors(
+) -> Result<Vec<crate::domain::CommandDescriptor>, crate::domain::CommandParseError> {
+    use crate::domain::{CommandArgumentSchema as A, CommandMechanism as M, CommandTarget as T};
+    type CommandSpec<'a> = (&'a str, &'a [&'a str], &'a str, M, T, A);
+    let specs: &[CommandSpec<'_>] = &[
+        (
+            "help",
+            &[],
+            "Show available commands",
+            M::SnapshotQuery,
+            T::ApplicationShell,
+            A::None,
+        ),
+        (
+            "clear",
+            &[],
+            "Clear the current conversation",
+            M::ApplicationControl,
+            T::ContextManagement,
+            A::None,
+        ),
+        (
+            "compact",
+            &[],
+            "Compact the current conversation",
+            M::ApplicationControl,
+            T::ContextManagement,
+            A::None,
+        ),
+        (
+            "usage",
+            &[],
+            "Show current token usage",
+            M::SnapshotQuery,
+            T::Audit,
+            A::None,
+        ),
+        (
+            "model",
+            &[],
+            "Switch model",
+            M::ApplicationControl,
+            T::Config,
+            A::OptionalText,
+        ),
+        (
+            "context",
+            &[],
+            "Show context window usage",
+            M::SnapshotQuery,
+            T::ContextManagement,
+            A::None,
+        ),
+        (
+            "cost",
+            &[],
+            "Show API cost statistics",
+            M::SnapshotQuery,
+            T::Audit,
+            A::None,
+        ),
+        (
+            "status",
+            &[],
+            "Show current session status",
+            M::SnapshotQuery,
+            T::Runtime,
+            A::None,
+        ),
+        (
+            "config",
+            &[],
+            "Show configuration settings",
+            M::SnapshotQuery,
+            T::Config,
+            A::None,
+        ),
+        (
+            "stats",
+            &[],
+            "Show statistics",
+            M::SnapshotQuery,
+            T::Runtime,
+            A::None,
+        ),
+        (
+            "init",
+            &[],
+            "Initialize project",
+            M::ApplicationControl,
+            T::Project,
+            A::OptionalText,
+        ),
+        (
+            "session",
+            &[],
+            "Manage sessions",
+            M::ApplicationControl,
+            T::ContextManagement,
+            A::OptionalText,
+        ),
+        (
+            "resume",
+            &[],
+            "Resume a previous session",
+            M::ApplicationControl,
+            T::ContextManagement,
+            A::RequiredText,
+        ),
+        (
+            "memory",
+            &["mem"],
+            "Manage memory",
+            M::ApplicationControl,
+            T::Memory,
+            A::OptionalText,
+        ),
+        (
+            "version",
+            &[],
+            "Show version information",
+            M::SnapshotQuery,
+            T::ApplicationShell,
+            A::None,
+        ),
+        (
+            "doctor",
+            &[],
+            "Run system diagnostics",
+            M::SnapshotQuery,
+            T::ApplicationShell,
+            A::None,
+        ),
+        (
+            "rewind",
+            &[],
+            "Rewind conversation",
+            M::ApplicationControl,
+            T::ContextManagement,
+            A::OptionalText,
+        ),
+        (
+            "save",
+            &[],
+            "Save current session",
+            M::ApplicationControl,
+            T::ContextManagement,
+            A::None,
+        ),
+        (
+            "reflect",
+            &[],
+            "Show reflection history",
+            M::SnapshotQuery,
+            T::Memory,
+            A::OptionalPositiveUsize { default: 10 },
+        ),
+        (
+            "paste",
+            &[],
+            "Paste image from clipboard",
+            M::ApplicationControl,
+            T::ApplicationShell,
+            A::None,
+        ),
+        (
+            "images",
+            &[],
+            "List pending images",
+            M::SnapshotQuery,
+            T::ApplicationShell,
+            A::None,
+        ),
+        (
+            "clear-images",
+            &[],
+            "Clear pending images",
+            M::ApplicationControl,
+            T::ApplicationShell,
+            A::None,
+        ),
+        (
+            "update",
+            &[],
+            "Update aemeath",
+            M::ApplicationControl,
+            T::ApplicationVersionControl,
+            A::None,
+        ),
+        (
+            "exit",
+            &["quit"],
+            "Exit the application",
+            M::ApplicationControl,
+            T::ApplicationShell,
+            A::None,
+        ),
+    ];
+    specs
+        .iter()
+        .map(|(name, aliases, description, mechanism, target, schema)| {
+            crate::domain::CommandDescriptor::new(
+                name,
+                aliases,
+                description,
+                *mechanism,
+                *target,
+                schema.clone(),
+            )
+        })
+        .collect()
+}

@@ -229,7 +229,7 @@ enum CommandRoute {
 }
 ```
 
-Router 只解析并选择机制，不统一执行三类命令，也不把各 BC 的结果折叠成通用基类：
+Router 只解析并选择机制，不统一执行三类命令，也不把各 BC 的结果折叠成通用基类。`ApplicationShell` 是封闭 target 中唯一的交付应用自身能力标识，仅用于 help、version、doctor、pending images、paste、exit 等不属于目标业务 BC 的命令；它 **NEVER** 包装 Runtime、Context、Memory、Config 等业务查询或状态变更：
 
 - PromptInjection handler 将 PromptCommand 物化为 PromptFragment，再交给 Context Management；
 - SnapshotQueryTarget 是封闭的目标 BC 标识；handler 依 target 调用对应 Query Port，并保留该 BC 的类型化 Published Snapshot；

@@ -1,45 +1,16 @@
-//! Slash command metadata exposed to TUI completion + command execution DTOs.
+//! Slash Command Published Language exposed to delivery clients.
+//!
+//! The owner is the Tools BC. SDK re-exports the exact types and ports instead
+//! of defining a second descriptor, parser, or route model.
 
-// ─── Builtin command metadata (TUI autocomplete) ───
+pub use tools::{
+    ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
+    CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
+    CommandRoute, CommandRouterPort, CommandTarget, ParsedArguments, PromptCommand, SlashInput,
+    SnapshotQueryCommand, SnapshotQueryTarget,
+};
 
-pub fn builtin_commands() -> Vec<(String, String, Vec<String>)> {
-    [
-        ("help", "Show available commands", vec![]),
-        ("clear", "Clear the current conversation", vec![]),
-        ("compact", "Compact the current conversation", vec![]),
-        ("usage", "Show current token usage", vec![]),
-        ("model", "Switch model", vec![]),
-        ("context", "Show context window usage", vec![]),
-        ("cost", "Show API cost statistics", vec![]),
-        ("status", "Show current session status", vec![]),
-        ("config", "Manage configuration settings", vec![]),
-        ("stats", "Show statistics", vec![]),
-        ("init", "Initialize project", vec![]),
-        ("session", "Manage sessions", vec![]),
-        ("resume", "Resume a previous session", vec![]),
-        ("memory", "Manage memory", vec![]),
-        ("version", "Show version information", vec![]),
-        ("doctor", "Run system diagnostics", vec![]),
-        ("rewind", "Rewind conversation", vec![]),
-        ("save", "Save current session", vec![]),
-        ("reflect", "Run reflection", vec![]),
-        ("paste", "Paste image from clipboard", vec![]),
-        ("images", "List pending images", vec![]),
-        ("clear-images", "Clear pending images", vec![]),
-        ("exit", "Exit the application", vec![]),
-    ]
-    .into_iter()
-    .map(|(name, description, aliases)| {
-        (
-            name.to_string(),
-            description.to_string(),
-            aliases.into_iter().map(str::to_string).collect(),
-        )
-    })
-    .collect()
-}
-
-// ─── Command execution types (SDK DTO) ───
+// ─── Command execution result views ───
 
 /// Result of estimating context window usage.
 #[derive(Debug, Clone, Copy)]

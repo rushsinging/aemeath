@@ -16,33 +16,43 @@ pub(crate) fn input_mode(stdin_is_terminal: bool) -> InputMode {
     }
 }
 
-pub(crate) fn is_exit_command(input: &str) -> bool {
-    matches!(input.trim(), "/exit" | "/quit")
+pub(crate) fn resolve_slash_for_delivery(
+    router: &dyn sdk::CommandRouterPort,
+    input: &str,
+) -> Result<sdk::CommandRoute, sdk::CommandParseError> {
+    router.resolve(sdk::SlashInput::new(input))
 }
 
 pub(crate) async fn run_no_tui_chat(
     client: std::sync::Arc<dyn sdk::AgentClient>,
     session_id: String,
+    command_router: std::sync::Arc<dyn sdk::CommandRouterPort>,
 ) -> Result<(), sdk::SdkError> {
     match input_mode(std::io::stdin().is_terminal()) {
-        InputMode::PipeOnce => run_pipe_once(client).await?,
-        InputMode::Repl => run_repl_loop(client).await?,
+        InputMode::PipeOnce => run_pipe_once(client, command_router).await?,
+        InputMode::Repl => run_repl_loop(client, command_router).await?,
     }
     println!("aemeath --resume {session_id}");
     Ok(())
 }
 
-async fn run_pipe_once(client: std::sync::Arc<dyn sdk::AgentClient>) -> Result<(), sdk::SdkError> {
+async fn run_pipe_once(
+    client: std::sync::Arc<dyn sdk::AgentClient>,
+    command_router: std::sync::Arc<dyn sdk::CommandRouterPort>,
+) -> Result<(), sdk::SdkError> {
     let mut input = String::new();
     std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)
         .map_err(|e| sdk::SdkError::Internal(format!("读取 stdin 失败: {e}")))?;
     if input.trim().is_empty() {
         return Ok(());
     }
-    run_single_turn(client, input).await
+    run_single_turn(client, input, command_router).await
 }
 
-async fn run_repl_loop(client: std::sync::Arc<dyn sdk::AgentClient>) -> Result<(), sdk::SdkError> {
+async fn run_repl_loop(
+    client: std::sync::Arc<dyn sdk::AgentClient>,
+    command_router: std::sync::Arc<dyn sdk::CommandRouterPort>,
+) -> Result<(), sdk::SdkError> {
     let mut line = String::new();
     loop {
         eprint!("> ");
@@ -52,13 +62,32 @@ async fn run_repl_loop(client: std::sync::Arc<dyn sdk::AgentClient>) -> Result<(
         let bytes = std::io::stdin()
             .read_line(&mut line)
             .map_err(|e| sdk::SdkError::Internal(format!("读取 stdin 失败: {e}")))?;
-        if bytes == 0 || is_exit_command(&line) {
+        if bytes == 0 {
             break;
         }
         if line.trim().is_empty() {
             continue;
         }
-        run_single_turn(client.clone(), line.trim_end().to_string()).await?;
+        if line.trim_start().starts_with('/') {
+            match resolve_slash_for_delivery(command_router.as_ref(), &line) {
+                Ok(sdk::CommandRoute::ApplicationControl { command, .. })
+                    if command.command.as_str() == "exit" =>
+                {
+                    break;
+                }
+                Err(error) => {
+                    eprintln!("{error}");
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        run_single_turn(
+            client.clone(),
+            line.trim_end().to_string(),
+            command_router.clone(),
+        )
+        .await?;
         println!();
     }
     Ok(())
@@ -67,13 +96,30 @@ async fn run_repl_loop(client: std::sync::Arc<dyn sdk::AgentClient>) -> Result<(
 async fn run_single_turn(
     client: std::sync::Arc<dyn sdk::AgentClient>,
     text: String,
+    command_router: std::sync::Arc<dyn sdk::CommandRouterPort>,
 ) -> Result<(), sdk::SdkError> {
-    let reflection_limit = match parse_reflection_history_command(&text) {
-        Ok(limit) => limit,
-        Err(message) => {
-            eprintln!("{message}");
-            return Ok(());
+    let reflection_limit = if text.trim_start().starts_with('/') {
+        match resolve_slash_for_delivery(command_router.as_ref(), &text) {
+            Ok(sdk::CommandRoute::SnapshotQuery { command, .. })
+                if command.command.as_str() == "reflect" =>
+            {
+                command
+                    .arguments
+                    .as_slice()
+                    .first()
+                    .and_then(|value| value.parse::<usize>().ok())
+            }
+            Ok(_) => {
+                eprintln!("该命令暂不支持 no-TUI 执行。");
+                return Ok(());
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                return Ok(());
+            }
         }
+    } else {
+        None
     };
     let (user_input, input_events) = if let Some(limit) = reflection_limit {
         let (tx, port) = crate::tui::effect::session::processing::TuiInputEventPort::channel();
@@ -259,25 +305,6 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
     Ok(())
 }
 
-fn parse_reflection_history_command(input: &str) -> Result<Option<usize>, &'static str> {
-    let mut parts = input.split_whitespace();
-    if parts.next() != Some("/reflect") {
-        return Ok(None);
-    }
-    let limit = match parts.next() {
-        None => 10,
-        Some(value) => value
-            .parse::<usize>()
-            .ok()
-            .filter(|limit| *limit > 0)
-            .ok_or("用法: /reflect [limit]，limit 必须是大于 0 的数字。")?,
-    };
-    if parts.next().is_some() {
-        return Err("用法: /reflect [limit]，limit 必须是大于 0 的数字。");
-    }
-    Ok(Some(limit))
-}
-
 fn print_stdout(text: &str) -> Result<(), sdk::SdkError> {
     print!("{text}");
     std::io::Write::flush(&mut std::io::stdout())
@@ -356,30 +383,19 @@ mod tests {
     }
 
     #[test]
-    fn test_is_exit_command_accepts_exit() {
-        assert!(is_exit_command("/exit"));
-    }
-
-    #[test]
-    fn test_is_exit_command_accepts_quit_with_whitespace() {
-        assert!(is_exit_command("  /quit  "));
-    }
-
-    #[test]
-    fn test_is_exit_command_rejects_regular_text() {
-        assert!(!is_exit_command("hello"));
-    }
-
-    #[test]
-    fn test_reflect_command_parses_default_and_explicit_limit() {
-        assert_eq!(parse_reflection_history_command("/reflect"), Ok(Some(10)));
-        assert_eq!(
-            parse_reflection_history_command(" /reflect 3 "),
-            Ok(Some(3))
-        );
-        assert!(parse_reflection_history_command("/reflect 0").is_err());
-        assert!(parse_reflection_history_command("/reflect nope").is_err());
-        assert_eq!(parse_reflection_history_command("hello"), Ok(None));
+    fn no_tui_uses_injected_router_for_exit_alias_and_reflect_arguments() {
+        let wiring = composition::tools::wire_commands().expect("command wiring");
+        assert!(matches!(
+            resolve_slash_for_delivery(wiring.router().as_ref(), "  /quit  "),
+            Ok(sdk::CommandRoute::ApplicationControl { command, .. })
+                if command.command.as_str() == "exit"
+        ));
+        assert!(matches!(
+            resolve_slash_for_delivery(wiring.router().as_ref(), "/reflect 3"),
+            Ok(sdk::CommandRoute::SnapshotQuery { command, .. })
+                if command.arguments.as_slice() == ["3"]
+        ));
+        assert!(resolve_slash_for_delivery(wiring.router().as_ref(), "/reflect 0").is_err());
     }
 
     #[test]

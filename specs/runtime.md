@@ -34,5 +34,6 @@
 ## slash 命令系统
 
 - slash 命令的 SDK/TUI 入站路由属于 `application/client`；具体命令能力由对应 Feature 的 Published Language / Tool 提供。
-- Runtime 内不再维护 `core/command` 固定层注册表；新增命令时按实际所有者更新 SDK、TUI 或对应 Feature，**NEVER** 恢复旧 `core/command/` 路径。
+- #913 已完成 Command Catalog/Router 生产切线：Command PL 与双端口由 Tools 独占，SDK 直接 re-export，Composition 向 TUI/no-TUI 注入同一 Catalog/Router；Runtime `PendingCommand` 仅作为目标 BC handler adapter，**NEVER** 再解析 slash 名称、alias 或参数 schema。
+- Runtime 内不再维护 `core/command` 固定层注册表；新增命令必须先进入 Tools-owned Descriptor/Catalog，并由实际 owner 提供 handler，**NEVER** 恢复 SDK/TUI/Runtime 静态清单。
 - 命令在 TUI 的展示样式见 `tui-cli.md`。

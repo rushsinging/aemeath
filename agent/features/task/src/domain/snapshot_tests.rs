@@ -1,4 +1,5 @@
-use super::{BatchId, TaskId, TaskRevision, TaskSnapshot, TaskSnapshotCodecError};
+use super::{BatchId, TaskId, TaskRevision, TaskSnapshot};
+use crate::TaskSnapshotCodecError;
 
 const EMPTY_V2: &[u8] = br#"{
   "schema_version": 2,
