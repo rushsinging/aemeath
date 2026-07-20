@@ -184,12 +184,13 @@ pub fn enter(
     if state.worktree_kind == WorktreeKind::NonGit {
         return Err(WorkspaceError::UnsupportedForNonGit);
     }
-    if !state.stack.is_empty() {
+    let mut next_stack = state.stack.clone();
+    if !next_stack.is_empty() {
         match git
             .is_linked_worktree(&state.path_base)
             .map_err(WorkspaceError::GitOperationFailed)?
         {
-            false => state.stack.clear(),
+            false => next_stack.clear(),
             true => {
                 return Err(WorkspaceError::NestedWorktree {
                     current_workspace_root: state.workspace_root.clone(),
@@ -221,7 +222,8 @@ pub fn enter(
         workspace_root: state.workspace_root.clone(),
         worktree_kind: state.worktree_kind,
     };
-    state.stack.push(frame.clone());
+    next_stack.push(frame.clone());
+    state.stack = next_stack;
     state.workspace_root = worktree_root;
     state.path_base = canonical;
     state.worktree_kind = worktree_kind;
@@ -262,10 +264,7 @@ pub fn exit(
         || worktree_root != prev.workspace_root
         || worktree_kind != prev.worktree_kind
     {
-        return Err(WorkspaceError::RepoMismatch {
-            path: canonical,
-            repo_root: prev.workspace_root,
-        });
+        return Err(WorkspaceError::GitProbeFailed(GitProbeError::InvalidOutput));
     }
     state.stack.pop();
     state.workspace_root = worktree_root;
