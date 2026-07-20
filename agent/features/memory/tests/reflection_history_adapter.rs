@@ -44,7 +44,10 @@ async fn reflection_history_upsert_replaces_stable_id_without_duplication() {
     let terminal = record("stable", 40);
     history.upsert(&terminal).await.unwrap();
 
-    assert_eq!(history.list(10).await.unwrap(), vec![terminal]);
+    assert_eq!(
+        history.list(10).await.unwrap(),
+        vec![terminal.safe_summary()]
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -58,7 +61,10 @@ async fn reflection_history_append_and_list_round_trip() {
     history.append(&first).await.unwrap();
     history.append(&second).await.unwrap();
 
-    assert_eq!(history.list(10).await.unwrap(), vec![second, first]);
+    assert_eq!(
+        history.list(10).await.unwrap(),
+        vec![second.safe_summary(), first.safe_summary()]
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -69,7 +75,10 @@ async fn reflection_history_reopen_keeps_records() {
     store(&root).append(&expected).await.unwrap();
 
     let reopened = store(&root);
-    assert_eq!(reopened.list(10).await.unwrap(), vec![expected]);
+    assert_eq!(
+        reopened.list(10).await.unwrap(),
+        vec![expected.safe_summary()]
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
