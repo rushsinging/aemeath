@@ -124,7 +124,11 @@ impl std::fmt::Display for WorkspaceError {
                 repo_root.display()
             ),
             WorkspaceError::NotLinkedWorktree { path } => {
-                write!(f, "路径 {} 不是 linked worktree", path.display())
+                write!(
+                    f,
+                    "路径 {} 是当前仓库的 primary checkout，不是 linked worktree",
+                    path.display()
+                )
             }
             WorkspaceError::EmptyStack => write!(
                 f,

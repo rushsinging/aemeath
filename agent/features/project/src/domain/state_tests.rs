@@ -659,6 +659,7 @@ fn validate_in_repo_reports_invalid_probe_instead_of_repo_mismatch_for_non_git_t
             crate::GitProbeError::InvalidOutput
         ))
     );
+    let _ = std::fs::remove_dir_all(target);
 }
 
 #[test]
@@ -802,11 +803,15 @@ fn enter_rejects_primary_target_as_not_linked_and_keeps_state_unchanged() {
             path: target.clone()
         })
     );
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("不是 linked worktree"));
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        format!(
+            "路径 {} 是当前仓库的 primary checkout，不是 linked worktree",
+            target.display()
+        )
+    );
     assert_eq!(snapshot(&state), before);
+    let _ = std::fs::remove_dir_all(target);
 }
 
 #[test]
