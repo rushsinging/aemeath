@@ -363,7 +363,9 @@ where
                 run.complete_step(&step_id)?;
                 port.finalize_step(&step_id).await?;
             }
-            ModelStep::StopHookBlocked { text: _ } => {
+            ModelStep::StopHookBlocked { text } => {
+                let text_decision = guard.inspect_text(&text);
+                record_stuck(run, port, &text_decision).await?;
                 let decision = guard.record_stop_hook_block();
                 record_stuck(run, port, &decision).await?;
                 match decision {
@@ -376,7 +378,7 @@ where
                     | StuckDecision::HardPause { .. } => {
                         run.transition(RunTransition::ContinueAfterResponse)?;
                         run.complete_step(&step_id)?;
-                        // Stop Hook Block 明确不提交当前 Step。
+                        port.finalize_step(&step_id).await?;
                     }
                 }
             }
