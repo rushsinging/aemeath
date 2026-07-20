@@ -16,7 +16,7 @@ use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::application::chat::looping::post_batch::run_post_tool_batch;
 use crate::application::chat::looping::reflection::{
-    should_run_turn_reflection, submit_interval_reflection,
+    maybe_submit_pre_compact_reflection, should_run_turn_reflection, submit_interval_reflection,
 };
 use crate::application::chat::looping::stream_handler::{
     should_emit_model_stream_waiting, InvocationEventReducer,
@@ -783,12 +783,39 @@ where
             .as_ref()
             .map(|window| window.backing_revision)
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
-        match self
+        // Freeze the pre-compact messages snapshot before invoking the context
+        // adapter. Only the early window that compact will discard feeds the
+        // PreCompact reflection; the recent tail stays in `recent_messages` and
+        // is observable by the next LLM turn without going through Memory.
+        let pre_compact_snapshot: Vec<share::message::Message> = self
+            .context_window
+            .as_ref()
+            .map(|window| {
+                context::compact::messages_selected_for_precompact_memory(&window.messages)
+            })
+            .unwrap_or_default();
+        let outcome = self
             .context
             .compact(request, source_revision)
             .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?
-        {
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        // Production PreCompact reflection trigger (#1284): only the success
+        // path submits the frozen pre-compact snapshot. Errors and `Skipped`
+        // never enqueue a job. The submission is non-blocking and shares the
+        // session-scoped slot with Interval and Manual triggers; the helper
+        // returns `BusySkipped`/`DisabledSkipped` without blocking the caller.
+        let _ = maybe_submit_pre_compact_reflection(
+            &outcome,
+            &pre_compact_snapshot,
+            self.reflection_tasks,
+            self.memory_config,
+            self.binding,
+            self.system_prompt_text,
+            self.language,
+            self.memory,
+            self.reflection_history,
+        );
+        match outcome {
             crate::ports::CompactOutcome::Committed(_) => {
                 *self.last_total_tokens = None;
                 self.context_window = None;

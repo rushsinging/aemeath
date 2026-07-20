@@ -35,4 +35,9 @@ pub trait AtomicBlobPort: Send + Sync {
         key: &StorageKey,
         options: DeleteOptions,
     ) -> Result<DeleteOutcome, StorageError>;
+
+    async fn list_primary(
+        &self,
+        namespace: crate::StorageNamespace,
+    ) -> Result<Vec<crate::StorageEntry>, StorageError>;
 }

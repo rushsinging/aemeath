@@ -250,7 +250,9 @@ pub trait ReflectionPromptPort: Send + Sync {
 pub trait ReflectionHistoryQuery: Send + Sync {
     /// Returns at most `limit` records, newest append first. A zero limit
     /// returns an empty result without weakening dataset validation.
-    async fn list(&self, limit: usize) -> Result<Vec<ReflectionRecord>, MemoryError>;
+    /// Only safe metadata summaries cross this boundary; full records
+    /// (including output content) stay internal to the adapter.
+    async fn list(&self, limit: usize) -> Result<Vec<ReflectionSafeSummary>, MemoryError>;
 }
 
 /// Memory-owned write boundary for completed Reflection facts. Implementations
