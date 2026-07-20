@@ -16,7 +16,7 @@ pub struct AgentRunRequest<'a> {
     pub plan_mode: Arc<dyn PlanModeState>,
     pub guidance: Arc<dyn Guidance>,
     pub timeout: std::time::Duration,
-    pub model_spec: Option<&'a str>,
+    pub role: &'a str,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentRunTerminal {

@@ -23,30 +23,39 @@ impl AgentRunner for CliAgentRunner {
         let guidance = request.guidance;
         let timeout = request.timeout;
         let parent_run_id = Some(sdk::RunId::from_legacy_or_new(identity.run_id()));
-        let model_spec = request.model_spec;
+        let role_name = request.role;
         let memory = request.memory;
         let progress_sink = request_progress.clone();
-        // Resolve role and model
-        let role = self.resolve_role(model_spec);
-        let resolved_spec = self.resolve_model_spec(model_spec);
+        let role = match self.resolve_role(role_name) {
+            Some(role) => role,
+            None => {
+                let mut available = self.agents_config.roles.keys().cloned().collect::<Vec<_>>();
+                available.sort();
+                return tools::AgentRunTerminal::Failed {
+                    error: format!(
+                        "unknown sub-agent role `{role_name}`; configured roles: {}",
+                        available.join(", ")
+                    ),
+                };
+            }
+        };
+        if role.model.trim().is_empty() {
+            return tools::AgentRunTerminal::Failed {
+                error: format!("sub-agent role `{role_name}` has no configured model"),
+            };
+        }
+        let resolved_spec = role.model.clone();
 
         // Resolve the model config from ModelsConfig to build a ProviderBuildSpec.
         // Unknown models fail closed — no silent fallback to a default client.
-        let model_lookup = resolved_spec
-            .as_deref()
-            .or_else(|| {
-                let default = self.models_config.default.as_str();
-                (!default.is_empty()).then_some(default)
-            })
-            .and_then(|spec| self.models_config.find_model(spec));
+        let model_lookup = self.models_config.find_model(&resolved_spec);
 
         let (source_key, source_config, model_entry) = match model_lookup {
             Some(found) => found,
             None => {
                 return tools::AgentRunTerminal::Failed {
                     error: format!(
-                        "unknown model for sub-agent (spec={:?}); no matching entry in models config",
-                        resolved_spec
+                        "unknown model `{resolved_spec}` configured for sub-agent role `{role_name}`"
                     ),
                 };
             }
@@ -55,7 +64,7 @@ impl AgentRunner for CliAgentRunner {
         let max_tokens_override = Self::role_max_tokens_override(role);
 
         // Determine reasoning for this sub-agent: role config > model config > default
-        let role_reasoning = role.and_then(|r| r.reasoning);
+        let role_reasoning = role.reasoning;
         let model_reasoning = model_entry.reasoning;
         // 模型配置的固定推理档位（"off".."max"），优先级高于 reasoning bool。
         let model_effort = model_entry
@@ -76,11 +85,9 @@ impl AgentRunner for CliAgentRunner {
             }
         };
 
-        let context_size = if model_entry.context_window > 0 {
-            model_entry.context_window
-        } else {
-            200_000
-        };
+        let context_size = self
+            .config_snapshot
+            .resolve_context_size(None, model_entry.context_window);
 
         // Construct ProviderBuildSpec from the resolved model config and build a binding.
         let max_tokens = max_tokens_override
@@ -128,14 +135,8 @@ impl AgentRunner for CliAgentRunner {
                     .map(ToString::to_string)
             })
             .unwrap_or_else(|| "subagent".to_string());
-        let role_name = model_spec.map(str::to_string).unwrap_or_else(|| {
-            resolved_spec
-                .clone()
-                .unwrap_or_else(|| binding.model.model.clone())
-        });
-        let model_name = resolved_spec
-            .clone()
-            .unwrap_or_else(|| binding.model.model.clone());
+        let role_name = role_name.to_string();
+        let model_name = resolved_spec.clone();
         let sub_run_id = sdk::RunId::new_v7();
         let sub_run_context = super::loop_run::sub_run_log_context(
             &logging::capture(),
@@ -162,7 +163,7 @@ impl AgentRunner for CliAgentRunner {
         let hook_runner = self.hook_runner.clone();
 
         // Append role-specific system suffix if configured
-        let system = match role.and_then(|r| r.system_suffix.as_ref()) {
+        let system = match role.system_suffix.as_ref() {
             Some(suffix) => format!("{}\n\n{}", system, suffix),
             None => system.to_string(),
         };
@@ -170,7 +171,7 @@ impl AgentRunner for CliAgentRunner {
         // Call SubagentStart hook
         let workspace_root = self.workspace.views().read().current_workspace_root();
         let hook_results = hook_runner
-            .on_subagent_start(prompt, &system, resolved_spec.as_deref(), &workspace_root)
+            .on_subagent_start(prompt, &system, Some(&resolved_spec), &workspace_root)
             .await;
         // Send any system messages from hook results to progress_tx
         for (_, _, json_output) in &hook_results {
@@ -218,15 +219,12 @@ impl AgentRunner for CliAgentRunner {
                 }
             }
         };
-        let sub_schemas = sub_catalog.model_schemas();
+        let tool_schemas = sub_catalog.model_schemas();
         let messages = vec![Message::user(prompt)];
-        // For sub-agents, use the system prompt as a single cached block
-        let system_blocks = vec![RequestSystemBlock::Cacheable(system.clone())];
         let provider_name_for_log = binding.model.provider.clone();
         let model_name_for_log_closure = model_name_for_log.clone();
         let role_name_for_request_log = role_name_for_log.clone();
-        let model_name_for_request_log = model_name_for_log.clone();
-        let schema_count = sub_schemas.len();
+        let schema_count = tool_schemas.len();
         let log_request_messages = move |turn: usize, messages: &[Message]| {
             // 只记录摘要，不 dump 完整消息内容
             let latest: Vec<serde_json::Value> = messages
@@ -241,13 +239,12 @@ impl AgentRunner for CliAgentRunner {
                 })
                 .collect();
             log::info!(target: crate::LOG_TARGET,
-                "[subagent_llm_request] session={}, turn={}, provider={}, model={}, role={}, model_spec={}, messages={}, tools={}, latest_roles={}",
+                "[subagent_llm_request] session={}, turn={}, provider={}, model={}, role={}, messages={}, tools={}, latest_roles={}",
                 session_id_for_log,
                 turn,
                 provider_name_for_log,
                 model_name_for_log_closure,
                 role_name_for_request_log,
-                model_name_for_request_log,
                 messages.len(),
                 schema_count,
                 serde_json::to_string(&latest).unwrap_or_default(),
@@ -290,15 +287,14 @@ impl AgentRunner for CliAgentRunner {
             runtime_cancellation: runtime_cancellation.clone(),
         };
 
-        let model_display = resolved_spec.as_deref().unwrap_or(&model_name_for_log);
+        let model_display = resolved_spec.as_str();
         // issue #499：发送 Started 事件，让 TUI 在 Agent 工具 header 显示实际 role/model。
         // 这是 sub-agent 的第一个 progress 事件，早于 ToolCalls/Message。
         if let Some(ref sink) = progress_sink {
             sink.emit(AgentProgressEvent {
                 sequence: 0,
                 kind: AgentProgressKind::Started {
-                    // 未配 role 时发 None，TUI 不显示 [role: ...] 标记。
-                    role: model_spec.map(|s| s.to_string()),
+                    role: Some(role_name_for_log.clone()),
                     model: model_display.to_string(),
                 },
             });
@@ -326,13 +322,14 @@ impl AgentRunner for CliAgentRunner {
             max_tokens,
             level,
             hook_runner,
-            sub_schemas,
+            tool_schemas,
+            config_snapshot: self.config_snapshot.clone(),
+            language: self.language.clone(),
             messages,
             committed_message_count: 0,
             context: isolated_context,
             context_request: None,
             context_window: None,
-            system_blocks,
             log_request_messages: Box::new(log_request_messages),
             agent,
             runtime_cancellation,
@@ -347,7 +344,7 @@ impl AgentRunner for CliAgentRunner {
             parent_run_id,
             role_name_for_log,
             model_name_for_log,
-            resolved_spec,
+            resolved_spec: Some(resolved_spec),
             progress: Box::new(progress),
             ctx_context_size: context_size,
             tool_result_materializer: self.tool_result_materializer.clone(),

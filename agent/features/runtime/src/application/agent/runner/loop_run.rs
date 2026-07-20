@@ -13,8 +13,7 @@ use crate::application::loop_engine::{
 };
 use crate::domain::agent_run::{Run, RunDomainEvent, RunSpec};
 use crate::ports::{
-    InvocationOptions, InvocationRequest, ModelToolSchema, ProviderBinding, ReasoningLevel,
-    StopReason,
+    InvocationOptions, InvocationRequest, ProviderBinding, ReasoningLevel, StopReason,
 };
 use async_trait::async_trait;
 use provider::RequestSystemBlock;
@@ -125,13 +124,14 @@ pub(super) struct SubAgentRun<'a> {
     pub max_tokens: u32,
     pub level: ReasoningLevel,
     pub hook_runner: hook::api::HookRunner,
-    pub sub_schemas: Vec<serde_json::Value>,
+    pub tool_schemas: Vec<serde_json::Value>,
+    pub config_snapshot: share::config::domain::snapshot::ConfigSnapshot,
+    pub language: String,
     pub messages: Vec<Message>,
     pub committed_message_count: usize,
     pub context: ContextCoordinator,
     pub context_request: Option<crate::ports::ContextRequest>,
     pub context_window: Option<crate::ports::ContextWindow>,
-    pub system_blocks: Vec<RequestSystemBlock>,
     pub log_request_messages: Box<dyn Fn(usize, &[Message]) + Send + Sync + 'a>,
     pub agent: Agent,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
@@ -157,6 +157,17 @@ pub(super) struct SubAgentRun<'a> {
 
 impl<'a> SubAgentRun<'a> {
     fn freeze_request(&self, step_id: &sdk::RunStepId) -> crate::ports::ContextRequest {
+        let raw_tool_schemas = self.tool_schemas.clone();
+        let tool_schemas = raw_tool_schemas
+            .iter()
+            .filter_map(|schema| {
+                Some(crate::ports::ModelToolSchema {
+                    name: schema.get("name")?.as_str()?.to_string(),
+                    description: schema.get("description")?.as_str()?.to_string(),
+                    input_schema: schema.get("input_schema")?.clone(),
+                })
+            })
+            .collect();
         crate::ports::ContextRequest {
             session_id: crate::ports::SessionId::new(&self.session_id),
             request_id: crate::ports::ContextRequestId::new(uuid::Uuid::now_v7().to_string()),
@@ -170,16 +181,14 @@ impl<'a> SubAgentRun<'a> {
                 chrono::Local::now().format("%Y-%m-%d").to_string(),
             ),
             task_reminder: crate::ports::TaskReminderSnapshot::default(),
-            language: crate::ports::Language::new("en"),
-            agent_roles: std::collections::HashMap::new(),
-            config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
-                share::config::Config::default(),
-            ),
+            language: crate::ports::Language::new(&self.language),
+            agent_roles: self.config_snapshot.agents().roles.clone(),
+            config_snapshot: self.config_snapshot.clone(),
             context_size: self.ctx_context_size,
             max_output_tokens: self.max_tokens as usize,
             last_api_input_tokens: self.last_total_tokens,
-            tool_schemas: vec![],
-            tool_schema_tokens: 0,
+            tool_schemas,
+            tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(&raw_tool_schemas),
             prev_system_tokens: None,
             prev_tool_schema_tokens: None,
         }
@@ -279,11 +288,26 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn log_input(&self) {
-        let mut data = build_json_logger_input_data(
-            &self.messages,
-            self.system_blocks.len(),
-            &self.sub_schemas,
-        );
+        let system_blocks_count = self
+            .context_window
+            .as_ref()
+            .map_or(0, |window| window.system_blocks.len());
+        let tool_schemas = self
+            .context_window
+            .as_ref()
+            .map_or(&[][..], |window| window.tool_schemas.as_slice());
+        let raw_tool_schemas = tool_schemas
+            .iter()
+            .map(|schema| {
+                serde_json::json!({
+                    "name": schema.name,
+                    "description": schema.description,
+                    "input_schema": schema.input_schema,
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut data =
+            build_json_logger_input_data(&self.messages, system_blocks_count, &raw_tool_schemas);
         if let serde_json::Value::Object(ref mut map) = data {
             map.insert(
                 "event_type".to_string(),
@@ -487,8 +511,6 @@ impl RunLoopPort for SubAgentRun<'_> {
                 (self.log_request_messages)(turn_number, &self.messages);
                 self.log_input();
 
-                let effective_blocks = self.system_blocks.clone();
-
                 let window = if let Some(window) = self.context_window.clone() {
                     Some(window)
                 } else if let Some(request) = &self.context_request {
@@ -505,6 +527,26 @@ impl RunLoopPort for SubAgentRun<'_> {
                     .as_ref()
                     .map(|window| messages_for_llm(&window.messages))
                     .unwrap_or_else(|| messages_for_llm(&self.messages));
+                let effective_blocks = window
+                    .as_ref()
+                    .map(|window| {
+                        window
+                            .system_blocks
+                            .iter()
+                            .map(|block| {
+                                if block.cacheable {
+                                    RequestSystemBlock::Cacheable(block.content.clone())
+                                } else {
+                                    RequestSystemBlock::Text(block.content.clone())
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let effective_tools = window
+                    .as_ref()
+                    .map(|window| window.tool_schemas.clone())
+                    .unwrap_or_default();
                 self.context_window = window;
                 let mut coordinator =
                     crate::application::model_invocation::ModelInvocationCoordinator::new();
@@ -527,29 +569,16 @@ impl RunLoopPort for SubAgentRun<'_> {
                         let level = self.level;
                         let system = effective_blocks.clone();
                         let messages = messages_for_api.clone();
-                        let tools = self.sub_schemas.clone();
+                        let tools = effective_tools.clone();
                         let cancellation = self.runtime_cancellation.clone();
                         let invocation_fut = async {
-                            let tool_schemas = tools
-                                .iter()
-                                .filter_map(|schema| {
-                                    Some(ModelToolSchema {
-                                        name: schema.get("name")?.as_str()?.to_string(),
-                                        description: schema
-                                            .get("description")?
-                                            .as_str()?
-                                            .to_string(),
-                                        input_schema: schema.get("input_schema")?.clone(),
-                                    })
-                                })
-                                .collect::<Vec<_>>();
                             let mut request = InvocationRequest::new(
                                 model,
                                 messages,
                                 InvocationOptions::new(max_tokens, level),
                             );
                             request.system = system;
-                            request.tools = tool_schemas;
+                            request.tools = tools;
                             request.cancellation = cancellation.clone();
                             match provider.invoke(request, &cancellation).await {
                                 Ok(stream) => {

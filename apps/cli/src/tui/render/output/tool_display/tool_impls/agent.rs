@@ -8,11 +8,18 @@ use super::super::{
 };
 use super::helpers::build_header_line;
 use ratatui::text::Line;
-use sdk::tool_input::AgentInput;
+use serde::Deserialize;
 use std::path::Path;
 
-/// Deserialize a typed Input from a raw `serde_json::Value`, tolerating
-/// missing / malformed fields via `Default`.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct AgentDisplayInput {
+    prompt: String,
+    description: String,
+}
+
+/// Deserialize the display-only projection, intentionally tolerating legacy
+/// calls that predate the required execution `role` field.
 fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Value) -> T {
     serde_json::from_value(input.clone()).unwrap_or_default()
 }
@@ -25,7 +32,7 @@ impl ToolDisplay for AgentDisplay {
         "Agent"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let args = parse_input::<AgentInput>(input);
+        let args = parse_input::<AgentDisplayInput>(input);
         let desc = if args.description.is_empty() {
             "sub-task"
         } else {
@@ -43,7 +50,7 @@ impl ToolDisplay for AgentDisplay {
         header
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let args = parse_input::<AgentInput>(input);
+        let args = parse_input::<AgentDisplayInput>(input);
         if args.prompt.is_empty() {
             return vec![];
         }
@@ -69,7 +76,7 @@ impl ToolDisplay for AgentDisplay {
         _result_payload: Option<&ToolResultPayload>,
         _workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let args = parse_input::<AgentInput>(input);
+        let args = parse_input::<AgentDisplayInput>(input);
         let description = args.description.as_str();
         // issue #499：追加 role/model 标记（由 merge_agent_meta 从 agent_meta 合并而来）
         let mut suffix = String::new();

@@ -4,7 +4,8 @@ use crate::application::startup::config_paths;
 use crate::ports::ProviderFactory;
 use hook::api::HookRunner;
 use share::config::hooks::HooksConfig;
-use share::config::{AgentsConfig, ModelsConfig};
+#[cfg(test)]
+use share::config::AgentsConfig;
 use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
@@ -30,8 +31,7 @@ pub fn start_session(resume_session_id: Option<String>) -> String {
 
 #[allow(clippy::too_many_arguments)]
 pub fn build_agent_runner(
-    models: Option<&ModelsConfig>,
-    agents: Option<&AgentsConfig>,
+    snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     factory: Arc<dyn ProviderFactory>,
     api_timeout_secs: u64,
     hook_runner: HookRunner,
@@ -48,8 +48,8 @@ pub fn build_agent_runner(
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
     tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
 ) -> Arc<agent_runner::CliAgentRunner> {
-    let models_config = Arc::new(models.cloned().unwrap_or_default());
-    let agents_config = Arc::new(agents.cloned().unwrap_or_default());
+    let models_config = Arc::new(snapshot.models().clone());
+    let agents_config = Arc::new(snapshot.agents().clone());
 
     Arc::new(agent_runner::CliAgentRunner {
         factory,
@@ -58,6 +58,8 @@ pub fn build_agent_runner(
         hook_runner,
         reasoning,
         models_config,
+        config_snapshot: snapshot.clone(),
+        language: snapshot.language().to_string(),
         api_timeout_secs,
         max_tool_concurrency,
         agent_semaphore,
@@ -125,9 +127,9 @@ mod tests {
             .into_views();
 
         let tools = tools::composition::TestCatalogExecutionFactory::empty();
+        let snapshot = share::config::domain::snapshot::ConfigSnapshot::new(Config::default());
         let runner = build_agent_runner(
-            None,
-            None,
+            &snapshot,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
             30,
             HookRunner::empty(),
