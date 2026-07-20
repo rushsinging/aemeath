@@ -325,6 +325,7 @@ Target 要求机械守卫证明：production Memory wiring 只由 Composition Ro
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口仍由 #1289 承接 | #1285/#1289 |
 | 2026-07-19 | #900 删除 Composition 第二 active Memory open，将 concrete dataset store/project opener/service 收回 Memory crate 内，生产仅经 Main Session `DatasetMemoryOpener` 返回 `MemoryPort` | #900 |
 | 2026-07-18 | #899 实现 Memory-owned durable Reflection history append/query；冻结 `/reflect [limit]` 仅安全摘要、正文不进入 TUI/日志 | #899 |
 | 2026-07-18 | #897 落地 NoOpMemory、Composition active Memory prepare/install 与 Disabled/Shared 派生；Main 启动按 ProjectIdentity/committed Config 单次 open，Tool 通过同一 MemoryPort Arc 操作 | #897 |

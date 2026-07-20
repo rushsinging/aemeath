@@ -543,6 +543,19 @@ impl ReflectionTaskAdapter {
         }
     }
 
+    /// Drains a running task until `deadline`. If it does not settle in time,
+    /// requests cancellation and then waits for the terminal completion so no
+    /// task can outlive the Run lease that owns this adapter.
+    pub async fn shutdown(&self, deadline: std::time::Duration) -> Vec<ReflectionTaskCompletion> {
+        match tokio::time::timeout(deadline, self.drain()).await {
+            Ok(completions) => completions,
+            Err(_) => {
+                self.cancel().await;
+                self.drain().await
+            }
+        }
+    }
+
     pub async fn drain(&self) -> Vec<ReflectionTaskCompletion> {
         loop {
             // Register before inspecting the slot, preventing a completion

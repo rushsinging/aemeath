@@ -304,6 +304,7 @@ struct ReflectionConfig {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口仍由 #1289 承接 | #1285/#1289 |
 | 2026-07-19 | #900 将旧 `MemoryStore` apply 示例更新为当前 Run shared lease 捕获的同一 `MemoryPort::apply_reflection`，保留 `ReflectionEngine` 作为无状态 prompt/parse 领域服务 | #900 |
 | 2026-07-18 | #899 完成三 trigger Runtime 单槽异步、busy skip、静默完成、Memory-owned history append/query 持久化、`/reflect [limit]` 只读安全摘要、安全日志与 Run teardown drain/cancel timeout | #899 |
 | 2026-07-12 | 初稿：ReflectionEngine 领域服务、MemorySuggestion、触发条件、prompt/output/apply、职责边界 | #789 |
