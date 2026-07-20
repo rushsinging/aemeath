@@ -66,9 +66,9 @@
 | 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
 | 19a | `check-config-adapter-boundary.sh` | 配置架构 | Config application 禁止直接 fs/JSON 解析；adapter stub/TODO 禁止回流 |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
-| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()`、同步 `cancel_run(run_id)`、Runtime-owned `reply_interaction` / `cancel_interaction` 与 Config control-plane；禁止恢复 `ChatInputEvent::Cancel` |
+| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()`、同步 typed Run control（兼容 `cancel_run` + `cancel_run_step` / `terminate_run`）、Runtime-owned `reply_interaction` / `cancel_interaction` 与 Config control-plane；禁止恢复 `ChatInputEvent::Cancel` |
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
-| 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
+| 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language 只能是纯值 DTO；#1247 后 `AgentClient` 必须发布 `cancel_run_step` / `terminate_run`，且禁止并发原语泄漏 |
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
@@ -581,13 +581,13 @@
 ## 23. check-run-control-boundary.sh
 
 - **位置**：`.agents/hooks/check-run-control-boundary.sh`。
-- **功能**：锁定 SDK run control Published Language 与 `AgentClient` 的迁移期扩容边界，防止 #878 atomic cutover 完成前提前引入并发原语或新 RPC。
+- **功能**：锁定 SDK run control Published Language 与 `AgentClient` 的 #1247 生产切线边界。
 - **守护**：
   - `packages/sdk/src/run.rs`（SDK run control Published Language）只能是纯值 DTO，禁止 `CancellationToken` / `Sender<` / `Receiver<` / `Mutex<` / `RwLock<` / `Arc<`；
-  - `packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前出现 `cancel_run_step` / `terminate_run` 新 API。
-- **检查方式**：`grep -nE` 分别扫描上述两个文件，命中即输出对应说明并 `exit 1`。
+  - `packages/sdk/src/client.rs` 必须发布 `cancel_run_step` / `terminate_run`，且 control command 禁止暴露并发原语。
+- **检查方式**：对 DTO 做禁止模式扫描，对两个目标 API 做正向存在性断言。
 - **白名单**：无。
-- **失败模式**：`SDK run control Published Language must contain only pure value DTOs.` / `New run control APIs must not reach production AgentClient before #878 atomic cutover.`
+- **失败模式**：`SDK run control Published Language must contain only pure value DTOs.` / `Target run control API missing after #1247 cutover`。
 
 ## 23a. check-tool-catalog-execution-boundary.sh
 

@@ -81,9 +81,10 @@ impl ActiveRunRegistration {
     fn new(
         active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
         run_id: sdk::RunId,
+        parent_run_id: Option<sdk::RunId>,
         cancel: tokio_util::sync::CancellationToken,
     ) -> Self {
-        active_run.activate(run_id.clone(), cancel);
+        active_run.activate(run_id.clone(), parent_run_id, cancel);
         Self { active_run, run_id }
     }
 }
@@ -198,6 +199,7 @@ impl<'a> SubAgentRun<'a> {
         let _registration = ActiveRunRegistration::new(
             self.active_run.clone(),
             self.run_id.clone(),
+            self.parent_run_id.clone(),
             cancel.clone(),
         );
         let _binding = match tools::ToolExecutionContextBindingGuard::bind(
@@ -827,11 +829,26 @@ impl RunLoopPort for SubAgentRun<'_> {
     }
 
     fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
+        debug_assert_eq!(run_id, &self.run_id);
         self.active_run.claim_terminal(run_id)
     }
 
     fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
+        debug_assert_eq!(run_id, &self.run_id);
         self.active_run.claim_cancellation(run_id)
+    }
+
+    fn take_control(
+        &mut self,
+        run_id: &sdk::RunId,
+    ) -> Option<crate::domain::agent_run::RunControl> {
+        debug_assert_eq!(run_id, &self.run_id);
+        self.active_run.take_control(run_id)
+    }
+
+    fn take_legacy_cancellation(&mut self, run_id: &sdk::RunId) -> bool {
+        debug_assert_eq!(run_id, &self.run_id);
+        self.active_run.take_legacy_cancellation(run_id)
     }
 
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
@@ -867,7 +884,12 @@ mod tests {
     }
 
     impl ActiveRunPort for RecordingActiveRunPort {
-        fn activate(&self, run_id: RunId, _cancel: tokio_util::sync::CancellationToken) {
+        fn activate(
+            &self,
+            run_id: RunId,
+            _parent_run_id: Option<RunId>,
+            _cancel: tokio_util::sync::CancellationToken,
+        ) {
             self.active.lock().unwrap().insert(run_id);
         }
 
@@ -892,6 +914,7 @@ mod tests {
             let _registration = ActiveRunRegistration::new(
                 registry.clone(),
                 run_id.clone(),
+                None,
                 tokio_util::sync::CancellationToken::new(),
             );
             assert!(registry.active.lock().unwrap().contains(&run_id));

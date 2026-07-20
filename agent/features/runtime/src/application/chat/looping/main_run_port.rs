@@ -961,6 +961,19 @@ where
         self.active_run.claim_cancellation(run_id)
     }
 
+    fn take_control(
+        &mut self,
+        run_id: &sdk::RunId,
+    ) -> Option<crate::domain::agent_run::RunControl> {
+        debug_assert_eq!(run_id, &self.run_id);
+        self.active_run.take_control(run_id)
+    }
+
+    fn take_legacy_cancellation(&mut self, run_id: &sdk::RunId) -> bool {
+        debug_assert_eq!(run_id, &self.run_id);
+        self.active_run.take_legacy_cancellation(run_id)
+    }
+
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
         for event in events {
             match event {

@@ -53,7 +53,7 @@ methods = re.findall(r'(?:async\s+)?fn\s+(\w+)', trait_body)
 
 # 允许的方法
 ALLOWED = {
-    "chat", "cancel_run", "config_view", "update_config",
+    "chat", "cancel_run", "cancel_run_step", "terminate_run", "config_view", "update_config",
     "reply_interaction", "cancel_interaction",
 }
 
@@ -64,9 +64,9 @@ if violations:
     print(json.dumps({
         "decision": "block",
         "reason": (
-            f"AgentClient trait 仅允许 chat/cancel_run、Runtime-owned interaction commands 与 Config control-plane。\n"
-            f"内容输入与结果回传请走 ChatInputEvent/ChatEvent；interaction command 只允许 SDK 纯值。\n"            f"违规方法: {violations}\n"
-            f"文件: {path}"
+            f"AgentClient trait 仅允许 chat、typed run/interaction commands 与 Config control-plane。\n"
+            f"内容输入与结果回传请走 ChatInputEvent/ChatEvent；control command 只允许 SDK 纯值。\n"
+            f"违规方法: {violations}\n"            f"文件: {path}"
         )
     }, ensure_ascii=False))
     sys.exit(2)

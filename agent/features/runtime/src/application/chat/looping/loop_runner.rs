@@ -464,7 +464,7 @@ where
                 let run_memory = bound_main_run.memory_arc();
                 let run_memory_config = bound_main_run.config().memory().clone();
                 let run_id = run.id().clone();
-                active_run.activate(run_id.clone(), cancel.clone());
+                active_run.activate(run_id.clone(), None, cancel.clone());
                 let combined_system_prompt = if user_context.is_empty() {
                     system_prompt_text.clone()
                 } else {

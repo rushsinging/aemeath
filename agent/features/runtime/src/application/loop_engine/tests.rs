@@ -6,13 +6,15 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::agent_run::{Run, RunDomainEvent, RunSpec, RunStatus};
+use crate::domain::agent_run::{Run, RunControl, RunDomainEvent, RunSpec, RunStatus};
 
 #[derive(Default)]
 struct ScriptedPort {
     model_steps: VecDeque<ModelStep>,
     model_errors: VecDeque<LoopEngineError>,
     tool_steps: VecDeque<ToolStep>,
+    controls: VecDeque<RunControl>,
+    control_after_model_calls: Option<usize>,
     calls: Vec<&'static str>,
     events: Vec<RunDomainEvent>,
     guarded_calls: Vec<Vec<ToolGuardDecision>>,
@@ -20,11 +22,15 @@ struct ScriptedPort {
     cancelled_during_model: bool,
     block_model_forever: bool,
     block_compact_until_cancelled: bool,
+    block_tools_until_cancelled: bool,
+    control_on_cancel: Option<RunControl>,
+    blocked_stage: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     cancelled_steps: Vec<sdk::RunStepId>,
     finalized_steps: Vec<sdk::RunStepId>,
     frozen_steps: Vec<sdk::RunStepId>,
     needs_compaction: bool,
     fail_emit_once: bool,
+    fail_cancelled_finalization_once: bool,
 }
 
 #[async_trait::async_trait]
@@ -47,6 +53,9 @@ impl RunLoopPort for ScriptedPort {
     async fn compact(&mut self, cancel: &CancellationToken) -> Result<(), LoopEngineError> {
         self.calls.push("compact");
         if self.block_compact_until_cancelled {
+            if let Some(blocked) = &self.blocked_stage {
+                blocked.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             cancel.cancelled().await;
             return Err(LoopEngineError::Cancelled);
         }
@@ -62,6 +71,9 @@ impl RunLoopPort for ScriptedPort {
             std::future::pending::<()>().await;
         }
         if self.cancelled_during_model {
+            if let Some(blocked) = &self.blocked_stage {
+                blocked.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             cancel.cancelled().await;
             return Err(LoopEngineError::Cancelled);
         }
@@ -86,6 +98,10 @@ impl RunLoopPort for ScriptedPort {
     ) -> Result<(), LoopEngineError> {
         self.calls.push("finalize_cancelled_step");
         self.cancelled_steps.push(step_id.clone());
+        if self.fail_cancelled_finalization_once {
+            self.fail_cancelled_finalization_once = false;
+            return Err(LoopEngineError::Adapter("finalization failed".to_string()));
+        }
         Ok(())
     }
 
@@ -94,11 +110,18 @@ impl RunLoopPort for ScriptedPort {
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
         calls: &[(ToolCall, ToolGuardDecision)],
-        _cancel: &CancellationToken,
+        cancel: &CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
         self.calls.push("tools");
         self.guarded_calls
             .push(calls.iter().map(|(_, decision)| decision.clone()).collect());
+        if self.block_tools_until_cancelled {
+            if let Some(blocked) = &self.blocked_stage {
+                blocked.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            cancel.cancelled().await;
+            return Err(LoopEngineError::Cancelled);
+        }
         self.tool_steps
             .pop_front()
             .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))
@@ -109,6 +132,25 @@ impl RunLoopPort for ScriptedPort {
         Ok(())
     }
 
+    fn take_control(&mut self, _run_id: &sdk::RunId) -> Option<RunControl> {
+        if let Some(control) = self.control_on_cancel.clone() {
+            let interrupted = self
+                .blocked_stage
+                .as_ref()
+                .is_some_and(|blocked| blocked.load(std::sync::atomic::Ordering::SeqCst));
+            if interrupted {
+                self.control_on_cancel = None;
+                return Some(control);
+            }
+        }
+        if let Some(required) = self.control_after_model_calls {
+            let model_calls = self.calls.iter().filter(|call| **call == "model").count();
+            if model_calls < required {
+                return None;
+            }
+        }
+        self.controls.pop_front()
+    }
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
         self.calls.push("emit");
         if self.fail_emit_once {
@@ -132,6 +174,110 @@ fn call(name: &str, input: serde_json::Value) -> ToolCall {
         index: 0,
         input,
     }
+}
+
+#[tokio::test]
+async fn cancel_step_finalizes_then_drains_without_cancelling_the_run() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = ScriptedPort {
+        controls: VecDeque::from([RunControl::CancelStep]),
+        control_after_model_calls: Some(1),
+        model_steps: VecDeque::from([
+            ModelStep::Complete {
+                text: "cancelled output".to_string(),
+            },
+            ModelStep::Complete {
+                text: "done".to_string(),
+            },
+        ]),
+        input_batches: VecDeque::from([
+            vec![LoopInput {
+                text: "first".to_string(),
+            }],
+            vec![LoopInput {
+                text: "after cancel".to_string(),
+            }],
+        ]),
+        ..Default::default()
+    };
+
+    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+
+    assert_eq!(directive, LoopDirective::Terminal);
+    assert_eq!(
+        run.status(),
+        RunStatus::Completed,
+        "calls={:?} events={:?}",
+        port.calls,
+        port.events
+    );
+    assert_eq!(run.steps().len(), 2);
+    assert_eq!(
+        run.steps()[0].status(),
+        crate::domain::agent_run::RunStepStatus::Cancelled
+    );
+    assert_eq!(
+        run.steps()[1].status(),
+        crate::domain::agent_run::RunStepStatus::Done
+    );
+    assert_eq!(port.cancelled_steps, vec![port.frozen_steps[0].clone()]);
+    let control_events = port
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            RunDomainEvent::StepCancellationRequested { .. } => Some("requested"),
+            RunDomainEvent::StepFinalizationStarted { .. } => Some("finalizing"),
+            RunDomainEvent::StepCancelled { .. } => Some("cancelled"),
+            RunDomainEvent::DrainingInput { .. } => Some("draining"),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        control_events,
+        vec!["requested", "finalizing", "cancelled", "draining"]
+    );
+    assert!(!port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+}
+
+#[tokio::test]
+async fn terminate_run_finishes_as_terminated_with_the_requested_reason() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let deadline = sdk::ControlDeadline::from_unix_millis(5_000);
+    let mut port = ScriptedPort {
+        controls: VecDeque::from([RunControl::Terminate {
+            reason: sdk::RunTerminationReason::UserExit,
+            deadline,
+        }]),
+        control_after_model_calls: Some(1),
+        model_steps: VecDeque::from([ModelStep::Continue {
+            text: "continue".to_string(),
+        }]),
+        input_batches: VecDeque::from([vec![LoopInput {
+            text: "first".to_string(),
+        }]]),
+        ..Default::default()
+    };
+
+    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+
+    assert_eq!(directive, LoopDirective::Terminal);
+    assert_eq!(run.status(), RunStatus::Terminated);
+    assert!(port.events.iter().any(|event| matches!(
+        event,
+        RunDomainEvent::Terminated {
+            reason: sdk::RunTerminationReason::UserExit,
+            ..
+        }
+    )));
+    assert!(!port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
 }
 
 #[test]
@@ -435,6 +581,123 @@ async fn engine_cancels_in_flight_model_and_emits_terminal_ack() {
 }
 
 #[tokio::test]
+async fn terminate_control_wins_when_compaction_is_interrupted() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let deadline = sdk::ControlDeadline::from_unix_millis(5_000);
+    let blocked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut port = ScriptedPort {
+        needs_compaction: true,
+        block_compact_until_cancelled: true,
+        input_batches: VecDeque::from([vec![LoopInput {
+            text: "start".to_string(),
+        }]]),
+        blocked_stage: Some(blocked.clone()),
+        control_on_cancel: Some(RunControl::Terminate {
+            reason: sdk::RunTerminationReason::UserExit,
+            deadline,
+        }),
+        ..Default::default()
+    };
+    let cancel_for_task = cancel.clone();
+    let canceller = tokio::spawn(async move {
+        while !blocked.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+        cancel_for_task.cancel();
+    });
+
+    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    canceller.await.unwrap();
+
+    assert_eq!(directive, LoopDirective::Terminal);
+    assert_eq!(run.status(), RunStatus::Terminated);
+    assert!(!port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+}
+
+#[tokio::test]
+async fn terminate_control_wins_when_model_is_interrupted() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let deadline = sdk::ControlDeadline::from_unix_millis(5_000);
+    let blocked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut port = ScriptedPort {
+        cancelled_during_model: true,
+        input_batches: VecDeque::from([vec![LoopInput {
+            text: "start".to_string(),
+        }]]),
+        blocked_stage: Some(blocked.clone()),
+        control_on_cancel: Some(RunControl::Terminate {
+            reason: sdk::RunTerminationReason::UserExit,
+            deadline,
+        }),
+        ..Default::default()
+    };
+    let cancel_for_task = cancel.clone();
+    let canceller = tokio::spawn(async move {
+        while !blocked.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+        cancel_for_task.cancel();
+    });
+
+    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    canceller.await.unwrap();
+
+    assert_eq!(directive, LoopDirective::Terminal);
+    assert_eq!(run.status(), RunStatus::Terminated);
+    assert!(!port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+}
+
+#[tokio::test]
+async fn terminate_control_wins_when_tool_is_interrupted() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let deadline = sdk::ControlDeadline::from_unix_millis(5_000);
+    let blocked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut port = ScriptedPort {
+        model_steps: VecDeque::from([ModelStep::Tools {
+            text: "tool".to_string(),
+            calls: vec![call("CustomTool", json!({}))],
+        }]),
+        input_batches: VecDeque::from([vec![LoopInput {
+            text: "start".to_string(),
+        }]]),
+        tool_steps: VecDeque::new(),
+        block_tools_until_cancelled: true,
+        blocked_stage: Some(blocked.clone()),
+        control_on_cancel: Some(RunControl::Terminate {
+            reason: sdk::RunTerminationReason::UserExit,
+            deadline,
+        }),
+        ..Default::default()
+    };
+    let cancel_for_task = cancel.clone();
+    let canceller = tokio::spawn(async move {
+        while !blocked.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+        cancel_for_task.cancel();
+    });
+
+    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    canceller.await.unwrap();
+
+    assert_eq!(directive, LoopDirective::Terminal);
+    assert_eq!(run.status(), RunStatus::Terminated);
+    assert!(!port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+}
+
+#[tokio::test]
 async fn engine_passes_soft_block_decision_to_the_single_tool_adapter() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
@@ -519,6 +782,90 @@ async fn awaiting_user_does_not_resume_without_input() {
         port.calls.iter().filter(|call| **call == "model").count(),
         model_calls
     );
+}
+
+#[tokio::test]
+async fn cancel_step_after_stop_hook_block_finalizes_without_persisting_completed_step() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = ScriptedPort {
+        controls: VecDeque::from([RunControl::CancelStep]),
+        control_after_model_calls: Some(1),
+        model_steps: VecDeque::from([ModelStep::StopHookBlocked {
+            text: "blocked".to_string(),
+        }]),
+        input_batches: VecDeque::from([vec![LoopInput {
+            text: "first".to_string(),
+        }]]),
+        ..Default::default()
+    };
+
+    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+
+    assert_eq!(directive, LoopDirective::Terminal);
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert_eq!(port.cancelled_steps, port.frozen_steps);
+    assert!(port.finalized_steps.is_empty());
+}
+
+#[tokio::test]
+async fn terminate_finalizer_error_still_closes_run_as_terminated() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = ScriptedPort {
+        controls: VecDeque::from([RunControl::Terminate {
+            reason: sdk::RunTerminationReason::SessionShutdown,
+            deadline: sdk::ControlDeadline::from_unix_millis(5_000),
+        }]),
+        control_after_model_calls: Some(1),
+        model_steps: VecDeque::from([ModelStep::Continue {
+            text: "partial".to_string(),
+        }]),
+        input_batches: VecDeque::from([vec![LoopInput {
+            text: "start".to_string(),
+        }]]),
+        fail_cancelled_finalization_once: true,
+        ..Default::default()
+    };
+
+    let error = run_loop(&mut run, &cancel, &mut port).await.unwrap_err();
+
+    assert!(matches!(error, LoopEngineError::Adapter(_)));
+    assert_eq!(run.status(), RunStatus::Terminated);
+    assert!(port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+}
+
+#[tokio::test]
+async fn terminate_while_awaiting_user_finishes_as_terminated() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = ScriptedPort {
+        model_steps: VecDeque::from([ModelStep::Tools {
+            text: "question".to_string(),
+            calls: vec![call("AskUserQuestion", json!({}))],
+        }]),
+        tool_steps: VecDeque::from([ToolStep::AwaitUser]),
+        input_batches: VecDeque::from([vec![LoopInput {
+            text: "start".to_string(),
+        }]]),
+        ..Default::default()
+    };
+    assert_eq!(
+        run_loop(&mut run, &cancel, &mut port).await.unwrap(),
+        LoopDirective::AwaitUser
+    );
+    port.controls.push_back(RunControl::Terminate {
+        reason: sdk::RunTerminationReason::SessionShutdown,
+        deadline: sdk::ControlDeadline::from_unix_millis(5_000),
+    });
+
+    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+
+    assert_eq!(directive, LoopDirective::Terminal);
+    assert_eq!(run.status(), RunStatus::Terminated);
 }
 
 #[tokio::test]

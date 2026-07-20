@@ -6,8 +6,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::agent::ToolCall;
 use crate::domain::agent_run::{
-    ModelInvocation, Run, RunCancellationRequest, RunDomainEvent, RunStatus, RunTransition,
-    RunTransitionError, ToolCallStatus,
+    ModelInvocation, Run, RunCancellationRequest, RunControl, RunDomainEvent, RunStatus,
+    RunTransition, RunTransitionError, ToolCallStatus,
 };
 
 use super::{StuckDecision, StuckGuard};
@@ -115,6 +115,12 @@ pub trait RunLoopPort: Send {
     fn claim_cancellation(&self, _run_id: &sdk::RunId) -> bool {
         true
     }
+    fn take_control(&mut self, _run_id: &sdk::RunId) -> Option<RunControl> {
+        None
+    }
+    fn take_legacy_cancellation(&mut self, _run_id: &sdk::RunId) -> bool {
+        false
+    }
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError>;
 }
 
@@ -170,21 +176,43 @@ where
 
     let mut guard = StuckGuard::new(run.spec().timeout, 5);
     loop {
-        if handle_interrupt(run, cancel, port).await? {
-            return Ok(LoopDirective::Terminal);
+        match handle_control(run, port).await? {
+            ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+            ControlDisposition::ContinueLoop => continue,
+            ControlDisposition::None => {}
+        }
+        match handle_interrupt(run, cancel, port).await? {
+            ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+            ControlDisposition::ContinueLoop => continue,
+            ControlDisposition::None => {}
         }
 
         let inputs = match await_interruptible(run, cancel, port.drain_input()).await {
             Interrupt::Completed(result) => result?,
-            Interrupt::Cancelled => {
-                cancel_run(run, port).await?;
-                return Ok(LoopDirective::Terminal);
-            }
+            Interrupt::Cancelled => match handle_cancelled_await(run, port).await? {
+                ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+                ControlDisposition::ContinueLoop => continue,
+                ControlDisposition::None => {
+                    cancel_run(run, port).await?;
+                    return Ok(LoopDirective::Terminal);
+                }
+            },
             Interrupt::TimedOut => {
                 timeout_run(run, port).await?;
                 return Ok(LoopDirective::Terminal);
             }
         };
+        if run.status() == RunStatus::DrainingInput {
+            run.apply_drain_decision(if inputs.is_empty() {
+                crate::domain::agent_run::DrainDecision::EmptyAndSealed
+            } else {
+                crate::domain::agent_run::DrainDecision::Inputs
+            })?;
+            emit_events(run, port).await?;
+            if run.is_terminal() {
+                return Ok(LoopDirective::Terminal);
+            }
+        }
         if run.status() == RunStatus::AwaitingUser {
             if inputs.is_empty() {
                 return Ok(LoopDirective::AwaitUser);
@@ -197,10 +225,11 @@ where
         let needs_compaction = match await_interruptible(run, cancel, port.needs_compaction()).await
         {
             Interrupt::Completed(result) => result?,
-            Interrupt::Cancelled => {
-                cancel_run(run, port).await?;
-                return Ok(LoopDirective::Terminal);
-            }
+            Interrupt::Cancelled => match handle_cancelled_await(run, port).await? {
+                ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+                ControlDisposition::ContinueLoop => continue,
+                ControlDisposition::None => unreachable!("cancelled await always resolves"),
+            },
             Interrupt::TimedOut => {
                 timeout_run(run, port).await?;
                 return Ok(LoopDirective::Terminal);
@@ -210,10 +239,11 @@ where
             run.transition(RunTransition::BeginCompaction)?;
             match await_interruptible(run, cancel, port.compact(cancel)).await {
                 Interrupt::Completed(result) => result?,
-                Interrupt::Cancelled => {
-                    cancel_run(run, port).await?;
-                    return Ok(LoopDirective::Terminal);
-                }
+                Interrupt::Cancelled => match handle_cancelled_await(run, port).await? {
+                    ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+                    ControlDisposition::ContinueLoop => continue,
+                    ControlDisposition::None => unreachable!("cancelled await always resolves"),
+                },
                 Interrupt::TimedOut => {
                     timeout_run(run, port).await?;
                     return Ok(LoopDirective::Terminal);
@@ -222,8 +252,10 @@ where
             run.transition(RunTransition::CompactionCompleted)?;
         }
 
-        if handle_interrupt(run, cancel, port).await? {
-            return Ok(LoopDirective::Terminal);
+        match handle_interrupt(run, cancel, port).await? {
+            ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+            ControlDisposition::ContinueLoop => continue,
+            ControlDisposition::None => {}
         }
         run.transition(RunTransition::ContextPrepared)?;
         let step_id = run.begin_step_with_id(step_id)?;
@@ -233,8 +265,11 @@ where
             match await_interruptible(run, cancel, port.invoke_model(cancel)).await {
                 Interrupt::Completed(Ok(result)) => break result,
                 Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
-                    cancel_run(run, port).await?;
-                    return Ok(LoopDirective::Terminal);
+                    match handle_cancelled_await(run, port).await? {
+                        ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+                        ControlDisposition::ContinueLoop => continue,
+                        ControlDisposition::None => unreachable!("cancelled await always resolves"),
+                    }
                 }
                 Interrupt::Completed(Err(LoopEngineError::NeedsCompaction(error))) => {
                     if compacted_after_context_too_long {
@@ -249,10 +284,13 @@ where
                     run.transition(RunTransition::ModelContextExceeded)?;
                     match await_interruptible(run, cancel, port.compact(cancel)).await {
                         Interrupt::Completed(result) => result?,
-                        Interrupt::Cancelled => {
-                            cancel_run(run, port).await?;
-                            return Ok(LoopDirective::Terminal);
-                        }
+                        Interrupt::Cancelled => match handle_cancelled_await(run, port).await? {
+                            ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+                            ControlDisposition::ContinueLoop => continue,
+                            ControlDisposition::None => {
+                                unreachable!("cancelled await always resolves")
+                            }
+                        },
                         Interrupt::TimedOut => {
                             timeout_run(run, port).await?;
                             return Ok(LoopDirective::Terminal);
@@ -300,8 +338,10 @@ where
                 token_usage.est_total(),
             );
         }
-        if handle_interrupt(run, cancel, port).await? {
-            return Ok(LoopDirective::Terminal);
+        match handle_interrupt(run, cancel, port).await? {
+            ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+            ControlDisposition::ContinueLoop => continue,
+            ControlDisposition::None => {}
         }
         run.record_model_invocation(&step_id, model_invocation(&model_step))?;
         run.transition(RunTransition::ModelInvoked)?;
@@ -312,6 +352,11 @@ where
             short(run.id()),
         );
 
+        match handle_control(run, port).await? {
+            ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+            ControlDisposition::ContinueLoop => continue,
+            ControlDisposition::None => {}
+        }
         match model_step {
             ModelStep::Complete { text } => {
                 match guard.inspect_text(&text) {
@@ -336,8 +381,10 @@ where
                 run.transition(RunTransition::ResponseWithoutTools)?;
                 run.complete_step(&step_id)?;
                 port.finalize_step(&step_id).await?;
-                if handle_interrupt(run, cancel, port).await? {
-                    return Ok(LoopDirective::Terminal);
+                match handle_interrupt(run, cancel, port).await? {
+                    ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+                    ControlDisposition::ContinueLoop => continue,
+                    ControlDisposition::None => {}
                 }
                 if !port.claim_terminal(run.id()) {
                     cancel_run(run, port).await?;
@@ -441,10 +488,11 @@ where
                 {
                     Interrupt::Completed(Ok(step)) => step,
                     Interrupt::Completed(Err(LoopEngineError::Cancelled))
-                    | Interrupt::Cancelled => {
-                        cancel_run(run, port).await?;
-                        return Ok(LoopDirective::Terminal);
-                    }
+                    | Interrupt::Cancelled => match handle_cancelled_await(run, port).await? {
+                        ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+                        ControlDisposition::ContinueLoop => continue,
+                        ControlDisposition::None => unreachable!("cancelled await always resolves"),
+                    },
                     Interrupt::Completed(Err(error)) => {
                         fail_run(run, port, error.to_string()).await?;
                         return Ok(LoopDirective::Terminal);
@@ -454,8 +502,10 @@ where
                         return Ok(LoopDirective::Terminal);
                     }
                 };
-                if handle_interrupt(run, cancel, port).await? {
-                    return Ok(LoopDirective::Terminal);
+                match handle_interrupt(run, cancel, port).await? {
+                    ControlDisposition::Terminal => return Ok(LoopDirective::Terminal),
+                    ControlDisposition::ContinueLoop => continue,
+                    ControlDisposition::None => {}
                 }
                 let fuse_bypassed = match &tool_step {
                     ToolStep::ContinueWithFuseBypass(ids) => ids.as_slice(),
@@ -517,23 +567,115 @@ where
     port.on_stuck(decision).await
 }
 
+enum ControlDisposition {
+    None,
+    ContinueLoop,
+    Terminal,
+}
+
+async fn handle_cancelled_await<P>(
+    run: &mut Run,
+    port: &mut P,
+) -> Result<ControlDisposition, LoopEngineError>
+where
+    P: RunLoopPort,
+{
+    match handle_control(run, port).await? {
+        ControlDisposition::None if port.take_legacy_cancellation(run.id()) => {
+            cancel_run(run, port).await?;
+            Ok(ControlDisposition::Terminal)
+        }
+        ControlDisposition::None => {
+            cancel_run(run, port).await?;
+            Ok(ControlDisposition::Terminal)
+        }
+        disposition => Ok(disposition),
+    }
+}
+
+async fn handle_control<P>(
+    run: &mut Run,
+    port: &mut P,
+) -> Result<ControlDisposition, LoopEngineError>
+where
+    P: RunLoopPort,
+{
+    let Some(control) = port.take_control(run.id()) else {
+        return Ok(ControlDisposition::None);
+    };
+    match control {
+        RunControl::CancelStep => {
+            let Some(step_id) = run.active_step_id() else {
+                return Ok(ControlDisposition::None);
+            };
+            match run.request_step_cancellation(&step_id) {
+                crate::domain::agent_run::RunStepCancellationRequest::Accepted => {
+                    emit_events(run, port).await?;
+                    run.begin_step_finalization(&step_id)?;
+                    emit_events(run, port).await?;
+                    port.finalize_cancelled_step(&step_id).await?;
+                    run.finish_cancelled_step(&step_id)?;
+                    emit_events(run, port).await?;
+                    Ok(ControlDisposition::ContinueLoop)
+                }
+                crate::domain::agent_run::RunStepCancellationRequest::AlreadyCancelling => {
+                    Ok(ControlDisposition::ContinueLoop)
+                }
+                crate::domain::agent_run::RunStepCancellationRequest::NoActiveStep => {
+                    Ok(ControlDisposition::None)
+                }
+                crate::domain::agent_run::RunStepCancellationRequest::RunTerminating
+                | crate::domain::agent_run::RunStepCancellationRequest::RunTerminal => {
+                    Ok(ControlDisposition::Terminal)
+                }
+            }
+        }
+        RunControl::Terminate { reason, deadline } => {
+            match run.request_termination(reason, deadline) {
+                crate::domain::agent_run::RunTerminationRequest::Accepted => {
+                    emit_events(run, port).await?;
+                    let finalization_error = if let Some(step_id) = run.active_step_id() {
+                        port.finalize_cancelled_step(&step_id).await.err()
+                    } else {
+                        None
+                    };
+                    run.finish_termination()?;
+                    emit_events(run, port).await?;
+                    if let Some(error) = finalization_error {
+                        return Err(error);
+                    }
+                }
+                crate::domain::agent_run::RunTerminationRequest::AlreadyTerminating => {}
+                crate::domain::agent_run::RunTerminationRequest::AlreadyTerminal => {}
+            }
+            Ok(ControlDisposition::Terminal)
+        }
+    }
+}
+
 async fn handle_interrupt<P>(
     run: &mut Run,
     cancel: &CancellationToken,
     port: &mut P,
-) -> Result<bool, LoopEngineError>
+) -> Result<ControlDisposition, LoopEngineError>
 where
     P: RunLoopPort,
 {
     if cancel.is_cancelled() || run.status() == RunStatus::Cancelling {
-        cancel_run(run, port).await?;
-        return Ok(true);
+        match handle_control(run, port).await? {
+            ControlDisposition::None if port.take_legacy_cancellation(run.id()) => {
+                cancel_run(run, port).await?;
+                return Ok(ControlDisposition::Terminal);
+            }
+            ControlDisposition::None => return Ok(ControlDisposition::None),
+            disposition => return Ok(disposition),
+        }
     }
     if run.has_timed_out(Instant::now()) {
         timeout_run(run, port).await?;
-        return Ok(true);
+        return Ok(ControlDisposition::Terminal);
     }
-    Ok(false)
+    Ok(ControlDisposition::None)
 }
 
 async fn timeout_run<P>(run: &mut Run, port: &mut P) -> Result<(), LoopEngineError>

@@ -20,6 +20,21 @@ pub trait AgentClient: Send + Sync + 'static {
     /// 同步、幂等地打断指定 Run。返回前 Runtime 已进入 Cancelling 并触发 cancellation scope。
     fn cancel_run(&self, run_id: &RunId) -> CancelRunOutcome;
 
+    /// 同步、幂等地取消当前 Run Step。
+    fn cancel_run_step(&self, _run_id: &RunId) -> crate::CancelRunStepOutcome {
+        crate::CancelRunStepOutcome::NotFound
+    }
+
+    /// 同步、幂等地终止整个 Run。
+    fn terminate_run(
+        &self,
+        _run_id: &RunId,
+        _reason: crate::RunTerminationReason,
+        _deadline: crate::ControlDeadline,
+    ) -> crate::TerminateRunOutcome {
+        crate::TerminateRunOutcome::NotFound
+    }
+
     /// 完成 Runtime-owned interaction waiter。
     fn reply_interaction(
         &self,

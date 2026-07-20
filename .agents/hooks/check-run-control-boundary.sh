@@ -11,8 +11,15 @@ if grep -nE 'CancellationToken|Sender<|Receiver<|Mutex<|RwLock<|Arc<' "$SDK_RUN"
   fail=1
 fi
 
-if grep -nE 'cancel_run_step|terminate_run' "$CLIENT"; then
-  echo "New run control APIs must not reach production AgentClient before #878 atomic cutover." >&2
+for api in cancel_run_step terminate_run; do
+  if ! grep -q "fn ${api}" "$CLIENT"; then
+    echo "Target run control API missing after #1247 cutover: ${api}." >&2
+    fail=1
+  fi
+done
+
+if grep -nE 'CancellationToken|Sender<|Receiver<|Mutex<|RwLock<' "$CLIENT"; then
+  echo "AgentClient run control commands must expose only pure value SDK types." >&2
   fail=1
 fi
 

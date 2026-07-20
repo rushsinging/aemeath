@@ -50,6 +50,19 @@ impl AgentClient for AgentClientImpl {
         self.inner.active_run.cancel(run_id)
     }
 
+    fn cancel_run_step(&self, run_id: &sdk::RunId) -> sdk::CancelRunStepOutcome {
+        self.inner.active_run.cancel_step(run_id)
+    }
+
+    fn terminate_run(
+        &self,
+        run_id: &sdk::RunId,
+        reason: sdk::RunTerminationReason,
+        deadline: sdk::ControlDeadline,
+    ) -> sdk::TerminateRunOutcome {
+        self.inner.active_run.terminate(run_id, reason, deadline)
+    }
+
     async fn chat(&self, input: ChatRequest) -> Result<ChatStream, SdkError> {
         super::trait_chat::chat_impl(self, input).await
     }

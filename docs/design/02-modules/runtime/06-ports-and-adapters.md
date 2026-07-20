@@ -242,7 +242,7 @@ Run root / Step cancellation scope 若与 reply/cancel 竞争则永远优先：`
 
 Main adapter **MUST** 在 Runtime-side interaction bridge 中先注册 `InteractionRequestId → pending waiter`，再发出纯值 `ChatEvent::InteractionRequested { request_id, run_id, body }`。`AgentClient::reply_interaction` / `cancel_interaction` 回到同一 bridge，校验 body-specific reply 后恰好一次完成 waiter；stream、TUI 与 SDK event **NEVER** 携带 sender。processing teardown 不拥有 waiter，Run cancellation 才由 Runtime drain 该 Run 的 pending request 并发布权威 cancellation 事件。
 
-> **迁移状态（#1245）**：Run-owned `PendingInteraction` / 四类 continuation、Runtime-side waiter bridge 与 SDK `AgentClient` reply/cancel 纯值命令契约已建立，并由 L1-L3 测试覆盖；bridge 尚未注入生产 Main/Sub adapter。Main Tool suspension 生产切线由 #1246，Sub/Hook/Reasoning 装配由 #1248，Run control drain 接线由 #1247 承接。旧 `AskUserBatch.reply_tx` 在这些 leaf 完成前仍是兼容路径，NEVER 视为 Target。
+> **迁移状态（#1245/#1247）**：Run-owned `PendingInteraction` / 四类 continuation、Runtime-side waiter bridge 与 SDK `AgentClient` reply/cancel 纯值命令契约已建立；#1247 已将同一 bridge 接入 ActiveRun control owner，`CancelRunStep` / `TerminateRun` 接受时会 drain 对应 Run（含 descendant）的 waiter。bridge 的 request 注册仍未注入生产 Main/Sub suspension adapter：Main Tool suspension 由 #1246，Sub/Hook/Reasoning 装配由 #1248 承接。旧 `AskUserBatch.reply_tx` 在这些 leaf 完成前仍是兼容路径，NEVER 视为 Target。
 
 ### 2.3 Runtime-owned EventSink / UsageSink
 
