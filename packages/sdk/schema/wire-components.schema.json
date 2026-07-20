@@ -1,0 +1,1192 @@
+{
+  "$defs": {
+    "ApprovalDecision": {
+      "oneOf": [
+        {
+          "enum": [
+            "Approve"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Deny": {
+              "properties": {
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "Deny"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CancelRunOutcome": {
+      "enum": [
+        "Accepted",
+        "AlreadyCancelling",
+        "AlreadyTerminal",
+        "NotFound"
+      ],
+      "title": "CancelRunOutcome",
+      "type": "string"
+    },
+    "CancelRunStepOutcome": {
+      "enum": [
+        "Accepted",
+        "AlreadyCancelling",
+        "NoActiveStep",
+        "RunTerminating",
+        "RunTerminal",
+        "NotFound"
+      ],
+      "title": "CancelRunStepOutcome",
+      "type": "string"
+    },
+    "ChatEventContext": {
+      "description": "Runtime stream context used to bind UI events to the authoritative chat/turn.",
+      "properties": {
+        "chat_id": {
+          "$ref": "#/$defs/ChatId"
+        },
+        "turn_id": {
+          "$ref": "#/$defs/ChatTurnId"
+        }
+      },
+      "required": [
+        "chat_id",
+        "turn_id"
+      ],
+      "title": "ChatEventContext",
+      "type": "object"
+    },
+    "ChatId": {
+      "format": "uuid",
+      "type": "string",
+      "x-aemeath-uuid-version": 7
+    },
+    "ChatMessage": {
+      "description": "SDK 级 message 投影。`content` 为 typed 块列表（serde 成与历史完全相同的 JSON）。",
+      "properties": {
+        "content": {
+          "items": {
+            "$ref": "#/$defs/ContentBlock"
+          },
+          "type": "array"
+        },
+        "input_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InputId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "TUI 输入归宿（#507 修复）：runtime→TUI 边界标识\"哪次用户输入产生了这条 Message\"，\nTUI 据此按 id 清对应占位。session 持久化默认不带此字段（`skip_serializing_if`）。"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatMessageMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "content"
+      ],
+      "title": "ChatMessage",
+      "type": "object"
+    },
+    "ChatMessageMetadata": {
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/ChatMessageSource",
+          "default": "user"
+        }
+      },
+      "type": "object"
+    },
+    "ChatMessageSource": {
+      "enum": [
+        "user",
+        "system_generated"
+      ],
+      "type": "string"
+    },
+    "ChatTurnId": {
+      "format": "uuid",
+      "type": "string",
+      "x-aemeath-uuid-version": 7
+    },
+    "ConfigChangeCause": {
+      "enum": [
+        "client_update",
+        "project_commit",
+        "file_reload"
+      ],
+      "type": "string"
+    },
+    "ConfigChangedEvent": {
+      "properties": {
+        "cause": {
+          "$ref": "#/$defs/ConfigChangeCause"
+        },
+        "changed_fields": {
+          "items": {
+            "$ref": "#/$defs/ConfigField"
+          },
+          "type": "array"
+        },
+        "view": {
+          "$ref": "#/$defs/ConfigView"
+        }
+      },
+      "required": [
+        "cause",
+        "changed_fields",
+        "view"
+      ],
+      "title": "ConfigChangedEvent",
+      "type": "object"
+    },
+    "ConfigField": {
+      "enum": [
+        "model",
+        "permission_mode",
+        "memory"
+      ],
+      "type": "string"
+    },
+    "ConfigUpdate": {
+      "oneOf": [
+        {
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "type": {
+              "const": "set_model",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "model"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "mode": {
+              "$ref": "#/$defs/PermissionModeView"
+            },
+            "type": {
+              "const": "set_permission_mode",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "mode"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "ConfigUpdate"
+    },
+    "ConfigUpdateResult": {
+      "properties": {
+        "changed_fields": {
+          "items": {
+            "$ref": "#/$defs/ConfigField"
+          },
+          "type": "array"
+        },
+        "view": {
+          "$ref": "#/$defs/ConfigView"
+        }
+      },
+      "required": [
+        "changed_fields",
+        "view"
+      ],
+      "title": "ConfigUpdateResult",
+      "type": "object"
+    },
+    "ConfigView": {
+      "properties": {
+        "context_size": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "has_api_key": {
+          "type": "boolean"
+        },
+        "logging_level": {
+          "type": "string"
+        },
+        "markdown": {
+          "type": "boolean"
+        },
+        "model_name": {
+          "type": "string"
+        },
+        "permission_mode": {
+          "type": "string"
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verbose": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model_name",
+        "has_api_key",
+        "permission_mode",
+        "markdown",
+        "verbose",
+        "context_size",
+        "logging_level"
+      ],
+      "type": "object"
+    },
+    "ContentBlock": {
+      "description": "消息内容块。`#[serde(tag = \"type\")]` + snake_case 与 wire / 持久化 JSON 对齐。",
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "placeholder": {
+              "description": "TUI 端输入时的占位符（形如 `\"[Image #1]\"`），用于 session resume 时\n把 image block 重新插入到 text 中正确位置（#fix-tui-image-input-output）。\nround-trip 字段，**不发给 LLM**——provider adapter 组装时丢弃。\n旧 history 没有此字段，`#[serde(default)]` 兼容。",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "$ref": "#/$defs/ImageSource"
+            },
+            "type": {
+              "const": "image",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "input": true,
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_use",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "name",
+            "input"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "content": true,
+            "is_error": {
+              "default": false,
+              "type": "boolean"
+            },
+            "text": {
+              "description": "text-first 文本（主重构 Phase B 引入）。仅 round-trip，**不**参与消息文本提取。",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_use_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "tool_use_id",
+            "content"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "signature": {
+              "description": "Anthropic extended-thinking 签名（与 share::ContentBlock 同形）。",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "thinking": {
+              "default": "",
+              "type": "string"
+            },
+            "type": {
+              "const": "thinking",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ControlDeadline": {
+      "description": "Absolute wall-clock deadline used only as wire data.\n\nRuntime converts this value to its injected monotonic clock at the control boundary.",
+      "properties": {
+        "unix_millis": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "unix_millis"
+      ],
+      "title": "ControlDeadline",
+      "type": "object"
+    },
+    "HookMessageKindView": {
+      "description": "Hook 面向展示层的消息类别。",
+      "enum": [
+        "additional_context",
+        "system_message"
+      ],
+      "type": "string"
+    },
+    "HookMessageView": {
+      "description": "Hook 面向展示层的结构化消息。",
+      "properties": {
+        "attempt": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "execution_ordinal": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/HookMessageKindView"
+        },
+        "point": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "point",
+        "source",
+        "execution_ordinal",
+        "attempt",
+        "kind",
+        "text"
+      ],
+      "title": "HookMessageView",
+      "type": "object"
+    },
+    "ImageSource": {
+      "oneOf": [
+        {
+          "properties": {
+            "data": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            },
+            "type": {
+              "const": "base64",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "media_type",
+            "data"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "InputId": {
+      "format": "uuid",
+      "type": "string",
+      "x-aemeath-uuid-version": 7
+    },
+    "InteractionCancelReason": {
+      "enum": [
+        "UserCancelled",
+        "RunCancelled",
+        "ClientDisconnected"
+      ],
+      "title": "InteractionCancelReason",
+      "type": "string"
+    },
+    "InteractionCommandOutcome": {
+      "oneOf": [
+        {
+          "enum": [
+            "Accepted",
+            "NotFound",
+            "AlreadyCompleted",
+            "RunCancelling"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "InvalidReply": {
+              "$ref": "#/$defs/InteractionReplyError"
+            }
+          },
+          "required": [
+            "InvalidReply"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "InteractionCommandOutcome"
+    },
+    "InteractionReply": {
+      "oneOf": [
+        {
+          "enum": [
+            "HardPauseContinue"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "UserQuestions": {
+              "items": {
+                "$ref": "#/$defs/UserAnswer"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "UserQuestions"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ToolApproval": {
+              "$ref": "#/$defs/ApprovalDecision"
+            }
+          },
+          "required": [
+            "ToolApproval"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "PlanApproval": {
+              "$ref": "#/$defs/ApprovalDecision"
+            }
+          },
+          "required": [
+            "PlanApproval"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "InteractionReply"
+    },
+    "InteractionReplyError": {
+      "oneOf": [
+        {
+          "enum": [
+            "VariantMismatch",
+            "AnswerCountMismatch"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "InvalidAnswer": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "InvalidAnswer"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "InteractionRequest": {
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/InteractionRequestBody"
+        },
+        "id": {
+          "$ref": "#/$defs/InteractionRequestId"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RunId"
+        }
+      },
+      "required": [
+        "id",
+        "run_id",
+        "body"
+      ],
+      "title": "InteractionRequest",
+      "type": "object"
+    },
+    "InteractionRequestBody": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "UserQuestions": {
+              "items": {
+                "$ref": "#/$defs/UserQuestion"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "UserQuestions"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ToolApproval": {
+              "$ref": "#/$defs/ToolApprovalPrompt"
+            }
+          },
+          "required": [
+            "ToolApproval"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "PlanApproval": {
+              "$ref": "#/$defs/PlanApprovalPrompt"
+            }
+          },
+          "required": [
+            "PlanApproval"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "HardPause": {
+              "$ref": "#/$defs/StuckDiagnostic"
+            }
+          },
+          "required": [
+            "HardPause"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "InteractionRequestBody"
+    },
+    "InteractionRequestId": {
+      "format": "uuid",
+      "type": "string",
+      "x-aemeath-uuid-version": 7
+    },
+    "ModelSummary": {
+      "description": "`aemeath models` 展示所需的模型摘要。",
+      "properties": {
+        "context_window": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "max_tokens": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "id",
+        "name",
+        "context_window",
+        "max_tokens"
+      ],
+      "title": "ModelSummary",
+      "type": "object"
+    },
+    "PermissionModeView": {
+      "enum": [
+        "ask",
+        "auto_read",
+        "allow_all"
+      ],
+      "type": "string"
+    },
+    "PlanApprovalPrompt": {
+      "properties": {
+        "plan_title": {
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "plan_title",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "ProjectContext": {
+      "description": "项目上下文快照（Copy 语义，零开销）。",
+      "properties": {
+        "cwd": {
+          "description": "当前工作目录。",
+          "type": "string"
+        },
+        "git_branch": {
+          "description": "当前 git 分支。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path_base": {
+          "description": "path_base（相对路径解析基准）。",
+          "type": "string"
+        },
+        "workspace_root": {
+          "description": "workspace root（git 根目录）。",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cwd",
+        "path_base",
+        "workspace_root"
+      ],
+      "title": "ProjectContext",
+      "type": "object"
+    },
+    "ReflectionApplyStatusView": {
+      "enum": [
+        "not_applied",
+        "applied",
+        "partially_applied"
+      ],
+      "type": "string"
+    },
+    "ReflectionErrorCategoryView": {
+      "enum": [
+        "llm_call",
+        "empty_response",
+        "parse",
+        "invalid_suggestion",
+        "apply",
+        "history",
+        "cancelled",
+        "timed_out"
+      ],
+      "type": "string"
+    },
+    "ReflectionHistoryView": {
+      "description": "Safe reflection history projection. It intentionally contains only metadata\nand aggregate counts, never reflection output, prompts, or conversation text.",
+      "properties": {
+        "apply_status": {
+          "$ref": "#/$defs/ReflectionApplyStatusView"
+        },
+        "deviations": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "duration_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "error_category": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReflectionErrorCategoryView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "outdated": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/ReflectionStatusView"
+        },
+        "suggestions": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timestamp": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "token_usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReflectionTokenUsageView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trigger": {
+          "$ref": "#/$defs/ReflectionTriggerView"
+        }
+      },
+      "required": [
+        "id",
+        "timestamp",
+        "trigger",
+        "status",
+        "deviations",
+        "suggestions",
+        "outdated",
+        "apply_status",
+        "duration_ms"
+      ],
+      "title": "ReflectionHistoryView",
+      "type": "object"
+    },
+    "ReflectionStatusView": {
+      "enum": [
+        "running",
+        "succeeded",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "ReflectionTokenUsageView": {
+      "properties": {
+        "input_tokens": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_tokens": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input_tokens",
+        "output_tokens"
+      ],
+      "type": "object"
+    },
+    "ReflectionTriggerView": {
+      "enum": [
+        "interval",
+        "pre_compact",
+        "manual"
+      ],
+      "type": "string"
+    },
+    "RiskLevel": {
+      "enum": [
+        "Low",
+        "Medium",
+        "High"
+      ],
+      "type": "string"
+    },
+    "RunId": {
+      "format": "uuid",
+      "type": "string",
+      "x-aemeath-uuid-version": 7
+    },
+    "RunTerminationReason": {
+      "enum": [
+        "UserExit",
+        "DoubleCtrlC",
+        "QuitCommand",
+        "ProcessSignal",
+        "SessionShutdown",
+        "ParentStepCancelled"
+      ],
+      "title": "RunTerminationReason",
+      "type": "string"
+    },
+    "SessionResumeFailureKind": {
+      "description": "`SessionResumeFailed` 的失败分类（#636 D2）。",
+      "oneOf": [
+        {
+          "const": "not_found",
+          "description": "session 文件不存在。",
+          "type": "string"
+        },
+        {
+          "const": "corrupt",
+          "description": "JSON 损坏且 .bak 回退失败。",
+          "type": "string"
+        },
+        {
+          "const": "io",
+          "description": "底层 IO 错误。",
+          "type": "string"
+        }
+      ],
+      "title": "SessionResumeFailureKind"
+    },
+    "SessionSnapshot": {
+      "description": "Session 快照（cheap clone）。\n\n底层 Vec 消息通过 Arc 共享，clone 开销低。",
+      "properties": {
+        "created_at": {
+          "description": "创建时间（ISO 8601）。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Session ID。",
+          "type": "string"
+        },
+        "message_count": {
+          "description": "消息列表摘要（消息数量）。",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "messages": {
+          "description": "完整消息列表（仅在 load_session 时填充，snapshot 为 None）。",
+          "items": {
+            "$ref": "#/$defs/ChatMessage"
+          },
+          "type": "array"
+        },
+        "repaired": {
+          "description": "消息清洗中修复的消息数。",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tasks": {
+          "description": "任务快照（Session 恢复时用于重建任务状态）。"
+        },
+        "total_tokens": {
+          "description": "总 token 使用量。",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "trimmed": {
+          "description": "消息清洗中移除的消息数。",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceContextView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "会话 workspace 上下文（若存在）。"
+        }
+      },
+      "required": [
+        "id",
+        "message_count",
+        "total_tokens",
+        "messages",
+        "trimmed",
+        "repaired"
+      ],
+      "title": "SessionSnapshot",
+      "type": "object"
+    },
+    "SessionSummary": {
+      "description": "Session 列表中的摘要条目。",
+      "properties": {
+        "created_at": {
+          "description": "创建时间。",
+          "type": "string"
+        },
+        "id": {
+          "description": "Session ID。",
+          "type": "string"
+        },
+        "message_count": {
+          "description": "消息数量。",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model": {
+          "description": "使用模型。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preview": {
+          "description": "首条用户消息预览。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": {
+          "description": "所属项目。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "description": "展示摘要。",
+          "type": "string"
+        },
+        "title": {
+          "description": "用户自定义标题。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "description": "最后更新时间。",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "created_at",
+        "updated_at",
+        "message_count",
+        "summary"
+      ],
+      "title": "SessionSummary",
+      "type": "object"
+    },
+    "StuckDiagnostic": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "recent_actions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "reason",
+        "recent_actions"
+      ],
+      "type": "object"
+    },
+    "TerminateRunOutcome": {
+      "enum": [
+        "Accepted",
+        "AlreadyTerminating",
+        "AlreadyTerminal",
+        "NotFound"
+      ],
+      "title": "TerminateRunOutcome",
+      "type": "string"
+    },
+    "ToolApprovalPrompt": {
+      "properties": {
+        "args_summary": {
+          "type": "string"
+        },
+        "risk_level": {
+          "$ref": "#/$defs/RiskLevel"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "args_summary",
+        "risk_level"
+      ],
+      "type": "object"
+    },
+    "UserAnswer": {
+      "type": "string"
+    },
+    "UserQuestion": {
+      "properties": {
+        "allow_multi": {
+          "type": "boolean"
+        },
+        "options": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "prompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt",
+        "options",
+        "allow_multi"
+      ],
+      "type": "object"
+    },
+    "WorkspaceContextView": {
+      "description": "TUI 可展示的 workspace 上下文视图。",
+      "properties": {
+        "context_stack": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceStackEntryView"
+          },
+          "type": "array"
+        },
+        "path_base": {
+          "type": "string"
+        },
+        "workspace_root": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path_base",
+        "workspace_root",
+        "context_stack"
+      ],
+      "title": "WorkspaceContextView",
+      "type": "object"
+    },
+    "WorkspaceStackEntryView": {
+      "description": "workspace 栈条目视图。",
+      "properties": {
+        "path_base": {
+          "type": "string"
+        },
+        "workspace_root": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path_base",
+        "workspace_root"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aemeath Agent Runtime Wire Components",
+  "type": "object"
+}

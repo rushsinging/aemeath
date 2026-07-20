@@ -1,15 +1,16 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{InteractionRequestId, RunId};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct InteractionRequest {
     pub id: InteractionRequestId,
     pub run_id: RunId,
     pub body: InteractionRequestBody,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum InteractionRequestBody {
     UserQuestions(Vec<UserQuestion>),
     ToolApproval(ToolApprovalPrompt),
@@ -17,46 +18,46 @@ pub enum InteractionRequestBody {
     HardPause(StuckDiagnostic),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UserQuestion {
     pub prompt: String,
     pub options: Vec<String>,
     pub allow_multi: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolApprovalPrompt {
     pub tool_name: String,
     pub args_summary: String,
     pub risk_level: RiskLevel,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PlanApprovalPrompt {
     pub plan_title: String,
     pub steps: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct StuckDiagnostic {
     pub reason: String,
     pub recent_actions: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum RiskLevel {
     Low,
     Medium,
     High,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum ApprovalDecision {
     Approve,
     Deny { reason: Option<String> },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum InteractionReply {
     UserQuestions(Vec<UserAnswer>),
     ToolApproval(ApprovalDecision),
@@ -64,24 +65,24 @@ pub enum InteractionReply {
     HardPauseContinue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UserAnswer(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum InteractionCancelReason {
     UserCancelled,
     RunCancelled,
     ClientDisconnected,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum InteractionReplyError {
     VariantMismatch,
     AnswerCountMismatch,
     InvalidAnswer(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum InteractionCommandOutcome {
     Accepted,
     NotFound,

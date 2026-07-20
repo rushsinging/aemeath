@@ -74,6 +74,13 @@ impl AtomicBlobPort for FakeBlobPort {
     ) -> Result<DeleteOutcome, StorageError> {
         Ok(DeleteOutcome::new(false, false, false))
     }
+
+    async fn list_primary(
+        &self,
+        _namespace: storage::api::StorageNamespace,
+    ) -> Result<Vec<storage::api::StorageEntry>, StorageError> {
+        Ok(Vec::new())
+    }
 }
 
 #[tokio::test]

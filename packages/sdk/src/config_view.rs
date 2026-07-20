@@ -1,8 +1,9 @@
 //! Pure Config DTOs exposed by the SDK.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigField {
     Model,
@@ -10,7 +11,7 @@ pub enum ConfigField {
     Memory,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigChangeCause {
     ClientUpdate,
@@ -18,7 +19,7 @@ pub enum ConfigChangeCause {
     FileReload,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionModeView {
     Ask,
@@ -26,7 +27,7 @@ pub enum PermissionModeView {
     AllowAll,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConfigView {
     pub model_name: String,
     pub provider: Option<String>,
@@ -38,20 +39,20 @@ pub struct ConfigView {
     pub logging_level: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConfigUpdate {
     SetModel { model: String },
     SetPermissionMode { mode: PermissionModeView },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConfigUpdateResult {
     pub changed_fields: Vec<ConfigField>,
     pub view: ConfigView,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConfigChangedEvent {
     pub cause: ConfigChangeCause,
     pub changed_fields: Vec<ConfigField>,

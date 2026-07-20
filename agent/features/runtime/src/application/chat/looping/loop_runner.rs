@@ -506,6 +506,7 @@ where
                     reasoning: reasoning.as_ref(),
                     pending_input: &mut pending_input,
                     deferred_user_inputs: &mut deferred_user_inputs,
+                    stop_hook_feedback: None,
                     cancel: cancel.clone(),
                     run_id: run_id.clone(),
                     active_run: active_run.as_ref(),
@@ -531,9 +532,10 @@ where
                 messages.clear();
                 active_run.clear(&run_id);
             }
-            // Session shutdown joins any accepted background reflection before resources
-            // (notably history persistence) are released.
-            let _ = reflection_tasks.drain().await;
+            // Session teardown first drains within a bounded grace period. If a
+            // Reflection job is still active, shutdown cancels it and waits for
+            // its terminal durable record before the Run lease is released.
+            let _ = reflection_tasks.shutdown(std::time::Duration::from_secs(5)).await;
         },
     )
     .await

@@ -7,10 +7,11 @@
 //! 引入目的：TUI / server 消费消息时走 typed 分发，**杜绝**到处裸抓
 //! `serde_json::Value` 的 `get("text")` / `get("type")`（见 #388 设计、#386 回归）。
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// 消息内容块。`#[serde(tag = "type")]` + snake_case 与 wire / 持久化 JSON 对齐。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     Text {
@@ -48,7 +49,7 @@ pub enum ContentBlock {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ImageSource {
     Base64 { media_type: String, data: String },

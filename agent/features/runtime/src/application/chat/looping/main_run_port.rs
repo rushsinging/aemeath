@@ -16,7 +16,7 @@ use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::application::chat::looping::post_batch::run_post_tool_batch;
 use crate::application::chat::looping::reflection::{
-    should_run_turn_reflection, submit_interval_reflection,
+    maybe_submit_pre_compact_reflection, should_run_turn_reflection, submit_interval_reflection,
 };
 use crate::application::chat::looping::stream_handler::{
     should_emit_model_stream_waiting, InvocationEventReducer,
@@ -82,25 +82,19 @@ impl StepMessageOwnership {
         }
     }
 
-    fn freeze(&mut self, inputs: &[LoopInput]) -> Vec<Message> {
-        let messages = if inputs.is_empty() {
-            std::mem::take(&mut self.pending)
+    fn freeze(&mut self, prefix: Option<Message>, inputs: &[LoopInput]) -> Vec<Message> {
+        let mut messages = prefix.into_iter().collect::<Vec<_>>();
+        if inputs.is_empty() {
+            messages.extend(std::mem::take(&mut self.pending));
         } else {
-            inputs
-                .iter()
-                .map(|input| Message::user(input.text.clone()))
-                .collect()
-        };
+            messages.extend(inputs.iter().map(|input| Message::user(input.text.clone())));
+        }
         self.active = messages.clone();
         messages
     }
 
     fn record(&mut self, message: Message) {
         self.active.push(message);
-    }
-
-    fn rollback_last(&mut self) -> Option<Message> {
-        self.active.pop()
     }
 
     fn finalized(&self) -> Vec<Message> {
@@ -118,7 +112,7 @@ pub(crate) fn fixture_bind_pending(
     inputs: &[LoopInput],
 ) -> (Vec<Message>, Vec<Message>) {
     let mut ownership = StepMessageOwnership::new(pending);
-    let frozen = ownership.freeze(inputs);
+    let frozen = ownership.freeze(None, inputs);
     (frozen, ownership.finalized())
 }
 
@@ -128,7 +122,7 @@ pub(crate) fn fixture_finalize_messages(
     produced: Vec<Message>,
 ) -> Vec<Message> {
     let mut ownership = StepMessageOwnership::new(pending);
-    ownership.freeze(&[]);
+    ownership.freeze(None, &[]);
     for message in produced {
         ownership.record(message);
     }
@@ -184,6 +178,8 @@ where
     pub(crate) reasoning: &'a dyn ReasoningPort,
     pub(crate) pending_input: &'a mut PendingInputBuffer,
     pub(crate) deferred_user_inputs: &'a mut VecDeque<sdk::ChatInputEvent>,
+    /// Stop hook 阻断后，作为下一 Step 系统前缀投递且恰好消费一次的反馈。
+    pub(crate) stop_hook_feedback: Option<Message>,
     pub(crate) cancel: CancellationToken,
     pub(crate) run_id: sdk::RunId,
     pub(crate) active_run: &'a dyn crate::domain::agent_run::ActiveRunPort,
@@ -677,15 +673,14 @@ where
         )
         .await
         {
-            let blocked_assistant = self.messages.pop();
-            let blocked_step_assistant = self.step_messages.rollback_last();
-            debug_assert!(blocked_assistant.is_some());
-            debug_assert!(blocked_step_assistant.is_some());
+            if self.cancel.is_cancelled() {
+                return Err(LoopEngineError::Cancelled);
+            }
             let feedback = Message::system_generated_user(format!(
                 "<system-reminder>\n{feedback}\n</system-reminder>"
             ));
-            self.messages.push(feedback.clone());
-            self.step_messages.record(feedback);
+            self.stop_hook_feedback = Some(feedback.clone());
+            self.messages.push(feedback);
             self.sink
                 .send_event(RuntimeStreamEvent::StopHookBlocked {
                     messages: self.messages.clone(),
@@ -715,15 +710,19 @@ where
     I: InputEventDrainPort,
 {
     fn freeze_step(&mut self, step_id: &RunStepId, inputs: &[LoopInput]) {
-        let pending_messages = self.step_messages.freeze(inputs);
-        if !inputs.is_empty() {
-            self.messages.extend(pending_messages.clone());
+        let feedback = self.stop_hook_feedback.take();
+        let has_stop_hook_feedback = feedback.is_some();
+        let pending_messages = self.step_messages.freeze(feedback, inputs);
+        if has_stop_hook_feedback {
+            self.messages
+                .extend(inputs.iter().map(|input| Message::user(input.text.clone())));
         }
         self.context_request = Some(self.freeze_request(step_id, pending_messages));
         self.context_window = None;
     }
 
     async fn drain_input(&mut self) -> Result<Vec<LoopInput>, LoopEngineError> {
+        let accepts_continuation_inputs = self.stop_hook_feedback.is_some();
         let mut events = self.input_events.drain_input_events().await;
         if let Some(queued) = self.queue.drain_queued_input().await {
             events.extend(
@@ -733,12 +732,23 @@ where
             );
         }
         let batch = split_input_events(events.clone());
-        let inputs = batch
-            .user_inputs
-            .into_iter()
-            .map(|input| LoopInput { text: input.text })
-            .collect();
+        let inputs = if accepts_continuation_inputs {
+            batch
+                .user_inputs
+                .iter()
+                .map(|input| LoopInput {
+                    text: input.text.clone(),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         for event in events {
+            if accepts_continuation_inputs
+                && matches!(event, sdk::ChatInputEvent::UserMessage { .. })
+            {
+                continue;
+            }
             self.queue_busy_event(event).await;
         }
         Ok(inputs)
@@ -773,12 +783,39 @@ where
             .as_ref()
             .map(|window| window.backing_revision)
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
-        match self
+        // Freeze the pre-compact messages snapshot before invoking the context
+        // adapter. Only the early window that compact will discard feeds the
+        // PreCompact reflection; the recent tail stays in `recent_messages` and
+        // is observable by the next LLM turn without going through Memory.
+        let pre_compact_snapshot: Vec<share::message::Message> = self
+            .context_window
+            .as_ref()
+            .map(|window| {
+                context::compact::messages_selected_for_precompact_memory(&window.messages)
+            })
+            .unwrap_or_default();
+        let outcome = self
             .context
             .compact(request, source_revision)
             .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?
-        {
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        // Production PreCompact reflection trigger (#1284): only the success
+        // path submits the frozen pre-compact snapshot. Errors and `Skipped`
+        // never enqueue a job. The submission is non-blocking and shares the
+        // session-scoped slot with Interval and Manual triggers; the helper
+        // returns `BusySkipped`/`DisabledSkipped` without blocking the caller.
+        let _ = maybe_submit_pre_compact_reflection(
+            &outcome,
+            &pre_compact_snapshot,
+            self.reflection_tasks,
+            self.memory_config,
+            self.binding,
+            self.system_prompt_text,
+            self.language,
+            self.memory,
+            self.reflection_history,
+        );
+        match outcome {
             crate::ports::CompactOutcome::Committed(_) => {
                 *self.last_total_tokens = None;
                 self.context_window = None;
