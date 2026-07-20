@@ -455,7 +455,7 @@ P1、feature/platform matrix 与真实 PTY smoke 由 #1050 落地为 `scripts/ch
 
 - host-native：fmt、workspace all-target clippy、workspace tests、TUI P0/P1、CLI build、真实 PTY smoke；
 - cross target：设置 `AEMEATH_MATRIX_CROSS=1` 后按 macOS/Linux host 尝试双架构 build；target/linker 不可用时明确 `SKIP`，编译失败仍阻断；
-- PTY 使用 allowlist 环境和隔离 HOME/agents config，验证 alternate screen 进入、Ctrl+C 退出、alternate screen/cursor 恢复，不访问真实 provider；子进程等待有上限，失败路径 kill/reap；
+- PTY 使用 allowlist 环境和隔离 HOME/agents config，验证 alternate screen 进入、Ctrl+C 退出、alternate screen/cursor 恢复，不访问真实 provider；CLI build 通过 Cargo JSON 输出解析实际 executable（显式 `AEMEATH_PTY_BIN` 可覆盖），子进程等待有上限，失败路径 kill/reap；
 - host-native 各层只执行一次：workspace 排除 CLI，P0/P1 精确过滤，PTY 在 build 后单独执行；当前完整热运行 77.48s（其中 all-target clippy 为主要成本），PTY 约 2s、P1 约 0.04s；跨 target 首次运行因额外构建成本较高，仅手动/release 前执行；
 - 不新增 PR workflow。
 
