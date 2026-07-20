@@ -191,7 +191,7 @@ fn noop_reflection_history() -> Arc<dyn memory::api::ReflectionHistoryStore> {
         async fn list(
             &self,
             _limit: usize,
-        ) -> Result<Vec<memory::api::ReflectionRecord>, memory::api::MemoryError> {
+        ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError> {
             Ok(Vec::new())
         }
     }

@@ -2,10 +2,11 @@
 
 use crate::content::ContentBlock;
 use crate::InputId;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// SDK 级 message 投影。`content` 为 typed 块列表（serde 成与历史完全相同的 JSON）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ChatMessage {
     pub role: String,
     pub content: Vec<ContentBlock>,
@@ -17,13 +18,13 @@ pub struct ChatMessage {
     pub input_id: Option<InputId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatMessageMetadata {
     #[serde(default)]
     pub source: ChatMessageSource,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatMessageSource {
     #[default]
@@ -210,7 +211,7 @@ impl ChatMessage {
 /// Session 快照（cheap clone）。
 ///
 /// 底层 Vec 消息通过 Arc 共享，clone 开销低。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SessionSnapshot {
     /// Session ID。
     pub id: String,
@@ -233,7 +234,7 @@ pub struct SessionSnapshot {
 }
 
 /// Session 列表中的摘要条目。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SessionSummary {
     /// Session ID。
     pub id: String,

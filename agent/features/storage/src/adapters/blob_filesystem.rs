@@ -15,7 +15,8 @@ use crate::{
     AtomicBlobPort, BlobRead, CorruptTransactionError, CorruptionReason, DeleteOptions,
     DeleteOutcome, Durability, Generation, PreviousPolicy, PromoteOutcome, QuarantineDisposition,
     QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome, SafePathSegment,
-    StorageError, StorageErrorKind, StorageKey, TransactionScope, WriteOptions, WriteReceipt,
+    StorageEntry, StorageError, StorageErrorKind, StorageKey, StorageNamespace, TransactionScope,
+    WriteOptions, WriteReceipt,
 };
 
 #[derive(Debug)]
@@ -134,6 +135,55 @@ impl FileSystemBlobAdapter {
         let lock = self.lock_key(&parent, &primary_name)?;
         self.recover_sync(&parent, &primary_name)?;
         Ok((parent, primary_name, lock))
+    }
+
+    fn is_protocol_artifact(name: &str) -> bool {
+        name.starts_with(".stage-")
+            || name.starts_with(".journal-")
+            || name.ends_with(".previous")
+            || name.ends_with(".previous.next")
+            || name.ends_with(".journal")
+            || name.ends_with(".lock")
+            || name.ends_with(".promoted")
+            || name.contains(".quarantine.")
+    }
+
+    fn list_primary_sync(
+        &self,
+        namespace: StorageNamespace,
+    ) -> Result<Vec<StorageEntry>, StorageError> {
+        let namespace_path = Path::new(namespace.as_str());
+        let namespace_dir = match self.root.open_dir(namespace_path) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(map_io(error)),
+        };
+        let mut entries = Vec::new();
+        for entry in namespace_dir.entries().map_err(map_io)? {
+            let entry = entry.map_err(map_io)?;
+            let raw_name = entry.file_name().to_string_lossy().into_owned();
+            if Self::is_protocol_artifact(&raw_name) {
+                continue;
+            }
+            let segment = match SafePathSegment::from_str(&raw_name) {
+                Ok(segment) => segment,
+                Err(_) => continue,
+            };
+            let metadata = entry.metadata().map_err(map_io)?;
+            if metadata.file_type().is_symlink() {
+                return Err(StorageError::new(
+                    StorageErrorKind::InvalidKey,
+                    "存储枚举遇到符号链接",
+                ));
+            }
+            if !metadata.file_type().is_file() {
+                continue;
+            }
+            let key = StorageKey::new(namespace, vec![segment])?;
+            entries.push(StorageEntry::new(key, metadata.len() as usize));
+        }
+        entries.sort_by(|left, right| left.key().segments().cmp(right.key().segments()));
+        Ok(entries)
     }
 
     fn recover_sync(&self, parent: &Dir, primary_name: &Path) -> Result<(), StorageError> {
@@ -569,6 +619,13 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
             deleted_previous,
             deleted_quarantine,
         ))
+    }
+
+    async fn list_primary(
+        &self,
+        namespace: StorageNamespace,
+    ) -> Result<Vec<StorageEntry>, StorageError> {
+        self.list_primary_sync(namespace)
     }
 }
 
