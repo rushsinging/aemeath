@@ -516,6 +516,7 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1057 完成测试完整性审查：补齐 SafeStorageRoot 路径安全契约、Session AtomicBlob 相邻映射、owning-layer 外置与跨进程锁确定性；公开面双 façade 与 `list_primary` 文档—代码漂移由 #1263 承接并阻断父项关闭 | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#1263](https://github.com/rushsinging/aemeath/issues/1263) |
 | 2026-07-17 | #928 发布 `SafeStorageRoot` / `SafeStorageDir` capability-root 路径安全 PL，并冻结其只负责 no-follow 打开安全句柄；Audit 自有 append/write/sync/read/list 语义，Storage 不新增 AppendLog OHS | [#928](https://github.com/rushsinging/aemeath/issues/928) |
 | 2026-07-12 | 摘要初稿：数据所有权、原子写/backup/quarantine 机制、窄端口与路径安全 | #793 |
 | 2026-07-14 | 为 AtomicDataset 增加 expected-revision CAS 与 typed committed receipt，并移除 Task / Project 直连 Storage 路径 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

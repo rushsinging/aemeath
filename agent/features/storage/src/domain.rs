@@ -4,6 +4,10 @@ mod blob_recovery;
 mod published_language;
 mod safe_path;
 
+#[cfg(test)]
+#[path = "domain/domain_tests.rs"]
+mod tests;
+
 pub use atomic_blob::{
     BlobRead, CommitWarning, DeleteOptions, DeleteOutcome, Generation, PromoteOutcome,
     QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome, TransactionScope,

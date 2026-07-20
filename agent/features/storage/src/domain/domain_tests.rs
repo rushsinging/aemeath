@@ -10,9 +10,11 @@ use crate::domain::{
 
 #[test]
 fn safe_path_segment_accepts_plain_component() {
-    let segment = SafePathSegment::from_str("session-01").expect("plain component should be valid");
-
-    assert_eq!(segment.as_str(), "session-01");
+    for value in ["a", "SESSION_01", "会话-01"] {
+        let segment = SafePathSegment::from_str(value).expect("plain component should be valid");
+        assert_eq!(segment.as_str(), value);
+        assert_eq!(segment.to_string(), value);
+    }
 }
 
 #[test]
@@ -202,7 +204,7 @@ fn dataset_manifest_orders_members_canonically_by_name() {
     let names: Vec<&str> = manifest
         .members()
         .iter()
-        .map(|member| member.name().as_str())
+        .map(|member| member.as_str())
         .collect();
 
     assert_eq!(names, ["active", "index", "payload"]);
