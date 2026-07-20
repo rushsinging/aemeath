@@ -7,7 +7,7 @@
 //! `CARGO_PKG_VERSION`（即 `Cargo.toml` 的 `workspace.version` 占位符 `0.0.0`）。
 //! 本地 dev build 永远显示 `0.0.0`，发布版本由 release workflow 注入。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -15,7 +15,7 @@ use std::path::Path;
 /// 将 Rust 类型映射到 JSON Schema 片段。
 fn rust_type_to_json_schema(
     ty: &syn::Type,
-    known_structs: &HashSet<String>,
+    known_structs: &HashMap<String, syn::ItemStruct>,
     known_enums: &HashMap<String, Vec<String>>,
 ) -> String {
     match ty {
@@ -29,7 +29,8 @@ fn rust_type_to_json_schema(
             let name = segments.last().unwrap().as_str();
 
             match name {
-                "String" | "PathBuf" | "OsString" => r#"{"type": "string"}"#.to_string(),
+                "String" | "PathBuf" | "OsString" | "TaskId" => r#"{"type": "string"}"#.to_string(),
+                "BatchId" => r#"{"type": "integer"}"#.to_string(),
                 "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64"
                 | "i128" | "isize" => r#"{"type": "integer"}"#.to_string(),
                 "f32" | "f64" => r#"{"type": "number"}"#.to_string(),
@@ -90,7 +91,10 @@ fn rust_type_to_json_schema(
                         enum_values.join(", ")
                     )
                 }
-                other if known_structs.contains(other) => r#"{"type": "object"}"#.to_string(),
+                other if known_structs.contains_key(other) => {
+                    let item = known_structs.get(other).expect("known struct must exist");
+                    generate_json_schema(item, known_structs, known_enums)
+                }
                 other => {
                     println!(
                         "cargo:warning=build.rs: 类型 `{other}` 未在 tool types 模块中定义，\
@@ -141,13 +145,11 @@ fn json_escape(s: &str) -> String {
         .replace(['\n', '\r'], " ")
 }
 
-/// 从 struct 定义提取字段，生成 ToolSchema impl。
-fn generate_tool_schema_impl(
+fn generate_json_schema(
     item: &syn::ItemStruct,
-    known_structs: &HashSet<String>,
+    known_structs: &HashMap<String, syn::ItemStruct>,
     known_enums: &HashMap<String, Vec<String>>,
-) -> Option<String> {
-    let struct_name = item.ident.to_string();
+) -> String {
     let mut properties = Vec::new();
     let mut required = Vec::new();
 
@@ -159,7 +161,6 @@ fn generate_tool_schema_impl(
 
         let is_option = is_option_type(&field.ty);
         let mut schema = rust_type_to_json_schema(&field.ty, known_structs, known_enums);
-        // 注入字段级 /// 文档注释为 description（供 LLM 理解参数；input schema 关键）。
         if let Some(desc) = extract_doc(&field.attrs) {
             schema = schema.replacen(
                 '{',
@@ -178,7 +179,7 @@ fn generate_tool_schema_impl(
     let required_str = required.join(",\n");
     let sp = "    ";
 
-    let schema = if required.is_empty() {
+    if required.is_empty() {
         format!(
             "{{\n\
              {sp}\"type\": \"object\",\n\
@@ -199,7 +200,18 @@ fn generate_tool_schema_impl(
              {sp}]\n\
              }}"
         )
-    };
+    }
+}
+
+/// 从 struct 定义提取字段，生成 ToolSchema impl。
+fn generate_tool_schema_impl(
+    item: &syn::ItemStruct,
+    known_structs: &HashMap<String, syn::ItemStruct>,
+    known_enums: &HashMap<String, Vec<String>>,
+) -> Option<String> {
+    let struct_name = item.ident.to_string();
+    let schema = generate_json_schema(item, known_structs, known_enums);
+    let sp = "    ";
 
     Some(format!(
         "\nimpl ToolSchema for {struct_name} {{\n\
@@ -238,7 +250,7 @@ fn main() {
     let skip_files = ["mod.rs"];
 
     // 第一遍：收集所有 struct 和 enum 定义
-    let mut known_structs = HashSet::new();
+    let mut known_structs: HashMap<String, syn::ItemStruct> = HashMap::new();
     let mut known_enums: HashMap<String, Vec<String>> = HashMap::new();
     let mut all_files = Vec::new();
 
@@ -262,7 +274,7 @@ fn main() {
             match item {
                 syn::Item::Struct(item_struct) => {
                     if matches!(item_struct.vis, syn::Visibility::Public(_)) {
-                        known_structs.insert(item_struct.ident.to_string());
+                        known_structs.insert(item_struct.ident.to_string(), item_struct.clone());
                     }
                 }
                 syn::Item::Enum(item_enum) => {
@@ -298,21 +310,26 @@ fn main() {
         all_files.push((path.clone(), syn_file));
     }
 
-    // Task is owned by the Task BC but participates in Tool input/output schemas.
-    // Parse its canonical source as part of generation without duplicating the type.
-    let task_types_path = Path::new("../../shared/src/task/types.rs");
+    // Task-owned Tool output views participate in schema generation without
+    // duplicating their definitions in Tools or Shared Kernel. Only the stable
+    // TaskView and its wire enums may enter the Tools schema graph; aggregate
+    // and command types stay private to Task.
+    let task_types_path = Path::new("../task/src/business/model.rs");
     println!("cargo:rerun-if-changed={}", task_types_path.display());
     let content = fs::read_to_string(task_types_path).unwrap();
     let syn_file: syn::File = syn::parse_str(&content)
         .unwrap_or_else(|e| panic!("build.rs: syn 解析 {} 失败: {e}", task_types_path.display()));
     for item in &syn_file.items {
         match item {
-            syn::Item::Struct(item_struct)
-                if matches!(item_struct.vis, syn::Visibility::Public(_)) =>
-            {
-                known_structs.insert(item_struct.ident.to_string());
+            syn::Item::Struct(item_struct) if item_struct.ident == "TaskView" => {
+                known_structs.insert(item_struct.ident.to_string(), item_struct.clone());
             }
-            syn::Item::Enum(item_enum) if matches!(item_enum.vis, syn::Visibility::Public(_)) => {
+            syn::Item::Enum(item_enum)
+                if matches!(
+                    item_enum.ident.to_string().as_str(),
+                    "TaskStatus" | "TaskPriority"
+                ) =>
+            {
                 let variants = item_enum
                     .variants
                     .iter()

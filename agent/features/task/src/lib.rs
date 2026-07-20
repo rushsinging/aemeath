@@ -137,6 +137,6 @@ pub use business::{
     StaleBatchInfo, Task, TaskCommandError, TaskCommandResult, TaskCreateSpec, TaskEvent, TaskId,
     TaskLifecycleSnapshot, TaskPriority, TaskPriorityStats, TaskReminderItem, TaskReminderSnapshot,
     TaskRevision, TaskSnapshot, TaskSnapshotCodecError, TaskSnapshotValidationError, TaskStatus,
-    TaskStoreStats,
+    TaskStoreStats, TaskView,
 };
 pub use core::{wire_task, TaskAccess, TaskPersist, TaskStore, TaskWiring};

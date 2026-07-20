@@ -18,7 +18,7 @@ pub use lifecycle::{
 pub(crate) use model::TaskSnapshotFields;
 pub use model::{
     Batch, BatchCreateSpec, BatchId, BatchStatus, Task, TaskCommandError, TaskCommandResult,
-    TaskCreateSpec, TaskEvent, TaskId, TaskPriority, TaskRevision, TaskStatus,
+    TaskCreateSpec, TaskEvent, TaskId, TaskPriority, TaskRevision, TaskStatus, TaskView,
 };
 pub use query::{
     TaskLifecycleSnapshot, TaskPriorityStats, TaskReminderItem, TaskReminderSnapshot,

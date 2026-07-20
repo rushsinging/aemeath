@@ -6,6 +6,7 @@ set -euo pipefail
 # 作用：守住 §6.4.5 rule6——kernel 只放数据契约与纯函数（禁 async_trait、Arc<Mutex>、
 #       tokio::sync、CancellationToken、SystemTime::now、Uuid::now_v7、fs/process/net、
 #       ToolRegistry/TaskStore 等）。
+# guard-registry:policy.shared.task-owner-boundary
 # 例外：per_file_exemptions——带退出条件的临时豁免（当前为空 {}）。
 #       另见脚本内 forbidden_modules（防回归禁止清单，非豁免，就近有注释）。
 
@@ -24,8 +25,8 @@ share_manifest = root / "agent" / "shared" / "Cargo.toml"
 
 forbidden_patterns = [
     (re.compile(r"\bToolRegistry\b"), "ToolRegistry belongs to the tools crate-root facade, not share"),
-    (re.compile(r"\bTaskStore\b"), "TaskStore belongs to storage::api, not share"),
-    (re.compile(r"\bTaskStoreStats\b"), "TaskStoreStats belongs to storage::api, not share"),
+    (re.compile(r"\bTaskStore\b"), "TaskStore belongs to the task capability, not share"),
+    (re.compile(r"\bTaskStoreStats\b"), "TaskStoreStats belongs to the task capability, not share"),
     (re.compile(r"\bstd::fs::|\btokio::fs::|\bFile::|\bread_to_string\b|\bwrite\(|\bcreate_dir"), "share must not perform fs IO"),
     (re.compile(r"\bstd::process::|\btokio::process::|\bCommand::new\b"), "share must not spawn processes"),
     (re.compile(r"\breqwest::|\bhyper::|\bureq::|\bhttp::"), "share must not perform network/http IO"),
@@ -42,14 +43,12 @@ forbidden_patterns = [
 # per_file_exemptions：带退出条件的临时豁免（命中模式但放行某文件）。当前为空。
 per_file_exemptions = {}
 
-# forbidden_modules：防回归"禁止清单"（与 exemption 语义相反）——这些 task 行为文件
-# 已在 #61 D2 迁出到 storage::api，下列路径一旦重新出现在 agent/shared/ 即视为越界。
-# 当前 4 个文件均已不在 shared（守卫通过），保留此清单以拦截"行为爬回 kernel"。
+# forbidden_modules：防回归"禁止清单"（与 exemption 语义相反）——Task 行为和 PL
+# 由 Task BC 独占，下列 legacy Shared 路径一旦重新出现即视为越界。
+# 当前文件均已不在 shared；保留此清单以拦截行为或重复 PL 爬回 kernel。
 forbidden_modules = {
-    "task/batch.rs": "task batch behavior belongs to storage::api",
-    "task/display.rs": "task display behavior belongs to storage::api",
-    "task/list.rs": "task list behavior belongs to storage::api",
-    "task/store.rs": "task store behavior belongs to storage::api",
+    "task.rs": "Task Published Language belongs to the task capability",
+    "task": "Task modules belong to the task capability",
     "tool.rs": "tool contracts and DTOs belong to the tools domain",
     "tool": "tool type modules belong to the tools domain",
 }

@@ -37,11 +37,11 @@
 | 1 | `check-cargo-dependency-graph.sh` | DDD 边界 | Cargo workspace 依赖方向白名单 |
 | 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
-| 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
+| 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单；禁止 Task PL/行为爬回 Shared |
 | 4a | `check-composition-layout.sh` | Composition Root | Composition 只使用扁平 capability-first wiring modules，禁止 Hexagonal/COLA 层与未登记顶层源码 |
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级与 Tools scope/profile 边界 | 未迁移 Feature 继续受 COLA 依赖方向约束；已迁移 Feature 锁定各自目标目录；Tools 额外锁定 capability-only 授权、`ToolProfile` shrink-only API 与 registry/domain/façade 边界 |
-| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime、Context、Storage 仅开放登记的 crate-root 窄 façade |
-| 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费 `TaskAccess`；Task persistence/restore authority 仅限 Context/Composition |
+| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 已迁移 feature（含 Task）仅开放登记的 crate-root 窄 façade，禁止穿透内部模块 |
+| 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费注入的 `TaskAccess`，禁止具体 `TaskStore` 与 persistence/wiring 能力；Task restore authority 仅限 Context/Composition |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
 | 6b | `check-provider-pull-stream.sh` | Provider 流边界 | 生产路径禁止恢复 `CallbackHandler` / `StreamHandler` / `RuntimeStreamHandler` / `stream_message_raw` / callback `stream_message`；Runtime 与 Context 只能主动 poll `InvocationStream` |
 | 6c | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
@@ -160,7 +160,7 @@
 | 模式 | 理由 |
 |---|---|
 | `\bToolRegistry\b` | 属于 `tools` crate-root façade |
-| `\bTaskStore\b` / `\bTaskStoreStats\b` | 属于 Storage crate-root façade |
+| `\bTaskStore\b` / `\bTaskStoreStats\b` | 属于 Task capability crate-root façade |
 | `\bstd::fs::` / `\btokio::fs::` / `\bFile::` / `read_to_string` / `write(` / `create_dir` | share 不得做 fs IO |
 | `\bstd::process::` / `\btokio::process::` / `Command::new` | share 不得 spawn process |
 | `\breqwest::` / `\bhyper::` / `\bureq::` / `\bhttp::` | share 不得做网络/http IO |
@@ -174,14 +174,7 @@
 | `\bUuid::now_v7\b` / `\bUuid::new_v4\b` | share kernel 不得生成 id |
 
 - **`per_file_exemptions`**：空。带退出条件的临时豁免（命中模式但放行某文件）当前**没有任何**。
-- **`forbidden_modules`**（防回归禁单——已迁出，禁止爬回）：
-
-| 路径 | 理由 |
-|---|---|
-| `agent/shared/src/task/batch.rs` | task 批处理行为属于 Storage 当前 façade |
-| `agent/shared/src/task/display.rs` | task 展示行为属于 Storage 当前 façade |
-| `agent/shared/src/task/list.rs` | task 列表行为属于 Storage 当前 façade |
-| `agent/shared/src/task/store.rs` | task store 行为属于 Storage 当前 façade |
+- **`forbidden_modules`**（防回归禁单）：`agent/shared/src/task.rs` 与 `agent/shared/src/task/`；Task PL、lifecycle 与 store 行为由 Task BC 独占，禁止第二套 DTO/schema/状态机爬回 Shared Kernel。
 
 - **依赖白名单（`allowed_dependencies`）**：`serde`, `serde_json`, `serde_yml`, `thiserror`, `tokio`, `tokio-util`, `uuid`, `log`, `logging`, `unicode-width`, `utils`。
 
@@ -238,17 +231,18 @@
 
 ## 6. check-crate-api-boundary.sh
 
-- **功能**：检查跨 feature 访问经稳定 façade。未迁移 feature 继续使用 `::<feature>::api`；Provider、Runtime、Context、Policy、Storage、Project 与 Audit 使用登记的 crate-root 窄 façade；Workflow 只允许 `workflow::api` 与 composition-only wiring。#916 后 Policy root allowlist 为空；Project `WorkspaceRead` 独占安全路径解析，Tool 直接消费；Context 继续通过既有 `guidance` 模块发布 purpose-specific assessment；Audit 的公开面按真实消费者登记。
+- **功能**：检查跨 feature 访问经稳定 façade。未迁移 feature 继续使用 `::<feature>::api`；Provider、Runtime、Context、Policy、Storage、Project、Task 与 Audit 使用登记的 crate-root 窄 façade；Workflow 只允许 `workflow::api` 与 composition-only wiring。
 - **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透 Current 内部层或 capability 私有模块；禁止 Current `api.rs` 暴露内部层；锁定已迁移 feature 的精确根公开面。
 - **常量**：
-  - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
+  - `FEATURE_CRATES = {runtime, project, policy, context, memory, provider, tools, storage, task, hook, audit, update, workflow}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
   - `ROOT_ACCESS_ALLOW.policy = ∅`：#916 已删除全部 path façade；#917 只可随真实 Policy PL/AllowAll 消费增量登记。
   - `ROOT_ACCESS_ALLOW.context` 继续只登记 `guidance` 模块；purpose-specific assessment façade保持稳定。
   - `ROOT_ACCESS_ALLOW.audit`：#927 Usage PL/query、#928 AppendLog、#929 concrete sender/worker config/lifecycle/metrics 与 start factory；Runtime trait bridge仍归 #931。
-   - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade 加 #928 `SafeStorageRoot` / `SafeStorageDir` / typed entry/open options 路径安全 PL；不包含任何 AppendLog/Usage 类型。
+  - `ROOT_ACCESS_ALLOW.task`：#891 按 `task/src/lib.rs` 的真实 Published Language、`TaskAccess` / `TaskPersist` 与 composition wiring 建立精确 crate-root policy；跨 crate 的 `task::{business,core,...}` 访问被拒绝。
+  - `ROOT_ACCESS_ALLOW.storage`：#883/#884 后仅登记 AtomicBlob/AtomicDataset、安全路径与 filesystem adapter 等通用持久化机制，不再包含 Task/Memory 业务 façade。
   - `ROOT_ACCESS_ALLOW.project`：Project 发布 `ProjectIdentity` / `WorkspaceId` / `WorktreeKind`、三类 workspace port、opaque restore token、结构化 init/control/restore/git 错误与 composition-only wiring；`WorkspaceService`、Git adapter/port 和内部 state **NEVER** 跨 crate 暴露。
   - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.workflow = ∅`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` composition wiring 由函数调用规则允许，graph/node/config 不再作为 crate-root façade。
@@ -268,11 +262,12 @@
 
 ### 6t. check-task-persistence-capability.sh
 
-- **功能**：把 Task persistence/restore authority 限定在 Context 与 Composition，Runtime/Tools 只能获得 `TaskAccess`。
-- **守护**：扫描 Runtime/Tools 生产 Rust 源码，拒绝 `TaskPersist`、`PreparedTaskRestore`、`TaskRestoreAdapter`、`TaskSnapshotSource`、`SessionTaskAdapters`、`TaskWiring` 与 `wire_task`；专用测试文件及 `trait_reflection.rs` 测试 fixture 不参与生产权限判断。
-- **正向路径**：Composition 创建唯一 `TaskWiring`，把 `TaskAccess` 注入 Runtime/Tools，并把 persistence view 交给 Context factory 封装为 capture-only `LegacyTaskCapture`；Runtime 无 prepare/commit restore 权限。
-- **sanity / 故意违规**：脚本内置允许 `TaskAccess`、拒绝 persistence symbols 的 detector sanity。#890 临时向 Runtime 生产文件加入 `use task::TaskPersist` 时以 exit code 2 拒绝；移除后通过。依赖图守卫另以 exit code 2 拒绝临时 `task → runtime` 依赖。
-- **范围边界**：跨 Project/Config/Memory/Task 的联合 prepare/commit gate 仍由 #871 承接；本守卫不建立联合 coordinator。
+- **功能**：把 Task backing / persistence / restore authority 限定在 Task、Context 与 Composition；Runtime/Tools 生产代码只能消费注入的 `TaskAccess`。
+- **守护**：扫描 Runtime/Tools 生产 Rust 源码，拒绝 `TaskStore`、`TaskPersist`、`PreparedTaskRestore`、`TaskRestoreAdapter`、`TaskSnapshotSource`、`SessionTaskAdapters`、`TaskWiring` 与 `wire_task`；专用测试文件及 `trait_reflection.rs` 测试 fixture 不参与生产权限判断。
+- **正向路径**：Composition 创建唯一 Main `TaskWiring`，把 `TaskAccess` 注入 Runtime/Tools，并把 persistence view 交给 Context；Sub Runtime 不再构造未消费的第二 Task backing。
+- **白名单预算**：Task / Storage migration exception 均为 `0`；测试路径排除是生产权限扫描的 scope exclusion，不授权生产代码。
+- **sanity / 故意违规**：脚本内置允许 `TaskAccess`、拒绝 concrete backing/persistence symbols 的 detector sanity；#891 分别以 `TaskStore`、`share::task` 与 Task internal segment 探针验证单 Guard 和总编排 exit 2，恢复后 clean pass。
+- **完成证据（#891）**：Shared legacy Task DTO/lifecycle 已物理删除；Runtime/Tools 生产扫描只允许注入的 `TaskAccess`；Task/Storage migration exception 均为 `0`，repository migration debt 保持 `6`；`cargo check/clippy --workspace --all-targets`、Task/Tools/Context 与受影响 Runtime 测试、production reachability 和总架构守卫共同验证该边界。
 
 ### 6a. check-provider-invocation-scope.sh
 

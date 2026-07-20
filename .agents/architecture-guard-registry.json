@@ -519,6 +519,55 @@
       "introduced_baseline": "v0.1.0",
       "exit_condition": "retain while the textual boundary guard excludes tests and filters the unique owner path",
       "status": "active"
+    },
+    {
+      "id": "policy.shared.task-owner-boundary",
+      "guard": "check-share-minimal-kernel.sh",
+      "module": "task",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/shared/src"
+      },
+      "classification": "target_capability_policy",
+      "owner": "task",
+      "reason": "Task Published Language and behavior are owned exclusively by the Task capability, never Shared Kernel",
+      "tracking_issue": 891,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Task ownership policy",
+      "status": "active"
+    },
+    {
+      "id": "policy.task.access-persistence-split",
+      "guard": "check-task-persistence-capability.sh",
+      "module": "task",
+      "scope": {
+        "kind": "symbol",
+        "value": "forbidden"
+      },
+      "classification": "target_capability_policy",
+      "owner": "task",
+      "reason": "Runtime and Tools receive only injected TaskAccess while Context and Composition own persistence and backing wiring",
+      "tracking_issue": 891,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent capability split",
+      "status": "active"
+    },
+    {
+      "id": "policy.task.crate-root-facade",
+      "guard": "check-crate-api-boundary.sh",
+      "module": "task",
+      "scope": {
+        "kind": "symbol",
+        "value": "ROOT_ACCESS_ALLOW.task"
+      },
+      "classification": "target_capability_policy",
+      "owner": "task",
+      "reason": "Task consumers use the registered crate-root Published Language and ports without traversing internal modules",
+      "tracking_issue": 891,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent narrow Task facade policy",
+      "status": "active"
+      "status": "active"
     }
   ]
 }

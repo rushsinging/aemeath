@@ -3,7 +3,7 @@ use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use task::{TaskAccess, TaskId};
+use task::{TaskAccess, TaskId, TaskView};
 
 pub struct TaskGetTool {
     pub access: Arc<dyn TaskAccess>,
@@ -14,34 +14,6 @@ fn parse_task_id(value: &str) -> Result<TaskId, String> {
         .parse::<u64>()
         .map(TaskId::new)
         .map_err(|_| format!("Task ID must be a decimal number: {value}"))
-}
-
-/// Temporary anti-corruption mapping while tool results retain the legacy wire DTO.
-fn to_legacy_task(task: &task::Task) -> share::task::types::Task {
-    use share::task::types::{TaskPriority, TaskStatus};
-    share::task::types::Task {
-        id: task.id().to_string(),
-        subject: task.subject().to_owned(),
-        description: task.description().to_owned(),
-        status: match task.status() {
-            task::TaskStatus::Pending => TaskStatus::Pending,
-            task::TaskStatus::InProgress => TaskStatus::InProgress,
-            task::TaskStatus::Completed => TaskStatus::Completed,
-            task::TaskStatus::Deleted => TaskStatus::Deleted,
-        },
-        owner: None,
-        blocked_by: task.blocked_by().iter().map(ToString::to_string).collect(),
-        priority: match task.priority() {
-            task::TaskPriority::Low => TaskPriority::Low,
-            task::TaskPriority::Normal => TaskPriority::Normal,
-            task::TaskPriority::High => TaskPriority::High,
-            task::TaskPriority::Urgent => TaskPriority::Urgent,
-        },
-        created_at: task.created_at(),
-        updated_at: task.updated_at(),
-        session_id: task.session_id().map(str::to_owned),
-        batch: task.batch().get(),
-    }
 }
 
 #[async_trait]
@@ -91,7 +63,7 @@ impl TypedTool for TaskGetTool {
         TypedToolResult::success(
             format!("Task #{}: {}", task.id(), task.subject()),
             TaskGetResult {
-                task: to_legacy_task(&task),
+                task: TaskView::from(&task),
             },
         )
     }
