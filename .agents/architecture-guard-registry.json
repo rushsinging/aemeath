@@ -521,6 +521,22 @@
       "status": "active"
     },
     {
+      "id": "policy.task.target-layout",
+      "guard": "check-cola-layer-purity.sh",
+      "module": "task",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/task/src"
+      },
+      "classification": "target_hexagonal_policy",
+      "owner": "task",
+      "reason": "Task uses its documented domain/adapters Target and rejects retired COLA layer names",
+      "tracking_issue": 891,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Task Target layout policy",
+      "status": "active"
+    },
+    {
       "id": "policy.shared.task-owner-boundary",
       "guard": "check-share-minimal-kernel.sh",
       "module": "task",
@@ -566,7 +582,6 @@
       "tracking_issue": 891,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent narrow Task facade policy",
-      "status": "active"
       "status": "active"
     }
   ]

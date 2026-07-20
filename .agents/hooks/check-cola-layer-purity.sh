@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # guard-registry:policy.hexagonal.current-layer-matrix
+# guard-registry:policy.task.target-layout
 # guard-registry:migration.runtime.application-accessors-to-adapters
 # guard-registry:migration.runtime.application-from-args-to-adapters
 # guard-registry:migration.runtime.input-buffer-port-to-application
@@ -9,7 +10,7 @@ set -euo pipefail
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
 # 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用
 #       domain/application/ports/adapters/shared；Workflow 使用 domain；Storage 使用 domain/ports/adapters；
-#       Project/Tools 使用 domain/adapters（domain 不得依赖 adapters）；Audit 仅允许随真实 Usage 交付增量建立的 Hexagonal 层。
+#       Project/Tools/Task 使用 domain/adapters（domain 不得依赖 adapters）；Audit 仅允许随真实 Usage 交付增量建立的 Hexagonal 层。
 # 例外：少量已登记的迁移期层级倒置（见脚本内 narrow migration exceptions 列表）。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -42,6 +43,9 @@ PROJECT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capa
 TOOLS_HEX_LAYERS = {"domain", "adapters"}
 TOOLS_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
 TOOLS_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
+TASK_HEX_LAYERS = {"domain", "adapters"}
+TASK_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
+TASK_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "ports", "capabilities"}
 AUDIT_HEX_LAYERS = {"domain", "application", "ports", "adapters"}
 AUDIT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "application.rs", "ports.rs", "adapters.rs"}
 AUDIT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
@@ -209,6 +213,8 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
         if parts[0] == "project" and normalized_layer in PROJECT_HEX_LAYERS:
             return parts[0], normalized_layer
         if parts[0] == "tools" and normalized_layer in TOOLS_HEX_LAYERS:
+            return parts[0], normalized_layer
+        if parts[0] == "task" and normalized_layer in TASK_HEX_LAYERS:
             return parts[0], normalized_layer
         if parts[0] == "audit" and normalized_layer in AUDIT_HEX_LAYERS:
             return parts[0], normalized_layer
@@ -420,6 +426,20 @@ for feature_src in sorted(features_root.glob("*/src")):
             elif child.is_file() and child.name not in TOOLS_ALLOWED_TOP_LEVEL_FILES:
                 violations.append(
                     f"{child.relative_to(root)}: tools top-level source files must be {sorted(TOOLS_ALLOWED_TOP_LEVEL_FILES)}"
+                )
+            continue
+        if crate_name == "task":
+            if child.stem in TASK_LEGACY_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Task legacy fixed layer is forbidden; use {sorted(TASK_HEX_LAYERS)}"
+                )
+            elif child.is_dir() and child.name not in TASK_HEX_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Task source directories must be {sorted(TASK_HEX_LAYERS)}"
+                )
+            elif child.is_file() and child.name not in TASK_ALLOWED_TOP_LEVEL_FILES:
+                violations.append(
+                    f"{child.relative_to(root)}: Task top-level source files must be {sorted(TASK_ALLOWED_TOP_LEVEL_FILES)}"
                 )
             continue
         if crate_name == "storage":

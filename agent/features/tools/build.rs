@@ -314,7 +314,7 @@ fn main() {
     // duplicating their definitions in Tools or Shared Kernel. Only the stable
     // TaskView and its wire enums may enter the Tools schema graph; aggregate
     // and command types stay private to Task.
-    let task_types_path = Path::new("../task/src/business/model.rs");
+    let task_types_path = Path::new("../task/src/domain/model.rs");
     println!("cargo:rerun-if-changed={}", task_types_path.display());
     let content = fs::read_to_string(task_types_path).unwrap();
     let syn_file: syn::File = syn::parse_str(&content)

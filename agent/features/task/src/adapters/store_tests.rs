@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::thread;
 
 use super::{TaskAccess, TaskStore};
-use crate::business::{
+use crate::domain::{
     BatchCreateSpec, TaskCommandError, TaskCreateSpec, TaskEvent, TaskId, TaskPriority,
     TaskRevision, TaskStatus, TaskStoreState,
 };

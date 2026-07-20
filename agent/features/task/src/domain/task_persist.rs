@@ -1,4 +1,4 @@
-use crate::business::{PreparedTaskRestore, TaskSnapshot, TaskSnapshotValidationError};
+use crate::domain::{PreparedTaskRestore, TaskSnapshot, TaskSnapshotValidationError};
 
 /// Narrow, Task-owned persistence capability: capture a coherent image,
 /// validate a candidate, then install it.

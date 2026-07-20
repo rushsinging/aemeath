@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use super::{TaskAccess, TaskPersist, TaskStore};
+use super::TaskStore;
+use crate::{TaskAccess, TaskPersist};
 
 /// Composition root for the Task BC.
 ///
@@ -42,7 +43,7 @@ impl TaskWiring {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::business::{
+    use crate::domain::{
         BatchCreateSpec, TaskCreateSpec, TaskPriority, TaskSnapshot, TaskSnapshotValidationError,
     };
 

@@ -563,7 +563,7 @@ def run_sanity() -> None:
         ("tools", "let _ = project::business::worktree::enter_worktree(args);"),
         ("runtime", "use storage::memory_store::MemoryStore;"),
         ("runtime", "use storage::HistoryManager;"),
-        ("runtime", "use task::core::TaskStore;"),    ]
+        ("runtime", "use task::adapters::TaskStore;"),    ]
     for current, line in allowed:
         if check_cross_crate_line(current, line):
             raise AssertionError(f"sanity allow failed: {line}")

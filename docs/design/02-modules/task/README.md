@@ -33,19 +33,24 @@ Task 采用 Hexagonal + Clean 最简形态（`domain + adapters`）。`transitio
 ```text
 src/
 ├── lib.rs                 # 窄 façade：Task PL、TaskAccess / TaskPersist、composition-only wiring
-├── domain.rs              # 领域策略入口
+├── domain.rs              # 领域策略入口与窄 OHS 定义
 ├── domain/
-│   ├── state.rs            #   TaskStoreState + Task / Batch 权威字段
-│   ├── transition.rs       #   Task 状态迁移用例
-│   ├── dependency.rs       #   依赖图不变量与删除边清理
-│   ├── batch.rs            #   Batch lifecycle 用例
-│   └── snapshot.rs         #   collect / prepare / commit restore 策略
+│   ├── model.rs           #   Task / Batch / typed ID / event / view
+│   ├── state.rs           #   TaskStoreState 聚合与 transition / dependency / batch 命令
+│   ├── lifecycle.rs       #   Batch lifecycle 只读领域服务
+│   ├── query.rs           #   统计、提醒与 lifecycle read model
+│   ├── snapshot.rs        #   typed snapshot、校验与 prepare candidate
+│   ├── task_access.rs     #   Runtime / Tool 的窄 OHS
+│   └── task_persist.rs    #   Context 的窄持久化 OHS
+├── adapters.rs            # adapter 注册与 composition-only export
 └── adapters/
-    └── snapshot_codec.rs   #   codec（持久化 I/O 终止于此）
+    ├── store.rs            #   单一同步内存 backing
+    ├── snapshot_codec.rs   #   V1/V2 wire codec
+    └── wiring.rs           #   同 backing 的 access / persist views
 ```
 
 - 这是 Hexagonal 最简形态投影，小实现可以从 `domain.rs` 开始，只在某个用例已有独立共同变化与测试边界时才拆子文件。
-- `domain/` 内的 `state` / `transition` / `dependency` / `batch` / `snapshot` 共同守护 `TaskStoreState` 聚合，**NEVER** 拆为独立 `capabilities/`。
+- `domain/` 内的 `model` / `state` / `lifecycle` / `query` / `snapshot` 共同守护 `TaskStoreState` 聚合，**NEVER** 拆为独立 `capabilities/`。
 - `ports/` **NEVER** 作为固定横向层预建；窄契约（`TaskAccess` / `TaskPersist`）与所有者 façade 共置在 `lib.rs`。
 - Composition Root 仍是唯一生产装配入口。
 
@@ -108,4 +113,4 @@ Config 通过只读 ConfigSnapshot 提供 Task 相关配置（如批次静默阈
 | 2026-07-12 | 初稿：Task 聚合、状态机、依赖图不变量、Batch、访问契约、Published Language | #791 |
 | 2026-07-14 | 拆分 TaskAccess / TaskPersist，并对齐单状态槽与联合 prepare-commit 恢复协议 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 增加 typed/fallible create 与 Batch pause/resume/archive-by-id 契约，移除 Batch description 漂移 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-16 | §3 更名为 Target 物理目录：明确 Task 单能力扁平 `task.rs` + `task/`，NEVER 建立 `capabilities/` 竖切容器，并补齐判定依据 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
+| 2026-07-20 | #891 物理退役 `business/core` COLA 层，落地 `domain + adapters` Target；codec 独占 adapter，TaskAccess / TaskPersist 与领域 PL 共置 | [#891](https://github.com/rushsinging/aemeath/issues/891) |
