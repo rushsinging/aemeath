@@ -32,6 +32,63 @@ fn empty_skill_materializer() -> Arc<dyn tools::SkillMaterializationPort> {
     Arc::new(EmptySkillMaterializer)
 }
 
+struct FixedSkillMaterializer;
+
+#[async_trait]
+impl tools::SkillMaterializationPort for FixedSkillMaterializer {
+    async fn materialize_available(
+        &self,
+        _query: tools::SkillMaterializationQuery,
+    ) -> Result<tools::SkillMaterializationSnapshot, tools::SkillError> {
+        Ok(tools::SkillMaterializationSnapshot::from_fragments(vec![
+            tools::PromptFragment::new(
+                "runtime-skill",
+                "SUBAGENT_SKILL_SENTINEL",
+                tools::SkillSource::builtin("aemeath-builtin://runtime-skill"),
+                tools::CacheHint::Stable,
+            ),
+        ]))
+    }
+}
+
+#[derive(Default)]
+struct CapturedInvocation {
+    system: Vec<String>,
+    tool_names: Vec<String>,
+}
+
+struct CapturingProvider {
+    captured: Arc<std::sync::Mutex<CapturedInvocation>>,
+}
+
+#[async_trait]
+impl LlmProvider for CapturingProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        system: &[SystemBlock],
+        _messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        let mut captured = self.captured.lock().unwrap();
+        captured.system = system.iter().map(|block| block.text.clone()).collect();
+        captured.tool_names = tool_schemas
+            .iter()
+            .filter_map(|schema| schema.get("name")?.as_str().map(str::to_string))
+            .collect();
+        Err(ProviderError::fatal(ProviderErrorKind::Network, "captured"))
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
 async fn wait_for_provider_call(calls: &std::sync::Mutex<usize>) {
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
@@ -86,6 +143,10 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
         models_config: test_models_config(),
+        config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config::default(),
+        ),
+        language: "en".to_string(),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
@@ -127,7 +188,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
                 plan_mode: ctx_a.plan_mode_state(),
                 guidance: ctx_a.guidance(),
                 timeout: std::time::Duration::from_secs(5),
-                model_spec: Some("role-a/model-a"),
+                role: "role-a",
             }),
             runner.run_agent(AgentRunRequest {
                 prompt: "b",
@@ -141,7 +202,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
                 plan_mode: ctx_b.plan_mode_state(),
                 guidance: ctx_b.guidance(),
                 timeout: std::time::Duration::from_secs(5),
-                model_spec: Some("role-b/model-b"),
+                role: "role-b",
             }),
         );
         assert!(matches!(a, tools::AgentRunTerminal::Failed { .. }));
@@ -153,9 +214,9 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
     let mut seen = seen.lock().unwrap().clone();
     seen.sort_by(|a, b| a.role.cmp(&b.role));
     assert_eq!(seen.len(), 2);
-    assert_eq!(seen[0].role.as_deref(), Some("role-a/model-a"));
+    assert_eq!(seen[0].role.as_deref(), Some("role-a"));
     assert_eq!(seen[0].model.as_deref(), Some("role-a/model-a"));
-    assert_eq!(seen[1].role.as_deref(), Some("role-b/model-b"));
+    assert_eq!(seen[1].role.as_deref(), Some("role-b"));
     assert_eq!(seen[1].model.as_deref(), Some("role-b/model-b"));
     for context in &seen {
         assert_eq!(context.turn, Some(1));
@@ -273,24 +334,19 @@ fn test_role_max_tokens_override() {
         max_tokens: Some(8192),
         ..Default::default()
     };
-    assert_eq!(
-        CliAgentRunner::role_max_tokens_override(Some(&role)),
-        Some(8192)
-    );
+    assert_eq!(CliAgentRunner::role_max_tokens_override(&role), Some(8192));
 
     let role = AgentRoleConfig {
         max_tokens: Some(0),
         ..Default::default()
     };
-    assert_eq!(CliAgentRunner::role_max_tokens_override(Some(&role)), None);
+    assert_eq!(CliAgentRunner::role_max_tokens_override(&role), None);
 
     let role = AgentRoleConfig {
         max_tokens: None,
         ..Default::default()
     };
-    assert_eq!(CliAgentRunner::role_max_tokens_override(Some(&role)), None);
-
-    assert_eq!(CliAgentRunner::role_max_tokens_override(None), None);
+    assert_eq!(CliAgentRunner::role_max_tokens_override(&role), None);
 }
 
 #[test]
@@ -516,7 +572,7 @@ async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            model_spec: None,
+            role: "coder",
         })
         .await;
 
@@ -547,7 +603,7 @@ async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            model_spec: None,
+            role: "coder",
         })
         .await;
 
@@ -577,7 +633,7 @@ async fn test_run_agent_context_cancelled_after_provider_error_returns_user_canc
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            model_spec: None,
+            role: "coder",
         })
         .await;
 
@@ -617,7 +673,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            model_spec: None,
+            role: "coder",
         }),
     )
     .await
@@ -625,6 +681,111 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
 
     canceller.await.unwrap();
     assert_eq!(result, tools::AgentRunTerminal::Cancelled);
+}
+
+struct ReadFixtureTool;
+
+#[async_trait]
+impl tools::TypedTool for ReadFixtureTool {
+    type Output = serde_json::Value;
+
+    fn name(&self) -> &str {
+        "Read"
+    }
+
+    fn description(&self) -> &str {
+        "read fixture"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
+
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: &tools::ToolExecutionContext,
+    ) -> tools::TypedToolResult<Self::Output> {
+        tools::TypedToolResult::success("ok", serde_json::json!({"ok": true}))
+    }
+}
+
+#[tokio::test]
+async fn unknown_sub_agent_role_fails_before_provider_invocation() {
+    let runner = test_runner(ProviderError::fatal(
+        ProviderErrorKind::Network,
+        "provider must not be invoked",
+    ));
+    let ctx = test_ctx();
+
+    let result = runner
+        .run_agent(AgentRunRequest {
+            prompt: "p",
+            system: "s",
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
+            timeout: std::time::Duration::from_secs(30),
+            role: "missing-role",
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        tools::AgentRunTerminal::Failed {
+            error: "unknown sub-agent role `missing-role`; configured roles: coder, role-a, role-b"
+                .to_string(),
+        }
+    );
+}
+
+#[tokio::test]
+async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
+    let captured = Arc::new(std::sync::Mutex::new(CapturedInvocation::default()));
+    let factory = tools::composition::TestCatalogExecutionFactory::new();
+    factory.register(ReadFixtureTool);
+    let mut runner = test_runner(ProviderError::fatal(ProviderErrorKind::Network, "unused"));
+    runner.factory = crate::application::testing::constant_factory(
+        crate::application::testing::binding_from_llm_provider(Arc::new(CapturingProvider {
+            captured: captured.clone(),
+        })),
+    );
+    let ports = factory.build(test_ctx());
+    runner.tool_catalog = ports.catalog_port();
+    runner.tool_execution = ports.execution();
+    runner.tool_context_binding = ports.binding();
+    runner.skill_materializer = Arc::new(FixedSkillMaterializer);
+    let ctx = test_ctx();
+
+    let result = runner
+        .run_agent(AgentRunRequest {
+            prompt: "p",
+            system: "base-system",
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
+            timeout: std::time::Duration::from_secs(30),
+            role: "coder",
+        })
+        .await;
+
+    assert!(matches!(result, tools::AgentRunTerminal::Failed { .. }));
+    let captured = captured.lock().unwrap();
+    assert!(captured
+        .system
+        .iter()
+        .any(|block| block.contains("SUBAGENT_SKILL_SENTINEL")));
+    assert!(captured.tool_names.iter().any(|name| name == "Read"));
 }
 
 // issue #646：SubAgentRun emit Started 事件测试
@@ -641,7 +802,7 @@ async fn test_started_event_emitted_with_role_and_model() {
 
     let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(8);
 
-    // model_spec = Some("coder") → role=Some("coder"), resolved_spec 取决于配置（默认 None）
+    // Required role resolves to its configured model and is preserved in progress metadata.
     let _ = runner
         .run_agent(AgentRunRequest {
             prompt: "p",
@@ -657,7 +818,7 @@ async fn test_started_event_emitted_with_role_and_model() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            model_spec: Some("coder"),
+            role: "coder",
         })
         .await;
 
@@ -672,7 +833,7 @@ async fn test_started_event_emitted_with_role_and_model() {
 }
 
 #[tokio::test]
-async fn test_started_event_without_role_uses_main_agent_model() {
+async fn started_event_always_reports_required_role_and_configured_model() {
     use tokio::sync::mpsc;
     use tools::{AgentProgressEvent, AgentProgressKind};
 
@@ -684,7 +845,7 @@ async fn test_started_event_without_role_uses_main_agent_model() {
 
     let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(8);
 
-    // model_spec = None → role=None, model=client.model_name()="test-model"
+    // Required role is preserved in progress metadata.
     let _ = runner
         .run_agent(AgentRunRequest {
             prompt: "p",
@@ -700,18 +861,15 @@ async fn test_started_event_without_role_uses_main_agent_model() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            model_spec: None,
+            role: "coder",
         })
         .await;
 
     let ev = rx.recv().await.expect("should receive Started event");
     match ev.kind {
         AgentProgressKind::Started { role, model } => {
-            assert!(role.is_none(), "role should be None when not configured");
-            assert_eq!(
-                model, "test-model",
-                "model should fallback to main agent's model"
-            );
+            assert_eq!(role.as_deref(), Some("coder"));
+            assert_eq!(model, "test-provider/test-model");
         }
         other => panic!("expected Started, got {other:?}"),
     }
@@ -740,7 +898,7 @@ async fn test_started_event_not_emitted_without_progress_tx() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            model_spec: None,
+            role: "coder",
         })
         .await;
 
@@ -770,7 +928,7 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            model_spec: None,
+            role: "coder",
         })
         .await;
 
@@ -803,7 +961,7 @@ async fn test_run_agent_timeout_comes_from_request_and_returns_typed_failure() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_nanos(1),
-            model_spec: None,
+            role: "coder",
         })
         .await;
 
@@ -839,6 +997,20 @@ fn test_tool_call_with_id(
 
 fn test_agents_config() -> Arc<share::config::AgentsConfig> {
     let mut roles = std::collections::HashMap::new();
+    roles.insert(
+        "role-a".to_string(),
+        AgentRoleConfig {
+            model: "role-a/model-a".to_string(),
+            ..Default::default()
+        },
+    );
+    roles.insert(
+        "role-b".to_string(),
+        AgentRoleConfig {
+            model: "role-b/model-b".to_string(),
+            ..Default::default()
+        },
+    );
     roles.insert(
         "coder".to_string(),
         AgentRoleConfig {
@@ -910,6 +1082,10 @@ fn test_runner(error: ProviderError) -> CliAgentRunner {
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
         models_config: test_models_config(),
+        config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config::default(),
+        ),
+        language: "en".to_string(),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
@@ -940,6 +1116,10 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
         models_config: test_models_config(),
+        config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config::default(),
+        ),
+        language: "en".to_string(),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),

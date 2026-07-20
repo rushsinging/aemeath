@@ -27,6 +27,10 @@ pub struct CliAgentRunner {
     pub reasoning: bool,
     /// Model entries config for reasoning lookup and ProviderBuildSpec construction.
     pub models_config: Arc<ModelsConfig>,
+    /// Committed configuration snapshot frozen for sub-run prompt materialization.
+    pub config_snapshot: share::config::domain::snapshot::ConfigSnapshot,
+    /// Language frozen with the configuration snapshot.
+    pub language: String,
     /// Per-request API timeout (seconds) forwarded to ProviderBuildSpec.
     pub api_timeout_secs: u64,
     pub max_tool_concurrency: usize,
@@ -45,42 +49,12 @@ pub struct CliAgentRunner {
 }
 
 impl CliAgentRunner {
-    /// Resolve a model spec to a concrete `"provider/model_id"` string.
-    ///
-    /// The `model_spec` passed in is already resolved by AgentTool:
-    ///   - If the user set `model="deepseek/deepseek-chat"`, that comes through directly.
-    ///   - If the user set `role="coder"`, that comes through as the role name.
-    ///   - If neither was set, it's `None`.
-    ///
-    /// Resolution order:
-    /// 1. If `model_spec` matches a role name in `agents.roles` → use the role's `model` field.
-    /// 2. If `model_spec` contains `/` → treat as `"provider/model_id"` directly.
-    /// 3. If `model_spec` is `None` → use `agents.default_model` if set.
-    fn resolve_model_spec(&self, model_spec: Option<&str>) -> Option<String> {
-        match model_spec {
-            Some(spec) => {
-                if let Some(role) = self.agents_config.roles.get(spec) {
-                    if !role.model.is_empty() {
-                        return Some(role.model.clone());
-                    }
-                }
-                Some(spec.to_string())
-            }
-            None => {
-                if !self.agents_config.default_model.is_empty() {
-                    return Some(self.agents_config.default_model.clone());
-                }
-                None
-            }
-        }
+    /// Resolve the required role to its configuration.
+    fn resolve_role(&self, role: &str) -> Option<&AgentRoleConfig> {
+        self.agents_config.roles.get(role)
     }
 
-    /// Get the resolved role config (if any) for a model spec.
-    fn resolve_role(&self, model_spec: Option<&str>) -> Option<&AgentRoleConfig> {
-        model_spec.and_then(|spec| self.agents_config.roles.get(spec))
-    }
-
-    fn role_max_tokens_override(role: Option<&AgentRoleConfig>) -> Option<u32> {
-        role.and_then(|r| r.max_tokens).filter(|tokens| *tokens > 0)
+    fn role_max_tokens_override(role: &AgentRoleConfig) -> Option<u32> {
+        role.max_tokens.filter(|tokens| *tokens > 0)
     }
 }
