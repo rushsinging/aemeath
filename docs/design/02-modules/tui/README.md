@@ -84,6 +84,7 @@ ViewModel / ViewState 作为 `view_assembler/` 产出的纯数据值类型就近
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1001 复核 capability-first 判据：TUI 作为交付层维持 TEA 技术目录，六 Context 不构成独立业务竖切；`tui.rs` façade 仅发布 `App`，render widget 保持内部实现细节；`app/`、`view_model/`、`view_state/` 的语义收敛继续由 #944/#947 承接 | [#1001](https://github.com/rushsinging/aemeath/issues/1001) |
 | 2026-07-18 | #899 冻结 Reflection 静默后台语义：TUI 不接收主动结果；`/reflect [limit]` 只读展示 Memory history 安全摘要且日志不含正文 | #899 |
 | 2026-07-12 | 初稿：八层 TEA 管线、六 Context 投影、SDK DTO 边界、架构门禁、reducer 纯化目标态 | #795 |
 | 2026-07-12 | 新增 02-model：六 Context 完整字段、投影状态机、Model 纯净性约束 | #796 |
