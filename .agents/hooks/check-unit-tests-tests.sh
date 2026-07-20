@@ -42,6 +42,12 @@ while [ "$#" -gt 0 ]; do
 done
 
 printf '%s\n' "$package" >>"$FAKE_CARGO_LOG"
+while IFS= read -r git_local_env; do
+  if [ -n "$git_local_env" ]; then
+    eval "git_local_value=\${$git_local_env-<unset>}"
+    printf '%s=%s\n' "$git_local_env" "$git_local_value" >>"$FAKE_CARGO_ENV_LOG"
+  fi
+done <<<"$FAKE_GIT_LOCAL_ENV_NAMES"
 
 case "${FAKE_CARGO_MODE}:${package}" in
   timeout:share)
@@ -67,13 +73,20 @@ run_hook() {
     CARGO_TARGET_DIR="$repo/target/hook-tests" \
     FAKE_CARGO_MODE="$mode" \
     FAKE_CARGO_LOG="$log" \
+    FAKE_CARGO_ENV_LOG="$repo/cargo-env.log" \
     FAKE_CARGO_PID_FILE="$pid_file" \
+    FAKE_GIT_LOCAL_ENV_NAMES="$(git rev-parse --local-env-vars)" \
+    GIT_DIR="$repo/caller.git" \
+    GIT_WORK_TREE="$repo/caller-worktree" \
+    GIT_INDEX_FILE="$repo/caller.index" \
+    GIT_OBJECT_DIRECTORY="$repo/caller-objects" \
+    GIT_COMMON_DIR="$repo/caller-common" \
     PATH="$bin_dir:$PATH" \
     "$HOOK" 2>&1
 }
 
 main() {
-  local repo bin_dir log pid_file output status timed_out_pid
+  local repo bin_dir log pid_file output status timed_out_pid expected_env_lines git_local_env_names
   tmp="$(mktemp -d)"
 
   repo="$tmp/repo"
@@ -109,6 +122,14 @@ main() {
     || fail "failure must stop before the next crate: $(cat "$log")"
   [ "$(cat "$log")" = "share" ] \
     || fail "failure-fast should stop on share: $(cat "$log")"
+
+  if grep -Fv '=<unset>' "$repo/cargo-env.log" >/dev/null; then
+    fail "git repository-local environment must not reach cargo: $(cat "$repo/cargo-env.log")"
+  fi
+  git_local_env_names="$(git rev-parse --local-env-vars)"
+  expected_env_lines=$(($(printf '%s\n' "$git_local_env_names" | grep -c .) * 2))
+  [ "$(wc -l <"$repo/cargo-env.log" | tr -d ' ')" -eq "$expected_env_lines" ] \
+    || fail "every git repository-local variable must be checked for both cargo runs"
 
   echo "check-unit-tests hook regression tests passed"
 }
