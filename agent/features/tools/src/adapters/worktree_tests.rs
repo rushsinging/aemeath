@@ -438,10 +438,17 @@ async fn exit_worktree_switch_cross_repo_returns_error_and_snapshot_unchanged() 
 async fn enter_worktree_with_branch_creates_linked_and_consistent_state() {
     let tmp = tempfile::tempdir().unwrap();
     init_main_repo(tmp.path());
+    let main_commit = git_stdout(tmp.path(), &["rev-parse", "main"]);
+    run_git(tmp.path(), &["switch", "-c", "caller/divergent"]);
+    std::fs::write(tmp.path().join("caller-only.txt"), "caller-only\n").unwrap();
+    run_git(tmp.path(), &["add", "caller-only.txt"]);
+    run_git(tmp.path(), &["commit", "-m", "caller-only"]);
+    let caller_commit = git_stdout(tmp.path(), &["rev-parse", "HEAD"]);
+    assert_ne!(caller_commit, main_commit, "caller branch 必须领先 main");
+
     let ctx = build_ctx(tmp.path().to_path_buf());
     let main_canonical = tmp.path().canonicalize().unwrap();
-    let expected_wt = main_canonical.join(".worktrees").join("feature-x");
-    let main_commit = git_stdout(tmp.path(), &["rev-parse", "main"]);
+    let expected_wt = main_canonical.join(".worktrees").join("default-from-main");
 
     // Pre-state：primary、空栈
     let before = crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
@@ -451,7 +458,7 @@ async fn enter_worktree_with_branch_creates_linked_and_consistent_state() {
     assert_eq!(before.workspace_root, main_canonical.display().to_string());
 
     let result = enter_tool(&ctx)
-        .call(serde_json::json!({ "branch": "feature-x" }), &ctx)
+        .call(serde_json::json!({ "branch": "default/from-main" }), &ctx)
         .await;
 
     assert!(!result.is_error, "EnterWorktree 必须成功: {}", result.text);
@@ -470,11 +477,15 @@ async fn enter_worktree_with_branch_creates_linked_and_consistent_state() {
     // data 字段应为期望值
     assert_eq!(data.path_base, expected_wt);
     assert_eq!(data.workspace_root, expected_wt);
-    assert_eq!(data.branch, "feature-x");
+    assert_eq!(data.branch, "default/from-main");
+    let worktree_head = git_stdout(&expected_wt, &["rev-parse", "HEAD"]);
     assert_eq!(
-        git_stdout(&expected_wt, &["rev-parse", "HEAD"]),
-        main_commit,
+        worktree_head, main_commit,
         "base 省略时新 worktree 必须从 main 创建"
+    );
+    assert_ne!(
+        worktree_head, caller_commit,
+        "base 省略时不得继承 divergent caller HEAD"
     );
 
     // snapshot：context_stack len=1、kind=Linked，path 指向 linked worktree
