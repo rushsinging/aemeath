@@ -48,6 +48,7 @@ legacy guard 替换的退出证据 **MUST** 包括：
 | TUI-6 | Conversation 结构化 `chats` 与 timeline 缺重叠事实 invariant；timeline 还包含 system / hook / error / AskUser 等结构化状态无法重建的事实，queued / progress 等重复投影也无关联证明；核心字段公开，resume、Chat / Run 术语及 Config / Workspace / Task 投影仍有越权写或双重真相 | 结构化 Conversation 投影（runs / queued / progress）与 `timeline` 是同一 reducer 事务原子维护的互补投影，只约束重叠稳定 ID、相对顺序、关联与终态；六 Context 核心字段私有，reducer 是唯一 mutation facade 调用方；resume 进入 Completed，六 Context 独立投影 | #944 私有化 / reducer / 互补 invariant；#947 旧字段、调用点与术语退役 |
 | TUI-7 | view_state 反向依赖 render；Input render model 与 ViewModel 重复；`follow_tail_hint` 无消费方；collapse 无输入闭环；QueuedUserMessage 被丢弃；BlockCache 无界；ToolResult display data 未参与 cache version；存在 no-op event / effect、无调用模块、临时全局 `allow(dead_code)`，且视图层门禁不完整 | ViewAssembler → ViewModel → Render 单向依赖；ViewState 只含瞬时交互态；queued / collapse / cache invalidation 均有封闭 Target 契约；缓存有容量上限；无重复模型、死字段、静默 event、no-op 变体或全局 dead-code 豁免；视图门禁全部可执行 | #947 统一退役、补闭环并启用守卫 |
 | TUI-8 | sub-agent progress 缺稳定 agent_id，部分 ToolOutput 被静默忽略 | Main/Sub 事件带 AgentId 并嵌套路由，所有进度变体显式映射 | #612 产品能力；#943 只保证 ACL 不静默丢弃 |
+| TUI-9 | `tui.rs` façade 曾 re-export `InputArea` / `OutputArea` / `StatusBar` 渲染 widget，交付入口暴露 render 实现细节；`app/`、`view_model/`、`view_state/` 仍是语义迁移期物理目录 | façade 只发布 `App` 入口；TUI 保持按 TEA 管线技术目录组织，**NEVER** 按六 Context 建 `capabilities/` 业务竖切；`app/`、`view_model/`、`view_state/` 的最终收敛只随 #944/#947 语义迁移完成 | #1001 已收紧 façade；#944/#947 负责语义收敛，#1022 负责正式 capability-first Guard |
 
 | Issue | Current → Target 责任 | 必须具备的退出证据 |
 |---|---|---|

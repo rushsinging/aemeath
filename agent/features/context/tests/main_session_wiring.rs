@@ -28,7 +28,8 @@ use sdk::RunId;
 use share::message::Message;
 use share::session_types::PersistedWorkspaceContext;
 use task::{
-    BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPersist, TaskPriority, TaskSnapshot, TaskStore,
+    BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPersist, TaskPriority, TaskSnapshot,
+    TaskSnapshotValidationError, TaskStore,
 };
 
 // ─── RAII temp directory ─────────────────────────────────────────────
@@ -452,6 +453,58 @@ async fn cross_project_resume_succeeds() {
         1,
         "memory opener should be called once"
     );
+}
+
+/// Resuming with a captured non-empty task snapshot installs it into the
+/// authoritative TaskAccess view after all participants prepare successfully.
+#[tokio::test]
+async fn task_captured_snapshot_restores_tasks_into_task_access() {
+    let _guard = git_lock().await;
+    let source = build_harness();
+    seed_tasks(&*source.task_access, 2);
+    let captured = source.task_store.collect_snapshot();
+
+    let target = build_harness();
+    let ws = target.workspace_persist.snapshot();
+    let session = session_with_workspace(&ws, SnapshotState::Captured(captured.clone()));
+
+    target
+        .wiring
+        .resume_prepared(session)
+        .await
+        .expect("captured task snapshot should resume");
+
+    assert_eq!(target.task_store.collect_snapshot(), captured);
+    assert_eq!(target.task_access.list().len(), 2);
+}
+
+/// A rejected Task snapshot must leave every already-live participant unchanged.
+#[tokio::test]
+async fn invalid_task_snapshot_keeps_committed_session_memory_and_tasks_unchanged() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    seed_tasks(&*h.task_access, 1);
+    let pre_session_id = h.wiring.committed_session().id.clone();
+    let pre_memory = h.wiring.committed_memory();
+    let before_tasks = h.task_store.collect_snapshot();
+    let invalid = TaskSnapshot::decode(
+        br#"{"schema_version":2,"revision":"1","tasks":[{"id":"1","batch":"1","subject":"t","description":"","active_form":null,"session_id":null,"tags":[],"blocked_by":["1"],"status":"pending","priority":"normal","created_at":1,"updated_at":1,"started_at":null,"completed_at":null}],"next_task_id":"2","next_batch_id":"2","current_batch":"1","batches":[{"id":"1","summary":"b","status":"active","created_at":1,"last_active_turn":0,"silence_turns":0}]}"#,
+    )
+    .expect("fixture must decode");
+    let ws = h.workspace_persist.snapshot();
+    let session = session_with_workspace(&ws, SnapshotState::Captured(invalid));
+
+    let result = h.wiring.resume_prepared(session).await;
+
+    assert!(matches!(
+        result,
+        Err(MainSessionError::TaskRestore(
+            TaskSnapshotValidationError::SelfDependency { .. }
+        ))
+    ));
+    assert_eq!(h.wiring.committed_session().id, pre_session_id);
+    assert!(Arc::ptr_eq(&h.wiring.committed_memory(), &pre_memory));
+    assert_eq!(h.task_store.collect_snapshot(), before_tasks);
 }
 
 /// Resuming with `tasks: Missing` clears stale live tasks via

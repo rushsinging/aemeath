@@ -107,6 +107,22 @@ async fn task_update_uses_typed_commands_for_fields_and_dependency() {
 }
 
 #[tokio::test]
+async fn task_update_rejects_zero_ids_before_ohs() {
+    let (_store, access, _id) = setup();
+    let tool = TaskUpdateTool { access };
+
+    let result = tool
+        .call(
+            serde_json::json!({"task_id": "0", "key": "status", "value": "completed"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(result.text.contains("non-zero decimal task ID"));
+}
+
+#[tokio::test]
 async fn task_update_rejects_non_decimal_ids_before_ohs() {
     let (_store, access, _id) = setup();
     let tool = TaskUpdateTool { access };

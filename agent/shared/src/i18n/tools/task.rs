@@ -104,12 +104,10 @@ pub fn task_update(lang: &str) -> &'static str {
 可用 key：
 - status: 状态（pending / in_progress / completed / deleted）
 - subject / description: 字符串
-- owner: 字符串
 - priority: 优先级（low / medium / high）
 - blocked_by_id: 依赖的单个任务 ID（如 "4"）
 
 状态工作流：pending → in_progress → completed。用 'deleted' 删除。
-
 标记任务为 completed 时，系统会显示哪些下游任务已解除阻塞、可执行。据此决定下一步处理什么。
 
 完成任务后，检查解除阻塞列表或调用 TaskList 查找下一个可用任务。"#
@@ -122,12 +120,10 @@ Parameters: task_id (task ID), key (field name), value (new value, string).
 Valid keys:
 - status: status (pending / in_progress / completed / deleted)
 - subject / description: string
-- owner: string
 - priority: priority (low / medium / high)
 - blocked_by_id: single task ID this task depends on (e.g. "4")
 
 Status workflow: pending → in_progress → completed. Use 'deleted' to remove.
-
 When you mark a task as completed, the system will show which downstream tasks
 are now unblocked and ready to execute. Use this to decide what to work on next.
 
@@ -164,7 +160,13 @@ mod tests {
         assert!(task_get("zh").contains("按 ID 检索任务"));
         assert!(task_list("zh").contains("列出所有任务"));
         assert!(task_stop("zh").contains("停止"));
-        assert!(task_update("zh").contains("更新任务"));
+        for text in [task_update("zh"), task_update("en")] {
+            assert!(text.contains("status:"));
+            assert!(text.contains("subject / description:"));
+            assert!(text.contains("priority:"));
+            assert!(text.contains("- blocked_by_id:"));
+            assert!(!text.contains("owner:"));
+        }
         assert!(task_list_create("zh").contains("创建任务列表"));
         assert!(task_list_complete("zh").contains("完成当前活动任务列表"));
     }

@@ -25,7 +25,11 @@ impl TaskReminderState {
                     ContentBlock::ToolUse { name, .. }
                         if matches!(
                             name.as_str(),
-                            "TaskCreate" | "TaskUpdate" | "TaskListCreate" | "TaskListComplete"
+                            "TaskCreate"
+                                | "TaskUpdate"
+                                | "TaskStop"
+                                | "TaskListCreate"
+                                | "TaskListComplete"
                         )
                 )
             }) {

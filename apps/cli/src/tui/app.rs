@@ -11,9 +11,11 @@ use crate::tui::model::root::TuiModel;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::input::input_area::suggestions::SuggestionViewState;
+use crate::tui::render::input::input_area::InputArea;
 use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
+use crate::tui::render::output_area::OutputArea;
+use crate::tui::render::status::StatusBar;
 use crate::tui::view_state::AppViewState;
-use crate::tui::{InputArea, OutputArea, StatusBar};
 use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},

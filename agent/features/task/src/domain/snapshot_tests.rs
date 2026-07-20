@@ -1,4 +1,7 @@
-use super::{BatchId, TaskId, TaskRevision, TaskSnapshot};
+use super::{
+    Batch, BatchCreateSpec, BatchId, Task, TaskCreateSpec, TaskId, TaskPriority, TaskRevision,
+    TaskSnapshot, TaskStoreState,
+};
 use crate::TaskSnapshotCodecError;
 
 const EMPTY_V2: &[u8] = br#"{
@@ -18,6 +21,75 @@ fn decode(bytes: &[u8]) -> TaskSnapshot {
 fn encoded_text(snapshot: &TaskSnapshot) -> String {
     String::from_utf8(snapshot.encode().expect("snapshot must encode"))
         .expect("snapshot JSON must be UTF-8")
+}
+
+#[test]
+fn snapshot_decode_normalizes_unordered_wire_entities() {
+    let unordered = br#"{
+        "schema_version":2,
+        "revision":"2",
+        "tasks":[
+            {"id":"2","batch":"1","subject":"second","description":"","active_form":null,"session_id":null,"tags":[],"blocked_by":[],"status":"pending","priority":"normal","created_at":2,"updated_at":2,"started_at":null,"completed_at":null},
+            {"id":"1","batch":"1","subject":"first","description":"","active_form":null,"session_id":null,"tags":[],"blocked_by":[],"status":"pending","priority":"normal","created_at":1,"updated_at":1,"started_at":null,"completed_at":null}
+        ],
+        "next_task_id":"3",
+        "next_batch_id":"3",
+        "current_batch":"1",
+        "batches":[
+            {"id":"2","summary":"second","status":"archived","created_at":2,"last_active_turn":0,"silence_turns":0},
+            {"id":"1","summary":"first","status":"active","created_at":1,"last_active_turn":0,"silence_turns":0}
+        ]
+    }"#;
+
+    let snapshot = decode(unordered);
+
+    assert_eq!(
+        snapshot.tasks().iter().map(Task::id).collect::<Vec<_>>(),
+        vec![TaskId::new(1), TaskId::new(2)]
+    );
+    assert_eq!(
+        snapshot.batches().iter().map(Batch::id).collect::<Vec<_>>(),
+        vec![BatchId::new(1), BatchId::new(2)]
+    );
+}
+
+#[test]
+fn snapshot_from_live_state_orders_tasks_and_batches_by_typed_id() {
+    let mut state = TaskStoreState::empty();
+    state
+        .create_batch(BatchCreateSpec::try_new("first".into()).unwrap(), 1)
+        .unwrap();
+    let first = state
+        .create_task(
+            TaskCreateSpec::try_new("first".into(), String::new(), None, TaskPriority::Normal)
+                .unwrap(),
+            2,
+        )
+        .unwrap()
+        .value;
+    state.pause_batch(BatchId::new(1)).unwrap();
+    state
+        .create_batch(BatchCreateSpec::try_new("second".into()).unwrap(), 3)
+        .unwrap();
+    let second = state
+        .create_task(
+            TaskCreateSpec::try_new("second".into(), String::new(), None, TaskPriority::Normal)
+                .unwrap(),
+            4,
+        )
+        .unwrap()
+        .value;
+
+    let snapshot = TaskSnapshot::from_state(&state);
+
+    assert_eq!(
+        snapshot.tasks().iter().map(Task::id).collect::<Vec<_>>(),
+        vec![first.id(), second.id()]
+    );
+    assert_eq!(
+        snapshot.batches().iter().map(Batch::id).collect::<Vec<_>>(),
+        vec![BatchId::new(1), BatchId::new(2)]
+    );
 }
 
 #[test]
