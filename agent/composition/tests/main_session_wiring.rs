@@ -394,6 +394,16 @@ async fn runtime_session_id_matches_wiring_committed_session() {
 
     // Capture the wiring's committed session id before building the client.
     let wiring_session_id = wiring.committed_session().id.clone();
+    let tools = tools::composition::TestCatalogExecutionFactory::empty();
+    let skill_wiring = tools::composition::wire_skills();
+    let tool_result_materializer = Arc::new(runtime::ToolResultMaterializer::new(
+        Arc::new(runtime::AtomicBlobToolResultStore::new(
+            Arc::new(storage::FileSystemBlobAdapter::new(temp.path()).expect("tool result blob")),
+            temp.path().to_path_buf(),
+        )),
+        runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
+    ));
+    let active_run = Arc::new(runtime::ActiveRunRegistry::default());
 
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         workspace,
@@ -403,6 +413,15 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         Arc::new(policy::AllowAllPolicy),
         task_access,
         session_management,
+        runtime::RuntimeToolAssemblyDependencies::new(
+            tools.catalog_port(),
+            tools.execution(),
+            tools.binding(),
+            skill_wiring.catalog(),
+            skill_wiring.materializer(),
+            tool_result_materializer,
+            active_run,
+        ),
     );
 
     let args = ChatBootstrapArgs {

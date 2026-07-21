@@ -1,7 +1,6 @@
 pub mod claude_settings_adapter;
 pub mod concurrency;
 pub mod config_paths;
-pub mod mcp_loader;
 pub mod model_runtime;
 pub mod runtime_support;
 
@@ -10,7 +9,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub use concurrency::resolve_concurrency_limits;
-pub use mcp_loader::{load_mcp_manager, spawn_mcp_connect};
 pub use model_runtime::{resolve_model_runtime_settings, ModelRuntimeSettings};
 pub use runtime_support::{build_agent_runner, build_hook_runner, start_session};
 

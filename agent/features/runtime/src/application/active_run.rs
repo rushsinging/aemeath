@@ -8,7 +8,7 @@ pub(crate) struct ActiveRun {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct ActiveRunRegistry {
+pub struct ActiveRunRegistry {
     active: std::sync::Mutex<std::collections::HashMap<sdk::RunId, ActiveRun>>,
 }
 

@@ -9,6 +9,22 @@
   },
   "entries": [
     {
+      "id": "policy.runtime.tool-assembly.composition-ownership",
+      "guard": "check-runtime-tool-assembly-ownership.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src/application/client"
+      },
+      "classification": "target_capability_policy",
+      "owner": "composition",
+      "reason": "Composition alone assembles Tool Catalog/Execution, Skill ports, Tool Result materializer and ActiveRunRegistry; Runtime bootstrap consumes injected resources",
+      "tracking_issue": 1294,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Composition-only Runtime tool assembly policy",
+      "status": "active"
+    },
+    {
       "id": "policy.config.override-store.composition-ownership",
       "guard": "check-config-store-ownership.sh",
       "module": "config",

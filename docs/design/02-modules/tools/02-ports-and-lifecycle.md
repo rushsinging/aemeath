@@ -157,7 +157,7 @@ trait CancellationSignal: Send + Sync {
 
 ## 5. Catalog Snapshot 与变化通知
 
-ToolCatalogSnapshot 是当前 Scope/Profile 的只读视图。Catalog 来源变化时发布：
+ToolCatalogSnapshot 是当前 Scope/Profile 的只读视图。#1294 后 Tools 私有 backing 的 Catalog/Execution/binding 仅由 Composition 装配，Runtime 只接收 Port；Main/Sub 复用该次装配所得的稳定端口实例。Catalog 来源变化时发布：
 
 ```rust
 struct CatalogChanged {
