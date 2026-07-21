@@ -34,17 +34,17 @@
 - Modify: `agent/features/runtime/tests/bootstrap_dependencies.rs`
 - Modify: `agent/composition/tests/main_session_wiring.rs`
 
-- [ ] **Step 1: 写 Runtime dependency identity 测试**
+- [x] **Step 1: 写 Runtime dependency identity 测试**
 
 在现有 `bootstrap_dependencies_preserve_injected_task_views` fixture 中创建 Tools test harness、Skill materializer、test Tool Result materializer 和 ActiveRunRegistry；调用扩展后的 `RuntimeBootstrapDependencies::new`，断言每个 accessor 返回同一 `Arc` 实例。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cargo test -p runtime --test bootstrap_dependencies injected -- --nocapture`
 
 Expected: 编译失败，原因是 dependencies 尚未接收这些资源。
 
-- [ ] **Step 3: 写 Composition bootstrap 转发场景测试**
+- [x] **Step 3: 写 Composition bootstrap 转发场景测试**
 
 在 `agent/composition/tests/main_session_wiring.rs` 使用真实 Composition bootstrap，断言 Runtime 不需要自行构造 Tool Result backing；场景只验证依赖装配成功，不执行真实 Provider 调用。
 
@@ -57,7 +57,7 @@ Expected: 编译失败，原因是 dependencies 尚未接收这些资源。
 - Modify: `agent/features/runtime/src/lib.rs`
 - Test: Task 1 tests
 
-- [ ] **Step 1: 扩展 `RuntimeBootstrapDependencies`**
+- [x] **Step 1: 扩展 `RuntimeBootstrapDependencies`**
 
 新增并发布以下资源：
 ```rust
@@ -71,11 +71,11 @@ active_run: Arc<ActiveRunRegistry>,
 
 构造器和 clone accessor 逐项接收/返回；不得在 Runtime 公开 Tools private backing、ToolRegistry 或 Storage port。
 
-- [ ] **Step 2: 使 Composition 可构造 Runtime-owned adapters**
+- [x] **Step 2: 使 Composition 可构造 Runtime-owned adapters**
 
 将 `ActiveRunRegistry` 和 `ToolResultMaterializer` 通过 `runtime::assembly`（或等价窄 module）发布给 Composition：只暴露构造与 Runtime 所需 domain-port 形状；不发布内部 map、Tool Result blob key 或 `RuntimeResources`。`AtomicBlobToolResultStore` 的 concrete adapter 留在 Runtime crate，但由 Composition 调用其 constructor。保持 cancellation terminal claim、Tool Result key/threshold/preview/idempotence 语义不变。
 
-- [ ] **Step 3: 修改 `from_args_with_workspace`**
+- [x] **Step 3: 修改 `from_args_with_workspace`**
 
 解构 injected resources，删除：
 ```rust
@@ -88,7 +88,7 @@ ActiveRunRegistry::default()
 
 Runtime 只把 injected materializer/registry 分发给 Main resources 与 Sub runner；Tool Result policy 的 snapshot 解读及 concrete store/materializer 构造一并移至 Composition helper。
 
-- [ ] **Step 4: 运行 Task 1 测试确认通过**
+- [x] **Step 4: 运行 Task 1 测试确认通过**
 
 Run: `cargo test -p runtime --test bootstrap_dependencies -- --nocapture`
 
@@ -100,11 +100,11 @@ Expected: PASS，所有 injected identity 断言成立。
 - Modify: `agent/composition/src/runtime.rs`
 - Modify: `agent/composition/tests/main_session_wiring.rs`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `agent/composition/tests/main_session_wiring.rs` 的现有 production bootstrap fixture 中，先断言真实 Composition bootstrap 成功装配 Tools catalog/execution/binding、一个 Skill wiring、Tool Result materializer 与 active-run；新增 test-only Composition accessor 或受控 assembly result，使测试能用 `Arc::ptr_eq` 证明 Context main factory 与 Runtime dependencies 获得同一 Skill materializer。不得执行真实 Provider 调用。
 
-- [ ] **Step 2: 增加 Composition-private assembly helper**
+- [x] **Step 2: 增加 Composition-private assembly helper**
 
 在 `runtime.rs` 创建 helper：
 ```rust
@@ -118,11 +118,11 @@ fn wire_runtime_tool_assembly(
 
 其内部唯一调用 `tools::composition::wire_builtin_catalog_execution`、`wire_skills`，从 `snapshot.tool_result_policy()` 建立 Runtime-owned policy/value，再构造 Tool Result filesystem blob/store/materializer 和 ActiveRunRegistry。错误保持 `SdkError::Init`。
 
-- [ ] **Step 3: 同一 Skill materializer 分发给 Context 与 Runtime**
+- [x] **Step 3: 同一 Skill materializer 分发给 Context 与 Runtime**
 
 先创建 `skill_wiring`，将 `skill_wiring.materializer()` 传给 `ProductionMainContextFactory::with_skill_supplier`，并将 clone 注入 Runtime dependencies；禁止保留 `wire_skill_materialization()` 的第二次生产调用。
 
-- [ ] **Step 4: 注入 dependencies 并运行场景测试**
+- [x] **Step 4: 注入 dependencies 并运行场景测试**
 
 Run: `cargo test -p composition --test main_session_wiring -- --nocapture`
 
@@ -134,11 +134,11 @@ Expected: PASS；Composition 是唯一 production factory，Runtime 只接收 po
 - Modify: `agent/features/runtime/src/application/startup/runtime_support.rs`
 - Modify: 受影响的 Runtime unit tests 与 runner fixtures
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 为 `build_agent_runner` 添加 identity test：传入 marker Skill materializer，断言 runner 使用该 materializer，不再内部 `wire_skill_materialization()`。
 
-- [ ] **Step 2: 改造 runner 构造签名**
+- [x] **Step 2: 改造 runner 构造签名**
 
 新增：
 ```rust
@@ -147,7 +147,7 @@ skill_materializer: Arc<dyn tools::SkillMaterializationPort>
 
 并直接存入 runner。更新所有生产和测试调用点；测试 fixture 可使用 existing Tools test harness，不得新增全局 fixture。
 
-- [ ] **Step 3: 运行定向 Runtime 测试**
+- [x] **Step 3: 运行定向 Runtime 测试**
 
 Run:
 ```bash
@@ -167,7 +167,7 @@ Expected: PASS；Main/Sub 未再创建第二个 Skill materializer。
 - Modify: design docs listed above
 - Modify: Issue #1294 body/comment
 
-- [ ] **Step 1: 写 Guard 负例**
+- [x] **Step 1: 写 Guard 负例**
 
 Sanity script 临时注入两种违规并断言 exit 2：
 1. `from_args.rs` 新增 `tools::composition::wire_builtin_catalog_execution`；
@@ -175,11 +175,11 @@ Sanity script 临时注入两种违规并断言 exit 2：
 
 恢复后单 guard 必须通过。
 
-- [ ] **Step 2: 实现并注册 Guard**
+- [x] **Step 2: 实现并注册 Guard**
 
 Guard 要求 Runtime production source 零 Tools composition factory、零 Tool Result concrete storage、零 ActiveRunRegistry factory；Composition `runtime.rs` 必须装配并传入全部依赖。禁止新增 allow/exclude/skip。
 
-- [ ] **Step 3: 更新文档与 #1294 差异表**
+- [x] **Step 3: 更新文档与 #1294 差异表**
 
 明确 Composition 是唯一 production assembly root；Runtime 只持 PL/port/materializer/registry。记录 Tool Result key/threshold/preview/idempotence、Tool Scope/Profile、Hook/MCP lifecycle 均未变化。
 

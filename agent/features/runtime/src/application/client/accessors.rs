@@ -6,7 +6,6 @@ use crate::application::chat::ChatEventSinkHandle;
 use crate::ports::legacy::ChatRuntimeContext;
 use sdk::ChatEvent;
 use share::config::models::ResolvedModel;
-use tools::McpConnectionManager;
 
 // ─── 结构体定义 ───
 
@@ -28,7 +27,6 @@ pub struct RuntimeHandle {
     pub session_id: String,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
-    pub _mcp_manager: Arc<McpConnectionManager>,
 
     // ─── 可切换的客户端（switch_model 更新此处） ───
     pub(crate) current_binding: std::sync::RwLock<Arc<crate::ports::ProviderBinding>>,
