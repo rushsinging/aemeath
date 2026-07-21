@@ -192,7 +192,6 @@ where
     pub(crate) context_size: usize,
     pub(crate) workspace: &'a project::WorkspaceViews,
     pub(crate) session_id: &'a str,
-    pub(crate) context_session_id: &'a str,
     pub(crate) read_files: &'a Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub(crate) session_reminders: &'a Arc<std::sync::Mutex<tools::SessionReminders>>,
     pub(crate) agent_runner: &'a Option<Arc<dyn tools::AgentRunner>>,
@@ -268,7 +267,7 @@ where
             })
             .collect::<Vec<_>>();
         ContextRequest {
-            session_id: SessionId::new(self.context_session_id),
+            session_id: SessionId::new(self.session_id),
             request_id: ContextRequestId::new(uuid::Uuid::now_v7().to_string()),
             run_id: self.run_id.clone(),
             step_id: step_id.clone(),

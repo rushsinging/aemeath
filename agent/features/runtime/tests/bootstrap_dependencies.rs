@@ -43,6 +43,49 @@ impl runtime::ports::ProviderFactory for TestProviderFactory {
 
 struct NoopReflectionHistory;
 
+struct NoopSessionManagement;
+
+#[async_trait::async_trait]
+impl context::SessionManagementPort for NoopSessionManagement {
+    async fn load_canonical(
+        &self,
+        id: &str,
+    ) -> Result<context::session::CanonicalSession, context::SessionManagementError> {
+        Err(context::SessionManagementError::NotFound(id.to_string()))
+    }
+
+    async fn list(
+        &self,
+    ) -> Result<Vec<context::SessionListEntry>, context::SessionManagementError> {
+        Ok(Vec::new())
+    }
+
+    async fn export(&self, id: &str) -> Result<Vec<u8>, context::SessionManagementError> {
+        Err(context::SessionManagementError::NotFound(id.to_string()))
+    }
+
+    async fn import(
+        &self,
+        _bytes: &[u8],
+    ) -> Result<context::SessionListEntry, context::SessionManagementError> {
+        Err(context::SessionManagementError::Storage(
+            "test port".to_string(),
+        ))
+    }
+
+    async fn update_metadata(
+        &self,
+        id: &str,
+        _update: context::SessionMetadataUpdate,
+    ) -> Result<context::SessionListEntry, context::SessionManagementError> {
+        Err(context::SessionManagementError::NotFound(id.to_string()))
+    }
+
+    async fn delete(&self, id: &str) -> Result<(), context::SessionManagementError> {
+        Err(context::SessionManagementError::NotFound(id.to_string()))
+    }
+}
+
 #[async_trait::async_trait]
 impl memory::api::ReflectionHistoryQuery for NoopReflectionHistory {
     async fn list(
@@ -83,12 +126,15 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         Arc::new(storage::FileSystemDatasetAdapter::new(temp.path()).unwrap()),
         Arc::new(memory::FileLegacyMemorySourceFactory::new(temp.path())),
     ));
+    let session_management: Arc<dyn context::SessionManagementPort> =
+        Arc::new(NoopSessionManagement);
     let wiring = context::wire_main_session(context::MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task.persist(),
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
+        session_management: session_management.clone(),
         context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
             Arc::new(context::adapters::NoOpCanonicalSessionWriter),
         )),
@@ -106,7 +152,13 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         history.clone(),
         Arc::new(policy::AllowAllPolicy),
         access.clone(),
+        session_management.clone(),
     );
+
+    assert!(Arc::ptr_eq(
+        &dependencies.session_management(),
+        &session_management
+    ));
 
     assert!(Arc::ptr_eq(&dependencies.reflection_history(), &history));
     assert!(Arc::ptr_eq(&dependencies.task_access(), &access));

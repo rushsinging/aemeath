@@ -250,3 +250,32 @@ async fn reflection_marks_existing_outdated_ids_and_rejects_invalid_ids() {
         .unwrap_err();
     assert!(matches!(error, MemoryError::InvalidEntry { .. }));
 }
+
+#[tokio::test]
+async fn reflection_applies_mixed_suggestion_and_outdated_id_as_one_result() {
+    let port = InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 200).unwrap();
+    let existing = entry("existing", "obsolete fact", 100);
+    port.write(existing.clone()).await.unwrap();
+
+    let result = port
+        .apply_reflection(&ReflectionOutput {
+            suggested_memories: vec![suggestion(MemoryLayer::Project, "current fact")],
+            outdated_memories: vec![existing.id.to_string()],
+            ..ReflectionOutput::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(result.attempted, 2);
+    assert_eq!(result.completed, 2);
+    assert_eq!(result.suggestions_added, 1);
+    assert_eq!(result.outdated_marked, 1);
+    assert!(port
+        .list(Some(MemoryLayer::Project))
+        .iter()
+        .any(|entry| entry.content == "current fact"));
+    assert!(port
+        .list(Some(MemoryLayer::Project))
+        .iter()
+        .any(|entry| entry.id == existing.id && entry.outdated));
+}
