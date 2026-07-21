@@ -1,4 +1,4 @@
-use hook::api::HookRunner;
+use hook::HookPort;
 use share::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ pub struct CliAgentRunner {
     /// Agent config for role resolution.
     pub agents_config: Arc<AgentsConfig>,
     /// Hook runner for executing sub-agent hooks.
-    pub hook_runner: HookRunner,
+    pub hook_runner: Arc<dyn HookPort>,
     /// Default reasoning setting for sub-agents (from config / CLI).
     pub reasoning: bool,
     /// Model entries config for reasoning lookup and ProviderBuildSpec construction.

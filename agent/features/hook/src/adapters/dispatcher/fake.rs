@@ -116,6 +116,8 @@ impl Executor for Scripted {
         &self,
         command: &HookCommand,
         stdin: &serde_json::Value,
+        _cwd: &std::path::Path,
+        _env: &std::collections::HashMap<String, String>,
         _timeout: Duration,
         _cancellation: &CancellationToken,
     ) -> Result<RawExecution, ExecutionFault> {

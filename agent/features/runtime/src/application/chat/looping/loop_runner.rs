@@ -5,7 +5,6 @@ use std::time::Instant;
 use sdk::ids::{ChatId, ChatTurnId};
 use tokio_util::sync::CancellationToken;
 
-use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::idle_lifecycle::{
     execute_set_thinking, idle_until_resume_or_shutdown, IdleResult,
 };
@@ -88,7 +87,6 @@ where
                 crate::application::reflection::ReflectionTaskAdapter::production(
                     std::time::Duration::from_secs(120),
                 );
-            let _hook_ui = HookUi::new(sink.clone());
             let mut cwd = workspace.read().current_workspace_root();
             let mut last_total_tokens = None;
             let mut turn_count = 0;

@@ -1,42 +1,40 @@
 use crate::application::agent::runner::AgentRunOutcome;
-use crate::application::chat::looping::hook_ui::HookUi;
+use crate::application::chat::looping::hook_ui::dispatch_hook;
 use crate::application::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
-use hook::api::{is_blocking, HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
-use share::config::hooks::HookEvent;
-use std::path::{Path, PathBuf};
+use crate::application::hook_adapter::{RuntimeHookDirective, RuntimeHookDispatch};
+use hook::{HookInvocation, HookPort, StopInput};
+use std::path::PathBuf;
+use std::sync::Arc;
 use task::TaskAccess;
+use tokio_util::sync::CancellationToken;
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_stop_hook_before_finish<S>(
     outcome: &AgentRunOutcome,
-    _sink: &S,
-    hook_ui: &HookUi<S>,
-    hook_runner: &HookRunner,
+    sink: &S,
+    hook_port: &Arc<dyn HookPort>,
     session_id: &str,
     language: &str,
-    workspace_root: &Path,
-    cancel: &tokio_util::sync::CancellationToken,
+    workspace_root: &std::path::Path,
+    cancel: &CancellationToken,
 ) -> Option<String>
 where
     S: ChatEventSink,
 {
-    let stop_results = hook_ui
-        .run_json_with_cancel(
-            hook_runner,
-            HookEvent::Stop,
-            None,
-            HookData::Stop(StopHookData {
-                turns: outcome.turns,
-            }),
-            workspace_root,
-            cancel,
-        )
-        .await;
-    if let Some(feedback) = stop_hook_feedback(&stop_results, session_id, language).await {
-        // hook_ui.run_json 已在内部发送 HookEvent（含 Blocked 状态），
-        // 此处不再重复发送，避免 TUI 显示两次 "Hook blocked: Stop"。
+    let dispatch = dispatch_hook(
+        hook_port,
+        sink,
+        HookInvocation::Stop(StopInput {
+            turns: outcome.turns,
+        }),
+        workspace_root,
+        cancel,
+    )
+    .await;
+    if matches!(dispatch.directive, RuntimeHookDirective::Block { .. }) {
+        let feedback = stop_hook_feedback(&dispatch, session_id, language).await;
         return Some(feedback);
     }
     None
@@ -73,87 +71,57 @@ pub(crate) async fn finish_completed_loop<S>(
 }
 
 async fn stop_hook_feedback(
-    hook_results: &[(
-        share::config::hooks::HookEntry,
-        HookResult,
-        Option<HookJsonOutput>,
-    )],
+    dispatch: &RuntimeHookDispatch,
     session_id: &str,
     language: &str,
-) -> Option<String> {
+) -> String {
     log::debug!(target: crate::LOG_TARGET,
-        "[stop_hook_debug] session={} evaluating {} hook result(s): {:?}",
+        "[stop_hook_debug] session={} stop hook directive={:?} executions={} messages={}",
         session_id,
-        hook_results.len(),
-        hook_results.iter().map(|(entry, result, _)| {
-            format!("cmd={} blocked={} error={:?}", entry.command, result.blocked, result.error)
-        }).collect::<Vec<_>>()
+        dispatch.directive,
+        dispatch.executions.len(),
+        dispatch.messages.len(),
     );
-    let (entry, result, json) = stop_hook_blocking_result(hook_results)?;
-    log::debug!(target: crate::LOG_TARGET,
-        "[stop_hook_debug] session={} BLOCKING hook cmd={} error={:?} output_len={}",
-        session_id, entry.command, result.error, result.output.len()
-    );
-    let details = hook_feedback_details(result, json, session_id, &entry.command, language).await;
+
+    // Extract stdout, stderr from the last execution
+    let last = dispatch.executions.last();
+    let stdout = last.map(|e| e.stdout.as_str()).unwrap_or("");
+    let stderr = last.map(|e| e.stderr.as_str()).unwrap_or("");
+
+    let source = dispatch
+        .messages
+        .first()
+        .map(|m| m.source.as_str())
+        .unwrap_or("stop hook");
+
+    let details = stop_hook_feedback_details(
+        stdout,
+        stderr,
+        &dispatch.messages,
+        session_id,
+        source,
+        language,
+    )
+    .await;
+
     let template = match language {
         "zh" => "Stop hook 阻止了停止。你现在还不能结束本轮处理。\n你 MUST 先满足下面 Stop hook 的要求，然后才能再次尝试停止。\n命令：{cmd}\n{details}",
         _ => "Stop hook prevented stopping. You cannot finish this turn yet.\nYou MUST first satisfy the Stop hook requirement below, then attempt to stop again.\nCommand: {cmd}\n{details}",
     };
-    Some(
-        template
-            .replace("{cmd}", &entry.command)
-            .replace("{details}", &details),
-    )
+    template
+        .replace("{cmd}", source)
+        .replace("{details}", &details)
 }
 
-fn stop_hook_blocking_result(
-    hook_results: &[(
-        share::config::hooks::HookEntry,
-        HookResult,
-        Option<HookJsonOutput>,
-    )],
-) -> Option<(
-    &share::config::hooks::HookEntry,
-    &HookResult,
-    &Option<HookJsonOutput>,
-)> {
-    hook_results
-        .iter()
-        .filter(|(_, result, json)| is_blocking(result, json))
-        .find(|(_, result, json)| has_hook_feedback(result, json))
-        .or_else(|| {
-            hook_results
-                .iter()
-                .find(|(_, result, json)| is_blocking(result, json))
-        })
-        .map(|(entry, result, json)| (entry, result, json))
-}
-
-fn has_hook_feedback(result: &HookResult, json: &Option<HookJsonOutput>) -> bool {
-    hook_json_reason(json).is_some()
-        || non_empty_text(result.error.as_deref().unwrap_or_default()).is_some()
-        || non_empty_text(&result.output).is_some()
-}
-
-fn hook_json_reason(json: &Option<HookJsonOutput>) -> Option<String> {
-    json.as_ref().and_then(|j| {
-        j.reason
-            .clone()
-            .or_else(|| j.system_message.clone())
-            .or_else(|| j.additional_context.clone())
-            .or_else(|| j.stop_reason.clone())
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn hook_feedback_details(
-    result: &HookResult,
-    json: &Option<HookJsonOutput>,
+async fn stop_hook_feedback_details(
+    stdout: &str,
+    stderr: &str,
+    messages: &[crate::application::hook_adapter::RuntimeHookDisplayMessage],
     session_id: &str,
     command: &str,
     language: &str,
 ) -> String {
-    let (labels, lang) = match language {
+    let (labels, _lang) = match language {
         "zh" => (
             HookFeedbackLabels {
                 json_feedback: "JSON 反馈：\n{}",
@@ -177,16 +145,31 @@ async fn hook_feedback_details(
             "en",
         ),
     };
-    let _ = lang;
-    let json_reason = hook_json_reason(json);
+    let _ = _lang;
+
+    // Collect system messages from display messages
+    let sys_msgs: Vec<&str> = messages
+        .iter()
+        .filter(|m| {
+            matches!(
+                m.kind,
+                crate::application::hook_adapter::RuntimeHookDisplayMessageKind::SystemMessage
+            )
+        })
+        .map(|m| m.text.as_str())
+        .collect();
+
     let mut sections = Vec::new();
-    if let Some(reason) = non_empty_text(json_reason.as_deref().unwrap_or_default()) {
-        sections.push(str::replace(labels.json_feedback, "{}", &reason));
+
+    // System messages carry reason/feedback
+    for msg in &sys_msgs {
+        sections.push(str::replace(labels.json_feedback, "{}", msg));
     }
-    if let Some(error) = non_empty_text(result.error.as_deref().unwrap_or_default()) {
+
+    if let Some(error) = non_empty_text(stderr) {
         sections.push(str::replace(labels.stderr_error, "{}", &error));
     }
-    if let Some(output) = non_empty_text(&result.output) {
+    if let Some(output) = non_empty_text(stdout) {
         sections.push(str::replace(labels.stdout, "{}", &output));
     }
     if sections.is_empty() {

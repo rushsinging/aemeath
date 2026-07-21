@@ -1,4 +1,4 @@
-use crate::tui::adapter::hook_notice::hook_event_notice;
+use crate::tui::adapter::hook_notice::{hook_event_notice, hook_message_notice};
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::*;
@@ -320,6 +320,17 @@ where
             }
             let mut mapping = AgentEventMapping::default();
             if let Some(notice) = hook_event_notice(event) {
+                mapping
+                    .conversation
+                    .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
+                        content: notice,
+                    }));
+            }
+            mapping
+        }
+        UiEvent::HookMessage(message) => {
+            let mut mapping = AgentEventMapping::default();
+            if let Some(notice) = hook_message_notice(message) {
                 mapping
                     .conversation
                     .push(ConversationIntent::AppendHookNotice(AppendHookNotice {

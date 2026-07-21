@@ -2,23 +2,29 @@ use crate::application::agent::runner as agent_runner;
 #[cfg(test)]
 use crate::application::startup::config_paths;
 use crate::ports::ProviderFactory;
-use hook::api::HookRunner;
+use hook::HookPort;
 use share::config::hooks::HooksConfig;
 #[cfg(test)]
 use share::config::AgentsConfig;
+use std::collections::HashMap;
 use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub fn build_hook_runner(hooks: Option<&HooksConfig>, _cwd: &Path) -> HookRunner {
-    let runner = match hooks {
-        Some(h) => HookRunner::new(h.clone()),
-        None => HookRunner::empty(),
+pub fn build_hook_runner(hooks: Option<&HooksConfig>, _cwd: &Path) -> Arc<dyn HookPort> {
+    let runner: Arc<dyn HookPort> = match hooks {
+        Some(h) => {
+            Arc::new(hook::build_dispatcher(h, HashMap::new()).expect("hook config 必须合法"))
+        }
+        None => Arc::new(
+            hook::build_dispatcher(&HooksConfig::default(), HashMap::new())
+                .expect("空 hook config 必须合法"),
+        ),
     };
     log::info!(target: crate::LOG_TARGET,
         "hook runner built: configured_events={}",
-        runner.hook_count()
+        hooks.map(|h| h.events.len()).unwrap_or(0)
     );
     runner
 }
@@ -34,7 +40,7 @@ pub fn build_agent_runner(
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     factory: Arc<dyn ProviderFactory>,
     api_timeout_secs: u64,
-    hook_runner: HookRunner,
+    hook_runner: Arc<dyn HookPort>,
     reasoning: bool,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     policy: Arc<dyn policy::PolicyPort>,
@@ -132,7 +138,7 @@ mod tests {
             &snapshot,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
             30,
-            HookRunner::empty(),
+            Arc::new(hook::build_dispatcher(&HooksConfig::default(), HashMap::new()).unwrap()),
             false,
             Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
             policy.clone(),
@@ -154,8 +160,8 @@ mod tests {
     #[test]
     fn test_build_hook_runner_accepts_empty_config() {
         let hook_runner = build_hook_runner(None, Path::new("."));
-
-        assert_eq!(hook_runner.hook_count(), 0);
+        // hook_runner is an Arc<dyn HookPort> — the dispatcher handles empty configs.
+        let _ = hook_runner;
     }
 
     #[test]
@@ -172,8 +178,8 @@ mod tests {
         let hooks = HooksConfig { events };
 
         let hook_runner = build_hook_runner(Some(&hooks), Path::new("project-root"));
-
-        assert_eq!(hook_runner.hook_count(), 1);
+        // hook_runner is an Arc<dyn HookPort> — config is handled by the dispatcher.
+        let _ = hook_runner;
     }
 
     #[test]

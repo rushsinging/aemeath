@@ -123,7 +123,8 @@ pub(super) struct SubAgentRun<'a> {
     pub binding: Arc<ProviderBinding>,
     pub max_tokens: u32,
     pub level: ReasoningLevel,
-    pub hook_runner: hook::api::HookRunner,
+    pub hook_port: Arc<dyn hook::HookPort>,
+    pub workspace_root: std::path::PathBuf,
     pub tool_schemas: Vec<serde_json::Value>,
     pub config_snapshot: share::config::domain::snapshot::ConfigSnapshot,
     pub language: String,
@@ -259,18 +260,17 @@ impl<'a> SubAgentRun<'a> {
             role: Some(self.role_name_for_log.clone()),
             model: self.model_name_for_log.clone(),
         };
-        let workspace_root = self.agent.ctx.workspace_read().current_workspace_root();
         let output = terminal.output();
         finalize_sub_agent(
             &outcome,
-            &self.hook_runner,
+            &self.hook_port,
+            &self.workspace_root,
             &self.session_id,
             self.prompt,
             &self.system,
             self.resolved_spec.as_deref(),
             &output,
             self.progress_sink.as_ref(),
-            &workspace_root,
         )
         .await;
 

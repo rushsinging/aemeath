@@ -1,238 +1,88 @@
+//! Hook dispatch helper — typed Runtime projection.
+
 use crate::application::chat::looping::{
-    ChatEventSink, RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookExecutionResult,
-    RuntimeStreamEvent,
+    ChatEventSink, RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookMessage,
+    RuntimeHookMessageKind, RuntimeStreamEvent,
 };
-use hook::api::{is_blocking, HookData, HookJsonOutput, HookResult, HookRunner};
-use share::config::hooks::{HookEntry, HookEvent};
+use crate::application::hook_adapter::{
+    project_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookDisplayMessageKind,
+};
+use hook::{HookDispatchContext, HookInvocation, HookPort};
 use std::path::Path;
+use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
-#[derive(Clone)]
-pub(crate) struct HookUi<S>
-where
-    S: ChatEventSink,
-{
-    sink: S,
-}
-
-impl<S> HookUi<S>
-where
-    S: ChatEventSink,
-{
-    pub(crate) fn new(sink: S) -> Self {
-        Self { sink }
-    }
-
-    pub(crate) async fn run_json(
-        &self,
-        runner: &HookRunner,
-        event: HookEvent,
-        tool_name: Option<&str>,
-        data: HookData,
-        workspace_root: &Path,
-    ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
-        self.run_json_with_cancel(
-            runner,
-            event,
-            tool_name,
-            data,
-            workspace_root,
-            &tokio_util::sync::CancellationToken::new(),
+/// 执行一次 hook dispatch 并投影为 Runtime 可消费的纯值。
+///
+/// 当前工作区根必须按 invocation 显式传入，确保 worktree 切换不会复用旧 cwd。
+pub(crate) async fn dispatch_hook<S: ChatEventSink>(
+    hook_port: &Arc<dyn HookPort>,
+    sink: &S,
+    invocation: HookInvocation,
+    workspace_root: &Path,
+    cancel: &CancellationToken,
+) -> RuntimeHookDispatch {
+    let point = invocation.point();
+    let _ = sink
+        .send_event(RuntimeStreamEvent::HookEvent(RuntimeHookEvent {
+            hook_name: format!("{point:?}"),
+            status: RuntimeHookEventStatus::Running,
+            matcher: None,
+            command: None,
+            result: None,
+        }))
+        .await;
+    let outcome = hook_port
+        .dispatch_at(invocation, HookDispatchContext::new(workspace_root), cancel)
+        .await;
+    let dispatch = project_hook_outcome(&outcome);
+    let status = if matches!(dispatch.directive, RuntimeHookDirective::Block { .. }) {
+        RuntimeHookEventStatus::Blocked
+    } else if dispatch.executions.iter().any(|execution| {
+        matches!(
+            execution.status,
+            crate::application::hook_adapter::RuntimeHookExecutionStatus::ExecutionFailed { .. }
         )
-        .await
-    }
-
-    pub(crate) async fn run_json_with_cancel(
-        &self,
-        runner: &HookRunner,
-        event: HookEvent,
-        tool_name: Option<&str>,
-        data: HookData,
-        workspace_root: &Path,
-        cancel: &tokio_util::sync::CancellationToken,
-    ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
-        let hooks = runner.matching_hooks(event, tool_name);
-        log::debug!(target: crate::LOG_TARGET,
-            "hook ui dispatch: event={} tool_name={:?} matched={}",
-            hook_event_name(event),
-            tool_name,
-            hooks.len()
-        );
-        if hooks.is_empty() {
-            return Vec::new();
-        }
-
-        let input = hook::api::HookInput { event, data };
-        let event_name = hook_event_name(event);
-        let mut results = Vec::with_capacity(hooks.len());
-
-        for hook in hooks {
-            log::debug!(target: crate::LOG_TARGET,
-                "hook timing start: event={} tool_name={:?} matcher={:?} command={} workspace_root={}",
-                event_name,
-                tool_name,
-                non_empty_text(&hook.matcher),
-                hook.command,
-                workspace_root.display(),
-            );
-            let started_at = std::time::Instant::now();
-            let _ = self
-                .sink
-                .send_event(RuntimeStreamEvent::HookEvent(runtime_hook_event_running(
-                    event_name, hook,
-                )))
-                .await;
-
-            let result = runner
-                .execute_hook_with_cancel(hook, &input, workspace_root, cancel)
-                .await;
-            let elapsed_ms = started_at.elapsed().as_millis();
-            let json_output = result.parse_json_output();
-            let status = runtime_hook_event_status(&result, &json_output);
-            let should_break =
-                result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
-            log::debug!(target: crate::LOG_TARGET,
-                "hook timing finish: event={} tool_name={:?} matcher={:?} status={:?} blocked={} exit_code={:?} elapsed_ms={} should_break={}",
-                event_name,
-                tool_name,
-                non_empty_text(&hook.matcher),
-                status,
-                result.blocked,
-                result.exit_code,
-                elapsed_ms,
-                should_break,
-            );
-
-            let _ = self
-                .sink
-                .send_event(RuntimeStreamEvent::HookEvent(runtime_hook_event_finished(
-                    event_name,
-                    hook,
-                    &result,
-                    &json_output,
-                )))
-                .await;
-
-            results.push((hook.clone(), result, json_output));
-            if should_break {
-                break;
-            }
-        }
-
-        results
-    }
-
-    pub(crate) async fn run_plain(
-        &self,
-        runner: &HookRunner,
-        event: HookEvent,
-        tool_name: Option<&str>,
-        data: HookData,
-        workspace_root: &Path,
-    ) -> Vec<HookResult> {
-        self.run_json(runner, event, tool_name, data, workspace_root)
-            .await
-            .into_iter()
-            .map(|(_, result, _)| result)
-            .collect()
-    }
-}
-
-pub(crate) fn runtime_hook_event_running(event_name: &str, hook: &HookEntry) -> RuntimeHookEvent {
-    RuntimeHookEvent {
-        hook_name: event_name.to_string(),
-        status: RuntimeHookEventStatus::Running,
-        matcher: non_empty_text(&hook.matcher),
-        command: Some(hook.command.clone()),
-        result: None,
-    }
-}
-
-pub(crate) fn runtime_hook_event_finished(
-    event_name: &str,
-    hook: &HookEntry,
-    result: &HookResult,
-    json_output: &Option<HookJsonOutput>,
-) -> RuntimeHookEvent {
-    RuntimeHookEvent {
-        hook_name: event_name.to_string(),
-        status: runtime_hook_event_status(result, json_output),
-        matcher: non_empty_text(&hook.matcher),
-        command: Some(hook.command.clone()),
-        result: Some(RuntimeHookExecutionResult {
-            exit_code: result.exit_code,
-            stdout: result.output.clone(),
-            stderr: result.error.clone().unwrap_or_default(),
-            decision: json_output.as_ref().and_then(|json| json.decision.clone()),
-            reason: hook_result_reason(result, json_output),
-            additional_context: json_output
-                .as_ref()
-                .and_then(|json| json.additional_context.clone()),
-        }),
-    }
-}
-
-fn runtime_hook_event_status(
-    result: &HookResult,
-    json_output: &Option<HookJsonOutput>,
-) -> RuntimeHookEventStatus {
-    if result.error.is_some() && !result.blocked {
-        return RuntimeHookEventStatus::Failed;
-    }
-    if is_blocking(result, json_output) {
-        return RuntimeHookEventStatus::Blocked;
-    }
-    RuntimeHookEventStatus::Succeeded
-}
-
-fn hook_result_reason(result: &HookResult, json_output: &Option<HookJsonOutput>) -> Option<String> {
-    json_output
-        .as_ref()
-        .and_then(|json| {
-            json.reason
-                .clone()
-                .or_else(|| json.system_message.clone())
-                .or_else(|| json.stop_reason.clone())
-        })
-        .or_else(|| result.error.clone())
-        .and_then(|text| non_empty_text(&text))
-}
-
-fn non_empty_text(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        None
+    }) {
+        RuntimeHookEventStatus::Failed
     } else {
-        Some(trimmed.to_string())
+        RuntimeHookEventStatus::Succeeded
+    };
+    let _ = sink
+        .send_event(RuntimeStreamEvent::HookEvent(RuntimeHookEvent {
+            hook_name: format!("{point:?}"),
+            status,
+            matcher: dispatch
+                .messages
+                .first()
+                .map(|message| message.source.clone()),
+            command: None,
+            result: None,
+        }))
+        .await;
+
+    for message in &dispatch.messages {
+        let kind = match message.kind {
+            RuntimeHookDisplayMessageKind::AdditionalContext => {
+                RuntimeHookMessageKind::AdditionalContext
+            }
+            RuntimeHookDisplayMessageKind::SystemMessage => RuntimeHookMessageKind::SystemMessage,
+        };
+        let _ = sink
+            .send_event(RuntimeStreamEvent::HookMessage(RuntimeHookMessage {
+                point: message.point,
+                source: message.source.clone(),
+                execution_ordinal: message.execution_ordinal,
+                attempt: message.attempt,
+                kind,
+                text: message.text.clone(),
+            }))
+            .await;
     }
+
+    dispatch
 }
 
-pub(crate) fn hook_event_name(event: HookEvent) -> &'static str {
-    match event {
-        HookEvent::PreToolUse => "PreToolUse",
-        HookEvent::PostToolUse => "PostToolUse",
-        HookEvent::PostToolUseFailure => "PostToolUseFailure",
-        HookEvent::UserPromptSubmit => "UserPromptSubmit",
-        HookEvent::Stop => "Stop",
-        HookEvent::StopFailure => "StopFailure",
-        HookEvent::SessionStart => "SessionStart",
-        HookEvent::SessionEnd => "SessionEnd",
-        HookEvent::PreCompact => "PreCompact",
-        HookEvent::PostCompact => "PostCompact",
-        HookEvent::PostToolBatch => "PostToolBatch",
-        HookEvent::SubagentStart => "SubagentStart",
-        HookEvent::SubagentStop => "SubagentStop",
-        HookEvent::TaskCreated => "TaskCreated",
-        HookEvent::TaskCompleted => "TaskCompleted",
-        HookEvent::PermissionRequest => "PermissionRequest",
-        HookEvent::PermissionDenied => "PermissionDenied",
-        HookEvent::Notification => "Notification",
-        HookEvent::InstructionsLoaded => "InstructionsLoaded",
-        HookEvent::ConfigChange => "ConfigChange",
-        HookEvent::Elicitation => "Elicitation",
-        HookEvent::ElicitationResult => "ElicitationResult",
-        HookEvent::UserPromptExpansion => "UserPromptExpansion",
-        HookEvent::CwdChanged => "CwdChanged",
-        HookEvent::FileChanged => "FileChanged",
-        HookEvent::TeammateIdle => "TeammateIdle",
-    }
+pub(crate) fn dispatch_is_blocking(dispatch: &RuntimeHookDispatch) -> bool {
+    matches!(dispatch.directive, RuntimeHookDirective::Block { .. })
 }

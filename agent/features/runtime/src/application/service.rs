@@ -45,7 +45,7 @@ mod tests {
     use super::*;
     use crate::application::chat::request::ChatLaunchOptions;
     use async_trait::async_trait;
-    use hook::api::HookRunner;
+    use hook::HookPort;
     use share::config::MemoryConfig;
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -189,7 +189,16 @@ mod tests {
                     crate::application::testing::test_tool_result_materializer(),
                 task_access: task::wire_task().access(),
                 skills_map: HashMap::new(),
-                hook_runner: HookRunner::empty(),
+                hook_runner: {
+                    let port: Arc<dyn HookPort> = Arc::new(
+                        hook::build_dispatcher(
+                            &share::config::hooks::HooksConfig::default(),
+                            HashMap::new(),
+                        )
+                        .unwrap(),
+                    );
+                    port
+                },
                 memory_config: MemoryConfig::default(),
                 memory: std::sync::Arc::new(memory::NoOpMemory),
                 reflection_history: Arc::new(NoopReflectionHistory),

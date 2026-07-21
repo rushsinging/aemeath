@@ -196,7 +196,7 @@ fn test_list_sessions() -> Arc<
 use crate::application::testing::text_completion_stream;
 
 use async_trait::async_trait;
-use hook::api::HookRunner;
+use hook::HookPort;
 use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
 use provider::{InvocationStream, ProviderError, ProviderErrorKind};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
@@ -591,7 +591,7 @@ impl LlmProvider for SequenceProvider {
     }
 }
 
-fn test_hook_runner() -> HookRunner {
+fn test_hook_port() -> Arc<dyn HookPort> {
     let mut events = HashMap::new();
     events.insert(
         HookEvent::Stop,
@@ -601,12 +601,10 @@ fn test_hook_runner() -> HookRunner {
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events })
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
 }
 
-fn blocking_then_success_hook_runner(flag_path: &std::path::Path) -> HookRunner {
-    // 用 nanos 时间戳生成唯一 flag 路径，避免与并行 cargo test 共享
-    // target/stop-hook-once.flag 时的 race condition。
+fn blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookPort> {
     let flag_path_str = flag_path.to_string_lossy().to_string();
     let mut events = HashMap::new();
     events.insert(
@@ -623,10 +621,10 @@ fn blocking_then_success_hook_runner(flag_path: &std::path::Path) -> HookRunner 
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events })
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
 }
 
-fn delayed_blocking_then_success_hook_runner(flag_path: &std::path::Path) -> HookRunner {
+fn delayed_blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookPort> {
     let flag_path_str = flag_path.to_string_lossy().to_string();
     let mut events = HashMap::new();
     events.insert(
@@ -643,7 +641,7 @@ fn delayed_blocking_then_success_hook_runner(flag_path: &std::path::Path) -> Hoo
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events })
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
 }
 
 #[tokio::test]
@@ -715,7 +713,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: blocking_then_success_hook_runner(&flag_path),
+        hook_runner: blocking_then_success_hook_port(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -868,7 +866,7 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: delayed_blocking_then_success_hook_runner(&flag_path),
+        hook_runner: delayed_blocking_then_success_hook_port(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -999,7 +997,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: blocking_then_success_hook_runner(&flag_path),
+        hook_runner: blocking_then_success_hook_port(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1187,7 +1185,9 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: HookRunner::new(HooksConfig { events }),
+        hook_runner: Arc::new(
+            hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap(),
+        ),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1281,7 +1281,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1324,7 +1324,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
 
 /// Hook 首次输出 `{"continue": false}` JSON (exit 0)，之后放行。
 /// 用于验证 `continue:false` 被识别为阻断（#372 缺陷 1）。
-fn continue_false_then_allow_hook_runner(flag_path: &std::path::Path) -> HookRunner {
+fn continue_false_then_allow_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookPort> {
     let flag_path_str = flag_path.to_string_lossy().to_string();
     let mut events = HashMap::new();
     events.insert(
@@ -1343,11 +1343,11 @@ fn continue_false_then_allow_hook_runner(flag_path: &std::path::Path) -> HookRun
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events })
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
 }
 
 /// Hook 前 `n` 次阻断 (exit 2)，之后放行。用计数器文件跟踪调用次数。
-fn block_n_times_hook_runner(counter_path: &std::path::Path, n: usize) -> HookRunner {
+fn block_n_times_hook_port(counter_path: &std::path::Path, n: usize) -> Arc<dyn HookPort> {
     let counter_path_str = counter_path.to_string_lossy().to_string();
     let mut events = HashMap::new();
     events.insert(
@@ -1367,11 +1367,11 @@ fn block_n_times_hook_runner(counter_path: &std::path::Path, n: usize) -> HookRu
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events })
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
 }
 
 /// Hook 每次都阻断 (exit 2)。用于验证连续阻断超上限强制停止（#372 缺陷 3）。
-fn always_blocking_hook_runner() -> HookRunner {
+fn always_blocking_hook_port() -> Arc<dyn HookPort> {
     let mut events = HashMap::new();
     events.insert(
         HookEvent::Stop,
@@ -1381,7 +1381,7 @@ fn always_blocking_hook_runner() -> HookRunner {
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events })
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
 }
 
 #[tokio::test]
@@ -1451,7 +1451,7 @@ async fn test_continue_false_json_treated_as_block() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: continue_false_then_allow_hook_runner(&flag_path),
+        hook_runner: continue_false_then_allow_hook_port(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1574,7 +1574,7 @@ async fn test_stall_triggers_stop_hook_check() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: block_n_times_hook_runner(&counter_path, 3),
+        hook_runner: block_n_times_hook_port(&counter_path, 3),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1736,7 +1736,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1900,7 +1900,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2096,7 +2096,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2217,7 +2217,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2318,7 +2318,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2398,7 +2398,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: always_blocking_hook_runner(),
+        hook_runner: always_blocking_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2582,7 +2582,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2795,7 +2795,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2979,7 +2979,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -3102,7 +3102,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -3198,7 +3198,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -3274,7 +3274,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -3420,7 +3420,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),

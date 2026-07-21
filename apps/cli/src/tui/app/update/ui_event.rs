@@ -56,6 +56,9 @@ impl App {
                 // 此处仅更新 spinner 状态（spinner 归 RuntimeModel 管理）。
                 self.spinner_phase(hook_spinner_phase(&event));
             }
+            UiEvent::HookMessage(_) => {
+                // Hook message 已由 map_agent_event -> AppendHookNotice 注入 ConversationModel。
+            }
             UiEvent::Error(msg) => {
                 // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，
                 crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::Error → spinner_stop");
