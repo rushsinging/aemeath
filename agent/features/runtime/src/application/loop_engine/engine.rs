@@ -86,6 +86,12 @@ pub enum LoopEngineError {
 pub trait RunLoopPort: Send {
     async fn drain_input(&mut self) -> Result<Vec<LoopInput>, LoopEngineError>;
     fn freeze_step(&mut self, _step_id: &sdk::RunStepId, _inputs: &[LoopInput]) {}
+    async fn accept_step_input(
+        &mut self,
+        _step_id: &sdk::RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        Ok(())
+    }
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError>;
     async fn compact(&mut self, cancel: &CancellationToken) -> Result<(), LoopEngineError>;
     async fn invoke_model(
@@ -194,6 +200,10 @@ where
 
         let step_id = sdk::RunStepId::new_v7();
         port.freeze_step(&step_id, &inputs);
+        if let Err(error) = port.accept_step_input(&step_id).await {
+            fail_run(run, port, error.to_string()).await?;
+            return Ok(LoopDirective::Terminal);
+        }
         let needs_compaction = match await_interruptible(run, cancel, port.needs_compaction()).await
         {
             Interrupt::Completed(result) => result?,

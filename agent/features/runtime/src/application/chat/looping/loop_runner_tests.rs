@@ -2,7 +2,9 @@
 //! runner file focused on the production code path.
 #![allow(clippy::type_complexity)]
 
-use super::loop_runner::main_run_port::{fixture_bind_pending, fixture_finalize_messages};
+use super::loop_runner::main_run_port::{
+    fixture_accepted_user_messages, fixture_bind_pending, fixture_finalize_messages,
+};
 use super::*;
 
 fn assistant(text: &str) -> Message {
@@ -23,6 +25,18 @@ fn empty_session_first_step_owns_user_then_assistant_without_loss() {
     assert_eq!(finalized.len(), 2);
     assert_eq!(finalized[0].text_content(), "first");
     assert_eq!(finalized[1].text_content(), "answer");
+}
+
+#[test]
+fn accepted_projection_keeps_only_user_input_not_system_feedback() {
+    let accepted = fixture_accepted_user_messages(
+        vec![Message::user("accepted")],
+        Some(Message::system_generated_user("stop hook feedback")),
+        &[],
+    );
+
+    assert_eq!(accepted.len(), 1);
+    assert_eq!(accepted[0].text_content(), "accepted");
 }
 
 #[test]

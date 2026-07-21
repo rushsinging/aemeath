@@ -16,8 +16,8 @@ use context::application::main_session::{
 };
 use context::domain::session::{CanonicalSession, SnapshotState};
 use context::domain::{
-    ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause, RunStepId, SessionId,
-    SessionRevision,
+    AcceptedInputAppend, ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause,
+    RunStepId, SessionId, SessionRevision,
 };
 use context::ports::ContextPort;
 use memory::{
@@ -332,6 +332,52 @@ async fn successful_resume_commits_all_and_updates_committed_state() {
     let bound = h.wiring.bind_main_run().await.expect("bind should succeed");
     assert_eq!(bound.session().id, "resume-target");
     assert_eq!(bound.config().revision(), post_config_revision);
+}
+
+#[tokio::test]
+async fn accepted_input_persists_and_is_visible_after_resume_without_outcome() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let bound = h.wiring.bind_main_run().await.expect("bind source run");
+    let context: Arc<dyn ContextPort> = bound.context();
+    let source_id = bound.session().id.clone();
+    let workspace = bound.session().workspace.clone();
+    drop(bound);
+
+    let receipt = context
+        .append_accepted_input(&AcceptedInputAppend {
+            session_id: SessionId::new(source_id.clone()),
+            run_id: RunId::new("run-accepted"),
+            step_id: RunStepId::new("step-accepted"),
+            source_request_id: ContextRequestId::new("request-accepted"),
+            messages: vec![Message::user("accepted before model")],
+            fingerprint: ContentFingerprint::new("accepted-fingerprint"),
+        })
+        .await
+        .expect("append accepted input");
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+
+    let committed = h.wiring.committed_session();
+    let step = &committed.run_slices[0].steps[0];
+    assert!(step.outcome.is_none());
+    assert_eq!(
+        step.accepted_input.as_ref().unwrap().messages[0].text_content(),
+        "accepted before model"
+    );
+
+    let mut resumed = (*committed).clone();
+    resumed.workspace = workspace;
+    h.wiring
+        .resume_prepared(resumed)
+        .await
+        .expect("resume accepted-only session");
+    let rebound = h.wiring.bind_main_run().await.expect("bind resumed run");
+    let resumed_step = &rebound.session().run_slices[0].steps[0];
+    assert!(resumed_step.outcome.is_none());
+    assert_eq!(
+        rebound.session().structured_messages()[0].text_content(),
+        "accepted before model"
+    );
 }
 
 #[tokio::test]
