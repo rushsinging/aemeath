@@ -9,6 +9,22 @@
   },
   "entries": [
     {
+      "id": "policy.config.override-store.composition-ownership",
+      "guard": "check-config-store-ownership.sh",
+      "module": "config",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src"
+      },
+      "classification": "target_capability_policy",
+      "owner": "config",
+      "reason": "Composition alone selects config override AtomicBlob backing; Config wiring consumes injected NativeConfigStore",
+      "tracking_issue": 1293,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with equivalent Composition-only config override store ownership policy",
+      "status": "active"
+    },
+    {
       "id": "policy.session-management.composition-ownership",
       "guard": "check-session-management-ownership.sh",
       "module": "context",

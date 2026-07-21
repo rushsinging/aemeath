@@ -60,6 +60,7 @@ impl ConfigWiring {
 
 pub async fn wire_project_config_with_cli(
     project_dir: &Path,
+    native_store: NativeConfigStore,
     cli: crate::adapters::CliConfigInput,
 ) -> Result<ConfigWiring, ConfigError> {
     log::debug!(
@@ -67,7 +68,8 @@ pub async fn wire_project_config_with_cli(
         "wire_project_config_with_cli: enter"
     );
     let result = async {
-        let service = std::sync::Arc::new(ConfigAppService::for_project(project_dir)?);
+        let service =
+            std::sync::Arc::new(ConfigAppService::for_project(project_dir, native_store)?);
         service
             .set_cli_patch(crate::adapters::CliArgsAdapter::read(&cli))
             .await;
@@ -88,14 +90,20 @@ pub async fn wire_project_config_with_cli(
     result
 }
 
-pub async fn wire_project_config(project_dir: &Path) -> Result<ConfigWiring, ConfigError> {
-    let service = std::sync::Arc::new(ConfigAppService::for_project(project_dir)?);
+pub async fn wire_project_config(
+    project_dir: &Path,
+    native_store: NativeConfigStore,
+) -> Result<ConfigWiring, ConfigError> {
+    let service = std::sync::Arc::new(ConfigAppService::for_project(project_dir, native_store)?);
     service.load().await.map_err(ConfigError::Load)?;
     Ok(ConfigWiring { service })
 }
 
 impl ConfigAppService {
-    fn for_project(project_dir: &Path) -> Result<Self, ConfigError> {
+    fn for_project(
+        project_dir: &Path,
+        native_store: NativeConfigStore,
+    ) -> Result<Self, ConfigError> {
         let canonical = project_dir
             .canonicalize()
             .map_err(|_| ConfigError::InvalidLocation(ProjectConfigLocationError::NotCanonical))?;
@@ -104,15 +112,11 @@ impl ConfigAppService {
             canonical.to_string_lossy().as_bytes(),
         )
         .map_err(ConfigError::InvalidLocation)?;
-        let storage = storage::api::file_system_blob(
-            share::config::paths::global_agents_dir().join("config-overrides"),
-        )
-        .map_err(|error| ConfigError::Load(format!("配置存储初始化失败：{error}")))?;
         let service = Self::with_global_path(
             Some(project_dir),
             share::config::paths::global_config_path(),
         )
-        .with_native_store(NativeConfigStore::new(storage));
+        .with_native_store(native_store);
         service.active.write().unwrap().location = Some(location);
         Ok(service)
     }
@@ -906,6 +910,13 @@ mod tests {
         _dir: tempfile::TempDir,
     }
 
+    fn test_native_store(root: &std::path::Path) -> NativeConfigStore {
+        NativeConfigStore::new(std::sync::Arc::new(
+            storage::FileSystemBlobAdapter::new(root.join("config-overrides"))
+                .expect("create test config override blob"),
+        ))
+    }
+
     impl AgentsDirEnvGuard {
         fn new() -> Self {
             let lock = AGENTS_DIR_ENV_LOCK
@@ -937,8 +948,12 @@ mod tests {
         let _env = AgentsDirEnvGuard::new();
         let project = tempfile::tempdir().unwrap();
 
-        let result =
-            wire_project_config_with_cli(project.path(), crate::CliConfigInput::default()).await;
+        let result = wire_project_config_with_cli(
+            project.path(),
+            test_native_store(project.path()),
+            crate::CliConfigInput::default(),
+        )
+        .await;
 
         assert!(
             result.is_ok(),
@@ -967,8 +982,10 @@ mod tests {
         install_config_capturing_logger();
         drain_captured_config_logs();
 
+        let missing_store_root = tempfile::tempdir().unwrap();
         let result = wire_project_config_with_cli(
             std::path::Path::new("/nonexistent/config/does/not/exist"),
+            test_native_store(missing_store_root.path()),
             crate::CliConfigInput::default(),
         )
         .await;
@@ -1009,6 +1026,7 @@ mod tests {
 
         let _ = wire_project_config_with_cli(
             project.path(),
+            test_native_store(project.path()),
             crate::CliConfigInput {
                 api_key: Some(secret.into()),
                 ..Default::default()

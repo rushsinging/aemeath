@@ -106,6 +106,15 @@ fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInput {
     }
 }
 
+fn config_native_store() -> config::NativeConfigStore {
+    config::NativeConfigStore::new(
+        storage::api::file_system_blob(
+            share::config::paths::global_agents_dir().join("config-overrides"),
+        )
+        .expect("create config override blob"),
+    )
+}
+
 fn session_management() -> Arc<dyn SessionManagementPort> {
     Arc::new(context::adapters::AtomicBlobSessionManagement::new(
         storage::api::file_system_blob(share::config::paths::global_agents_dir())
@@ -151,6 +160,7 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
         .into_views();
     let config = config::wire_project_config_with_cli(
         &root,
+        config_native_store(),
         cli_config_input(&ChatBootstrapArgs {
             api_key: Some("test-api-key".to_string()),
             base_url: Some("http://127.0.0.1:1/v1".to_string()),
@@ -231,7 +241,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config(&root)
+    let config = config::wire_project_config(&root, config_native_store())
         .await
         .expect("wire config");
     let task_wiring = task::wire_task();
@@ -328,6 +338,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         .into_views();
     let config = config::wire_project_config_with_cli(
         &root,
+        config_native_store(),
         cli_config_input(&ChatBootstrapArgs {
             api_key: Some("test-api-key".to_string()),
             base_url: Some("http://127.0.0.1:1/v1".to_string()),
@@ -428,7 +439,7 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config(&root)
+    let config = config::wire_project_config(&root, config_native_store())
         .await
         .expect("wire config");
 
