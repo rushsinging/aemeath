@@ -112,6 +112,8 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
                 tasks: context::session::SnapshotState::Missing,
                 workspace: context::session::SnapshotState::Captured(persist.snapshot()),
                 revision: 0,
+                compact: None,
+                run_slices: Vec::new(),
                 committed_steps: Vec::new(),
             },
             initial_memory: Arc::new(memory::api::NoOpMemory),

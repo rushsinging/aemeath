@@ -60,7 +60,7 @@ async fn legacy_load_save_reload_is_canonical() {
     let canonical = store.writes.lock().unwrap()[0].clone();
     assert!(String::from_utf8(canonical.clone())
         .unwrap()
-        .contains("\"schema_version\": 1"));
+        .contains("\"schema_version\": 2"));
     *store.primary.lock().unwrap() = Some(canonical);
     assert_eq!(service.load().await.unwrap().id, "legacy-fixture");
     let _ = std::fs::remove_dir_all(project);
