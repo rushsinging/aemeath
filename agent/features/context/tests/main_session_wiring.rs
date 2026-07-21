@@ -594,6 +594,31 @@ async fn task_captured_snapshot_restores_tasks_into_task_access() {
     assert_eq!(target.task_access.list().len(), 2);
 }
 
+#[tokio::test]
+async fn pending_task_with_legacy_started_at_restores_after_snapshot_normalization() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let snapshot = TaskSnapshot::decode(
+        br#"{"schema_version":2,"revision":"1","tasks":[{"id":"35","batch":"8","subject":"resumable","description":"","active_form":null,"session_id":null,"tags":[],"blocked_by":[],"status":"pending","priority":"high","created_at":100,"updated_at":300,"started_at":200,"completed_at":null}],"next_task_id":"36","next_batch_id":"9","current_batch":"8","batches":[{"id":"8","summary":"active","status":"active","created_at":100,"last_active_turn":0,"silence_turns":0}]}"#,
+    )
+    .expect("legacy pending task snapshot must decode");
+    let ws = h.workspace_persist.snapshot();
+    let session = session_with_workspace(&ws, SnapshotState::Captured(snapshot));
+
+    h.wiring
+        .resume_prepared(session)
+        .await
+        .expect("normalized pending task snapshot must resume");
+
+    let task = h
+        .task_access
+        .list()
+        .into_iter()
+        .next()
+        .expect("task restored");
+    assert_eq!(task.status(), task::TaskStatus::Pending);
+}
+
 /// A rejected Task snapshot must leave every already-live participant unchanged.
 #[tokio::test]
 async fn invalid_task_snapshot_keeps_committed_session_memory_and_tasks_unchanged() {
