@@ -76,6 +76,14 @@ fn cli_config_input(args: &AgentArgs) -> config::CliConfigInput {
     }
 }
 
+fn wire_config_override_store() -> Result<config::NativeConfigStore, SdkError> {
+    let blob = storage::api::file_system_blob(
+        share::config::paths::global_agents_dir().join("config-overrides"),
+    )
+    .map_err(|error| SdkError::Init(format!("配置 override 存储初始化失败：{error}")))?;
+    Ok(config::NativeConfigStore::new(blob))
+}
+
 fn logging_settings_from_snapshot(
     snapshot: &ConfigSnapshot,
     default_logs_dir: &Path,
@@ -173,9 +181,13 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
     let logging_output = args.logging_output;
-    let config = config::wire_project_config_with_cli(&cwd, cli_config_input(&args))
-        .await
-        .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    let config = config::wire_project_config_with_cli(
+        &cwd,
+        wire_config_override_store()?,
+        cli_config_input(&args),
+    )
+    .await
+    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
     let gateways = FeatureGateways::wire_default(configured_policy(&config));
     init_logging(&config.reader().committed_snapshot(), logging_output)
         .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
@@ -198,9 +210,13 @@ async fn build_agent_client_with_gateways(
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
     let logging_output = args.logging_output;
-    let config = config::wire_project_config_with_cli(&cwd, cli_config_input(&args))
-        .await
-        .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    let config = config::wire_project_config_with_cli(
+        &cwd,
+        wire_config_override_store()?,
+        cli_config_input(&args),
+    )
+    .await
+    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
     init_logging(&config.reader().committed_snapshot(), logging_output)
         .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =
@@ -218,9 +234,13 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
     let logging_output = args.logging_output;
-    let config = config::wire_project_config_with_cli(&cwd, cli_config_input(&args))
-        .await
-        .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    let config = config::wire_project_config_with_cli(
+        &cwd,
+        wire_config_override_store()?,
+        cli_config_input(&args),
+    )
+    .await
+    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
     let gateways = FeatureGateways::wire_default(configured_policy(&config));
     init_logging(&config.reader().committed_snapshot(), logging_output)
         .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;

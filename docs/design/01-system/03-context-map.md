@@ -95,7 +95,7 @@ Interaction 同样不是第 16 个 BC：Runtime-owned `InteractionPort` 隔离 T
 
 | 供应方 | 消费方 | 模式 | 契约 |
 |---|---|---|---|
-| Config | 全部 BC | **CF + PL** | 各 BC 顺从消费只读 `ConfigSnapshot`（Published Language），**NEVER** 反向依赖，**NEVER** 绕过快照读裸配置 |
+| Config | 全部 BC | **CF + PL** | 各 BC 顺从消费只读 `ConfigSnapshot`（Published Language），**NEVER** 反向依赖，**NEVER** 绕过快照读裸配置。Composition 独占 `config-overrides` 的 Storage adapter 构造，并向 Config wiring 注入 Config-owned `NativeConfigStore`；其他 BC 不获得该 store 或 Storage Port。 |
 
 Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启动 / resume 的协调 ACL 把 Project-owned `ProjectIdentity` 映射成 Config-owned `ProjectConfigLocation` 后调用 Config participant；Config **NEVER** import Project PL，因此 `Config → Project` 的全局上游方向不会形成物理循环。每个 Main Run 在 shared session lease 下捕获一次 active snapshot；Provider / Tool / Hook / Policy / Reflection factory **NEVER** 回读进程级 current 配置。同步 `ConfigReader` 只是 Config-internal committed-state view，只能被 coordinator / gate-aware façade 持有；AgentClient application implementation 只消费 async `ConfigQuery` / `ConfigWriter`，非 Run query / subscribe 先取得 shared session-switch permit。TUI / CLI 只经 Runtime-owned AgentClient command 与 SDK event 投影配置，**NEVER** 直连 Config OHS、subscription 或 watch receiver。
 

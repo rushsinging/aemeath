@@ -559,9 +559,14 @@ mod tests {
             context_size: 8192,
             ..Default::default()
         };
-        let config = config::wire_project_config(&root)
-            .await
-            .expect("wire config");
+        let config = config::wire_project_config(
+            &root,
+            config::NativeConfigStore::new(Arc::new(
+                storage::FileSystemBlobAdapter::new(&agents_dir).expect("create config blob"),
+            )),
+        )
+        .await
+        .expect("wire config");
         let task_wiring = task::wire_task();
         let wiring = context::test_support::wire_in_memory(
             &workspace,
