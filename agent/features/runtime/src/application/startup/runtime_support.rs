@@ -53,6 +53,7 @@ pub fn build_agent_runner(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
     tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
+    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
 ) -> Arc<agent_runner::CliAgentRunner> {
     let models_config = Arc::new(snapshot.models().clone());
     let agents_config = Arc::new(snapshot.agents().clone());
@@ -76,7 +77,7 @@ pub fn build_agent_runner(
         tool_catalog,
         tool_execution,
         tool_context_binding,
-        skill_materializer: tools::composition::wire_skill_materialization(),
+        skill_materializer,
         policy,
     })
 }
@@ -133,6 +134,8 @@ mod tests {
             .into_views();
 
         let tools = tools::composition::TestCatalogExecutionFactory::empty();
+        let skill_wiring = tools::composition::wire_skills();
+        let skill_materializer = skill_wiring.materializer();
         let snapshot = share::config::domain::snapshot::ConfigSnapshot::new(Config::default());
         let runner = build_agent_runner(
             &snapshot,
@@ -149,8 +152,13 @@ mod tests {
             tools.catalog_port(),
             tools.execution(),
             tools.binding(),
+            skill_materializer.clone(),
         );
 
+        assert!(
+            Arc::ptr_eq(&runner.skill_materializer, &skill_materializer),
+            "Sub Run runner 必须复用 Composition 注入的同一 Skill materializer"
+        );
         assert!(
             Arc::ptr_eq(&runner.policy, &policy),
             "Sub Run runner 必须保留 Composition 注入的同一 PolicyPort 实例"

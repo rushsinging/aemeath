@@ -8,6 +8,60 @@ use crate::app::FeatureGateways;
 
 pub(crate) use runtime::AgentClientImpl;
 
+struct WiringMemoryPortSource {
+    wiring: Arc<context::MainSessionWiring>,
+}
+
+impl tools::MemoryPortSource for WiringMemoryPortSource {
+    fn current(&self) -> Arc<dyn memory::MemoryPort> {
+        self.wiring.committed_memory()
+    }
+}
+
+struct RuntimeToolAssembly {
+    catalog: Arc<dyn tools::ToolCatalogPort>,
+    execution: Arc<dyn tools::ToolExecutionPort>,
+    binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
+    tool_result_materializer: Arc<runtime::ToolResultMaterializer>,
+    active_run: Arc<runtime::ActiveRunRegistry>,
+}
+
+fn wire_runtime_tool_assembly(
+    task_access: Arc<dyn task::TaskAccess>,
+    memory_source: Arc<dyn tools::MemoryPortSource>,
+    workspace_control: Arc<dyn project::WorkspaceControl>,
+    snapshot: &share::config::domain::snapshot::ConfigSnapshot,
+) -> Result<RuntimeToolAssembly, sdk::SdkError> {
+    let tools = tools::composition::wire_builtin_catalog_execution(
+        task_access,
+        memory_source,
+        workspace_control,
+    )
+    .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+    let policy = snapshot.tool_result_policy();
+    let blobs = Arc::new(runtime::AtomicBlobToolResultStore::new(
+        Arc::new(
+            storage::FileSystemBlobAdapter::new(share::config::paths::global_agents_dir())
+                .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
+        ),
+        share::config::paths::global_agents_dir(),
+    ));
+    Ok(RuntimeToolAssembly {
+        catalog: tools.catalog(),
+        execution: tools.execution(),
+        binding: tools.binding(),
+        tool_result_materializer: Arc::new(runtime::ToolResultMaterializer::new(
+            blobs,
+            runtime::ToolResultMaterializationPolicy::new(
+                policy.threshold_chars(),
+                policy.preview_head_chars(),
+                policy.preview_tail_chars(),
+            ),
+        )),
+        active_run: Arc::new(runtime::ActiveRunRegistry::default()),
+    })
+}
+
 pub(crate) async fn from_args_with_gateways(
     args: AgentArgs,
     gateways: FeatureGateways,
@@ -30,6 +84,9 @@ pub(crate) async fn from_args_with_gateways(
         ));
 
     let task_wiring = task::wire_task();
+    let skill_wiring = tools::composition::wire_skills();
+    let skill_catalog = skill_wiring.catalog();
+    let skill_materializer = skill_wiring.materializer();
     let session_blob = storage::api::file_system_blob(share::config::paths::global_agents_dir())
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
@@ -55,7 +112,7 @@ pub(crate) async fn from_args_with_gateways(
                 context::adapters::AtomicBlobCanonicalSessionWriter::new(session_blob),
             ))
             .with_skill_supplier(
-                tools::composition::wire_skill_materialization(),
+                skill_materializer.clone(),
                 Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
                     workspace.read(),
                 )),
@@ -66,6 +123,15 @@ pub(crate) async fn from_args_with_gateways(
         .await
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
 
+    let tool_assembly = wire_runtime_tool_assembly(
+        task_wiring.access(),
+        Arc::new(WiringMemoryPortSource {
+            wiring: wiring.clone(),
+        }),
+        workspace.control(),
+        &config.reader().committed_snapshot(),
+    )?;
+
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         workspace,
         wiring,
@@ -74,6 +140,15 @@ pub(crate) async fn from_args_with_gateways(
         gateways.policy,
         task_wiring.access(),
         session_management,
+        runtime::RuntimeToolAssemblyDependencies::new(
+            tool_assembly.catalog,
+            tool_assembly.execution,
+            tool_assembly.binding,
+            skill_catalog,
+            skill_materializer,
+            tool_assembly.tool_result_materializer,
+            tool_assembly.active_run,
+        ),
     );
     runtime::from_args_with_workspace(args, dependencies).await
 }
