@@ -53,11 +53,14 @@ fn skill_descriptor_exposes_name_description_source_and_aliases() {
             "/p/.agents/skills/review.md",
         ),
         vec!["cr".to_string()],
+        Some("review".to_string()),
+        Vec::new(),
     );
     assert_eq!(desc.name(), "review");
     assert_eq!(desc.description(), "code review skill");
     assert_eq!(desc.source().kind, SkillSourceKind::ProjectAgents);
     assert_eq!(desc.aliases(), &["cr".to_string()]);
+    assert_eq!(desc.slash_command(), Some("review"));
 }
 
 // ── SkillMaterializationRevision (content-derived) ─────────────────────

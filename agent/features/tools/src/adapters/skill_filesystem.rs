@@ -216,6 +216,10 @@ struct RawSkill {
     name: String,
     description: String,
     aliases: Vec<String>,
+    /// 显式 Slash 投影；package namespace Skill 默认仅供 agent 物化。
+    slash_command: Option<String>,
+    /// 仅当 Slash 投影存在时随之公开的合法别名。
+    slash_aliases: Vec<String>,
     source: SkillSource,
     content: String,
     /// frontmatter `requires_tools`：非空时要求所列工具全部出现在
@@ -228,7 +232,14 @@ struct RawSkill {
 
 impl RawSkill {
     fn into_descriptor(self) -> SkillDescriptor {
-        SkillDescriptor::new(self.name, self.description, self.source, self.aliases)
+        SkillDescriptor::new(
+            self.name,
+            self.description,
+            self.source,
+            self.aliases,
+            self.slash_command,
+            self.slash_aliases,
+        )
     }
 
     fn into_fragment(self) -> PromptFragment {
@@ -254,10 +265,9 @@ impl RawSkill {
     }
 }
 
-/// YAML frontmatter 中性结构（忽略未知字段）。
-///
-/// 恢复 `requires_tools` / `fallback_for`：前者声明该 Skill 依赖的工具，
-/// 后者声明本 Skill 是哪些主 Skill 的 fallback。adapter 据此过滤。
+/// 恢复 `requires_tools` / `fallback_for` 与 Slash 投影：前两者分别声明
+/// 工具依赖和 fallback 关系；`slash_command` / `slash_aliases` 则显式控制
+/// 是否及如何投影为用户 Slash Command。adapter 不从 Skill identity 推导 Slash。
 #[derive(Debug, Default, Deserialize)]
 struct Frontmatter {
     #[serde(default)]
@@ -266,6 +276,13 @@ struct Frontmatter {
     description: String,
     #[serde(default)]
     aliases: Vec<String>,
+    /// 可选 Slash Command 名；省略时普通 Skill 默认使用自身 identity，package
+    /// namespace 会在 `apply_namespace` 阶段关闭该投影。
+    #[serde(default)]
+    slash_command: Option<String>,
+    /// `slash_command` 的用户可输入别名，不与 identity aliases 混用。
+    #[serde(default)]
+    slash_aliases: Vec<String>,
     /// 所需工具名；任一缺失则该 Skill 不可见。
     #[serde(default)]
     requires_tools: Vec<String>,
@@ -414,6 +431,8 @@ fn apply_namespace(mut raw: RawSkill, namespace: Option<&str>) -> RawSkill {
         if !ns.is_empty() {
             raw.aliases.push(raw.name.clone());
             raw.name = format!("{ns}:{}", raw.name);
+            raw.slash_command = None;
+            raw.slash_aliases.clear();
         }
     }
     raw
@@ -466,6 +485,8 @@ fn parse_skill_file(path: &Path, kind: SkillSourceKind) -> Result<RawSkill, Skil
     }
 
     Ok(RawSkill {
+        slash_command: fm.slash_command.or_else(|| Some(name.clone())),
+        slash_aliases: fm.slash_aliases,
         name,
         description: fm.description,
         aliases,
@@ -507,6 +528,8 @@ fn builtin_commit_skill() -> RawSkill {
         name: "commit".to_string(),
         description: "Create a git commit using the repository's Commit Style Context".to_string(),
         aliases: vec!["git-commit".to_string()],
+        slash_command: Some("commit".to_string()),
+        slash_aliases: vec!["git-commit".to_string()],
         source: SkillSource::builtin(BUILTIN_COMMIT_URI),
         content: builtin_commit_body().to_string(),
         requires_tools: Vec::new(),
