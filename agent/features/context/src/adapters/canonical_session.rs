@@ -2,10 +2,13 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 
-use crate::domain::session::{ActiveCompactMarker, CanonicalSession, CommittedStep, SnapshotState};
+use crate::domain::session::{
+    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedStep, SnapshotState,
+};
 use crate::domain::{
-    AppendReceipt, CompactOutcome, CompactRequest, CompactSkipReason, ContextAppend,
-    ContextAppendError, ContextPortError, ManualCompactRequest, SessionId, SessionRevision,
+    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
+    CompactRequest, CompactSkipReason, ContextAppend, ContextAppendError, ContextPortError,
+    ManualCompactRequest, SessionId, SessionRevision,
 };
 use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
 
@@ -144,6 +147,18 @@ impl CanonicalSessionRepository {
             fingerprint: append.fingerprint.clone(),
         }
     }
+
+    fn accepted_receipt(
+        append: &AcceptedInputAppend,
+        revision: SessionRevision,
+    ) -> AcceptedInputReceipt {
+        AcceptedInputReceipt {
+            run_id: append.run_id.clone(),
+            step_id: append.step_id.clone(),
+            committed_revision: revision,
+            fingerprint: append.fingerprint.clone(),
+        }
+    }
 }
 
 #[async_trait]
@@ -159,6 +174,60 @@ impl SessionRepository for CanonicalSessionRepository {
             messages,
             active_summary: session.active_summary().map(str::to_string),
         })
+    }
+
+    async fn append_accepted_input(
+        &self,
+        append: &AcceptedInputAppend,
+    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        let _mutation = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| AcceptedInputError::Storage(error.to_string()))?
+            .clone();
+        if current.id != append.session_id.as_str() {
+            return Err(AcceptedInputError::SessionNotFound(
+                append.session_id.clone(),
+            ));
+        }
+        if let Some(input) = current.accepted_input(append.run_id.as_ref(), append.step_id.as_str())
+        {
+            if input.fingerprint == append.fingerprint.as_str() {
+                return Ok(Self::accepted_receipt(
+                    append,
+                    SessionRevision::new(input.committed_revision),
+                ));
+            }
+            return Err(AcceptedInputError::ContentConflict {
+                run_id: append.run_id.clone(),
+                step_id: append.step_id.clone(),
+            });
+        }
+        let mut candidate = (*current).clone();
+        candidate.revision += 1;
+        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.append_accepted_input(
+            append.run_id.as_ref(),
+            append.step_id.as_str(),
+            AcceptedInputProjection::new(
+                append.messages.clone(),
+                append.fingerprint.as_str(),
+                candidate.revision,
+            ),
+        );
+        self.writer
+            .save(&candidate)
+            .await
+            .map_err(AcceptedInputError::Storage)?;
+        let revision = SessionRevision::new(candidate.revision);
+        *self
+            .session
+            .write()
+            .map_err(|error| AcceptedInputError::Storage(error.to_string()))? = Arc::new(candidate);
+        Ok(Self::accepted_receipt(append, revision))
     }
 
     async fn append_finalized(

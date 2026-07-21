@@ -21,9 +21,10 @@
 use std::sync::Arc;
 
 use crate::ports::{
-    AppendReceipt, CompactOutcome, CompactRequest, CompactTrigger, ContentFingerprint,
-    ContextAppend, ContextAppendError, ContextPort, ContextPortError, ContextRequest,
-    ContextWindow, FinalizeCause, ManualCompactRequest, SessionId, SessionRevision, StepReceipt,
+    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
+    CompactRequest, CompactTrigger, ContentFingerprint, ContextAppend, ContextAppendError,
+    ContextPort, ContextPortError, ContextRequest, ContextWindow, FinalizeCause,
+    ManualCompactRequest, SessionId, SessionRevision, StepReceipt,
 };
 use sdk::RunStepId;
 use sha2::{Digest, Sha256};
@@ -83,6 +84,24 @@ impl ContextCoordinator {
         self.port.clear_session(session_id).await
     }
 
+    pub(crate) async fn append_accepted_input(
+        &self,
+        request: &ContextRequest,
+        messages: Vec<Message>,
+    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        let fingerprint = accepted_input_fingerprint(request, &messages)?;
+        self.port
+            .append_accepted_input(&AcceptedInputAppend {
+                session_id: request.session_id.clone(),
+                run_id: request.run_id.clone(),
+                step_id: request.step_id.clone(),
+                source_request_id: request.request_id.clone(),
+                messages,
+                fingerprint,
+            })
+            .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn append_finalized(
         &self,
@@ -117,6 +136,25 @@ impl ContextCoordinator {
             })
             .await
     }
+}
+
+fn accepted_input_fingerprint(
+    request: &ContextRequest,
+    messages: &[Message],
+) -> Result<ContentFingerprint, AcceptedInputError> {
+    let payload = serde_json::to_vec(&(
+        request.session_id.as_str(),
+        request.run_id.to_string(),
+        request.step_id.as_str(),
+        messages,
+    ))
+    .map_err(|error| {
+        AcceptedInputError::Storage(format!("accepted input 指纹编码失败：{error}"))
+    })?;
+    Ok(ContentFingerprint::new(format!(
+        "{:x}",
+        Sha256::digest(payload)
+    )))
 }
 
 fn fingerprint(

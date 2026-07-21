@@ -160,6 +160,54 @@ impl PartialEq for CanonicalSession {
 impl Eq for CanonicalSession {}
 
 impl CanonicalSession {
+    pub fn append_accepted_input(
+        &mut self,
+        run_id: &str,
+        step_id: &str,
+        accepted_input: AcceptedInputProjection,
+    ) {
+        let cursor = RunStepCursor {
+            run_id: run_id.to_string(),
+            step_id: step_id.to_string(),
+        };
+        if let Some(slice) = self
+            .run_slices
+            .iter_mut()
+            .find(|slice| slice.run_id == run_id)
+        {
+            if let Some(step) = slice.steps.iter_mut().find(|step| step.step_id == step_id) {
+                step.accepted_input = Some(accepted_input);
+            } else {
+                slice
+                    .steps
+                    .push(CommittedRunStep::accepted_only(step_id, accepted_input));
+            }
+        } else {
+            self.run_slices.push(CommittedRunSlice::new(
+                run_id,
+                vec![CommittedRunStep::accepted_only(step_id, accepted_input)],
+            ));
+        }
+        if self
+            .compact
+            .as_ref()
+            .is_some_and(|marker| marker.start_at.is_none())
+        {
+            self.compact.as_mut().expect("checked above").start_at = Some(cursor);
+        }
+    }
+
+    pub fn accepted_input(&self, run_id: &str, step_id: &str) -> Option<&AcceptedInputProjection> {
+        self.run_slices
+            .iter()
+            .find(|slice| slice.run_id == run_id)?
+            .steps
+            .iter()
+            .find(|step| step.step_id == step_id)?
+            .accepted_input
+            .as_ref()
+    }
+
     pub fn append_finalized_outcome(
         &mut self,
         run_id: &str,
