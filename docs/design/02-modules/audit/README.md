@@ -258,7 +258,7 @@ struct UsageQueryWarning {
 }
 ```
 
-`UsageQueryError` / `UsageQueryWarning` 是稳定的 query-facing PL，**NEVER** 引用 #928 才定义的 `AppendLogError` / `AppendLogStream` adapter 类型；#930 负责把内部错误与 stream key 防腐映射为安全字符串。`UsageCursor` 对调用方不透明，只用于稳定续页；limit 上限由 #930 的 Audit query policy 校验。#927 只冻结上述 DTO 与 `UsageQueryPort` 签名，不实现文件扫描、filter、cursor、坏行处理或 token 聚合。
+`UsageQueryError` / `UsageQueryWarning` 是稳定的 query-facing PL，**NEVER** 引用 #928 才定义的 `AppendLogError` / `AppendLogStream` adapter 类型；#930 负责把内部错误与 stream key 防腐映射为安全字符串。`UsageCursor` 对调用方不透明，只用于稳定续页；#930 的 cursor 采用版本化 `query fingerprint + stream + next line offset` 内部编码，续页从该行重新应用同一过滤谓词，filter 改变、cursor 格式错误或 cursor 所在分区已被外部删除即返回 `InvalidCursor`，因此 append-only 分区内不丢不重。上限由 Audit query policy 统一 clamp 为 `1000` 条，避免单页失控而不改变查询语义。版本化 decoder 仅接受当前 `UsageEnvelopeV1`；JSON 解析失败、未知版本与未终结尾行统一跳过并返回 `CorruptLine` warning，append-store I/O 则映射为 `Storage`，不得伪装成坏行。`UsageSummary` 仅是 token/record_count 投影，遇到损坏行沿用同一 skip 规则但不携带 warnings；需要定位损坏行时调用 `query`。#927 只冻结上述 DTO 与 `UsageQueryPort` 签名，不实现文件扫描、filter、cursor、坏行处理或 token 聚合。
 
 UsageSummary 只汇总 token 与记录数，不包含 Cost。查询实现读取 Audit 分区并在 BC 内聚合，CLI/TUI 不直接解析 JSONL。
 
@@ -352,6 +352,7 @@ src/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-21 | #930 实现 Audit-owned `UsageQueryPort`：按关联 ID/provider/model/半开时间范围过滤、版本化 opaque cursor、单页 1000 条 clamp、逐行 V1 decoder、损坏行/截断尾行 warning 与纯 token summary；查询仅经 `UsageAppendStorePort` 逐分区读取，CLI/TUI 不解析 JSONL，生产 wiring 仍归 #931 | [#930](https://github.com/rushsinging/aemeath/issues/930) |
 | 2026-07-18 | #929 冻结 bounded sender/worker lifecycle：默认 capacity 1024、shutdown 5s；一致 state metrics、64 倍数聚合 warning、File adapter blocking boundary、超时 unconfirmed 计数与 Composition lifecycle assembly；Runtime bridge/Invocation wiring 仍归 #931 | [#929](https://github.com/rushsinging/aemeath/issues/929) |
 | 2026-07-17 | #927 冻结 Usage PL：跨 BC ID 复用 SDK 唯一 newtype，Audit 拥有 UsageRecord/V1 envelope/emit/query DTO，Runtime 仅拥有 UsageSink trait；配置归 #929，查询行为归 #930，并按真实交付增量建立 domain/ports 层 | [#927](https://github.com/rushsinging/aemeath/issues/927) |
 | 2026-07-17 | #988 删除无行为的 `api/contract/gateway` COLA 占位；Usage 实现前仅保留真实 crate 入口，后续按已冻结的 Usage Target 增量建层 | [#988](https://github.com/rushsinging/aemeath/issues/988) |
