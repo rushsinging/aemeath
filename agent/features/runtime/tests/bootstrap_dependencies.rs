@@ -148,7 +148,6 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         workspace,
         wiring,
         Arc::new(TestProviderFactory),
-        tools::wire_tools(),
         history.clone(),
         Arc::new(policy::AllowAllPolicy),
         access.clone(),

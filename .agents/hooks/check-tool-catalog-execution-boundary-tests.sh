@@ -77,5 +77,9 @@ schema_probe="$TMP/agent/features/runtime/src/application/schema_copy.rs"
 printf '%s\n' 'fn validate_tool_input() { jsonschema::validate(); }' >"$schema_probe"
 expect_failure schema-copy 'Schema validator implementation must exist only in Tools' rm -f "$schema_probe"
 
+legacy_scope_probe="$TMP/agent/features/tools/src/adapters/legacy_scope.rs"
+printf '%s\n' 'enum Legacy { LegacyNoAgent }' >"$legacy_scope_probe"
+expect_failure legacy-scope 'Tools legacy Registry/Profile/SkillTool paths must stay retired' rm -f "$legacy_scope_probe"
+
 run_guard >/dev/null
 echo 'Tool Catalog/Execution guard sanity checks passed.'

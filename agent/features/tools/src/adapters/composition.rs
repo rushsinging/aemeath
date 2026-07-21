@@ -18,9 +18,7 @@ use crate::domain::{
 };
 
 #[cfg(feature = "test-harness")]
-pub use super::test_harness::{
-    CountingToolCatalogGateway, TestCatalogExecution, TestCatalogExecutionFactory,
-};
+pub use super::test_harness::{TestCatalogExecution, TestCatalogExecutionFactory};
 
 /// The narrow result of composition-time Tool adapter assembly.
 pub struct CatalogExecutionWiring {
@@ -105,9 +103,6 @@ pub fn wire_builtin_catalog_execution(
         let scope = register_named_scope(
             &registry,
             task_access.clone(),
-            // Skill is no longer a tool for Main/Sub (#912); the empty map is
-            // never accessed because Skill is only registered for LegacyNoAgent.
-            Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             memory_source.clone(),
             workspace_control.clone(),
             scope_kind,
@@ -116,7 +111,6 @@ pub fn wire_builtin_catalog_execution(
         let profile_name = match scope_kind {
             BuiltinRegistryScope::Main => ToolProfileName::new("main-full"),
             BuiltinRegistryScope::SubAgent => ToolProfileName::new("sub-agent-restricted"),
-            BuiltinRegistryScope::LegacyNoAgent => unreachable!(),
         };
         scopes.insert(scope.name().clone(), scope);
         profiles.insert(profile_name, profile);

@@ -66,10 +66,10 @@ Session（对话历史容器，跨多次输入）
         └── ActiveCompactMarker（summary + 首个可见 Step）
 ```
 - **一个 Session 含多个 Run 的结构化事实**；compact marker 只改变活跃读取起点，不创建第二条历史链
-- **Run 读写 Session**：经 `ContextPort` 读 marker 后历史构建 Context Window；每个 RunStep 经唯一 `StepFinalizer` 收口为 finalized projection 后追加并落盘到 `run_slices`
+- **Run 读写 Session**：在 `freeze_step` 绑定 user input 后、首次 `build_window` 前，Runtime 经 `append_accepted_input` 将仅包含 accepted user facts 的 `AcceptedInputProjection` durable 写入；同一 Step 后续由 `StepFinalizer` 经 `ContextAppend` 只补充 outcome。accepted append 在 Context mutation gate 内自行读取当前 revision、检查 `(run_id, step_id, fingerprint)` 幂等/冲突、durable save 后再 publish；它**不**要求 Runtime 提供 CAS。finalized outcome 发生在 window 构建后，仍以 `ContextWindow.backing_revision` 作为 `expected_revision` 做 CAS。
 - Run 是内存态执行；Session 是持久化数据——两者生命周期不同（Run 短、Session 长）
 ## 6. RunStep 持久化边界
-Session 采用 **per finalized RunStep** 提交：一个 RunStep 无论普通完成、接受 `CancelRunStep`，还是随 `TerminateRun` 收口，都先由 Runtime 唯一 `StepFinalizer` 形成不可变 finalized projection，再构造唯一 `ContextAppend`。Runtime 用显式 `StepMessageOwnership` 把尚未绑定的用户输入 move 到 active Step，并在模型/Tool 产出时逐条记录；**NEVER** 根据消息数组长度、位置、历史数量或 `projection_start_index` 一类索引推断消息归属。Context Management 以 `(run_id, step_id)` 为幂等键追加或补充 `run_slices`、收集跨 BC snapshot 并原子落盘。`FinalizeCause` 只允许 `Completed | UserCancelledStep | RunTerminated`；它描述本次对话事实为何收口，不把 Run 状态机迁入 Session。
+Session 采用两阶段 per-RunStep 持久化：`freeze_step` 已绑定的 user input 首先形成不可变 `AcceptedInputProjection` 并立刻 durable；后续普通完成、`CancelRunStep` 或 `TerminateRun` 仅由 Runtime 唯一 `StepFinalizer` 形成 outcome projection，补充同一 `CommittedRunStep` 而**不重复** accepted input。Runtime 用显式 `StepMessageOwnership` 把尚未绑定的用户输入 move 到 active Step，并在模型/Tool 产出时逐条记录；**NEVER** 根据消息数组长度、位置、历史数量或 `projection_start_index` 一类索引推断消息归属。Context Management 以 `(run_id, step_id, fingerprint)` 为 accepted-input 幂等键，在 mutation gate 内完成 current revision 读取、写入、跨 BC snapshot 收集、原子落盘与 publish；同键不同 payload 返回 typed conflict。outcome 仍使用 `ContextWindow.backing_revision` CAS，避免以过期 Context Window 覆盖新历史。`FinalizeCause` 只允许 `Completed | UserCancelledStep | RunTerminated`；它描述 outcome 为何收口，不把 Run 状态机迁入 Session。
 `append_and_persist` **MUST** 将 projection 追加到对应
 `CommittedRunSlice.steps`，而不是只把 `messages` extend 到一个扁平数组。相同
 `run_id` 的连续 Step 归入同一个 Run slice；新 `run_id` 新建 slice。

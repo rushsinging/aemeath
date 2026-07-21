@@ -384,7 +384,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         workspace,
         wiring,
         composition::provider::provider_factory(),
-        tools::wire_tools(),
         reflection_history,
         Arc::new(policy::AllowAllPolicy),
         task_access,

@@ -131,6 +131,7 @@ pub(super) struct SubAgentRun<'a> {
     pub committed_message_count: usize,
     pub context: ContextCoordinator,
     pub context_request: Option<crate::ports::ContextRequest>,
+    pub accepted_input: Vec<Message>,
     pub context_window: Option<crate::ports::ContextWindow>,
     pub log_request_messages: Box<dyn Fn(usize, &[Message]) + Send + Sync + 'a>,
     pub agent: Agent,
@@ -173,7 +174,9 @@ impl<'a> SubAgentRun<'a> {
             request_id: crate::ports::ContextRequestId::new(uuid::Uuid::now_v7().to_string()),
             run_id: self.run_id.clone(),
             step_id: step_id.clone(),
-            pending_messages: self.messages[self.committed_message_count..].to_vec(),
+            pending_messages: self.messages
+                [self.committed_message_count + self.accepted_input.len()..]
+                .to_vec(),
             system_prompt: crate::ports::SystemPromptSpec::new(&self.system),
             model_id: self.model_name_for_log.clone(),
             effective_reasoning: self.level,
@@ -434,8 +437,34 @@ impl RunLoopPort for SubAgentRun<'_> {
         step_id: &sdk::RunStepId,
         _inputs: &[crate::application::loop_engine::LoopInput],
     ) {
+        self.accepted_input = if self.committed_message_count == 0 {
+            self.messages
+                .first()
+                .filter(|message| message.role == share::message::Role::User)
+                .cloned()
+                .into_iter()
+                .collect()
+        } else {
+            Vec::new()
+        };
         self.context_request = Some(self.freeze_request(step_id));
         self.context_window = None;
+    }
+
+    async fn accept_step_input(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
+        let request = self
+            .context_request
+            .as_ref()
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+        debug_assert_eq!(&request.step_id, step_id);
+        if self.accepted_input.is_empty() {
+            return Ok(());
+        }
+        self.context
+            .append_accepted_input(request, self.accepted_input.clone())
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        Ok(())
     }
 
     async fn drain_input(
@@ -728,7 +757,8 @@ impl RunLoopPort for SubAgentRun<'_> {
             return Ok(());
         };
         debug_assert_eq!(&request.step_id, step_id);
-        let messages = self.messages[self.committed_message_count..].to_vec();
+        let messages =
+            self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
         self.context
             .append_finalized(
                 request,
@@ -753,13 +783,15 @@ impl RunLoopPort for SubAgentRun<'_> {
             return Ok(());
         };
         debug_assert_eq!(&request.step_id, step_id);
+        let messages =
+            self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
         self.context
             .append_finalized(
                 request,
                 step_id.clone(),
                 window.backing_revision,
                 crate::ports::FinalizeCause::UserCancelledStep,
-                self.messages[self.committed_message_count..].to_vec(),
+                messages,
                 vec![],
                 self.last_total_tokens,
             )

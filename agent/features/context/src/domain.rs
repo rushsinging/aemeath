@@ -298,6 +298,37 @@ impl StepReceipt {
     }
 }
 
+/// 已绑定到 RunStep 的不可变 user 输入提交载荷。
+#[derive(Debug, Clone)]
+pub struct AcceptedInputAppend {
+    pub session_id: SessionId,
+    pub run_id: RunId,
+    pub step_id: RunStepId,
+    pub source_request_id: ContextRequestId,
+    pub messages: Vec<ContextMessage>,
+    pub fingerprint: ContentFingerprint,
+}
+
+/// accepted input durable commit 的确定性回执。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceptedInputReceipt {
+    pub run_id: RunId,
+    pub step_id: RunStepId,
+    pub committed_revision: SessionRevision,
+    pub fingerprint: ContentFingerprint,
+}
+
+/// accepted input append 的 typed failure。
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+pub enum AcceptedInputError {
+    #[error("RunStep 已接受输入冲突：run={run_id} step={step_id}")]
+    ContentConflict { run_id: RunId, step_id: RunStepId },
+    #[error("Session 不存在：{0}")]
+    SessionNotFound(SessionId),
+    #[error("Session 已接受输入持久化失败：{0}")]
+    Storage(String),
+}
+
 /// 单个 finalized RunStep 的不可变提交载荷。
 #[derive(Debug, Clone)]
 pub struct ContextAppend {

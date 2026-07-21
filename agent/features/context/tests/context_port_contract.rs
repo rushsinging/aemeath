@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use context::context_port::{
-    AppendReceipt, CalendarDate, CompactOutcome, CompactRequest, CompactResult, CompactTrigger,
-    CompactionDecision, ContentFingerprint, ContextAppend, ContextAppendError, ContextMessage,
-    ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
-    FinalizeCause, Language, ManualCompactRequest, RunStepId, SessionId, SessionRevision,
-    StepReceipt, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, ToolOutcomeKind, Urgency,
+    AcceptedInputAppend, AcceptedInputReceipt, AppendReceipt, CalendarDate, CompactOutcome,
+    CompactRequest, CompactResult, CompactTrigger, CompactionDecision, ContentFingerprint,
+    ContextAppend, ContextAppendError, ContextMessage, ContextPort, ContextPortError,
+    ContextRequest, ContextRequestId, ContextWindow, DecisionReason, FinalizeCause, Language,
+    ManualCompactRequest, RunStepId, SessionId, SessionRevision, StepReceipt, SystemPromptSpec,
+    TaskReminderSnapshot, TokenBudget, ToolOutcomeKind, Urgency,
 };
 use provider::ReasoningLevel;
 use sdk::RunId;
@@ -98,6 +99,18 @@ impl ContextPort for FakeContextPort {
         Ok(())
     }
 
+    async fn append_accepted_input(
+        &self,
+        append: &AcceptedInputAppend,
+    ) -> Result<AcceptedInputReceipt, context::context_port::AcceptedInputError> {
+        Ok(AcceptedInputReceipt {
+            run_id: append.run_id.clone(),
+            step_id: append.step_id.clone(),
+            committed_revision: SessionRevision::new(4),
+            fingerprint: append.fingerprint.clone(),
+        })
+    }
+
     async fn append_and_persist(
         &self,
         append: &ContextAppend,
@@ -109,6 +122,25 @@ impl ContextPort for FakeContextPort {
             fingerprint: append.fingerprint.clone(),
         })
     }
+}
+
+#[tokio::test]
+async fn accepted_input_port_returns_typed_receipt() {
+    let port = FakeContextPort;
+    let accepted = AcceptedInputAppend {
+        session_id: SessionId::new("session-1"),
+        run_id: RunId::new("run-1"),
+        step_id: RunStepId::new("step-1"),
+        source_request_id: ContextRequestId::new("request-1"),
+        messages: vec![Message::user("accepted")],
+        fingerprint: ContentFingerprint::new("input-fingerprint"),
+    };
+
+    let receipt: AcceptedInputReceipt = port.append_accepted_input(&accepted).await.unwrap();
+    assert_eq!(receipt.run_id, accepted.run_id);
+    assert_eq!(receipt.step_id, accepted.step_id);
+    assert_eq!(receipt.committed_revision, SessionRevision::new(4));
+    assert_eq!(receipt.fingerprint, accepted.fingerprint);
 }
 
 #[tokio::test]
