@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
+use context::adapters::CommittedMemoryRetrieveAdapter;
 use context::application::ContextApplicationService;
 use context::domain::{
     CalendarDate, ContextAppend, ContextRequest, ContextRequestId, FinalizeCause, Language,
@@ -10,6 +11,7 @@ use context::ports::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
     PromptMaterialization, SessionRepository, SessionSnapshot,
 };
+use memory::api::{MemoryPort, NoOpMemory};
 use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
@@ -140,6 +142,33 @@ fn service() -> ContextApplicationService {
         Arc::new(FakePrompt),
         Arc::new(FakeMemory),
     )
+}
+
+#[tokio::test]
+async fn committed_memory_adapter_switches_from_noop_to_active_memory_for_context() {
+    let memory: Arc<RwLock<Arc<dyn MemoryPort>>> = Arc::new(RwLock::new(Arc::new(NoOpMemory)));
+    let source = CommittedMemoryRetrieveAdapter::new(Arc::clone(&memory));
+
+    let before = source.materialize(&request()).await.unwrap();
+    assert!(before.blocks.is_empty());
+
+    let active = memory::InMemoryMemory::new(memory::MemoryPolicy::default()).unwrap();
+    let entry = memory::MemoryEntry::new(
+        memory::MemoryId::now_v7(),
+        100,
+        memory::MemoryLayer::Project,
+        memory::MemoryCategory::Fact,
+        "active memory fact",
+        memory::MemorySource::User,
+    )
+    .unwrap();
+    active.write(entry).await.unwrap();
+    *memory.write().unwrap() = Arc::new(active);
+
+    let after = source.materialize(&request()).await.unwrap();
+    assert_eq!(after.blocks.len(), 1);
+    assert_eq!(after.blocks[0].kind, "memory_context");
+    assert!(after.blocks[0].content.contains("active memory fact"));
 }
 
 #[tokio::test]
