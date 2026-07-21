@@ -9,9 +9,11 @@ use crate::domain::{
 };
 
 pub mod context_port;
+pub mod session_management;
 pub mod session_snapshot_store;
 pub use crate::domain::PromptMaterializationError;
 pub use context_port::ContextPort;
+pub use session_management::SessionManagementPort;
 pub use session_snapshot_store::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
 
 pub trait MainContextFactory: Send + Sync {

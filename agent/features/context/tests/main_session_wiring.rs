@@ -218,6 +218,9 @@ fn build_harness() -> Harness {
             open_count: Arc::clone(&memory_opener.open_count),
             fail: Arc::clone(&memory_opener.fail),
         }),
+        session_management: Arc::new(context::adapters::AtomicBlobSessionManagement::new(
+            Arc::new(storage::FileSystemBlobAdapter::new(tmp.path()).unwrap()),
+        )),
         initial_session,
         initial_memory,
         context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(

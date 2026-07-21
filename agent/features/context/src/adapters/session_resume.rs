@@ -5,7 +5,7 @@ impl crate::application::MainSessionWiring {
         &self,
         session_id: &str,
     ) -> Result<SessionResumeProjection, SessionManagementError> {
-        let session = super::session_management::load_canonical(session_id).await?;
+        let session = self.session_management().load_canonical(session_id).await?;
         self.resume_prepared(session)
             .await
             .map_err(|error| SessionManagementError::Resume(error.to_string()))?;

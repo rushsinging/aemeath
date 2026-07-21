@@ -151,7 +151,7 @@ pub fn global_tool_results_dir() -> PathBuf {
 
 /// `~/.agents/tool-results/{session_id}/` — 某个 session 的工具结果子目录。
 ///
-/// 生命周期与 session 绑定：session 删除时一并清理。
+/// 工具结果按 session ID 归档，但删除 Session 不级联删除历史工具结果。
 pub fn session_tool_results_dir(session_id: &str) -> PathBuf {
     global_tool_results_dir().join(session_id)
 }

@@ -23,6 +23,7 @@ pub struct RuntimeBootstrapDependencies {
     reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
     policy: Arc<dyn policy::PolicyPort>,
     task_access: Arc<dyn task::TaskAccess>,
+    session_management: Arc<dyn context::SessionManagementPort>,
 }
 
 impl RuntimeBootstrapDependencies {
@@ -34,6 +35,7 @@ impl RuntimeBootstrapDependencies {
         reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
         policy: Arc<dyn policy::PolicyPort>,
         task_access: Arc<dyn task::TaskAccess>,
+        session_management: Arc<dyn context::SessionManagementPort>,
     ) -> Self {
         Self {
             workspace,
@@ -43,6 +45,7 @@ impl RuntimeBootstrapDependencies {
             reflection_history,
             policy,
             task_access,
+            session_management,
         }
     }
 
@@ -52,6 +55,10 @@ impl RuntimeBootstrapDependencies {
 
     pub fn task_access(&self) -> Arc<dyn task::TaskAccess> {
         self.task_access.clone()
+    }
+
+    pub fn session_management(&self) -> Arc<dyn context::SessionManagementPort> {
+        self.session_management.clone()
     }
 
     pub fn wiring(&self) -> Arc<context::MainSessionWiring> {
@@ -77,6 +84,7 @@ pub async fn from_args_with_workspace(
         reflection_history,
         policy,
         task_access,
+        session_management,
     } = dependencies;
 
     // Config query/writer come from the wiring gate-aware façade.
@@ -414,6 +422,7 @@ pub async fn from_args_with_workspace(
         wiring: wiring.clone(),
         config_query,
         config_writer,
+        session_management,
         event_sink_factory: Arc::new(|tx| {
             crate::application::chat::ChatEventSinkHandle::new(
                 crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
@@ -560,6 +569,7 @@ mod tests {
             task_wiring.persist(),
             config.reader(),
             config.participant(),
+            Arc::new(context::test_support::UnavailableSessionManagement),
             Arc::new(context::ProductionMainContextFactory::new(Arc::new(
                 context::NoOpCanonicalSessionWriter,
             ))),
@@ -574,6 +584,7 @@ mod tests {
             Arc::new(TestReflectionHistory),
             policy.clone(),
             task_wiring.access(),
+            Arc::new(context::test_support::UnavailableSessionManagement),
         );
         let client = from_args_with_workspace(args, dependencies)
             .await
