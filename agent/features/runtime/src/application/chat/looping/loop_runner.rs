@@ -453,8 +453,10 @@ where
                     .await;
                 }
 
-                handle_turn_boundary_config(
+                let config_reader = wiring.config_reader();
+                let _refresh = handle_turn_boundary_config(
                     &mut config_snapshot,
+                    config_reader.as_ref(),
                     turn_count,
                     &sink,
                     &mut messages,
@@ -462,7 +464,6 @@ where
                     &segment_id,
                 )
                 .await;
-
                 let bound_main_run = match wiring.bind_main_run().await {
                     Ok(bound) => bound,
                     Err(error) => {

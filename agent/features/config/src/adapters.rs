@@ -1,10 +1,11 @@
+use sha2::{Digest, Sha256};
 use share::config::domain::merge::{
     AgentsConfigPatch, ApiConfigPatch, ConfigPatch, LoggingConfigPatch, ModelConfigPatch,
     ModelsConfigPatch, PermissionConfigPatch, ToolsConfigPatch, UiConfigPatch,
 };
 use share::config::hooks::{default_timeout_secs, ClaudeSettingsConfig, HookEntry, HooksConfig};
 use share::config::PermissionModeConfig;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -221,6 +222,64 @@ impl CliArgsAdapter {
 }
 
 pub struct FileAdapter;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceFingerprints {
+    pub global: Option<[u8; 32]>,
+    pub claude: Option<[u8; 32]>,
+    pub project: Option<[u8; 32]>,
+}
+
+pub async fn source_fingerprints(
+    global_path: &Path,
+    claude_path: Option<&Path>,
+    project_path: Option<&Path>,
+) -> SourceFingerprints {
+    SourceFingerprints {
+        global: file_fingerprint(global_path).await,
+        claude: match claude_path {
+            Some(path) => file_fingerprint(path).await,
+            None => None,
+        },
+        project: match project_path {
+            Some(path) => file_fingerprint(path).await,
+            None => None,
+        },
+    }
+}
+
+pub fn config_fingerprint(config: &share::config::Config) -> Result<[u8; 32], ConfigAdapterError> {
+    fn canonicalize(value: serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Array(values) => {
+                serde_json::Value::Array(values.into_iter().map(canonicalize).collect())
+            }
+            serde_json::Value::Object(values) => {
+                let values: BTreeMap<_, _> = values
+                    .into_iter()
+                    .map(|(key, value)| (key, canonicalize(value)))
+                    .collect();
+                serde_json::to_value(values).expect("BTreeMap serializes")
+            }
+            other => other,
+        }
+    }
+
+    let value = serde_json::to_value(config).map_err(|_| ConfigAdapterError::Parse)?;
+    let bytes = serde_json::to_vec(&canonicalize(value)).map_err(|_| ConfigAdapterError::Parse)?;
+    Ok(Sha256::digest(bytes).into())
+}
+
+async fn file_fingerprint(path: &Path) -> Option<[u8; 32]> {
+    match tokio::fs::read(path).await {
+        Ok(bytes) => Some(Sha256::digest(bytes).into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            log::warn!(target: crate::LOG_TARGET, "无法读取配置源 {}: {}", path.display(), error);
+            Some([0; 32])
+        }
+    }
+}
 
 impl FileAdapter {
     pub async fn read(path: &Path) -> Result<Option<ConfigPatch>, ConfigAdapterError> {

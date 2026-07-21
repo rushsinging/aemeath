@@ -1,6 +1,7 @@
 use crate::adapters::{
-    encode_native_patch, merge_native_patches, CompatibilityAdapter, ConfigAdapterError,
-    ConfigValidator, EnvAdapter, EnvSource, FileAdapter, NativeConfigStore,
+    config_fingerprint, encode_native_patch, merge_native_patches, source_fingerprints,
+    CompatibilityAdapter, ConfigAdapterError, ConfigValidator, EnvAdapter, EnvSource, FileAdapter,
+    NativeConfigStore, SourceFingerprints,
 };
 use crate::contract::*;
 use async_trait::async_trait;
@@ -15,6 +16,7 @@ pub struct ConfigAppService {
     tx: watch::Sender<ConfigSnapshot>,
     inner: AsyncRwLock<Inner>,
     active: RwLock<ActiveConfig>,
+    source_fingerprints: RwLock<SourceFingerprints>,
     mutation_lock: tokio::sync::Mutex<()>,
     native_store: Option<NativeConfigStore>,
     env_source: std::sync::Arc<dyn EnvSource>,
@@ -143,6 +145,7 @@ impl ConfigAppService {
                 config: initial,
                 location: None,
             }),
+            source_fingerprints: RwLock::new(SourceFingerprints::default()),
             mutation_lock: tokio::sync::Mutex::new(()),
             native_store: None,
             env_source: std::sync::Arc::new(crate::adapters::ProcessEnv),
@@ -184,9 +187,18 @@ impl ConfigAppService {
         )
         .await
         .map_err(|error| format!("配置加载失败：{error:?}"))?;
+        let global_path = inner.global_path.clone();
+        let claude_path = inner.claude_project_settings_path.clone();
+        let project_path = inner.project_path.clone();
         drop(inner);
         let snapshot = ConfigSnapshot::new(config.clone());
         self.active.write().unwrap().config = config;
+        *self.source_fingerprints.write().unwrap() = source_fingerprints(
+            &global_path,
+            claude_path.as_deref(),
+            project_path.as_deref(),
+        )
+        .await;
         self.tx.send_replace(snapshot);
         Ok(())
     }
@@ -205,13 +217,13 @@ async fn load_config(
     if let Some(patch) = FileAdapter::read(global_path).await? {
         chain.push(patch);
     }
-    if let Some(path) = project_path {
-        if let Some(patch) = FileAdapter::read(path).await? {
+    if let Some(path) = claude_project_settings_path {
+        if let Some(patch) = CompatibilityAdapter::read_one(path).await? {
             chain.push(patch);
         }
     }
-    if let Some(path) = claude_project_settings_path {
-        if let Some(patch) = CompatibilityAdapter::read_one(path).await? {
+    if let Some(path) = project_path {
+        if let Some(patch) = FileAdapter::read(path).await? {
             chain.push(patch);
         }
     }
@@ -309,6 +321,7 @@ fn map_adapter_persist_error(error: ConfigAdapterError) -> ConfigPersistError {
     }
 }
 
+#[async_trait]
 impl ConfigReader for ConfigAppService {
     fn committed_snapshot(&self) -> ConfigSnapshot {
         self.tx.borrow().clone()
@@ -316,6 +329,86 @@ impl ConfigReader for ConfigAppService {
 
     fn subscribe_committed(&self) -> watch::Receiver<ConfigSnapshot> {
         self.tx.subscribe()
+    }
+
+    async fn refresh_if_sources_changed(&self) -> ConfigRefreshOutcome {
+        let _mutation = self.mutation_lock.lock().await;
+        let inner = self.inner.read().await;
+        let current_sources = source_fingerprints(
+            &inner.global_path,
+            inner.claude_project_settings_path.as_deref(),
+            inner.project_path.as_deref(),
+        )
+        .await;
+        if current_sources == *self.source_fingerprints.read().unwrap() {
+            return ConfigRefreshOutcome::Unchanged;
+        }
+
+        let project_key = self
+            .active
+            .read()
+            .unwrap()
+            .location
+            .as_ref()
+            .map(|location| location.key().to_owned())
+            .unwrap_or_else(|| "global".to_owned());
+        let loaded = load_config(
+            &inner.global_path,
+            inner.project_path.as_deref(),
+            inner.claude_project_settings_path.as_deref(),
+            &inner.cli_patch,
+            self.native_store.as_ref(),
+            &project_key,
+            self.env_source.as_ref(),
+        )
+        .await;
+        drop(inner);
+
+        let config = match loaded {
+            Ok(config) => config,
+            Err(error) => {
+                return ConfigRefreshOutcome::Rejected {
+                    error: refresh_error(error),
+                }
+            }
+        };
+        let candidate_fingerprint = match config_fingerprint(&config) {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                return ConfigRefreshOutcome::Rejected {
+                    error: refresh_error(error),
+                }
+            }
+        };
+        let active_fingerprint = match config_fingerprint(&self.active.read().unwrap().config) {
+            Ok(fingerprint) => fingerprint,
+            Err(error) => {
+                return ConfigRefreshOutcome::Rejected {
+                    error: refresh_error(error),
+                }
+            }
+        };
+        *self.source_fingerprints.write().unwrap() = current_sources;
+        if candidate_fingerprint == active_fingerprint {
+            return ConfigRefreshOutcome::Unchanged;
+        }
+
+        let revision = self.committed_snapshot().revision().next();
+        let snapshot = ConfigSnapshot::new_with_revision(revision, config.clone());
+        self.active.write().unwrap().config = config;
+        self.tx.send_replace(snapshot.clone());
+        ConfigRefreshOutcome::Reloaded { snapshot }
+    }
+}
+
+fn refresh_error(error: ConfigAdapterError) -> ConfigRefreshError {
+    match error {
+        ConfigAdapterError::Parse => ConfigRefreshError::Parse,
+        ConfigAdapterError::Invalid => ConfigRefreshError::Invalid,
+        ConfigAdapterError::Io
+        | ConfigAdapterError::PermissionDenied
+        | ConfigAdapterError::UnsupportedDurability
+        | ConfigAdapterError::CorruptTransaction => ConfigRefreshError::Io,
     }
 }
 
@@ -1041,5 +1134,88 @@ mod tests {
                 "sensitive api_key leaked into log message: {message}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn project_aemeath_overrides_claude_compatibility() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agents")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+        std::fs::write(
+            dir.path().join(".agents/aemeath.json"),
+            r#"{"model":{"name":"aemeath"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".claude/settings.json"),
+            r#"{"model":"claude"}"#,
+        )
+        .unwrap();
+        let service =
+            ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("global.json"));
+        service.load().await.unwrap();
+
+        assert_eq!(service.committed_snapshot().model_name(), "aemeath");
+    }
+
+    #[tokio::test]
+    async fn refresh_rejects_invalid_source_and_preserves_committed_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.json");
+        std::fs::write(&global, r#"{"model":{"name":"first"}}"#).unwrap();
+        let service = ConfigAppService::with_global_path(None, global.clone());
+        service.load().await.unwrap();
+        let before = service.committed_snapshot();
+
+        std::fs::write(&global, "not json").unwrap();
+        assert!(matches!(
+            service.refresh_if_sources_changed().await,
+            ConfigRefreshOutcome::Rejected {
+                error: ConfigRefreshError::Parse
+            }
+        ));
+        assert_eq!(service.committed_snapshot().model_name(), "first");
+        assert_eq!(service.committed_snapshot().revision(), before.revision());
+    }
+
+    #[tokio::test]
+    async fn refresh_does_not_publish_file_change_overridden_by_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.json");
+        std::fs::write(&global, r#"{"model":{"name":"first"}}"#).unwrap();
+        let service = ConfigAppService::with_global_path(None, global.clone()).with_env_source(
+            std::sync::Arc::new(FakeEnv(std::collections::HashMap::from([(
+                "AEMEATH_MODEL".into(),
+                "env-model".into(),
+            )]))),
+        );
+        service.load().await.unwrap();
+        let before = service.committed_snapshot();
+
+        std::fs::write(&global, r#"{"model":{"name":"second"}}"#).unwrap();
+        assert!(matches!(
+            service.refresh_if_sources_changed().await,
+            ConfigRefreshOutcome::Unchanged
+        ));
+        assert_eq!(service.committed_snapshot().model_name(), "env-model");
+        assert_eq!(service.committed_snapshot().revision(), before.revision());
+    }
+
+    #[tokio::test]
+    async fn refresh_publishes_to_watch_subscribers_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.json");
+        std::fs::write(&global, r#"{"model":{"name":"first"}}"#).unwrap();
+        let service = ConfigAppService::with_global_path(None, global.clone());
+        service.load().await.unwrap();
+        let mut changes = service.subscribe_committed();
+
+        std::fs::write(&global, r#"{"model":{"name":"second"}}"#).unwrap();
+        assert!(matches!(
+            service.refresh_if_sources_changed().await,
+            ConfigRefreshOutcome::Reloaded { .. }
+        ));
+        changes.changed().await.unwrap();
+        assert_eq!(changes.borrow().model_name(), "second");
     }
 }
