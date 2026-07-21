@@ -304,10 +304,14 @@ async fn production_context_append_reopens_from_atomic_blob() {
         .expect("canonical run_slices array");
     assert_eq!(slices.len(), 1);
     let outcome = slices[0]["steps"][0]["outcome"]
-        .as_array()
-        .expect("finalized compatibility outcome");
-    assert_eq!(outcome.len(), 1);
-    assert_eq!(outcome[0]["role"], "user");
+        .as_object()
+        .expect("finalized outcome projection");
+    assert_eq!(outcome["finalize_cause"], "Completed");
+    assert_eq!(outcome["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(outcome["messages"][0]["role"], "user");
+    assert_eq!(outcome["api_input_tokens"], 34);
+    assert_eq!(outcome["fingerprint"], "production-fingerprint");
+    assert_eq!(outcome["committed_revision"], 1);
 }
 
 /// The Runtime client's session id must match the wiring's committed session

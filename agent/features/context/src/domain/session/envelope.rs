@@ -4,9 +4,11 @@ use share::message::Message;
 use std::path::PathBuf;
 use task::TaskSnapshot;
 
+use crate::domain::{FinalizeCause, StepReceipt};
+
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
 
-pub const CURRENT_SESSION_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SESSION_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", content = "value", rename_all = "snake_case")]
@@ -71,12 +73,35 @@ pub struct ActiveCompactMarker {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FinalizedOutcomeProjection {
+    pub finalize_cause: FinalizeCause,
+    pub messages: Vec<Message>,
+    pub receipts: Vec<StepReceipt>,
+    pub api_input_tokens: Option<u64>,
+    pub fingerprint: String,
+    pub committed_revision: u64,
+}
+
+impl FinalizedOutcomeProjection {
+    pub fn compatibility(messages: Vec<Message>) -> Self {
+        Self {
+            finalize_cause: FinalizeCause::Completed,
+            messages,
+            receipts: Vec::new(),
+            api_input_tokens: None,
+            fingerprint: String::new(),
+            committed_revision: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommittedRunStep {
     pub step_id: String,
     #[serde(default)]
     pub accepted_input: Option<AcceptedInputProjection>,
     #[serde(default)]
-    pub outcome: Option<Vec<Message>>,
+    pub outcome: Option<FinalizedOutcomeProjection>,
 }
 
 impl CommittedRunStep {
@@ -91,12 +116,16 @@ impl CommittedRunStep {
         }
     }
 
-    pub fn outcome_only(step_id: impl Into<String>, outcome: Vec<Message>) -> Self {
+    pub fn outcome_only(step_id: impl Into<String>, outcome: FinalizedOutcomeProjection) -> Self {
         Self {
             step_id: step_id.into(),
             accepted_input: None,
             outcome: Some(outcome),
         }
+    }
+
+    pub fn compatibility_outcome_only(step_id: impl Into<String>, messages: Vec<Message>) -> Self {
+        Self::outcome_only(step_id, FinalizedOutcomeProjection::compatibility(messages))
     }
 }
 
@@ -212,7 +241,7 @@ impl CanonicalSession {
         &mut self,
         run_id: &str,
         step_id: &str,
-        messages: Vec<Message>,
+        outcome: FinalizedOutcomeProjection,
     ) {
         let cursor = RunStepCursor {
             run_id: run_id.to_string(),
@@ -224,16 +253,16 @@ impl CanonicalSession {
             .find(|slice| slice.run_id == run_id)
         {
             if let Some(step) = slice.steps.iter_mut().find(|step| step.step_id == step_id) {
-                step.outcome = Some(messages);
+                step.outcome = Some(outcome);
             } else {
                 slice
                     .steps
-                    .push(CommittedRunStep::outcome_only(step_id, messages));
+                    .push(CommittedRunStep::outcome_only(step_id, outcome));
             }
         } else {
             self.run_slices.push(CommittedRunSlice::new(
                 run_id,
-                vec![CommittedRunStep::outcome_only(step_id, messages)],
+                vec![CommittedRunStep::outcome_only(step_id, outcome)],
             ));
         }
         if self
@@ -266,7 +295,11 @@ impl CanonicalSession {
                         .accepted_input
                         .iter()
                         .flat_map(|input| input.messages.iter())
-                        .chain(step.outcome.iter().flat_map(|outcome| outcome.iter()))
+                        .chain(
+                            step.outcome
+                                .iter()
+                                .flat_map(|outcome| outcome.messages.iter()),
+                        )
                         .cloned()
                         .collect();
                     steps.push((
@@ -315,6 +348,89 @@ struct VersionedEnvelope {
     schema_version: u32,
     #[serde(flatten)]
     session: CanonicalSession,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2VersionedEnvelope {
+    #[allow(dead_code)]
+    schema_version: u32,
+    #[serde(flatten)]
+    session: V2CanonicalSession,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2CanonicalSession {
+    id: String,
+    #[serde(default)]
+    chats: Vec<ChatSegment>,
+    created_at: String,
+    updated_at: String,
+    #[serde(default)]
+    metadata: SessionMetadata,
+    #[serde(with = "task_snapshot_state")]
+    tasks: SnapshotState<TaskSnapshot>,
+    workspace: SnapshotState<PersistedWorkspaceContext>,
+    #[serde(default)]
+    revision: u64,
+    #[serde(default)]
+    compact: Option<ActiveCompactMarker>,
+    #[serde(default)]
+    run_slices: Vec<V2CommittedRunSlice>,
+    #[serde(default)]
+    committed_steps: Vec<CommittedStep>,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2CommittedRunSlice {
+    run_id: String,
+    #[serde(default)]
+    steps: Vec<V2CommittedRunStep>,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2CommittedRunStep {
+    step_id: String,
+    #[serde(default)]
+    accepted_input: Option<AcceptedInputProjection>,
+    #[serde(default)]
+    outcome: Option<Vec<Message>>,
+}
+
+impl From<V2CanonicalSession> for CanonicalSession {
+    fn from(session: V2CanonicalSession) -> Self {
+        Self {
+            id: session.id,
+            chats: session.chats,
+            created_at: session.created_at,
+            updated_at: session.updated_at,
+            metadata: session.metadata,
+            tasks: session.tasks,
+            workspace: session.workspace,
+            revision: session.revision,
+            compact: session.compact,
+            run_slices: session
+                .run_slices
+                .into_iter()
+                .map(|slice| {
+                    CommittedRunSlice::new(
+                        slice.run_id,
+                        slice
+                            .steps
+                            .into_iter()
+                            .map(|step| CommittedRunStep {
+                                step_id: step.step_id,
+                                accepted_input: step.accepted_input,
+                                outcome: step
+                                    .outcome
+                                    .map(FinalizedOutcomeProjection::compatibility),
+                            })
+                            .collect(),
+                    )
+                })
+                .collect(),
+            committed_steps: session.committed_steps,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -512,6 +628,14 @@ impl SessionCodec {
                     upgraded_from_legacy: false,
                 })
             }
+            Some(2) => {
+                let envelope: V2VersionedEnvelope = serde_json::from_value(value)
+                    .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))?;
+                Ok(DecodedSession {
+                    session: envelope.session.into(),
+                    upgraded_from_legacy: true,
+                })
+            }
             Some(1) => {
                 let legacy: V1VersionedEnvelope = serde_json::from_value(value)
                     .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))?;
@@ -552,9 +676,10 @@ impl SessionCodec {
                         step_id,
                         AcceptedInputProjection::new(segment.messages.clone(), run_id.clone(), 0),
                     ),
-                    super::SegmentKind::Compact => {
-                        CommittedRunStep::outcome_only(step_id, segment.messages.clone())
-                    }
+                    super::SegmentKind::Compact => CommittedRunStep::compatibility_outcome_only(
+                        step_id,
+                        segment.messages.clone(),
+                    ),
                 };
                 CommittedRunSlice::new(run_id, vec![step])
             })

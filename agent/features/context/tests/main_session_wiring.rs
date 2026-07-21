@@ -17,7 +17,7 @@ use context::application::main_session::{
 use context::domain::session::{CanonicalSession, SnapshotState};
 use context::domain::{
     AcceptedInputAppend, ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause,
-    RunStepId, SessionId, SessionRevision,
+    RunStepId, SessionId, SessionRevision, StepReceipt, ToolOutcomeKind,
 };
 use context::ports::ContextPort;
 use memory::{
@@ -381,6 +381,74 @@ async fn accepted_input_persists_and_is_visible_after_resume_without_outcome() {
         rebound.session().structured_messages()[0].text_content(),
         "accepted before model"
     );
+}
+
+#[tokio::test]
+async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let bound = h.wiring.bind_main_run().await.expect("bind source run");
+    let context: Arc<dyn ContextPort> = bound.context();
+    let source_id = bound.session().id.clone();
+    let workspace = bound.session().workspace.clone();
+    drop(bound);
+
+    context
+        .append_accepted_input(&AcceptedInputAppend {
+            session_id: SessionId::new(source_id.clone()),
+            run_id: RunId::new("run-finalized"),
+            step_id: RunStepId::new("step-finalized"),
+            source_request_id: ContextRequestId::new("request-finalized"),
+            messages: vec![Message::user("accepted input")],
+            fingerprint: ContentFingerprint::new("input-fingerprint"),
+        })
+        .await
+        .expect("append accepted input");
+    context
+        .append_and_persist(&ContextAppend {
+            session_id: SessionId::new(source_id.clone()),
+            expected_revision: SessionRevision::new(1),
+            run_id: RunId::new("run-finalized"),
+            step_id: RunStepId::new("step-finalized"),
+            source_request_id: ContextRequestId::new("request-finalized"),
+            finalize_cause: FinalizeCause::RunTerminated,
+            messages: vec![Message::user("finalized partial")],
+            receipts: vec![StepReceipt::agent(
+                "agent-call",
+                0,
+                ToolOutcomeKind::CancellationUnconfirmed,
+            )],
+            api_input_tokens: Some(34),
+            fingerprint: ContentFingerprint::new("outcome-fingerprint"),
+        })
+        .await
+        .expect("append finalized outcome");
+
+    let mut resumed = (*h.wiring.committed_session()).clone();
+    resumed.workspace = workspace;
+    h.wiring
+        .resume_prepared(resumed)
+        .await
+        .expect("resume finalized session");
+    let rebound = h.wiring.bind_main_run().await.expect("bind resumed run");
+    let step = &rebound.session().run_slices[0].steps[0];
+    assert_eq!(
+        rebound
+            .session()
+            .structured_messages()
+            .iter()
+            .map(|message| message.text_content())
+            .collect::<Vec<_>>(),
+        ["accepted input", "finalized partial"]
+    );
+    let outcome = step.outcome.as_ref().expect("finalized outcome");
+    assert_eq!(outcome.finalize_cause, FinalizeCause::RunTerminated);
+    assert_eq!(outcome.api_input_tokens, Some(34));
+    assert_eq!(
+        outcome.receipts[0].outcome(),
+        ToolOutcomeKind::CancellationUnconfirmed
+    );
+    assert_eq!(outcome.committed_revision, 2);
 }
 
 #[tokio::test]
