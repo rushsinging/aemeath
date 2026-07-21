@@ -246,6 +246,34 @@ async fn invalid_skill_root_returns_typed_read_error() {
 }
 
 #[tokio::test]
+async fn frontmatter_slash_projection_is_independent_from_identity_aliases() {
+    let project = fresh_project("explicit_slash_projection");
+    let root = agents_skills_dir(&project);
+    write_skill_fm(
+        &root.join("review"),
+        "SKILL.md",
+        "review-skill",
+        "review",
+        "aliases:\n  - identity-review\nslash_command: review\nslash_aliases:\n  - cr\n",
+        "review body",
+    );
+
+    let adapter = FilesystemSkillAdapter::new(fresh_global("explicit_slash_projection"));
+    let descriptor = adapter
+        .list(catalog_query(project))
+        .into_iter()
+        .find(|descriptor| descriptor.name() == "review-skill")
+        .expect("Skill must appear in catalog");
+
+    assert_eq!(
+        descriptor.aliases(),
+        &["identity-review".to_string(), "review".to_string()]
+    );
+    assert_eq!(descriptor.slash_command(), Some("review"));
+    assert_eq!(descriptor.slash_aliases(), &["cr".to_string()]);
+}
+
+#[tokio::test]
 async fn package_skill_entry_keeps_namespace() {
     let project = fresh_project("package_skill_entry");
     let package_root = agents_skills_dir(&project)
@@ -260,9 +288,19 @@ async fn package_skill_entry_keeps_namespace() {
 
     let adapter = FilesystemSkillAdapter::new(fresh_global("package_skill_entry"));
     let snapshot = adapter
-        .materialize_available(mat_query(project))
+        .materialize_available(mat_query(project.clone()))
         .await
         .expect("package SKILL.md must materialize");
+    let descriptors = adapter.list(catalog_query(project));
+    let skill = descriptors
+        .iter()
+        .find(|descriptor| descriptor.name() == "superpowers:brainstorming")
+        .expect("namespaced package Skill missing from catalog");
+    assert_eq!(
+        skill.slash_command(),
+        None,
+        "package Skill must not auto-register a Slash command"
+    );
     assert!(
         snapshot
             .fragments()

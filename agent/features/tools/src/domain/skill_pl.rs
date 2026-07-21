@@ -146,6 +146,11 @@ pub struct SkillDescriptor {
     description: String,
     source: SkillSource,
     aliases: Vec<String>,
+    /// 用户可输入的 Slash Command 名；`None` 表示该 Skill 仅供 agent 物化，
+    /// 不得自动注册进 Command Catalog。
+    slash_command: Option<String>,
+    /// 与 `slash_command` 同一投影的合法别名；不复用 Skill identity aliases。
+    slash_aliases: Vec<String>,
 }
 
 impl SkillDescriptor {
@@ -154,12 +159,16 @@ impl SkillDescriptor {
         description: impl Into<String>,
         source: SkillSource,
         aliases: Vec<String>,
+        slash_command: Option<String>,
+        slash_aliases: Vec<String>,
     ) -> Self {
         Self {
             name: name.into(),
             description: description.into(),
             source,
             aliases,
+            slash_command,
+            slash_aliases,
         }
     }
 
@@ -177,6 +186,14 @@ impl SkillDescriptor {
 
     pub fn aliases(&self) -> &[String] {
         &self.aliases
+    }
+
+    pub fn slash_command(&self) -> Option<&str> {
+        self.slash_command.as_deref()
+    }
+
+    pub fn slash_aliases(&self) -> &[String] {
+        &self.slash_aliases
     }
 }
 
