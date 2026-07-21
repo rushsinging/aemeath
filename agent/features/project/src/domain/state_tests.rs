@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::git::tests::FakeGit;
+use crate::domain::git::tests::{FakeGit, WorktreeAddCall};
 
 fn st(cwd: &str) -> WorkspaceState {
     WorkspaceState::new(PathBuf::from(cwd))
@@ -68,6 +68,115 @@ fn exit_pops_and_restores() {
     let prev = exit(&mut s, &git).unwrap();
     assert_eq!(prev.path_base, root);
     assert_eq!(s.path_base, prev.path_base);
+}
+
+#[test]
+fn exit_rejects_noncanonical_frame_path_as_invalid_output_and_keeps_state() {
+    let root = unique_temp_dir("exit_noncanonical_frame");
+    let nested = root.join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    let noncanonical = nested.join("..");
+    let common = root.join(".git");
+    let mut state = WorkspaceState::from_verified(
+        ProjectIdentity {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        root.clone(),
+        root.clone(),
+        WorktreeKind::Linked,
+    );
+    state.stack.push(WorkspaceFrame {
+        path_base: noncanonical,
+        workspace_root: root.clone(),
+        worktree_kind: WorktreeKind::Primary,
+    });
+    let mut git = FakeGit::default();
+    git.toplevel.insert(root.clone(), root.clone());
+    git.common_dir.insert(root.clone(), common);
+    let before = snapshot(&state);
+
+    let result = exit(&mut state, &git);
+
+    assert_eq!(
+        result,
+        Err(WorkspaceError::GitProbeFailed(
+            crate::GitProbeError::InvalidOutput
+        ))
+    );
+    assert_eq!(snapshot(&state), before);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn exit_rejects_frame_workspace_root_mismatch_as_invalid_output_and_keeps_state() {
+    let root = unique_temp_dir("exit_root_mismatch");
+    let common = root.join(".git");
+    let actual_root = root.join("actual");
+    let mut state = WorkspaceState::from_verified(
+        ProjectIdentity {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        root.clone(),
+        root.clone(),
+        WorktreeKind::Linked,
+    );
+    state.stack.push(WorkspaceFrame {
+        path_base: root.clone(),
+        workspace_root: root.join("expected"),
+        worktree_kind: WorktreeKind::Primary,
+    });
+    let mut git = FakeGit::default();
+    git.toplevel.insert(root.clone(), actual_root.clone());
+    git.common_dir.insert(actual_root, common);
+    let before = snapshot(&state);
+
+    let result = exit(&mut state, &git);
+
+    assert_eq!(
+        result,
+        Err(WorkspaceError::GitProbeFailed(
+            crate::GitProbeError::InvalidOutput
+        ))
+    );
+    assert_eq!(snapshot(&state), before);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn exit_rejects_frame_worktree_kind_mismatch_as_invalid_output_and_keeps_state() {
+    let root = unique_temp_dir("exit_kind_mismatch");
+    let common = root.join(".git");
+    let mut state = WorkspaceState::from_verified(
+        ProjectIdentity {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        root.clone(),
+        root.clone(),
+        WorktreeKind::Linked,
+    );
+    state.stack.push(WorkspaceFrame {
+        path_base: root.clone(),
+        workspace_root: root.clone(),
+        worktree_kind: WorktreeKind::Linked,
+    });
+    let mut git = FakeGit::default();
+    git.toplevel.insert(root.clone(), root.clone());
+    git.common_dir.insert(root.clone(), common);
+    let before = snapshot(&state);
+
+    let result = exit(&mut state, &git);
+
+    assert_eq!(
+        result,
+        Err(WorkspaceError::GitProbeFailed(
+            crate::GitProbeError::InvalidOutput
+        ))
+    );
+    assert_eq!(snapshot(&state), before);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -374,7 +483,7 @@ fn enter_with_stale_stack_clears_only_after_negative_probe() {
         worktree_kind: WorktreeKind::Primary,
     });
 
-    enter(&mut state, &git, Some(target), None).unwrap();
+    enter(&mut state, &git, Some(target), None, None).unwrap();
 
     assert_eq!(state.stack.len(), 1, "残栈清理后只压入当前 frame");
     assert_eq!(state.stack[0].workspace_root, PathBuf::from("/repo"));
@@ -394,7 +503,7 @@ fn enter_when_stale_stack_probe_fails_keeps_state_unchanged() {
     };
     state.stack.push(frame.clone());
 
-    let result = enter(&mut state, &git, Some("/target".into()), None);
+    let result = enter(&mut state, &git, Some("/target".into()), None, None);
 
     assert_eq!(
         result,
@@ -408,6 +517,23 @@ fn enter_when_stale_stack_probe_fails_keeps_state_unchanged() {
 }
 
 #[test]
+fn enter_with_stale_stack_and_missing_target_keeps_full_state_unchanged() {
+    let git = FakeGit::default();
+    let mut state = st("/repo");
+    state.stack.push(WorkspaceFrame {
+        path_base: "/stale".into(),
+        workspace_root: "/stale".into(),
+        worktree_kind: WorktreeKind::Primary,
+    });
+    let before = snapshot(&state);
+
+    let result = enter(&mut state, &git, None, None, None);
+
+    assert_eq!(result, Err(WorkspaceError::MissingPathAndBranch));
+    assert_eq!(snapshot(&state), before);
+}
+
+#[test]
 fn enter_rejects_nested_when_in_worktree() {
     let mut git = FakeGit::default();
     git.worktrees.insert(PathBuf::from("/repo")); // 当前 path_base 在 worktree 中
@@ -418,7 +544,7 @@ fn enter_rejects_nested_when_in_worktree() {
         worktree_kind: WorktreeKind::Primary,
     });
     assert!(matches!(
-        enter(&mut s, &git, Some("/other".into()), None),
+        enter(&mut s, &git, Some("/other".into()), None, None),
         Err(WorkspaceError::NestedWorktree {
             current_workspace_root,
             current_path_base,
@@ -518,13 +644,204 @@ fn switch_to_succeeds_same_repo() {
 }
 
 #[test]
+fn validate_in_repo_reports_invalid_probe_instead_of_repo_mismatch_for_non_git_target() {
+    let target = unique_temp_dir("non_git_target");
+    let mut git = FakeGit::default();
+    git.toplevel.insert(target.clone(), target.clone());
+    git.non_git.insert(target.clone());
+    let state = st("/repo");
+
+    let result = validate_in_repo(&state, &git, &target);
+
+    assert_eq!(
+        result,
+        Err(WorkspaceError::GitProbeFailed(
+            crate::GitProbeError::InvalidOutput
+        ))
+    );
+    let _ = std::fs::remove_dir_all(target);
+}
+
+#[test]
 fn enter_missing_path_and_branch_errors() {
     let git = FakeGit::default();
     let mut s = st("/repo");
     assert_eq!(
-        enter(&mut s, &git, None, None),
+        enter(&mut s, &git, None, None, None),
         Err(WorkspaceError::MissingPathAndBranch)
     );
+}
+
+#[test]
+fn resolve_worktree_path_treats_empty_path_as_missing() {
+    let state = st("/repo");
+
+    let resolved =
+        resolve_worktree_path(&state, Some(PathBuf::new()), Some("feature/path contract")).unwrap();
+
+    assert_eq!(
+        resolved,
+        PathBuf::from("/repo/.worktrees/feature-path-contract")
+    );
+}
+
+#[test]
+fn resolve_worktree_base_defaults_for_missing_or_blank_values() {
+    assert_eq!(resolve_worktree_base(None), DEFAULT_WORKTREE_BASE);
+    assert_eq!(resolve_worktree_base(Some("")), DEFAULT_WORKTREE_BASE);
+    assert_eq!(resolve_worktree_base(Some(" \t\n ")), DEFAULT_WORKTREE_BASE);
+}
+
+#[test]
+fn resolve_worktree_base_preserves_explicit_value() {
+    assert_eq!(resolve_worktree_base(Some(" release/v2 ")), " release/v2 ");
+}
+
+#[test]
+fn enter_with_empty_path_derives_target_and_forwards_default_base() {
+    let root = unique_temp_dir("enter_empty_path");
+    let expected_target = root.join(".worktrees/feature-empty-path");
+    let mut state = WorkspaceState::new(root.clone());
+    let git = FakeGit::default();
+
+    enter(
+        &mut state,
+        &git,
+        Some(PathBuf::new()),
+        Some("feature/empty path".into()),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(state.path_base, expected_target);
+    assert_eq!(
+        git.added.lock().unwrap().as_slice(),
+        &[WorktreeAddCall {
+            repo_root: root.clone(),
+            path: expected_target.clone(),
+            branch: "feature/empty path".into(),
+            base: DEFAULT_WORKTREE_BASE.into(),
+        }]
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn enter_with_blank_base_forwards_default_base() {
+    for (case, base) in [("empty", ""), ("whitespace", " \t\n ")] {
+        let root = unique_temp_dir(&format!("enter_blank_base_{case}"));
+        let expected_target = root.join(format!(".worktrees/feature-{case}"));
+        let mut state = WorkspaceState::new(root.clone());
+        let git = FakeGit::default();
+
+        enter(
+            &mut state,
+            &git,
+            None,
+            Some(format!("feature/{case}")),
+            Some(base.into()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            git.added.lock().unwrap().as_slice(),
+            &[WorktreeAddCall {
+                repo_root: root.clone(),
+                path: expected_target,
+                branch: format!("feature/{case}"),
+                base: DEFAULT_WORKTREE_BASE.into(),
+            }]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[test]
+fn enter_with_explicit_base_forwards_value_unchanged() {
+    let root = unique_temp_dir("enter_explicit_base");
+    let expected_target = root.join(".worktrees/feature-explicit");
+    let mut state = WorkspaceState::new(root.clone());
+    let git = FakeGit::default();
+
+    enter(
+        &mut state,
+        &git,
+        None,
+        Some("feature/explicit".into()),
+        Some(" release/v2 ".into()),
+    )
+    .unwrap();
+
+    assert_eq!(
+        git.added.lock().unwrap().as_slice(),
+        &[WorktreeAddCall {
+            repo_root: root.clone(),
+            path: expected_target,
+            branch: "feature/explicit".into(),
+            base: " release/v2 ".into(),
+        }]
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn enter_rejects_primary_target_as_not_linked_and_keeps_state_unchanged() {
+    let target = unique_temp_dir("primary_target");
+    let common = PathBuf::from("/repo/.git");
+    let mut git = FakeGit::default();
+    git.toplevel.insert(target.clone(), target.clone());
+    git.common_dir.insert(target.clone(), common);
+
+    let mut state = st("/repo");
+    let before = snapshot(&state);
+
+    let result = enter(&mut state, &git, Some(target.clone()), None, None);
+
+    assert_eq!(
+        result,
+        Err(WorkspaceError::NotLinkedWorktree {
+            path: target.clone()
+        })
+    );
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        format!(
+            "路径 {} 是当前仓库的 primary checkout，不是 linked worktree",
+            target.display()
+        )
+    );
+    assert_eq!(snapshot(&state), before);
+    let _ = std::fs::remove_dir_all(target);
+}
+
+#[test]
+fn enter_existing_linked_worktree_ignores_invalid_base_without_git_add() {
+    let root = unique_temp_dir("existing_linked_ignores_base");
+    let target = root.join("linked");
+    std::fs::create_dir_all(&target).unwrap();
+    let common = root.join(".git");
+    let mut git = FakeGit::default();
+    git.toplevel.insert(target.clone(), target.clone());
+    git.common_dir.insert(target.clone(), common);
+    git.worktrees.insert(target.clone());
+    let mut state = WorkspaceState::new(root.clone());
+
+    let frame = enter(
+        &mut state,
+        &git,
+        Some(target.clone()),
+        None,
+        Some("definitely-invalid-base".into()),
+    )
+    .unwrap();
+
+    assert!(git.added.lock().unwrap().is_empty());
+    assert_eq!(frame.path_base, root);
+    assert_eq!(state.path_base, target);
+    assert_eq!(state.workspace_root, target);
+    assert_eq!(state.worktree_kind, WorktreeKind::Linked);
+    assert_eq!(state.stack, vec![frame]);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -562,7 +879,7 @@ fn enter_happy_path_pushes_frame_and_swaps_cwd() {
 
     // Pass the temp dir as an absolute path → resolve_worktree_path returns it directly,
     // target.exists() is true → worktree_add is NOT called.
-    let frame = enter(&mut s, &git, Some(canonical_tmp.clone()), None).unwrap();
+    let frame = enter(&mut s, &git, Some(canonical_tmp.clone()), None, None).unwrap();
 
     // Returned frame holds the PRE-change state.
     assert_eq!(frame.path_base, saved_path_base);
@@ -612,7 +929,7 @@ fn enter_rejects_non_git_identity() {
     let mut s = st("/repo");
     s.worktree_kind = WorktreeKind::NonGit;
     assert_eq!(
-        enter(&mut s, &git, Some("/repo/wt".into()), None),
+        enter(&mut s, &git, Some("/repo/wt".into()), None, None),
         Err(WorkspaceError::UnsupportedForNonGit)
     );
     assert!(git.added.lock().unwrap().is_empty());
@@ -645,7 +962,7 @@ fn enter_promotes_worktree_kind_to_linked_and_captures_previous() {
     let mut s = st("/repo");
     s.worktree_kind = WorktreeKind::Primary;
 
-    let frame = enter(&mut s, &git, Some(canonical_tmp.clone()), None).unwrap();
+    let frame = enter(&mut s, &git, Some(canonical_tmp.clone()), None, None).unwrap();
 
     assert_eq!(
         frame.worktree_kind,

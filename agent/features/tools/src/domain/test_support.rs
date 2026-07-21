@@ -125,6 +125,7 @@ impl WorkspaceControl for FakeWorkspace {
         &self,
         _path: Option<PathBuf>,
         _branch: Option<String>,
+        _base: Option<String>,
     ) -> Result<WorkspaceFrame, WorkspaceError> {
         Err(WorkspaceError::UnsupportedForNonGit)
     }
