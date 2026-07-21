@@ -3,9 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::domain::{
-    AppendReceipt, CompactOutcome, CompactRequest, CompactionDecision, ContextAppend,
-    ContextAppendError, ContextPortError, ContextRequest, ContextWindow, ManualCompactRequest,
-    SessionId, SystemBlock,
+    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
+    CompactRequest, CompactionDecision, ContextAppend, ContextAppendError, ContextPortError,
+    ContextRequest, ContextWindow, ManualCompactRequest, SessionId, SystemBlock,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
@@ -117,6 +117,13 @@ impl ContextPort for ContextApplicationService {
 
     async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
         self.session.clear(session_id).await
+    }
+
+    async fn append_accepted_input(
+        &self,
+        append: &AcceptedInputAppend,
+    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        self.session.append_accepted_input(append).await
     }
 
     async fn append_and_persist(

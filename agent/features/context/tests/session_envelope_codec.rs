@@ -70,6 +70,36 @@ fn structured_projection_flattens_steps_once() {
 }
 
 #[test]
+fn accepted_only_step_round_trips_without_outcome_or_runtime_state() {
+    let mut session = CanonicalSession::fixture("accepted-only");
+    session.run_slices = vec![CommittedRunSlice::new(
+        "run",
+        vec![CommittedRunStep::accepted_only(
+            "step",
+            AcceptedInputProjection::new(vec![Message::user("durable input")], "fp", 1),
+        )],
+    )];
+    session.revision = 1;
+
+    let decoded = decode_session(&SessionCodec::encode(&session).unwrap()).unwrap();
+    let step = &decoded.session.run_slices[0].steps[0];
+    assert_eq!(
+        step.accepted_input.as_ref().unwrap().messages[0].text_content(),
+        "durable input"
+    );
+    assert!(step.outcome.is_none());
+    assert_eq!(
+        decoded
+            .session
+            .structured_messages()
+            .iter()
+            .map(|message| message.text_content())
+            .collect::<Vec<_>>(),
+        ["durable input"]
+    );
+}
+
+#[test]
 fn v1_normal_segment_upgrades_to_single_synthetic_step() {
     let bytes = serde_json::to_vec(&json!({
         "schema_version": 1,
