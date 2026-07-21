@@ -59,7 +59,7 @@ where
                 mut context_size,
                 workspace,
                 wiring,
-                session_id,
+                mut session_id,
                 read_files,
                 session_reminders,
                 agent_runner,
@@ -193,8 +193,22 @@ where
                             }
                         }
                     } else {
-                        let (text, is_error) =
-                            super::idle_commands::execute_session(&args, &session_id).await;
+                        let port = wiring.session_management();
+                        let args = args.clone();
+                        let active_session_id = session_id.clone();
+                        let result = wiring
+                            .with_shared(async move {
+                                super::idle_commands::execute_session(
+                                    &args,
+                                    &active_session_id,
+                                    port.as_ref(),
+                                )
+                                .await
+                            })
+                            .await;
+                        let (text, is_error) = result.unwrap_or_else(|_| {
+                            ("Session is being switched, please retry.".to_string(), true)
+                        });
                         let _ = sink
                             .send_event(RuntimeStreamEvent::CommandResultText {
                                 text,
@@ -230,6 +244,7 @@ where
                     .await
                     {
                         Ok(projection) => {
+                            session_id = projection.session_id.clone();
                             messages = projection.messages.clone();
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::SessionResumed {
@@ -455,10 +470,17 @@ where
                         continue;
                     }
                 };
-                let context_session_id = bound_main_run.session().id.clone();
+                let bound_session_id = bound_main_run.session().id.clone();
                 let context = crate::application::context_coordination::ContextCoordinator::new(
                     bound_main_run.context(),
                 );
+                if session_id != bound_session_id {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "Runtime Session ID 与 Context 提交状态不一致，采用 Context Session ID"
+                    );
+                    session_id = bound_session_id;
+                }
                 let cancel = CancellationToken::new();
                 let mut run = Run::new(RunSpec::main(), None);
                 let run_memory = bound_main_run.memory_arc();
@@ -488,7 +510,6 @@ where
                     context_size,
                     workspace: &workspace,
                     session_id: &session_id,
-                    context_session_id: &context_session_id,
                     read_files: &read_files,
                     session_reminders: &session_reminders,
                     agent_runner: &agent_runner,

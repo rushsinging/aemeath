@@ -241,7 +241,6 @@ fn build_compact_test_port<'a>(
         context_size: 128_000,
         workspace: &harness.workspace,
         session_id: "pre-compact-test",
-        context_session_id: "pre-compact-test",
         read_files: &harness.read_files,
         session_reminders: &harness.session_reminders,
         agent_runner: &None,

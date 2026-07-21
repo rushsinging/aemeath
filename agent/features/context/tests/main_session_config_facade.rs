@@ -232,6 +232,9 @@ async fn build_facade_harness(
             last_key,
             fail,
         }),
+        session_management: Arc::new(context::adapters::AtomicBlobSessionManagement::new(
+            Arc::new(storage::FileSystemBlobAdapter::new(tmp.path()).unwrap()),
+        )),
         initial_session,
         initial_memory,
         context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(

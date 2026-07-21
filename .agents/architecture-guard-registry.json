@@ -9,6 +9,22 @@
   },
   "entries": [
     {
+      "id": "policy.session-management.composition-ownership",
+      "guard": "check-session-management-ownership.sh",
+      "module": "context",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/context/src"
+      },
+      "classification": "target_capability_policy",
+      "owner": "context",
+      "reason": "Composition alone constructs Session AtomicBlob backing; Context and Runtime consume the same SessionManagementPort Arc",
+      "tracking_issue": 1292,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Composition-only Session backing ownership policy",
+      "status": "active"
+    },
+    {
       "id": "policy.cargo.capability-dependency-matrix",
       "guard": "check-cargo-dependency-graph.sh",
       "module": "repository",
