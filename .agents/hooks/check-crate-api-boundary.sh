@@ -188,6 +188,18 @@ ROOT_ACCESS_ALLOW = {
           "PolicyRequest", "PolicyRequestError", "StandardPolicy",
       },
     "workflow": set(),
+    # guard-registry:policy.hook.crate-root-facade
+    "hook": {
+        "Dispatcher", "MAX_ATTEMPTS", "classify_directive", "ClassifyError", "HookClass",
+        "HookCommand", "HookDispatchContext", "HookDirective",
+        "HookDisplayMessage", "HookDisplayMessageKind", "HookExecution",
+        "HookExecutionStatus", "HookFailurePolicy", "HookInvocation", "HookMatcher",
+        "HookOutcome", "HookPoint", "HookPointMetadata", "HookPort", "HookReason",
+        "HookSubscription", "InstructionsInput", "PermissionInput", "PostToolBatchInput",
+        "PostToolUseFailureInput", "PostToolUseInput", "PreToolUseInput", "ProtocolViolation",
+        "SubRunInput", "SubRunStopInput", "SubscriptionError", "TaskInput", "StopInput",
+        "build_dispatcher",
+    },
     "project": PROJECT_ROOT_ACCESS_ALLOW,
     "tools": TOOLS_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。

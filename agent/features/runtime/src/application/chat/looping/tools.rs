@@ -1,17 +1,15 @@
 use crate::application::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::chat::looping::agent_calls::execute_agent_calls;
 use crate::application::chat::looping::ask_user::ask_user;
-use crate::application::chat::looping::hook_ui::HookUi;
+use crate::application::chat::looping::hook_ui::dispatch_hook;
 use crate::application::chat::looping::non_agent::execute_non_agent;
 use crate::application::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
 use crate::application::tool_coordination::{prepare_tool_round, restore_tool_call_order};
-use hook::api::{HookData, ToolHookData};
+use hook::{HookInvocation, HookPort, PermissionInput, PostToolUseFailureInput, PostToolUseInput};
 
 use sdk::ids::ToolCallId;
-use share::config::hooks::HookEvent;
-use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::ToolOutcome;
@@ -28,11 +26,10 @@ pub(crate) async fn execute_tool_round<S>(
     step_id: &sdk::RunStepId,
     agent: &Agent,
     sink: &S,
-    hook_ui: &HookUi<S>,
-    hook_runner: &hook::api::HookRunner,
+    hook_port: &Arc<dyn HookPort>,
     cancel: &CancellationToken,
     language: &str,
-    workspace_root: &Path,
+    workspace_root: &std::path::Path,
     guarded_calls: &[(ToolCall, crate::application::loop_engine::ToolGuardDecision)],
 ) -> (Vec<ToolExecution>, Vec<ToolCallId>)
 where
@@ -71,8 +68,8 @@ where
         &prepared.denied,
         sink,
         context,
-        hook_ui,
-        hook_runner,
+        hook_port,
+        cancel,
         workspace_root,
     )
     .await;
@@ -116,8 +113,7 @@ where
     let ask_user_results = ask_user(
         context,
         sink,
-        hook_ui,
-        hook_runner,
+        hook_port,
         &ask_user_suspensions,
         cancel,
         workspace_root,
@@ -127,11 +123,13 @@ where
         context,
         agent,
         sink,
-        hook_ui,
-        hook_runner,
+        hook_port,
         &non_agent_approved,
         language,
         workspace_root,
+        policy,
+        run_id,
+        step_id,
     )
     .await;
     let agent_results = execute_agent_calls(
@@ -142,10 +140,13 @@ where
         &agent.agent_semaphore,
         &agent.workspace_persist,
         sink,
-        hook_ui,
-        hook_runner,
+        hook_port,
         cancel,
         workspace_root,
+        &catalog,
+        policy,
+        run_id,
+        step_id,
     )
     .await;
 
@@ -184,9 +185,9 @@ async fn deny_tool_calls<S>(
     denied: &[crate::application::tool_coordination::DeniedToolCall],
     sink: &S,
     context: &RuntimeTurnContext,
-    hook_ui: &HookUi<S>,
-    hook_runner: &hook::api::HookRunner,
-    workspace_root: &Path,
+    hook_port: &Arc<dyn HookPort>,
+    cancel: &CancellationToken,
+    workspace_root: &std::path::Path,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -198,18 +199,17 @@ where
             "tool call denied by policy: name={}, reason={}, runtime_id={}, provider_id={}",
             call.call.name, call.reason, call.call.id, call.call.provider_id,
         );
-        let _ = hook_ui
-            .run_plain(
-                hook_runner,
-                HookEvent::PermissionDenied,
-                Some(&call.call.name),
-                HookData::Permission(hook::api::PermissionHookData {
-                    tool_name: call.call.name.clone(),
-                    permission_rule: "deny".to_string(),
-                }),
-                workspace_root,
-            )
-            .await;
+        let _ = dispatch_hook(
+            hook_port,
+            sink,
+            HookInvocation::PermissionDenied(PermissionInput {
+                tool_name: call.call.name.clone(),
+                permission_rule: "deny".to_string(),
+            }),
+            workspace_root,
+            cancel,
+        )
+        .await;
         // 发送 ToolCall 事件，让 pending 占位行获取 LLM 的 tool_use_id，
         // 后续 ToolResult 中的 mark_tool_header_done 才能精确匹配（Bug #52）。
         let call_id = call.call.id.clone();
@@ -249,82 +249,44 @@ where
 
 pub(crate) async fn run_post_tool_hooks<S>(
     sink: &S,
-    hook_ui: &HookUi<S>,
-    hook_runner: &hook::api::HookRunner,
+    hook_port: &Arc<dyn HookPort>,
     call: &ToolCall,
     execution: &ToolExecution,
-    workspace_root: &Path,
     cancel: &CancellationToken,
+    workspace_root: &std::path::Path,
 ) where
     S: ChatEventSink,
 {
     let output = &execution.outcome.text;
     let is_error = execution.outcome.is_error;
-    emit_json_hook_context(
+
+    let _ = dispatch_hook(
+        hook_port,
         sink,
-        hook_ui
-            .run_json_with_cancel(
-                hook_runner,
-                HookEvent::PostToolUse,
-                Some(&call.name),
-                HookData::Tool(ToolHookData {
-                    tool_name: call.name.clone(),
-                    tool_input: call.input.clone(),
-                    tool_output: Some(output.to_string()),
-                    is_error: Some(is_error),
-                }),
-                workspace_root,
-                cancel,
-            )
-            .await,
+        HookInvocation::PostToolUse(PostToolUseInput {
+            tool_name: call.name.clone(),
+            tool_input: call.input.clone(),
+            tool_output: output.to_string(),
+            is_error,
+        }),
+        workspace_root,
+        cancel,
     )
     .await;
+
     if is_error {
-        emit_json_hook_context(
+        let _ = dispatch_hook(
+            hook_port,
             sink,
-            hook_ui
-                .run_json_with_cancel(
-                    hook_runner,
-                    HookEvent::PostToolUseFailure,
-                    Some(&call.name),
-                    HookData::Tool(ToolHookData {
-                        tool_name: call.name.clone(),
-                        tool_input: call.input.clone(),
-                        tool_output: Some(output.to_string()),
-                        is_error: Some(is_error),
-                    }),
-                    workspace_root,
-                    cancel,
-                )
-                .await,
+            HookInvocation::PostToolUseFailure(PostToolUseFailureInput {
+                tool_name: call.name.clone(),
+                tool_input: call.input.clone(),
+                error: output.to_string(),
+            }),
+            workspace_root,
+            cancel,
         )
         .await;
-    }
-}
-
-pub(crate) async fn emit_json_hook_context<S>(
-    sink: &S,
-    hook_results: Vec<(
-        share::config::hooks::HookEntry,
-        hook::api::HookResult,
-        Option<hook::api::HookJsonOutput>,
-    )>,
-) where
-    S: ChatEventSink,
-{
-    for (_entry, _result, json_output) in hook_results {
-        if let Some(json) = json_output {
-            if let Some(ctx) = json.additional_context {
-                let _ = sink
-                    .send_event(RuntimeStreamEvent::SystemMessage(ctx))
-                    .await;
-            }
-            if let Some(msg) = json.system_message {
-                let _ = sink
-                    .send_event(RuntimeStreamEvent::SystemMessage(msg))
-                    .await;
-            }
-        }
     }
 }
 
@@ -418,18 +380,37 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
 mod tests {
     use super::{execute_tool_round, tool_results_for_api};
     use crate::application::agent::{Agent, ToolCall, ToolExecution};
-    use crate::application::chat::looping::hook_ui::HookUi;
     use crate::application::chat::looping::{
         ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext,
     };
     use crate::application::loop_engine::ToolGuardDecision;
     use async_trait::async_trait;
+    use hook::{HookInvocation, HookOutcome, HookPort};
     use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
     use serde_json::Value;
     use share::message::ContentBlock;
     use std::sync::{Arc, Mutex};
+    use tokio_util::sync::CancellationToken;
     use tools::ToolOutcome;
     use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
+
+    /// A test HookPort that always returns Continue.
+    struct NoOpHookPort;
+
+    #[async_trait]
+    impl HookPort for NoOpHookPort {
+        async fn dispatch(
+            &self,
+            _invocation: HookInvocation,
+            _cancellation: &CancellationToken,
+        ) -> HookOutcome {
+            HookOutcome::proceed()
+        }
+    }
+
+    fn noop_hook_port() -> Arc<dyn HookPort> {
+        Arc::new(NoOpHookPort)
+    }
 
     #[derive(Clone, Default)]
     struct RecordingSink {
@@ -525,17 +506,7 @@ mod tests {
         let ctx = test_tool_context();
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
-        let hook_ui = HookUi::new(sink.clone());
-        let mut events = std::collections::HashMap::new();
-        events.insert(
-            share::config::hooks::HookEvent::PreToolUse,
-            vec![share::config::hooks::HookEntry {
-                matcher: "UnsafeLifecycle".to_string(),
-                command: "exit 2".to_string(),
-                timeout: 5,
-            }],
-        );
-        let hook_runner = hook::api::HookRunner::new(share::config::hooks::HooksConfig { events });
+        let hook_port = noop_hook_port();
         let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
         let call = lifecycle_call(0);
@@ -551,8 +522,7 @@ mod tests {
             &sdk::RunStepId::new_v7(),
             &agent,
             &sink,
-            &hook_ui,
-            &hook_runner,
+            &hook_port,
             &tokio_util::sync::CancellationToken::new(),
             "en",
             &workspace_root,
@@ -580,8 +550,7 @@ mod tests {
         let ctx = test_tool_context();
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
-        let hook_ui = HookUi::new(sink.clone());
-        let hook_runner = hook::api::HookRunner::new(Default::default());
+        let hook_port = noop_hook_port();
         let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
         let calls = vec![lifecycle_call(0), lifecycle_call(1)];
@@ -604,8 +573,7 @@ mod tests {
             &sdk::RunStepId::new_v7(),
             &agent,
             &sink,
-            &hook_ui,
-            &hook_runner,
+            &hook_port,
             &tokio_util::sync::CancellationToken::new(),
             "en",
             &workspace_root,

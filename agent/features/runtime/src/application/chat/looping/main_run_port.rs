@@ -12,7 +12,6 @@ use crate::application::agent::{Agent, ToolCall};
 use crate::application::chat::looping::finalize::{
     finish_completed_loop, run_stop_hook_before_finish,
 };
-use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::application::chat::looping::post_batch::run_post_tool_batch;
 use crate::application::chat::looping::reflection::{
@@ -168,7 +167,7 @@ where
     pub(crate) task_access: &'a Arc<dyn task::TaskAccess>,
     pub(crate) max_tool_concurrency: usize,
     pub(crate) agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
-    pub(crate) hook_runner: &'a hook::api::HookRunner,
+    pub(crate) hook_runner: &'a std::sync::Arc<dyn hook::HookPort>,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
     pub(crate) memory: &'a Arc<dyn memory::MemoryPort>,
     pub(crate) reflection_history: &'a Arc<dyn memory::api::ReflectionHistoryStore>,
@@ -663,7 +662,6 @@ where
         if let Some(feedback) = run_stop_hook_before_finish(
             &outcome,
             self.sink,
-            &HookUi::new(self.sink.clone()),
             self.hook_runner,
             self.session_id,
             self.language,
@@ -898,7 +896,6 @@ where
             step_id,
             &agent,
             self.sink,
-            &HookUi::new(self.sink.clone()),
             self.hook_runner,
             cancel,
             self.language,
@@ -965,9 +962,9 @@ where
         }
         run_post_tool_batch(
             self.sink,
-            &HookUi::new(self.sink.clone()),
             self.hook_runner,
             &agent.runtime_cancellation,
+            raw_calls.len(),
             self.turn_count,
             &self.current_cwd(),
         )

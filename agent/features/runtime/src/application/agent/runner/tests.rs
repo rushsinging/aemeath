@@ -32,6 +32,27 @@ fn empty_skill_materializer() -> Arc<dyn tools::SkillMaterializationPort> {
     Arc::new(EmptySkillMaterializer)
 }
 
+/// 测试用 NoOp `HookPort`：对每次 dispatch 返回 `HookOutcome::proceed()`。
+///
+/// 满足 #926 要求（test-only scripted Dispatcher 或 runtime-local port fake），
+/// 测试用空 HookPort。
+struct NoOpHookPort;
+
+#[async_trait]
+impl hook::HookPort for NoOpHookPort {
+    async fn dispatch(
+        &self,
+        _invocation: hook::HookInvocation,
+        _cancellation: &tokio_util::sync::CancellationToken,
+    ) -> hook::HookOutcome {
+        hook::HookOutcome::proceed()
+    }
+}
+
+fn noop_hook_port() -> Arc<dyn hook::HookPort> {
+    Arc::new(NoOpHookPort)
+}
+
 struct FixedSkillMaterializer;
 
 #[async_trait]
@@ -140,7 +161,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
         api_timeout_secs: 30,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         agents_config: test_agents_config(),
-        hook_runner: hook::api::HookRunner::empty(),
+        hook_runner: noop_hook_port(),
         reasoning: false,
         models_config: test_models_config(),
         config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
@@ -1079,7 +1100,7 @@ fn test_runner(error: ProviderError) -> CliAgentRunner {
         api_timeout_secs: 30,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         agents_config: test_agents_config(),
-        hook_runner: hook::api::HookRunner::empty(),
+        hook_runner: noop_hook_port(),
         reasoning: false,
         models_config: test_models_config(),
         config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
@@ -1113,7 +1134,7 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
         api_timeout_secs: 30,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         agents_config: test_agents_config(),
-        hook_runner: hook::api::HookRunner::empty(),
+        hook_runner: noop_hook_port(),
         reasoning: false,
         models_config: test_models_config(),
         config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(

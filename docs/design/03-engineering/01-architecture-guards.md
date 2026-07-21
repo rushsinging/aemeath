@@ -49,6 +49,7 @@
 | 6e | `check-provider-usage-capability.sh` | Provider PL 语义 | pull-stream usage 禁止把未报告字段默认成零；OpenAI-compatible reasoning maximum 与 legacy clamp 必须从唯一 `ReasoningCapability` 派生 |
 | 6f | `check-provider-driver-acl.sh` | Provider Driver ACL | driver 解析、协议族/API style 选择与实现配置必须留在 Provider；Runtime/Composition/CLI 禁止解析 driver 或引用内部配置 |
 | 6g | `check-session-management-ownership.sh` | Context / Composition 构造权 | Composition 唯一创建 Session AtomicBlob backing 与 `SessionManagementPort`；Context / Runtime 只消费同一注入 Port，禁止 Context filesystem 构造、legacy free-function façade 或 Runtime 直连 façade |
+| 6h | `check-hook-target-facade.sh` | Hook / Runtime 边界 | Hook 只从 crate-root 发布稳定 PL 与 `HookPort`；禁止 `hook::api`、legacy re-export 与 Runtime 生产消费 `hook::api::*` |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
 | 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
@@ -261,6 +262,14 @@
   - 对仍存在的 `agent/features/*/src/api.rs`，`pub use crate::<segment>` 仅可指向 `contract` / `gateway`；
   - `CONTEXT_FORBIDDEN_PATHS` 任一路径复活立即失败。
 - **例外**：无 path 级白名单。Context、Policy 与 Storage root 集合都是结构化 façade policy，不是 migration exception。
+
+### 6h. check-hook-target-facade.sh
+
+- **功能**：锁定 #926 后 Hook 的 crate-root Published Language 与 Runtime 消费边界。
+- **扫描范围**：`agent/features/hook/src/lib.rs`、不存在性检查 `agent/features/hook/src/api.rs`，以及全部 `agent/features/runtime/src/**/*.rs` 生产源（跳过 `*_tests.rs`、`tests.rs` 与 `tests/`）。
+- **不变量**：Hook crate-root 只能发布稳定 PL、`HookPort`、`HookDispatchContext` 与生产 Dispatcher；禁止 `pub mod api`、`api.rs` 物理路径和 `adapters::legacy` re-export；Runtime 必须经登记的 Hook crate-root façade消费，禁止 `hook::api::*`。
+- **白名单预算**：迁移例外、路径/整文件豁免、行级 allow、`grep -v` / exclude / skip 均为 `0`；`policy.hook.target-facade` 与 `policy.hook.crate-root-facade` 分别是 Target façade/re-export policy，不计 migration debt。
+- **故意违规证据**：`check-hook-target-facade-tests.sh` 在隔离副本依次注入 `pub mod api`、legacy re-export 与 Runtime `hook::api` import；每类反例均以 exit 2 被单 Guard 拦截，恢复后单 Guard clean pass。总编排 fast profile 同时执行该 Guard。
 
 ### 6t. check-task-persistence-capability.sh
 

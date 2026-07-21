@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use hook::api::HookRunner;
+use hook::HookPort;
 use provider::RequestSystemBlock;
 use tools::{AgentRunner, ToolCatalogPort, ToolExecutionPort};
 
@@ -31,7 +31,7 @@ pub struct TuiLaunchContext {
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub memory_config: sdk::MemoryConfigView,
     pub skills_map: std::collections::HashMap<String, sdk::SkillView>,
-    pub hook_runner: HookRunner,
+    pub hook_runner: Arc<dyn HookPort>,
     /// 本地 session reminders（用于 TUI 展示，独立于 RuntimeHandle 实例）
     pub session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,
     /// #567：项目工作区根路径（替代 client.project() RPC）

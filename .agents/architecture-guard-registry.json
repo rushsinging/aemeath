@@ -599,6 +599,38 @@
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent narrow Task facade policy",
       "status": "active"
+    },
+    {
+      "id": "policy.hook.target-facade",
+      "guard": "check-hook-target-facade.sh",
+      "module": "hook",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/hook/src"
+      },
+      "classification": "target_capability_policy",
+      "owner": "hook",
+      "reason": "Hook exposes only its crate-root Published Language and HookPort; Runtime must not restore the legacy api facade",
+      "tracking_issue": 926,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Hook crate-root facade policy",
+      "status": "active"
+    },
+    {
+      "id": "policy.hook.crate-root-facade",
+      "guard": "check-crate-api-boundary.sh",
+      "module": "hook",
+      "scope": {
+        "kind": "symbol",
+        "value": "ROOT_ACCESS_ALLOW.hook"
+      },
+      "classification": "target_capability_policy",
+      "owner": "hook",
+      "reason": "Cross-feature consumers use only the registered Hook crate-root Published Language",
+      "tracking_issue": 926,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent narrow Hook facade policy",
+      "status": "active"
     }
   ]
 }

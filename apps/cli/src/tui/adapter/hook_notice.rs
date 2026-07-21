@@ -19,6 +19,23 @@ pub fn hook_event_notice(event: &sdk::HookEventView) -> Option<HookNoticeContent
     }
 }
 
+pub fn hook_message_notice(message: &sdk::HookMessageView) -> Option<HookNoticeContent> {
+    let body = non_empty(&message.text)?;
+    let kind = match message.kind {
+        sdk::HookMessageKindView::AdditionalContext => "context",
+        sdk::HookMessageKindView::SystemMessage => "message",
+    };
+    Some(HookNoticeContent {
+        kind: HookNoticeKind::Info,
+        title: format!("Hook {kind}: {}", message.point),
+        body,
+        details: Some(format!(
+            "Source: {}\nExecution: {}\nAttempt: {}",
+            message.source, message.execution_ordinal, message.attempt
+        )),
+    })
+}
+
 pub fn hook_spinner_phase(
     event: &sdk::HookEventView,
 ) -> crate::tui::model::conversation::spinner::SpinnerPhase {
@@ -135,6 +152,40 @@ mod tests {
             reason: Some("why".to_string()),
             additional_context: Some("ctx".to_string()),
         }
+    }
+
+    #[test]
+    fn additional_context_message_builds_info_notice_with_metadata() {
+        let notice = hook_message_notice(&sdk::HookMessageView {
+            point: "PreToolUse".to_string(),
+            source: "matcher:Bash".to_string(),
+            execution_ordinal: 2,
+            attempt: 3,
+            kind: sdk::HookMessageKindView::AdditionalContext,
+            text: "Use formatter".to_string(),
+        })
+        .expect("non-empty hook message must render");
+
+        assert_eq!(notice.kind, HookNoticeKind::Info);
+        assert_eq!(notice.title, "Hook context: PreToolUse");
+        assert_eq!(notice.body, "Use formatter");
+        assert_eq!(
+            notice.details.as_deref(),
+            Some("Source: matcher:Bash\nExecution: 2\nAttempt: 3")
+        );
+    }
+
+    #[test]
+    fn empty_hook_message_is_not_rendered() {
+        assert!(hook_message_notice(&sdk::HookMessageView {
+            point: "PreToolUse".to_string(),
+            source: "matcher:Bash".to_string(),
+            execution_ordinal: 0,
+            attempt: 1,
+            kind: sdk::HookMessageKindView::SystemMessage,
+            text: "<system-reminder>\n</system-reminder>".to_string(),
+        })
+        .is_none());
     }
 
     #[test]

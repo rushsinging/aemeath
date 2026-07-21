@@ -40,7 +40,7 @@ pub use context_port::{
     ToolOutcomeKind, Urgency,
 };
 pub use event_sink::EventSink;
-pub use hook::api::{HookInvocation, HookOutcome, HookPoint, HookPort};
+pub use hook::{HookInvocation, HookOutcome, HookPoint, HookPort};
 pub use input_buffer::InputBuffer;
 pub(crate) use input_buffer::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort};
 pub use policy_port::{
