@@ -913,9 +913,6 @@ where
         calls: &[(ToolCall, ToolGuardDecision)],
         cancel: &CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
-        if cancel.is_cancelled() {
-            return Err(LoopEngineError::Cancelled);
-        }
         if calls.is_empty() {
             return Ok(ToolStep::Continue);
         }
@@ -958,9 +955,16 @@ where
             calls,
         )
         .await;
-        if cancel.is_cancelled() {
-            return Err(LoopEngineError::Cancelled);
-        }
+        let cancelled = cancel.is_cancelled();
+
+        let all_results = if cancelled {
+            crate::application::tool_coordination::complete_cancelled_tool_round(
+                &raw_calls,
+                all_results,
+            )
+        } else {
+            all_results
+        };
 
         let metadata: HashMap<&str, (Option<&str>, Option<&str>)> = raw_calls
             .iter()
@@ -1014,6 +1018,9 @@ where
                     tasks: Box::new(snapshot),
                 })
                 .await;
+        }
+        if cancelled {
+            return Err(LoopEngineError::Cancelled);
         }
         run_post_tool_batch(
             self.sink,
