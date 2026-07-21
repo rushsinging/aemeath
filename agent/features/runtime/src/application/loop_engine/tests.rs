@@ -23,6 +23,7 @@ struct ScriptedPort {
     cancelled_steps: Vec<sdk::RunStepId>,
     finalized_steps: Vec<sdk::RunStepId>,
     frozen_steps: Vec<sdk::RunStepId>,
+    fail_accept_input: bool,
     needs_compaction: bool,
     fail_emit_once: bool,
 }
@@ -37,6 +38,19 @@ impl RunLoopPort for ScriptedPort {
     fn freeze_step(&mut self, step_id: &sdk::RunStepId, _inputs: &[LoopInput]) {
         self.calls.push("freeze_step");
         self.frozen_steps.push(step_id.clone());
+    }
+
+    async fn accept_step_input(
+        &mut self,
+        _step_id: &sdk::RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        self.calls.push("accept_step_input");
+        if self.fail_accept_input {
+            return Err(LoopEngineError::Adapter(
+                "accepted input durable write failed".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
@@ -247,6 +261,7 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
             "emit",
             "input",
             "freeze_step",
+            "accept_step_input",
             "needs_compaction",
             "emit",
             "model",
@@ -258,6 +273,49 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
         .events
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Completed { .. })));
+}
+
+#[tokio::test]
+async fn engine_accepts_input_before_building_context() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = ScriptedPort {
+        model_steps: VecDeque::from([ModelStep::Complete {
+            text: "done".to_string(),
+        }]),
+        ..Default::default()
+    };
+
+    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+
+    let accepted = port
+        .calls
+        .iter()
+        .position(|call| *call == "accept_step_input")
+        .unwrap();
+    let context = port
+        .calls
+        .iter()
+        .position(|call| *call == "needs_compaction")
+        .unwrap();
+    assert!(accepted < context);
+}
+
+#[tokio::test]
+async fn engine_stops_before_context_when_accepted_input_durable_write_fails() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = ScriptedPort {
+        fail_accept_input: true,
+        ..Default::default()
+    };
+
+    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+
+    assert_eq!(run.status(), RunStatus::Failed);
+    assert!(port.calls.contains(&"accept_step_input"));
+    assert!(!port.calls.contains(&"needs_compaction"));
+    assert!(!port.calls.contains(&"model"));
 }
 
 #[tokio::test]
@@ -340,6 +398,7 @@ async fn provider_context_too_long_compacts_then_rebuilds_before_reinvoking() {
             "emit",
             "input",
             "freeze_step",
+            "accept_step_input",
             "needs_compaction",
             "emit",
             "model",

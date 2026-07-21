@@ -7,9 +7,10 @@ use context::domain::session::{
     SnapshotState,
 };
 use context::domain::{
-    CalendarDate, CompactRequest, CompactTrigger, ContentFingerprint, ContextAppend,
-    ContextAppendError, ContextRequest, ContextRequestId, FinalizeCause, Language, RunStepId,
-    SessionId, SessionRevision, SystemPromptSpec, TaskReminderSnapshot,
+    AcceptedInputAppend, AcceptedInputError, CalendarDate, CompactRequest, CompactTrigger,
+    ContentFingerprint, ContextAppend, ContextAppendError, ContextRequest, ContextRequestId,
+    FinalizeCause, Language, RunStepId, SessionId, SessionRevision, SystemPromptSpec,
+    TaskReminderSnapshot,
 };
 use context::ports::SessionRepository;
 use project::{PreparedWorkspaceRestore, WorkspacePersist, WorkspaceRestoreError};
@@ -98,6 +99,17 @@ fn append(fingerprint: &str) -> ContextAppend {
         messages: vec![Message::user("fact")],
         receipts: vec![],
         api_input_tokens: None,
+        fingerprint: ContentFingerprint::new(fingerprint),
+    }
+}
+
+fn accepted_input(fingerprint: &str) -> AcceptedInputAppend {
+    AcceptedInputAppend {
+        session_id: SessionId::new("session"),
+        run_id: RunId::new("run"),
+        step_id: RunStepId::new("step"),
+        source_request_id: ContextRequestId::new("request"),
+        messages: vec![Message::user("accepted fact")],
         fingerprint: ContentFingerprint::new(fingerprint),
     }
 }
@@ -220,6 +232,54 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
     assert!(matches!(
         outcome,
         context::domain::CompactOutcome::Committed(_)
+    ));
+}
+
+#[tokio::test]
+async fn accepted_input_persists_before_publish() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer.clone());
+    let accepted = accepted_input("input-v1");
+
+    let receipt = repository.append_accepted_input(&accepted).await.unwrap();
+
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+    assert_eq!(writer.saved.lock().unwrap().len(), 1);
+    {
+        let session = holder.read().unwrap();
+        let step = &session.run_slices[0].steps[0];
+        assert_eq!(
+            step.accepted_input.as_ref().unwrap().messages[0].text_content(),
+            "accepted fact"
+        );
+        assert!(step.outcome.is_none());
+    }
+    assert_eq!(
+        repository
+            .snapshot(&accepted.session_id)
+            .await
+            .unwrap()
+            .messages[0]
+            .text_content(),
+        "accepted fact"
+    );
+}
+
+#[tokio::test]
+async fn accepted_input_is_idempotent_but_rejects_content_conflict() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, _) = repository(writer);
+    let accepted = accepted_input("input-v1");
+
+    let first = repository.append_accepted_input(&accepted).await.unwrap();
+    let second = repository.append_accepted_input(&accepted).await.unwrap();
+    assert_eq!(first, second);
+
+    let mut conflicting = accepted;
+    conflicting.fingerprint = ContentFingerprint::new("input-v2");
+    assert!(matches!(
+        repository.append_accepted_input(&conflicting).await,
+        Err(AcceptedInputError::ContentConflict { .. })
     ));
 }
 

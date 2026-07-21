@@ -4,9 +4,9 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 
 use crate::domain::{
-    AppendReceipt, CompactOutcome, CompactRequest, CompactSkipReason, ContentFingerprint,
-    ContextAppend, ContextAppendError, ContextMessage, ContextPortError, SessionId,
-    SessionRevision,
+    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
+    CompactRequest, CompactSkipReason, ContentFingerprint, ContextAppend, ContextAppendError,
+    ContextMessage, ContextPortError, SessionId, SessionRevision,
 };
 use crate::ports::{SessionRepository, SessionSnapshot};
 
@@ -15,6 +15,7 @@ struct SessionState {
     revision: u64,
     messages: Vec<ContextMessage>,
     active_summary: Option<String>,
+    accepted_steps: HashMap<(String, String), (ContentFingerprint, SessionRevision)>,
     committed_steps: HashMap<(String, String), (ContentFingerprint, SessionRevision)>,
 }
 
@@ -45,6 +46,7 @@ impl InMemorySessionRepository {
                     revision: revision.get(),
                     messages,
                     active_summary,
+                    accepted_steps: HashMap::new(),
                     committed_steps: HashMap::new(),
                 },
             );
@@ -52,6 +54,18 @@ impl InMemorySessionRepository {
 
     fn receipt(append: &ContextAppend, committed_revision: SessionRevision) -> AppendReceipt {
         AppendReceipt {
+            run_id: append.run_id.clone(),
+            step_id: append.step_id.clone(),
+            committed_revision,
+            fingerprint: append.fingerprint.clone(),
+        }
+    }
+
+    fn accepted_receipt(
+        append: &AcceptedInputAppend,
+        committed_revision: SessionRevision,
+    ) -> AcceptedInputReceipt {
+        AcceptedInputReceipt {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision,
@@ -72,6 +86,39 @@ impl SessionRepository for InMemorySessionRepository {
             messages: state.messages.clone(),
             active_summary: state.active_summary.clone(),
         })
+    }
+
+    async fn append_accepted_input(
+        &self,
+        append: &AcceptedInputAppend,
+    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|error| AcceptedInputError::Storage(error.to_string()))?;
+        let state = sessions
+            .get_mut(append.session_id.as_str())
+            .ok_or_else(|| AcceptedInputError::SessionNotFound(append.session_id.clone()))?;
+        let key = (
+            append.run_id.to_string(),
+            append.step_id.as_str().to_string(),
+        );
+        if let Some((fingerprint, revision)) = state.accepted_steps.get(&key) {
+            if fingerprint == &append.fingerprint {
+                return Ok(Self::accepted_receipt(append, *revision));
+            }
+            return Err(AcceptedInputError::ContentConflict {
+                run_id: append.run_id.clone(),
+                step_id: append.step_id.clone(),
+            });
+        }
+        state.messages.extend(append.messages.clone());
+        state.revision += 1;
+        let committed_revision = SessionRevision::new(state.revision);
+        state
+            .accepted_steps
+            .insert(key, (append.fingerprint.clone(), committed_revision));
+        Ok(Self::accepted_receipt(append, committed_revision))
     }
 
     async fn append_finalized(
@@ -138,6 +185,7 @@ impl SessionRepository for InMemorySessionRepository {
             .ok_or_else(|| ContextPortError::SessionNotFound(session_id.clone()))?;
         state.messages.clear();
         state.active_summary = None;
+        state.accepted_steps.clear();
         state.committed_steps.clear();
         state.revision += 1;
         Ok(())
