@@ -337,6 +337,7 @@ impl AgentRunner for CliAgentRunner {
             committed_message_count: 0,
             context: isolated_context,
             context_request: None,
+            accepted_input: Vec::new(),
             context_window: None,
             log_request_messages: Box::new(log_request_messages),
             agent,

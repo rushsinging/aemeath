@@ -157,12 +157,17 @@ fn task_execution_timestamps_follow_status_transitions() {
     assert_eq!(task.completed_at(), None);
 
     task.transition_to(TaskStatus::Pending, 30).unwrap();
+    assert_eq!(
+        task.started_at(),
+        None,
+        "回退到 pending 后不得保留执行时间戳，否则 snapshot 无法恢复"
+    );
     task.transition_to(TaskStatus::InProgress, 40).unwrap();
-    assert_eq!(task.started_at(), Some(20));
+    assert_eq!(task.started_at(), Some(40));
     assert_eq!(task.completed_at(), None);
 
     task.transition_to(TaskStatus::Completed, 50).unwrap();
-    assert_eq!(task.started_at(), Some(20));
+    assert_eq!(task.started_at(), Some(40));
     assert_eq!(task.completed_at(), Some(50));
 
     let mut directly_completed =

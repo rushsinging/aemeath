@@ -30,7 +30,7 @@ struct CommittedRunSlice {
 struct CommittedRunStep {
     step_id: RunStepId,
     accepted_input: Option<AcceptedInputProjection>, // #1277 填充
-    outcome: Option<CompatibilityOutcome>,           // #1282 bridge；#1278 收口
+    outcome: Option<FinalizedOutcomeProjection>,    // #1278 正式 outcome
 }
 struct ActiveCompactMarker {
     summary: String,
@@ -66,12 +66,12 @@ Session（对话历史容器，跨多次输入）
         └── ActiveCompactMarker（summary + 首个可见 Step）
 ```
 - **一个 Session 含多个 Run 的结构化事实**；compact marker 只改变活跃读取起点，不创建第二条历史链
-- **Run 读写 Session**：经 `ContextPort` 读 marker 后历史构建 Context Window；每个 RunStep 经唯一 `StepFinalizer` 收口为 finalized projection 后追加并落盘到 `run_slices`
+- **Run 读写 Session**：在 `freeze_step` 绑定 user input 后、首次 `build_window` 前，Runtime 经 `append_accepted_input` 将仅包含 accepted user facts 的 `AcceptedInputProjection` durable 写入；同一 Step 后续由 `StepFinalizer` 经 `ContextAppend` 只补充 outcome。accepted append 在 Context mutation gate 内自行读取当前 revision、检查 `(run_id, step_id, fingerprint)` 幂等/冲突、durable save 后再 publish；它**不**要求 Runtime 提供 CAS。finalized outcome 发生在 window 构建后，仍以 `ContextWindow.backing_revision` 作为 `expected_revision` 做 CAS。
 - Run 是内存态执行；Session 是持久化数据——两者生命周期不同（Run 短、Session 长）
 ## 6. RunStep 持久化边界
-Session 采用 **per finalized RunStep** 提交：一个 RunStep 无论普通完成、接受 `CancelRunStep`，还是随 `TerminateRun` 收口，都先由 Runtime 唯一 `StepFinalizer` 形成不可变 finalized projection，再构造唯一 `ContextAppend`。Runtime 用显式 `StepMessageOwnership` 把尚未绑定的用户输入 move 到 active Step，并在模型/Tool 产出时逐条记录；**NEVER** 根据消息数组长度、位置、历史数量或 `projection_start_index` 一类索引推断消息归属。Context Management 以 `(run_id, step_id)` 为幂等键追加或补充 `run_slices`、收集跨 BC snapshot 并原子落盘。`FinalizeCause` 只允许 `Completed | UserCancelledStep | RunTerminated`；它描述本次对话事实为何收口，不把 Run 状态机迁入 Session。
-`append_and_persist` **MUST** 将 projection 追加到对应
-`CommittedRunSlice.steps`，而不是只把 `messages` extend 到一个扁平数组。相同
+Session 采用两阶段 per-RunStep 持久化：`freeze_step` 已绑定的 user input 首先形成不可变 `AcceptedInputProjection` 并立刻 durable；后续普通完成、`CancelRunStep` 或 `TerminateRun` 仅由 Runtime 唯一 `StepFinalizer` 形成 outcome projection，补充同一 `CommittedRunStep` 而**不重复** accepted input。Runtime 用显式 `StepMessageOwnership` 把尚未绑定的用户输入 move 到 active Step，并在模型/Tool 产出时逐条记录；**NEVER** 根据消息数组长度、位置、历史数量或 `projection_start_index` 一类索引推断消息归属。Context Management 以 `(run_id, step_id, fingerprint)` 为 accepted-input 幂等键，在 mutation gate 内完成 current revision 读取、写入、跨 BC snapshot 收集、原子落盘与 publish；同键不同 payload 返回 typed conflict。outcome 仍使用 `ContextWindow.backing_revision` CAS，避免以过期 Context Window 覆盖新历史。`FinalizeCause` 只允许 `Completed | UserCancelledStep | RunTerminated`；它描述 outcome 为何收口，不把 Run 状态机迁入 Session。
+`FinalizedOutcomeProjection` 只补充同一 Step 的 finalized facts：`FinalizeCause`、assistant/partial assistant、原序 Tool terminal results、`StepReceipt`、usage、outcome fingerprint 与 committed revision；它**不重复或覆盖** `AcceptedInputProjection`。同键 outcome 重试以 `(run_id, step_id, fingerprint)` 幂等，内容不同返回 typed conflict。v2 compatibility vector 升级为单一 `Completed` projection，receipt/usage 缺失保持显式缺失，**NEVER** 根据 role 或 ToolUse/ToolResult 顺序猜测历史边界或伪造 receipt。
+`append_and_persist` **MUST** 将 outcome projection 补充到对应 `CommittedRunSlice.steps`，而不是只把 `messages` extend 到一个扁平数组。相同
 `run_id` 的连续 Step 归入同一个 Run slice；新 `run_id` 新建 slice。
 旧 Session 缺少 Step 边界时，兼容 reader **MUST** 把一个 legacy Normal segment
 视为一个不可拆分的 synthetic Step，**NEVER** 根据 role 或 ToolUse/ToolResult
@@ -102,7 +102,7 @@ Session 采用 **per finalized RunStep** 提交：一个 RunStep 无论普通完
 - RuntimeContext、各 Port 活实例、lease 与 Composition scope；
 - StuckGuard / ToolLoopGuard 计数、临时 token 估算 cache；
 - Sub Run 的执行状态与完整消息链；父 Agent Tool 只保存 child terminal receipt 形成的稳定 Tool result，**NEVER** 把 Sub 私有对话链注入父 Session；
-- Stop Hook Block 后尚未获准提交的 assistant response 与 feedback 驱动的 pending Step。
+- Stop Hook Block 后当前已完成 assistant / Tool outcome 仍按正常 finalized schema 落盘；只有 feedback 驱动的下一 Step pending input 不属于当前 outcome。
 ### 6.3 并发 Tool 混合结果
 同一 RunStep 的 Tool Call **MAY** 并发执行，但普通完成路径的收集与提交 **MUST NOT** fail-fast。Runtime 必须等待每个调用收敛为稳定 outcome，再按原 ToolCall 顺序构造单个 `ContextAppend`：
 - 一个调用失败 **NEVER** 丢弃、回滚或覆盖同批其他调用已经成功的结果；

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use share::message::Message;
+use share::message::{Message, MessageSource, Role};
 use tokio_util::sync::CancellationToken;
 
 use crate::application::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
@@ -71,6 +71,8 @@ pub(crate) fn request_log_context(
 pub(crate) struct StepMessageOwnership {
     pending: Vec<Message>,
     active: Vec<Message>,
+    accepted_input: Vec<Message>,
+    outcome: Vec<Message>,
 }
 
 impl StepMessageOwnership {
@@ -78,6 +80,8 @@ impl StepMessageOwnership {
         Self {
             pending,
             active: Vec::new(),
+            accepted_input: Vec::new(),
+            outcome: Vec::new(),
         }
     }
 
@@ -89,19 +93,38 @@ impl StepMessageOwnership {
             messages.extend(inputs.iter().map(|input| Message::user(input.text.clone())));
         }
         self.active = messages.clone();
+        self.accepted_input = messages
+            .iter()
+            .filter(|message| {
+                message.role == Role::User
+                    && message
+                        .metadata
+                        .as_ref()
+                        .is_none_or(|metadata| metadata.source != MessageSource::SystemGenerated)
+            })
+            .cloned()
+            .collect();
+        self.outcome.clear();
         messages
     }
 
-    fn record(&mut self, message: Message) {
-        self.active.push(message);
+    fn accepted_user_messages(&self) -> Vec<Message> {
+        self.accepted_input.clone()
     }
 
-    fn finalized(&self) -> Vec<Message> {
-        self.active.clone()
+    fn record(&mut self, message: Message) {
+        self.active.push(message.clone());
+        self.outcome.push(message);
+    }
+
+    fn outcome(&self) -> Vec<Message> {
+        self.outcome.clone()
     }
 
     fn committed(&mut self) {
         self.active.clear();
+        self.accepted_input.clear();
+        self.outcome.clear();
     }
 }
 
@@ -112,7 +135,18 @@ pub(crate) fn fixture_bind_pending(
 ) -> (Vec<Message>, Vec<Message>) {
     let mut ownership = StepMessageOwnership::new(pending);
     let frozen = ownership.freeze(None, inputs);
-    (frozen, ownership.finalized())
+    (frozen.clone(), frozen)
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_accepted_user_messages(
+    pending: Vec<Message>,
+    prefix: Option<Message>,
+    inputs: &[LoopInput],
+) -> Vec<Message> {
+    let mut ownership = StepMessageOwnership::new(pending);
+    ownership.freeze(prefix, inputs);
+    ownership.accepted_user_messages()
 }
 
 #[cfg(test)]
@@ -121,11 +155,11 @@ pub(crate) fn fixture_finalize_messages(
     produced: Vec<Message>,
 ) -> Vec<Message> {
     let mut ownership = StepMessageOwnership::new(pending);
-    ownership.freeze(None, &[]);
+    let accepted = ownership.freeze(None, &[]);
     for message in produced {
         ownership.record(message);
     }
-    ownership.finalized()
+    accepted.into_iter().chain(ownership.outcome()).collect()
 }
 
 /// Main-chat adapter for the shared run loop.
@@ -270,7 +304,7 @@ where
         let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
             return Ok(());
         };
-        let messages = self.step_messages.finalized();
+        let messages = self.step_messages.outcome();
         self.context
             .append_finalized(
                 request,
@@ -677,6 +711,7 @@ where
                 "<system-reminder>\n{feedback}\n</system-reminder>"
             ));
             self.stop_hook_feedback = Some(feedback.clone());
+            self.step_messages.record(feedback.clone());
             self.messages.push(feedback);
             self.sink
                 .send_event(RuntimeStreamEvent::StopHookBlocked {
@@ -709,13 +744,30 @@ where
     fn freeze_step(&mut self, step_id: &RunStepId, inputs: &[LoopInput]) {
         let feedback = self.stop_hook_feedback.take();
         let has_stop_hook_feedback = feedback.is_some();
-        let pending_messages = self.step_messages.freeze(feedback, inputs);
+        let _pending_messages = self.step_messages.freeze(feedback, inputs);
         if has_stop_hook_feedback {
             self.messages
                 .extend(inputs.iter().map(|input| Message::user(input.text.clone())));
         }
-        self.context_request = Some(self.freeze_request(step_id, pending_messages));
+        self.context_request = Some(self.freeze_request(step_id, self.step_messages.outcome()));
         self.context_window = None;
+    }
+
+    async fn accept_step_input(&mut self, step_id: &RunStepId) -> Result<(), LoopEngineError> {
+        let accepted = self.step_messages.accepted_user_messages();
+        if accepted.is_empty() {
+            return Ok(());
+        }
+        let request = self
+            .context_request
+            .as_ref()
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+        debug_assert_eq!(&request.step_id, step_id);
+        self.context
+            .append_accepted_input(request, accepted)
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        Ok(())
     }
 
     async fn drain_input(&mut self) -> Result<Vec<LoopInput>, LoopEngineError> {

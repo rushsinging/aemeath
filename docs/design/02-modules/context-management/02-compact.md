@@ -10,7 +10,7 @@ Compact 家族是 Context Management 的**核心能力**：在 LLM context windo
 - **非破坏优先**：L1 先限制尚未进入 `run_slices` 的单条 ToolResult；L2/L3/L4 只变换读模型；只有 L5 修改已持久化 Session backing。
 ## 1.1 #1282 Session backing cutover
 
-L5 的持久化真相是 `run_slices + ActiveCompactMarker`，不是 `ChatChain` / `ChatSegment`：marker 保存累计 summary、首个可见完整 Step 与 source revision；完整历史只保留一份 `run_slices`。每次 compact 以完整 Step 为边界更新同一个 marker，**NEVER** 复制扁平 recent tail；新 accepted/finalized Step 只写 `run_slices`，自然位于 marker 后并在下一次 ContextWindow 可见。本文其余出现的 ChatChain/Compact segment 描述均为 pre-#1282 迁移背景，不得作为新 writer 的实现依据。
+L5 的持久化真相是 `run_slices + ActiveCompactMarker`，不是 `ChatChain` / `ChatSegment`：marker 保存累计 summary、首个可见完整 Step 与 source revision；完整历史只保留一份 `run_slices`。每次 compact 以完整 Step 为边界更新同一个 marker，**NEVER** 复制扁平 recent tail；新 accepted/finalized Step 只写 `run_slices`，自然位于 marker 后并在下一次 ContextWindow 可见。compact 读取每个 `FinalizedOutcomeProjection.messages` 作为模型历史，不把 receipts、usage、fingerprint 或 revision 扁平为消息；这些 metadata 继续与 Run/Step identity 一起留在 structured backing。本文其余出现的 ChatChain/Compact segment 描述均为 pre-#1282 迁移背景，不得作为新 writer 的实现依据。
 
 ## 2. ContextPort 签名
 ```rust

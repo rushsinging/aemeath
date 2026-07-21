@@ -179,7 +179,10 @@ fn decode_v2(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodec
     ))
 }
 
-fn task_from_v2(wire: TaskWireV2, index: usize) -> Result<Task, TaskSnapshotCodecError> {
+fn task_from_v2(mut wire: TaskWireV2, index: usize) -> Result<Task, TaskSnapshotCodecError> {
+    if wire.status == TaskStatus::Pending && wire.completed_at.is_none() {
+        wire.started_at = None;
+    }
     let id = parse_id(&wire.id, &format!("tasks[{index}].id"), false)?;
     let batch = parse_id(&wire.batch, &format!("tasks[{index}].batch"), false)?;
     let blocked_by = wire

@@ -58,6 +58,54 @@ fn test_static_prompt_guides_worktree_relative_paths_without_fixed_workspace_roo
 }
 
 #[test]
+fn test_allow_all_prompt_does_not_require_workspace_boundary() {
+    let text = static_system_prompt_for_test_with_permission_mode(
+        "/tmp/project",
+        true,
+        "en",
+        share::config::PermissionModeConfig::AllowAll,
+    );
+
+    assert!(text.contains("not required to stay within workspace_root"));
+    assert!(!text.contains("absolute paths MUST be inside the current workspace"));
+}
+
+#[test]
+fn test_standard_prompt_retains_workspace_boundary() {
+    for permission_mode in [
+        share::config::PermissionModeConfig::Ask,
+        share::config::PermissionModeConfig::AutoRead,
+    ] {
+        let text = static_system_prompt_for_test_with_permission_mode(
+            "/tmp/project",
+            true,
+            "en",
+            permission_mode,
+        );
+
+        assert!(text.contains("it MUST be inside the current workspace"));
+        assert!(!text.contains("not required to stay within workspace_root"));
+    }
+}
+
+#[test]
+fn test_allow_all_zh_prompt_does_not_require_workspace_boundary() {
+    let text = static_system_prompt_for_test_with_permission_mode(
+        "/tmp/project",
+        true,
+        "zh",
+        share::config::PermissionModeConfig::AllowAll,
+    );
+
+    assert!(text.contains("路径无需限制在 workspace_root 内"));
+    assert!(text.contains("必要时允许使用当前工作区外的绝对路径"));
+    assert!(text.contains("应使用最新的工作区上下文"));
+    assert!(!text.contains("绝对路径必须位于其下"));
+    assert!(!text.contains("it MUST be inside the current workspace"));
+    assert!(!text.contains("Do not reuse absolute paths from another checkout"));
+}
+
+#[test]
 fn test_build_commit_guidance_includes_provider_model_trailer() {
     let guidance = build_commit_guidance(Some("zhipu"), Some("glm-5.1"), "en");
 
@@ -82,13 +130,22 @@ fn test_build_commit_guidance_uses_unknown_fallback() {
 #[test]
 fn test_prompt_context_new_preserves_model_metadata() {
     let cwd = PathBuf::from("/tmp/example");
-    let context = PromptContext::new(&cwd, Some("openrouter"), Some("anthropic/claude-sonnet-4"));
+    let context = PromptContext::new(
+        &cwd,
+        Some("openrouter"),
+        Some("anthropic/claude-sonnet-4"),
+        share::config::PermissionModeConfig::Ask,
+    );
 
     assert_eq!(context.cwd, cwd);
     assert_eq!(context.provider_name.as_deref(), Some("openrouter"));
     assert_eq!(
         context.model_name.as_deref(),
         Some("anthropic/claude-sonnet-4")
+    );
+    assert_eq!(
+        context.permission_mode,
+        share::config::PermissionModeConfig::Ask
     );
 }
 
@@ -202,7 +259,12 @@ async fn test_build_system_prompt_parts_includes_commit_guidance() {
     let hook_runner: Arc<dyn HookPort> = Arc::new(
         hook::build_dispatcher(&HooksConfig::default(), std::collections::HashMap::new()).unwrap(),
     );
-    let context = PromptContext::new(&cwd, Some("deepseek"), Some("deepseek-chat"));
+    let context = PromptContext::new(
+        &cwd,
+        Some("deepseek"),
+        Some("deepseek-chat"),
+        share::config::PermissionModeConfig::Ask,
+    );
 
     let parts = build_system_prompt_parts(&context, &hook_runner, "en").await;
 

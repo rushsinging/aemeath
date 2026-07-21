@@ -64,9 +64,15 @@ async fn make_wiring_and_workspace(
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config(&root)
-        .await
-        .expect("wire config");
+    let config = config::wire_project_config(
+        &root,
+        config::NativeConfigStore::new(Arc::new(
+            storage::FileSystemBlobAdapter::new(temp.path().join("config-overrides"))
+                .expect("create config blob"),
+        )),
+    )
+    .await
+    .expect("wire config");
     let task_wiring = task::wire_task();
     let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
         context::adapters::AtomicBlobSessionManagement::new(Arc::new(
@@ -212,9 +218,15 @@ async fn config_query_and_writer_come_from_wiring() {
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config(&root)
-        .await
-        .expect("wire config");
+    let config = config::wire_project_config(
+        &root,
+        config::NativeConfigStore::new(Arc::new(
+            storage::FileSystemBlobAdapter::new(temp.path().join("config-overrides"))
+                .expect("create config blob"),
+        )),
+    )
+    .await
+    .expect("wire config");
     let task_wiring = task::wire_task();
     let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
         context::adapters::AtomicBlobSessionManagement::new(Arc::new(

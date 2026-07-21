@@ -116,7 +116,14 @@ impl memory::api::ReflectionHistoryStore for NoopReflectionHistory {
 #[tokio::test]
 async fn bootstrap_dependencies_preserve_injected_task_views() {
     let temp = tempfile::tempdir().unwrap();
-    let config = config::wire_project_config(temp.path()).await.unwrap();
+    let config = config::wire_project_config(
+        temp.path(),
+        config::NativeConfigStore::new(Arc::new(
+            storage::FileSystemBlobAdapter::new(temp.path()).unwrap(),
+        )),
+    )
+    .await
+    .unwrap();
     let workspace = project::wire_production_workspace(temp.path().to_path_buf())
         .unwrap()
         .into_views();
@@ -148,7 +155,6 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         workspace,
         wiring,
         Arc::new(TestProviderFactory),
-        tools::wire_tools(),
         history.clone(),
         Arc::new(policy::AllowAllPolicy),
         access.clone(),

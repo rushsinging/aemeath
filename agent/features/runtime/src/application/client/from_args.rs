@@ -19,7 +19,6 @@ pub struct RuntimeBootstrapDependencies {
     workspace: project::WorkspaceViews,
     wiring: Arc<context::MainSessionWiring>,
     provider_factory: Arc<dyn ProviderFactory>,
-    _tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
     reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
     policy: Arc<dyn policy::PolicyPort>,
     task_access: Arc<dyn task::TaskAccess>,
@@ -31,7 +30,6 @@ impl RuntimeBootstrapDependencies {
         workspace: project::WorkspaceViews,
         wiring: Arc<context::MainSessionWiring>,
         provider_factory: Arc<dyn ProviderFactory>,
-        _tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
         reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
         policy: Arc<dyn policy::PolicyPort>,
         task_access: Arc<dyn task::TaskAccess>,
@@ -41,7 +39,6 @@ impl RuntimeBootstrapDependencies {
             workspace,
             wiring,
             provider_factory,
-            _tool_gateway,
             reflection_history,
             policy,
             task_access,
@@ -80,7 +77,6 @@ pub async fn from_args_with_workspace(
         workspace,
         wiring,
         provider_factory,
-        _tool_gateway: _,
         reflection_history,
         policy,
         task_access,
@@ -344,6 +340,7 @@ pub async fn from_args_with_workspace(
         &cwd,
         Some(&binding.model.provider),
         Some(&binding.model.model),
+        snapshot.permission_mode(),
     );
     let prompt_parts =
         build_system_prompt_parts(&prompt_context, &hook_runner, snapshot.language()).await;
@@ -563,9 +560,14 @@ mod tests {
             context_size: 8192,
             ..Default::default()
         };
-        let config = config::wire_project_config(&root)
-            .await
-            .expect("wire config");
+        let config = config::wire_project_config(
+            &root,
+            config::NativeConfigStore::new(Arc::new(
+                storage::FileSystemBlobAdapter::new(&agents_dir).expect("create config blob"),
+            )),
+        )
+        .await
+        .expect("wire config");
         let task_wiring = task::wire_task();
         let wiring = context::test_support::wire_in_memory(
             &workspace,
@@ -583,7 +585,6 @@ mod tests {
             workspace,
             wiring,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
-            tools::wire_tools(),
             Arc::new(TestReflectionHistory),
             policy.clone(),
             task_wiring.access(),

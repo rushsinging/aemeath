@@ -106,6 +106,15 @@ fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInput {
     }
 }
 
+fn config_native_store() -> config::NativeConfigStore {
+    config::NativeConfigStore::new(
+        storage::api::file_system_blob(
+            share::config::paths::global_agents_dir().join("config-overrides"),
+        )
+        .expect("create config override blob"),
+    )
+}
+
 fn session_management() -> Arc<dyn SessionManagementPort> {
     Arc::new(context::adapters::AtomicBlobSessionManagement::new(
         storage::api::file_system_blob(share::config::paths::global_agents_dir())
@@ -151,6 +160,7 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
         .into_views();
     let config = config::wire_project_config_with_cli(
         &root,
+        config_native_store(),
         cli_config_input(&ChatBootstrapArgs {
             api_key: Some("test-api-key".to_string()),
             base_url: Some("http://127.0.0.1:1/v1".to_string()),
@@ -231,7 +241,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config(&root)
+    let config = config::wire_project_config(&root, config_native_store())
         .await
         .expect("wire config");
     let task_wiring = task::wire_task();
@@ -304,10 +314,14 @@ async fn production_context_append_reopens_from_atomic_blob() {
         .expect("canonical run_slices array");
     assert_eq!(slices.len(), 1);
     let outcome = slices[0]["steps"][0]["outcome"]
-        .as_array()
-        .expect("finalized compatibility outcome");
-    assert_eq!(outcome.len(), 1);
-    assert_eq!(outcome[0]["role"], "user");
+        .as_object()
+        .expect("finalized outcome projection");
+    assert_eq!(outcome["finalize_cause"], "Completed");
+    assert_eq!(outcome["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(outcome["messages"][0]["role"], "user");
+    assert_eq!(outcome["api_input_tokens"], 34);
+    assert_eq!(outcome["fingerprint"], "production-fingerprint");
+    assert_eq!(outcome["committed_revision"], 1);
 }
 
 /// The Runtime client's session id must match the wiring's committed session
@@ -324,6 +338,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         .into_views();
     let config = config::wire_project_config_with_cli(
         &root,
+        config_native_store(),
         cli_config_input(&ChatBootstrapArgs {
             api_key: Some("test-api-key".to_string()),
             base_url: Some("http://127.0.0.1:1/v1".to_string()),
@@ -384,7 +399,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         workspace,
         wiring,
         composition::provider::provider_factory(),
-        tools::wire_tools(),
         reflection_history,
         Arc::new(policy::AllowAllPolicy),
         task_access,
@@ -425,7 +439,7 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config(&root)
+    let config = config::wire_project_config(&root, config_native_store())
         .await
         .expect("wire config");
 

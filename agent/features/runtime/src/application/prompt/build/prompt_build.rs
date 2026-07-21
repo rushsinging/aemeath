@@ -5,6 +5,7 @@ const INSTRUCTION_SEARCH_DEPTH: u32 = 5;
 
 use hook::{HookDispatchContext, HookInvocation, HookPort};
 use share::config::paths;
+use share::config::PermissionModeConfig;
 use share::i18n::prompt::commit::commit_guidance_template;
 use share::i18n::prompt::system::{date_label, static_system_prompt};
 
@@ -26,14 +27,21 @@ pub struct PromptContext {
     pub cwd: PathBuf,
     pub provider_name: Option<String>,
     pub model_name: Option<String>,
+    pub permission_mode: PermissionModeConfig,
 }
 
 impl PromptContext {
-    pub fn new(cwd: &Path, provider_name: Option<&str>, model_name: Option<&str>) -> Self {
+    pub fn new(
+        cwd: &Path,
+        provider_name: Option<&str>,
+        model_name: Option<&str>,
+        permission_mode: PermissionModeConfig,
+    ) -> Self {
         Self {
             cwd: cwd.to_path_buf(),
             provider_name: provider_name.map(str::to_string),
             model_name: model_name.map(str::to_string),
+            permission_mode,
         }
     }
 }
@@ -45,15 +53,66 @@ impl PromptContext {
 // ---------------------------------------------------------------------------
 
 /// Falls back to English for unknown languages.
-fn static_system_prompt_for(cwd_str: &str, is_git: bool, lang: &str) -> String {
-    static_system_prompt(lang)
+fn static_system_prompt_for(
+    cwd_str: &str,
+    is_git: bool,
+    lang: &str,
+    permission_mode: PermissionModeConfig,
+) -> String {
+    let prompt = static_system_prompt(lang)
         .replace("{cwd_str}", cwd_str)
-        .replace("{is_git}", &is_git.to_string())
+        .replace("{is_git}", &is_git.to_string());
+
+    match permission_mode {
+        PermissionModeConfig::AllowAll => {
+            let (workspace_boundary, relative_path_guidance, worktree_guidance) = match lang {
+                "zh" => (
+                    "path_base 是相对路径解析基（相对路径会与 path_base 拼接成绝对路径）。在 allow_all 模式下，workspace_root 仅用于提供上下文信息；路径无需限制在 workspace_root 内。",
+                    "工作目录内的操作优先使用相对路径；必要时允许使用当前工作区外的绝对路径。",
+                    "当 EnterWorktree 或 ExitWorktree 的工具结果返回新的 path_base/workspace_root 时，应使用最新的工作区上下文。",
+                ),
+                _ => (
+                    "path_base is the base for resolving relative paths (relative paths are joined to path_base to form absolute paths). In allow-all mode, workspace_root is informational: paths are not required to stay within workspace_root.",
+                    "Prefer relative paths for operations in the working directory. Absolute paths may be used outside the current workspace when required.",
+                    "When EnterWorktree or ExitWorktree returns a new path_base/workspace_root in its tool result, use that latest tool result as the current workspace context.",
+                ),
+            };
+
+            prompt
+                .replace(
+                    "path_base = the base for resolving relative paths (relative paths are joined to path_base to form absolute paths); workspace_root = the safety boundary (absolute paths MUST fall inside it or be rejected).",
+                    workspace_boundary,
+                )
+                .replace(
+                    "path_base = 相对路径解析基（相对路径会与 path_base 拼接成绝对路径）；workspace_root = 安全边界（绝对路径必须位于其下，否则被拒绝）。",
+                    workspace_boundary,
+                )
+                .replace(
+                    "Prefer relative paths for Read, Edit, Write, Glob, Grep, and Bash paths. If you need an absolute path, it MUST be inside the current workspace.",
+                    relative_path_guidance,
+                )
+                .replace(
+                    "Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. When EnterWorktree or ExitWorktree returns a new path_base/workspace_root in its tool result, use that latest tool result as the current workspace context. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace.",
+                    worktree_guidance,
+                )
+        }
+        PermissionModeConfig::Ask | PermissionModeConfig::AutoRead => prompt,
+    }
 }
 
 #[cfg(test)]
 fn static_system_prompt_for_test(cwd_str: &str, is_git: bool, lang: &str) -> String {
-    static_system_prompt_for(cwd_str, is_git, lang)
+    static_system_prompt_for(cwd_str, is_git, lang, PermissionModeConfig::Ask)
+}
+
+#[cfg(test)]
+fn static_system_prompt_for_test_with_permission_mode(
+    cwd_str: &str,
+    is_git: bool,
+    lang: &str,
+    permission_mode: PermissionModeConfig,
+) -> String {
+    static_system_prompt_for(cwd_str, is_git, lang, permission_mode)
 }
 
 /// Build commit guidance with provider/model trailer. 文案模板迁自 `share::i18n::prompt::commit`。
@@ -83,7 +142,7 @@ pub async fn build_system_prompt_parts(
     let is_git = is_git_repo(cwd).await;
 
     // --- Static part: instructions that don't change between sessions ---
-    let static_part = static_system_prompt_for(&cwd_str, is_git, lang);
+    let static_part = static_system_prompt_for(&cwd_str, is_git, lang, context.permission_mode);
 
     // --- Dynamic part: session-specific context ---
     let mut dynamic = String::new();

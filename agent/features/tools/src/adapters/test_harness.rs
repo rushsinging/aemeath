@@ -4,13 +4,7 @@
 //! keeps the concrete registry private while allowing cross-crate tests to
 //! preserve real `TypedTool` behavior behind the catalog/execution ports.
 
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-};
+use std::{collections::HashMap, sync::Arc};
 
 use parking_lot::Mutex;
 
@@ -149,81 +143,5 @@ impl TestCatalogExecution {
 
     pub fn binding(&self) -> Arc<dyn crate::domain::ToolExecutionContextBindingPort> {
         self.binding.clone()
-    }
-}
-
-/// Gateway fake used by composition tests without exposing a concrete registry.
-#[derive(Default)]
-pub struct CountingToolCatalogGateway {
-    new_registry_calls: AtomicUsize,
-    register_all_tools_calls: AtomicUsize,
-}
-
-impl CountingToolCatalogGateway {
-    pub fn new_registry_calls(&self) -> usize {
-        self.new_registry_calls.load(Ordering::SeqCst)
-    }
-
-    pub fn register_all_tools_calls(&self) -> usize {
-        self.register_all_tools_calls.load(Ordering::SeqCst)
-    }
-}
-
-impl crate::adapters::wiring::ToolCatalogGateway for CountingToolCatalogGateway {
-    fn new_registry(&self) -> ToolRegistry {
-        self.new_registry_calls.fetch_add(1, Ordering::SeqCst);
-        ToolRegistry::new()
-    }
-
-    fn register_all_tools(
-        &self,
-        registry: &ToolRegistry,
-        task_access: Arc<dyn task::TaskAccess>,
-        skills: Arc<tokio::sync::Mutex<HashMap<String, share::skill_ops::Skill>>>,
-        memory_source: Arc<dyn crate::domain::MemoryPortSource>,
-        workspace_control: Arc<dyn project::WorkspaceControl>,
-    ) {
-        self.register_all_tools_calls.fetch_add(1, Ordering::SeqCst);
-        crate::adapters::registry::register_all_tools(
-            registry,
-            task_access,
-            skills,
-            memory_source,
-            workspace_control,
-        );
-    }
-
-    fn register_all_tools_except_agent(
-        &self,
-        registry: &ToolRegistry,
-        task_access: Arc<dyn task::TaskAccess>,
-        skills: Arc<tokio::sync::Mutex<HashMap<String, share::skill_ops::Skill>>>,
-        memory_source: Arc<dyn crate::domain::MemoryPortSource>,
-        workspace_control: Arc<dyn project::WorkspaceControl>,
-    ) {
-        crate::adapters::registry::register_all_tools_except_agent(
-            registry,
-            task_access,
-            skills,
-            memory_source,
-            workspace_control,
-        );
-    }
-
-    fn register_subagent_tools(
-        &self,
-        registry: &mut ToolRegistry,
-        task_access: Arc<dyn task::TaskAccess>,
-        skills: Arc<tokio::sync::Mutex<HashMap<String, share::skill_ops::Skill>>>,
-        memory_source: Arc<dyn crate::domain::MemoryPortSource>,
-        workspace_control: Arc<dyn project::WorkspaceControl>,
-    ) {
-        crate::adapters::registry::register_subagent_tools(
-            registry,
-            task_access,
-            skills,
-            memory_source,
-            workspace_control,
-        );
     }
 }

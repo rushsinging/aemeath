@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GUARD="$SCRIPT_DIR/check-tool-catalog-execution-boundary.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -57,6 +58,14 @@ runtime_probe="$TMP/agent/features/runtime/src/application/bypass.rs"
 printf '%s\n' 'fn bypass(registry: &ToolRegistry) { let _ = registry.get("Bash"); }' >"$runtime_probe"
 expect_failure runtime-registry 'Runtime production code must not reference ToolRegistry' rm -f "$runtime_probe"
 
+runtime_adapter_probe="$TMP/agent/features/runtime/src/application/private_adapter.rs"
+printf '%s\n' 'use tools::adapters::execution::ExecutionAdapter;' >"$runtime_adapter_probe"
+expect_failure runtime-private-adapter 'Runtime production code must not import Tools private adapters' rm -f "$runtime_adapter_probe"
+
+runtime_backing_probe="$TMP/agent/features/runtime/src/application/private_backing.rs"
+printf '%s\n' 'fn bypass(_: ToolBacking) {}' >"$runtime_backing_probe"
+expect_failure runtime-private-backing 'Runtime production code must not reference Tools private backing or adapters' rm -f "$runtime_backing_probe"
+
 cp "$TMP/agent/features/tools/src/adapters/execution.rs" "$TMP/execution.clean"
 printf '%s\n' 'fn execute() { hook::before(); }' >>"$TMP/agent/features/tools/src/adapters/execution.rs"
 expect_failure execution-hook 'Tools Execution adapter must not depend on policy/hook/sdk/tui/runtime' cp "$TMP/execution.clean" "$TMP/agent/features/tools/src/adapters/execution.rs"
@@ -77,5 +86,10 @@ schema_probe="$TMP/agent/features/runtime/src/application/schema_copy.rs"
 printf '%s\n' 'fn validate_tool_input() { jsonschema::validate(); }' >"$schema_probe"
 expect_failure schema-copy 'Schema validator implementation must exist only in Tools' rm -f "$schema_probe"
 
+legacy_scope_probe="$TMP/agent/features/tools/src/adapters/legacy_scope.rs"
+printf '%s\n' 'enum Legacy { LegacyNoAgent }' >"$legacy_scope_probe"
+expect_failure legacy-scope 'Tools legacy Registry/Profile/SkillTool paths must stay retired' rm -f "$legacy_scope_probe"
+
 run_guard >/dev/null
+AEMEATH_PROJECT_DIR="$ROOT" "$GUARD" >/dev/null
 echo 'Tool Catalog/Execution guard sanity checks passed.'

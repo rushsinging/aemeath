@@ -7,9 +7,10 @@ use context::domain::session::{
     SnapshotState,
 };
 use context::domain::{
-    CalendarDate, CompactRequest, CompactTrigger, ContentFingerprint, ContextAppend,
-    ContextAppendError, ContextRequest, ContextRequestId, FinalizeCause, Language, RunStepId,
-    SessionId, SessionRevision, SystemPromptSpec, TaskReminderSnapshot,
+    AcceptedInputAppend, AcceptedInputError, CalendarDate, CompactRequest, CompactTrigger,
+    ContentFingerprint, ContextAppend, ContextAppendError, ContextRequest, ContextRequestId,
+    FinalizeCause, Language, RunStepId, SessionId, SessionRevision, SystemPromptSpec,
+    TaskReminderSnapshot,
 };
 use context::ports::SessionRepository;
 use project::{PreparedWorkspaceRestore, WorkspacePersist, WorkspaceRestoreError};
@@ -102,6 +103,17 @@ fn append(fingerprint: &str) -> ContextAppend {
     }
 }
 
+fn accepted_input(fingerprint: &str) -> AcceptedInputAppend {
+    AcceptedInputAppend {
+        session_id: SessionId::new("session"),
+        run_id: RunId::new("run"),
+        step_id: RunStepId::new("step"),
+        source_request_id: ContextRequestId::new("request"),
+        messages: vec![Message::user("accepted fact")],
+        fingerprint: ContentFingerprint::new(fingerprint),
+    }
+}
+
 fn compact_request(session_id: SessionId) -> ContextRequest {
     ContextRequest {
         session_id,
@@ -177,7 +189,7 @@ fn ten_step_slices() -> Vec<CommittedRunSlice> {
         .map(|index| {
             CommittedRunSlice::new(
                 format!("run-{index}"),
-                vec![CommittedRunStep::outcome_only(
+                vec![CommittedRunStep::compatibility_outcome_only(
                     format!("step-{index}"),
                     vec![Message::user(format!("message-{index}"))],
                 )],
@@ -224,6 +236,54 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
 }
 
 #[tokio::test]
+async fn accepted_input_persists_before_publish() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer.clone());
+    let accepted = accepted_input("input-v1");
+
+    let receipt = repository.append_accepted_input(&accepted).await.unwrap();
+
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+    assert_eq!(writer.saved.lock().unwrap().len(), 1);
+    {
+        let session = holder.read().unwrap();
+        let step = &session.run_slices[0].steps[0];
+        assert_eq!(
+            step.accepted_input.as_ref().unwrap().messages[0].text_content(),
+            "accepted fact"
+        );
+        assert!(step.outcome.is_none());
+    }
+    assert_eq!(
+        repository
+            .snapshot(&accepted.session_id)
+            .await
+            .unwrap()
+            .messages[0]
+            .text_content(),
+        "accepted fact"
+    );
+}
+
+#[tokio::test]
+async fn accepted_input_is_idempotent_but_rejects_content_conflict() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, _) = repository(writer);
+    let accepted = accepted_input("input-v1");
+
+    let first = repository.append_accepted_input(&accepted).await.unwrap();
+    let second = repository.append_accepted_input(&accepted).await.unwrap();
+    assert_eq!(first, second);
+
+    let mut conflicting = accepted;
+    conflicting.fingerprint = ContentFingerprint::new("input-v2");
+    assert!(matches!(
+        repository.append_accepted_input(&conflicting).await,
+        Err(AcceptedInputError::ContentConflict { .. })
+    ));
+}
+
+#[tokio::test]
 async fn finalized_append_bridges_messages_into_structured_outcome() {
     let writer = Arc::new(RecordingWriter::default());
     let (repository, holder) = repository(writer);
@@ -240,10 +300,53 @@ async fn finalized_append_bridges_messages_into_structured_outcome() {
     assert_eq!(session.run_slices[0].run_id, run_id.to_string());
     assert_eq!(session.run_slices[0].steps.len(), 1);
     assert_eq!(session.run_slices[0].steps[0].step_id, step_id.as_str());
+    let outcome = session.run_slices[0].steps[0].outcome.as_ref().unwrap();
+    assert_eq!(outcome.finalize_cause, FinalizeCause::Completed);
+    assert_eq!(outcome.messages[0].text_content(), "fact");
+    assert!(outcome.receipts.is_empty());
+    assert_eq!(outcome.api_input_tokens, None);
+    assert_eq!(outcome.fingerprint, "same");
+    assert_eq!(outcome.committed_revision, 1);
+}
+
+#[tokio::test]
+async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer);
+    let accepted = accepted_input("input-v1");
+    repository.append_accepted_input(&accepted).await.unwrap();
+
+    let mut finalized = append("outcome-v1");
+    finalized.expected_revision = SessionRevision::new(1);
+    finalized.finalize_cause = FinalizeCause::UserCancelledStep;
+    finalized.api_input_tokens = Some(42);
+    finalized.receipts = vec![context::domain::StepReceipt::agent(
+        "agent-call",
+        0,
+        context::domain::ToolOutcomeKind::CancellationUnconfirmed,
+    )];
+    let receipt = repository.append_finalized(&finalized).await.unwrap();
+
+    let session = holder.read().unwrap();
+    let step = &session.run_slices[0].steps[0];
     assert_eq!(
-        session.run_slices[0].steps[0].outcome.as_ref().unwrap()[0].text_content(),
-        "fact"
+        step.accepted_input.as_ref().unwrap().messages[0].text_content(),
+        "accepted fact"
     );
+    assert_eq!(
+        step.accepted_input.as_ref().unwrap().fingerprint,
+        "input-v1"
+    );
+    assert_eq!(step.accepted_input.as_ref().unwrap().committed_revision, 1);
+    let outcome = step.outcome.as_ref().unwrap();
+    assert_eq!(outcome.finalize_cause, FinalizeCause::UserCancelledStep);
+    assert_eq!(outcome.api_input_tokens, Some(42));
+    assert_eq!(
+        outcome.receipts[0].outcome(),
+        context::domain::ToolOutcomeKind::CancellationUnconfirmed
+    );
+    assert_eq!(outcome.fingerprint, "outcome-v1");
+    assert_eq!(outcome.committed_revision, receipt.committed_revision.get());
 }
 
 #[tokio::test]

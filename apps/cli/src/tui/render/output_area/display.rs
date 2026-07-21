@@ -114,6 +114,11 @@ mod tests {
         );
         // ANSI CSI 序列（含 ESC + '[' + 参数 + 终止字母）整体剥离。
         assert_eq!(sanitize_for_display("\x1b[31mred\x1b[0m"), "red");
+        // 鼠标 CSI 序列的终止字符 `M` 也必须被整体剥离。
+        assert_eq!(
+            sanitize_for_display("before\x1b[<65;67;25Mafter"),
+            "beforeafter"
+        );
         // \r 单独被跳过；\n 走 is_control 分支也跳过（实际在 TUI 渲染前是预期行为）。
         assert_eq!(sanitize_for_display("hi\r\nworld\x07"), "hiworld");
     }
