@@ -57,6 +57,14 @@ runtime_probe="$TMP/agent/features/runtime/src/application/bypass.rs"
 printf '%s\n' 'fn bypass(registry: &ToolRegistry) { let _ = registry.get("Bash"); }' >"$runtime_probe"
 expect_failure runtime-registry 'Runtime production code must not reference ToolRegistry' rm -f "$runtime_probe"
 
+runtime_adapter_probe="$TMP/agent/features/runtime/src/application/private_adapter.rs"
+printf '%s\n' 'use tools::adapters::execution::ExecutionAdapter;' >"$runtime_adapter_probe"
+expect_failure runtime-private-adapter 'Runtime production code must not import Tools private adapters' rm -f "$runtime_adapter_probe"
+
+runtime_backing_probe="$TMP/agent/features/runtime/src/application/private_backing.rs"
+printf '%s\n' 'fn bypass(_: ToolBacking) {}' >"$runtime_backing_probe"
+expect_failure runtime-private-backing 'Runtime production code must not reference Tools private backing or adapters' rm -f "$runtime_backing_probe"
+
 cp "$TMP/agent/features/tools/src/adapters/execution.rs" "$TMP/execution.clean"
 printf '%s\n' 'fn execute() { hook::before(); }' >>"$TMP/agent/features/tools/src/adapters/execution.rs"
 expect_failure execution-hook 'Tools Execution adapter must not depend on policy/hook/sdk/tui/runtime' cp "$TMP/execution.clean" "$TMP/agent/features/tools/src/adapters/execution.rs"

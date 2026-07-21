@@ -946,6 +946,62 @@ async fn empty_roots_yields_only_builtin_commit() {
     assert_eq!(snap.fragments()[0].stable_key(), "commit");
 }
 
+#[tokio::test]
+async fn global_and_extra_skills_materialize_content_and_preserve_priority() {
+    let project = fresh_project("materialize_global_extra");
+    let global = fresh_global("materialize_global_extra");
+    let extra = tempfile::tempdir().unwrap().keep().join("extra-skills");
+    write_skill(&global, "global.md", "global", "global", "global body");
+    write_skill(&extra, "extra.md", "extra", "extra", "extra body");
+    write_skill(&extra, "shadow.md", "global", "extra shadow", "wrong body");
+
+    let adapter = FilesystemSkillAdapter::new(global);
+    let snapshot = adapter
+        .materialize_available(SkillMaterializationQuery::new(
+            project,
+            vec![extra],
+            BTreeSet::new(),
+        ))
+        .await
+        .unwrap();
+    let global = snapshot
+        .fragments()
+        .iter()
+        .find(|fragment| fragment.stable_key() == "global")
+        .unwrap();
+    let extra = snapshot
+        .fragments()
+        .iter()
+        .find(|fragment| fragment.stable_key() == "extra")
+        .unwrap();
+    assert_eq!(global.content(), "global body");
+    assert_eq!(global.source().kind, SkillSourceKind::Global);
+    assert_eq!(extra.content(), "extra body");
+    assert_eq!(extra.source().kind, SkillSourceKind::Extra);
+}
+
+#[tokio::test]
+async fn fallback_is_visible_when_its_primary_skill_is_absent() {
+    let project = fresh_project("fallback_visible");
+    write_skill_fm(
+        &agents_skills_dir(&project),
+        "backup.md",
+        "backup",
+        "backup",
+        "fallback_for:\n  - primary\n",
+        "backup body",
+    );
+    let adapter = FilesystemSkillAdapter::new(fresh_global("fallback_visible"));
+    let snapshot = adapter
+        .materialize_available(mat_query(project))
+        .await
+        .unwrap();
+    assert!(snapshot
+        .fragments()
+        .iter()
+        .any(|fragment| fragment.stable_key() == "backup" && fragment.content() == "backup body"));
+}
+
 // ── ports are object-safe via Arc<dyn …> ────────────────────────────────
 
 #[tokio::test]

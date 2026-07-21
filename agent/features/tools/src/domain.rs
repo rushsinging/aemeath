@@ -26,6 +26,8 @@ pub mod tool_types;
 pub mod types;
 
 #[cfg(test)]
+mod command_pl_tests;
+#[cfg(test)]
 mod scope_profile_tests;
 #[cfg(test)]
 mod skill_pl_tests;

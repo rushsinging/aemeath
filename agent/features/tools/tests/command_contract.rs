@@ -88,3 +88,95 @@ fn delivery_commands_have_an_explicit_application_shell_target() {
     assert_eq!(help.target, CommandTarget::ApplicationShell);
     assert_eq!(help.argument_schema, CommandArgumentSchema::None);
 }
+
+#[test]
+fn builtin_catalog_exposes_the_complete_stable_descriptor_matrix() {
+    let wiring = tools::composition::wire_commands(Vec::new()).expect("valid builtin catalog");
+    let commands = wiring.catalog().list();
+    let names = commands
+        .iter()
+        .map(|command| command.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        vec![
+            "clear",
+            "clear-images",
+            "compact",
+            "config",
+            "context",
+            "cost",
+            "doctor",
+            "exit",
+            "help",
+            "images",
+            "init",
+            "memory",
+            "model",
+            "paste",
+            "reflect",
+            "resume",
+            "rewind",
+            "save",
+            "session",
+            "stats",
+            "status",
+            "update",
+            "usage",
+            "version",
+        ]
+    );
+    assert!(commands.iter().all(|command| match command.mechanism {
+        CommandMechanism::PromptInjection => true,
+        CommandMechanism::SnapshotQuery =>
+            command.target != CommandTarget::ApplicationVersionControl,
+        CommandMechanism::ApplicationControl => {
+            command.target != CommandTarget::Audit && command.target != CommandTarget::Provider
+        }
+    }));
+    let reflect = commands
+        .iter()
+        .find(|command| command.name.as_str() == "reflect")
+        .unwrap();
+    assert_eq!(
+        reflect.argument_schema,
+        CommandArgumentSchema::OptionalPositiveUsize { default: 10 }
+    );
+}
+
+#[test]
+fn public_wiring_preserves_duplicate_target_and_missing_argument_errors() {
+    let duplicate = tools::CommandDescriptor::new(
+        "help",
+        &[],
+        "duplicate",
+        CommandMechanism::PromptInjection,
+        CommandTarget::ContextManagement,
+        CommandArgumentSchema::OptionalText,
+    )
+    .unwrap();
+    assert!(matches!(
+        tools::composition::wire_commands(vec![duplicate]),
+        Err(CommandParseError::DuplicateName { .. })
+    ));
+
+    let mismatch = tools::CommandDescriptor::new(
+        "bad-target",
+        &[],
+        "bad",
+        CommandMechanism::ApplicationControl,
+        CommandTarget::Audit,
+        CommandArgumentSchema::None,
+    )
+    .unwrap();
+    assert!(matches!(
+        tools::composition::wire_commands(vec![mismatch]),
+        Err(CommandParseError::TargetMismatch { .. })
+    ));
+
+    let wiring = tools::composition::wire_commands(Vec::new()).unwrap();
+    assert!(matches!(
+        wiring.router().resolve(SlashInput::new("/resume")),
+        Err(CommandParseError::MissingArgument { .. })
+    ));
+}

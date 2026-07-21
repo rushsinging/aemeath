@@ -3,6 +3,8 @@ mod ask_user_tests;
 #[cfg(test)]
 mod catalog_execution_contract_tests;
 #[cfg(test)]
+mod command_tests;
+#[cfg(test)]
 mod skill_filesystem_tests;
 #[cfg(test)]
 mod skill_not_tool_contract_tests;
