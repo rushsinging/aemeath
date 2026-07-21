@@ -340,6 +340,7 @@ pub async fn from_args_with_workspace(
         &cwd,
         Some(&binding.model.provider),
         Some(&binding.model.model),
+        snapshot.permission_mode(),
     );
     let prompt_parts =
         build_system_prompt_parts(&prompt_context, &hook_runner, snapshot.language()).await;
