@@ -3,6 +3,7 @@ use super::CliAgentRunner;
 use crate::application::agent::Agent;
 use crate::ports::{ModelId, ProviderBinding, ProviderBuildSpec};
 use async_trait::async_trait;
+use hook::HookDispatchContext;
 use provider::RequestSystemBlock;
 use share::message::Message;
 use std::sync::Arc;
@@ -159,8 +160,8 @@ impl AgentRunner for CliAgentRunner {
             self.reasoning
         );
 
-        // Extract hook_runner to avoid borrow conflicts with closure
-        let hook_runner = self.hook_runner.clone();
+        // Extract hook port to avoid borrow conflicts with closure
+        let hook_port = self.hook_runner.clone();
 
         // Append role-specific system suffix if configured
         let system = match role.system_suffix.as_ref() {
@@ -170,21 +171,27 @@ impl AgentRunner for CliAgentRunner {
 
         // Call SubagentStart hook
         let workspace_root = self.workspace.views().read().current_workspace_root();
-        let hook_results = hook_runner
-            .on_subagent_start(prompt, &system, Some(&resolved_spec), &workspace_root)
+        let hook_outcome = hook_port
+            .dispatch_at(
+                hook::HookInvocation::SubRunStart(hook::SubRunInput {
+                    prompt: prompt.to_string(),
+                    system: system.clone(),
+                    model_spec: Some(resolved_spec.clone()),
+                }),
+                HookDispatchContext::new(&workspace_root),
+                &tokio_util::sync::CancellationToken::new(),
+            )
             .await;
         // Send any system messages from hook results to progress_tx
-        for (_, _, json_output) in &hook_results {
-            if let Some(ref output) = json_output {
-                if let Some(ref sys_msg) = output.system_message {
-                    if let Some(ref sink) = progress_sink {
-                        sink.emit(AgentProgressEvent {
-                            sequence: 0,
-                            kind: AgentProgressKind::Message {
-                                text: format!("[hook] {sys_msg}"),
-                            },
-                        });
-                    }
+        for msg in &hook_outcome.messages {
+            if let hook::HookDisplayMessageKind::SystemMessage = msg.kind {
+                if let Some(ref sink) = progress_sink {
+                    sink.emit(AgentProgressEvent {
+                        sequence: 0,
+                        kind: AgentProgressKind::Message {
+                            text: format!("[hook] {}", msg.text),
+                        },
+                    });
                 }
             }
         }
@@ -321,7 +328,8 @@ impl AgentRunner for CliAgentRunner {
             binding,
             max_tokens,
             level,
-            hook_runner,
+            hook_port,
+            workspace_root,
             tool_schemas,
             config_snapshot: self.config_snapshot.clone(),
             language: self.language.clone(),

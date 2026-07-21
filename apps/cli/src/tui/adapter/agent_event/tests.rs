@@ -512,6 +512,41 @@ mod started_tests {
     }
 }
 
+#[test]
+fn test_hook_message_maps_to_info_notice_with_typed_metadata() {
+    let mapping = map_agent_event(&UiEvent::HookMessage(sdk::HookMessageView {
+        point: "PreToolUse".to_string(),
+        source: "matcher:Bash".to_string(),
+        execution_ordinal: 2,
+        attempt: 3,
+        kind: sdk::HookMessageKindView::AdditionalContext,
+        text: "Use the checked-in formatter.".to_string(),
+    }));
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::AppendHookNotice(AppendHookNotice { content })]
+            if content.kind == crate::tui::model::conversation::block::HookNoticeKind::Info
+                && content.title == "Hook context: PreToolUse"
+                && content.body == "Use the checked-in formatter."
+                && content.details.as_deref() == Some("Source: matcher:Bash\nExecution: 2\nAttempt: 3")
+    ));
+}
+
+#[test]
+fn test_hook_message_with_empty_text_is_not_rendered() {
+    let mapping = map_agent_event(&UiEvent::HookMessage(sdk::HookMessageView {
+        point: "PreToolUse".to_string(),
+        source: "matcher:Bash".to_string(),
+        execution_ordinal: 0,
+        attempt: 1,
+        kind: sdk::HookMessageKindView::SystemMessage,
+        text: " <system-reminder>\n</system-reminder> ".to_string(),
+    }));
+
+    assert!(mapping.conversation.is_empty());
+}
+
 // ── #1106：runtime 允许发空 SystemMessage，TUI（ACL 层）不渲染 ──
 
 #[test]

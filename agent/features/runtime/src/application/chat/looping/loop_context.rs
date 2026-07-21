@@ -70,7 +70,7 @@ where
     pub task_access: Arc<dyn task::TaskAccess>,
     pub max_tool_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub hook_runner: hook::api::HookRunner,
+    pub hook_runner: std::sync::Arc<dyn hook::HookPort>,
     pub memory_config: share::config::MemoryConfig,
     /// Memory domain port（MemoryTool 使用）。
     pub memory: Arc<dyn memory::MemoryPort>,

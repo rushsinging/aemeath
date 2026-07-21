@@ -49,6 +49,7 @@
 | 6e | `check-provider-usage-capability.sh` | Provider PL 语义 | pull-stream usage 禁止把未报告字段默认成零；OpenAI-compatible reasoning maximum 与 legacy clamp 必须从唯一 `ReasoningCapability` 派生 |
 | 6f | `check-provider-driver-acl.sh` | Provider Driver ACL | driver 解析、协议族/API style 选择与实现配置必须留在 Provider；Runtime/Composition/CLI 禁止解析 driver 或引用内部配置 |
 | 6g | `check-session-management-ownership.sh` | Context / Composition 构造权 | Composition 唯一创建 Session AtomicBlob backing 与 `SessionManagementPort`；Context / Runtime 只消费同一注入 Port，禁止 Context filesystem 构造、legacy free-function façade 或 Runtime 直连 façade |
+| 6h | `check-hook-target-facade.sh` | Hook / Runtime 边界 | Hook 只从 crate-root 发布稳定 PL 与 `HookPort`；禁止 `hook::api`、legacy re-export 与 Runtime 生产消费 `hook::api::*` |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
 | 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
@@ -72,6 +73,7 @@
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
+| 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution/binding、Skill ports、Tool Result materializer 与 ActiveRunRegistry；Runtime bootstrap 只消费 injected resources，禁止恢复 Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
@@ -262,6 +264,14 @@
   - 对仍存在的 `agent/features/*/src/api.rs`，`pub use crate::<segment>` 仅可指向 `contract` / `gateway`；
   - `CONTEXT_FORBIDDEN_PATHS` 任一路径复活立即失败。
 - **例外**：无 path 级白名单。Context、Policy 与 Storage root 集合都是结构化 façade policy，不是 migration exception。
+
+### 6h. check-hook-target-facade.sh
+
+- **功能**：锁定 #926 后 Hook 的 crate-root Published Language 与 Runtime 消费边界。
+- **扫描范围**：`agent/features/hook/src/lib.rs`、不存在性检查 `agent/features/hook/src/api.rs`，以及全部 `agent/features/runtime/src/**/*.rs` 生产源（跳过 `*_tests.rs`、`tests.rs` 与 `tests/`）。
+- **不变量**：Hook crate-root 只能发布稳定 PL、`HookPort`、`HookDispatchContext` 与生产 Dispatcher；禁止 `pub mod api`、`api.rs` 物理路径和 `adapters::legacy` re-export；Runtime 必须经登记的 Hook crate-root façade消费，禁止 `hook::api::*`。
+- **白名单预算**：迁移例外、路径/整文件豁免、行级 allow、`grep -v` / exclude / skip 均为 `0`；`policy.hook.target-facade` 与 `policy.hook.crate-root-facade` 分别是 Target façade/re-export policy，不计 migration debt。
+- **故意违规证据**：`check-hook-target-facade-tests.sh` 在隔离副本依次注入 `pub mod api`、legacy re-export 与 Runtime `hook::api` import；每类反例均以 exit 2 被单 Guard 拦截，恢复后单 Guard clean pass。总编排 fast profile 同时执行该 Guard。
 
 ### 6t. check-task-persistence-capability.sh
 

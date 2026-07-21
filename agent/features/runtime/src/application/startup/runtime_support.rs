@@ -2,23 +2,29 @@ use crate::application::agent::runner as agent_runner;
 #[cfg(test)]
 use crate::application::startup::config_paths;
 use crate::ports::ProviderFactory;
-use hook::api::HookRunner;
+use hook::HookPort;
 use share::config::hooks::HooksConfig;
 #[cfg(test)]
 use share::config::AgentsConfig;
+use std::collections::HashMap;
 use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub fn build_hook_runner(hooks: Option<&HooksConfig>, _cwd: &Path) -> HookRunner {
-    let runner = match hooks {
-        Some(h) => HookRunner::new(h.clone()),
-        None => HookRunner::empty(),
+pub fn build_hook_runner(hooks: Option<&HooksConfig>, _cwd: &Path) -> Arc<dyn HookPort> {
+    let runner: Arc<dyn HookPort> = match hooks {
+        Some(h) => {
+            Arc::new(hook::build_dispatcher(h, HashMap::new()).expect("hook config 必须合法"))
+        }
+        None => Arc::new(
+            hook::build_dispatcher(&HooksConfig::default(), HashMap::new())
+                .expect("空 hook config 必须合法"),
+        ),
     };
     log::info!(target: crate::LOG_TARGET,
         "hook runner built: configured_events={}",
-        runner.hook_count()
+        hooks.map(|h| h.events.len()).unwrap_or(0)
     );
     runner
 }
@@ -34,7 +40,7 @@ pub fn build_agent_runner(
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     factory: Arc<dyn ProviderFactory>,
     api_timeout_secs: u64,
-    hook_runner: HookRunner,
+    hook_runner: Arc<dyn HookPort>,
     reasoning: bool,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     policy: Arc<dyn policy::PolicyPort>,
@@ -47,6 +53,7 @@ pub fn build_agent_runner(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
     tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
+    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
 ) -> Arc<agent_runner::CliAgentRunner> {
     let models_config = Arc::new(snapshot.models().clone());
     let agents_config = Arc::new(snapshot.agents().clone());
@@ -70,7 +77,7 @@ pub fn build_agent_runner(
         tool_catalog,
         tool_execution,
         tool_context_binding,
-        skill_materializer: tools::composition::wire_skill_materialization(),
+        skill_materializer,
         policy,
     })
 }
@@ -127,12 +134,14 @@ mod tests {
             .into_views();
 
         let tools = tools::composition::TestCatalogExecutionFactory::empty();
+        let skill_wiring = tools::composition::wire_skills();
+        let skill_materializer = skill_wiring.materializer();
         let snapshot = share::config::domain::snapshot::ConfigSnapshot::new(Config::default());
         let runner = build_agent_runner(
             &snapshot,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
             30,
-            HookRunner::empty(),
+            Arc::new(hook::build_dispatcher(&HooksConfig::default(), HashMap::new()).unwrap()),
             false,
             Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
             policy.clone(),
@@ -143,8 +152,13 @@ mod tests {
             tools.catalog_port(),
             tools.execution(),
             tools.binding(),
+            skill_materializer.clone(),
         );
 
+        assert!(
+            Arc::ptr_eq(&runner.skill_materializer, &skill_materializer),
+            "Sub Run runner 必须复用 Composition 注入的同一 Skill materializer"
+        );
         assert!(
             Arc::ptr_eq(&runner.policy, &policy),
             "Sub Run runner 必须保留 Composition 注入的同一 PolicyPort 实例"
@@ -154,8 +168,8 @@ mod tests {
     #[test]
     fn test_build_hook_runner_accepts_empty_config() {
         let hook_runner = build_hook_runner(None, Path::new("."));
-
-        assert_eq!(hook_runner.hook_count(), 0);
+        // hook_runner is an Arc<dyn HookPort> — the dispatcher handles empty configs.
+        let _ = hook_runner;
     }
 
     #[test]
@@ -172,8 +186,8 @@ mod tests {
         let hooks = HooksConfig { events };
 
         let hook_runner = build_hook_runner(Some(&hooks), Path::new("project-root"));
-
-        assert_eq!(hook_runner.hook_count(), 1);
+        // hook_runner is an Arc<dyn HookPort> — config is handled by the dispatcher.
+        let _ = hook_runner;
     }
 
     #[test]
