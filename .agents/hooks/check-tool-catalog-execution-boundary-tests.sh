@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GUARD="$SCRIPT_DIR/check-tool-catalog-execution-boundary.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -90,4 +91,5 @@ printf '%s\n' 'enum Legacy { LegacyNoAgent }' >"$legacy_scope_probe"
 expect_failure legacy-scope 'Tools legacy Registry/Profile/SkillTool paths must stay retired' rm -f "$legacy_scope_probe"
 
 run_guard >/dev/null
+AEMEATH_PROJECT_DIR="$ROOT" "$GUARD" >/dev/null
 echo 'Tool Catalog/Execution guard sanity checks passed.'

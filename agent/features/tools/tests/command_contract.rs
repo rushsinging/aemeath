@@ -91,6 +91,7 @@ fn delivery_commands_have_an_explicit_application_shell_target() {
 
 #[test]
 fn builtin_catalog_exposes_the_complete_stable_descriptor_matrix() {
+    // 更新 builtin Command 时必须同步此稳定的公开目录契约。
     let wiring = tools::composition::wire_commands(Vec::new()).expect("valid builtin catalog");
     let commands = wiring.catalog().list();
     let names = commands

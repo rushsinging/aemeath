@@ -106,6 +106,20 @@ fn router_validates_required_and_positive_arguments_and_maps_targets() {
             CommandTarget::Runtime,
             CommandArgumentSchema::None,
         ),
+        descriptor(
+            "review",
+            &[],
+            CommandMechanism::PromptInjection,
+            CommandTarget::ContextManagement,
+            CommandArgumentSchema::OptionalText,
+        ),
+        descriptor(
+            "model",
+            &[],
+            CommandMechanism::ApplicationControl,
+            CommandTarget::Config,
+            CommandArgumentSchema::OptionalText,
+        ),
     ])
     .unwrap();
 
@@ -139,5 +153,20 @@ fn router_validates_required_and_positive_arguments_and_maps_targets() {
             target: ApplicationControlTarget::ContextManagement,
             command,
         }) if command.arguments.as_slice() == ["session-1"]
+    ));
+    assert!(matches!(
+        adapter.resolve(SlashInput::new("/review staged")),
+        Ok(CommandRoute::PromptInjection(command))
+            if command.command.as_str() == "review" && command.arguments.as_slice() == ["staged"]
+    ));
+    assert!(matches!(
+        adapter.resolve(SlashInput::new("/model gpt-5")),
+        Ok(CommandRoute::ApplicationControl { command, .. })
+            if command.command.as_str() == "model" && command.arguments.as_slice() == ["gpt-5"]
+    ));
+    assert!(matches!(
+        adapter.resolve(SlashInput::new("/model")),
+        Ok(CommandRoute::ApplicationControl { command, .. })
+            if command.command.as_str() == "model" && command.arguments.as_slice().is_empty()
     ));
 }

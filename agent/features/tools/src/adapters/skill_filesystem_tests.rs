@@ -996,10 +996,12 @@ async fn fallback_is_visible_when_its_primary_skill_is_absent() {
         .materialize_available(mat_query(project))
         .await
         .unwrap();
-    assert!(snapshot
+    let backup = snapshot
         .fragments()
         .iter()
-        .any(|fragment| fragment.stable_key() == "backup" && fragment.content() == "backup body"));
+        .find(|fragment| fragment.stable_key() == "backup" && fragment.content() == "backup body")
+        .expect("fallback must materialize while primary is absent");
+    assert_eq!(backup.source().kind, SkillSourceKind::ProjectAgents);
 }
 
 // ── ports are object-safe via Arc<dyn …> ────────────────────────────────
