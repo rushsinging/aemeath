@@ -74,7 +74,6 @@ else:
         # provider gateway is retired.
         required_patterns = {
             "provider factory forwarding": r"gateways\.provider",
-            "tool gateway forwarding": r"gateways\.tools",
             "policy gateway forwarding": r"gateways\.policy",
         }
         for label, pattern in required_patterns.items():
@@ -97,7 +96,7 @@ else:
             "injected ProviderFactory parameter": r"provider_factory\s*:\s*Arc<dyn\s+ProviderFactory>",
             "ProviderBuildSpec construction": r"\bProviderBuildSpec\s*\{",
             "factory.build consumption": r"provider_factory\s*\.build\s*\(",
-            "injected tool gateway parameter": r"_?tool_gateway\s*:\s*Arc<dyn\s+tools::ToolCatalogGateway>",        }
+        }
         for label, pattern in required_patterns.items():
             if not re.search(pattern, text, re.DOTALL):
                 violations.append(

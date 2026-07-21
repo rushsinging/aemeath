@@ -8,9 +8,9 @@ use tools::types::{
     AgentResult, AskUserQuestionResult, BashResult, BriefResult, EditResult, EnterWorktreeResult,
     ExitWorktreeResult, GlobResult, GrepResult, ListMcpResourcesResult, LspResult,
     McpManagerResult, McpToolResult, MemoryResult, PlanModeResult, ReadMcpResourceResult,
-    ReadResult, SkillResult, TaskCreateResult, TaskGetResult, TaskListCompleteResult,
-    TaskListCreateResult, TaskListResult, TaskStopResult, TaskUpdateResult, ToolSearchResult,
-    WebFetchResult, WebSearchResult, WriteResult,
+    ReadResult, TaskCreateResult, TaskGetResult, TaskListCompleteResult, TaskListCreateResult,
+    TaskListResult, TaskStopResult, TaskUpdateResult, ToolSearchResult, WebFetchResult,
+    WebSearchResult, WriteResult,
 };
 
 /// Tool result adapter: convert `serde_json::Value` back to the typed R struct.
@@ -42,7 +42,6 @@ impl ToolResultAdapter for BriefResult {}
 impl ToolResultAdapter for LspResult {}
 impl ToolResultAdapter for PlanModeResult {}
 impl ToolResultAdapter for MemoryResult {}
-impl ToolResultAdapter for SkillResult {}
 impl ToolResultAdapter for TaskCreateResult {}
 impl ToolResultAdapter for TaskGetResult {}
 impl ToolResultAdapter for TaskListResult {}

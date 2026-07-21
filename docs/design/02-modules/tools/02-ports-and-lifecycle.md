@@ -94,7 +94,7 @@ Tool BC 只拥有局部调用正确性：
 - 协作取消；
 - ToolOutcome 标准化。
 
-Policy、Hook、人工审批、timeout、跨 Tool 并发和重试不得下沉进 ToolExecutionPort，否则会吞并 Runtime 与其他 BC 的职责。
+- Runtime 拥有进度、计划、Policy、Hook、人工审批、timeout、跨 Tool 并发和重试；这些机制不得下沉进 ToolExecutionPort，否则会吞并 Runtime 与其他 BC 的职责。进度/计划资源从现有 Tools Context 收回 Runtime 的物理迁移由 #879 承接。
 
 ## 3. ExecutionScope 与资源端口
 
@@ -332,6 +332,7 @@ Deny: agent/features/** production code and apps/**
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：双 Tool 端口、ExecutionScope、取消、Skill/Command 协作与 MCP 生命周期 | #787 |
+| 2026-07-21 | #914 删除 legacy-no-agent、历史 Registry gateway 与 SkillTool；现有 Tools Context 的 progress/plan adapter 物理收口明确由 #879 承接 | [#914](https://github.com/rushsinging/aemeath/issues/914) |
 | 2026-07-20 | 明确 Skill stable identity / identity aliases 与显式 Slash name / slash aliases 分离；package namespace Skill 默认不投影为 Slash Command，外部 Skill 元数据不得阻断 Command Catalog bootstrap | #1302 |
 | 2026-07-14 | Tool 资源改为直接消费 Project-owned WorkspaceRead / WorkspaceControl，移除宽包装并将 Control 注入限于三个 Tool | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | #993 过渡目录迁移记录移至 Migration Governance；本文端口与生命周期保持 Target | [#993](https://github.com/rushsinging/aemeath/issues/993) |
