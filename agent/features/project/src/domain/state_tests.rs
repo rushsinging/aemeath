@@ -815,6 +815,36 @@ fn enter_rejects_primary_target_as_not_linked_and_keeps_state_unchanged() {
 }
 
 #[test]
+fn enter_existing_linked_worktree_ignores_invalid_base_without_git_add() {
+    let root = unique_temp_dir("existing_linked_ignores_base");
+    let target = root.join("linked");
+    std::fs::create_dir_all(&target).unwrap();
+    let common = root.join(".git");
+    let mut git = FakeGit::default();
+    git.toplevel.insert(target.clone(), target.clone());
+    git.common_dir.insert(target.clone(), common);
+    git.worktrees.insert(target.clone());
+    let mut state = WorkspaceState::new(root.clone());
+
+    let frame = enter(
+        &mut state,
+        &git,
+        Some(target.clone()),
+        None,
+        Some("definitely-invalid-base".into()),
+    )
+    .unwrap();
+
+    assert!(git.added.lock().unwrap().is_empty());
+    assert_eq!(frame.path_base, root);
+    assert_eq!(state.path_base, target);
+    assert_eq!(state.workspace_root, target);
+    assert_eq!(state.worktree_kind, WorktreeKind::Linked);
+    assert_eq!(state.stack, vec![frame]);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn enter_happy_path_pushes_frame_and_swaps_cwd() {
     use std::time::{SystemTime, UNIX_EPOCH};
 

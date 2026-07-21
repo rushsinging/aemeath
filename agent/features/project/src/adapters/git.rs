@@ -248,9 +248,10 @@ impl<R: GitCommandRunner> GitWorktreeOps for GitOps<R> {
         let args = vec![
             OsString::from("worktree"),
             OsString::from("add"),
-            path.as_os_str().to_os_string(),
             OsString::from("-b"),
             OsString::from(branch),
+            OsString::from("--"),
+            path.as_os_str().to_os_string(),
             OsString::from(base),
         ];
         let output = self.runner.run(repo_root, &args).map_err(operation_spawn)?;
@@ -331,14 +332,14 @@ mod tests {
         }
     }
 
-    struct TestRepository {
+    pub(super) struct TestRepository {
         _temp: TestTempDir,
-        root: PathBuf,
-        git_environment: TestGitEnvironment,
+        pub(super) root: PathBuf,
+        pub(super) git_environment: TestGitEnvironment,
     }
 
     #[derive(Clone)]
-    struct TestGitEnvironment {
+    pub(super) struct TestGitEnvironment {
         unavailable_global_config: PathBuf,
         hooks_dir: PathBuf,
     }
@@ -353,7 +354,7 @@ mod tests {
             }
         }
 
-        fn command(&self) -> Command {
+        pub(super) fn command(&self) -> Command {
             let mut command = Command::new("git");
             command
                 .env("LC_ALL", "C")
@@ -399,7 +400,7 @@ mod tests {
         );
     }
 
-    fn initialized_repository() -> TestRepository {
+    pub(super) fn initialized_repository() -> TestRepository {
         let temp = TestTempDir::new();
         let root = temp.path().join("repo");
         std::fs::create_dir(&root).expect("create repository directory");
@@ -659,3 +660,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "git_option_tests.rs"]
+mod option_tests;
