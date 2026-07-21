@@ -576,7 +576,7 @@ fn snapshot_validate_rejects_completed_status_missing_completed_at() {
 }
 
 #[test]
-fn snapshot_validate_rejects_pending_status_with_started_at() {
+fn snapshot_validate_normalizes_pending_status_with_stale_started_at() {
     let batch = baseline_batch().json();
     let task = TaskFixture {
         id: "1",
@@ -591,9 +591,30 @@ fn snapshot_validate_rejects_pending_status_with_started_at() {
     .json();
     let bytes = snapshot_bytes("0", &[task], "2", "2", Some("1"), &[batch]);
 
+    decode(&bytes)
+        .validate()
+        .expect("历史 pending 任务残留 started_at 必须归一化后恢复");
+}
+
+#[test]
+fn snapshot_validate_rejects_pending_status_with_completed_at() {
+    let batch = baseline_batch().json();
+    let task = TaskFixture {
+        id: "1",
+        batch: "1",
+        status: "pending",
+        created_at: 100,
+        updated_at: 100,
+        started_at: Some(100),
+        completed_at: Some(100),
+        blocked_by: &[],
+    }
+    .json();
+    let bytes = snapshot_bytes("0", &[task], "2", "2", Some("1"), &[batch]);
+
     let error = decode(&bytes)
         .validate()
-        .expect_err("Pending status carrying started_at must be rejected");
+        .expect_err("pending 任务携带 completed_at 必须继续拒绝");
 
     assert!(matches!(
         error,

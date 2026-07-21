@@ -547,7 +547,11 @@ impl Task {
         }
         self.status = to;
         self.updated_at = updated_at;
-        if matches!(to, TaskStatus::InProgress | TaskStatus::Completed) && self.started_at.is_none()
+        if to == TaskStatus::Pending {
+            self.started_at = None;
+            self.completed_at = None;
+        } else if matches!(to, TaskStatus::InProgress | TaskStatus::Completed)
+            && self.started_at.is_none()
         {
             self.started_at = Some(updated_at);
         }
