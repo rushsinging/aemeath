@@ -12,36 +12,45 @@ use std::path::Path;
 // ── EnterWorktree ────────────────────────────────────────────────
 
 struct EnterWorktreeDisplay;
+
+fn input_target(input: &serde_json::Value) -> Option<String> {
+    ["branch", "path"].into_iter().find_map(|key| {
+        input
+            .get(key)
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| format!("{key}={value}"))
+    })
+}
+
 impl ToolDisplay for EnterWorktreeDisplay {
     fn name(&self) -> &str {
         "EnterWorktree"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let target = input
-            .get("branch")
-            .and_then(|branch| branch.as_str())
-            .or_else(|| input.get("path").and_then(|path| path.as_str()))
-            .unwrap_or("worktree");
-        format!("{} {target}", self.display_name())
+        input_target(input)
+            .map(|target| format!("{} {target}", self.display_name()))
+            .unwrap_or_else(|| self.display_name().to_string())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
     fn format_header_line_with_result(
         &self,
-        _input: &serde_json::Value,
+        input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
         _workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let result: Option<sdk::tool_result::EnterWorktreeResult> = typed_data(result_payload);
-        let branch = result
-            .as_ref()
-            .map(|r| r.branch.clone())
-            .unwrap_or_else(|| "(default)".to_string());
-        let arg = format!("branch={branch}");
-        let path_suffix = result
-            .map(|r| format!(" ({})", r.workspace_root.display()))
-            .unwrap_or_default();
+        let result: Option<sdk::tool_result::EnterWorktreeResult> = result_payload
+            .filter(|payload| !payload.is_error)
+            .and_then(|payload| typed_data(Some(payload)));
+        let (arg, path_suffix) = match result {
+            Some(result) => (
+                format!("branch={}", result.branch),
+                format!(" ({})", result.workspace_root.display()),
+            ),
+            None => (input_target(input).unwrap_or_default(), String::new()),
+        };
         build_header_line(self.display_name(), &arg, &path_suffix)
     }
     fn render_policy(&self) -> ToolRenderPolicy {

@@ -14,7 +14,7 @@ use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
 use context::application::main_session::{
     MainSessionError, MainSessionWiring, MainSessionWiringBuilder,
 };
-use context::domain::session::{CanonicalSession, ChatChain, SnapshotState};
+use context::domain::session::{CanonicalSession, SnapshotState};
 use context::domain::{
     ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause, RunStepId, SessionId,
     SessionRevision,
@@ -205,6 +205,8 @@ fn build_harness() -> Harness {
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::Captured(ws_ctx),
         revision: 0,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     };
 
@@ -255,6 +257,8 @@ fn session_with_workspace(
         tasks,
         workspace: SnapshotState::Captured(ws.clone()),
         revision: 1,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     }
 }
@@ -365,7 +369,7 @@ async fn finalized_append_persists_and_is_visible_after_resume() {
     assert_eq!(committed.revision, 1);
     assert_eq!(committed.committed_steps.len(), 1);
     assert_eq!(
-        ChatChain::from_chats(&committed.chats).messages().len(),
+        committed.structured_messages().len(),
         1,
         "committed history must contain the finalized message"
     );
@@ -383,12 +387,7 @@ async fn finalized_append_persists_and_is_visible_after_resume() {
         rebound.session().committed_steps[0].step_id,
         RunStepId::new("step-persist").to_string()
     );
-    assert_eq!(
-        ChatChain::from_chats(&rebound.session().chats)
-            .messages()
-            .len(),
-        1
-    );
+    assert_eq!(rebound.session().structured_messages().len(), 1);
 }
 
 /// Cross-project resume is allowed: a session whose workspace belongs to a
@@ -580,6 +579,8 @@ async fn workspace_missing_returns_typed_error() {
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::Missing,
         revision: 1,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     };
 
@@ -611,6 +612,8 @@ async fn workspace_captured_empty_returns_typed_error() {
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::CapturedEmpty,
         revision: 1,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     };
 

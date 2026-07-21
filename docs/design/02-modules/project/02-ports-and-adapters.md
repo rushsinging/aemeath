@@ -79,7 +79,12 @@ pub trait WorkspaceControl: Send + Sync {
     /// 切换到指定路径（不压栈，ExitWorktree{path} 用）
     fn switch_to(&self, path: PathBuf) -> Result<(), WorkspaceError>;
     /// 进入 worktree（压栈 + 切换）
-    fn enter(&self, path: Option<PathBuf>, branch: Option<String>) -> Result<WorkspaceFrame, WorkspaceError>;
+    fn enter(
+        &self,
+        path: Option<PathBuf>,
+        branch: Option<String>,
+        base: Option<String>,
+    ) -> Result<WorkspaceFrame, WorkspaceError>;
     /// 退出 worktree（弹栈 + 恢复）
     fn exit(&self) -> Result<WorkspaceFrame, WorkspaceError>;
 }
@@ -99,6 +104,9 @@ pub trait WorkspaceControl: Send + Sync {
 - 栈非空时 `enter` **MUST** 默认 fail-closed；唯一允许的残栈自愈是 control 用例调用 fallible `is_linked_worktree` 且明确得到 `false`。返回 `true` 必须报 `NestedWorktree`，probe 失败必须传播结构化错误，普通 `WorkspaceRead` **NEVER** 触发该 probe。
 - Bash / EnterWorktree / ExitWorktree **MUST** 同时获得同一 `WorkspaceWiring` 的 `WorkspaceRead`，在转换完成后读取 path、root 与 branch 生成现有 Tool 结果；Control 权限 **NEVER** 因此扩散给第四个 Tool。
 - `change_directory` **MUST** canonicalize 并验证路径存在且位于当前 `workspace_root` 内，再委托 Project 私有 `set_path_base` 转换；`switch_to` / `enter` / `exit` **MUST** 通过 Project 内部转换统一守护 Project identity、包含关系与 repository identity。
+- `enter` 的 `path` 为 `None` 或 empty `PathBuf` 时，Project **MUST** 从非空 `branch` 推导 `.worktrees/<safe-branch>`；`path` 与 `branch` 均缺失或为空时返回 `MissingPathAndBranch`。
+- `enter` 的 optional `base` 默认值 **MUST** 由 Project domain 唯一维护：`None`、空串或纯空白归一为 `main`，显式非空值原样作为新 worktree 的创建起点。Tools **NEVER** 复制该默认值。
+- `base` **MUST** 仅在目标路径不存在、Project 创建新 worktree 时传给 `GitWorktreeOps::worktree_add`；进入已有 linked worktree 时忽略。
 - `set_workspace_root` 只可作为 Project 私有状态转换 helper，**NEVER** 出现在公开 Control port；否则调用方可绕过同源校验和 Project identity。
 - `enter` 和 `exit` 的返回值是被压入或弹出的 `WorkspaceFrame`；变更后的状态 **MUST** 经同一实例的 `WorkspaceRead` 读取。
 - `switch_to` 不压栈——它直接切换到目标路径，供 `ExitWorktree { path }` 使用（退出到指定路径而非弹栈）。
@@ -355,3 +363,4 @@ project/src/
 | 2026-07-12 | 初稿：三端口定义、GitWorktreeOps、持久化 DTO、git 上下文供给、目标目录结构 | #791 |
 | 2026-07-14 | 对齐 capability-first Project 目标树、三个窄 trait 与直接消费者；以 opaque production factory / active-main-session-slot scope 隔离私有 git adapter；补 Project identity 与 prepare-commit restore，移除 Runtime Workspace façade | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | 拆清 #892 私有边界与锁模型、#893 消费与 gate 编排、#894 identity/snapshot/restore，并冻结残栈 probe 的 fail-closed 语义 | [#892](https://github.com/rushsinging/aemeath/issues/892) / [#893](https://github.com/rushsinging/aemeath/issues/893) / [#894](https://github.com/rushsinging/aemeath/issues/894) |
+| 2026-07-21 | 对齐 WorkspaceControl::enter 的 optional base、Project-owned 默认值与仅创建时生效的边界 | [#1297](https://github.com/rushsinging/aemeath/issues/1297) |

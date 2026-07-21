@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use share::message::{Message, Role};
 
-use super::{CanonicalSession, ChatChain, SessionMetadata};
+use super::{CanonicalSession, SessionMetadata};
 
 /// Context-owned session list projection published to Runtime/SDK adapters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,7 +19,7 @@ pub struct SessionListEntry {
 
 impl SessionListEntry {
     pub(crate) fn from_canonical(session: &CanonicalSession) -> Self {
-        let messages = ChatChain::from_chats(&session.chats).messages();
+        let messages = session.structured_messages();
         let preview = messages
             .iter()
             .find(|message| message.role == Role::User)
@@ -50,6 +50,10 @@ fn first_line(message: &Message) -> Option<String> {
     let first = text.lines().next().unwrap_or_default().trim();
     (!first.is_empty()).then(|| first.chars().take(50).collect())
 }
+
+#[cfg(test)]
+#[path = "management_tests.rs"]
+mod tests;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionMetadataUpdate {

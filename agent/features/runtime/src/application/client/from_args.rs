@@ -263,6 +263,8 @@ pub async fn from_args_with_workspace(
                 sdk::SkillView {
                     name: descriptor.name().to_string(),
                     aliases: descriptor.aliases().to_vec(),
+                    slash_command: descriptor.slash_command().map(str::to_string),
+                    slash_aliases: descriptor.slash_aliases().to_vec(),
                     description: Some(descriptor.description().to_string()),
                     content: fragment.content().to_string(),
                     source: Some(descriptor.source().path.clone()),
@@ -489,7 +491,8 @@ mod tests {
             async fn list(
                 &self,
                 _limit: usize,
-            ) -> Result<Vec<memory::api::ReflectionRecord>, memory::api::MemoryError> {
+            ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError>
+            {
                 Ok(Vec::new())
             }
         }

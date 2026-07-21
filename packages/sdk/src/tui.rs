@@ -104,6 +104,10 @@ impl Default for MemoryConfigView {
 pub struct SkillView {
     pub name: String,
     pub aliases: Vec<String>,
+    /// 可选 Slash Command 名；`None` 表示仅保留 Skill identity，不暴露 slash。
+    pub slash_command: Option<String>,
+    /// `slash_command` 的合法别名，不复用 Skill identity aliases。
+    pub slash_aliases: Vec<String>,
     pub description: Option<String>,
     pub content: String,
     pub source: Option<String>,
