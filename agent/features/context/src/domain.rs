@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use provider::{ModelToolSchema, ReasoningLevel};
 use sdk::RunId;
 pub use sdk::{RunStepId, SessionId};
+use serde::{Deserialize, Serialize};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::AgentRoleConfig;
 pub use share::message::Message as ContextMessage;
@@ -188,7 +189,7 @@ pub enum CompactOutcome {
 }
 
 /// finalized projection 的收口原因。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FinalizeCause {
     Completed,
     UserCancelledStep,
@@ -196,7 +197,7 @@ pub enum FinalizeCause {
 }
 
 /// Tool/Agent 调用已经收敛的稳定结果种类。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToolOutcomeKind {
     Success,
     Failure,
@@ -206,7 +207,7 @@ pub enum ToolOutcomeKind {
 }
 
 /// finalized Step 中可确定重放的 Tool/Agent receipt。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepReceipt {
     call_id: String,
     index: usize,

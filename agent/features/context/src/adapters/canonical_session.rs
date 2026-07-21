@@ -3,7 +3,8 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 
 use crate::domain::session::{
-    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedStep, SnapshotState,
+    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedStep,
+    FinalizedOutcomeProjection, SnapshotState,
 };
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
@@ -269,15 +270,22 @@ impl SessionRepository for CanonicalSessionRepository {
         }
 
         let mut candidate = (*current).clone();
-        candidate.append_finalized_outcome(
-            append.run_id.as_ref(),
-            append.step_id.as_str(),
-            append.messages.clone(),
-        );
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.append_finalized_outcome(
+            append.run_id.as_ref(),
+            append.step_id.as_str(),
+            FinalizedOutcomeProjection {
+                finalize_cause: append.finalize_cause,
+                messages: append.messages.clone(),
+                receipts: append.receipts.clone(),
+                api_input_tokens: append.api_input_tokens,
+                fingerprint: append.fingerprint.as_str().to_string(),
+                committed_revision: candidate.revision,
+            },
+        );
         candidate.committed_steps.push(CommittedStep {
             run_id: append.run_id.to_string(),
             step_id: append.step_id.as_str().to_string(),

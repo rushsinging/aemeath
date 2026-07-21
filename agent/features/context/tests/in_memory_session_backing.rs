@@ -64,6 +64,30 @@ async fn accepted_input_has_independent_idempotency_from_finalized_outcome() {
 }
 
 #[tokio::test]
+async fn finalized_outcome_keeps_receipt_metadata_for_idempotent_retry() {
+    let backing = InMemorySessionRepository::new();
+    let session_id = SessionId::new("session");
+    backing.seed(&session_id, SessionRevision::new(0), vec![], None);
+    let mut outcome = append("outcome-v1");
+    outcome.finalize_cause = FinalizeCause::RunTerminated;
+    outcome.api_input_tokens = Some(21);
+    outcome.receipts = vec![context::domain::StepReceipt::agent(
+        "agent-call",
+        0,
+        context::domain::ToolOutcomeKind::CancellationUnconfirmed,
+    )];
+
+    let first = backing.append_finalized(&outcome).await.unwrap();
+    let second = backing.append_finalized(&outcome).await.unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first.committed_revision, SessionRevision::new(1));
+    assert_eq!(
+        backing.snapshot(&session_id).await.unwrap().messages[0].text_content(),
+        "fact"
+    );
+}
+
+#[tokio::test]
 async fn same_step_and_fingerprint_is_idempotent() {
     let backing = InMemorySessionRepository::new();
     backing.seed(
