@@ -14,9 +14,7 @@ pub mod composition {
         CatalogExecutionWiring, CommandWiring, SkillWiring,
     };
     #[cfg(feature = "test-harness")]
-    pub use crate::adapters::composition::{
-        CountingToolCatalogGateway, TestCatalogExecution, TestCatalogExecutionFactory,
-    };
+    pub use crate::adapters::composition::{TestCatalogExecution, TestCatalogExecutionFactory};
 }
 
 /// Published tool-domain DTO types (kept as a public module facade).
@@ -53,8 +51,8 @@ pub use domain::schema_validator::{
 // Runtime's phase-peel seam delegates to this Tools-owned typed parser.
 pub use adapters::ask_user::ask_user_suspension;
 
-// Gateway/OHS: tool catalog and registration wiring.
-pub use adapters::wiring::{
-    is_readonly_command, wire_tools, DefaultToolCatalogGateway, McpConnectionManager,
-    McpServerConfig, McpTool, McpToolDef, McpTransportKind, ToolCatalogGateway,
-};
+// Adapter façade: only MCP protocol values and the read-only command classifier.
+pub use adapters::bash::is_readonly_command;
+pub use adapters::mcp::{McpServerConfig, McpToolDef, McpTransportKind};
+pub use adapters::mcp_manager::McpConnectionManager;
+pub use adapters::mcp_tool::McpTool;

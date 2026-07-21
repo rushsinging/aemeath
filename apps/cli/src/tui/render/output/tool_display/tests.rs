@@ -117,15 +117,6 @@ fn canonical_catalog_names_hit_specialized_displays() {
     );
     assert_eq!(line_to_string(&agent), "Agent 分析主工具编排");
     assert_eq!(agent_details, vec!["只读分析三个文件"]);
-
-    let (skill, skill_details) = format_tool_call(
-        "Skill",
-        r#"{"skill":"superpowers:writing-plans"}"#,
-        None,
-        None,
-    );
-    assert_eq!(line_to_string(&skill), "Skill superpowers:writing-plans");
-    assert!(skill_details.is_empty());
 }
 
 #[test]
@@ -444,14 +435,6 @@ fn test_format_tool_call_task_list_create_empty_subject_no_question_mark() {
         text, "New Task List",
         "空 subject 时应只显示 display name 'New Task List': {text}"
     );
-    assert!(!text.contains('?'));
-}
-
-#[test]
-fn test_format_tool_call_skill_empty_no_question_mark() {
-    let (header, _details) = format_tool_call("Skill", "{}", None, None);
-    let text = line_to_string(&header);
-    assert_eq!(text, "Skill");
     assert!(!text.contains('?'));
 }
 

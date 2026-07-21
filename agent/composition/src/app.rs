@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use runtime::ProviderFactory;
 use sdk::{AgentClient, MemoryConfigView, SdkError, SkillView};
-use tools::ToolCatalogGateway;
 
 use crate::runtime::{AgentArgs, AgentClientImpl};
 use logging::{LoggingOutputMode, LoggingSettings, UnifiedLogger};
@@ -32,30 +31,17 @@ pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
 }
 
 pub struct FeatureGateways {
-    pub tools: Arc<dyn ToolCatalogGateway>,
     pub provider: Arc<dyn ProviderFactory>,
     pub policy: Arc<dyn policy::PolicyPort>,
 }
 
 impl FeatureGateways {
-    pub fn new(
-        tools: Arc<dyn ToolCatalogGateway>,
-        provider: Arc<dyn ProviderFactory>,
-        policy: Arc<dyn policy::PolicyPort>,
-    ) -> Self {
-        Self {
-            tools,
-            provider,
-            policy,
-        }
+    pub fn new(provider: Arc<dyn ProviderFactory>, policy: Arc<dyn policy::PolicyPort>) -> Self {
+        Self { provider, policy }
     }
 
     pub fn wire_default(policy: Arc<dyn policy::PolicyPort>) -> Self {
-        Self::new(
-            crate::tools::wire_tools(),
-            crate::provider::provider_factory(),
-            policy,
-        )
+        Self::new(crate::provider::provider_factory(), policy)
     }
 }
 
@@ -269,7 +255,6 @@ mod tests {
     use runtime::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
     use share::config::Config;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use tools::composition::CountingToolCatalogGateway;
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -350,7 +335,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn build_agent_client_with_gateways_consumes_injected_provider_and_tools() {
+    async fn build_agent_client_with_gateways_consumes_injected_provider() {
         let temp = tempfile::tempdir().expect("create temp root");
         let root = temp.path().join("root");
         let agents_dir = temp.path().join("agents");
@@ -386,12 +371,7 @@ mod tests {
         let _env = EnvGuard::set(&agents_dir, temp.path());
 
         let provider = Arc::new(CountingProviderFactory::default());
-        let tools = Arc::new(CountingToolCatalogGateway::default());
-        let gateways = FeatureGateways::new(
-            tools.clone(),
-            provider.clone(),
-            Arc::new(policy::AllowAllPolicy),
-        );
+        let gateways = FeatureGateways::new(provider.clone(), Arc::new(policy::AllowAllPolicy));
         let args = AgentArgs {
             cwd: Some(root),
             api_key: Some("test-api-key".to_string()),
@@ -405,8 +385,6 @@ mod tests {
 
         result.expect("build client with injected gateways");
         assert_eq!(provider.build_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(tools.new_registry_calls(), 1);
-        assert_eq!(tools.register_all_tools_calls(), 1);
     }
 
     #[test]
