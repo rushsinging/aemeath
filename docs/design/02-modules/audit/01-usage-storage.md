@@ -88,12 +88,13 @@ Audit reader：
 
 ## 7. 查询
 
-按 SessionId 查询只读取对应分区。v0.1.0 的 `AppendLogReader` 对单分区采用 eager `Vec<Vec<u8>>`，因此“流式”只表示逐分区处理、**NEVER** 同时加载全部 Session 文件；单个超大分区的真正 streaming reader 留作后续演进。跨 Session 查询：
+按 SessionId 查询只读取对应分区；目标分区尚未形成文件时返回空结果。v0.1.0 的 `AppendLogReader` 对单分区采用 eager `Vec<Vec<u8>>`，因此“流式”只表示逐分区处理、**NEVER** 同时加载全部 Session 文件；单个超大分区的真正 streaming reader 留作后续演进。跨 Session 查询：
 
 - 由 Audit Query adapter 调用 `UsageAppendStorePort::list_streams("usage")` 枚举可用分区；
 - 逐分区读取，不一次性加载全部 Session 文件；单分区 eager reader 是 v0.1.0 明确取舍；
-- pagination 在 Audit BC 内实施；
-- token summary 在解析后聚合；
+- pagination 在 Audit BC 内实施：opaque V1 cursor 保存 query fingerprint、当前 stream 与下一条机械行偏移，续页从该位置重新应用全部 filter；分区目录在两页间发生外部变更时 cursor 失效并返回 `InvalidCursor`，不承诺跨列表快照的新增分区可见性；
+- 每页最多返回 1000 条，调用方更大的 limit 被 policy clamp；
+- token summary 在解析后聚合，跳过损坏行；
 - 不计算 Cost。
 
 ## 8. 删除与 retention
@@ -134,6 +135,7 @@ Future retention 必须由 Audit Config 定义，并通过 Audit 的 File Append
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-21 | #930 完成版本化 V1 decoder、坏行/截断尾行 warning、关联字段与时间 filter、opaque cursor 续页和纯 token summary；缺失 Session 分区安全返回空，Runtime/Composition production wiring 仍归 #931 | [#930](https://github.com/rushsinging/aemeath/issues/930) |
 | 2026-07-17 | #927 冻结嵌套 `UsageEnvelopeV1` serde 契约与责任边界：#928 只处理 bytes append/read，#930 实现版本化 decoder 与坏行处理 | [#927](https://github.com/rushsinging/aemeath/issues/927) |
 | 2026-07-12 | 初稿：按 SessionId 分区的独立 Audit JSONL、逐条 flush 与损坏隔离 | #790 |
 | 2026-07-15 | 修正职责归属：append/flush/IO 隔离/retention 执行改为 Audit-owned File AppendLog Adapter 直接实现，不再归 Storage | [#972](https://github.com/rushsinging/aemeath/issues/972) |
