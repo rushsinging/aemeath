@@ -215,6 +215,8 @@ pub async fn wire_main_session(
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::Captured(ws_ctx),
         revision: 0,
+        compact: None,
+        run_slices: Vec::new(),
         committed_steps: Vec::new(),
     };
 

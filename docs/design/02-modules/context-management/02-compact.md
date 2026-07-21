@@ -7,7 +7,11 @@ Compact 家族是 Context Management 的**核心能力**：在 LLM context windo
 - **内聚于 ContextPort**：五级管线是 ContextPort 的实现细节，Runtime 只调用 §2 的 4 个稳定方法
 - **策略分层**：从零成本（规则）到高成本（LLM），逐级升级
 - **幂等性**：相同 Context backing revision + 相同 request → 相同压缩决策（#550）
-- **非破坏优先**：L1 先限制尚未进入 ChatChain 的单条 ToolResult；L2/L3/L4 只变换读模型；只有 L5 修改已持久化对话链
+- **非破坏优先**：L1 先限制尚未进入 `run_slices` 的单条 ToolResult；L2/L3/L4 只变换读模型；只有 L5 修改已持久化 Session backing。
+## 1.1 #1282 Session backing cutover
+
+L5 的持久化真相是 `run_slices + ActiveCompactMarker`，不是 `ChatChain` / `ChatSegment`：marker 保存累计 summary、首个可见完整 Step 与 source revision；完整历史只保留一份 `run_slices`。每次 compact 以完整 Step 为边界更新同一个 marker，**NEVER** 复制扁平 recent tail；新 accepted/finalized Step 只写 `run_slices`，自然位于 marker 后并在下一次 ContextWindow 可见。本文其余出现的 ChatChain/Compact segment 描述均为 pre-#1282 迁移背景，不得作为新 writer 的实现依据。
+
 ## 2. ContextPort 签名
 ```rust
 #[async_trait]
@@ -166,7 +170,7 @@ uncached_suffix:
 | L3 | **Microcompact** | `build_window` 读模型变换 | 零 | 无（移除 ContextWindow 中的探索类 content） | 是 | #548 |
 | L4 | **Context collapse** | `build_window` 投影折叠 | 零 | 无（投影层折叠） | 是 | #554 |
 | L5 | **Auto-compact** | token 超阈值 | LLM 调用 | 有（摘要替换历史） | 否 | Context baseline / #671 |
-### 执行序
+`ActiveCompactMarker` 是唯一 L5 持久化边界：保存累计 summary、`start_at`（第一个可见完整 RunStep）和 source revision。完整 `run_slices` 不复制 tail；ContextWindow 从 marker 起投影，后续新 Step 继续追加到同一 `run_slices`，因此自动可见。
 ```
 ExecutingTools
   │
