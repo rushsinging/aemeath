@@ -87,14 +87,11 @@ TOOLS_DOMAIN_FACADE = {
 }
 TOOLS_ADAPTER_FACADE = {
     "is_readonly_command",
-    "wire_tools",
-    "DefaultToolCatalogGateway",
     "McpConnectionManager",
     "McpServerConfig",
     "McpToolDef",
     "McpTransportKind",
     "McpTool",
-    "ToolCatalogGateway",
 }
 TOOLS_ROOT_ACCESS_ALLOW = {"LOG_TARGET", "types"} | TOOLS_DOMAIN_FACADE | TOOLS_ADAPTER_FACADE | {
     "format_tool_input_error",
@@ -507,7 +504,15 @@ def check_tools_facade() -> list[str]:
         return {item.strip().split(" as ", 1)[-1].strip() for item in match.group(1).split(",") if item.strip()}
 
     actual_domain = braced_names("domain")
-    actual_adapters = braced_names("adapters::wiring")
+    actual_adapters = {
+        name
+        for name in TOOLS_ADAPTER_FACADE
+        if re.search(
+            rf"\bpub\s+use\s+adapters::[^;]*\b{re.escape(name)}\b",
+            text,
+            re.S,
+        )
+    }
     supplemental = {
         "format_tool_input_error",
         "strip_runtime_meta",

@@ -22,7 +22,6 @@ pub use tools::types::grep::GrepInput;
 pub use tools::types::lsp::LspInput;
 pub use tools::types::plan_mode::{EnterPlanModeInput, ExitPlanModeInput};
 pub use tools::types::read::ReadInput;
-pub use tools::types::skill::SkillInput;
 pub use tools::types::task_create::TaskCreateInput;
 pub use tools::types::task_get::TaskGetInput;
 pub use tools::types::task_list_create::TaskListCreateInput;

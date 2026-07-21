@@ -8,7 +8,7 @@ use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use sdk::tool_input::{
-    EnterPlanModeInput, ExitPlanModeInput, LspInput, SkillInput, TaskCreateInput, TaskGetInput,
+    EnterPlanModeInput, ExitPlanModeInput, LspInput, TaskCreateInput, TaskGetInput,
     TaskListCreateInput, TaskStopInput, TaskUpdateInput,
 };
 use sdk::tool_result::TaskUpdateResult;
@@ -253,7 +253,7 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskListCompleteDisplay)
 });
 
-// ── Skill ────────────────────────────────────────────────────────
+// ── Skill（历史 ToolCall 展示）──────────────────────────────────────
 
 struct SkillDisplay;
 impl ToolDisplay for SkillDisplay {
@@ -261,12 +261,11 @@ impl ToolDisplay for SkillDisplay {
         "Skill"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let args = parse_input::<SkillInput>(input);
-        if args.skill.is_empty() {
-            self.display_name().to_string()
-        } else {
-            format!("{} {}", self.display_name(), args.skill)
-        }
+        let skill = input.get("skill").and_then(serde_json::Value::as_str);
+        skill.filter(|value| !value.is_empty()).map_or_else(
+            || self.display_name().to_string(),
+            |value| format!("{} {value}", self.display_name()),
+        )
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
