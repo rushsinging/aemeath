@@ -93,6 +93,8 @@ for path in production_files(tools):
 # findings that must be migrated or retired rather than hidden.
 runtime_rules = [
     (r"\bToolRegistry\b", "Runtime production code must not reference ToolRegistry"),
+    (r"\b(?:use|pub\s+use)\s+(?:::)?tools::adapters(?:::|\b)", "Runtime production code must not import Tools private adapters"),
+    (r"\b(?:ToolBacking|CatalogAdapter|ExecutionAdapter|BoundExecutionContexts)\b", "Runtime production code must not reference Tools private backing or adapters"),
     (r"\bArc\s*<\s*dyn\s+(?:::tools::)?Tool\s*>", "Runtime production code must not hold Arc<dyn Tool>"),
     (r"\bregistry\s*\.\s*get\s*\(", "Runtime production code must not call registry.get()"),
     (r"\btool\s*\.\s*call\s*\(", "Runtime production code must not call tool.call()"),
