@@ -93,7 +93,7 @@ pub struct ToolRenderPolicy {
 - **TaskCreate 使用 `Compact` 单行模式**，description 合并进 header（`TaskCreate {subject}: {description}`）。
 - **ToolResult 子块首行使用 `⎿` 圆角连接**作为 gutter marker（由 `gutter.rs` 按 `OutputBlockKind::ToolResult` 注入），连接到父 ToolCall header。
 - **Tool display name 着色为 `ACCENT_BRIGHT`（Mauve）**，与参数文本（`TEXT`）和元信息（`TEXT_MUTED`）形成视觉层次。`format_header_line` 默认实现按 `display_name` 前缀拆分；不支持前缀匹配的（如 emoji 前缀的 `CustomIcon`）自动 fallback 为整体 raw。
-- result-aware header override **MUST** 在结构化 result 缺失、解析失败或标记为 error 时回退消费原始 input；**NEVER** 使用伪默认值掩盖实际调用参数。
+- `EnterWorktreeDisplay` 的 result-aware header override **MUST** 在结构化 result 缺失、解析失败或标记为 error 时回退消费原始 input；**NEVER** 使用伪默认值掩盖实际调用参数。
 
 ## 主题色板（Catppuccin Macchiato）
 
