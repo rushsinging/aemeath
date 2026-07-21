@@ -68,11 +68,18 @@ async fn make_wiring_and_workspace(
         .await
         .expect("wire config");
     let task_wiring = task::wire_task();
+    let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
+        context::adapters::AtomicBlobSessionManagement::new(Arc::new(
+            storage::FileSystemBlobAdapter::new(temp.path().join("agents"))
+                .expect("create session blob"),
+        )),
+    );
     let wiring = context::test_support::wire_in_memory(
         &workspace,
         task_wiring.persist(),
         config.reader(),
         config.participant(),
+        session_management,
         Arc::new(context::adapters::ProductionMainContextFactory::new(
             Arc::new(context::adapters::NoOpCanonicalSessionWriter),
         )),
@@ -81,7 +88,7 @@ async fn make_wiring_and_workspace(
     (wiring, workspace)
 }
 
-async fn seed_session(workspace: &project::WorkspaceViews, id: &str) {
+async fn seed_session(wiring: &MainSessionWiring, workspace: &project::WorkspaceViews, id: &str) {
     let bytes = serde_json::to_vec(&serde_json::json!({
         "id": id,
         "created_at": "2026-01-01T00:00:00Z",
@@ -91,7 +98,9 @@ async fn seed_session(workspace: &project::WorkspaceViews, id: &str) {
         "workspace": workspace.persist().snapshot(),
     }))
     .expect("encode legacy seed");
-    context::import_session_bytes(&bytes)
+    let session_management = wiring.session_management();
+    session_management
+        .import(&bytes)
         .await
         .expect("import seed session");
 }
@@ -108,7 +117,7 @@ async fn startup_resume_truly_restores_messages() {
     std::fs::create_dir_all(temp.path().join("agents")).expect("create agents dir");
 
     let (wiring, workspace) = make_wiring_and_workspace(&temp).await;
-    seed_session(&workspace, "resume-target-1").await;
+    seed_session(&wiring, &workspace, "resume-target-1").await;
 
     let projection = resume_session_to_backing("resume-target-1", &wiring)
         .await
@@ -136,7 +145,7 @@ async fn runtime_resume_is_equivalent_to_startup_resume() {
     std::fs::create_dir_all(temp.path().join("agents")).expect("create agents dir");
 
     let (wiring, workspace) = make_wiring_and_workspace(&temp).await;
-    seed_session(&workspace, "resume-target-2").await;
+    seed_session(&wiring, &workspace, "resume-target-2").await;
 
     // Both startup and runtime paths call the same `resume_session_to_backing`
     // helper. Calling it twice with the same session should produce identical
@@ -165,7 +174,7 @@ async fn bound_lease_blocks_resume_until_dropped() {
     std::fs::create_dir_all(temp.path().join("agents")).expect("create agents dir");
 
     let (wiring, workspace) = make_wiring_and_workspace(&temp).await;
-    seed_session(&workspace, "resume-target-3").await;
+    seed_session(&wiring, &workspace, "resume-target-3").await;
 
     // Bind a main run — acquires shared permit.
     let bound = wiring
@@ -207,12 +216,19 @@ async fn config_query_and_writer_come_from_wiring() {
         .await
         .expect("wire config");
     let task_wiring = task::wire_task();
+    let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
+        context::adapters::AtomicBlobSessionManagement::new(Arc::new(
+            storage::FileSystemBlobAdapter::new(temp.path().join("agents"))
+                .expect("create session blob"),
+        )),
+    );
 
     let wiring = context::test_support::wire_in_memory(
         &workspace,
         task_wiring.persist(),
         config.reader(),
         config.participant(),
+        session_management,
         Arc::new(context::adapters::ProductionMainContextFactory::new(
             Arc::new(context::adapters::NoOpCanonicalSessionWriter),
         )),
@@ -334,7 +350,7 @@ async fn cross_project_resume_bound_run_sees_target_memory_config() {
     let workspace_b = project::wire_production_workspace(root_b.clone())
         .expect("wire workspace B")
         .into_views();
-    seed_session(&workspace_b, "cross-project-memory-target").await;
+    seed_session(&wiring, &workspace_b, "cross-project-memory-target").await;
 
     // Bind before resume — should see project A defaults.
     {
@@ -405,7 +421,7 @@ async fn cross_project_resume_committed_config_has_target_model_and_memory() {
     let workspace_b = project::wire_production_workspace(root_b.clone())
         .expect("wire workspace B")
         .into_views();
-    seed_session(&workspace_b, "cross-project-config-target").await;
+    seed_session(&wiring, &workspace_b, "cross-project-config-target").await;
 
     // Before resume: default model string should not contain "target-model".
     let before = wiring.committed_config();
@@ -450,7 +466,7 @@ async fn resume_projection_matches_committed_session() {
     std::fs::create_dir_all(temp.path().join("agents")).expect("create agents dir");
 
     let (wiring, workspace) = make_wiring_and_workspace(&temp).await;
-    seed_session(&workspace, "projection-equiv").await;
+    seed_session(&wiring, &workspace, "projection-equiv").await;
 
     let projection = resume_session_to_backing("projection-equiv", &wiring)
         .await

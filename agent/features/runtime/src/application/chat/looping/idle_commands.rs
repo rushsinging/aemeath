@@ -3,6 +3,7 @@
 //! 从旧 CommandRegistry 迁移，每个命令是独立函数。
 //! 结果通过 RuntimeStreamEvent::CommandResultText { text, is_error } 回传 TUI。
 
+use context::SessionManagementPort;
 use memory::{
     MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemoryPort, MemorySearchQuery,
     MemorySource, MemoryStats, WriteResult,
@@ -38,14 +39,18 @@ pub fn execute_init(cwd: &str, force: bool) -> (String, bool) {
 }
 
 /// 执行 /session 命令。
-pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
+pub async fn execute_session(
+    args: &str,
+    session_id: &str,
+    session_management: &dyn SessionManagementPort,
+) -> (String, bool) {
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() {
         return (format!("Current session: {}", session_id), false);
     }
     match parts[0] {
         "list" => {
-            let sessions = match context::list_session_entries().await {
+            let sessions = match session_management.list().await {
                 Ok(sessions) => sessions,
                 Err(error) => return (format!("Failed to list sessions: {error}"), true),
             };
@@ -72,14 +77,15 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
             if parts.len() < 3 {
                 return ("Usage: /session rename <id> <name>".to_string(), true);
             }
-            match context::update_session_metadata_entry(
-                parts[1],
-                context::SessionMetadataUpdate {
-                    title: Some(parts[2..].join(" ")),
-                    ..Default::default()
-                },
-            )
-            .await
+            match session_management
+                .update_metadata(
+                    parts[1],
+                    context::SessionMetadataUpdate {
+                        title: Some(parts[2..].join(" ")),
+                        ..Default::default()
+                    },
+                )
+                .await
             {
                 Ok(_) => (
                     format!("Session {} renamed to {}", parts[1], parts[2]),
@@ -99,7 +105,7 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
             if parts.len() < 2 {
                 return ("Usage: /session export <id>".to_string(), true);
             }
-            match context::export_session_bytes(parts[1]).await {
+            match session_management.export(parts[1]).await {
                 Ok(bytes) => match String::from_utf8(bytes) {
                     Ok(json) => (json, false),
                     Err(e) => (format!("Failed to encode session export: {e}"), true),
@@ -112,7 +118,7 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
                 return ("Usage: /session import <file>".to_string(), true);
             }
             match tokio::fs::read(parts[1]).await {
-                Ok(content) => match context::import_session_bytes(&content).await {
+                Ok(content) => match session_management.import(&content).await {
                     Ok(session) => (format!("Session {} imported", session.id), false),
                     Err(e) => (format!("Failed to import session: {e}"), true),
                 },

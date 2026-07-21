@@ -103,6 +103,7 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
             config_reader: config.clone(),
             config_participant: config,
             memory_opener: Box::new(TestMemoryOpener),
+            session_management: Arc::new(context::test_support::UnavailableSessionManagement),
             initial_session: context::session::CanonicalSession {
                 id: uuid::Uuid::now_v7().to_string(),
                 chats: Vec::new(),
@@ -251,6 +252,20 @@ fn test_build_switched_client(
         };
         Ok((binding, result))
     })
+}
+
+#[test]
+fn runtime_resume_replaces_the_only_active_session_id() {
+    let runner_source = include_str!("loop_runner.rs");
+    let port_source = include_str!("main_run_port.rs");
+
+    assert!(runner_source.contains("mut session_id,"));
+    assert!(runner_source.contains("session_id = projection.session_id.clone();"));
+    assert!(runner_source.contains("if session_id != bound_session_id"));
+    assert!(runner_source.contains("session_id = bound_session_id;"));
+    assert!(!runner_source.contains("context_session_id"));
+    assert!(!port_source.contains("context_session_id"));
+    assert!(port_source.contains("session_id: SessionId::new(self.session_id)"));
 }
 
 #[test]

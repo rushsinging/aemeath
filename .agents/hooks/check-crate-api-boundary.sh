@@ -190,8 +190,7 @@ ROOT_ACCESS_ALLOW = {
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
     "context": {
         "compact", "context_port", "domain", "guidance", "session", "skill",
-        "delete_session_entry", "export_session_bytes", "import_session_bytes", "isolated_context",
-        "list_session_entries", "update_session_metadata_entry", "SessionListEntry",
+        "isolated_context", "SessionManagementPort", "SessionListEntry",
         "SessionManagementError", "SessionMetadataUpdate", "SessionResumeProjection",
         "ProductionMainContextFactory", "NoOpCanonicalSessionWriter",
         "test_support", "wire_main_session", "BoundMainRun", "MainSessionDependencies",
