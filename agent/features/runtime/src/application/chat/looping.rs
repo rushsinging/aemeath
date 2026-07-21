@@ -20,8 +20,12 @@ mod loop_runner;
 mod loop_runner_tests;
 mod non_agent;
 mod post_batch;
+#[cfg(test)]
+mod pre_compact_trigger_tests;
 mod queue;
 pub(crate) mod reflection;
+#[cfg(test)]
+mod reflection_trigger_tests;
 mod snapshot_registry;
 pub(crate) mod stall;
 mod stream_handler;

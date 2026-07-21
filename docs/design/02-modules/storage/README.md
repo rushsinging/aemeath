@@ -165,11 +165,12 @@ struct DeleteOutcome {
     deleted_quarantine: bool,
 }
 
-/// list_primary() 的单个条目。
+/// `list_primary()` 的单个顶层 primary blob。字段私有；调用方只能读取逻辑 key、
+/// primary generation 与完整 primary bytes 的文件大小。
 struct StorageEntry {
     key: StorageKey,
     size_bytes: usize,
-    generation: Generation,
+    generation: Generation, // 恒为 Primary
 }
 
 struct DatasetKey {
@@ -324,7 +325,10 @@ trait AtomicBlobPort: Send + Sync {
         key: &StorageKey,
         options: DeleteOptions,
     ) -> Result<DeleteOutcome, StorageError>;
-    async fn list_primary(&self, prefix: &StorageKey) -> Result<Vec<StorageEntry>, StorageError>;
+    /// 只列举 namespace 根目录下的顶层 primary regular blob；按安全 segment
+    /// 排序，隐藏 stage/journal/previous/quarantine/lock/promoted 和嵌套目录。
+    /// `StorageKey` 继续必须含至少一个 segment，不作为目录 prefix 使用。
+    async fn list_primary(&self, namespace: StorageNamespace) -> Result<Vec<StorageEntry>, StorageError>;
 }
 
 trait AtomicDatasetPort: Send + Sync {
@@ -466,7 +470,7 @@ consumer read Primary
 
 ## 8. 生命周期与清理
 
-Storage 可以提供 `delete_all_generations/list_primary` 等机械能力，但不得自行猜测数据是否过期。`list_primary` 永远隐藏 stage/previous/quarantine；`delete_all_generations` 幂等删除 primary、previous 及本 key 可识别的未提交临时文件，`DeleteOptions.include_quarantine` 决定是否一并删除 quarantine，默认 true 以兑现用户业务删除。若 quarantine 需保留取证，数据 BC 必须显式 opt out 并给出独立 retention 命令；不能让隐藏副本无限期遗留。
+Storage 可以提供 `delete_all_generations` 与 `list_primary(namespace)` 等机械能力，但不得自行猜测数据是否过期。`list_primary` 只列举 namespace 根目录下的顶层 primary regular blob，按安全 segment 排序，隐藏 stage、journal、previous、quarantine、lock、promoted、symlink 与嵌套目录；它不接受 `StorageKey` prefix，因为 key 始终表示确定 blob 而非目录。`delete_all_generations` 幂等删除 primary、previous 及本 key 可识别的未提交临时文件，`DeleteOptions.include_quarantine` 决定是否一并删除 quarantine，默认 true 以兑现用户业务删除。若 quarantine 需保留取证，数据 BC 必须显式 opt out 并给出独立 retention 命令；不能让隐藏副本无限期遗留。
 
 清理流程由拥有生命周期的 BC 发起：
 
@@ -516,6 +520,8 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-20 | #1057 完成测试完整性审查：补齐 SafeStorageRoot 路径安全契约、Session AtomicBlob 相邻映射、owning-layer 外置与跨进程锁确定性；公开面双 façade 与 `list_primary` 文档—代码漂移由 #1263 承接并阻断父项关闭 | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#1263](https://github.com/rushsinging/aemeath/issues/1263) |
+| 2026-07-20 | #1263 将已实现的 `AtomicBlobPort::list_primary(namespace)` 与 `StorageEntry` 对齐 Target：只枚举 namespace 顶层 primary regular blob，隐藏协议文件、symlink 与嵌套目录；Session 管理以此 OHS 列表，不把 `StorageKey` 放宽为目录 prefix | [#1263](https://github.com/rushsinging/aemeath/issues/1263) |
 | 2026-07-17 | #928 发布 `SafeStorageRoot` / `SafeStorageDir` capability-root 路径安全 PL，并冻结其只负责 no-follow 打开安全句柄；Audit 自有 append/write/sync/read/list 语义，Storage 不新增 AppendLog OHS | [#928](https://github.com/rushsinging/aemeath/issues/928) |
 | 2026-07-12 | 摘要初稿：数据所有权、原子写/backup/quarantine 机制、窄端口与路径安全 | #793 |
 | 2026-07-14 | 为 AtomicDataset 增加 expected-revision CAS 与 typed committed receipt，并移除 Task / Project 直连 Storage 路径 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

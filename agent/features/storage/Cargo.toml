@@ -3,6 +3,11 @@ name = "storage"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+# 仅供 Storage crash harness 编译故障点；默认生产构建不包含 env/abort 路径。
+test-fault-injection = []
+
 [dependencies]
 tokio = { workspace = true }
 log = { version = "0.4", features = ["std"] }
@@ -16,3 +21,11 @@ fs2 = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+
+[[test]]
+name = "crash_recovery"
+required-features = ["test-fault-injection"]
+
+[[test]]
+name = "atomic_dataset_crash"
+required-features = ["test-fault-injection"]

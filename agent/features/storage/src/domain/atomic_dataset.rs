@@ -280,12 +280,3 @@ fn reject_duplicate_names(members: &[SafePathSegment]) -> Result<(), StorageErro
 fn duplicate_member_error() -> StorageError {
     StorageError::new(StorageErrorKind::InvalidKey, "数据集成员名必须唯一")
 }
-
-// The pre-existing L1 tests treated manifest entries like DatasetMember. Keep
-// that test-only spelling while the published manifest surface exposes names.
-#[cfg(test)]
-impl SafePathSegment {
-    pub(crate) fn name(&self) -> &Self {
-        self
-    }
-}

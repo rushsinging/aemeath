@@ -181,6 +181,30 @@ pub enum ReadOutcome {
     NotFound,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorageEntry {
+    key: super::StorageKey,
+    size_bytes: usize,
+}
+
+impl StorageEntry {
+    pub fn new(key: super::StorageKey, size_bytes: usize) -> Self {
+        Self { key, size_bytes }
+    }
+
+    pub fn key(&self) -> &super::StorageKey {
+        &self.key
+    }
+
+    pub fn size_bytes(&self) -> usize {
+        self.size_bytes
+    }
+
+    pub fn generation(&self) -> Generation {
+        Generation::Primary
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WriteOptions {
     durability: Durability,

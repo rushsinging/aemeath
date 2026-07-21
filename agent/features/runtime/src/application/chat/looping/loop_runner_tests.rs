@@ -2,7 +2,9 @@
 //! runner file focused on the production code path.
 #![allow(clippy::type_complexity)]
 
-use super::loop_runner::main_run_port::{fixture_bind_pending, fixture_finalize_messages};
+use super::loop_runner::main_run_port::{
+    fixture_accepted_user_messages, fixture_bind_pending, fixture_finalize_messages,
+};
 use super::*;
 
 fn assistant(text: &str) -> Message {
@@ -23,6 +25,18 @@ fn empty_session_first_step_owns_user_then_assistant_without_loss() {
     assert_eq!(finalized.len(), 2);
     assert_eq!(finalized[0].text_content(), "first");
     assert_eq!(finalized[1].text_content(), "answer");
+}
+
+#[test]
+fn accepted_projection_keeps_only_user_input_not_system_feedback() {
+    let accepted = fixture_accepted_user_messages(
+        vec![Message::user("accepted")],
+        Some(Message::system_generated_user("stop hook feedback")),
+        &[],
+    );
+
+    assert_eq!(accepted.len(), 1);
+    assert_eq!(accepted[0].text_content(), "accepted");
 }
 
 #[test]
@@ -103,6 +117,7 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
             config_reader: config.clone(),
             config_participant: config,
             memory_opener: Box::new(TestMemoryOpener),
+            session_management: Arc::new(context::test_support::UnavailableSessionManagement),
             initial_session: context::session::CanonicalSession {
                 id: uuid::Uuid::now_v7().to_string(),
                 chats: Vec::new(),
@@ -112,6 +127,8 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
                 tasks: context::session::SnapshotState::Missing,
                 workspace: context::session::SnapshotState::Captured(persist.snapshot()),
                 revision: 0,
+                compact: None,
+                run_slices: Vec::new(),
                 committed_steps: Vec::new(),
             },
             initial_memory: Arc::new(memory::api::NoOpMemory),
@@ -197,7 +214,7 @@ impl memory::api::ReflectionHistoryQuery for TestReflectionHistory {
     async fn list(
         &self,
         _limit: usize,
-    ) -> Result<Vec<memory::api::ReflectionRecord>, memory::api::MemoryError> {
+    ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError> {
         Ok(Vec::new())
     }
 }
@@ -249,6 +266,20 @@ fn test_build_switched_client(
         };
         Ok((binding, result))
     })
+}
+
+#[test]
+fn runtime_resume_replaces_the_only_active_session_id() {
+    let runner_source = include_str!("loop_runner.rs");
+    let port_source = include_str!("main_run_port.rs");
+
+    assert!(runner_source.contains("mut session_id,"));
+    assert!(runner_source.contains("session_id = projection.session_id.clone();"));
+    assert!(runner_source.contains("if session_id != bound_session_id"));
+    assert!(runner_source.contains("session_id = bound_session_id;"));
+    assert!(!runner_source.contains("context_session_id"));
+    assert!(!port_source.contains("context_session_id"));
+    assert!(port_source.contains("session_id: SessionId::new(self.session_id)"));
 }
 
 #[test]
@@ -510,8 +541,10 @@ impl LlmProvider for TwoTurnProvider {
     }
 }
 
+#[derive(Clone)]
 struct SequenceProvider {
     responses: Arc<Mutex<VecDeque<String>>>,
+    requests: Arc<Mutex<Vec<Vec<Message>>>>,
 }
 
 impl SequenceProvider {
@@ -520,7 +553,12 @@ impl SequenceProvider {
             responses: Arc::new(Mutex::new(
                 responses.into_iter().map(str::to_string).collect(),
             )),
+            requests: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    fn requests(&self) -> Vec<Vec<Message>> {
+        self.requests.lock().unwrap().clone()
     }
 }
 
@@ -530,10 +568,11 @@ impl LlmProvider for SequenceProvider {
         &self,
         _scope: &InvocationScope,
         _system: &[SystemBlock],
-        _messages: &[Message],
+        messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
     ) -> Result<InvocationStream, ProviderError> {
+        self.requests.lock().unwrap().push(messages.to_vec());
         let text = self
             .responses
             .lock()
@@ -587,6 +626,26 @@ fn blocking_then_success_hook_runner(flag_path: &std::path::Path) -> HookRunner 
     HookRunner::new(HooksConfig { events })
 }
 
+fn delayed_blocking_then_success_hook_runner(flag_path: &std::path::Path) -> HookRunner {
+    let flag_path_str = flag_path.to_string_lossy().to_string();
+    let mut events = HashMap::new();
+    events.insert(
+        HookEvent::Stop,
+        vec![HookEntry {
+            matcher: String::new(),
+            command: format!(
+                "python3 -c 'import pathlib, sys, time; \
+                 p=pathlib.Path(\"{flag_path}\"); \
+                 sys.exit(0 if p.exists() else (p.parent.mkdir(parents=True, exist_ok=True), \
+                 p.write_text(\"blocked\"), time.sleep(0.2), print(\"fix before stopping\"), 2)[4])'",
+                flag_path = flag_path_str,
+            ),
+            timeout: 5,
+        }],
+    );
+    HookRunner::new(HooksConfig { events })
+}
+
 #[tokio::test]
 async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
     // 每次测试生成独立 flag 路径，避免 cargo test 并行 race。
@@ -600,6 +659,10 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
     let _ = std::fs::remove_file(&flag_path);
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = Arc::new(SequenceProvider::new(vec![
+        "first attempted final",
+        "after hook feedback",
+    ]));
 
     input_tx
         .send(sdk::ChatInputEvent::user_message(
@@ -629,9 +692,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
-            SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
-        )),
+        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
@@ -696,12 +757,179 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
     assert!(hook_notice < feedback_sync);
     assert!(feedback_sync < second_text);
     assert!(second_text < done);
+    let requests = provider.requests();
+    assert_eq!(
+        requests.len(),
+        2,
+        "Stop block should trigger one continuation request"
+    );
+    let continuation = &requests[1];
+    let texts = continuation
+        .iter()
+        .map(Message::text_content)
+        .collect::<Vec<_>>();
+    let assistant_idx = texts
+        .iter()
+        .position(|text| text == "first attempted final")
+        .expect("blocked assistant output must remain in canonical history");
+    let feedback_idx = texts
+        .iter()
+        .position(|text| text.contains("You MUST first satisfy the Stop hook requirement"))
+        .expect("Stop hook feedback must reach the continuation request");
+    assert!(
+        assistant_idx < feedback_idx,
+        "history must precede Stop feedback: {texts:?}"
+    );
     assert_eq!(
         events
             .iter()
             .filter(|event| event.as_str() == "DoneWithDuration")
             .count(),
         1
+    );
+}
+
+#[tokio::test]
+async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
+    let flag_path = std::env::temp_dir().join(format!(
+        "aemeath_stop_hook_follow_up_{}.flag",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_file(&flag_path);
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = Arc::new(SequenceProvider::new(vec!["attempted final", "continued"]));
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "initial".to_string(),
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_input = input_tx.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .any(|event| event == "HookEvent:Stop:Running")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        driver_input
+            .send(sdk::ChatInputEvent::user_message(
+                "follow up during stop hook".to_string(),
+                Vec::new(),
+            ))
+            .unwrap();
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .any(|event| event.as_str() == "DoneWithDuration")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-stop-hook-follow-up".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: delayed_blocking_then_success_hook_runner(&flag_path),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after shutdown");
+    driver.await.unwrap();
+    let _ = std::fs::remove_file(&flag_path);
+
+    let requests = provider.requests();
+    assert_eq!(
+        requests.len(),
+        2,
+        "follow-up must join the continuation, not start a new Run"
+    );
+    let texts = requests[1]
+        .iter()
+        .map(Message::text_content)
+        .collect::<Vec<_>>();
+    let assistant_idx = texts
+        .iter()
+        .position(|text| text == "attempted final")
+        .unwrap();
+    let feedback_idx = texts
+        .iter()
+        .position(|text| text.contains("You MUST first satisfy the Stop hook requirement"))
+        .unwrap();
+    let follow_up_idx = texts
+        .iter()
+        .position(|text| text == "follow up during stop hook")
+        .unwrap();
+    assert!(
+        assistant_idx < feedback_idx && feedback_idx < follow_up_idx,
+        "unexpected continuation order: {texts:?}"
+    );
+    let feedback_count = sink
+        .synced_messages()
+        .into_iter()
+        .filter(|messages| {
+            messages
+                .iter()
+                .filter(|message| {
+                    message
+                        .text_content()
+                        .contains("You MUST first satisfy the Stop hook requirement")
+                })
+                .count()
+                > 1
+        })
+        .count();
+    assert_eq!(
+        feedback_count, 0,
+        "UI sync must not duplicate Stop feedback"
     );
 }
 

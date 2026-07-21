@@ -1,6 +1,7 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum CancelRunOutcome {
     Accepted,
     AlreadyCancelling,
@@ -8,7 +9,7 @@ pub enum CancelRunOutcome {
     NotFound,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum CancelRunStepOutcome {
     Accepted,
     AlreadyCancelling,
@@ -18,7 +19,7 @@ pub enum CancelRunStepOutcome {
     NotFound,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum TerminateRunOutcome {
     Accepted,
     AlreadyTerminating,
@@ -26,7 +27,7 @@ pub enum TerminateRunOutcome {
     NotFound,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum RunTerminationReason {
     UserExit,
     DoubleCtrlC,
@@ -39,7 +40,7 @@ pub enum RunTerminationReason {
 /// Absolute wall-clock deadline used only as wire data.
 ///
 /// Runtime converts this value to its injected monotonic clock at the control boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ControlDeadline {
     unix_millis: u64,
 }

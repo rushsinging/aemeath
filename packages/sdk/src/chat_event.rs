@@ -6,10 +6,11 @@ use crate::chat_view::{
     AgentProgressEventView, HookEventView, HookMessageView, WorkspaceContextView,
 };
 use crate::ChatMessage;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Runtime stream context used to bind UI events to the authoritative chat/turn.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatEventContext {
     pub chat_id: crate::ids::ChatId,
     pub turn_id: crate::ids::ChatTurnId,
@@ -29,7 +30,7 @@ pub enum ToolCallStatusView {
     Running,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReflectionTriggerView {
     Interval,
@@ -37,7 +38,7 @@ pub enum ReflectionTriggerView {
     Manual,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReflectionStatusView {
     Running,
@@ -45,7 +46,7 @@ pub enum ReflectionStatusView {
     Failed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReflectionApplyStatusView {
     NotApplied,
@@ -53,7 +54,7 @@ pub enum ReflectionApplyStatusView {
     PartiallyApplied,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReflectionErrorCategoryView {
     LlmCall,
@@ -66,7 +67,7 @@ pub enum ReflectionErrorCategoryView {
     TimedOut,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReflectionTokenUsageView {
     pub input_tokens: u32,
     pub output_tokens: u32,
@@ -74,7 +75,7 @@ pub struct ReflectionTokenUsageView {
 
 /// Safe reflection history projection. It intentionally contains only metadata
 /// and aggregate counts, never reflection output, prompts, or conversation text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReflectionHistoryView {
     pub id: String,
     pub timestamp: u64,
@@ -418,7 +419,7 @@ pub enum ChatEvent {
 }
 
 /// `SessionResumeFailed` 的失败分类（#636 D2）。
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionResumeFailureKind {
     /// session 文件不存在。

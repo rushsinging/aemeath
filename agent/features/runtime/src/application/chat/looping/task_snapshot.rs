@@ -143,42 +143,5 @@ fn format_blocked_by(blocked_by: &[TaskId]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use task::{BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPriority};
-
-    #[test]
-    fn task_snapshot_renders_task_owned_projection_without_owner() {
-        let store = task::TaskStore::new();
-        let access: &dyn TaskAccess = &store;
-        access
-            .create_batch(BatchCreateSpec::try_new("batch".into()).unwrap(), 1)
-            .unwrap();
-        let created = access
-            .create_task(
-                TaskCreateSpec::try_new(
-                    "实现适配器".into(),
-                    String::new(),
-                    None,
-                    TaskPriority::Normal,
-                )
-                .unwrap(),
-                2,
-            )
-            .unwrap();
-
-        let snapshot = build_task_snapshot(access);
-
-        assert_eq!(snapshot.lines[0], "━━ Tasks: 0/1 ━━");
-        assert!(snapshot.lines[1].contains(&format!("#{}", created.value.id())));
-        assert!(snapshot.lines[1].contains("实现适配器"));
-        assert!(!snapshot.lines[1].contains('@'));
-    }
-
-    #[test]
-    fn task_snapshot_empty_without_active_batch() {
-        let store = task::TaskStore::new();
-        let access: &dyn TaskAccess = &store;
-        assert!(build_task_snapshot(access).lines.is_empty());
-    }
-}
+#[path = "task_snapshot_tests.rs"]
+mod tests;

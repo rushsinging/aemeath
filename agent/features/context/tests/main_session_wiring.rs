@@ -14,10 +14,10 @@ use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
 use context::application::main_session::{
     MainSessionError, MainSessionWiring, MainSessionWiringBuilder,
 };
-use context::domain::session::{CanonicalSession, ChatChain, SnapshotState};
+use context::domain::session::{CanonicalSession, SnapshotState};
 use context::domain::{
-    ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause, RunStepId, SessionId,
-    SessionRevision,
+    AcceptedInputAppend, ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause,
+    RunStepId, SessionId, SessionRevision,
 };
 use context::ports::ContextPort;
 use memory::{
@@ -28,7 +28,8 @@ use sdk::RunId;
 use share::message::Message;
 use share::session_types::PersistedWorkspaceContext;
 use task::{
-    BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPersist, TaskPriority, TaskSnapshot, TaskStore,
+    BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPersist, TaskPriority, TaskSnapshot,
+    TaskSnapshotValidationError, TaskStore,
 };
 
 // ─── RAII temp directory ─────────────────────────────────────────────
@@ -204,6 +205,8 @@ fn build_harness() -> Harness {
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::Captured(ws_ctx),
         revision: 0,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     };
 
@@ -217,6 +220,9 @@ fn build_harness() -> Harness {
             open_count: Arc::clone(&memory_opener.open_count),
             fail: Arc::clone(&memory_opener.fail),
         }),
+        session_management: Arc::new(context::adapters::AtomicBlobSessionManagement::new(
+            Arc::new(storage::FileSystemBlobAdapter::new(tmp.path()).unwrap()),
+        )),
         initial_session,
         initial_memory,
         context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
@@ -251,6 +257,8 @@ fn session_with_workspace(
         tasks,
         workspace: SnapshotState::Captured(ws.clone()),
         revision: 1,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     }
 }
@@ -330,6 +338,52 @@ async fn successful_resume_commits_all_and_updates_committed_state() {
 }
 
 #[tokio::test]
+async fn accepted_input_persists_and_is_visible_after_resume_without_outcome() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let bound = h.wiring.bind_main_run().await.expect("bind source run");
+    let context: Arc<dyn ContextPort> = bound.context();
+    let source_id = bound.session().id.clone();
+    let workspace = bound.session().workspace.clone();
+    drop(bound);
+
+    let receipt = context
+        .append_accepted_input(&AcceptedInputAppend {
+            session_id: SessionId::new(source_id.clone()),
+            run_id: RunId::new("run-accepted"),
+            step_id: RunStepId::new("step-accepted"),
+            source_request_id: ContextRequestId::new("request-accepted"),
+            messages: vec![Message::user("accepted before model")],
+            fingerprint: ContentFingerprint::new("accepted-fingerprint"),
+        })
+        .await
+        .expect("append accepted input");
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+
+    let committed = h.wiring.committed_session();
+    let step = &committed.run_slices[0].steps[0];
+    assert!(step.outcome.is_none());
+    assert_eq!(
+        step.accepted_input.as_ref().unwrap().messages[0].text_content(),
+        "accepted before model"
+    );
+
+    let mut resumed = (*committed).clone();
+    resumed.workspace = workspace;
+    h.wiring
+        .resume_prepared(resumed)
+        .await
+        .expect("resume accepted-only session");
+    let rebound = h.wiring.bind_main_run().await.expect("bind resumed run");
+    let resumed_step = &rebound.session().run_slices[0].steps[0];
+    assert!(resumed_step.outcome.is_none());
+    assert_eq!(
+        rebound.session().structured_messages()[0].text_content(),
+        "accepted before model"
+    );
+}
+
+#[tokio::test]
 async fn finalized_append_persists_and_is_visible_after_resume() {
     let _guard = git_lock().await;
     let h = build_harness();
@@ -361,7 +415,7 @@ async fn finalized_append_persists_and_is_visible_after_resume() {
     assert_eq!(committed.revision, 1);
     assert_eq!(committed.committed_steps.len(), 1);
     assert_eq!(
-        ChatChain::from_chats(&committed.chats).messages().len(),
+        committed.structured_messages().len(),
         1,
         "committed history must contain the finalized message"
     );
@@ -379,12 +433,7 @@ async fn finalized_append_persists_and_is_visible_after_resume() {
         rebound.session().committed_steps[0].step_id,
         RunStepId::new("step-persist").to_string()
     );
-    assert_eq!(
-        ChatChain::from_chats(&rebound.session().chats)
-            .messages()
-            .len(),
-        1
-    );
+    assert_eq!(rebound.session().structured_messages().len(), 1);
 }
 
 /// Cross-project resume is allowed: a session whose workspace belongs to a
@@ -452,6 +501,58 @@ async fn cross_project_resume_succeeds() {
         1,
         "memory opener should be called once"
     );
+}
+
+/// Resuming with a captured non-empty task snapshot installs it into the
+/// authoritative TaskAccess view after all participants prepare successfully.
+#[tokio::test]
+async fn task_captured_snapshot_restores_tasks_into_task_access() {
+    let _guard = git_lock().await;
+    let source = build_harness();
+    seed_tasks(&*source.task_access, 2);
+    let captured = source.task_store.collect_snapshot();
+
+    let target = build_harness();
+    let ws = target.workspace_persist.snapshot();
+    let session = session_with_workspace(&ws, SnapshotState::Captured(captured.clone()));
+
+    target
+        .wiring
+        .resume_prepared(session)
+        .await
+        .expect("captured task snapshot should resume");
+
+    assert_eq!(target.task_store.collect_snapshot(), captured);
+    assert_eq!(target.task_access.list().len(), 2);
+}
+
+/// A rejected Task snapshot must leave every already-live participant unchanged.
+#[tokio::test]
+async fn invalid_task_snapshot_keeps_committed_session_memory_and_tasks_unchanged() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    seed_tasks(&*h.task_access, 1);
+    let pre_session_id = h.wiring.committed_session().id.clone();
+    let pre_memory = h.wiring.committed_memory();
+    let before_tasks = h.task_store.collect_snapshot();
+    let invalid = TaskSnapshot::decode(
+        br#"{"schema_version":2,"revision":"1","tasks":[{"id":"1","batch":"1","subject":"t","description":"","active_form":null,"session_id":null,"tags":[],"blocked_by":["1"],"status":"pending","priority":"normal","created_at":1,"updated_at":1,"started_at":null,"completed_at":null}],"next_task_id":"2","next_batch_id":"2","current_batch":"1","batches":[{"id":"1","summary":"b","status":"active","created_at":1,"last_active_turn":0,"silence_turns":0}]}"#,
+    )
+    .expect("fixture must decode");
+    let ws = h.workspace_persist.snapshot();
+    let session = session_with_workspace(&ws, SnapshotState::Captured(invalid));
+
+    let result = h.wiring.resume_prepared(session).await;
+
+    assert!(matches!(
+        result,
+        Err(MainSessionError::TaskRestore(
+            TaskSnapshotValidationError::SelfDependency { .. }
+        ))
+    ));
+    assert_eq!(h.wiring.committed_session().id, pre_session_id);
+    assert!(Arc::ptr_eq(&h.wiring.committed_memory(), &pre_memory));
+    assert_eq!(h.task_store.collect_snapshot(), before_tasks);
 }
 
 /// Resuming with `tasks: Missing` clears stale live tasks via
@@ -524,6 +625,8 @@ async fn workspace_missing_returns_typed_error() {
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::Missing,
         revision: 1,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     };
 
@@ -555,6 +658,8 @@ async fn workspace_captured_empty_returns_typed_error() {
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::CapturedEmpty,
         revision: 1,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     };
 

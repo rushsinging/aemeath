@@ -31,6 +31,28 @@ numeric_id!(TaskId);
 numeric_id!(BatchId);
 numeric_id!(TaskRevision);
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("任务 ID 必须是非零十进制整数：{value}")]
+pub struct TaskIdParseError {
+    value: String,
+}
+
+impl TaskId {
+    /// Parses a Task Tool wire identifier. Aggregate internals may still
+    /// construct zero IDs solely to validate malformed persisted snapshots.
+    pub fn parse_tool_input(value: &str) -> Result<Self, TaskIdParseError> {
+        let id = value.parse::<u64>().map_err(|_| TaskIdParseError {
+            value: value.to_owned(),
+        })?;
+        if id == 0 || (value.len() > 1 && value.starts_with('0')) {
+            return Err(TaskIdParseError {
+                value: value.to_owned(),
+            });
+        }
+        Ok(Self::new(id))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {

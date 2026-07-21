@@ -9,11 +9,13 @@ pub struct TaskGetTool {
     pub access: Arc<dyn TaskAccess>,
 }
 
+#[cfg(test)]
+#[path = "task_get_tests.rs"]
+mod tests;
+
 fn parse_task_id(value: &str) -> Result<TaskId, String> {
-    value
-        .parse::<u64>()
-        .map(TaskId::new)
-        .map_err(|_| format!("Task ID must be a decimal number: {value}"))
+    TaskId::parse_tool_input(value)
+        .map_err(|_| format!("Task ID must be a non-zero decimal number: {value}"))
 }
 
 #[async_trait]
@@ -57,8 +59,8 @@ impl TypedTool for TaskGetTool {
             Err(error) => return TypedToolResult::error(error),
         };
         let task = match self.access.get(id) {
-            Some(task) => task,
-            None => return TypedToolResult::error(format!("Task not found: {}", args.task_id)),
+            Some(task) if task.status() != task::TaskStatus::Deleted => task,
+            _ => return TypedToolResult::error(format!("Task not found: {}", args.task_id)),
         };
         TypedToolResult::success(
             format!("Task #{}: {}", task.id(), task.subject()),

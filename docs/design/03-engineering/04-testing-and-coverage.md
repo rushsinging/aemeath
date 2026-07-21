@@ -455,7 +455,7 @@ P1、feature/platform matrix 与真实 PTY smoke 由 #1050 落地为 `scripts/ch
 
 - host-native：fmt、workspace all-target clippy、workspace tests、TUI P0/P1、CLI build、真实 PTY smoke；
 - cross target：设置 `AEMEATH_MATRIX_CROSS=1` 后按 macOS/Linux host 尝试双架构 build；target/linker 不可用时明确 `SKIP`，编译失败仍阻断；
-- PTY 使用 allowlist 环境和隔离 HOME/agents config，验证 alternate screen 进入、Ctrl+C 退出、alternate screen/cursor 恢复，不访问真实 provider；子进程等待有上限，失败路径 kill/reap；
+- PTY 使用 allowlist 环境和隔离 HOME/agents config，验证 alternate screen 进入、Ctrl+C 退出、alternate screen/cursor 恢复，不访问真实 provider；CLI build 通过 Cargo JSON 输出解析实际 executable（显式 `AEMEATH_PTY_BIN` 可覆盖），子进程等待有上限，失败路径 kill/reap；
 - host-native 各层只执行一次：workspace 排除 CLI，P0/P1 精确过滤，PTY 在 build 后单独执行；当前完整热运行 77.48s（其中 all-target clippy 为主要成本），PTY 约 2s、P1 约 0.04s；跨 target 首次运行因额外构建成本较高，仅手动/release 前执行；
 - 不新增 PR workflow。
 
@@ -583,6 +583,133 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 覆盖率以 `./scripts/coverage.sh` 的实际输出为准；#1062 同步 #1221 后实测 policy 为 regions 86.30%、functions 76.92%、lines 85.07%。绝对百分比低于旧 AllowAll-only 基线 90.60% / 83.87% / 88.17%，原因是 #1221 新增 Standard/ConfiguredPolicy 与五维授权上下文后分母扩大；新增核心分支均有 L1～L4 证据，未覆盖项主要为简单 getter 与 defensive 分支。changed-lines 在 v0.1.0 仅记录信号、不设阈值；production reachability 与覆盖率独立执行。审查未发现需要新增 L5 或由新 Issue 承接的 Policy 关键行为缺口。
 
+### 11.9 #1057 Storage 根因级测试审查执行计划
+
+本节先冻结执行计划，不提前宣称 Storage 已通过父项验收。实施必须从行为—风险矩阵和失败证据出发；不得只补覆盖率数字，也不得用 L4/L5 替代 L1～L3。父 Issue [#848](https://github.com/rushsinging/aemeath/issues/848) 创建时的业务叶子 #991、#880、#881、#882、#883、#884、#983 均已关闭，#1057 负责核验这些交付组合后的测试完整性、确定性、生产可达性和治理退出证据。
+
+#### 11.9.1 范围与审查单元
+
+审查按稳定行为而非生产文件计数，覆盖以下八个单元：
+
+1. `SafePathSegment`、`StorageKey`、`DatasetKey` 与 capability-root 路径安全；
+2. `AtomicBlobPort` 的整值替换、代际读取、promote、quarantine、delete-all 与 list；
+3. blob journal、durability、跨进程锁、提交点与 crash recovery；
+4. `AtomicDatasetPort` 的 manifest、revision、完整 replacement、omitted delete 与 CAS；
+5. dataset Prepared commit、roll-forward、promote、corruption quarantine 与跨进程隔离；
+6. Context、Memory、Task、Audit、Runtime、Composition 对 Storage 机制的相邻边界；
+7. Task/Memory/History 业务模型从 Storage 退役后的 production reachability 与公开面；
+8. 测试 fixture、日志捕获、临时目录、子进程协调和平台差异的确定性。
+
+每个单元建立「行为 / 风险 → 设计依据 → 必要层级 → 当前测试路径与测试名 → 已覆盖边界 → 缺口类型 → 修复路径或承接 Issue → 结论」矩阵。文档错误、实现缺口、测试缺口、过期测试和治理残留必须分开记录；发现业务实现或设计语义错误时，不得补一个适配错误现状的测试将其固化。
+
+#### 11.9.2 L0～L5 责任
+
+| 层级 | Storage 责任 | 计划证据 |
+|---|---|---|
+| L0 | production-only 编译、all-target lint、`domain ← ports ← adapters` 方向、窄公开面、test-only API、退役模型零回流 | production reachability、public surface/source guard、crate API guard、Storage layer guard、all-target clippy |
+| L1 | 路径段/键校验、namespace policy、digest/revision、恢复决策、typed error 与局部不变量 | owning-layer `*_tests.rs` 或 `tests.rs + tests/`；先补失败证据再改实现 |
+| L2 | adapter 内 lock、stage/fsync、journal/manifest、promote/quarantine、读取前恢复与 fault driver 协作 | 每测试唯一临时目录、受控 fault seam、有界子进程协调 |
+| L3 | `AtomicBlobPort`、`AtomicDatasetPort`、`SafeStorageRoot` 及消费方窄 Port 的公共契约 | crate integration contract；共享断言定义一次，通过 factory/fixture 复用 |
+| L4 | crash/abort → reopen → 完整旧代或新代、Storage 到消费方的关键恢复旅程 | 进程 harness 与相邻边界场景；逐边界保留 L2/L3 证据 |
+| L5 | 仅真实平台 durability、安装或进程边界无法由 harness 证明时适用 | 默认不新增；现有真实子进程 crash/OS lock 先按 L4 process harness 归类，若平台能力仍不可证明再登记独立 smoke |
+
+#### 11.9.3 根因级修正顺序
+
+1. **冻结矩阵与失败基线**：逐项对照 #848 及七个已关闭业务叶子、Storage Target 文档、Published Language、Port、恢复状态表和 Current→Target 迁移记录，先记录不符合项。
+2. **修复测试组织根因**：把 `lib.rs` 和 adapter 中违反当前规范的 inline test 迁回真实 owning layer；`domain_tests.rs` 按 `safe_path`、Published Language、blob recovery、dataset 等稳定 owner 拆分。只迁移本次涉及的测试，禁止顺带搬迁全仓历史测试；禁止 `mod.rs` 与 `include!`。
+3. **修复测试基础设施根因**：日志捕获器安装失败必须显式失败，test fixture 保持 `cfg(test)`；Blob/Dataset 构造与恢复日志使用同一 owner 下的设施，避免全局状态静默失效。
+4. **修复 flaky 根因**：锁测试用 child-ready/release 的有界握手直接证明 release 前未完成、release 后完成；墙钟只作死锁上限，不再以 `sleep + elapsed` 证明互斥。每个文件测试使用 RAII 唯一临时目录，不修改 cwd，不依赖用户目录。
+5. **补齐 `SafePath` / `SafeStorageRoot`**：L1 覆盖合法等价类、非法输入、显示与键边界；L3 覆盖 root open、幂等多段 `ensure_dir`、中间目录 symlink、`open_existing`/`create_or_open` 的存在性与类型错误、entries 的 typed 分类/排序/过滤，以及错误与日志不泄漏绝对路径。Unix 特有证据显式标注平台边界。
+6. **逐表复核 AtomicBlob**：确认 durability、提交前/后故障、Prepared/Committed digest 分支、跨 reopen promote、指定 generation quarantine、delete/list 与协议文件 no-follow；只对矩阵中的真实空白补测试。
+7. **逐表复核 AtomicDataset**：确认 canonical revision、重复 member、stale CAS 零事务证据、omitted delete、显式 previous、完整 swap、fault matrix、corruption 优先级、quarantine 持续 fail-closed，以及相同/不同 dataset 的锁隔离。
+8. **复核相邻消费边界**：Context Session snapshot、Memory dataset、Audit append path primitive、Runtime Tool Result 与 Composition wiring 必须各自保留相邻契约；Task/Memory/History 旧 Storage-owned schema 必须保持零生产可达。消费方业务缺陷另建 owner 明确的原生 sub-issue。
+9. **收口公开面与 Guard**：核对 crate-root 与 `storage::api` 重复 façade、具体 filesystem adapter 的稳定性所有者、`check-crate-api-boundary.sh` 中过渡白名单及退役描述。若公开面迁移需要多消费方协同，拆为独立 sub-issue，不把结构迁移强塞进测试审查 PR。
+10. **回写治理事实**：矩阵、覆盖率、production reachability、仍存缺口和 L5 不适用理由回写本文与 Migration Governance；同步 #848 的过期子项状态。存在未闭合关键行为时，#1057 与 #848 均不得宣称完成。
+
+#### 11.9.4 验证与退出门禁
+
+实施完成后按以下顺序保留首次结果：
+
+1. `scripts/setup-dev-env.sh --check`；
+2. `cargo fmt --all -- --check`；
+3. `cargo check -p storage`；
+4. `cargo test -p storage --lib` 与 `cargo test -p storage --tests`；
+5. Context、Memory、Task、Audit、Runtime、Composition 的 Storage 相邻边界定向测试；
+6. `cargo run -p xtask -- production-reachability .`；
+7. `cargo clippy --workspace --all-targets -- -D warnings`；
+8. `.agents/hooks/check-architecture-guards.sh`；
+9. `cargo test --workspace`；
+10. `./scripts/coverage.sh`，记录 Storage line/region/function 与 changed-lines 信号。
+
+覆盖率与 production reachability 独立判定。首次失败不得被重跑成功覆盖；flaky 必须修复确定性或登记阻断。只有行为矩阵无未解释空白、关键缺口已补齐或有 owner 的原生 Issue 承接、全部适用门禁通过且父项治理事实已同步，才可给出 #848 的 Storage 测试完整性结论。
+
+#### 11.9.5 #1057 实施结果与行为—证据矩阵
+
+| 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
+|---|---|---|---|
+| SafePath、StorageKey、DatasetKey 的合法/非法等价类与策略不变量 | L1 | `agent/features/storage/src/domain/domain_tests.rs` | 已覆盖；补齐单字符、大小写/下划线、Unicode 与 `Display`，空键、namespace durability/previous policy、digest/revision/recovery 决策保持单元证据 |
+| SafeStorageRoot capability-root、no-follow、普通文件与目录枚举 | L3 | `agent/features/storage/tests/safe_storage_root_contract.rs` | #1057 补齐；覆盖缺失 root、多段幂等目录、中间 symlink、create/open、missing/directory target、typed 排序/过滤及路径不泄漏 |
+| AtomicBlob 整值替换、显式代际、promote/quarantine/delete | L2-L3 | `atomic_blob_contract.rs`、`crash_recovery.rs` | 完整；旧/新 primary、previous、指定代 quarantine、跨 reopen promote 幂等、并发 writer 与协议 symlink 均可追溯 |
+| Blob 提交点、durability、fault matrix 与 typed corruption | L1-L4 | `domain/domain_tests.rs`、`crash_recovery.rs` | 完整；Prepared/Committed digest 分支、提交前 Err、提交后 warning、abort/reopen 与 corruption quarantine 均覆盖 |
+| AtomicDataset manifest、revision、CAS、完整替换与 previous | L1-L3 | `domain/domain_tests.rs`、`atomic_dataset_contract.rs` | 完整；canonical revision、重复 member、omitted delete、stale CAS、显式 previous、promote/quarantine 均覆盖 |
+| Dataset Prepared、roll-forward、完整代可见性与 corruption 优先级 | L2-L4 | `atomic_dataset_crash.rs` | 完整；member 中途发布、journal/member/revision 矛盾、partial quarantine fail-closed 与 promote crash matrix 均覆盖 |
+| 相同 key/dataset 跨进程串行、不同 dataset 独立 | L4 | `crash_recovery.rs`、`atomic_dataset_crash.rs` | #1057 修复确定性；ready/release 有界握手替代 `sleep + elapsed` 业务断言，墙钟只保留等待上限 |
+| Context Session、Memory dataset、Audit append primitive、Runtime Tool Result、Composition wiring | L3-L4 | `context/tests/session_snapshot_store_contract.rs`、`memory/src/adapters_tests.rs`、`audit/tests/append_store_contract.rs`、`runtime/tests/tool_result_blob_contract.rs`、`composition/tests/main_session_wiring.rs` | 已覆盖；#1057 增加 Session durability、promote、delete-all 相邻映射证据 |
+| 测试 owning-layer、test-only API 与生产可达性 | L0 | Storage `*_tests.rs`、production reachability、source/architecture guards | #1057 收口；移除生产文件 inline test，domain/adapter/façade 测试外置；删除只为测试存在的 `SafePathSegment::name` API；日志捕获器安装失败不再静默 |
+| crate-root / `storage::api` 重复 façade 与文档 `list_primary` 漂移 | L0-L3 | [#1263](https://github.com/rushsinging/aemeath/issues/1263) | 结构性缺口已由原生 sub-issue 承接并设置为 #1057 blocked-by；跨 Context/Config/Runtime/Memory/Composition，不在测试审查 PR 强行迁移 |
+| 真终端、网络、安装与发布资产 | L5 | 不适用说明 | Storage 机制不依赖终端/网络/发布资产；真实子进程 crash 与 OS lock 已由隔离 process harness 覆盖，无新增 L5 |
+
+测试组织与确定性结论：Storage domain 测试迁入 `src/domain/` owner，Blob/Dataset adapter 与 crate façade 日志测试外置；未新增 `mod.rs`、`include!`、万能 `test_utils` 或生产 test-only API。SafeStorageRoot 文件测试均使用 RAII 唯一目录。跨进程锁不再用固定等待时长判断成功。
+
+验证证据（2026-07-20）：
+
+- `cargo fmt --all -- --check`、`cargo check -p storage`、`cargo test -p storage --all-targets` 通过。
+- Context Session、Runtime Tool Result、Memory、Audit append、Composition Main Session 定向测试通过。
+- `cargo run -p xtask -- production-reachability .`、`cargo clippy --workspace --all-targets -- -D warnings`、全部 architecture guards 通过。
+- 独立 `cargo test --workspace` 两次均在 Runtime 测试进程超过 10 分钟未结束；首次结果未被隐藏，也未以重跑成功冒充通过。`cargo test --workspace --no-run` 通过，已确认卡住进程不属于 Storage 变更路径。
+- workspace `./scripts/coverage.sh` 同样因 Runtime 测试进程超过 10 分钟未完成；改用同版本工具执行 `cargo llvm-cov --manifest-path agent/features/storage/Cargo.toml --all-targets --summary-only`，Storage regions/functions/lines 为 `83.52% / 91.81% / 86.98%`。初始文档基线为 `75.28% / 69.26% / 76.39%`；口径分别记录，不把百分比当作行为正确证明。
+
+最终结论：Storage 机制测试的 L0～L4 缺口已按最低充分层闭合，L5 不适用；公开面/list 契约漂移由 #1263 继续阻断 #1057，因此 #1057 与父项 #848 暂不满足关闭条件。
+
+#### 11.10 #1058 Task Management L0–L5 覆盖证据
+
+#849 创建时的直接执行叶子 #996、#885–#891 均已关闭；本审查只核验其组合后的 Task BC，不承载新的业务设计。审查基线为 Task-owned `domain + adapters`、`TaskAccess` / `TaskPersist` 两个窄 OHS，以及 Context Session 内嵌快照。
+
+| 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
+|---|---|---|---|
+| typed ID、创建规格、状态机、DAG、Batch/current_batch、revision、删除边清理与 lifecycle | L1 | `agent/features/task/src/domain/{model,state,lifecycle,query}_tests.rs` | 已覆盖：合法/非法迁移、幂等、overflow、环、跨 Batch、blocked admission、稳定排序与 tombstone 过滤均有确定性断言。 |
+| TaskSnapshot V1→V2 codec、typed validation、未知字段、wire ID、候选安装与稳定快照顺序 | L1/L2 | `agent/features/task/src/domain/{snapshot,snapshot_validation}_tests.rs`；`agent/features/task/src/adapters/snapshot_store_tests.rs` | 已覆盖：codec 与 aggregate validation 分阶段；#1058 补 live snapshot 的 Task/Batch typed-ID 稳定排序，避免 HashMap 枚举顺序泄漏。 |
+| TaskAccess 单一事务 backing、同 backing Access/Persist view、失败/no-op 原子性 | L2/L3 | `agent/features/task/src/adapters/{contract/task_access.rs,store_tests.rs,wiring.rs}`；`agent/features/task/tests/task_persist_contract.rs` | 已覆盖：新增公共 `TaskPersist` integration contract，验证非空跨 view round-trip 与非法快照不修改 live view。 |
+| Tool wire → Task ACL：非零 ID、已删除任务隐藏、创建/更新/停止/列表的意图命令 | L2/L3 | `agent/features/tools/src/adapters/task_{create,get,list,stop,update}_tests.rs`；`agent/features/tools/src/domain/types/task_{get,list}_tests.rs` | 已覆盖：#1058 将 Tool 输入统一委托 Task-owned non-zero parser，拒绝 `0`；TaskGet 不发布 tombstone；TaskView wire 仍锁定既有 batch 数字兼容格式且不含 owner。 |
+| Runtime Task snapshot 渲染与 reminder 观察 | L1 | `agent/features/runtime/src/application/chat/looping/{task_snapshot_tests.rs,task_reminder_tests.rs}` | 已覆盖：状态排序、依赖渲染、截断/hidden count、零行限制、全部 Task mutation 工具与跨 turn 保留均有确定性断言；TaskStop 与 TasksSnapshot 的 mutation 集保持一致。 |
+| Context Session 的 captured empty/missing/non-empty Task snapshot、Task prepare 失败的联合恢复原子性 | L3/L4 | `agent/features/context/tests/main_session_wiring.rs` | 已覆盖：新增 captured non-empty snapshot → TaskAccess 可观察恢复；self dependency prepare 失败时 canonical session、memory 和 Task state 均保持旧值。 |
+| TaskCommandResult 事件到 Runtime/SDK/TUI 的唯一投影 | L4 | #879 | **实现缺口**：Task BC 已原子产出 `TaskEvent`，但当前 Runtime 仍按 Tool 名和结果文本推断 snapshot / hook，未消费事件建立权威 SDK 投影；由已开启的 #879 承接，#1058 / #849 因此保持开放。 |
+| L0：生产可达性、公开面、Task persistence authority、layout/dependency 守卫 | L0 | `cargo run -p xtask -- production-reachability .`；`cargo clippy --workspace --all-targets --all-features -- -D warnings`；`.agents/hooks/check-architecture-guards.sh --full` | 已覆盖：Task target layout 与 Access/Persist capability policy 无新增 migration exception。 |
+| 真进程、PTY、网络、平台、安装或发布资产 | L5 | 不适用说明 | Task BC 是进程内同步聚合、codec 和窄端口；真实外部边界不属于该能力，L1–L4 可完整覆盖，不新增 smoke。 |
+
+确定性与组织：Task codec/aggregate 测试只用固定 timestamp/ID；Context 场景使用独立临时目录与 gate；本次新增 Tool/Runtime 测试均按同级 `*_tests.rs` 外置，未新增 `mod.rs`、`include!`、万能 fixture 或生产 test-only API。`TaskId::new(0)` 保留给 Snapshot validator 构造非法持久化 fixture；外部 Tool wire 只可经 `TaskId::parse_tool_input` 取得非零 ID。
+
+覆盖率信号（2026-07-20，`./scripts/coverage.sh`）：Task regions **95.69%**、functions **93.85%**、lines **96.85%**。百分比只作风险信号；关键状态机、契约与跨 BC 恢复行为以本矩阵为验收依据。慢速矩阵的 PTY smoke 首次因未构建 CLI binary 失败，按 worktree-local Cargo build-dir 显式设置 `AEMEATH_PTY_BIN` 后通过；该 PTY 责任与 Task BC 无关，不影响 L5 不适用判断。
+
+#### 11.11 #1060 Memory / Reflection L0–L5 覆盖证据
+
+父 Issue [#851](https://github.com/rushsinging/aemeath/issues/851) 创建时的执行叶子 #895–#900、#984 与 #997 均已关闭。审查后新增的 #1283、#1284、#1285 已分别由 PR #1287、#1290、#1291 合入 `main`；Manual Reflection 的用户命令与 SDK/TUI 投影属于交付层工作，已移至 #860 的子项 #1289，不阻断本父项测试审查。
+
+| 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
+|---|---|---|---|
+| MemoryId / Entry 不变量、eligibility、dedup、eviction、JSON parse、prompt/summary 与安全错误类别 | L1 | `agent/features/memory/src/domain/{model,persistence,reflection}.rs` 的现有单元测试；`agent/features/memory/tests/reflection_error_boundary.rs`；`agent/features/runtime/src/application/chat/looping/reflection_trigger_tests.rs` | 已覆盖值对象、持久化规则、parser 等价类与 turn trigger 的 enabled/interval/tool/finish-gate 边界；#1283 将 parse error 收窄为稳定 Display，并锁定模型正文不泄漏。 |
+| MemoryService candidate→CAS→publish、committed receipt、一次 recompute、query 零 I/O、reflection apply | L2 | `agent/features/memory/src/service.rs` 的 scripted-store 测试；`agent/features/memory/src/service_reflection_tests.rs` | 已覆盖 commit failure、RecoveryPending、一次/二次 CAS、layer-targeted commit、真实 `retrieve_for_inject` 零写入，以及 mixed suggestion/outdated 的 `PartialApply` 已提交状态与计数。 |
+| MemoryPort / NoOp / opener / history adapter 的稳定边界、ACL 与持久化 | L3 | `agent/features/memory/tests/{memory_port_contract,noop_memory_contract,opener_seam_contract,reflection_history_adapter,reflection_error_boundary}.rs` | 已覆盖 Disabled NoOp、typed query/mutation、mixed apply、history Running→同 id terminal upsert、reopen/corruption 与仅安全摘要查询；无未解释的 adapter/ACL 缺口。 |
+| Main Session 同一 active Arc、Context 只读注入、Sub Disabled / Shared、Reflection 端到端生命周期 | L4 | `agent/composition/src/memory.rs` 的 `main_views_share_the_active_arc`、`prepare_does_not_change_active_until_install`、`preparing_the_active_identity_reuses_arc_without_opening`、`sub_disabled_is_noop_and_shared_reuses_active_without_opening`；`agent/composition/tests/main_session_wiring.rs`；`agent/features/context/tests/application_service_contract.rs`；`agent/features/runtime/src/application/chat/looping/pre_compact_trigger_tests.rs`；`agent/features/runtime/tests/reflection_teardown.rs` | #1284 证明 compact 成功后的冻结 snapshot 才提交 PreCompact；#1285 证明 grace deadline 后 cancel 并等待 terminal completion；#1299 证明 NoOp→committed active Arc 的 Context 注入切换，以及 history append 失败后 terminal completion、History 分类与单槽释放。 |
+| L0 production reachability、all-target clippy、public/test-only API、architecture guards | L0 | `.agents/hooks/check-production-reachability.sh`；`cargo clippy --workspace --all-targets -- -D warnings`；`.agents/hooks/check-architecture-guards.sh --full`；`cargo test --workspace` | 2026-07-21 在 `8b841da6` 上复采全部通过；production reachability 与覆盖率独立判定，未发现由测试引用掩盖的新增生产死代码。 |
+| 真实 PTY / 平台 / 安装路径 | L5 | `apps/cli/tests/pty_smoke.rs`；`scripts/check-slow-test-matrix.sh` | 2026-07-21 默认慢速矩阵完整通过（含 CLI build 与 PTY smoke）；#1303 已令矩阵从 Cargo JSON 解析 worktree-local executable。#1298 归属 #1050 的慢速入口修复已合入，不再留下本能力 L5 阻断。 |
+
+确定性与组织：#1283/#1284/#1285/#1299 的新增测试均位于 owning layer 的外置测试文件；无 `mod.rs`、`include!` 或生产 test-only API。Reflection task 测试使用 cancellation token、Notify 和 bounded timeout，不以短 sleep 证明状态。
+
+覆盖率信号（2026-07-21，`./scripts/coverage.sh`，commit `8b841da6`）：Memory regions/functions/lines **88.52% / 86.69% / 88.83%**；Runtime **71.65% / 71.11% / 72.12%**；workspace **77.89% / 79.24% / 78.22%**。统一工具仍不生成 changed-lines 指标；百分比仅作风险信号，不能替代上述行为矩阵与相邻边界证据。
+
+最终结论：#851 的创建时业务叶子及审查后新增的 #1283/#1284/#1285 均已关闭，#1299 已由 PR #1308 合入并关闭；#1298 已由 PR #1303 合入且按 owner 边界归 #1050。#1060 的 L0–L5 矩阵无未解释空白、适用证据均可追溯，#851 / #1060 已满足测试审查完成定义；Issue 关闭仍待用户确认。
+
 ## 12. 相关文档
 
 - [01-architecture-guards.md](01-architecture-guards.md)：架构守卫注册表与例外治理
@@ -593,6 +720,10 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-21 | #1060 最终复采并验收：#1299 已由 #1308 合入、#1298 已由 #1303 合入；L0 守卫、workspace tests、默认慢速矩阵（含 PTY）与 coverage 全部通过，#851 / #1060 已满足测试审查完成定义，等待用户确认关闭 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#851](https://github.com/rushsinging/aemeath/issues/851)、[#1299](https://github.com/rushsinging/aemeath/issues/1299)、[#1308](https://github.com/rushsinging/aemeath/pull/1308)、[#1303](https://github.com/rushsinging/aemeath/pull/1303) |
+| 2026-07-20 | #1060 调整慢速矩阵缺陷归属：#1298 移至 #1050，L5 PTY 直接验证保留为通过；#1060 仅由能力内测试缺口 #1299 阻断 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#1050](https://github.com/rushsinging/aemeath/issues/1050)、[#1298](https://github.com/rushsinging/aemeath/issues/1298)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
+| 2026-07-20 | #1060 初次 Memory / Reflection L0–L5 审查经独立复核后修正证据路径：`policy.rs` 无直接单元测试；same-Arc / Sub Disabled 正确证据在 `composition/src/memory.rs`；`for_complete_reflection` 零调用者与 Runtime 覆盖率风险均由 #1299 承接 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
+| 2026-07-20 | #1060 完成 Memory / Reflection 初次 L0–L5 审查：记录 Memory/Runtime coverage、#1283/#1284/#1285 合入证据与 PTY worktree binary 首次失败；事务/history 相邻测试由 #1299、慢速矩阵路径修复由 #1298 承接，#851 暂不关闭 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#851](https://github.com/rushsinging/aemeath/issues/851)、[#1298](https://github.com/rushsinging/aemeath/issues/1298)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
 | 2026-07-14 | 初稿：定义六层测试模型、目录组织、覆盖率、生产可达性、dead-code 与 CI 治理 | [#677](https://github.com/rushsinging/aemeath/issues/677)、[#1006](https://github.com/rushsinging/aemeath/issues/1006) |
 | 2026-07-15 | 将 L0-L5、覆盖证据、目录、命名、fixture 与确定性规则同步到 Rust 编码规范，并按 Runtime 单能力轻量六边形 Target 收敛测试归属；`shared` 仅在存在真实共享内容时按需创建 | [#1013](https://github.com/rushsinging/aemeath/issues/1013)、[#1027](https://github.com/rushsinging/aemeath/pull/1027) |
 | 2026-07-15 | 接入 cargo-llvm-cov 0.8.7，建立 workspace/per-crate 命令行覆盖率入口与 v0.1.0 基线 | [#1014](https://github.com/rushsinging/aemeath/issues/1014) |
@@ -601,3 +732,6 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 | 2026-07-17 | 登记 #884 Tool Result 的 L1/L3/L4 覆盖：Config policy、Unicode materialization、写失败 fallback、AtomicBlob adapter contract、Main/Sub 共享入口与旧 `.txt` 引用兼容边界 | [#884](https://github.com/rushsinging/aemeath/issues/884) |
 | 2026-07-17 | 登记 #983 AtomicDataset 的 L0–L5 覆盖：纯规则、adapter 协作、公共 port contract、Prepared/roll-forward/corruption fault matrix 与真实进程 abort/OS lock；Memory 集成 deferred 至 #896 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
 | 2026-07-19 | 完成 #1062 Policy 测试审查：登记 Standard/AllowAll Config 映射、五维授权上下文、Runtime 单次评估与 fuse、Main/Sub 同实例注入、CLI ACL、L4 授权旅程及 L5 不适用理由 | [#1062](https://github.com/rushsinging/aemeath/issues/1062)、[#1221](https://github.com/rushsinging/aemeath/issues/1221) |
+| 2026-07-20 | 完成 #1057 Storage 根因级测试审查：补齐 SafeStorageRoot、Session 相邻映射、owning-layer 与锁确定性；记录 Storage 覆盖率和 workspace Runtime 卡住事实；公开面/list 契约漂移由 #1263 承接 | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#1263](https://github.com/rushsinging/aemeath/issues/1263) |
+| 2026-07-20 | 完成 #1058 Task Management 测试审查：补 Task Tool ACL、TaskPersist contract、Context restore、Runtime snapshot/reminder 与稳定 snapshot；TaskEvent→Runtime/SDK/TUI 唯一投影缺口由 #879 原生依赖承接 | [#1058](https://github.com/rushsinging/aemeath/issues/1058)、[#849](https://github.com/rushsinging/aemeath/issues/849)、[#879](https://github.com/rushsinging/aemeath/issues/879) |
+| 2026-07-20 | 冻结 #1057 Storage 根因级测试审查计划：按八个稳定行为单元建立 L0～L5 矩阵，优先修复 owning-layer、日志测试设施、墙钟锁断言与 SafeStorageRoot 契约根因，再复核 Blob/Dataset、消费方边界、公开面和 Guard | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#848](https://github.com/rushsinging/aemeath/issues/848) |

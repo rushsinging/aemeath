@@ -99,22 +99,26 @@ impl PreparedTaskRestore {
 
 impl TaskSnapshot {
     pub(crate) fn from_state(state: &TaskStoreState) -> Self {
+        let mut tasks: Vec<_> = state
+            .tasks()
+            .values()
+            .filter(|task| task.status() != TaskStatus::Deleted)
+            .cloned()
+            .map(|mut task| {
+                task.restore_blocks(Vec::new());
+                task
+            })
+            .collect();
+        tasks.sort_unstable_by_key(Task::id);
+        let mut batches: Vec<_> = state.batches().values().cloned().collect();
+        batches.sort_unstable_by_key(Batch::id);
         Self {
             revision: state.revision(),
-            tasks: state
-                .tasks()
-                .values()
-                .filter(|task| task.status() != TaskStatus::Deleted)
-                .cloned()
-                .map(|mut task| {
-                    task.restore_blocks(Vec::new());
-                    task
-                })
-                .collect(),
+            tasks,
             next_task_id: state.next_task_id_for_snapshot(),
             next_batch_id: state.next_batch_id_for_snapshot(),
             current_batch: state.current_batch(),
-            batches: state.batches().values().cloned().collect(),
+            batches,
         }
     }
 
@@ -131,12 +135,14 @@ impl TaskSnapshot {
 
     pub(crate) fn from_decoded_parts(
         revision: TaskRevision,
-        tasks: Vec<Task>,
+        mut tasks: Vec<Task>,
         next_task_id: TaskId,
         next_batch_id: BatchId,
         current_batch: Option<BatchId>,
-        batches: Vec<Batch>,
+        mut batches: Vec<Batch>,
     ) -> Self {
+        tasks.sort_unstable_by_key(Task::id);
+        batches.sort_unstable_by_key(Batch::id);
         Self {
             revision,
             tasks,

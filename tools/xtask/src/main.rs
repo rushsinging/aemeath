@@ -78,6 +78,18 @@ fn main() -> Result<()> {
                 _ => anyhow::bail!("guard-registry 仅支持 check 或 report"),
             }
         }
+        Some("sdk-wire-schema") => {
+            let action = args.next().unwrap_or_else(|| "check".to_owned());
+            let output = PathBuf::from(
+                args.next()
+                    .unwrap_or_else(|| "packages/sdk/schema/wire-components.schema.json".to_owned()),
+            );
+            match action.as_str() {
+                "write" => xtask::sdk_wire_schema::write(&output),
+                "check" => xtask::sdk_wire_schema::check(&output),
+                _ => anyhow::bail!("sdk-wire-schema 仅支持 write 或 check"),
+            }
+        }
         Some("source-guard") => {
             let root = PathBuf::from(args.next().unwrap_or_else(|| ".".to_owned()));
             let output = args.next().map(PathBuf::from);

@@ -10,10 +10,8 @@ pub struct TaskUpdateTool {
 }
 
 fn parse_id(value: &str, field: &str) -> Result<TaskId, String> {
-    value
-        .parse::<u64>()
-        .map(TaskId::new)
-        .map_err(|_| format!("{field} must be a decimal task ID: {value}"))
+    TaskId::parse_tool_input(value)
+        .map_err(|_| format!("{field} must be a non-zero decimal task ID: {value}"))
 }
 
 fn parse_priority(value: &str) -> Result<TaskPriority, String> {

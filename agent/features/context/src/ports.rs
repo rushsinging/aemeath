@@ -3,15 +3,17 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 
 use crate::domain::{
-    AppendReceipt, CompactOutcome, CompactRequest, ContextAppend, ContextAppendError,
-    ContextMessage, ContextPortError, ContextRequest, ManualCompactRequest, SessionId,
-    SessionRevision, SystemBlock,
+    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
+    CompactRequest, ContextAppend, ContextAppendError, ContextMessage, ContextPortError,
+    ContextRequest, ManualCompactRequest, SessionId, SessionRevision, SystemBlock,
 };
 
 pub mod context_port;
+pub mod session_management;
 pub mod session_snapshot_store;
 pub use crate::domain::PromptMaterializationError;
 pub use context_port::ContextPort;
+pub use session_management::SessionManagementPort;
 pub use session_snapshot_store::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
 
 pub trait MainContextFactory: Send + Sync {
@@ -42,6 +44,14 @@ pub struct SessionSnapshot {
 #[async_trait]
 pub trait SessionRepository: Send + Sync {
     async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String>;
+    async fn append_accepted_input(
+        &self,
+        _append: &AcceptedInputAppend,
+    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        Err(AcceptedInputError::Storage(
+            "此 SessionRepository 未实现已接受输入持久化".to_string(),
+        ))
+    }
     async fn append_finalized(
         &self,
         append: &ContextAppend,

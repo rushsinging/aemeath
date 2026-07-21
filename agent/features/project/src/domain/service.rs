@@ -266,10 +266,11 @@ impl WorkspaceControl for WorkspaceService {
         &self,
         path: Option<PathBuf>,
         branch: Option<String>,
+        base: Option<String>,
     ) -> Result<WorkspaceFrame, WorkspaceError> {
         let _control = self.lock_control();
         let mut candidate = self.candidate();
-        let frame = rules::enter(&mut candidate, self.git.as_ref(), path, branch)?;
+        let frame = rules::enter(&mut candidate, self.git.as_ref(), path, branch, base)?;
         self.commit(candidate);
         Ok(frame)
     }

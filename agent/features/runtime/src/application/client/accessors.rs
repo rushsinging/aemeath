@@ -46,6 +46,8 @@ pub struct RuntimeHandle {
     pub(crate) wiring: Arc<context::MainSessionWiring>,
     pub(crate) config_query: Arc<dyn config::ConfigQuery>,
     pub(crate) config_writer: Arc<dyn config::ConfigWriter>,
+    /// Same Composition-injected instance borrowed by MainSessionWiring for resume.
+    pub(crate) session_management: Arc<dyn context::SessionManagementPort>,
     pub(crate) event_sink_factory: Arc<
         dyn Fn(tokio::sync::mpsc::UnboundedSender<ChatEvent>) -> ChatEventSinkHandle + Send + Sync,
     >,

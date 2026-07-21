@@ -63,6 +63,8 @@ pub struct TaskLifecycleSnapshot {
 
 impl TaskStoreState {
     /// Returns an owned read model, never a handle into mutable store state.
+    /// Commands use the tombstone to preserve idempotent delete semantics; list
+    /// and lifecycle projections filter it before exposing live work.
     pub fn get(&self, id: TaskId) -> Option<Task> {
         self.tasks().get(&id).cloned()
     }

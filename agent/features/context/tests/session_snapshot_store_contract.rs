@@ -9,11 +9,24 @@ use storage::api::{
     WriteReceipt,
 };
 
-#[derive(Default)]
 struct RecordingBlob {
     reads: Mutex<Vec<Generation>>,
     quarantines: Mutex<Vec<(Generation, TransactionScope, QuarantineReason)>>,
-    writes: Mutex<Vec<Vec<u8>>>,
+    writes: Mutex<Vec<(Vec<u8>, WriteOptions)>>,
+    promote_outcome: Mutex<PromoteOutcome>,
+    delete_options: Mutex<Vec<DeleteOptions>>,
+}
+
+impl Default for RecordingBlob {
+    fn default() -> Self {
+        Self {
+            reads: Mutex::new(Vec::new()),
+            quarantines: Mutex::new(Vec::new()),
+            writes: Mutex::new(Vec::new()),
+            promote_outcome: Mutex::new(PromoteOutcome::AlreadyPromoted),
+            delete_options: Mutex::new(Vec::new()),
+        }
+    }
 }
 
 #[async_trait]
@@ -30,13 +43,13 @@ impl AtomicBlobPort for RecordingBlob {
         &self,
         _key: &StorageKey,
         bytes: &[u8],
-        _options: WriteOptions,
+        options: WriteOptions,
     ) -> Result<WriteReceipt, StorageError> {
-        self.writes.lock().unwrap().push(bytes.to_vec());
+        self.writes.lock().unwrap().push((bytes.to_vec(), options));
         Ok(WriteReceipt::committed(None))
     }
     async fn promote_previous(&self, _key: &StorageKey) -> Result<PromoteOutcome, StorageError> {
-        Ok(PromoteOutcome::AlreadyPromoted)
+        Ok(*self.promote_outcome.lock().unwrap())
     }
     async fn quarantine(
         &self,
@@ -54,9 +67,17 @@ impl AtomicBlobPort for RecordingBlob {
     async fn delete_all_generations(
         &self,
         _key: &StorageKey,
-        _options: DeleteOptions,
+        options: DeleteOptions,
     ) -> Result<DeleteOutcome, StorageError> {
+        self.delete_options.lock().unwrap().push(options);
         Ok(DeleteOutcome::new(false, false, false))
+    }
+
+    async fn list_primary(
+        &self,
+        _namespace: storage::api::StorageNamespace,
+    ) -> Result<Vec<storage::api::StorageEntry>, StorageError> {
+        Ok(Vec::new())
     }
 }
 
@@ -72,7 +93,13 @@ async fn adapter_maps_context_operations_to_session_atomic_blob_contract() {
     store.write(b"canonical").await.unwrap();
     store.quarantine(SessionGeneration::Previous).await.unwrap();
     assert_eq!(*blob.reads.lock().unwrap(), vec![Generation::Primary]);
-    assert_eq!(*blob.writes.lock().unwrap(), vec![b"canonical".to_vec()]);
+    let writes = blob.writes.lock().unwrap();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(writes[0].0, b"canonical");
+    assert_eq!(
+        writes[0].1.durability(),
+        storage::api::Durability::ProcessCrashSafe
+    );
     assert_eq!(
         *blob.quarantines.lock().unwrap(),
         vec![(
@@ -81,6 +108,29 @@ async fn adapter_maps_context_operations_to_session_atomic_blob_contract() {
             QuarantineReason::DecoderRejected
         )]
     );
+}
+
+#[tokio::test]
+async fn adapter_maps_promote_and_delete_to_atomic_blob_contract() {
+    let blob = Arc::new(RecordingBlob::default());
+    let store = AtomicBlobSessionStore::new(blob.clone(), "session-1").unwrap();
+
+    store.promote_previous().await.unwrap();
+    store.delete_all().await.unwrap();
+
+    let options = blob.delete_options.lock().unwrap();
+    assert_eq!(options.len(), 1);
+    assert!(options[0].include_quarantine());
+}
+
+#[tokio::test]
+async fn adapter_reports_missing_previous_generation() {
+    let blob = Arc::new(RecordingBlob::default());
+    *blob.promote_outcome.lock().unwrap() = PromoteOutcome::NotFound;
+    let store = AtomicBlobSessionStore::new(blob, "session-1").unwrap();
+
+    let error = store.promote_previous().await.unwrap_err();
+    assert!(error.to_string().contains("not found"));
 }
 
 #[test]
