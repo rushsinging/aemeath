@@ -104,6 +104,27 @@ pub(crate) fn prepare_tool_round(
     prepared
 }
 
+pub(crate) fn complete_cancelled_tool_round(
+    calls: &[ToolCall],
+    results: Vec<ToolExecution>,
+) -> Vec<ToolExecution> {
+    let mut by_id: HashMap<_, _> = results
+        .into_iter()
+        .map(|result| (result.call_id.clone(), result))
+        .collect();
+    calls
+        .iter()
+        .map(|call| {
+            by_id.remove(&call.id).unwrap_or_else(|| {
+                ToolExecution::new(
+                    call,
+                    tools::ToolOutcome::error("tool execution cancelled by user"),
+                )
+            })
+        })
+        .collect()
+}
+
 /// Restores original model call order after concurrent execution and gate paths.
 pub(crate) fn restore_tool_call_order(
     calls: &[ToolCall],

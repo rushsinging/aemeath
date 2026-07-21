@@ -423,6 +423,7 @@ mod tests {
         ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext,
     };
     use crate::application::loop_engine::ToolGuardDecision;
+    use crate::application::tool_coordination::complete_cancelled_tool_round;
     use async_trait::async_trait;
     use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
     use serde_json::Value;
@@ -626,6 +627,31 @@ mod tests {
                 (calls[1].id.to_string(), "Result".to_string()),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn cancelled_tool_round_materializes_one_result_for_each_provider_call() {
+        let calls = vec![lifecycle_call(0), lifecycle_call(1)];
+        let completed = ToolExecution::new(
+            &calls[0],
+            ToolOutcome::new("finished", Value::Null, Vec::new()),
+        );
+        let results = complete_cancelled_tool_round(&calls, vec![completed]);
+        let materializer = crate::application::testing::test_tool_result_materializer();
+
+        let message =
+            tool_results_for_api(materializer.as_ref(), results, "test-cancelled-round").await;
+
+        assert_eq!(message.content.len(), 2);
+        let provider_ids = message
+            .content
+            .iter()
+            .map(|block| match block {
+                ContentBlock::ToolResult { tool_use_id, .. } => tool_use_id.as_str(),
+                other => panic!("expected tool result, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(provider_ids, ["provider-0", "provider-1"]);
     }
 
     #[tokio::test]
