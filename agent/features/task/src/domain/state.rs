@@ -138,7 +138,6 @@ impl TaskStoreState {
         if self.tasks.is_empty()
             && self.batches.is_empty()
             && self.current_batch.is_none()
-            && self.next_task_id == TaskId::new(1)
             && self.next_batch_id == BatchId::new(1)
         {
             return Ok(TaskCommandResult::uncommitted((), Vec::new()));
@@ -151,7 +150,6 @@ impl TaskStoreState {
         }];
         self.tasks.clear();
         self.batches.clear();
-        self.next_task_id = TaskId::new(1);
         self.next_batch_id = BatchId::new(1);
         self.current_batch = None;
         Ok(self.commit(TaskCommandResult::uncommitted((), events), revision))
@@ -162,12 +160,6 @@ impl TaskStoreState {
         spec: BatchCreateSpec,
         timestamp: u64,
     ) -> Result<TaskCommandResult<Batch>, TaskCommandError> {
-        if let Some(active) = self.current_batch {
-            return Err(TaskCommandError::ActiveBatchConflict {
-                active,
-                requested: self.next_batch_id,
-            });
-        }
         let id = self.next_batch_id;
         let next_batch_id = id
             .get()
@@ -175,6 +167,13 @@ impl TaskStoreState {
             .map(BatchId::new)
             .ok_or(TaskCommandError::BatchIdExhausted)?;
         let revision = self.reserve_revision()?;
+        if let Some(active) = self.current_batch {
+            self.batches
+                .get_mut(&active)
+                .expect("current batch must exist")
+                .transition_to(BatchStatus::Archived)
+                .expect("current batch must be active");
+        }
         let batch = Batch::create(id, spec, timestamp);
         self.batches.insert(id, batch.clone());
         self.current_batch = Some(id);
@@ -195,7 +194,16 @@ impl TaskStoreState {
             .map(TaskId::new)
             .ok_or(TaskCommandError::TaskIdExhausted)?;
         let revision = self.reserve_revision()?;
-        let result = Task::create(id, batch, spec, timestamp);
+        let seq = self
+            .tasks
+            .values()
+            .filter(|task| task.batch() == batch)
+            .map(Task::seq)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(TaskCommandError::TaskIdExhausted)?;
+        let result = Task::create(id, batch, seq, spec, timestamp);
         self.tasks.insert(id, result.value.clone());
         self.next_task_id = next_task_id;
         Ok(self.commit(result, revision))

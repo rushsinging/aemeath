@@ -116,6 +116,7 @@ fn constructors_keep_specs_private_and_create_pending_entities() {
     let task = Task::create(
         TaskId::new(1),
         BatchId::new(1),
+        1,
         TaskCreateSpec::try_new("任务".into(), "描述".into(), None, TaskPriority::Normal).unwrap(),
         0,
     )
