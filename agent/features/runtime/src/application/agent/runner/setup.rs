@@ -353,6 +353,8 @@ impl AgentRunner for CliAgentRunner {
             tool_result_materializer: self.tool_result_materializer.clone(),
             policy: self.policy.clone(),
             tool_context_binding: self.tool_context_binding.clone(),
+            prompt_drained: false,
+            next_epoch: crate::application::loop_engine::DrainEpoch(0),
         }
         .run_loop()
         .await

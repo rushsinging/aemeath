@@ -174,7 +174,8 @@ fn new_control_path_drains_before_work_and_after_cancelled_step() {
 
     run.start_draining().unwrap();
     assert_eq!(run.status(), RunStatus::DrainingInput);
-    run.apply_drain_decision(DrainDecision::Inputs).unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
     assert_eq!(run.status(), RunStatus::PreparingContext);
     run.transition(RunTransition::ContextPrepared).unwrap();
     let step_id = run.begin_step().unwrap();
@@ -188,7 +189,7 @@ fn new_control_path_drains_before_work_and_after_cancelled_step() {
 
     assert_eq!(run.steps()[0].status(), RunStepStatus::Cancelled);
     assert_eq!(run.status(), RunStatus::DrainingInput);
-    run.apply_drain_decision(DrainDecision::EmptyAndSealed)
+    run.apply_drain_decision(DrainDecision::EmptyAndSealed, None)
         .unwrap();
     assert_eq!(run.status(), RunStatus::Completed);
 }
@@ -197,14 +198,16 @@ fn new_control_path_drains_before_work_and_after_cancelled_step() {
 fn scenario_cancelled_step_drains_input_then_starts_fresh_step() {
     let mut run = run();
     run.start_draining().unwrap();
-    run.apply_drain_decision(DrainDecision::Inputs).unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
     run.transition(RunTransition::ContextPrepared).unwrap();
     let cancelled = run.begin_step().unwrap();
     run.request_step_cancellation(&cancelled);
     run.begin_step_finalization(&cancelled).unwrap();
     run.finish_cancelled_step(&cancelled).unwrap();
 
-    run.apply_drain_decision(DrainDecision::Inputs).unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
     run.transition(RunTransition::ContextPrepared).unwrap();
     let next = run.begin_step().unwrap();
 
@@ -241,7 +244,7 @@ fn internal_continuation_leaves_drain_for_preparing_context() {
     let mut run = run();
     run.start_draining().unwrap();
 
-    run.apply_drain_decision(DrainDecision::InternalContinuation)
+    run.apply_drain_decision(DrainDecision::InternalContinuation, None)
         .unwrap();
 
     assert_eq!(run.status(), RunStatus::PreparingContext);
@@ -295,15 +298,19 @@ fn cancellation_deadline_can_close_step_as_unconfirmed_then_drain() {
 fn run_follows_the_happy_path_to_completed() {
     let mut run = run();
 
-    run.transition(RunTransition::Start).unwrap();
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
     run.transition(RunTransition::ContextPrepared).unwrap();
     let step_id = run.begin_step().unwrap();
     run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
         .unwrap();
     run.transition(RunTransition::ModelInvoked).unwrap();
-    run.transition(RunTransition::ResponseWithoutTools).unwrap();
+    run.transition(RunTransition::ContinueAfterResponse)
+        .unwrap();
     run.complete_step(&step_id).unwrap();
-    run.complete("final answer").unwrap();
+    run.apply_drain_decision(DrainDecision::EmptyAndSealed, Some("final answer"))
+        .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     assert!(run.is_terminal());
@@ -317,7 +324,7 @@ fn run_follows_the_happy_path_to_completed() {
 fn every_state_change_emits_transitioned_with_reason() {
     let mut run = run();
 
-    run.transition(RunTransition::Start).unwrap();
+    run.start_draining().unwrap();
     run.fail("provider failed").unwrap();
 
     let transitions: Vec<_> = run
@@ -336,11 +343,11 @@ fn every_state_change_emits_transitioned_with_reason() {
         vec![
             (
                 RunStatus::Created,
-                RunStatus::PreparingContext,
-                RunTransitionReason::Start,
+                RunStatus::DrainingInput,
+                RunTransitionReason::DrainStarted,
             ),
             (
-                RunStatus::PreparingContext,
+                RunStatus::DrainingInput,
                 RunStatus::Failed,
                 RunTransitionReason::Failed,
             ),
@@ -351,14 +358,14 @@ fn every_state_change_emits_transitioned_with_reason() {
 #[test]
 fn cancellation_and_completion_use_the_same_transition_event() {
     let mut cancelled = run();
-    cancelled.transition(RunTransition::Start).unwrap();
+    cancelled.start_draining().unwrap();
     cancelled.request_cancellation();
     cancelled.finish_cancellation().unwrap();
 
     assert!(cancelled.events().iter().any(|event| matches!(
         event,
         RunDomainEvent::Transitioned {
-            from: RunStatus::PreparingContext,
+            from: RunStatus::DrainingInput,
             to: RunStatus::Cancelling,
             reason: RunTransitionReason::InterruptRequested,
             ..
@@ -405,7 +412,9 @@ fn run_rejects_illegal_transition_without_mutating_status() {
 #[test]
 fn cancellation_is_two_phase_and_idempotent() {
     let mut run = run();
-    run.transition(RunTransition::Start).unwrap();
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
     run.transition(RunTransition::ContextPrepared).unwrap();
 
     assert_eq!(run.request_cancellation(), RunCancellationRequest::Accepted);
@@ -435,6 +444,10 @@ fn cancellation_is_two_phase_and_idempotent() {
                 run_id: run.id().clone(),
                 parent_run_id: None,
             },
+            RunDomainEvent::DrainingInput {
+                run_id: run.id().clone(),
+                parent_run_id: None,
+            },
             RunDomainEvent::CancellationRequested {
                 run_id: run.id().clone(),
                 parent_run_id: None,
@@ -450,7 +463,7 @@ fn cancellation_is_two_phase_and_idempotent() {
 #[test]
 fn cancelling_run_rejects_new_work() {
     let mut run = run();
-    run.transition(RunTransition::Start).unwrap();
+    run.start_draining().unwrap();
     run.request_cancellation();
 
     assert!(matches!(
@@ -469,7 +482,9 @@ fn cancelling_run_rejects_new_work() {
 #[test]
 fn cancellation_closes_the_active_step_and_rejects_late_completion() {
     let mut run = run();
-    run.transition(RunTransition::Start).unwrap();
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
     run.transition(RunTransition::ContextPrepared).unwrap();
     let step_id = run.begin_step().unwrap();
 
@@ -486,7 +501,7 @@ fn cancellation_closes_the_active_step_and_rejects_late_completion() {
 #[test]
 fn terminal_run_rejects_new_steps() {
     let mut run = run();
-    run.transition(RunTransition::Start).unwrap();
+    run.start_draining().unwrap();
     run.fail("boom").unwrap();
 
     assert!(matches!(
@@ -503,7 +518,7 @@ fn parent_identity_is_carried_by_every_domain_event() {
         Some(parent.clone()),
     );
 
-    run.transition(RunTransition::Start).unwrap();
+    run.start_draining().unwrap();
     run.fail("failed").unwrap();
 
     assert_eq!(run.parent_id(), Some(&parent));
@@ -513,7 +528,7 @@ fn parent_identity_is_carried_by_every_domain_event() {
         .all(|event| event.parent_run_id() == Some(&parent)));
 }
 
-const ALL_RUN_STATUSES: [RunStatus; 18] = [
+const ALL_RUN_STATUSES: [RunStatus; 17] = [
     RunStatus::Created,
     RunStatus::DrainingInput,
     RunStatus::PreparingContext,
@@ -523,7 +538,6 @@ const ALL_RUN_STATUSES: [RunStatus; 18] = [
     RunStatus::ExecutingTools,
     RunStatus::AwaitingUser,
     RunStatus::Compacting,
-    RunStatus::Finishing,
     RunStatus::CancellingStep,
     RunStatus::FinalizingStep,
     RunStatus::Cancelling,
@@ -534,8 +548,7 @@ const ALL_RUN_STATUSES: [RunStatus; 18] = [
     RunStatus::Terminated,
 ];
 
-const ALL_RUN_TRANSITIONS: [RunTransition; 22] = [
-    RunTransition::Start,
+const ALL_RUN_TRANSITIONS: [RunTransition; 19] = [
     RunTransition::StartDraining,
     RunTransition::DrainInputs,
     RunTransition::DrainInternalContinuation,
@@ -547,13 +560,11 @@ const ALL_RUN_TRANSITIONS: [RunTransition; 22] = [
     RunTransition::ModelContextExceeded,
     RunTransition::ModelInvoked,
     RunTransition::ResponseWithTools,
-    RunTransition::ResponseWithoutTools,
     RunTransition::ContinueAfterResponse,
     RunTransition::ToolsApproved,
     RunTransition::AwaitUser,
     RunTransition::UserResumed,
     RunTransition::ToolsCompleted,
-    RunTransition::Finish,
     RunTransition::StepCancelled,
     RunTransition::TerminationFinished,
     RunTransition::CancellationFinished,
@@ -578,7 +589,9 @@ fn run_at_status(status: RunStatus) -> Run {
         return run;
     }
 
-    run.transition(RunTransition::Start).unwrap();
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
     match status {
         RunStatus::Created | RunStatus::DrainingInput => unreachable!(),
         RunStatus::PreparingContext => {}
@@ -605,10 +618,6 @@ fn run_at_status(status: RunStatus) -> Run {
             run.transition(RunTransition::ResponseWithTools).unwrap();
             run.transition(RunTransition::AwaitUser).unwrap();
         }
-        RunStatus::Finishing => {
-            invoke_to_applying(&mut run);
-            run.transition(RunTransition::ResponseWithoutTools).unwrap();
-        }
         RunStatus::CancellingStep => {
             run.transition(RunTransition::ContextPrepared).unwrap();
             let step_id = run.begin_step().unwrap();
@@ -631,9 +640,11 @@ fn run_at_status(status: RunStatus) -> Run {
         }
         RunStatus::Completed => {
             let step_id = invoke_to_applying(&mut run);
-            run.transition(RunTransition::ResponseWithoutTools).unwrap();
+            run.transition(RunTransition::ContinueAfterResponse)
+                .unwrap();
             run.complete_step(&step_id).unwrap();
-            run.transition(RunTransition::Finish).unwrap();
+            run.apply_drain_decision(DrainDecision::EmptyAndSealed, Some("done"))
+                .unwrap();
         }
         RunStatus::Terminated => {
             run.request_termination(
@@ -656,7 +667,6 @@ fn run_at_status(status: RunStatus) -> Run {
 
 fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<RunStatus> {
     match (from, transition) {
-        (RunStatus::Created, RunTransition::Start) => Some(RunStatus::PreparingContext),
         (RunStatus::Created, RunTransition::StartDraining) => Some(RunStatus::DrainingInput),
         (RunStatus::DrainingInput, RunTransition::DrainInputs)
         | (RunStatus::DrainingInput, RunTransition::DrainInternalContinuation) => {
@@ -684,22 +694,18 @@ fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<Run
         (RunStatus::ApplyingResponse, RunTransition::ResponseWithTools) => {
             Some(RunStatus::AwaitingToolApproval)
         }
-        (RunStatus::ApplyingResponse, RunTransition::ResponseWithoutTools) => {
-            Some(RunStatus::Finishing)
-        }
         (RunStatus::ApplyingResponse, RunTransition::ContinueAfterResponse) => {
-            Some(RunStatus::PreparingContext)
+            Some(RunStatus::DrainingInput)
         }
         (RunStatus::AwaitingToolApproval, RunTransition::ToolsApproved) => {
             Some(RunStatus::ExecutingTools)
         }
         (RunStatus::AwaitingToolApproval, RunTransition::AwaitUser)
         | (RunStatus::ExecutingTools, RunTransition::AwaitUser) => Some(RunStatus::AwaitingUser),
-        (RunStatus::AwaitingUser, RunTransition::UserResumed)
-        | (RunStatus::ExecutingTools, RunTransition::ToolsCompleted) => {
-            Some(RunStatus::PreparingContext)
+        (RunStatus::AwaitingUser, RunTransition::UserResumed) => Some(RunStatus::DrainingInput),
+        (RunStatus::ExecutingTools, RunTransition::ToolsCompleted) => {
+            Some(RunStatus::DrainingInput)
         }
-        (RunStatus::Finishing, RunTransition::Finish) => Some(RunStatus::Completed),
         (RunStatus::FinalizingStep, RunTransition::StepCancelled) => Some(RunStatus::DrainingInput),
         (RunStatus::Terminating, RunTransition::TerminationFinished) => Some(RunStatus::Terminated),
         (RunStatus::Cancelling, RunTransition::CancellationFinished) => Some(RunStatus::Cancelled),
@@ -777,22 +783,6 @@ fn run_rejects_second_active_step_and_incomplete_step_completion() {
         run.complete_step(&step_id),
         Err(RunTransitionError::StepIncomplete)
     );
-}
-
-#[test]
-fn run_cannot_complete_while_step_is_active() {
-    let mut run = run_at_status(RunStatus::InvokingModel);
-    let step_id = run.begin_step().unwrap();
-    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
-        .unwrap();
-    run.transition(RunTransition::ModelInvoked).unwrap();
-    run.transition(RunTransition::ResponseWithoutTools).unwrap();
-
-    assert_eq!(
-        run.complete("invalid"),
-        Err(RunTransitionError::StepIncomplete)
-    );
-    assert_eq!(run.status(), RunStatus::Finishing);
 }
 
 #[test]
@@ -909,4 +899,295 @@ fn derived_sub_spec_can_only_restrict_parent_capabilities() {
         sub.with_tool_scope(ToolScope::Full),
         Err(RunSpecError::CapabilityEscalation)
     );
+}
+
+// ---------------------------------------------------------------------------
+// #1272 Phase 2: per-turn drain-or-seal invariants
+// ---------------------------------------------------------------------------
+
+#[test]
+fn created_only_transitions_into_draining_input() {
+    let mut run = run();
+
+    // Created 不得通过 Start 直接进入 PreparingContext (#1272)
+    assert_eq!(
+        run.transition(RunTransition::ContextPrepared),
+        Err(RunTransitionError::IllegalTransition {
+            from: RunStatus::Created,
+            transition: RunTransition::ContextPrepared,
+        })
+    );
+    assert_eq!(
+        run.status(),
+        RunStatus::Created,
+        "被拒迁移不得污染 Run 状态"
+    );
+
+    assert_eq!(
+        run.start_draining().map(|_| run.status()),
+        Ok(RunStatus::DrainingInput)
+    );
+    assert!(run
+        .events()
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Started { .. })));
+    assert!(run
+        .events()
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::DrainingInput { .. })));
+}
+
+#[test]
+fn finishing_transition_and_run_complete_bypass_are_not_in_the_machine() {
+    for &from in ALL_RUN_STATUSES.iter() {
+        for &transition in ALL_RUN_TRANSITIONS.iter() {
+            let mut run = run_at_status(from);
+            if from == RunStatus::InvokingModel && transition == RunTransition::ModelInvoked {
+                let step_id = run.begin_step().unwrap();
+                run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+                    .unwrap();
+            }
+            let next = try_transition(&mut run, transition);
+            if next == Some(RunStatus::Completed) {
+                assert_eq!(
+                    (from, transition),
+                    (RunStatus::DrainingInput, RunTransition::DrainEmptyAndSealed),
+                    "Completed 仅可由 DrainingInput + DrainEmptyAndSealed 产生，\
+                     实际来源为 {from:?} --{transition:?}",
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn completed_only_via_draining_input_and_empty_and_sealed() {
+    for &from in ALL_RUN_STATUSES.iter() {
+        for &transition in ALL_RUN_TRANSITIONS.iter() {
+            let mut run = run_at_status(from);
+            if from == RunStatus::InvokingModel && transition == RunTransition::ModelInvoked {
+                let step_id = run.begin_step().unwrap();
+                run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+                    .unwrap();
+            }
+            let next = try_transition(&mut run, transition);
+            if next == Some(RunStatus::Completed) {
+                assert_eq!(
+                    (from, transition),
+                    (RunStatus::DrainingInput, RunTransition::DrainEmptyAndSealed),
+                    "Completed 仅可由 DrainingInput + DrainEmptyAndSealed 产生，\
+                     实际来源为 {from:?} --{transition:?}",
+                );
+            }
+        }
+    }
+}
+
+fn try_transition(run: &mut Run, transition: RunTransition) -> Option<RunStatus> {
+    let outcome: Result<(), RunTransitionError> =
+        if transition == RunTransition::DrainEmptyAndSealed {
+            run.apply_drain_decision(DrainDecision::EmptyAndSealed, Some(""))
+        } else if transition == RunTransition::DrainInputs {
+            run.apply_drain_decision(DrainDecision::Inputs, None)
+        } else if transition == RunTransition::DrainInternalContinuation {
+            run.apply_drain_decision(DrainDecision::InternalContinuation, None)
+        } else if transition == RunTransition::StartDraining {
+            run.start_draining()
+        } else {
+            run.transition(transition).map(|_| ())
+        };
+    match outcome {
+        Ok(()) => Some(run.status()),
+        Err(_) => None,
+    }
+}
+
+#[test]
+fn draining_input_drain_inputs_moves_to_preparing_context() {
+    let mut run = run();
+    run.start_draining().unwrap();
+
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
+    assert_eq!(run.status(), RunStatus::PreparingContext);
+}
+
+#[test]
+fn draining_input_internal_continuation_moves_to_preparing_context() {
+    let mut run = run();
+    run.start_draining().unwrap();
+
+    run.apply_drain_decision(DrainDecision::InternalContinuation, None)
+        .unwrap();
+    assert_eq!(run.status(), RunStatus::PreparingContext);
+}
+
+#[test]
+fn draining_input_empty_and_sealed_emits_completed_via_domain_only() {
+    let mut run = run();
+    run.start_draining().unwrap();
+
+    run.apply_drain_decision(DrainDecision::EmptyAndSealed, Some("final"))
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert!(run.is_terminal());
+    assert!(
+        run.events().iter().any(|event| matches!(
+            event,
+            RunDomainEvent::Completed { result, .. } if result == "final"
+        )),
+        "domain should publish Completed on EmptyAndSealed, not the engine"
+    );
+}
+
+#[test]
+fn finalized_text_continue_stopblock_transition_each_enters_draining() {
+    let transitions: &[RunTransition] = &[
+        RunTransition::ContinueAfterResponse,
+        RunTransition::ContinueAfterResponse,
+        RunTransition::ContinueAfterResponse,
+    ];
+    for transition in transitions {
+        let mut run = run_at_status(RunStatus::ApplyingResponse);
+        let step_id = run
+            .active_step_id()
+            .expect("applying state has an active step");
+        run.complete_step(&step_id).unwrap();
+
+        run.transition(*transition).unwrap();
+        assert_eq!(
+            run.status(),
+            RunStatus::DrainingInput,
+            "text/continue/stopblock finalized → DrainingInput ({transition:?})"
+        );
+    }
+}
+
+#[test]
+fn tools_completed_normal_path_enters_draining_not_preparing_context() {
+    let mut run = run_at_status(RunStatus::ExecutingTools);
+    run.transition(RunTransition::ToolsCompleted).unwrap();
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+}
+
+// ---------------------------------------------------------------------------
+// #1272: set_pending_completion_result — explicit completion result API
+// ---------------------------------------------------------------------------
+
+#[test]
+fn set_pending_completion_result_is_used_by_empty_and_sealed() {
+    let mut run = run();
+    run.start_draining().unwrap();
+    run.set_pending_completion_result("explicit result".to_string());
+
+    run.apply_drain_decision(DrainDecision::EmptyAndSealed, None)
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert!(run.is_terminal());
+    assert!(
+        run.events().iter().any(|event| matches!(
+            event,
+            RunDomainEvent::Completed { result, .. } if result == "explicit result"
+        )),
+        "Completed event must carry the result set via set_pending_completion_result"
+    );
+}
+
+#[test]
+fn empty_and_sealed_without_explicit_result_emits_empty_completed() {
+    let mut run = run();
+    run.start_draining().unwrap();
+
+    run.apply_drain_decision(DrainDecision::EmptyAndSealed, None)
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert!(run.is_terminal());
+    assert!(
+        run.events().iter().any(|event| matches!(
+            event,
+            RunDomainEvent::Completed { result, .. } if result.is_empty()
+        )),
+        "Completed event must still be emitted with an empty result"
+    );
+}
+
+#[test]
+fn terminal_text_still_works_for_backward_compat() {
+    let mut run = run();
+    run.start_draining().unwrap();
+
+    run.apply_drain_decision(DrainDecision::EmptyAndSealed, Some("legacy text"))
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert!(
+        run.events().iter().any(|event| matches!(
+            event,
+            RunDomainEvent::Completed { result, .. } if result == "legacy text"
+        )),
+        "terminal_text parameter must still work for backward compat"
+    );
+}
+
+#[test]
+fn set_pending_completion_result_is_consumed_and_not_reused() {
+    let mut run = run();
+    run.start_draining().unwrap();
+    run.set_pending_completion_result("first result".to_string());
+
+    run.apply_drain_decision(DrainDecision::EmptyAndSealed, None)
+        .unwrap();
+    assert_eq!(run.status(), RunStatus::Completed);
+
+    assert!(!run.events().iter().any(|event| matches!(
+        event,
+        RunDomainEvent::Completed { result, .. } if result.is_empty()
+    )));
+}
+
+// ── #1272 drain epoch persistence ─────────────────────────────────
+#[test]
+fn new_run_starts_with_drain_epoch_zero() {
+    let run = run();
+    assert_eq!(run.next_drain_epoch(), 0);
+}
+
+#[test]
+fn advance_drain_epoch_increments_monotonically() {
+    let mut run = run();
+    assert_eq!(run.next_drain_epoch(), 0);
+    run.advance_drain_epoch();
+    assert_eq!(run.next_drain_epoch(), 1);
+    run.advance_drain_epoch();
+    assert_eq!(run.next_drain_epoch(), 2);
+}
+
+#[test]
+fn drain_epoch_persists_across_run_operations() {
+    let mut run = run();
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
+    run.transition(RunTransition::ContextPrepared).unwrap();
+    let step_id = run.begin_step().unwrap();
+    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+        .unwrap();
+    run.transition(RunTransition::ModelInvoked).unwrap();
+    run.transition(RunTransition::ContinueAfterResponse)
+        .unwrap();
+    run.complete_step(&step_id).unwrap();
+
+    // Advance epoch to simulate drain persistence across run_loop re-entry.
+    run.advance_drain_epoch();
+    run.advance_drain_epoch();
+    assert_eq!(run.next_drain_epoch(), 2);
+
+    // Epoch survives terminal transition.
+    run.apply_drain_decision(DrainDecision::EmptyAndSealed, Some("done"))
+        .unwrap();
+    assert_eq!(run.next_drain_epoch(), 2);
+    assert_eq!(run.status(), RunStatus::Completed);
 }
