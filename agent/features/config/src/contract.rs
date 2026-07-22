@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use share::config::domain::scope::ConfigApplicationScope;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::{MemoryConfig, PermissionModeConfig};
 use std::path::{Path, PathBuf};
@@ -42,8 +43,13 @@ pub enum ConfigRefreshError {
 #[derive(Debug, Clone)]
 pub enum ConfigRefreshOutcome {
     Unchanged,
-    Reloaded { snapshot: ConfigSnapshot },
-    Rejected { error: ConfigRefreshError },
+    Reloaded {
+        snapshot: ConfigSnapshot,
+        scopes: Vec<ConfigApplicationScope>,
+    },
+    Rejected {
+        error: ConfigRefreshError,
+    },
 }
 
 #[derive(Debug)]

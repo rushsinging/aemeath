@@ -30,11 +30,15 @@ where
     let refresh = config_reader.refresh_if_sources_changed().await;
     match &refresh {
         ConfigRefreshOutcome::Unchanged => {}
-        ConfigRefreshOutcome::Reloaded { .. } => {
-            sink.send_event(RuntimeStreamEvent::ConfigReloaded {
-                changed_keys: vec!["config:reloaded".to_string()],
-            })
-            .await;
+        ConfigRefreshOutcome::Reloaded { scopes, .. } => {
+            let mut changed_keys = vec!["config:reloaded".to_string()];
+            changed_keys.extend(
+                scopes
+                    .iter()
+                    .map(|scope| format!("config:scope:{}", scope.as_str())),
+            );
+            sink.send_event(RuntimeStreamEvent::ConfigReloaded { changed_keys })
+                .await;
         }
         ConfigRefreshOutcome::Rejected { error } => {
             sink.send_event(RuntimeStreamEvent::SystemMessage(format!(
