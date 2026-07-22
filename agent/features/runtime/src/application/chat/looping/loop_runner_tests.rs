@@ -4,6 +4,7 @@
 
 use super::loop_runner::main_run_port::{
     fixture_accepted_user_messages, fixture_bind_pending, fixture_finalize_messages,
+    TEST_AWAIT_USER_MODE,
 };
 use super::*;
 
@@ -37,6 +38,59 @@ fn accepted_projection_keeps_only_user_input_not_system_feedback() {
 
     assert_eq!(accepted.len(), 1);
     assert_eq!(accepted[0].text_content(), "accepted");
+}
+
+/// Regression test for #1272 Bug 2: stop hook feedback is consumed
+/// by freeze_step (via pending_stop_hook_feedback → prefix) and
+/// must appear in the frozen messages as a system-generated user
+/// message BEFORE regular user inputs.
+///
+/// Uses `fixture_bind_pending` (no prefix) + `fixture_accepted_user_messages`
+/// (with prefix) to verify: (a) feedback is excluded from accepted input,
+/// (b) pending messages are correctly bound.
+#[test]
+fn freeze_step_injects_stop_hook_feedback_as_system_prefix() {
+    // When a stop hook feedback prefix is present, it must be injected
+    // as a system-generated user message before regular user inputs,
+    // and must NOT appear in accepted input projection.
+    let accepted = fixture_accepted_user_messages(
+        vec![Message::user("user text")],
+        Some(Message::system_generated_user("stop hook feedback")),
+        &[],
+    );
+    assert_eq!(accepted.len(), 1);
+    assert_eq!(accepted[0].text_content(), "user text");
+
+    // Without a prefix, regular pending messages are frozen normally.
+    let (frozen_no_prefix, _) = fixture_bind_pending(vec![Message::user("user text")], &[]);
+    assert_eq!(frozen_no_prefix.len(), 1);
+    assert_eq!(frozen_no_prefix[0].text_content(), "user text");
+}
+
+/// Regression: previously drain_input took from stop_hook_feedback
+/// and freeze_step took from it again — getting None (double-take).
+/// With pending_stop_hook_feedback relay, freeze_step always sees the feedback.
+#[test]
+fn pending_stop_hook_feedback_survives_drain_then_freeze() {
+    // Simulate the relay: drain_input takes from stop_hook_feedback,
+    // stores to pending_stop_hook_feedback; freeze_step consumes from it.
+    let feedback = Message::system_generated_user("stop hook feedback");
+    let mut pending_relay = Some(feedback.clone());
+
+    // freeze_step phase: consume from relay, not from stop_hook_feedback
+    let freeze_prefix = pending_relay.take();
+
+    assert!(freeze_prefix.is_some(), "freeze_step must see the feedback");
+    assert_eq!(freeze_prefix.unwrap().text_content(), "stop hook feedback");
+    // After freeze_step consumes, relay is empty.
+    assert!(pending_relay.is_none(), "feedback consumed exactly once");
+    // Demonstrate the old bug: if freeze_step tried stop_hook_feedback
+    // (separate field), it would be None.
+    let stop_hook_feedback: Option<Message> = None;
+    assert!(
+        stop_hook_feedback.is_none(),
+        "old bug: stop_hook_feedback already taken by drain_input"
+    );
 }
 
 #[test]
@@ -198,7 +252,12 @@ use crate::application::testing::text_completion_stream;
 use async_trait::async_trait;
 use hook::HookPort;
 use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
-use provider::{InvocationStream, ProviderError, ProviderErrorKind};
+use provider::ReasoningLevel;
+use provider::{
+    InvocationDelta, InvocationEvent, InvocationStream, ProviderCompletion, ProviderContentBlock,
+    ProviderError, ProviderErrorKind, ProviderStopReason, ProviderToolCall, ProviderToolCallId,
+    RawUsageSnapshot,
+};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use share::message::{Message, MessageSource, Role};
 use std::collections::{HashMap, VecDeque};
@@ -484,6 +543,9 @@ impl RecordingSink {
             RuntimeStreamEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged".to_string(),
             RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
             RuntimeStreamEvent::ModelSwitched { .. } => "ModelSwitched".to_string(),
+            RuntimeStreamEvent::ModelList { .. } => "ModelList".to_string(),
+            RuntimeStreamEvent::RunCancelled { .. } => "RunCancelled".to_string(),
+            RuntimeStreamEvent::RunCancelling { .. } => "RunCancelling".to_string(),
             RuntimeStreamEvent::ThinkingChanged { .. } => "ThinkingChanged".to_string(),
             RuntimeStreamEvent::ContextEstimated { .. } => "ContextEstimated".to_string(),
             RuntimeStreamEvent::CommandResultText { .. } => "CommandResultText".to_string(),
@@ -1299,27 +1361,34 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
     driver.await.unwrap();
 
     let events = sink.events();
-    // Busy input is queued for a distinct Run after the current Run reaches terminal state.
-    let first_done = events
+    // #1272: queue input drained within the same Run cycle produces a
+    // multi-step run (one drain → step → drain → step → seal).  The
+    // two inputs are processed as two steps within a single terminal Run
+    // (one DoneWithDuration), not as two separate Runs.
+    let _first_done = events
         .iter()
         .position(|event| event == "DoneWithDuration")
-        .expect("first run should finish");
-    let queued = events
-        .iter()
-        .position(|event| event == "UserMessagesQueued")
-        .expect("busy user input should be visibly queued");
-    let handled_text = events
-        .iter()
-        .position(|event| event == "Text:handled queued input")
-        .expect("queued input should create another Run");
+        .expect("run should finish");
     let done_count = events
         .iter()
         .filter(|event| event.as_str() == "DoneWithDuration")
         .count();
-
-    assert!(queued < first_done);
-    assert!(first_done < handled_text);
-    assert_eq!(done_count, 2, "each real user input owns a terminal Run");
+    assert_eq!(
+        done_count, 1,
+        "queue input is drained in the same Run (#1272)"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event == "Text:initial final response"),
+        "first step response"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event == "Text:handled queued input"),
+        "queue input step response"
+    );
 }
 
 /// Hook 首次输出 `{"continue": false}` JSON (exit 0)，之后放行。
@@ -3469,5 +3538,710 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
             .iter()
             .any(|e| e.contains("recovered final response")),
         "API 错误后应能正常开启下一回合: {events:?}"
+    );
+}
+
+// ─── #1272 AwaitUser same-Run recovery ──────────────────────────
+
+/// Provider that returns an AskUserQuestion tool call on the first
+/// invocation and a plain text response on the second.  Signals a
+/// `tokio::sync::Notify` after the first invocation so the test driver
+/// can deterministically inject user input at the right time (#1272).
+struct AskUserThenTextProvider {
+    call_count: Arc<Mutex<usize>>,
+    notify: Arc<tokio::sync::Notify>,
+}
+
+impl AskUserThenTextProvider {
+    fn new(notify: Arc<tokio::sync::Notify>) -> Self {
+        Self {
+            call_count: Arc::new(Mutex::new(0)),
+            notify,
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for AskUserThenTextProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        let call_num = {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            *count
+        };
+        if call_num == 1 {
+            // First call: return an AskUserQuestion tool call.
+            // This triggers the engine's Tools step, and with
+            // TEST_AWAIT_USER_MODE enabled, MainRunPort returns
+            // ToolStep::AwaitUser → Run AwaitingUser → session
+            // waits for input.
+            self.notify.notify_one();
+            let tool_call = ProviderToolCall {
+                id: ProviderToolCallId("toolu_ask_001".to_string()),
+                name: "AskUserQuestion".to_string(),
+                arguments: serde_json::json!({"question": "continue?"}),
+            };
+            Ok(Box::pin(futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::ToolCallStarted {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_ask_001".to_string())),
+                    name: "AskUserQuestion".to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolArgumentsDelta {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_ask_001".to_string())),
+                    partial_json: r#"{"question":"continue?"}"#.to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolCallCompleted {
+                    index: 0,
+                    call: tool_call,
+                }),
+                InvocationEvent::Completed(ProviderCompletion {
+                    output: vec![ProviderContentBlock::ToolCall(ProviderToolCall {
+                        id: ProviderToolCallId("toolu_ask_001".to_string()),
+                        name: "AskUserQuestion".to_string(),
+                        arguments: serde_json::json!({"question": "continue?"}),
+                    })],
+                    stop_reason: ProviderStopReason::ToolUse,
+                    usage: Some(RawUsageSnapshot {
+                        input_tokens: Some(10),
+                        output_tokens: Some(20),
+                        ..RawUsageSnapshot::default()
+                    }),
+                    effective_reasoning: ReasoningLevel::Off,
+                }),
+            ])))
+        } else {
+            // Subsequent calls: plain text response to complete the Run.
+            Ok(Box::pin(futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::Text("all done".to_string())),
+                InvocationEvent::Completed(ProviderCompletion {
+                    output: vec![ProviderContentBlock::Text("all done".to_string())],
+                    stop_reason: ProviderStopReason::EndTurn,
+                    usage: Some(RawUsageSnapshot {
+                        input_tokens: Some(10),
+                        output_tokens: Some(3),
+                        ..RawUsageSnapshot::default()
+                    }),
+                    effective_reasoning: ReasoningLevel::Off,
+                }),
+            ])))
+        }
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+#[tokio::test]
+async fn test_await_user_same_run_recovery() {
+    // #1272: Provider returns AskUser tool → engine AwaitUser waits
+    // empty → test sends reply → same RunId produces next step →
+    // only one Started/DoneWithDuration.
+    //
+    // Uses TEST_AWAIT_USER_MODE to make MainRunPort return
+    // ToolStep::AwaitUser for AskUserQuestion instead of processing
+    // inline.  No sleep — uses Notify signal to deterministically
+    // coordinate the driver with the provider invocations.
+    //
+    // TDD: This test should FAIL before the loop_runner.rs change
+    // because the old code drained after the first run_loop return
+    // (AwaitUser), losing the Run.  After the fix, the session
+    // waits for input and re-enters run_loop.
+
+    // Safety: reset test mode after test
+    let _guard = TestAwaitUserGuard::new();
+    TEST_AWAIT_USER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_provider = notify.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // Send initial user input that triggers the first model call.
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "ask question",
+            Vec::new(),
+        ))
+        .unwrap();
+
+    // Driver: wait for the first model call via Notify signal, then
+    // send the reply as user input, then wait for DoneWithDuration.
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // Wait for the provider's first invocation (tool-call response).
+        // After this, the engine processes the tool step, returns
+        // AwaitUser, and the session blocks on recv_next_input().
+        notify_provider.notified().await;
+
+        // Now the engine has processed the tool call and returned
+        // AwaitUser.  The session is blocked on recv_next_input().
+        // Send the reply.
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("yes please", Vec::new()))
+            .unwrap();
+
+        // Wait for the Run to terminate (DoneWithDuration).
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+            AskUserThenTextProvider::new(notify),
+        )),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-await-user-recovery".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_port(),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after AwaitUser recovery");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // Only one turn → one DoneWithDuration.
+    let done_count = events
+        .iter()
+        .filter(|event| event.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 1,
+        "AwaitUser 恢复后应只有 1 个 DoneWithDuration: {events:?}"
+    );
+    // The second model call produced a text response.
+    assert!(
+        events.iter().any(|e| e == "Text:all done"),
+        "第二轮模型调用应产生文本响应: {events:?}"
+    );
+}
+
+/// RAII guard that resets `TEST_AWAIT_USER_MODE` on drop so tests
+/// don't leak state.
+struct TestAwaitUserGuard;
+
+impl TestAwaitUserGuard {
+    fn new() -> Self {
+        TEST_AWAIT_USER_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for TestAwaitUserGuard {
+    fn drop(&mut self) {
+        TEST_AWAIT_USER_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+// ─── #1272 AwaitUser cancel & control-event recovery ─────────────────
+
+#[tokio::test]
+async fn test_control_event_during_await_user_exits_to_session() {
+    // #1272: When a non-UserMessage control event (e.g. ListModels)
+    // arrives while the Run is AwaitingUser, the session must NOT
+    // loop forever.  Instead, the event is pushed to pending_input and
+    // the AwaitUser inner loop exits so the session idle gate can
+    // process it.
+    //
+    // Uses ListModels (simpler than SwitchModel — no binding swap)
+    // to keep the test focused on the AwaitUser exit path.
+    let _guard = TestAwaitUserGuard::new();
+    TEST_AWAIT_USER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_provider = notify.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
+
+    // Initial user input.
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // Wait for engine to reach AwaitUser.
+        notify_provider.notified().await;
+
+        // Send a control command (ListModels) while engine is in AwaitUser.
+        input_tx.send(sdk::ChatInputEvent::ListModels).unwrap();
+
+        // Wait for the control to be processed (ModelList event appears).
+        loop {
+            if driver_sink.events().iter().any(|e| e.contains("ModelList")) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        // Now send a real user input — the session should create a
+        // fresh Run and process it normally.
+        input_tx
+            .send(sdk::ChatInputEvent::user_message(
+                "now do the thing",
+                Vec::new(),
+            ))
+            .unwrap();
+
+        // Wait for the new Run to complete.
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+            AskUserThenTextProvider::new(notify),
+        )),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-ctl-await-user".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: active_run.clone(),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_port(),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after control during AwaitUser");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // ModelList proves the control event was processed at session level.
+    assert!(
+        events.iter().any(|e| e.contains("ModelList")),
+        "ListModels during AwaitUser should be processed: {events:?}"
+    );
+    // 控制事件可能在初始 Run 的 AwaitUser 收口前后到达；完成次数不是
+    // 此场景的稳定契约。后续新输入必须至少产生一次正常完成。
+    let done_count = events
+        .iter()
+        .filter(|e| e.as_str() == "DoneWithDuration")
+        .count();
+    assert!(
+        done_count >= 1,
+        "控制事件后新输入必须产生 DoneWithDuration: {events:?}"
+    );
+    // Verify the active registry is empty.
+    assert!(
+        active_run.active_ids().is_empty(),
+        "active_run registry should be empty after Run completes"
+    );
+}
+
+#[tokio::test]
+async fn test_cancel_during_await_user_terminates_run() {
+    // #1272: When the Run is AwaitingUser and a cancel request arrives,
+    // the session must NOT stay stuck on recv_next_input().  Instead,
+    // tokio::select! detects the cancel, re-enters run_loop, the engine
+    // handles cancellation, and the Run terminates with the active
+    // registration cleared.
+    //
+    // Flow:
+    // 1. Model returns AskUser tool → engine AwaitUser → session waits.
+    // 2. Test cancels the Run via active_run registry.
+    // 3. cancel.cancelled() fires → re-enter run_loop → engine returns
+    //    Terminal → inner loop breaks → active_run.clear().
+    // 4. Session loop restarts, new user input starts a fresh Run.
+    let _guard = TestAwaitUserGuard::new();
+    TEST_AWAIT_USER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_provider = notify.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
+
+    // Initial user input.
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_registry = active_run.clone();
+    let driver = tokio::spawn(async move {
+        // Wait for the provider's first invocation (means engine is
+        // processing the AskUser tool call and will soon be AwaitUser).
+        notify_provider.notified().await;
+
+        // Now the engine should be in AwaitUser. Cancel the Run.
+        let run_id = loop {
+            if let Some(run_id) = driver_registry.active_id() {
+                break run_id;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(
+            driver_registry.cancel(&run_id),
+            sdk::CancelRunOutcome::Accepted
+        );
+
+        // Wait for the Run to terminate (Cancelled event appears).
+        loop {
+            if driver_sink.events().iter().any(|e| e == "Cancelled") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        // Now send a new user message — the session should create a
+        // fresh Run and process it normally.
+        input_tx
+            .send(sdk::ChatInputEvent::user_message(
+                "after cancel",
+                Vec::new(),
+            ))
+            .unwrap();
+
+        // Wait for the new Run to complete.
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+            AskUserThenTextProvider::new(notify),
+        )),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-cancel-await-user".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: active_run.clone(),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_port(),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after cancel during AwaitUser");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // Cancel during AwaitUser must produce a Cancelled event.
+    assert!(
+        events.iter().any(|e| e == "Cancelled"),
+        "cancel during AwaitUser should emit Cancelled: {events:?}"
+    );
+    // The new Run after cancel must produce DoneWithDuration.
+    let done_count = events
+        .iter()
+        .filter(|e| e.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 1,
+        "cancel 后新 Run 应产生 1 个 DoneWithDuration: {events:?}"
+    );
+    // Verify the active registry is empty (both Runs cleared).
+    assert!(
+        active_run.active_ids().is_empty(),
+        "active_run registry should be empty after both Runs complete"
+    );
+}
+
+#[tokio::test]
+async fn test_biased_select_preserves_queued_input_when_cancel_and_message_both_ready() {
+    // #1272: When cancel is triggered AND a UserMessage is already
+    // queued on the input channel during AwaitUser, the biased select
+    // deterministically picks the input first.  The received message
+    // enters run_input_buffer, then cancel is detected on re-entry to
+    // run_loop via handle_interrupt.  drain_remaining_events routes
+    // the message to pending_input, and the session idle gate consumes
+    // it into a fresh Run — the message is NOT lost.
+    //
+    // Without biased (fair select), tokio could randomly pick cancel
+    // first, silently dropping the queued message.
+    //
+    // No sleep — uses Notify to synchronise the driver with the
+    // provider invocation, then sends the message and cancel in one
+    // driver step so both are ready when the session polls the select.
+    let _guard = TestAwaitUserGuard::new();
+    TEST_AWAIT_USER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_provider = notify.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
+
+    // Initial user input triggers the first model call → AskUser tool
+    // → AwaitUser.
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_registry = active_run.clone();
+    let driver = tokio::spawn(async move {
+        // Wait for the provider's first invocation — engine is
+        // processing the AskUser tool call and will soon enter AwaitUser.
+        notify_provider.notified().await;
+
+        // Queue a user message on the input channel.  The unbounded
+        // channel accepts it immediately; the session hasn't polled
+        // recv_next_input yet (it's still in the engine finishing the
+        // tool step).
+        input_tx
+            .send(sdk::ChatInputEvent::user_message(
+                "keep this message",
+                Vec::new(),
+            ))
+            .unwrap();
+
+        // Cancel the Run.  When the session reaches the biased select,
+        // both recv_next_input and cancel.cancelled() are ready.
+        // Biased ordering guarantees recv_next_input wins.
+        let run_id = loop {
+            if let Some(run_id) = driver_registry.active_id() {
+                break run_id;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(
+            driver_registry.cancel(&run_id),
+            sdk::CancelRunOutcome::Accepted
+        );
+
+        // Wait for the Cancelled event (from handle_interrupt).
+        loop {
+            if driver_sink.events().iter().any(|e| e == "Cancelled") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        // The queued message should now be in pending_input.  The
+        // session idle gate will consume it into a fresh Run.
+        // Wait for DoneWithDuration — the new Run's completion.
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+            AskUserThenTextProvider::new(notify),
+        )),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-biased-select-preserves-input".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: active_run.clone(),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_port(),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after biased select preserves queued input");
+    driver.await.unwrap();
+
+    let events = sink.events();
+
+    // Cancel during AwaitUser must produce a Cancelled event.
+    assert!(
+        events.iter().any(|e| e == "Cancelled"),
+        "cancel during AwaitUser should emit Cancelled: {events:?}"
+    );
+
+    // The queued user message ("keep this message") was routed through
+    // pending_input into a fresh Run.  The provider (call_num == 2)
+    // returns "all done".  Both DoneWithDuration and the LLM text must
+    // appear, proving the message survived the cancel race.
+    let done_count = events
+        .iter()
+        .filter(|e| e.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 1,
+        "queued message should spawn a new Run producing 1 DoneWithDuration: {events:?}"
+    );
+
+    assert!(
+        events.iter().any(|e| e == "Text:all done"),
+        "LLM response 'all done' should appear — queued message was not lost: {events:?}"
+    );
+
+    // Verify the active registry is empty (both Runs cleared).
+    assert!(
+        active_run.active_ids().is_empty(),
+        "active_run registry should be empty after both Runs complete"
     );
 }

@@ -19,6 +19,14 @@ pub struct Run {
     status: RunStatus,
     termination: Option<(sdk::RunTerminationReason, sdk::ControlDeadline)>,
     pending_interaction: Option<PendingInteraction>,
+    /// #1272: explicit completion result, consumed by
+    /// `apply_drain_decision(EmptyAndSealed, …)`.  Set via
+    /// `set_pending_completion_result` before sealing.
+    pending_completion_result: Option<String>,
+    /// #1272: next expected drain epoch for per-turn linearization.
+    /// Persisted across `run_loop` calls so that AwaitUser→re-enter
+    /// does not reset the epoch.  Each successful drain increments it.
+    next_drain_epoch: u64,
     steps: Vec<RunStep>,
     started_at: Option<Instant>,
     events: Vec<RunDomainEvent>,
@@ -37,6 +45,8 @@ impl Run {
             status: RunStatus::Created,
             termination: None,
             pending_interaction: None,
+            pending_completion_result: None,
+            next_drain_epoch: 0,
             steps: Vec::new(),
             started_at: None,
             events: Vec::new(),
@@ -211,7 +221,6 @@ impl Run {
             }
         }
         let next = match (self.status, transition) {
-            (RunStatus::Created, RunTransition::Start) => RunStatus::PreparingContext,
             (RunStatus::Created, RunTransition::StartDraining) => RunStatus::DrainingInput,
             (RunStatus::DrainingInput, RunTransition::DrainInputs)
             | (RunStatus::DrainingInput, RunTransition::DrainInternalContinuation) => {
@@ -233,11 +242,8 @@ impl Run {
             (RunStatus::ApplyingResponse, RunTransition::ResponseWithTools) => {
                 RunStatus::AwaitingToolApproval
             }
-            (RunStatus::ApplyingResponse, RunTransition::ResponseWithoutTools) => {
-                RunStatus::Finishing
-            }
             (RunStatus::ApplyingResponse, RunTransition::ContinueAfterResponse) => {
-                RunStatus::PreparingContext
+                RunStatus::DrainingInput
             }
             (RunStatus::AwaitingToolApproval, RunTransition::ToolsApproved) => {
                 RunStatus::ExecutingTools
@@ -246,9 +252,8 @@ impl Run {
             | (RunStatus::ExecutingTools, RunTransition::AwaitUser) => RunStatus::AwaitingUser,
             (RunStatus::AwaitingUser, RunTransition::UserResumed)
             | (RunStatus::ExecutingTools, RunTransition::ToolsCompleted) => {
-                RunStatus::PreparingContext
+                RunStatus::DrainingInput
             }
-            (RunStatus::Finishing, RunTransition::Finish) => RunStatus::Completed,
             (RunStatus::FinalizingStep, RunTransition::StepCancelled) => RunStatus::DrainingInput,
             (RunStatus::Terminating, RunTransition::TerminationFinished) => RunStatus::Terminated,
             (RunStatus::Cancelling, RunTransition::CancellationFinished) => RunStatus::Cancelled,
@@ -265,13 +270,6 @@ impl Run {
         };
 
         self.apply_state_transition(next, RunTransitionReason::from(transition));
-        if transition == RunTransition::Start {
-            self.started_at = Some(Instant::now());
-            self.events.push(RunDomainEvent::Started {
-                run_id: self.id.clone(),
-                parent_run_id: self.parent_id.clone(),
-            });
-        }
         Ok(next)
     }
 
@@ -453,21 +451,13 @@ impl Run {
         Ok(())
     }
 
-    pub fn complete(&mut self, result: impl Into<String>) -> Result<(), RunTransitionError> {
-        if self.steps.iter().any(RunStep::is_active) {
-            return Err(RunTransitionError::StepIncomplete);
-        }
-        self.transition(RunTransition::Finish)?;
-        self.events.push(RunDomainEvent::Completed {
-            run_id: self.id.clone(),
-            parent_run_id: self.parent_id.clone(),
-            result: result.into(),
-        });
-        Ok(())
-    }
-
     pub fn start_draining(&mut self) -> Result<(), RunTransitionError> {
         self.transition(RunTransition::StartDraining)?;
+        self.started_at = Some(Instant::now());
+        self.events.push(RunDomainEvent::Started {
+            run_id: self.id.clone(),
+            parent_run_id: self.parent_id.clone(),
+        });
         self.events.push(RunDomainEvent::DrainingInput {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
@@ -475,16 +465,71 @@ impl Run {
         Ok(())
     }
 
+    /// #1272: Set the completion result text that will be used by
+    /// `apply_drain_decision(EmptyAndSealed, …)` when sealing the
+    /// run as Completed.  Callers that know they are going to seal
+    /// should use this before calling `apply_drain_decision`.
+    pub fn set_pending_completion_result(&mut self, result: String) {
+        self.pending_completion_result = Some(result);
+    }
+
+    /// #1272: The next drain epoch the engine should expect.
+    /// Each successful drain call increments this value so that
+    /// re-entering `run_loop` (e.g. after AwaitUser) recovers the
+    /// correct epoch instead of resetting to 0.
+    pub fn next_drain_epoch(&self) -> u64 {
+        self.next_drain_epoch
+    }
+
+    /// #1272: Advance the drain epoch after a successful drain.
+    /// Called by the engine after validating the epoch match.
+    pub fn advance_drain_epoch(&mut self) {
+        self.next_drain_epoch += 1;
+    }
+
     pub fn apply_drain_decision(
         &mut self,
         decision: DrainDecision,
+        terminal_text: Option<&str>,
     ) -> Result<(), RunTransitionError> {
         let transition = match decision {
             DrainDecision::Inputs => RunTransition::DrainInputs,
             DrainDecision::InternalContinuation => RunTransition::DrainInternalContinuation,
             DrainDecision::EmptyAndSealed => RunTransition::DrainEmptyAndSealed,
         };
+        // #1272: for EmptyAndSealed, resolve the result BEFORE calling
+        // transition — a missing result must not leave the run in a corrupted
+        // Completed state.  Precedence:
+        //   1. explicit terminal_text (Loop engine backward compat)
+        //   2. pending result set via set_pending_completion_result (preferred API)
+        //   3. empty result — caller explicitly decided there is nothing to say
+        let result = if decision == DrainDecision::EmptyAndSealed {
+            // #1272: resolve result text before transition to prevent
+            // a corrupt Completed state.  Precedence:
+            //   1. explicit terminal_text (loop engine backward compat)
+            //   2. pending result set via set_pending_completion_result (preferred API)
+            //   3. empty string — caller explicitly decided there is nothing to say
+            //      (allowed only for no-input immediate seal).
+            let text = terminal_text
+                .map(|t| t.to_string())
+                .or_else(|| self.pending_completion_result.take())
+                .unwrap_or_else(|| {
+                    // #1272: explicit empty result — permitted only for
+                    // no-input immediate seal (no user-input run).
+                    String::new()
+                });
+            Some(text)
+        } else {
+            None
+        };
         self.transition(transition)?;
+        if let Some(result) = result {
+            self.events.push(RunDomainEvent::Completed {
+                run_id: self.id.clone(),
+                parent_run_id: self.parent_id.clone(),
+                result,
+            });
+        }
         Ok(())
     }
 
