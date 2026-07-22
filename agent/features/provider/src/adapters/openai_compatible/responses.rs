@@ -241,6 +241,67 @@ mod tests {
     }
 
     #[test]
+    fn test_build_responses_request_body_uses_effective_reasoning_effort() {
+        use crate::adapters::client::OpenAIProviderConfig;
+        use crate::ProviderDriverKind;
+
+        let config = OpenAIProviderConfig::from_driver(ProviderDriverKind::OpenAI, "test");
+        let provider = super::super::OpenAICompatibleProvider::new(
+            config,
+            "test-key".to_string(),
+            Some("https://example.com".to_string()),
+            Some("test-model".to_string()),
+            8192,
+            true,
+            None,
+            60,
+        );
+        let scope = InvocationScope::new(
+            "test-model",
+            8192,
+            crate::ports::ReasoningLevel::Max,
+            crate::ports::ReasoningLevel::High,
+        )
+        .expect("valid scope");
+
+        let body = provider.build_responses_request_body(&scope, &[], &[], &[], false);
+
+        assert_eq!(
+            body.get("reasoning"),
+            Some(&serde_json::json!({"effort": "high"}))
+        );
+    }
+
+    #[test]
+    fn test_build_responses_request_body_omits_reasoning_when_effective_reasoning_is_off() {
+        use crate::adapters::client::OpenAIProviderConfig;
+        use crate::ProviderDriverKind;
+
+        let config = OpenAIProviderConfig::from_driver(ProviderDriverKind::OpenAI, "test");
+        let provider = super::super::OpenAICompatibleProvider::new(
+            config,
+            "test-key".to_string(),
+            Some("https://example.com".to_string()),
+            Some("test-model".to_string()),
+            8192,
+            false,
+            None,
+            60,
+        );
+        let scope = InvocationScope::new(
+            "test-model",
+            8192,
+            crate::ports::ReasoningLevel::Off,
+            crate::ports::ReasoningLevel::Off,
+        )
+        .expect("valid scope");
+
+        let body = provider.build_responses_request_body(&scope, &[], &[], &[], false);
+
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
     fn test_build_responses_request_body_injects_tools_from_flat_schema() {
         use crate::adapters::client::OpenAIProviderConfig;
         use crate::ProviderDriverKind;

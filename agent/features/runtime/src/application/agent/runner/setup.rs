@@ -64,27 +64,22 @@ impl AgentRunner for CliAgentRunner {
 
         let max_tokens_override = Self::role_max_tokens_override(role);
 
-        // Determine reasoning for this sub-agent: role config > model config > default
-        let role_reasoning = role.reasoning;
+        // Model configuration is the sole owner of provider protocol and capability
+        // settings; roles only supply identity, prompt suffix, and token budget.
         let model_reasoning = model_entry.reasoning;
-        // 模型配置的固定推理档位（"off".."max"），优先级高于 reasoning bool。
         let model_effort = model_entry
             .reasoning_effort
             .as_deref()
             .and_then(provider::ReasoningLevel::parse);
-        let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
-        // The provider adapter clamps the requested level to the model capability
-        // during invoke, so we pass the unclamped level here.
-        let level = match model_effort {
-            Some(effort) => effort,
-            None => {
-                if reasoning {
-                    provider::ReasoningLevel::Medium
-                } else {
-                    provider::ReasoningLevel::Off
-                }
+        let reasoning = model_reasoning.unwrap_or(self.reasoning);
+        // A fixed model effort takes precedence over the model's boolean flag.
+        let level = model_effort.unwrap_or({
+            if reasoning {
+                provider::ReasoningLevel::Medium
+            } else {
+                provider::ReasoningLevel::Off
             }
-        };
+        });
 
         let context_size = self
             .config_snapshot
@@ -150,11 +145,10 @@ impl AgentRunner for CliAgentRunner {
 
         logging::instrument(sub_run_context, async move {
         log::info!(target: crate::LOG_TARGET,
-            "[SubAgent] reasoning={} level={} max_tokens={:?} (role={:?}, model={:?}, effort={:?}, default={})",
+            "[SubAgent] reasoning={} level={} max_tokens={:?} (model={:?}, effort={:?}, default={})",
             reasoning,
             level,
             max_tokens_override,
-            role_reasoning,
             model_reasoning,
             model_effort,
             self.reasoning
