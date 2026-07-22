@@ -245,6 +245,7 @@ mod tests {
             }],
             metadata: Some(MessageMetadata {
                 source: MessageSource::SystemGenerated,
+                stop_hook: None,
             }),
         };
         let result = convert_messages(&[msg]);

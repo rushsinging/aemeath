@@ -28,7 +28,10 @@ pub fn render_hook_notice(
     _ctx: &RenderCtx,
 ) -> RenderedBlock {
     let title_style = Style::default().fg(semantic_color(view.style));
-    let body_style = Style::default().fg(theme::TEXT);
+    let body_style = Style::default().fg(match view.kind {
+        crate::tui::view_model::output::HookNoticeSemanticKind::Blocked => theme::TEXT_MUTED,
+        _ => theme::TEXT,
+    });
     let details_style = Style::default().fg(theme::TEXT_DIM);
     let mut lines = vec![RenderedLine::new(vec![Span::styled(
         view.title.clone(),
@@ -113,6 +116,23 @@ mod tests {
 
         assert_eq!(block.lines.len(), 1);
         assert_eq!(block.lines[0].plain, "plain");
+    }
+
+    fn blocked_hook_notice_uses_muted_body_and_error_title() {
+        let view = HookNoticeBlockView {
+            key: "hook-blocked".into(),
+            kind: crate::tui::view_model::output::HookNoticeSemanticKind::Blocked,
+            title: "Hook blocked: Stop".into(),
+            body: "Stop hook prevented stopping.".into(),
+            details: Some("Command: check-agent-stop.sh".into()),
+            style: SemanticStyle::Error,
+        };
+
+        let block = render_hook_notice("hook-blocked", &view, &RenderCtx { text_width: 80 });
+
+        assert_eq!(block.lines[0].spans[0].style.fg, Some(theme::ERROR));
+        assert_eq!(block.lines[1].spans[0].style.fg, Some(theme::TEXT_MUTED));
+        assert_eq!(block.lines[2].spans[0].style.fg, Some(theme::TEXT_DIM));
     }
 
     #[test]

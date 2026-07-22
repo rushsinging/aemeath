@@ -158,6 +158,17 @@ pub enum HookExecutionStatus {
 
 // ─── HookOutcome ──────────────────────────────────────────────
 
+/// 触发最终阻断的 subscription 与实际执行记录。
+#[derive(Debug, Clone)]
+pub struct HookBlockDetail {
+    /// 配置的实际执行命令（变量已按当前 invocation 展开）。
+    pub command: String,
+    /// 在 HookOutcome 全量执行记录中的 1-based 序号。
+    pub execution_ordinal: u32,
+    /// 触发阻断的最终执行记录。
+    pub execution: HookExecution,
+}
+
 /// Hook dispatch 的最终结果。
 ///
 /// Runtime 拥有 directive 响应编排（如 Stop 阻断累计 15 次后第 16 次 RunFailed）。
@@ -172,6 +183,8 @@ pub struct HookOutcome {
     /// 与 `directive` 的聚合 context 不同：`messages` 按「每条 subscription 的每次成功
     /// 执行」逐条保留 additionalContext / systemMessage，供调用方（Runtime / TUI）原样展示。
     pub messages: Vec<HookDisplayMessage>,
+    /// 最终 directive 为 Block 时，标识实际阻断 subscription；其它 directive 为 None。
+    pub block_detail: Option<HookBlockDetail>,
 }
 
 impl HookOutcome {
@@ -181,6 +194,7 @@ impl HookOutcome {
             executions: Vec::new(),
             directive: HookDirective::Continue,
             messages: Vec::new(),
+            block_detail: None,
         }
     }
 }
