@@ -620,7 +620,7 @@ fn clear_is_one_atomic_revision_and_empty_clear_is_noop() {
     assert!(state.list().is_empty());
     assert!(state.list_batches().is_empty());
     assert_eq!(state.current_batch(), None);
-    assert_eq!(state.next_task_id(), TaskId::new(1));
+    assert_eq!(state.next_task_id(), TaskId::new(3));
     assert_eq!(state.next_batch_id(), BatchId::new(1));
 
     let revision = state.revision();

@@ -69,6 +69,16 @@ impl TaskStoreState {
         self.tasks().get(&id).cloned()
     }
 
+    pub fn current_task_by_seq(&self, seq: u64) -> Option<Task> {
+        let batch = self.current_batch()?;
+        self.tasks()
+            .values()
+            .find(|task| {
+                task.batch() == batch && task.seq() == seq && task.status() != TaskStatus::Deleted
+            })
+            .cloned()
+    }
+
     /// Returns all live Tasks in ascending typed-ID order.
     pub fn list(&self) -> Vec<Task> {
         let mut tasks: Vec<_> = self

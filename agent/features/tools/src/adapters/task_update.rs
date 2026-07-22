@@ -9,9 +9,18 @@ pub struct TaskUpdateTool {
     pub access: Arc<dyn TaskAccess>,
 }
 
-fn parse_id(value: &str, field: &str) -> Result<TaskId, String> {
+fn parse_seq(value: &str, field: &str) -> Result<u64, String> {
     TaskId::parse_tool_input(value)
-        .map_err(|_| format!("{field} must be a non-zero decimal task ID: {value}"))
+        .map(TaskId::get)
+        .map_err(|_| format!("{field} must be a non-zero decimal task ID sequence: {value}"))
+}
+
+fn current_task_id(access: &dyn TaskAccess, value: &str, field: &str) -> Result<TaskId, String> {
+    let seq = parse_seq(value, field)?;
+    access
+        .current_task_by_seq(seq)
+        .map(|task| task.id())
+        .ok_or_else(|| format!("Task not found in current task list: {value}"))
 }
 
 fn parse_priority(value: &str) -> Result<TaskPriority, String> {
@@ -78,7 +87,7 @@ impl TypedTool for TaskUpdateTool {
             Ok(args) => args,
             Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
-        let id = match parse_id(&args.task_id, "task_id") {
+        let id = match current_task_id(self.access.as_ref(), &args.task_id, "task_id") {
             Ok(id) => id,
             Err(error) => return TypedToolResult::error(error),
         };
@@ -111,8 +120,11 @@ impl TypedTool for TaskUpdateTool {
                 self.access.set_priority(id, priority, timestamp)
             }
             "blocked_by_id" => {
-                let dependency = match parse_id(value, "blocked_by_id") {
-                    Ok(id) => id,
+                let dependency = match current_task_id(
+                    self.access.as_ref(),
+                    value,
+                    "blocked_by_id",
+                ) {                    Ok(id) => id,
                     Err(error) => return TypedToolResult::error(error),
                 };
                 self.access.add_dependency(id, dependency, timestamp)
@@ -126,8 +138,13 @@ impl TypedTool for TaskUpdateTool {
             Ok(result) => result.value,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
-        let task_id = updated.id().to_string();
+        let task_id = updated.seq().to_string();
         let status = status_label(updated.status()).to_owned();
+        let blocked_by = updated
+            .blocked_by()
+            .iter()
+            .filter_map(|id| self.access.get(*id).map(|task| format!("#{}", task.seq())))
+            .collect();
         TypedToolResult::success(
             format!("Task #{} updated. Status: {}", task_id, status),
             TaskUpdateResult {
@@ -135,11 +152,7 @@ impl TypedTool for TaskUpdateTool {
                 status,
                 subject: updated.subject().to_owned(),
                 priority: priority_label(updated.priority()).to_owned(),
-                blocked_by: updated
-                    .blocked_by()
-                    .iter()
-                    .map(|id| format!("#{id}"))
-                    .collect(),
+                blocked_by,
             },
         )
     }
