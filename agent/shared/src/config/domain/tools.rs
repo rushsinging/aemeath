@@ -73,8 +73,12 @@ pub struct ToolsConfig {
 /// ```json
 /// { "agents": { "roles": { "coder": { "model": "deepseek/deepseek-chat", "description": "Writes and edits code" } } } }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRoleConfig {
+    /// Whether this role is available for main-agent dispatch.
+    #[serde(default = "default_agent_role_enabled")]
+    pub enabled: bool,
+
     /// LLM to use for this role, in "<source>/<model>" format (e.g. "deepseek/deepseek-chat").
     /// Resolved via ModelsConfig::find_model at runtime.
     #[serde(default, rename = "model")]
@@ -105,6 +109,23 @@ pub struct AgentRoleConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub max_tokens: Option<u32>,
+}
+
+impl Default for AgentRoleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model: String::new(),
+            description: String::new(),
+            system_suffix: None,
+            reasoning: None,
+            max_tokens: None,
+        }
+    }
+}
+
+fn default_agent_role_enabled() -> bool {
+    true
 }
 
 /// Agent configuration
@@ -153,6 +174,13 @@ impl Default for AgentsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_agent_role_config_enabled_defaults_to_true() {
+        let config: AgentRoleConfig = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(config.enabled);
+        assert!(AgentRoleConfig::default().enabled);
+    }
 
     #[test]
     fn test_agent_role_config_max_tokens_snake_case() {
@@ -221,7 +249,7 @@ mod tests {
     #[test]
     fn test_agents_config_uses_snake_case_and_accepts_legacy_aliases() {
         let snake: AgentsConfig = serde_json::from_str(
-            r#"{ "max_concurrency": 7, "default_model": "snake/model", "roles": { "coder": { "system_suffix": "snake" } } }"#,
+            r#"{ "max_concurrency": 7, "default_model": "snake/model", "roles": { "coder": { "enabled": false, "system_suffix": "snake" } } }"#,
         )
         .unwrap();
         let legacy: AgentsConfig = serde_json::from_str(
@@ -229,6 +257,8 @@ mod tests {
         )
         .unwrap();
 
+        assert!(!snake.roles["coder"].enabled);
+        assert!(legacy.roles["coder"].enabled);
         assert_eq!(snake.max_concurrency, 7);
         assert_eq!(snake.default_model, "snake/model");
         assert_eq!(snake.roles["coder"].system_suffix.as_deref(), Some("snake"));
@@ -240,6 +270,10 @@ mod tests {
         );
 
         let serialized = serde_json::to_value(snake).unwrap();
+        assert_eq!(
+            serialized["roles"]["coder"]["enabled"],
+            serde_json::json!(false)
+        );
         assert_eq!(serialized["max_concurrency"], serde_json::json!(7));
         assert_eq!(
             serialized["default_model"],

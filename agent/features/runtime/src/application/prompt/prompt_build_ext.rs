@@ -45,13 +45,11 @@ fn append_agent_roles(prompt: &mut String, config_file: Option<&ConfigSnapshot>,
     let Some(snap) = config_file else {
         return;
     };
-    if snap.agents().roles.is_empty() {
-        return;
-    }
     let role_lines: Vec<String> = snap
         .agents()
         .roles
         .iter()
+        .filter(|(_, role)| role.enabled)
         .map(|(name, role)| {
             let desc = if role.description.is_empty() {
                 String::new()
@@ -66,6 +64,9 @@ fn append_agent_roles(prompt: &mut String, config_file: Option<&ConfigSnapshot>,
             format!("- `{}`{}{}", name, desc, model_info)
         })
         .collect();
+    if role_lines.is_empty() {
+        return;
+    }
     let footer = agent_roles_footer(lang);
     let header = agent_roles_header(lang);
     prompt.push_str(&format!("{}{}{}", header, role_lines.join("\n"), footer));
@@ -167,6 +168,34 @@ mod tests {
             prompt, "base",
             "config_file 为 None 时 prompt 不应追加任何内容"
         );
+    }
+
+    /// disabled role 即使保留定义，也不得把它注入主 LLM。
+    #[test]
+    fn test_append_agent_roles_omits_disabled_role() {
+        let mut roles = HashMap::new();
+        roles.insert(
+            "coder".to_string(),
+            AgentRoleConfig {
+                enabled: false,
+                description: "编写代码".to_string(),
+                ..Default::default()
+            },
+        );
+        roles.insert(
+            "reviewer".to_string(),
+            AgentRoleConfig {
+                description: "审查代码".to_string(),
+                ..Default::default()
+            },
+        );
+        let snap = make_snapshot(roles, "zh");
+        let mut prompt = String::from("base");
+
+        append_agent_roles(&mut prompt, Some(&snap), "zh");
+
+        assert!(!prompt.contains("`coder`"));
+        assert!(prompt.contains("`reviewer`"));
     }
 
     /// ConfigSnapshot.language="zh" 且 lang 参数传 "zh" 时，

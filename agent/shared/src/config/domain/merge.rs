@@ -782,7 +782,7 @@ mod tests {
                 "agents": {
                     "max_concurrency": 6,
                     "default_model": "snake/model",
-                    "roles": { "coder": { "system_suffix": "snake" } }
+                    "roles": { "coder": { "enabled": false, "system_suffix": "snake" } }
                 }
             }"#,
         )
@@ -790,6 +790,7 @@ mod tests {
 
         let snapshot = ConfigSnapshot::new(apply_patch(Config::default(), patch));
 
+        assert!(!snapshot.agents().roles["coder"].enabled);
         assert_eq!(snapshot.max_tool_concurrency(), 9);
         assert_eq!(snapshot.max_agent_concurrency(), 6);
         assert_eq!(snapshot.agents().default_model, "snake/model");
