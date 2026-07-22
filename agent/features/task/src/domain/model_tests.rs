@@ -41,6 +41,7 @@ fn local_domain_results_are_uncommitted_until_store_transaction() {
     let result = Task::create(
         TaskId::new(1),
         BatchId::new(1),
+        1,
         TaskCreateSpec::try_new("任务".into(), String::new(), None, TaskPriority::Normal).unwrap(),
         1,
     );
@@ -52,6 +53,7 @@ fn task_create_and_local_fields_preserve_private_state() {
     let result = Task::create(
         TaskId::new(2),
         BatchId::new(3),
+        1,
         TaskCreateSpec::try_new(
             "任务".into(),
             "描述".into(),
@@ -81,6 +83,7 @@ fn task_subject_and_description_updates_are_typed_and_idempotent() {
     let mut task = Task::create(
         TaskId::new(1),
         BatchId::new(1),
+        1,
         TaskCreateSpec::try_new(
             "原始标题".into(),
             "原始描述".into(),
@@ -157,12 +160,17 @@ fn task_execution_timestamps_follow_status_transitions() {
     assert_eq!(task.completed_at(), None);
 
     task.transition_to(TaskStatus::Pending, 30).unwrap();
+    assert_eq!(
+        task.started_at(),
+        None,
+        "回退到 pending 后不得保留执行时间戳，否则 snapshot 无法恢复"
+    );
     task.transition_to(TaskStatus::InProgress, 40).unwrap();
-    assert_eq!(task.started_at(), Some(20));
+    assert_eq!(task.started_at(), Some(40));
     assert_eq!(task.completed_at(), None);
 
     task.transition_to(TaskStatus::Completed, 50).unwrap();
-    assert_eq!(task.started_at(), Some(20));
+    assert_eq!(task.started_at(), Some(40));
     assert_eq!(task.completed_at(), Some(50));
 
     let mut directly_completed =

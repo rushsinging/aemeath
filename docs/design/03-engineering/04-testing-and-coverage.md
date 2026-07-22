@@ -455,7 +455,7 @@ P1、feature/platform matrix 与真实 PTY smoke 由 #1050 落地为 `scripts/ch
 
 - host-native：fmt、workspace all-target clippy、workspace tests、TUI P0/P1、CLI build、真实 PTY smoke；
 - cross target：设置 `AEMEATH_MATRIX_CROSS=1` 后按 macOS/Linux host 尝试双架构 build；target/linker 不可用时明确 `SKIP`，编译失败仍阻断；
-- PTY 使用 allowlist 环境和隔离 HOME/agents config，验证 alternate screen 进入、Ctrl+C 退出、alternate screen/cursor 恢复，不访问真实 provider；子进程等待有上限，失败路径 kill/reap；
+- PTY 使用 allowlist 环境和隔离 HOME/agents config，验证 alternate screen 进入、Ctrl+C 退出、alternate screen/cursor 恢复，不访问真实 provider；CLI build 通过 Cargo JSON 输出解析实际 executable（显式 `AEMEATH_PTY_BIN` 可覆盖），子进程等待有上限，失败路径 kill/reap；
 - host-native 各层只执行一次：workspace 排除 CLI，P0/P1 精确过滤，PTY 在 build 后单独执行；当前完整热运行 77.48s（其中 all-target clippy 为主要成本），PTY 约 2s、P1 约 0.04s；跨 target 首次运行因额外构建成本较高，仅手动/release 前执行；
 - 不新增 PR workflow。
 
@@ -691,6 +691,43 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 覆盖率信号（2026-07-20，`./scripts/coverage.sh`）：Task regions **95.69%**、functions **93.85%**、lines **96.85%**。百分比只作风险信号；关键状态机、契约与跨 BC 恢复行为以本矩阵为验收依据。慢速矩阵的 PTY smoke 首次因未构建 CLI binary 失败，按 worktree-local Cargo build-dir 显式设置 `AEMEATH_PTY_BIN` 后通过；该 PTY 责任与 Task BC 无关，不影响 L5 不适用判断。
 
+#### 11.11 #1060 Memory / Reflection L0–L5 覆盖证据
+
+父 Issue [#851](https://github.com/rushsinging/aemeath/issues/851) 创建时的执行叶子 #895–#900、#984 与 #997 均已关闭。审查后新增的 #1283、#1284、#1285 已分别由 PR #1287、#1290、#1291 合入 `main`；Manual Reflection 的用户命令与 SDK/TUI 投影属于交付层工作，已移至 #860 的子项 #1289，不阻断本父项测试审查。
+
+| 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
+|---|---|---|---|
+| MemoryId / Entry 不变量、eligibility、dedup、eviction、JSON parse、prompt/summary 与安全错误类别 | L1 | `agent/features/memory/src/domain/{model,persistence,reflection}.rs` 的现有单元测试；`agent/features/memory/tests/reflection_error_boundary.rs`；`agent/features/runtime/src/application/chat/looping/reflection_trigger_tests.rs` | 已覆盖值对象、持久化规则、parser 等价类与 turn trigger 的 enabled/interval/tool/finish-gate 边界；#1283 将 parse error 收窄为稳定 Display，并锁定模型正文不泄漏。 |
+| MemoryService candidate→CAS→publish、committed receipt、一次 recompute、query 零 I/O、reflection apply | L2 | `agent/features/memory/src/service.rs` 的 scripted-store 测试；`agent/features/memory/src/service_reflection_tests.rs` | 已覆盖 commit failure、RecoveryPending、一次/二次 CAS、layer-targeted commit、真实 `retrieve_for_inject` 零写入，以及 mixed suggestion/outdated 的 `PartialApply` 已提交状态与计数。 |
+| MemoryPort / NoOp / opener / history adapter 的稳定边界、ACL 与持久化 | L3 | `agent/features/memory/tests/{memory_port_contract,noop_memory_contract,opener_seam_contract,reflection_history_adapter,reflection_error_boundary}.rs` | 已覆盖 Disabled NoOp、typed query/mutation、mixed apply、history Running→同 id terminal upsert、reopen/corruption 与仅安全摘要查询；无未解释的 adapter/ACL 缺口。 |
+| Main Session 同一 active Arc、Context 只读注入、Sub Disabled / Shared、Reflection 端到端生命周期 | L4 | `agent/composition/src/memory.rs` 的 `main_views_share_the_active_arc`、`prepare_does_not_change_active_until_install`、`preparing_the_active_identity_reuses_arc_without_opening`、`sub_disabled_is_noop_and_shared_reuses_active_without_opening`；`agent/composition/tests/main_session_wiring.rs`；`agent/features/context/tests/application_service_contract.rs`；`agent/features/runtime/src/application/chat/looping/pre_compact_trigger_tests.rs`；`agent/features/runtime/tests/reflection_teardown.rs` | #1284 证明 compact 成功后的冻结 snapshot 才提交 PreCompact；#1285 证明 grace deadline 后 cancel 并等待 terminal completion；#1299 证明 NoOp→committed active Arc 的 Context 注入切换，以及 history append 失败后 terminal completion、History 分类与单槽释放。 |
+| L0 production reachability、all-target clippy、public/test-only API、architecture guards | L0 | `.agents/hooks/check-production-reachability.sh`；`cargo clippy --workspace --all-targets -- -D warnings`；`.agents/hooks/check-architecture-guards.sh --full`；`cargo test --workspace` | 2026-07-21 在 `8b841da6` 上复采全部通过；production reachability 与覆盖率独立判定，未发现由测试引用掩盖的新增生产死代码。 |
+| 真实 PTY / 平台 / 安装路径 | L5 | `apps/cli/tests/pty_smoke.rs`；`scripts/check-slow-test-matrix.sh` | 2026-07-21 默认慢速矩阵完整通过（含 CLI build 与 PTY smoke）；#1303 已令矩阵从 Cargo JSON 解析 worktree-local executable。#1298 归属 #1050 的慢速入口修复已合入，不再留下本能力 L5 阻断。 |
+
+确定性与组织：#1283/#1284/#1285/#1299 的新增测试均位于 owning layer 的外置测试文件；无 `mod.rs`、`include!` 或生产 test-only API。Reflection task 测试使用 cancellation token、Notify 和 bounded timeout，不以短 sleep 证明状态。
+
+覆盖率信号（2026-07-21，`./scripts/coverage.sh`，commit `8b841da6`）：Memory regions/functions/lines **88.52% / 86.69% / 88.83%**；Runtime **71.65% / 71.11% / 72.12%**；workspace **77.89% / 79.24% / 78.22%**。统一工具仍不生成 changed-lines 指标；百分比仅作风险信号，不能替代上述行为矩阵与相邻边界证据。
+
+最终结论：#851 的创建时业务叶子及审查后新增的 #1283/#1284/#1285 均已关闭，#1299 已由 PR #1308 合入并关闭；#1298 已由 PR #1303 合入且按 owner 边界归 #1050。#1060 的 L0–L5 矩阵无未解释空白、适用证据均可追溯，#851 / #1060 已满足测试审查完成定义；Issue 关闭仍待用户确认。
+
+#### 11.12 #1085 Tool / Skill / Command L0–L5 覆盖证据
+
+父 Issue [#853](https://github.com/rushsinging/aemeath/issues/853) 的执行叶子 #908、#909、#910、#911、#912、#913、#914 与 #993 已关闭。#1085 不只审查，直接在同一 PR 补齐组合后的测试证据；不以覆盖率替代行为矩阵，也不将 #879 progress/plan Runtime 所有权收口、#947 TUI I/O Effect 化或 MCP Ready 生命周期伪装为本能力已完成。
+
+| 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
+|---|---|---|---|
+| Command 名称规范化、非法等价类、Descriptor、参数值对象与错误文本 | L1 | `tools/src/domain/command_pl_tests.rs` | 覆盖 slash/大小写/空白、非法字符、alias、序列化与参数拼接。 |
+| Command Adapter 的冲突、补全、schema 与 target 分类 | L2 | `tools/src/adapters/command_tests.rs` | 覆盖 name/alias 冲突、无效 target、大小写补全、RequiredText/positive usize 与三类 route。 |
+| builtin Command 真相、公开 router 错误与 Composition skill projection | L3 | `tools/tests/command_contract.rs`、`composition/tests/command_wiring.rs`、`apps/cli/src/command_contract_tests.rs` | 全量 builtin descriptor、公开错误和交付入口共用 router；Skill 与 builtin 的冲突语义在 Composition 层锁定。 |
+| Tool Catalog/Execution Scope/Profile、输出映射和动态成员撤销 | L2-L3 | `tools/src/adapters/catalog_execution_contract_tests.rs` | 覆盖 invocation-time authorization、success content/data/metadata、retryable failure 与 dynamic membership add/remove。 |
+| Tool private backing/adapter 不得由 Runtime 穿透 | L0 | `check-tool-catalog-execution-boundary.sh` 与 `-tests.sh` | Runtime 直引 adapters 或 ToolBacking/具体 adapter 的故意违规均 exit 2。 |
+| Skill PL、query、revision 与 typed error | L1 | `tools/src/domain/skill_pl_tests.rs` | 覆盖 slash aliases、materialization error、query snapshot 与 cache hint。 |
+| Filesystem Skill 来源、优先级、过滤和实际 materialization | L2 | `tools/src/adapters/skill_filesystem_tests.rs` | 覆盖 global/extra content、同名优先级和 primary 缺失时 fallback 可见。 |
+| Skill materialization 到 Context prompt block、slash projection | L3-L4 | `context/tests/skill_prompt_pipeline.rs`、`context/tests/isolated_context_with_skill.rs`、`composition/tests/command_wiring.rs` | Context 只经 `SkillMaterializationPort` 消费；真实 filesystem adapter 的来源/优先级/物化在 Tools owning layer 证明，跨 BC 使用 port fake 证明无 adapter 穿透。 |
+| 真进程、PTY、网络、平台或发布资产 | L5 | 不适用说明 | Tool/Skill/Command catalog、prompt 与 router 均为进程内能力；不以 L5 替代 L1-L4。 |
+
+覆盖率信号以 `cargo llvm-cov --manifest-path agent/features/tools/Cargo.toml --all-targets --summary-only` 为准；补齐后 Tools regions/functions/lines 为 **62.34% / 67.93% / 65.63%**（审查前为 62.02% / 67.64% / 65.26%），仅作风险信号。完成条件是上述矩阵无未解释空白、适用 Guard/production reachability 与定向测试通过；#879/#947/MCP Ready 仍按各自 owner 跟踪。
+
 ## 12. 相关文档
 
 - [01-architecture-guards.md](01-architecture-guards.md)：架构守卫注册表与例外治理
@@ -701,6 +738,10 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-21 | #1060 最终复采并验收：#1299 已由 #1308 合入、#1298 已由 #1303 合入；L0 守卫、workspace tests、默认慢速矩阵（含 PTY）与 coverage 全部通过，#851 / #1060 已满足测试审查完成定义，等待用户确认关闭 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#851](https://github.com/rushsinging/aemeath/issues/851)、[#1299](https://github.com/rushsinging/aemeath/issues/1299)、[#1308](https://github.com/rushsinging/aemeath/pull/1308)、[#1303](https://github.com/rushsinging/aemeath/pull/1303) |
+| 2026-07-20 | #1060 调整慢速矩阵缺陷归属：#1298 移至 #1050，L5 PTY 直接验证保留为通过；#1060 仅由能力内测试缺口 #1299 阻断 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#1050](https://github.com/rushsinging/aemeath/issues/1050)、[#1298](https://github.com/rushsinging/aemeath/issues/1298)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
+| 2026-07-20 | #1060 初次 Memory / Reflection L0–L5 审查经独立复核后修正证据路径：`policy.rs` 无直接单元测试；same-Arc / Sub Disabled 正确证据在 `composition/src/memory.rs`；`for_complete_reflection` 零调用者与 Runtime 覆盖率风险均由 #1299 承接 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
+| 2026-07-20 | #1060 完成 Memory / Reflection 初次 L0–L5 审查：记录 Memory/Runtime coverage、#1283/#1284/#1285 合入证据与 PTY worktree binary 首次失败；事务/history 相邻测试由 #1299、慢速矩阵路径修复由 #1298 承接，#851 暂不关闭 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#851](https://github.com/rushsinging/aemeath/issues/851)、[#1298](https://github.com/rushsinging/aemeath/issues/1298)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
 | 2026-07-14 | 初稿：定义六层测试模型、目录组织、覆盖率、生产可达性、dead-code 与 CI 治理 | [#677](https://github.com/rushsinging/aemeath/issues/677)、[#1006](https://github.com/rushsinging/aemeath/issues/1006) |
 | 2026-07-15 | 将 L0-L5、覆盖证据、目录、命名、fixture 与确定性规则同步到 Rust 编码规范，并按 Runtime 单能力轻量六边形 Target 收敛测试归属；`shared` 仅在存在真实共享内容时按需创建 | [#1013](https://github.com/rushsinging/aemeath/issues/1013)、[#1027](https://github.com/rushsinging/aemeath/pull/1027) |
 | 2026-07-15 | 接入 cargo-llvm-cov 0.8.7，建立 workspace/per-crate 命令行覆盖率入口与 v0.1.0 基线 | [#1014](https://github.com/rushsinging/aemeath/issues/1014) |

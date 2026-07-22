@@ -31,5 +31,4 @@ pub mod memory;
 pub mod message;
 pub mod reasoning;
 pub mod session_types;
-pub mod skill_ops;
 pub mod string_idx;

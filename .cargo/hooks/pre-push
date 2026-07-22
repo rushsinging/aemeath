@@ -8,3 +8,4 @@ cd "$ROOT"
 export AEMEATH_PROJECT_DIR="$ROOT"
 "$ROOT/.agents/hooks/check-architecture-guards.sh" --full
 "$ROOT/.agents/hooks/check-unit-tests.sh"
+"$ROOT/scripts/clean-worktree-targets.sh" --current --yes

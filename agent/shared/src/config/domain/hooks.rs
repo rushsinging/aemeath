@@ -34,9 +34,9 @@
 //!
 //! ## Exit Code + JSON 输出协议
 //!
-//! exit 0 = 成功。stdout 可包含 JSON（字段见 HookJsonOutput）
-//! exit 2 = 阻止操作。stderr 作为反馈传给 LLM
-//! exit 其他 = 非阻塞错误
+//! exit 0 = 成功。stdout 可包含结构化 JSON directive。
+//! 任意非零 exit（含 1/2/127）= 阻止操作。stderr 作为结构化 Block reason 的来源。
+//! spawn / wait / IO / timeout 等执行故障 = ExecutionFailed，由 Hook Dispatcher 按策略重试。
 //!
 //! exit 0 时 JSON 支持的字段：
 //! - `continue: false` + `stopReason` — 全局停止

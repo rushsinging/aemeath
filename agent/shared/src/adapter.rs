@@ -7,7 +7,6 @@
 
 pub mod fs;
 pub mod git;
-pub mod hook;
 pub mod mcp;
 pub mod process;
 pub mod provider;

@@ -57,6 +57,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ReflectionHistory { .. } => "ReflectionHistory",
         UiEvent::AskUserBatch { .. } => "AskUserBatch",
         UiEvent::HookEvent(_) => "HookEvent",
+        UiEvent::HookMessage(_) => "HookMessage",
         UiEvent::AgentProgress { .. } => "AgentProgress",
         UiEvent::WorkingDirectoryChanged { .. } => "WorkingDirectoryChanged",
         UiEvent::WorkspaceMetadataResolved(_) => "WorkspaceMetadataResolved",

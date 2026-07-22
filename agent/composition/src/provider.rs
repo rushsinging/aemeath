@@ -169,8 +169,9 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
                 LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
                 LlmError::Network(_) => ProviderErrorKind::Network,
                 LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
-                LlmError::Stream(_) | LlmError::StreamTruncated { .. } => {
-                    ProviderErrorKind::Protocol
+                LlmError::Stream(_) => ProviderErrorKind::Protocol,
+                LlmError::StreamInterrupted(_) | LlmError::StreamTruncated { .. } => {
+                    ProviderErrorKind::StreamTruncated
                 }
                 LlmError::Config(_) => ProviderErrorKind::Configuration,
             };

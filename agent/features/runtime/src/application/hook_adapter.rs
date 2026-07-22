@@ -1,16 +1,16 @@
 //! Runtime application hook adapter —— 纯值投影。
 //!
-//! 把 Hook BC 的 `hook::api::HookOutcome`（Hook BC 拥有的领域结果）
+//! 把 Hook BC 的 `hook::HookOutcome`（Hook BC 拥有的领域结果）
 //! 投影成 Runtime 拥有的纯值 `RuntimeHookDispatch`。
 //!
 //! 设计约束（#925）：
 //! - **纯转换**：不解析 stdout / JSON，不维护 Run 状态，不触碰 IO。
 //!   Hook BC 已完成所有分类 / JSON 解析；此处仅做类型化搬运。
-//! - **结构化 reason**：`hook::api::HookReason` 的全部 variant 都有对应的
+//! - **结构化 reason**：`hook::HookReason` 的全部 variant 都有对应的
 //!   `RuntimeHookReason` variant，绝不压成仅 Debug 字符串。
 //! - **execution 完整保留**：status / attempts / exit_code / stdout / stderr /
 //!   duration 全部 1:1 搬运，重试轨迹（多次 execution）原样保留顺序与数量。
-//! - **messages 顺序无损**：`hook::api::HookOutcome.messages`（BC 展示消息）按源顺序
+//! - **messages 顺序无损**：`hook::HookOutcome.messages`（BC 展示消息）按源顺序
 //!   1:1 投影到 `RuntimeHookDispatch.messages`，point / source /
 //!   execution_ordinal / attempt / kind / text 全部保留，不合并、不丢失来源。
 //!
@@ -34,11 +34,21 @@ pub struct RuntimeHookDispatch {
     pub executions: Vec<RuntimeHookExecution>,
     /// BC 保留的展示消息（按源顺序 1:1 投影，不合并、不丢失来源，#925）。
     pub messages: Vec<RuntimeHookDisplayMessage>,
+    /// 最终 Block 的实际 subscription 与 execution；其它 directive 为 None。
+    pub block_detail: Option<RuntimeHookBlockDetail>,
+}
+
+/// Runtime 视角下实际触发 Block 的 subscription 与 execution。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeHookBlockDetail {
+    pub command: String,
+    pub execution_ordinal: u32,
+    pub execution: RuntimeHookExecution,
 }
 
 /// Runtime 视角下的 hook directive。
 ///
-/// 与 `hook::api::HookDirective` 一一对应，但去掉 `ContinueWith*` 前缀以突出
+/// 与 `hook::HookDirective` 一一对应，但去掉 `ContinueWith*` 前缀以突出
 /// “继续 + 副作用”的 Runtime 语义。
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeHookDirective {
@@ -68,7 +78,7 @@ pub enum RuntimeHookDirective {
     },
 }
 
-/// 结构化 hook 阻断原因，对应 `hook::api::HookReason` 的全部 variant。
+/// 结构化 hook 阻断原因，对应 `hook::HookReason` 的全部 variant。
 ///
 /// 必须保留 variant 边界：两个文本相同但 variant 不同的 reason
 /// （例如 `JsonBlock{reason:"x"}` 与 `StopHookExecutionFailed{error:"x"}`）
@@ -139,7 +149,7 @@ pub enum RuntimeHookExecutionStatus {
 
 /// Hook 展示消息种类（Runtime 投影）。
 ///
-/// 与 `hook::api::HookDisplayMessageKind` 一一对应：
+/// 与 `hook::HookDisplayMessageKind` 一一对应：
 /// - `AdditionalContext` ← JSON `additionalContext`（注入 LLM 对话流）；
 /// - `SystemMessage` ← JSON `systemMessage`（显示在 TUI）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,16 +162,16 @@ pub enum RuntimeHookDisplayMessageKind {
 
 /// Hook BC 保留的展示消息（Runtime 投影）。
 ///
-/// 由 [`project_message`] 产出，按源（`hook::api::HookDisplayMessage`）顺序 1:1 搬运，
+/// 由 [`project_message`] 产出，按源（`hook::HookDisplayMessage`）顺序 1:1 搬运，
 /// 不合并、不丢失来源。六个字段全部投影：point / source / execution_ordinal /
 /// attempt / kind / text。
 ///
-/// `point` 直接复用 `hook::api::HookPoint`（Copy 域枚举，稳定共享词表，不重复定义
+/// `point` 直接复用 `hook::HookPoint`（Copy 域枚举，稳定共享词表，不重复定义
 /// Runtime 镜像），其余字段为 Runtime 拥有的纯值。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeHookDisplayMessage {
-    /// 触发点（直接复用 `hook::api::HookPoint`，Copy 域枚举）。
-    pub point: hook::api::HookPoint,
+    /// 触发点（直接复用 `hook::HookPoint`，Copy 域枚举）。
+    pub point: hook::HookPoint,
     /// 来源（HookMatcher 稳定非秘密值：`All`="*"，`ToolName(name)`=name）。
     pub source: String,
     /// 执行序号（按 executions 聚合顺序，1-based）。
@@ -176,35 +186,41 @@ pub struct RuntimeHookDisplayMessage {
 
 // ─── pure projection ──────────────────────────────────────────
 
-/// 把 Hook BC 的 [`hook::api::HookOutcome`] 投影为 Runtime 拥有的
+/// 把 Hook BC 的 [`hook::HookOutcome`] 投影为 Runtime 拥有的
 /// [`RuntimeHookDispatch`]。
 ///
 /// 纯转换：不解析 stdout / JSON，不维护 Run 状态，不修改源。
-pub fn project_hook_outcome(outcome: &hook::api::HookOutcome) -> RuntimeHookDispatch {
+pub fn project_hook_outcome(outcome: &hook::HookOutcome) -> RuntimeHookDispatch {
     RuntimeHookDispatch {
         directive: project_directive(&outcome.directive),
         executions: outcome.executions.iter().map(project_execution).collect(),
         messages: outcome.messages.iter().map(project_message).collect(),
+        block_detail: outcome
+            .block_detail
+            .as_ref()
+            .map(|detail| RuntimeHookBlockDetail {
+                command: detail.command.clone(),
+                execution_ordinal: detail.execution_ordinal,
+                execution: project_execution(&detail.execution),
+            }),
     }
 }
 
-fn project_directive(directive: &hook::api::HookDirective) -> RuntimeHookDirective {
+fn project_directive(directive: &hook::HookDirective) -> RuntimeHookDirective {
     match directive {
-        hook::api::HookDirective::Continue => RuntimeHookDirective::Continue,
-        hook::api::HookDirective::Block { reason } => RuntimeHookDirective::Block {
+        hook::HookDirective::Continue => RuntimeHookDirective::Continue,
+        hook::HookDirective::Block { reason } => RuntimeHookDirective::Block {
             reason: project_reason(reason),
         },
-        hook::api::HookDirective::ContinueWithContext { context } => {
-            RuntimeHookDirective::Context {
-                context: context.clone(),
-            }
-        }
-        hook::api::HookDirective::ContinueWithUpdatedInput { input } => {
+        hook::HookDirective::ContinueWithContext { context } => RuntimeHookDirective::Context {
+            context: context.clone(),
+        },
+        hook::HookDirective::ContinueWithUpdatedInput { input } => {
             RuntimeHookDirective::UpdatedInput {
                 input: input.clone(),
             }
         }
-        hook::api::HookDirective::ContinueWithContextAndInput { context, input } => {
+        hook::HookDirective::ContinueWithContextAndInput { context, input } => {
             RuntimeHookDirective::ContextAndInput {
                 context: context.clone(),
                 input: input.clone(),
@@ -213,32 +229,32 @@ fn project_directive(directive: &hook::api::HookDirective) -> RuntimeHookDirecti
     }
 }
 
-fn project_reason(reason: &hook::api::HookReason) -> RuntimeHookReason {
+fn project_reason(reason: &hook::HookReason) -> RuntimeHookReason {
     match reason {
-        hook::api::HookReason::ExitCode { code, stderr } => RuntimeHookReason::ExitCode {
+        hook::HookReason::ExitCode { code, stderr } => RuntimeHookReason::ExitCode {
             code: *code,
             stderr: stderr.clone(),
         },
-        hook::api::HookReason::JsonBlock { reason } => RuntimeHookReason::JsonBlock {
+        hook::HookReason::JsonBlock { reason } => RuntimeHookReason::JsonBlock {
             reason: reason.clone(),
         },
-        hook::api::HookReason::JsonContinueFalse { stop_reason } => {
+        hook::HookReason::JsonContinueFalse { stop_reason } => {
             RuntimeHookReason::JsonContinueFalse {
                 stop_reason: stop_reason.clone(),
             }
         }
-        hook::api::HookReason::StopHookExecutionFailed { error } => {
+        hook::HookReason::StopHookExecutionFailed { error } => {
             RuntimeHookReason::StopHookExecutionFailed {
                 error: error.clone(),
             }
         }
-        hook::api::HookReason::PolicyBlock { error } => RuntimeHookReason::PolicyBlock {
+        hook::HookReason::PolicyBlock { error } => RuntimeHookReason::PolicyBlock {
             error: error.clone(),
         },
     }
 }
 
-fn project_execution(execution: &hook::api::HookExecution) -> RuntimeHookExecution {
+fn project_execution(execution: &hook::HookExecution) -> RuntimeHookExecution {
     RuntimeHookExecution {
         status: project_execution_status(&execution.status),
         attempts: execution.attempts,
@@ -249,11 +265,11 @@ fn project_execution(execution: &hook::api::HookExecution) -> RuntimeHookExecuti
     }
 }
 
-fn project_execution_status(status: &hook::api::HookExecutionStatus) -> RuntimeHookExecutionStatus {
+fn project_execution_status(status: &hook::HookExecutionStatus) -> RuntimeHookExecutionStatus {
     match status {
-        hook::api::HookExecutionStatus::Success => RuntimeHookExecutionStatus::Success,
-        hook::api::HookExecutionStatus::Blocked => RuntimeHookExecutionStatus::Blocked,
-        hook::api::HookExecutionStatus::ExecutionFailed { error } => {
+        hook::HookExecutionStatus::Success => RuntimeHookExecutionStatus::Success,
+        hook::HookExecutionStatus::Blocked => RuntimeHookExecutionStatus::Blocked,
+        hook::HookExecutionStatus::ExecutionFailed { error } => {
             RuntimeHookExecutionStatus::ExecutionFailed {
                 error: error.clone(),
             }
@@ -261,7 +277,7 @@ fn project_execution_status(status: &hook::api::HookExecutionStatus) -> RuntimeH
     }
 }
 
-fn project_message(message: &hook::api::HookDisplayMessage) -> RuntimeHookDisplayMessage {
+fn project_message(message: &hook::HookDisplayMessage) -> RuntimeHookDisplayMessage {
     RuntimeHookDisplayMessage {
         point: message.point,
         source: message.source.clone(),
@@ -272,19 +288,17 @@ fn project_message(message: &hook::api::HookDisplayMessage) -> RuntimeHookDispla
     }
 }
 
-fn project_message_kind(kind: &hook::api::HookDisplayMessageKind) -> RuntimeHookDisplayMessageKind {
+fn project_message_kind(kind: &hook::HookDisplayMessageKind) -> RuntimeHookDisplayMessageKind {
     match kind {
-        hook::api::HookDisplayMessageKind::AdditionalContext => {
+        hook::HookDisplayMessageKind::AdditionalContext => {
             RuntimeHookDisplayMessageKind::AdditionalContext
         }
-        hook::api::HookDisplayMessageKind::SystemMessage => {
-            RuntimeHookDisplayMessageKind::SystemMessage
-        }
+        hook::HookDisplayMessageKind::SystemMessage => RuntimeHookDisplayMessageKind::SystemMessage,
     }
 }
 
-impl From<&hook::api::HookOutcome> for RuntimeHookDispatch {
-    fn from(outcome: &hook::api::HookOutcome) -> Self {
+impl From<&hook::HookOutcome> for RuntimeHookDispatch {
+    fn from(outcome: &hook::HookOutcome) -> Self {
         project_hook_outcome(outcome)
     }
 }

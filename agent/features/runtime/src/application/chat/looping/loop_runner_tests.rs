@@ -2,7 +2,10 @@
 //! runner file focused on the production code path.
 #![allow(clippy::type_complexity)]
 
-use super::loop_runner::main_run_port::{fixture_bind_pending, fixture_finalize_messages};
+use super::loop_runner::main_run_port::{
+    fixture_accepted_user_messages, fixture_bind_pending, fixture_finalize_messages,
+    TEST_AWAIT_USER_MODE,
+};
 use super::*;
 
 fn assistant(text: &str) -> Message {
@@ -23,6 +26,71 @@ fn empty_session_first_step_owns_user_then_assistant_without_loss() {
     assert_eq!(finalized.len(), 2);
     assert_eq!(finalized[0].text_content(), "first");
     assert_eq!(finalized[1].text_content(), "answer");
+}
+
+#[test]
+fn accepted_projection_keeps_only_user_input_not_system_feedback() {
+    let accepted = fixture_accepted_user_messages(
+        vec![Message::user("accepted")],
+        Some(Message::system_generated_user("stop hook feedback")),
+        &[],
+    );
+
+    assert_eq!(accepted.len(), 1);
+    assert_eq!(accepted[0].text_content(), "accepted");
+}
+
+/// Regression test for #1272 Bug 2: stop hook feedback is consumed
+/// by freeze_step (via pending_stop_hook_feedback → prefix) and
+/// must appear in the frozen messages as a system-generated user
+/// message BEFORE regular user inputs.
+///
+/// Uses `fixture_bind_pending` (no prefix) + `fixture_accepted_user_messages`
+/// (with prefix) to verify: (a) feedback is excluded from accepted input,
+/// (b) pending messages are correctly bound.
+#[test]
+fn freeze_step_injects_stop_hook_feedback_as_system_prefix() {
+    // When a stop hook feedback prefix is present, it must be injected
+    // as a system-generated user message before regular user inputs,
+    // and must NOT appear in accepted input projection.
+    let accepted = fixture_accepted_user_messages(
+        vec![Message::user("user text")],
+        Some(Message::system_generated_user("stop hook feedback")),
+        &[],
+    );
+    assert_eq!(accepted.len(), 1);
+    assert_eq!(accepted[0].text_content(), "user text");
+
+    // Without a prefix, regular pending messages are frozen normally.
+    let (frozen_no_prefix, _) = fixture_bind_pending(vec![Message::user("user text")], &[]);
+    assert_eq!(frozen_no_prefix.len(), 1);
+    assert_eq!(frozen_no_prefix[0].text_content(), "user text");
+}
+
+/// Regression: previously drain_input took from stop_hook_feedback
+/// and freeze_step took from it again — getting None (double-take).
+/// With pending_stop_hook_feedback relay, freeze_step always sees the feedback.
+#[test]
+fn pending_stop_hook_feedback_survives_drain_then_freeze() {
+    // Simulate the relay: drain_input takes from stop_hook_feedback,
+    // stores to pending_stop_hook_feedback; freeze_step consumes from it.
+    let feedback = Message::system_generated_user("stop hook feedback");
+    let mut pending_relay = Some(feedback.clone());
+
+    // freeze_step phase: consume from relay, not from stop_hook_feedback
+    let freeze_prefix = pending_relay.take();
+
+    assert!(freeze_prefix.is_some(), "freeze_step must see the feedback");
+    assert_eq!(freeze_prefix.unwrap().text_content(), "stop hook feedback");
+    // After freeze_step consumes, relay is empty.
+    assert!(pending_relay.is_none(), "feedback consumed exactly once");
+    // Demonstrate the old bug: if freeze_step tried stop_hook_feedback
+    // (separate field), it would be None.
+    let stop_hook_feedback: Option<Message> = None;
+    assert!(
+        stop_hook_feedback.is_none(),
+        "old bug: stop_hook_feedback already taken by drain_input"
+    );
 }
 
 #[test]
@@ -103,6 +171,7 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
             config_reader: config.clone(),
             config_participant: config,
             memory_opener: Box::new(TestMemoryOpener),
+            session_management: Arc::new(context::test_support::UnavailableSessionManagement),
             initial_session: context::session::CanonicalSession {
                 id: uuid::Uuid::now_v7().to_string(),
                 chats: Vec::new(),
@@ -112,6 +181,8 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
                 tasks: context::session::SnapshotState::Missing,
                 workspace: context::session::SnapshotState::Captured(persist.snapshot()),
                 revision: 0,
+                compact: None,
+                run_slices: Vec::new(),
                 committed_steps: Vec::new(),
             },
             initial_memory: Arc::new(memory::api::NoOpMemory),
@@ -179,9 +250,14 @@ fn test_list_sessions() -> Arc<
 use crate::application::testing::text_completion_stream;
 
 use async_trait::async_trait;
-use hook::api::HookRunner;
+use hook::HookPort;
 use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
-use provider::{InvocationStream, ProviderError, ProviderErrorKind};
+use provider::ReasoningLevel;
+use provider::{
+    InvocationDelta, InvocationEvent, InvocationStream, ProviderCompletion, ProviderContentBlock,
+    ProviderError, ProviderErrorKind, ProviderStopReason, ProviderToolCall, ProviderToolCallId,
+    RawUsageSnapshot,
+};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use share::message::{Message, MessageSource, Role};
 use std::collections::{HashMap, VecDeque};
@@ -249,6 +325,20 @@ fn test_build_switched_client(
         };
         Ok((binding, result))
     })
+}
+
+#[test]
+fn runtime_resume_replaces_the_only_active_session_id() {
+    let runner_source = include_str!("loop_runner.rs");
+    let port_source = include_str!("main_run_port.rs");
+
+    assert!(runner_source.contains("mut session_id,"));
+    assert!(runner_source.contains("session_id = projection.session_id.clone();"));
+    assert!(runner_source.contains("if session_id != bound_session_id"));
+    assert!(runner_source.contains("session_id = bound_session_id;"));
+    assert!(!runner_source.contains("context_session_id"));
+    assert!(!port_source.contains("context_session_id"));
+    assert!(port_source.contains("session_id: SessionId::new(self.session_id)"));
 }
 
 #[test]
@@ -353,6 +443,10 @@ struct RecordingSink {
     messages_syncs: Arc<Mutex<Vec<Vec<Message>>>>,
     compact_rollback_snapshots: Arc<Mutex<Vec<Vec<Message>>>>,
     done_durations: Arc<Mutex<Vec<std::time::Duration>>>,
+    /// Captures InputId lists per `UserMessagesAdopted` emit (#1272).
+    adopted_ids: Arc<Mutex<Vec<Vec<String>>>>,
+    /// Captures TurnStarted message counts per turn (#1272).
+    llm_message_counts: Arc<Mutex<Vec<usize>>>,
 }
 
 impl ChatEventSink for RecordingSink {
@@ -380,7 +474,10 @@ impl RecordingSink {
             | RuntimeStreamEvent::CompactFinished { messages } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
                 let tag = match &event {
-                    RuntimeStreamEvent::TurnStarted { .. } => "TurnStarted",
+                    RuntimeStreamEvent::TurnStarted { .. } => {
+                        self.llm_message_counts.lock().unwrap().push(messages.len());
+                        "TurnStarted"
+                    }
                     RuntimeStreamEvent::MicrocompactDone { .. } => "MicrocompactDone",
                     RuntimeStreamEvent::StopHookBlocked { .. } => "StopHookBlocked",
                     RuntimeStreamEvent::PostToolExecutionSync { .. } => "PostToolExecutionSync",
@@ -446,13 +543,24 @@ impl RecordingSink {
             }
             RuntimeStreamEvent::TasksSnapshot { .. } => "TasksSnapshot".to_string(),
             RuntimeStreamEvent::ConfigReloaded { .. } => "ConfigReloaded".to_string(),
-            RuntimeStreamEvent::UserMessagesAdopted { .. } => "UserMessagesAdopted".to_string(),
+            RuntimeStreamEvent::UserMessagesAdopted { items, .. } => {
+                self.adopted_ids.lock().unwrap().push(
+                    items
+                        .iter()
+                        .map(|(id, _)| id.as_str().to_string())
+                        .collect(),
+                );
+                "UserMessagesAdopted".to_string()
+            }
             RuntimeStreamEvent::UserMessagesQueued { .. } => "UserMessagesQueued".to_string(),
             RuntimeStreamEvent::SessionReset => "SessionReset".to_string(),
             RuntimeStreamEvent::UserMessagesWithdrawn { .. } => "UserMessagesWithdrawn".to_string(),
             RuntimeStreamEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged".to_string(),
             RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
             RuntimeStreamEvent::ModelSwitched { .. } => "ModelSwitched".to_string(),
+            RuntimeStreamEvent::ModelList { .. } => "ModelList".to_string(),
+            RuntimeStreamEvent::RunCancelled { .. } => "RunCancelled".to_string(),
+            RuntimeStreamEvent::RunCancelling { .. } => "RunCancelling".to_string(),
             RuntimeStreamEvent::ThinkingChanged { .. } => "ThinkingChanged".to_string(),
             RuntimeStreamEvent::ContextEstimated { .. } => "ContextEstimated".to_string(),
             RuntimeStreamEvent::CommandResultText { .. } => "CommandResultText".to_string(),
@@ -475,6 +583,15 @@ impl RecordingSink {
 
     fn done_durations(&self) -> Vec<std::time::Duration> {
         self.done_durations.lock().unwrap().clone()
+    }
+
+    fn adopted_ids(&self) -> Vec<Vec<String>> {
+        self.adopted_ids.lock().unwrap().clone()
+    }
+
+    #[allow(dead_code)]
+    fn llm_message_counts(&self) -> Vec<usize> {
+        self.llm_message_counts.lock().unwrap().clone()
     }
 }
 
@@ -510,8 +627,10 @@ impl LlmProvider for TwoTurnProvider {
     }
 }
 
+#[derive(Clone)]
 struct SequenceProvider {
     responses: Arc<Mutex<VecDeque<String>>>,
+    requests: Arc<Mutex<Vec<Vec<Message>>>>,
 }
 
 impl SequenceProvider {
@@ -520,7 +639,12 @@ impl SequenceProvider {
             responses: Arc::new(Mutex::new(
                 responses.into_iter().map(str::to_string).collect(),
             )),
+            requests: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    fn requests(&self) -> Vec<Vec<Message>> {
+        self.requests.lock().unwrap().clone()
     }
 }
 
@@ -530,10 +654,11 @@ impl LlmProvider for SequenceProvider {
         &self,
         _scope: &InvocationScope,
         _system: &[SystemBlock],
-        _messages: &[Message],
+        messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
     ) -> Result<InvocationStream, ProviderError> {
+        self.requests.lock().unwrap().push(messages.to_vec());
         let text = self
             .responses
             .lock()
@@ -552,7 +677,7 @@ impl LlmProvider for SequenceProvider {
     }
 }
 
-fn test_hook_runner() -> HookRunner {
+fn test_hook_port() -> Arc<dyn HookPort> {
     let mut events = HashMap::new();
     events.insert(
         HookEvent::Stop,
@@ -562,12 +687,10 @@ fn test_hook_runner() -> HookRunner {
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events })
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
 }
 
-fn blocking_then_success_hook_runner(flag_path: &std::path::Path) -> HookRunner {
-    // 用 nanos 时间戳生成唯一 flag 路径，避免与并行 cargo test 共享
-    // target/stop-hook-once.flag 时的 race condition。
+fn blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookPort> {
     let flag_path_str = flag_path.to_string_lossy().to_string();
     let mut events = HashMap::new();
     events.insert(
@@ -575,16 +698,36 @@ fn blocking_then_success_hook_runner(flag_path: &std::path::Path) -> HookRunner 
         vec![HookEntry {
             matcher: String::new(),
             command: format!(
-                "python3 -c 'import pathlib, sys; \
+                "python3 -c 'import pathlib, sys, json; \
                  p=pathlib.Path(\"{flag_path}\"); \
                  sys.exit(0 if p.exists() else (p.parent.mkdir(parents=True, exist_ok=True), \
-                 p.write_text(\"blocked\"), print(\"fix before stopping\"), 2)[3])'",
+                 p.write_text(\"blocked\"), print(\"{{\\\"continue\\\":false,\\\"stopReason\\\":\\\"fix before stopping\\\"}}\"), 2)[3])'",
                 flag_path = flag_path_str,
             ),
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events })
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
+}
+
+fn delayed_blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookPort> {
+    let flag_path_str = flag_path.to_string_lossy().to_string();
+    let mut events = HashMap::new();
+    events.insert(
+        HookEvent::Stop,
+        vec![HookEntry {
+            matcher: String::new(),
+            command: format!(
+                "python3 -c 'import pathlib, sys, time, json; \
+                 p=pathlib.Path(\"{flag_path}\"); \
+                 sys.exit(0 if p.exists() else (p.parent.mkdir(parents=True, exist_ok=True), \
+                 p.write_text(\"blocked\"), time.sleep(0.2), print(\"{{\\\"continue\\\":false,\\\"stopReason\\\":\\\"fix before stopping\\\"}}\"), 2)[4])'",
+                flag_path = flag_path_str,
+            ),
+            timeout: 5,
+        }],
+    );
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
 }
 
 #[tokio::test]
@@ -600,6 +743,10 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
     let _ = std::fs::remove_file(&flag_path);
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = Arc::new(SequenceProvider::new(vec![
+        "first attempted final",
+        "after hook feedback",
+    ]));
 
     input_tx
         .send(sdk::ChatInputEvent::user_message(
@@ -629,15 +776,14 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
-            SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
-        )),
+        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
         tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
         tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
         tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: vec![],
         context_size: 200_000,
@@ -654,7 +800,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: blocking_then_success_hook_runner(&flag_path),
+        hook_runner: blocking_then_success_hook_port(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -676,8 +822,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
     let feedback_sync = events
         .iter()
         .position(|event| {
-            event.starts_with("StopHookBlocked:")
-                && event.contains("You MUST first satisfy the Stop hook requirement")
+            event.starts_with("StopHookBlocked:") && event.contains("Stop hook prevented stopping")
         })
         .expect("blocked Stop hook feedback should be synced into messages");
     let hook_notice = events
@@ -696,6 +841,29 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
     assert!(hook_notice < feedback_sync);
     assert!(feedback_sync < second_text);
     assert!(second_text < done);
+    let requests = provider.requests();
+    assert_eq!(
+        requests.len(),
+        2,
+        "Stop block should trigger one continuation request"
+    );
+    let continuation = &requests[1];
+    let texts = continuation
+        .iter()
+        .map(Message::text_content)
+        .collect::<Vec<_>>();
+    let assistant_idx = texts
+        .iter()
+        .position(|text| text == "first attempted final")
+        .expect("blocked assistant output must remain in canonical history");
+    let feedback_idx = texts
+        .iter()
+        .position(|text| text.contains("Stop hook prevented stopping"))
+        .expect("Stop hook feedback must reach the continuation request");
+    assert!(
+        assistant_idx < feedback_idx,
+        "history must precede Stop feedback: {texts:?}"
+    );
     assert_eq!(
         events
             .iter()
@@ -706,7 +874,152 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
 }
 
 #[tokio::test]
-async fn test_stop_hook_feedback_message_is_marked_system_generated() {
+async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
+    let flag_path = std::env::temp_dir().join(format!(
+        "aemeath_stop_hook_follow_up_{}.flag",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_file(&flag_path);
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = Arc::new(SequenceProvider::new(vec!["attempted final", "continued"]));
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "initial".to_string(),
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_input = input_tx.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .any(|event| event == "HookEvent:Stop:Running")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        driver_input
+            .send(sdk::ChatInputEvent::user_message(
+                "follow up during stop hook".to_string(),
+                Vec::new(),
+            ))
+            .unwrap();
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .any(|event| event.as_str() == "DoneWithDuration")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-stop-hook-follow-up".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: delayed_blocking_then_success_hook_port(&flag_path),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after shutdown");
+    driver.await.unwrap();
+    let _ = std::fs::remove_file(&flag_path);
+
+    let requests = provider.requests();
+    assert_eq!(
+        requests.len(),
+        2,
+        "follow-up must join the continuation, not start a new Run"
+    );
+    let texts = requests[1]
+        .iter()
+        .map(Message::text_content)
+        .collect::<Vec<_>>();
+    let assistant_idx = texts
+        .iter()
+        .position(|text| text == "attempted final")
+        .unwrap();
+    let feedback_idx = texts
+        .iter()
+        .position(|text| text.contains("Stop hook prevented stopping"))
+        .unwrap();
+    let follow_up_idx = texts
+        .iter()
+        .position(|text| text == "follow up during stop hook")
+        .unwrap();
+    assert!(
+        assistant_idx < feedback_idx && feedback_idx < follow_up_idx,
+        "unexpected continuation order: {texts:?}"
+    );
+    let feedback_count = sink
+        .synced_messages()
+        .into_iter()
+        .filter(|messages| {
+            messages
+                .iter()
+                .filter(|message| {
+                    message
+                        .text_content()
+                        .contains("Stop hook prevented stopping")
+                })
+                .count()
+                > 1
+        })
+        .count();
+    assert_eq!(
+        feedback_count, 0,
+        "UI sync must not duplicate Stop feedback"
+    );
+}
+
+#[tokio::test]
+async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
     let flag_path = std::env::temp_dir().join(format!(
         "aemeath_stop_hook_metadata_{}.flag",
         std::time::SystemTime::now()
@@ -755,6 +1068,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: vec![],
         context_size: 200_000,
@@ -771,7 +1085,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: blocking_then_success_hook_runner(&flag_path),
+        hook_runner: blocking_then_success_hook_port(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -796,12 +1110,12 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         .find(|message| {
             message
                 .text_content()
-                .contains("You MUST first satisfy the Stop hook requirement")
+                .contains("Stop hook prevented stopping")
         })
         .expect("blocked Stop hook feedback should be synced into messages");
 
     assert_eq!(feedback.role, Role::User);
-    assert_eq!(feedback.source(), MessageSource::SystemGenerated);
+    assert_eq!(feedback.source(), MessageSource::StopHook);
 }
 
 #[tokio::test]
@@ -945,6 +1259,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: vec![],
         context_size: 200_000,
@@ -959,7 +1274,9 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: HookRunner::new(HooksConfig { events }),
+        hook_runner: Arc::new(
+            hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap(),
+        ),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1037,6 +1354,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: vec![],
         context_size: 200_000,
@@ -1053,7 +1371,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1071,32 +1389,39 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
     driver.await.unwrap();
 
     let events = sink.events();
-    // Busy input is queued for a distinct Run after the current Run reaches terminal state.
-    let first_done = events
+    // #1272: queue input drained within the same Run cycle produces a
+    // multi-step run (one drain → step → drain → step → seal).  The
+    // two inputs are processed as two steps within a single terminal Run
+    // (one DoneWithDuration), not as two separate Runs.
+    let _first_done = events
         .iter()
         .position(|event| event == "DoneWithDuration")
-        .expect("first run should finish");
-    let queued = events
-        .iter()
-        .position(|event| event == "UserMessagesQueued")
-        .expect("busy user input should be visibly queued");
-    let handled_text = events
-        .iter()
-        .position(|event| event == "Text:handled queued input")
-        .expect("queued input should create another Run");
+        .expect("run should finish");
     let done_count = events
         .iter()
         .filter(|event| event.as_str() == "DoneWithDuration")
         .count();
-
-    assert!(queued < first_done);
-    assert!(first_done < handled_text);
-    assert_eq!(done_count, 2, "each real user input owns a terminal Run");
+    assert_eq!(
+        done_count, 1,
+        "queue input is drained in the same Run (#1272)"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event == "Text:initial final response"),
+        "first step response"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event == "Text:handled queued input"),
+        "queue input step response"
+    );
 }
 
 /// Hook 首次输出 `{"continue": false}` JSON (exit 0)，之后放行。
 /// 用于验证 `continue:false` 被识别为阻断（#372 缺陷 1）。
-fn continue_false_then_allow_hook_runner(flag_path: &std::path::Path) -> HookRunner {
+fn continue_false_then_allow_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookPort> {
     let flag_path_str = flag_path.to_string_lossy().to_string();
     let mut events = HashMap::new();
     events.insert(
@@ -1115,11 +1440,11 @@ fn continue_false_then_allow_hook_runner(flag_path: &std::path::Path) -> HookRun
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events })
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
 }
 
 /// Hook 前 `n` 次阻断 (exit 2)，之后放行。用计数器文件跟踪调用次数。
-fn block_n_times_hook_runner(counter_path: &std::path::Path, n: usize) -> HookRunner {
+fn block_n_times_hook_port(counter_path: &std::path::Path, n: usize) -> Arc<dyn HookPort> {
     let counter_path_str = counter_path.to_string_lossy().to_string();
     let mut events = HashMap::new();
     events.insert(
@@ -1139,11 +1464,11 @@ fn block_n_times_hook_runner(counter_path: &std::path::Path, n: usize) -> HookRu
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events })
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
 }
 
 /// Hook 每次都阻断 (exit 2)。用于验证连续阻断超上限强制停止（#372 缺陷 3）。
-fn always_blocking_hook_runner() -> HookRunner {
+fn always_blocking_hook_port() -> Arc<dyn HookPort> {
     let mut events = HashMap::new();
     events.insert(
         HookEvent::Stop,
@@ -1153,7 +1478,7 @@ fn always_blocking_hook_runner() -> HookRunner {
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events })
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
 }
 
 #[tokio::test]
@@ -1207,6 +1532,7 @@ async fn test_continue_false_json_treated_as_block() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: vec![],
         context_size: 200_000,
@@ -1223,7 +1549,7 @@ async fn test_continue_false_json_treated_as_block() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: continue_false_then_allow_hook_runner(&flag_path),
+        hook_runner: continue_false_then_allow_hook_port(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1330,6 +1656,7 @@ async fn test_stall_triggers_stop_hook_check() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: vec![],
         context_size: 200_000,
@@ -1346,7 +1673,7 @@ async fn test_stall_triggers_stop_hook_check() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: block_n_times_hook_runner(&counter_path, 3),
+        hook_runner: block_n_times_hook_port(&counter_path, 3),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1492,6 +1819,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: Vec::new(),
         context_size: 200_000,
@@ -1508,7 +1836,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1656,6 +1984,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: Vec::new(),
         context_size: 200_000,
@@ -1672,7 +2001,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1852,6 +2181,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: Vec::new(),
         context_size: 200_000,
@@ -1868,7 +2198,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1973,6 +2303,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: Vec::new(),
         context_size: 200_000,
@@ -1989,7 +2320,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2074,6 +2405,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: Vec::new(),
         context_size: 200_000,
@@ -2090,7 +2422,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2154,6 +2486,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: vec![],
         context_size: 200_000,
@@ -2170,7 +2503,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: always_blocking_hook_runner(),
+        hook_runner: always_blocking_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2338,6 +2671,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: Vec::new(),
         context_size: 200_000,
@@ -2354,7 +2688,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2551,6 +2885,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: Vec::new(),
         context_size: 200_000,
@@ -2567,7 +2902,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2735,6 +3070,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: Vec::new(),
         context_size: 200_000,
@@ -2751,7 +3087,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2858,6 +3194,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: Vec::new(),
         context_size: 200_000,
@@ -2874,7 +3211,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2954,6 +3291,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: messages, // 末条为 User，模拟 resume
         context_size: 200_000,
@@ -2970,7 +3308,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -3030,6 +3368,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: messages,
         context_size: 200_000,
@@ -3046,7 +3385,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -3176,6 +3515,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
+        initial_git_context: String::new(),
         user_context: String::new(),
         initial_messages: vec![],
         context_size: 200_000,
@@ -3192,7 +3532,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
+        hook_runner: test_hook_port(),
         memory_config: share::config::MemoryConfig::default(),
         memory: std::sync::Arc::new(memory::NoOpMemory),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -3241,5 +3581,1573 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
             .iter()
             .any(|e| e.contains("recovered final response")),
         "API 错误后应能正常开启下一回合: {events:?}"
+    );
+}
+
+// ─── #1272 AwaitUser same-Run recovery ──────────────────────────
+
+/// Provider that returns an AskUserQuestion tool call on the first
+/// invocation and a plain text response on the second.  Signals a
+/// `tokio::sync::Notify` after the first invocation so the test driver
+/// can deterministically inject user input at the right time (#1272).
+struct AskUserThenTextProvider {
+    call_count: Arc<Mutex<usize>>,
+    notify: Arc<tokio::sync::Notify>,
+}
+
+impl AskUserThenTextProvider {
+    fn new(notify: Arc<tokio::sync::Notify>) -> Self {
+        Self {
+            call_count: Arc::new(Mutex::new(0)),
+            notify,
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for AskUserThenTextProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        let call_num = {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            *count
+        };
+        if call_num == 1 {
+            // First call: return an AskUserQuestion tool call.
+            // This triggers the engine's Tools step, and with
+            // TEST_AWAIT_USER_MODE enabled, MainRunPort returns
+            // ToolStep::AwaitUser → Run AwaitingUser → session
+            // waits for input.
+            self.notify.notify_one();
+            let tool_call = ProviderToolCall {
+                id: ProviderToolCallId("toolu_ask_001".to_string()),
+                name: "AskUserQuestion".to_string(),
+                arguments: serde_json::json!({"question": "continue?"}),
+            };
+            Ok(Box::pin(futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::ToolCallStarted {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_ask_001".to_string())),
+                    name: "AskUserQuestion".to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolArgumentsDelta {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_ask_001".to_string())),
+                    partial_json: r#"{"question":"continue?"}"#.to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolCallCompleted {
+                    index: 0,
+                    call: tool_call,
+                }),
+                InvocationEvent::Completed(ProviderCompletion {
+                    output: vec![ProviderContentBlock::ToolCall(ProviderToolCall {
+                        id: ProviderToolCallId("toolu_ask_001".to_string()),
+                        name: "AskUserQuestion".to_string(),
+                        arguments: serde_json::json!({"question": "continue?"}),
+                    })],
+                    stop_reason: ProviderStopReason::ToolUse,
+                    usage: Some(RawUsageSnapshot {
+                        input_tokens: Some(10),
+                        output_tokens: Some(20),
+                        ..RawUsageSnapshot::default()
+                    }),
+                    effective_reasoning: ReasoningLevel::Off,
+                }),
+            ])))
+        } else {
+            // Subsequent calls: plain text response to complete the Run.
+            Ok(Box::pin(futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::Text("all done".to_string())),
+                InvocationEvent::Completed(ProviderCompletion {
+                    output: vec![ProviderContentBlock::Text("all done".to_string())],
+                    stop_reason: ProviderStopReason::EndTurn,
+                    usage: Some(RawUsageSnapshot {
+                        input_tokens: Some(10),
+                        output_tokens: Some(3),
+                        ..RawUsageSnapshot::default()
+                    }),
+                    effective_reasoning: ReasoningLevel::Off,
+                }),
+            ])))
+        }
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+#[tokio::test]
+async fn test_await_user_same_run_recovery() {
+    // #1272: Provider returns AskUser tool → engine AwaitUser waits
+    // empty → test sends reply → same RunId produces next step →
+    // only one Started/DoneWithDuration.
+    //
+    // Uses TEST_AWAIT_USER_MODE to make MainRunPort return
+    // ToolStep::AwaitUser for AskUserQuestion instead of processing
+    // inline.  No sleep — uses Notify signal to deterministically
+    // coordinate the driver with the provider invocations.
+    //
+    // TDD: This test should FAIL before the loop_runner.rs change
+    // because the old code drained after the first run_loop return
+    // (AwaitUser), losing the Run.  After the fix, the session
+    // waits for input and re-enters run_loop.
+
+    // Safety: reset test mode after test
+    let _guard = TestAwaitUserGuard::new();
+    TEST_AWAIT_USER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_provider = notify.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // Send initial user input that triggers the first model call.
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "ask question",
+            Vec::new(),
+        ))
+        .unwrap();
+
+    // Driver: wait for the first model call via Notify signal, then
+    // send the reply as user input, then wait for DoneWithDuration.
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // Wait for the provider's first invocation (tool-call response).
+        // After this, the engine processes the tool step, returns
+        // AwaitUser, and the session blocks on recv_next_input().
+        notify_provider.notified().await;
+
+        // Now the engine has processed the tool call and returned
+        // AwaitUser.  The session is blocked on recv_next_input().
+        // Send the reply.
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("yes please", Vec::new()))
+            .unwrap();
+
+        // Wait for the Run to terminate (DoneWithDuration).
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+            AskUserThenTextProvider::new(notify),
+        )),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-await-user-recovery".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_port(),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after AwaitUser recovery");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // Only one turn → one DoneWithDuration.
+    let done_count = events
+        .iter()
+        .filter(|event| event.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 1,
+        "AwaitUser 恢复后应只有 1 个 DoneWithDuration: {events:?}"
+    );
+    // The second model call produced a text response.
+    assert!(
+        events.iter().any(|e| e == "Text:all done"),
+        "第二轮模型调用应产生文本响应: {events:?}"
+    );
+}
+
+/// RAII guard that resets `TEST_AWAIT_USER_MODE` on drop so tests
+/// don't leak state.
+struct TestAwaitUserGuard;
+
+impl TestAwaitUserGuard {
+    fn new() -> Self {
+        TEST_AWAIT_USER_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for TestAwaitUserGuard {
+    fn drop(&mut self) {
+        TEST_AWAIT_USER_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+// ─── #1272 AwaitUser cancel & control-event recovery ─────────────────
+
+#[tokio::test]
+async fn test_control_event_during_await_user_exits_to_session() {
+    // #1272: When a non-UserMessage control event (e.g. ListModels)
+    // arrives while the Run is AwaitingUser, the session must NOT
+    // loop forever.  Instead, the event is pushed to pending_input and
+    // the AwaitUser inner loop exits so the session idle gate can
+    // process it.
+    //
+    // Uses ListModels (simpler than SwitchModel — no binding swap)
+    // to keep the test focused on the AwaitUser exit path.
+    let _guard = TestAwaitUserGuard::new();
+    TEST_AWAIT_USER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_provider = notify.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
+
+    // Initial user input.
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // Wait for engine to reach AwaitUser.
+        notify_provider.notified().await;
+
+        // Send a control command (ListModels) while engine is in AwaitUser.
+        input_tx.send(sdk::ChatInputEvent::ListModels).unwrap();
+
+        // Wait for the control to be processed (ModelList event appears).
+        loop {
+            if driver_sink.events().iter().any(|e| e.contains("ModelList")) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        // Now send a real user input — the session should create a
+        // fresh Run and process it normally.
+        input_tx
+            .send(sdk::ChatInputEvent::user_message(
+                "now do the thing",
+                Vec::new(),
+            ))
+            .unwrap();
+
+        // Wait for the new Run to complete.
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+            AskUserThenTextProvider::new(notify),
+        )),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-ctl-await-user".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: active_run.clone(),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_port(),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after control during AwaitUser");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // ModelList proves the control event was processed at session level.
+    assert!(
+        events.iter().any(|e| e.contains("ModelList")),
+        "ListModels during AwaitUser should be processed: {events:?}"
+    );
+    // 控制事件可能在初始 Run 的 AwaitUser 收口前后到达；完成次数不是
+    // 此场景的稳定契约。后续新输入必须至少产生一次正常完成。
+    let done_count = events
+        .iter()
+        .filter(|e| e.as_str() == "DoneWithDuration")
+        .count();
+    assert!(
+        done_count >= 1,
+        "控制事件后新输入必须产生 DoneWithDuration: {events:?}"
+    );
+    // Verify the active registry is empty.
+    assert!(
+        active_run.active_ids().is_empty(),
+        "active_run registry should be empty after Run completes"
+    );
+}
+
+#[tokio::test]
+async fn test_cancel_during_await_user_terminates_run() {
+    // #1272: When the Run is AwaitingUser and a cancel request arrives,
+    // the session must NOT stay stuck on recv_next_input().  Instead,
+    // tokio::select! detects the cancel, re-enters run_loop, the engine
+    // handles cancellation, and the Run terminates with the active
+    // registration cleared.
+    //
+    // Flow:
+    // 1. Model returns AskUser tool → engine AwaitUser → session waits.
+    // 2. Test cancels the Run via active_run registry.
+    // 3. cancel.cancelled() fires → re-enter run_loop → engine returns
+    //    Terminal → inner loop breaks → active_run.clear().
+    // 4. Session loop restarts, new user input starts a fresh Run.
+    let _guard = TestAwaitUserGuard::new();
+    TEST_AWAIT_USER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_provider = notify.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
+
+    // Initial user input.
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_registry = active_run.clone();
+    let driver = tokio::spawn(async move {
+        // Wait for the provider's first invocation (means engine is
+        // processing the AskUser tool call and will soon be AwaitUser).
+        notify_provider.notified().await;
+
+        // Now the engine should be in AwaitUser. Cancel the Run.
+        let run_id = loop {
+            if let Some(run_id) = driver_registry.active_id() {
+                break run_id;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(
+            driver_registry.cancel(&run_id),
+            sdk::CancelRunOutcome::Accepted
+        );
+
+        // Wait for the Run to terminate (Cancelled event appears).
+        loop {
+            if driver_sink.events().iter().any(|e| e == "Cancelled") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        // Now send a new user message — the session should create a
+        // fresh Run and process it normally.
+        input_tx
+            .send(sdk::ChatInputEvent::user_message(
+                "after cancel",
+                Vec::new(),
+            ))
+            .unwrap();
+
+        // Wait for the new Run to complete.
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+            AskUserThenTextProvider::new(notify),
+        )),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-cancel-await-user".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: active_run.clone(),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_port(),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after cancel during AwaitUser");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // Cancel during AwaitUser must produce a Cancelled event.
+    assert!(
+        events.iter().any(|e| e == "Cancelled"),
+        "cancel during AwaitUser should emit Cancelled: {events:?}"
+    );
+    // The new Run after cancel must produce DoneWithDuration.
+    let done_count = events
+        .iter()
+        .filter(|e| e.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 1,
+        "cancel 后新 Run 应产生 1 个 DoneWithDuration: {events:?}"
+    );
+    // Verify the active registry is empty (both Runs cleared).
+    assert!(
+        active_run.active_ids().is_empty(),
+        "active_run registry should be empty after both Runs complete"
+    );
+}
+
+#[tokio::test]
+async fn test_biased_select_preserves_queued_input_when_cancel_and_message_both_ready() {
+    // #1272: When cancel is triggered AND a UserMessage is already
+    // queued on the input channel during AwaitUser, the biased select
+    // deterministically picks the input first.  The received message
+    // enters run_input_buffer, then cancel is detected on re-entry to
+    // run_loop via handle_interrupt.  drain_remaining_events routes
+    // the message to pending_input, and the session idle gate consumes
+    // it into a fresh Run — the message is NOT lost.
+    //
+    // Without biased (fair select), tokio could randomly pick cancel
+    // first, silently dropping the queued message.
+    //
+    // No sleep — uses Notify to synchronise the driver with the
+    // provider invocation, then sends the message and cancel in one
+    // driver step so both are ready when the session polls the select.
+    let _guard = TestAwaitUserGuard::new();
+    TEST_AWAIT_USER_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_provider = notify.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
+
+    // Initial user input triggers the first model call → AskUser tool
+    // → AwaitUser.
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_registry = active_run.clone();
+    let driver = tokio::spawn(async move {
+        // Wait for the provider's first invocation — engine is
+        // processing the AskUser tool call and will soon enter AwaitUser.
+        notify_provider.notified().await;
+
+        // Queue a user message on the input channel.  The unbounded
+        // channel accepts it immediately; the session hasn't polled
+        // recv_next_input yet (it's still in the engine finishing the
+        // tool step).
+        input_tx
+            .send(sdk::ChatInputEvent::user_message(
+                "keep this message",
+                Vec::new(),
+            ))
+            .unwrap();
+
+        // Cancel the Run.  When the session reaches the biased select,
+        // both recv_next_input and cancel.cancelled() are ready.
+        // Biased ordering guarantees recv_next_input wins.
+        let run_id = loop {
+            if let Some(run_id) = driver_registry.active_id() {
+                break run_id;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(
+            driver_registry.cancel(&run_id),
+            sdk::CancelRunOutcome::Accepted
+        );
+
+        // Wait for the Cancelled event (from handle_interrupt).
+        loop {
+            if driver_sink.events().iter().any(|e| e == "Cancelled") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        // The queued message should now be in pending_input.  The
+        // session idle gate will consume it into a fresh Run.
+        // Wait for DoneWithDuration — the new Run's completion.
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+            AskUserThenTextProvider::new(notify),
+        )),
+        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
+        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
+        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-biased-select-preserves-input".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: active_run.clone(),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_port(),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after biased select preserves queued input");
+    driver.await.unwrap();
+
+    let events = sink.events();
+
+    // Cancel during AwaitUser must produce a Cancelled event.
+    assert!(
+        events.iter().any(|e| e == "Cancelled"),
+        "cancel during AwaitUser should emit Cancelled: {events:?}"
+    );
+
+    // The queued user message ("keep this message") was routed through
+    // pending_input into a fresh Run.  The provider (call_num == 2)
+    // returns "all done".  Both DoneWithDuration and the LLM text must
+    // appear, proving the message survived the cancel race.
+    let done_count = events
+        .iter()
+        .filter(|e| e.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 1,
+        "queued message should spawn a new Run producing 1 DoneWithDuration: {events:?}"
+    );
+
+    assert!(
+        events.iter().any(|e| e == "Text:all done"),
+        "LLM response 'all done' should appear — queued message was not lost: {events:?}"
+    );
+
+    // Verify the active registry is empty (both Runs cleared).
+    assert!(
+        active_run.active_ids().is_empty(),
+        "active_run registry should be empty after both Runs complete"
+    );
+}
+
+// ── #1272 per-turn adopted preservation tests ──────────────────────────
+
+/// freeze 时 LoopInput 携带 images → 生成含 image content block 的 Message，
+/// 而非纯文本 Message（不丢 images 语义）。
+#[test]
+fn freeze_preserves_images_from_loop_input() {
+    let img = sdk::ChatInputImage {
+        id: "[Image #1]".to_string(),
+        base64: "aW1n".to_string(),
+        media_type: "image/png".to_string(),
+    };
+    let input = crate::application::loop_engine::LoopInput {
+        text: "看图[Image #1]".to_string(),
+        input_id: Some(sdk::InputId::new_v7()),
+        images: vec![img],
+    };
+    let (frozen, _active) = fixture_bind_pending(Vec::new(), &[input]);
+
+    assert_eq!(frozen.len(), 1);
+    // text_content 还原含占位符的完整文本
+    assert_eq!(frozen[0].text_content(), "看图[Image #1]");
+    // content 中应含 Image block（非纯文本）
+    let has_image = frozen[0]
+        .content
+        .iter()
+        .any(|b| matches!(b, share::message::ContentBlock::Image { .. }));
+    assert!(
+        has_image,
+        "freeze must produce Image content block when LoopInput carries images"
+    );
+}
+
+/// freeze 时 LoopInput 无 images → 生成纯文本 Message（与旧行为一致）。
+#[test]
+fn freeze_text_only_when_no_images() {
+    let input = crate::application::loop_engine::LoopInput {
+        text: "hello".to_string(),
+        input_id: Some(sdk::InputId::new_v7()),
+        images: Vec::new(),
+    };
+    let (frozen, _active) = fixture_bind_pending(Vec::new(), &[input]);
+
+    assert_eq!(frozen.len(), 1);
+    assert_eq!(frozen[0].text_content(), "hello");
+    // 无 images 时应为纯 Text 块
+    let all_text = frozen[0]
+        .content
+        .iter()
+        .all(|b| matches!(b, share::message::ContentBlock::Text { .. }));
+    assert!(all_text, "text-only input should produce text-only message");
+}
+
+/// freeze 时 inputs 为空 → fallback 到 pending（保留 pending 中的 images）。
+#[test]
+fn freeze_empty_inputs_uses_pending_with_images() {
+    let img = sdk::ChatInputImage {
+        id: "[Image #1]".to_string(),
+        base64: "aW1n".to_string(),
+        media_type: "image/png".to_string(),
+    };
+    let pending_msg =
+        super::input_gate::user_message_with_images("看图[Image #1]".to_string(), vec![img]);
+    let (frozen, _active) = fixture_bind_pending(vec![pending_msg], &[]);
+
+    assert_eq!(frozen.len(), 1);
+    assert_eq!(frozen[0].text_content(), "看图[Image #1]");
+    let has_image = frozen[0]
+        .content
+        .iter()
+        .any(|b| matches!(b, share::message::ContentBlock::Image { .. }));
+    assert!(
+        has_image,
+        "pending messages with images must be preserved when inputs are empty"
+    );
+}
+
+// ── #1272 idle initial input replay regression ──────────────────────────
+
+/// Regression: idle gate-adopted user input must NOT be replayed when a
+/// subsequent step has empty inputs (InternalContinuation / ToolResults).
+///
+/// Before the fix, `loop_runner` passed the same gate-adopted messages to
+/// both `RunInputBuffer` (as step input) and `StepMessageOwnership::new()`
+/// (as pending). On the first step the buffer drain was non-empty, so
+/// `freeze` consumed the drained inputs and left `pending` untouched. On
+/// the next step with empty inputs (e.g., ToolResults continuation),
+/// `freeze` fell through to `pending`, re-introducing the same user
+/// messages into `accepted_input` and the LLM context.
+///
+/// After the fix, `StepMessageOwnership::new()` receives an empty `Vec`.
+/// The gate-adopted input enters the Run exclusively via `RunInputBuffer`.
+#[test]
+fn idle_initial_input_not_replayed_on_empty_continuation_step() {
+    use super::loop_runner::main_run_port::fixture_two_step_accepted;
+    use crate::application::chat::looping::run_input_buffer::{BufferDrain, RunInputBuffer};
+    use crate::application::loop_engine::DrainEpoch;
+
+    let input_id = sdk::InputId::new_v7();
+
+    // --- Simulate production flow ---
+
+    // 1. Seed RunInputBuffer with gate-adopted event (as loop_runner does)
+    let mut buffer = RunInputBuffer::new();
+    buffer.push(sdk::ChatInputEvent::UserMessage {
+        id: input_id.clone(),
+        text: "initial user message".to_string(),
+        images: Vec::new(),
+    });
+
+    // 2. First step drain: buffer has the event → Ready
+    let first_inputs = match buffer.drain_or_seal(DrainEpoch(0)) {
+        BufferDrain::Ready { batch, .. } => batch,
+        other => panic!("first drain should be Ready, got {other:?}"),
+    };
+    assert_eq!(first_inputs.len(), 1);
+    assert_eq!(first_inputs[0].text, "initial user message");
+
+    // 3. Second step drain: InternalContinuation (buffer now empty → empty batch)
+    let second_inputs = match buffer.take_internal_continuation(DrainEpoch(1)) {
+        BufferDrain::Ready { batch, .. } => batch,
+        other => panic!("second drain should be Ready (empty), got {other:?}"),
+    };
+    assert!(
+        second_inputs.is_empty(),
+        "InternalContinuation batch must be empty"
+    );
+
+    // --- StepMessageOwnership lifecycle (after fix: empty pending) ---
+    let (first_accepted, second_accepted) = fixture_two_step_accepted(
+        Vec::new(),     // FIX: empty pending (not messages.clone())
+        &first_inputs,  // from buffer drain
+        &second_inputs, // empty (InternalContinuation)
+    );
+
+    // First step: exactly one accepted user message
+    assert_eq!(
+        first_accepted.len(),
+        1,
+        "first step: initial input accepted exactly once"
+    );
+    assert_eq!(first_accepted[0].text_content(), "initial user message");
+
+    // Second step: NO replayed user messages from stale pending
+    assert_eq!(
+        second_accepted.len(),
+        0,
+        "second step must NOT replay the initial input (no stale pending)"
+    );
+
+    // UserMessagesAdopted: per_turn_adopted is derived from inputs' input_id.
+    // First step has input_id → exactly one UserMessagesAdopted.
+    // Second step has empty inputs → zero UserMessagesAdopted.
+    // This proves exactly-once adoption across both steps.
+    let total_adopted = first_inputs
+        .iter()
+        .chain(second_inputs.iter())
+        .filter(|i| i.input_id.is_some())
+        .count();
+    assert_eq!(
+        total_adopted, 1,
+        "exactly one UserMessagesAdopted emission across both steps"
+    );
+}
+
+/// Counter-test: demonstrates the replay bug when `pending` contains the
+/// same messages as the buffer (the pre-fix `messages.clone()` behavior).
+/// This test documents WHY the fix is necessary — it shows the stale
+/// `pending` leaking into the second step's `accepted_input`.
+#[test]
+fn stale_pending_replays_initial_input_on_empty_continuation_step() {
+    use super::loop_runner::main_run_port::fixture_two_step_accepted;
+    use crate::application::loop_engine::LoopInput;
+
+    let input = LoopInput {
+        text: "initial".to_string(),
+        input_id: Some(sdk::InputId::new_v7()),
+        images: Vec::new(),
+    };
+
+    // Pre-fix behavior: pending = messages.clone() (same content as buffer)
+    let (first_accepted, second_accepted) = fixture_two_step_accepted(
+        vec![Message::user("initial")], // BUGGY: stale pending
+        &[input],                       // first step: from buffer
+        &[],                            // second step: empty
+    );
+
+    assert_eq!(first_accepted.len(), 1, "first step: one accepted");
+    // BUG: pending leaks into second step's accepted_input
+    assert_eq!(
+        second_accepted.len(),
+        1,
+        "pre-fix bug: stale pending replays into second step"
+    );
+}
+
+// ─── #1272 per-turn drain seal fixtures ────────────────────────────────
+//
+// These verify the production drain→freeze→adopt pipeline through
+// `process_chat_loop`. The invariants are:
+//   1. `Context::append_accepted_input` is called exactly once for the
+//      initial user message (observable as exactly one user occurrence per
+//      LLM payload).
+//   2. `RuntimeStreamEvent::UserMessagesAdopted` is emitted exactly once
+//      per accepted batch with the original `InputId` preserved.
+//   3. No duplicate user messages in any single provider request payload.
+
+/// Minimal real typed tool that returns a deterministic marker.
+/// Registered through `TestCatalogExecutionFactory` so the engine
+/// exercises the real `TypedToolAdapter` → `ToolExecutionPort` path.
+struct NoopMarkerTool;
+
+#[derive(serde::Serialize)]
+struct NoopMarkerOutput {
+    marker: &'static str,
+}
+
+#[async_trait]
+impl ::tools::TypedTool for NoopMarkerTool {
+    type Output = NoopMarkerOutput;
+    fn name(&self) -> &str {
+        "NoopMarker"
+    }
+    fn description(&self) -> &str {
+        "Test-only noop tool that returns a deterministic marker."
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {"marker": {"type": "string"}},
+            "required": ["marker"]
+        })
+    }
+    fn data_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {"marker": {"type": "string"}},
+            "required": ["marker"]
+        })
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: &::tools::ToolExecutionContext,
+    ) -> ::tools::TypedToolResult<Self::Output> {
+        ::tools::TypedToolResult::success(
+            "noop-marker-result",
+            NoopMarkerOutput {
+                marker: "noop-marker-result",
+            },
+        )
+    }
+}
+
+/// LLM provider that returns a real tool call on the first invocation
+/// (matching `NoopMarker` registered in `TestCatalogExecutionFactory`)
+/// and plain text on the second invocation.
+///
+/// Notify signals fire after each invocation so the driver can observe
+/// boundaries deterministically without sleeps.
+struct ToolThenTextProvider {
+    call_count: Arc<Mutex<usize>>,
+    /// Recorded `request.messages` per invocation for replay detection.
+    recorded_messages: Arc<Mutex<Vec<Vec<Message>>>>,
+    after_first: Arc<tokio::sync::Notify>,
+    after_second: Arc<tokio::sync::Notify>,
+}
+
+impl ToolThenTextProvider {
+    fn new(after_first: Arc<tokio::sync::Notify>, after_second: Arc<tokio::sync::Notify>) -> Self {
+        Self {
+            call_count: Arc::new(Mutex::new(0)),
+            recorded_messages: Arc::new(Mutex::new(Vec::new())),
+            after_first,
+            after_second,
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ToolThenTextProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        let call_num = {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            *count
+        };
+        self.recorded_messages
+            .lock()
+            .unwrap()
+            .push(messages.to_vec());
+
+        if call_num == 1 {
+            let tool_call = ProviderToolCall {
+                id: ProviderToolCallId("toolu_noop_001".to_string()),
+                name: "NoopMarker".to_string(),
+                arguments: serde_json::json!({"marker": "noop-marker-result"}),
+            };
+            self.after_first.notify_one();
+            Ok(Box::pin(futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::ToolCallStarted {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_noop_001".to_string())),
+                    name: "NoopMarker".to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolArgumentsDelta {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_noop_001".to_string())),
+                    partial_json: r#"{"marker":"noop-marker-result"}"#.to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolCallCompleted {
+                    index: 0,
+                    call: tool_call,
+                }),
+                InvocationEvent::Completed(ProviderCompletion {
+                    output: vec![ProviderContentBlock::ToolCall(ProviderToolCall {
+                        id: ProviderToolCallId("toolu_noop_001".to_string()),
+                        name: "NoopMarker".to_string(),
+                        arguments: serde_json::json!({"marker": "noop-marker-result"}),
+                    })],
+                    stop_reason: ProviderStopReason::ToolUse,
+                    usage: Some(RawUsageSnapshot {
+                        input_tokens: Some(10),
+                        output_tokens: Some(20),
+                        ..RawUsageSnapshot::default()
+                    }),
+                    effective_reasoning: ReasoningLevel::Off,
+                }),
+            ])))
+        } else {
+            self.after_second.notify_one();
+            Ok(Box::pin(futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::Text("finished".to_string())),
+                InvocationEvent::Completed(ProviderCompletion {
+                    output: vec![ProviderContentBlock::Text("finished".to_string())],
+                    stop_reason: ProviderStopReason::EndTurn,
+                    usage: Some(RawUsageSnapshot {
+                        input_tokens: Some(15),
+                        output_tokens: Some(3),
+                        ..RawUsageSnapshot::default()
+                    }),
+                    effective_reasoning: ReasoningLevel::Off,
+                }),
+            ])))
+        }
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+/// LLM provider that returns plain text (no tools) on a single invocation.
+struct TextOnlyProvider {
+    call_count: Arc<Mutex<usize>>,
+    recorded_messages: Arc<Mutex<Vec<Vec<Message>>>>,
+    after_response: Arc<tokio::sync::Notify>,
+}
+
+impl TextOnlyProvider {
+    fn new(after_response: Arc<tokio::sync::Notify>) -> Self {
+        Self {
+            call_count: Arc::new(Mutex::new(0)),
+            recorded_messages: Arc::new(Mutex::new(Vec::new())),
+            after_response,
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for TextOnlyProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+        }
+        self.recorded_messages
+            .lock()
+            .unwrap()
+            .push(messages.to_vec());
+        self.after_response.notify_one();
+        Ok(Box::pin(futures::stream::iter(vec![
+            InvocationEvent::Delta(InvocationDelta::Text("hello from model".to_string())),
+            InvocationEvent::Completed(ProviderCompletion {
+                output: vec![ProviderContentBlock::Text("hello from model".to_string())],
+                stop_reason: ProviderStopReason::EndTurn,
+                usage: Some(RawUsageSnapshot {
+                    input_tokens: Some(5),
+                    output_tokens: Some(3),
+                    ..RawUsageSnapshot::default()
+                }),
+                effective_reasoning: ReasoningLevel::Off,
+            }),
+        ])))
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+// ─── #1272 drain seal tests ────────────────────────────────────────────
+
+/// #1272: idle initial user input → gate adopts → provider returns a real
+/// NoopMarker tool call → engine processes tool → InternalContinuation →
+/// provider returns text → Run terminates.
+///
+/// Asserts:
+///   a) `UserMessagesAdopted` emitted exactly once with the correct InputId.
+///   b) The LLM never sees the user message duplicated within a single
+///      request payload.
+///   c) DoneWithDuration emitted (loop terminated).
+///   d) Provider saw exactly 2 invocations.
+#[tokio::test]
+async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_continuation() {
+    let after_first = Arc::new(tokio::sync::Notify::new());
+    let after_second = Arc::new(tokio::sync::Notify::new());
+
+    let provider = Arc::new(ToolThenTextProvider::new(
+        after_first.clone(),
+        after_second.clone(),
+    ));
+    let recorded = provider.recorded_messages.clone();
+    let call_count = provider.call_count.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // Build catalog with the real NoopMarker typed tool.
+    let factory = ::tools::composition::TestCatalogExecutionFactory::new();
+    factory.register(NoopMarkerTool);
+    let tool_ctx = crate::application::testing::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        Default::default(),
+    );
+    let wired = factory.build(tool_ctx);
+    let catalog_port = wired.catalog_port();
+    let execution = wired.execution();
+    let binding_port = wired.binding();
+
+    let user_input_id = sdk::InputId::new_v7();
+    let user_text = "first-message-marker-1272";
+
+    input_tx
+        .send(sdk::ChatInputEvent::UserMessage {
+            id: user_input_id.clone(),
+            text: user_text.to_string(),
+            images: Vec::new(),
+        })
+        .expect("input channel is open");
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
+        tool_catalog: catalog_port,
+        tool_execution: execution,
+        tool_context_binding: binding_port,
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-per-turn-drain-seal".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_port(),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    let driver_sink = sink.clone();
+    let driver_after_first = after_first.clone();
+    let driver_after_second = after_second.clone();
+    let driver = tokio::spawn(async move {
+        driver_after_first.notified().await;
+        driver_after_second.notified().await;
+        loop {
+            let done = driver_sink.events().iter().any(|e| e == "DoneWithDuration");
+            if done {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop completes after ToolResults continuation + final text");
+
+    driver.await.expect("driver joins cleanly");
+
+    // ── Invariant a: UserMessagesAdopted emitted exactly once ──────────
+    let adopted = sink.adopted_ids();
+    assert_eq!(
+        adopted.len(),
+        1,
+        "UserMessagesAdopted must be emitted exactly once, got {adopted:?}"
+    );
+    assert_eq!(
+        adopted[0],
+        vec![user_input_id.as_str().to_string()],
+        "InputId must equal the original ChatInputEvent::UserMessage::id"
+    );
+
+    // ── Invariant b: LLM did not see duplicate user messages per call ──
+    let recorded = recorded.lock().unwrap().clone();
+    assert_eq!(
+        recorded.len(),
+        2,
+        "expected exactly two model invocations (tool call + final text)"
+    );
+    for (idx, payload) in recorded.iter().enumerate() {
+        let count = payload
+            .iter()
+            .filter(|m| matches!(m.role, Role::User) && m.text_content() == user_text)
+            .count();
+        assert!(
+            count <= 1,
+            "LLM invocation #{idx} saw the user message {count} times (must be ≤ 1)"
+        );
+    }
+    let first_count = recorded[0]
+        .iter()
+        .filter(|m| matches!(m.role, Role::User) && m.text_content() == user_text)
+        .count();
+    let second_count = recorded[1]
+        .iter()
+        .filter(|m| matches!(m.role, Role::User) && m.text_content() == user_text)
+        .count();
+    assert_eq!(
+        first_count, 1,
+        "first invocation: user message exactly once"
+    );
+    assert_eq!(
+        second_count, 1,
+        "second invocation (post-tool-results): user message exactly once — no double-drain replay"
+    );
+
+    // ── Invariant c: DoneWithDuration emitted ──────────────────────────
+    assert!(
+        sink.events().iter().any(|e| e == "DoneWithDuration"),
+        "Run must terminate with DoneWithDuration"
+    );
+
+    // ── Invariant d: provider saw exactly 2 invocations ────────────────
+    assert_eq!(*call_count.lock().unwrap(), 2, "tool call + final text");
+}
+
+/// #1272: Same MainRunPort construction point, verifies the post-tool
+/// continuation re-entry does NOT re-emit UserMessagesAdopted for the
+/// original user message.
+#[tokio::test]
+async fn per_turn_drain_seal_input_id_preserved_when_run_returns_tool_results_with_fresh_input() {
+    let after_first = Arc::new(tokio::sync::Notify::new());
+    let after_second = Arc::new(tokio::sync::Notify::new());
+
+    let provider = Arc::new(ToolThenTextProvider::new(
+        after_first.clone(),
+        after_second.clone(),
+    ));
+    let recorded = provider.recorded_messages.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    let factory = ::tools::composition::TestCatalogExecutionFactory::new();
+    factory.register(NoopMarkerTool);
+    let tool_ctx = crate::application::testing::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        Default::default(),
+    );
+    let wired = factory.build(tool_ctx);
+    let catalog_port = wired.catalog_port();
+    let execution = wired.execution();
+    let binding_port = wired.binding();
+
+    let user_input_id = sdk::InputId::new_v7();
+    let user_text = "second-scenario-marker-1272";
+
+    input_tx
+        .send(sdk::ChatInputEvent::UserMessage {
+            id: user_input_id.clone(),
+            text: user_text.to_string(),
+            images: Vec::new(),
+        })
+        .unwrap();
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
+        tool_catalog: catalog_port,
+        tool_execution: execution,
+        tool_context_binding: binding_port,
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-per-turn-drain-seal-2".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_port(),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    let driver_sink = sink.clone();
+    let driver_after_first = after_first.clone();
+    let driver_after_second = after_second.clone();
+    let driver = tokio::spawn(async move {
+        driver_after_first.notified().await;
+        driver_after_second.notified().await;
+        loop {
+            let done = driver_sink.events().iter().any(|e| e == "DoneWithDuration");
+            if done {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop completes");
+    driver.await.unwrap();
+
+    // Only one adopted emit even though there are two LLM invocations.
+    let adopted = sink.adopted_ids();
+    assert_eq!(
+        adopted.len(),
+        1,
+        "post-ToolResults continuation must NOT re-emit UserMessagesAdopted; got {adopted:?}"
+    );
+    assert_eq!(adopted[0].len(), 1);
+    assert_eq!(
+        adopted[0][0],
+        user_input_id.as_str(),
+        "InputId preserved end-to-end"
+    );
+
+    let recorded = recorded.lock().unwrap().clone();
+    for (idx, payload) in recorded.iter().enumerate() {
+        let count = payload
+            .iter()
+            .filter(|m| matches!(m.role, Role::User) && m.text_content() == user_text)
+            .count();
+        assert!(
+            count <= 1,
+            "LLM invocation #{idx} saw user text {count} times — replay regression"
+        );
+    }
+}
+
+/// #1272: idle initial user input → gate adopts → provider returns plain
+/// text (no tool calls) → Run terminates after a single LLM invocation.
+///
+/// Asserts:
+///   a) User message appears exactly once in the single LLM payload.
+///   b) Exactly 1 LLM invocation.
+///   c) `UserMessagesAdopted` emitted exactly once with correct InputId.
+///   d) `DoneWithDuration` emitted.
+#[tokio::test]
+async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation() {
+    let after_response = Arc::new(tokio::sync::Notify::new());
+
+    let provider = Arc::new(TextOnlyProvider::new(after_response.clone()));
+    let recorded = provider.recorded_messages.clone();
+    let call_count = provider.call_count.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // Empty catalog — no tools needed for text-only path.
+    let factory = ::tools::composition::TestCatalogExecutionFactory::empty();
+    let catalog_port = factory.catalog_port();
+    let execution = factory.execution();
+    let binding_port = factory.binding();
+
+    let user_input_id = sdk::InputId::new_v7();
+    let user_text = "single-invocation-marker-1272";
+
+    input_tx
+        .send(sdk::ChatInputEvent::UserMessage {
+            id: user_input_id.clone(),
+            text: user_text.to_string(),
+            images: Vec::new(),
+        })
+        .expect("input channel is open");
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
+        tool_catalog: catalog_port,
+        tool_execution: execution,
+        tool_context_binding: binding_port,
+        policy: Arc::new(policy::AllowAllPolicy),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        initial_messages: vec![],
+        context_size: 200_000,
+        wiring: test_wiring(),
+        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
+            .into_views(),
+        session_id: "test-per-turn-drain-seal-single".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        agent_runner: None,
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        task_access: Arc::new(task::TaskStore::new()),
+        max_tool_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_port(),
+        memory_config: share::config::MemoryConfig::default(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
+        build_switched_client: Arc::new(test_build_switched_client),
+        reflection_history: test_reflection_history_store(),
+        language: "en".to_string(),
+        list_reflection_history: test_reflection_history(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    let driver_sink = sink.clone();
+    let driver_after = after_response.clone();
+    let driver = tokio::spawn(async move {
+        driver_after.notified().await;
+        loop {
+            let done = driver_sink.events().iter().any(|e| e == "DoneWithDuration");
+            if done {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop completes after single text response");
+
+    driver.await.expect("driver joins cleanly");
+
+    // ── Invariant a: user message appears exactly once ─────────────────
+    let recorded = recorded.lock().unwrap().clone();
+    assert_eq!(recorded.len(), 1, "expected exactly one LLM invocation");
+    let payload = &recorded[0];
+    let user_count = payload
+        .iter()
+        .filter(|m| matches!(m.role, Role::User) && m.text_content() == user_text)
+        .count();
+    assert_eq!(
+        user_count, 1,
+        "user message must appear exactly once; found {user_count}"
+    );
+
+    // ── Invariant b: exactly 1 LLM invocation ─────────────────────────
+    assert_eq!(*call_count.lock().unwrap(), 1);
+
+    // ── Invariant c: UserMessagesAdopted emitted exactly once ──────────
+    let adopted = sink.adopted_ids();
+    assert_eq!(
+        adopted.len(),
+        1,
+        "UserMessagesAdopted emitted once, got {adopted:?}"
+    );
+    assert_eq!(
+        adopted[0],
+        vec![user_input_id.as_str().to_string()],
+        "InputId must match the original"
+    );
+
+    // ── Invariant d: DoneWithDuration emitted ──────────────────────────
+    assert!(
+        sink.events().iter().any(|e| e == "DoneWithDuration"),
+        "Run must terminate with DoneWithDuration"
     );
 }

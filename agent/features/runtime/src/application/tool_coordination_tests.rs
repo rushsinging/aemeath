@@ -265,6 +265,24 @@ fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
 }
 
 #[test]
+fn complete_cancelled_tool_round_preserves_finished_results_and_fills_missing_calls() {
+    let calls = vec![call("Allowed", 0), call("Allowed", 1)];
+    let completed = crate::application::agent::ToolExecution::new(
+        &calls[0],
+        tools::ToolOutcome::new("finished", serde_json::Value::Null, Vec::new()),
+    );
+
+    let results = complete_cancelled_tool_round(&calls, vec![completed]);
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].provider_id, "provider-0");
+    assert_eq!(results[0].outcome.text, "finished");
+    assert_eq!(results[1].provider_id, "provider-1");
+    assert!(results[1].outcome.is_error);
+    assert!(results[1].outcome.text.contains("cancelled"));
+}
+
+#[test]
 fn restore_tool_call_order_uses_original_call_order() {
     let calls = vec![call("Allowed", 0), call("Allowed", 1), call("Allowed", 2)];
     let results = vec![

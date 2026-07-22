@@ -100,6 +100,7 @@ impl TypedTool for BashTool {
             .arg("-c")
             .arg(&script)
             .current_dir(&path_base)
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)

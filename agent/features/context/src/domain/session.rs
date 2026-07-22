@@ -11,8 +11,9 @@ mod types;
 
 pub use chat_chain::{ChatChain, ChatSegment, SegmentKind};
 pub use envelope::{
-    CanonicalSession, CommittedStep, DecodedSession, SessionCodec, SessionCodecError,
-    SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
+    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
+    CommittedRunStep, CommittedStep, DecodedSession, FinalizedOutcomeProjection, RunStepCursor,
+    SessionCodec, SessionCodecError, SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };
 pub use management::{
     SessionListEntry, SessionManagementError, SessionMetadataUpdate, SessionResumeProjection,

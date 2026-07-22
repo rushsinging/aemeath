@@ -32,15 +32,16 @@ pub mod usage_sink;
 pub mod workspace_port;
 
 pub use context_port::{
-    AppendReceipt, CalendarDate, CompactOutcome, CompactRequest, CompactResult, CompactSkipReason,
-    CompactTrigger, CompactionDecision, ContentFingerprint, ContextAppend, ContextAppendError,
-    ContextMessage, ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow,
-    DecisionReason, FinalizeCause, Language, ManualCompactRequest, RunStepId, SessionId,
-    SessionRevision, StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget,
-    ToolOutcomeKind, Urgency,
+    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
+    CompactRequest, CompactResult, CompactSkipReason, CompactTrigger, CompactionDecision,
+    ContentFingerprint, ContextAppend, ContextAppendError, ContextMessage, ContextPort,
+    ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
+    FinalizeCause, Language, ManualCompactRequest, RunStepId, SessionId, SessionRevision,
+    StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, ToolOutcomeKind,
+    Urgency,
 };
 pub use event_sink::EventSink;
-pub use hook::api::{HookInvocation, HookOutcome, HookPoint, HookPort};
+pub use hook::{HookInvocation, HookOutcome, HookPoint, HookPort};
 pub use input_buffer::InputBuffer;
 pub(crate) use input_buffer::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort};
 pub use policy_port::{

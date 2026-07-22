@@ -87,14 +87,11 @@ TOOLS_DOMAIN_FACADE = {
 }
 TOOLS_ADAPTER_FACADE = {
     "is_readonly_command",
-    "wire_tools",
-    "DefaultToolCatalogGateway",
     "McpConnectionManager",
     "McpServerConfig",
     "McpToolDef",
     "McpTransportKind",
     "McpTool",
-    "ToolCatalogGateway",
 }
 TOOLS_ROOT_ACCESS_ALLOW = {"LOG_TARGET", "types"} | TOOLS_DOMAIN_FACADE | TOOLS_ADAPTER_FACADE | {
     "format_tool_input_error",
@@ -178,7 +175,9 @@ ROOT_ACCESS_ALLOW = {
         "ProviderBuildSpec",
         "ProviderFactory",
         "ProviderPort",
-        "RuntimeBootstrapDependencies",        "RuntimeConfigDependencies",
+        "RuntimeBootstrapDependencies", "RuntimeToolAssemblyDependencies",
+        "ToolResultMaterializer", "ToolResultMaterializationPolicy", "ActiveRunRegistry",
+        "AtomicBlobToolResultStore",
         "UsageSink",
         "from_args_with_workspace",
     },
@@ -188,13 +187,24 @@ ROOT_ACCESS_ALLOW = {
           "PolicyRequest", "PolicyRequestError", "StandardPolicy",
       },
     "workflow": set(),
+    # guard-registry:policy.hook.crate-root-facade
+    "hook": {
+        "Dispatcher", "MAX_ATTEMPTS", "classify_directive", "ClassifyError", "HookClass",
+        "HookCommand", "HookDispatchContext", "HookDirective",
+        "HookDisplayMessage", "HookDisplayMessageKind", "HookExecution",
+        "HookExecutionStatus", "HookFailurePolicy", "HookInvocation", "HookMatcher",
+        "HookOutcome", "HookPoint", "HookPointMetadata", "HookPort", "HookReason",
+        "HookSubscription", "InstructionsInput", "PermissionInput", "PostToolBatchInput",
+        "PostToolUseFailureInput", "PostToolUseInput", "PreToolUseInput", "ProtocolViolation",
+        "SubRunInput", "SubRunStopInput", "SubscriptionError", "TaskInput", "StopInput",
+        "build_dispatcher",
+    },
     "project": PROJECT_ROOT_ACCESS_ALLOW,
     "tools": TOOLS_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
     "context": {
         "compact", "context_port", "domain", "guidance", "session", "skill",
-        "delete_session_entry", "export_session_bytes", "import_session_bytes", "isolated_context",
-        "list_session_entries", "update_session_metadata_entry", "SessionListEntry",
+        "isolated_context", "SessionManagementPort", "SessionListEntry",
         "SessionManagementError", "SessionMetadataUpdate", "SessionResumeProjection",
         "ProductionMainContextFactory", "NoOpCanonicalSessionWriter",
         "test_support", "wire_main_session", "BoundMainRun", "MainSessionDependencies",
@@ -507,7 +517,15 @@ def check_tools_facade() -> list[str]:
         return {item.strip().split(" as ", 1)[-1].strip() for item in match.group(1).split(",") if item.strip()}
 
     actual_domain = braced_names("domain")
-    actual_adapters = braced_names("adapters::wiring")
+    actual_adapters = {
+        name
+        for name in TOOLS_ADAPTER_FACADE
+        if re.search(
+            rf"\bpub\s+use\s+adapters::[^;]*\b{re.escape(name)}\b",
+            text,
+            re.S,
+        )
+    }
     supplemental = {
         "format_tool_input_error",
         "strip_runtime_meta",

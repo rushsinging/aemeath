@@ -307,11 +307,16 @@ impl ConversationModel {
             .retain(|it| !matches!(it, OutputTimelineItem::QueuedUserMessage { .. }));
         for msg in queued {
             let id = self.next_block_id("queued");
-            let input_id = msg
-                .input_id
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(sdk::InputId::new_v7);
+            let input_id = match msg.input_id.as_ref() {
+                Some(id) => id.clone(),
+                None => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "[tui] sync_queued_from_runtime: ChatMessage missing input_id, not projecting to queue"
+                    );
+                    continue;
+                }
+            };
             let text = msg.text_content().to_string();
             self.queued_submissions.push(QueuedSubmission::new(
                 id.clone(),

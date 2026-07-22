@@ -3,6 +3,8 @@ mod ask_user_tests;
 #[cfg(test)]
 mod catalog_execution_contract_tests;
 #[cfg(test)]
+mod command_tests;
+#[cfg(test)]
 mod skill_filesystem_tests;
 #[cfg(test)]
 mod skill_not_tool_contract_tests;
@@ -43,7 +45,6 @@ pub mod read_mcp_resource;
 // 构建的未用告警。端口与 PL 类型已在 domain.rs / lib.rs 正式 re-export。
 #[allow(dead_code)]
 pub mod skill_filesystem;
-pub mod skill_tool;
 pub mod task_create;
 pub mod task_get;
 pub mod task_list;
@@ -62,9 +63,6 @@ pub(crate) mod test_support_tests;
 /// core/mod.rs — 核心流程（指挥官）：Tool 注册编排
 pub mod registry;
 pub mod tool_registry;
-
-/// gateway/OHS：工具目录与注册接线
-pub mod wiring;
 
 #[cfg(feature = "test-harness")]
 pub mod test_harness;

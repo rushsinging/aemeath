@@ -191,6 +191,7 @@ impl ContextPromptSource for SkillPromptSource {
                 kind: "skills".to_string(),
                 content,
                 cacheable: true,
+                cache_break: false,
             };
             match discipline_idx {
                 Some(idx) => cacheable.insert(idx + 1, skills_block),

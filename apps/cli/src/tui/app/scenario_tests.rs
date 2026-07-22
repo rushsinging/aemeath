@@ -9,3 +9,4 @@ mod interaction;
 mod p1;
 mod snapshot;
 mod startup;
+mod stop_hook_feedback;

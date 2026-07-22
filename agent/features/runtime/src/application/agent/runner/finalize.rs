@@ -1,5 +1,5 @@
-use hook::api::HookRunner;
-use std::path::Path;
+use hook::{HookDispatchContext, HookInvocation, HookPort, SubRunStopInput};
+use std::sync::Arc;
 use std::time::Duration;
 use tools::{AgentProgressEvent, AgentProgressKind};
 
@@ -43,14 +43,14 @@ pub fn log_agent_outcome(outcome: &AgentRunOutcome, session_id: &str) {
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn finalize_sub_agent(
     outcome: &AgentRunOutcome,
-    hook_runner: &HookRunner,
+    hook_port: &Arc<dyn HookPort>,
+    workspace_root: &std::path::Path,
     session_id: &str,
     prompt: &str,
     system: &str,
     model_spec: Option<&str>,
     output: &str,
     progress_sink: Option<&std::sync::Arc<dyn tools::ProgressSink>>,
-    workspace_root: &Path,
 ) {
     log_agent_outcome(outcome, session_id);
 
@@ -61,29 +61,30 @@ pub(crate) async fn finalize_sub_agent(
             | AgentRunStatus::TimedOut
             | AgentRunStatus::ApiError(_)
     );
-    let hook_results = hook_runner
-        .on_subagent_stop(
-            prompt,
-            system,
-            model_spec,
-            output,
-            outcome.turns,
-            is_error,
-            workspace_root,
+    let outcome_dispatch = hook_port
+        .dispatch_at(
+            HookInvocation::SubRunStop(SubRunStopInput {
+                prompt: prompt.to_string(),
+                system: system.to_string(),
+                model_spec: model_spec.map(|s| s.to_string()),
+                result: output.to_string(),
+                turns: outcome.turns,
+                is_error,
+            }),
+            HookDispatchContext::new(workspace_root),
+            &tokio_util::sync::CancellationToken::new(),
         )
         .await;
 
-    for (_, _, json_output) in &hook_results {
-        if let Some(ref output) = json_output {
-            if let Some(ref sys_msg) = output.system_message {
-                if let Some(sink) = progress_sink {
-                    sink.emit(AgentProgressEvent {
-                        sequence: outcome.turns,
-                        kind: AgentProgressKind::Message {
-                            text: format!("[hook] {sys_msg}"),
-                        },
-                    });
-                }
+    for msg in &outcome_dispatch.messages {
+        if let hook::HookDisplayMessageKind::SystemMessage = msg.kind {
+            if let Some(sink) = progress_sink {
+                sink.emit(AgentProgressEvent {
+                    sequence: outcome.turns,
+                    kind: AgentProgressKind::Message {
+                        text: format!("[hook] {}", msg.text),
+                    },
+                });
             }
         }
     }

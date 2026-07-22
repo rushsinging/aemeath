@@ -137,6 +137,28 @@ async fn dynamic_mcp_style_tool_enters_main_catalog_and_receives_invocation_auth
 
     assert!(outcome.is_success());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    ports
+        .backing
+        .sync_dynamic_membership(&[], &[ToolName::new("mcp__demo__read")]);
+    assert!(ports
+        .catalog
+        .snapshot(
+            &RegistryScopeName::new("main"),
+            &ToolProfileName::new("full"),
+        )
+        .unwrap()
+        .find(&ToolName::new("mcp__demo__read"))
+        .is_none());
+    assert_unavailable(
+        ports
+            .execution
+            .execute(
+                invocation(&ports.scope, "mcp__demo__read", json!({"value":"again"})),
+                &ManualCancellation::default(),
+            )
+            .await,
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -277,14 +299,21 @@ async fn run_contract(factory: ContractFactory) {
     );
     assert_eq!(ports.calls.load(Ordering::SeqCst), 1);
 
-    assert!(ports
+    let success = ports
         .execution
         .execute(
             invocation(&ports.scope, "Counting", json!({"value":"ok"})),
             &cancellation,
         )
-        .await
-        .is_success());
+        .await;
+    assert!(matches!(
+        success,
+        ExecutionOutcome::Success(ref result)
+            if result.content.len() == 1
+                && result.content[0].text == "ok"
+                && result.data.is_none()
+                && result.metadata.duration_ms.is_none()
+    ));
     assert_eq!(ports.calls.load(Ordering::SeqCst), 2);
 
     let suspended = ports
@@ -332,6 +361,8 @@ async fn run_contract(factory: ContractFactory) {
         ExecutionOutcome::Failure(ref failure)
             if failure.kind
                 == crate::domain::published_language::ToolErrorKind::ResourceUnavailable
+                && failure.retryable
+                && failure.content.len() == 1
     ));
     assert_eq!(ports.calls.load(Ordering::SeqCst), 2);
 

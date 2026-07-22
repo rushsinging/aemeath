@@ -1,8 +1,10 @@
 use context::adapters::decode_session;
 use context::domain::session::{
-    CanonicalSession, CommittedStep, SessionCodec, SessionCodecError, SnapshotState,
+    AcceptedInputProjection, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
+    FinalizedOutcomeProjection, SessionCodec, SessionCodecError, SnapshotState,
     CURRENT_SESSION_SCHEMA_VERSION,
 };
+use context::domain::{FinalizeCause, StepReceipt, ToolOutcomeKind};
 use serde_json::json;
 use share::message::Message;
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
@@ -14,6 +16,9 @@ fn current_envelope_round_trips_canonically() {
     let decoded = decode_session(&bytes).unwrap();
     assert_eq!(decoded.session, session);
     assert!(!String::from_utf8(bytes).unwrap().contains("\"messages\""));
+    assert!(!String::from_utf8(SessionCodec::encode(&session).unwrap())
+        .unwrap()
+        .contains("\"chats\""));
 }
 
 #[test]
@@ -36,6 +41,233 @@ fn legacy_messages_upgrade_to_single_normal_chat() {
     assert_eq!(decoded.session.metadata.title.as_deref(), Some("old"));
     assert!(matches!(decoded.session.tasks, SnapshotState::Missing));
     assert!(matches!(decoded.session.workspace, SnapshotState::Missing));
+}
+
+#[test]
+fn structured_projection_flattens_steps_once() {
+    let mut session = CanonicalSession::fixture("structured");
+    session.run_slices = vec![
+        CommittedRunSlice::new(
+            "run-a",
+            vec![CommittedRunStep::accepted_only(
+                "step-a",
+                AcceptedInputProjection::new(vec![Message::user("accepted-a")], "fp-a", 1),
+            )],
+        ),
+        CommittedRunSlice::new(
+            "run-b",
+            vec![CommittedRunStep::compatibility_outcome_only(
+                "step-b",
+                vec![Message::user("outcome-b")],
+            )],
+        ),
+    ];
+
+    let messages = session.structured_messages();
+    let texts: Vec<_> = messages
+        .iter()
+        .map(|message| message.text_content())
+        .collect();
+    assert_eq!(texts, ["accepted-a", "outcome-b"]);
+}
+
+#[test]
+fn accepted_only_step_round_trips_without_outcome_or_runtime_state() {
+    let mut session = CanonicalSession::fixture("accepted-only");
+    session.run_slices = vec![CommittedRunSlice::new(
+        "run",
+        vec![CommittedRunStep::accepted_only(
+            "step",
+            AcceptedInputProjection::new(vec![Message::user("durable input")], "fp", 1),
+        )],
+    )];
+    session.revision = 1;
+
+    let decoded = decode_session(&SessionCodec::encode(&session).unwrap()).unwrap();
+    let step = &decoded.session.run_slices[0].steps[0];
+    assert_eq!(
+        step.accepted_input.as_ref().unwrap().messages[0].text_content(),
+        "durable input"
+    );
+    assert!(step.outcome.is_none());
+    assert_eq!(
+        decoded
+            .session
+            .structured_messages()
+            .iter()
+            .map(|message| message.text_content())
+            .collect::<Vec<_>>(),
+        ["durable input"]
+    );
+}
+
+#[test]
+fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
+    let mut session = CanonicalSession::fixture("finalized-outcome");
+    session.run_slices = vec![CommittedRunSlice::new(
+        "run",
+        vec![CommittedRunStep {
+            step_id: "step".to_string(),
+            accepted_input: Some(AcceptedInputProjection::new(
+                vec![Message::user("accepted")],
+                "input-fingerprint",
+                1,
+            )),
+            outcome: Some(FinalizedOutcomeProjection {
+                finalize_cause: FinalizeCause::UserCancelledStep,
+                messages: vec![Message::user("partial assistant")],
+                receipts: vec![StepReceipt::agent(
+                    "agent-call",
+                    0,
+                    ToolOutcomeKind::CancellationUnconfirmed,
+                )],
+                api_input_tokens: Some(42),
+                fingerprint: "outcome-fingerprint".to_string(),
+                committed_revision: 2,
+            }),
+        }],
+    )];
+    session.revision = 2;
+
+    let decoded = decode_session(&SessionCodec::encode(&session).unwrap()).unwrap();
+    let outcome = decoded.session.run_slices[0].steps[0]
+        .outcome
+        .as_ref()
+        .unwrap();
+    assert_eq!(outcome.finalize_cause, FinalizeCause::UserCancelledStep);
+    assert_eq!(outcome.messages[0].text_content(), "partial assistant");
+    assert_eq!(
+        outcome.receipts[0].outcome(),
+        ToolOutcomeKind::CancellationUnconfirmed
+    );
+    assert_eq!(outcome.api_input_tokens, Some(42));
+    assert_eq!(outcome.fingerprint, "outcome-fingerprint");
+    assert_eq!(outcome.committed_revision, 2);
+    assert_eq!(
+        decoded
+            .session
+            .structured_messages()
+            .iter()
+            .map(|message| message.text_content())
+            .collect::<Vec<_>>(),
+        ["accepted", "partial assistant"]
+    );
+}
+
+#[test]
+fn v2_compatibility_outcome_vector_upgrades_as_single_projection() {
+    let bytes = serde_json::to_vec(&json!({
+        "schema_version": 2,
+        "id": "v2-bridge",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "tasks": {"state": "missing"},
+        "workspace": {"state": "missing"},
+        "revision": 1,
+        "run_slices": [{
+            "run_id": "run",
+            "steps": [{
+                "step_id": "step",
+                "outcome": [Message::user("legacy outcome")]
+            }]
+        }]
+    }))
+    .unwrap();
+
+    let decoded = decode_session(&bytes).unwrap();
+    let outcome = decoded.session.run_slices[0].steps[0]
+        .outcome
+        .as_ref()
+        .unwrap();
+    assert_eq!(outcome.finalize_cause, FinalizeCause::Completed);
+    assert_eq!(outcome.messages[0].text_content(), "legacy outcome");
+    assert!(outcome.receipts.is_empty());
+    assert_eq!(outcome.api_input_tokens, None);
+    assert_eq!(outcome.fingerprint, "");
+    assert_eq!(outcome.committed_revision, 0);
+}
+
+#[test]
+fn outcome_field_missing_decodes_as_none() {
+    let step: CommittedRunStep = serde_json::from_value(json!({"step_id": "step"})).unwrap();
+    assert!(step.outcome.is_none());
+}
+
+#[test]
+fn v1_normal_segment_upgrades_to_single_synthetic_step() {
+    let bytes = serde_json::to_vec(&json!({
+        "schema_version": 1,
+        "id": "v1",
+        "chats": [{
+            "id": "normal-1",
+            "kind": "normal",
+            "messages": [Message::user("first"), Message::user("second")]
+        }, {
+            "id": "compact-1",
+            "kind": "compact",
+            "summary": "legacy summary",
+            "messages": [Message::user("tail")]
+        }],
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-02T00:00:00Z",
+        "tasks": {"state": "missing"},
+        "workspace": {"state": "missing"}
+    }))
+    .unwrap();
+
+    let decoded = decode_session(&bytes).unwrap();
+    assert!(decoded.upgraded_from_legacy);
+    assert_eq!(decoded.session.run_slices.len(), 2);
+    let slice = &decoded.session.run_slices[0];
+    assert_eq!(slice.run_id, "legacy:normal-1");
+    assert_eq!(slice.steps.len(), 1);
+    assert_eq!(slice.steps[0].step_id, "synthetic:normal-1");
+    assert_eq!(
+        slice.steps[0]
+            .accepted_input
+            .as_ref()
+            .unwrap()
+            .messages
+            .iter()
+            .map(|message| message.text_content())
+            .collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+    assert_eq!(decoded.session.chats.len(), 2);
+    assert_eq!(decoded.session.active_summary(), Some("legacy summary"));
+    assert_eq!(
+        decoded
+            .session
+            .structured_messages()
+            .iter()
+            .map(|message| message.text_content())
+            .collect::<Vec<_>>(),
+        ["tail"]
+    );
+}
+
+#[test]
+fn legacy_messages_upgrade_to_single_synthetic_step() {
+    let bytes = serde_json::to_vec(&json!({
+        "id": "legacy-step",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-02T00:00:00Z",
+        "messages": [Message::user("legacy fact")]
+    }))
+    .unwrap();
+
+    let decoded = decode_session(&bytes).unwrap();
+    assert_eq!(decoded.session.run_slices.len(), 1);
+    assert_eq!(decoded.session.run_slices[0].steps.len(), 1);
+    assert_eq!(
+        decoded
+            .session
+            .structured_messages()
+            .iter()
+            .map(|message| message.text_content())
+            .collect::<Vec<_>>(),
+        ["legacy fact"]
+    );
 }
 
 #[test]

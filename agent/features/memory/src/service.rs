@@ -669,6 +669,10 @@ fn relevance(entry: &MemoryEntry, text: &str) -> Option<f64> {
 }
 
 #[cfg(test)]
+#[path = "service_reflection_tests.rs"]
+mod reflection_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::{
@@ -680,16 +684,16 @@ mod tests {
     /// an independent generation, so its loads, commits, and call counts are
     /// tracked separately.
     #[derive(Default)]
-    struct LayerScript {
-        loads: VecDeque<Result<CommittedMemoryDataset<u64>, MemoryError>>,
-        commits: VecDeque<Result<MemoryCommitReceipt<u64>, MemoryError>>,
-        load_calls: usize,
-        commit_calls: usize,
+    pub(super) struct LayerScript {
+        pub(super) loads: VecDeque<Result<CommittedMemoryDataset<u64>, MemoryError>>,
+        pub(super) commits: VecDeque<Result<MemoryCommitReceipt<u64>, MemoryError>>,
+        pub(super) load_calls: usize,
+        pub(super) commit_calls: usize,
     }
 
-    struct Script {
-        global: LayerScript,
-        project: LayerScript,
+    pub(super) struct Script {
+        pub(super) global: LayerScript,
+        pub(super) project: LayerScript,
     }
 
     impl Script {
@@ -702,18 +706,18 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct ScriptedStore {
-        script: Arc<StdMutex<Script>>,
+    pub(super) struct ScriptedStore {
+        pub(super) script: Arc<StdMutex<Script>>,
     }
 
     impl ScriptedStore {
-        fn new(global: LayerScript, project: LayerScript) -> Self {
+        pub(super) fn new(global: LayerScript, project: LayerScript) -> Self {
             Self {
                 script: Arc::new(StdMutex::new(Script { global, project })),
             }
         }
 
-        fn calls(&self, layer: MemoryLayer) -> (usize, usize) {
+        pub(super) fn calls(&self, layer: MemoryLayer) -> (usize, usize) {
             let mut script = self.script.lock().unwrap();
             let layer = script.layer(layer);
             (layer.load_calls, layer.commit_calls)

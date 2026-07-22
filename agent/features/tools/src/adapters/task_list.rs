@@ -67,7 +67,17 @@ impl TypedTool for TaskListTool {
             _ => None,
         });
         let priority = args.priority.as_deref().and_then(parse_priority);
-        let mut tasks = self.access.list();
+        let current_batch = self.access.current_batch();
+        let all_tasks = self.access.list();
+        let seq_by_id = all_tasks
+            .iter()
+            .filter(|task| Some(task.batch()) == current_batch)
+            .map(|task| (task.id(), task.seq().to_string()))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut tasks: Vec<_> = all_tasks
+            .into_iter()
+            .filter(|task| Some(task.batch()) == current_batch)
+            .collect();
         if let Some(status) = status {
             tasks.retain(|task| task.status() == status);
         }
@@ -89,7 +99,18 @@ impl TypedTool for TaskListTool {
         TypedToolResult::success(
             message,
             TaskListResult {
-                tasks: tasks.iter().map(TaskView::from).collect(),
+                tasks: tasks
+                    .iter()
+                    .map(|task| {
+                        TaskView::from_task(
+                            task,
+                            task.blocked_by()
+                                .iter()
+                                .filter_map(|id| seq_by_id.get(id).cloned())
+                                .collect(),
+                        )
+                    })
+                    .collect(),
             },
         )
     }

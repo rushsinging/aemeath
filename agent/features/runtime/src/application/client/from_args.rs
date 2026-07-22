@@ -7,22 +7,66 @@ use crate::application::prompt::build::{build_system_prompt_parts, PromptContext
 use crate::application::startup::ChatBootstrapArgs;
 use crate::application::startup::{
     build_agent_runner, build_hook_runner, resolve_concurrency_limits,
-    resolve_model_runtime_settings, spawn_mcp_connect,
+    resolve_model_runtime_settings,
 };
 use crate::ports::legacy::ChatRuntimeContext;
 use crate::ports::{ProviderBuildSpec, ProviderFactory, RequestSystemBlock};
 
 use super::{AgentClientImpl, RuntimeHandle};
 
+/// 由 Composition 装配、供 Runtime bootstrap 转发的 Tool/Skill/Run 资源。
+pub struct RuntimeToolAssemblyDependencies {
+    tool_catalog: Arc<dyn tools::ToolCatalogPort>,
+    tool_execution: Arc<dyn tools::ToolExecutionPort>,
+    tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
+    skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    tool_result_materializer:
+        Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
+    active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
+}
+
+impl RuntimeToolAssemblyDependencies {
+    pub fn new(
+        tool_catalog: Arc<dyn tools::ToolCatalogPort>,
+        tool_execution: Arc<dyn tools::ToolExecutionPort>,
+        tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
+        skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+        skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+        tool_result_materializer: Arc<
+            crate::application::tool_result_materialization::ToolResultMaterializer,
+        >,
+        active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
+    ) -> Self {
+        Self {
+            tool_catalog,
+            tool_execution,
+            tool_context_binding,
+            skill_catalog,
+            skill_materializer,
+            tool_result_materializer,
+            active_run,
+        }
+    }
+}
+
 /// Runtime bootstrap 所需的活依赖；由 Composition 一次性构造并注入。
 pub struct RuntimeBootstrapDependencies {
     workspace: project::WorkspaceViews,
     wiring: Arc<context::MainSessionWiring>,
     provider_factory: Arc<dyn ProviderFactory>,
-    _tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
     reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
     policy: Arc<dyn policy::PolicyPort>,
     task_access: Arc<dyn task::TaskAccess>,
+    session_management: Arc<dyn context::SessionManagementPort>,
+    tool_catalog: Arc<dyn tools::ToolCatalogPort>,
+    tool_execution: Arc<dyn tools::ToolExecutionPort>,
+    tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
+    skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    tool_result_materializer:
+        Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
+    active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
 }
 
 impl RuntimeBootstrapDependencies {
@@ -30,19 +74,36 @@ impl RuntimeBootstrapDependencies {
         workspace: project::WorkspaceViews,
         wiring: Arc<context::MainSessionWiring>,
         provider_factory: Arc<dyn ProviderFactory>,
-        _tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
         reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
         policy: Arc<dyn policy::PolicyPort>,
         task_access: Arc<dyn task::TaskAccess>,
+        session_management: Arc<dyn context::SessionManagementPort>,
+        tool_assembly: RuntimeToolAssemblyDependencies,
     ) -> Self {
+        let RuntimeToolAssemblyDependencies {
+            tool_catalog,
+            tool_execution,
+            tool_context_binding,
+            skill_catalog,
+            skill_materializer,
+            tool_result_materializer,
+            active_run,
+        } = tool_assembly;
         Self {
             workspace,
             wiring,
             provider_factory,
-            _tool_gateway,
             reflection_history,
             policy,
             task_access,
+            session_management,
+            tool_catalog,
+            tool_execution,
+            tool_context_binding,
+            skill_catalog,
+            skill_materializer,
+            tool_result_materializer,
+            active_run,
         }
     }
 
@@ -54,8 +115,34 @@ impl RuntimeBootstrapDependencies {
         self.task_access.clone()
     }
 
+    pub fn session_management(&self) -> Arc<dyn context::SessionManagementPort> {
+        self.session_management.clone()
+    }
+
     pub fn wiring(&self) -> Arc<context::MainSessionWiring> {
         self.wiring.clone()
+    }
+
+    pub fn tool_catalog(&self) -> Arc<dyn tools::ToolCatalogPort> {
+        self.tool_catalog.clone()
+    }
+
+    pub fn skill_catalog(&self) -> Arc<dyn tools::SkillCatalogPort> {
+        self.skill_catalog.clone()
+    }
+
+    pub fn skill_materializer(&self) -> Arc<dyn tools::SkillMaterializationPort> {
+        self.skill_materializer.clone()
+    }
+
+    pub fn tool_result_materializer(
+        &self,
+    ) -> Arc<crate::application::tool_result_materialization::ToolResultMaterializer> {
+        self.tool_result_materializer.clone()
+    }
+
+    pub fn active_run(&self) -> Arc<crate::application::active_run::ActiveRunRegistry> {
+        self.active_run.clone()
     }
 }
 
@@ -73,10 +160,17 @@ pub async fn from_args_with_workspace(
         workspace,
         wiring,
         provider_factory,
-        _tool_gateway: _,
         reflection_history,
         policy,
         task_access,
+        session_management,
+        tool_catalog,
+        tool_execution,
+        tool_context_binding,
+        skill_catalog,
+        skill_materializer,
+        tool_result_materializer,
+        active_run,
     } = dependencies;
 
     // Config query/writer come from the wiring gate-aware façade.
@@ -194,30 +288,6 @@ pub async fn from_args_with_workspace(
         .map_err(|error| SdkError::Init(error.to_string()))?;
 
     // 11. Tooling
-    // MemoryPortSource: delegates to wiring.committed_memory() at execution
-    // time so resume swaps are transparent to the already-registered tool.
-    let memory_source: Arc<dyn tools::MemoryPortSource> = {
-        struct WiringMemoryPortSource {
-            wiring: Arc<context::MainSessionWiring>,
-        }
-        impl tools::MemoryPortSource for WiringMemoryPortSource {
-            fn current(&self) -> Arc<dyn memory::MemoryPort> {
-                self.wiring.committed_memory()
-            }
-        }
-        Arc::new(WiringMemoryPortSource {
-            wiring: wiring.clone(),
-        })
-    };
-    let tool_wiring = tools::composition::wire_builtin_catalog_execution(
-        task_access.clone(),
-        memory_source,
-        workspace.control(),
-    )
-    .map_err(|error| SdkError::Init(error.to_string()))?;
-    let tool_catalog = tool_wiring.catalog();
-    let tool_execution = tool_wiring.execution();
-    let tool_context_binding = tool_wiring.binding();
     let available_tools = tool_catalog
         .snapshot(
             &tools::RegistryScopeName::new("main"),
@@ -228,12 +298,10 @@ pub async fn from_args_with_workspace(
         .iter()
         .map(|descriptor| descriptor.name.as_str().to_string())
         .collect();
-    let skill_wiring = tools::composition::wire_skills();
     let skill_query =
         tools::SkillQuery::new(cwd.clone(), snapshot.skills().dirs.clone(), available_tools);
-    let descriptors = skill_wiring.catalog().list(skill_query.clone());
-    let materialized = skill_wiring
-        .materializer()
+    let descriptors = skill_catalog.list(skill_query.clone());
+    let materialized = skill_materializer
         .materialize_available(tools::SkillMaterializationQuery::new(
             skill_query.project_root,
             skill_query.extra_dirs,
@@ -255,6 +323,8 @@ pub async fn from_args_with_workspace(
                 sdk::SkillView {
                     name: descriptor.name().to_string(),
                     aliases: descriptor.aliases().to_vec(),
+                    slash_command: descriptor.slash_command().map(str::to_string),
+                    slash_aliases: descriptor.slash_aliases().to_vec(),
                     description: Some(descriptor.description().to_string()),
                     content: fragment.content().to_string(),
                     source: Some(descriptor.source().path.clone()),
@@ -262,37 +332,14 @@ pub async fn from_args_with_workspace(
             ))
         })
         .collect();
-    let mcp_manager = spawn_mcp_connect(&tool_wiring, &cwd).await;
+    // #1327 承接 MCP Ready lifecycle / Catalog 同步；#1294 不保留 MCP manager 或
+    // Tools 私有 CatalogExecutionWiring 接线。
 
     // 12. Hook runner
     let hook_runner = build_hook_runner(Some(snapshot.hooks()), &cwd);
     let _hook_runner_before = hook_runner.clone();
 
-    // 13. Tool Result blob 与 materialization policy。
-    let blob_adapter = Arc::new(
-        storage::FileSystemBlobAdapter::new(share::config::paths::global_agents_dir())
-            .map_err(|error| SdkError::Init(error.to_string()))?,
-    );
-    let blob_store = Arc::new(
-        crate::adapters::tool_result_blob::AtomicBlobToolResultStore::new(
-            blob_adapter,
-            share::config::paths::global_agents_dir(),
-        ),
-    );
-    let tool_result_policy = snapshot.tool_result_policy();
-    let tool_result_materializer = Arc::new(
-        crate::application::tool_result_materialization::ToolResultMaterializer::new(
-            blob_store,
-            crate::application::tool_result_materialization::ToolResultMaterializationPolicy::new(
-                tool_result_policy.threshold_chars(),
-                tool_result_policy.preview_head_chars(),
-                tool_result_policy.preview_tail_chars(),
-            ),
-        ),
-    );
-
-    // 14. Agent runner 与 Main/Sub 共享同一个 per-Run registry 和 materializer。
-    let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
+    // 13. Tool Result materializer 与 14. active-run registry 由 Composition 注入。
 
     // 15. Concurrency limits — must resolve before building agent runner.
     let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
@@ -327,6 +374,7 @@ pub async fn from_args_with_workspace(
         tool_catalog.clone(),
         tool_execution.clone(),
         tool_context_binding.clone(),
+        skill_materializer.clone(),
     );
 
     // 18. Prompt bundle
@@ -334,6 +382,7 @@ pub async fn from_args_with_workspace(
         &cwd,
         Some(&binding.model.provider),
         Some(&binding.model.model),
+        snapshot.permission_mode(),
     );
     let prompt_parts =
         build_system_prompt_parts(&prompt_context, &hook_runner, snapshot.language()).await;
@@ -347,10 +396,7 @@ pub async fn from_args_with_workspace(
         prompt_parts.clone(),
     )
     .await;
-    let system_blocks = vec![
-        RequestSystemBlock::Cacheable(static_prompt),
-        RequestSystemBlock::Text(prompt_parts.dynamic_part),
-    ];
+    let system_blocks = vec![RequestSystemBlock::Cacheable(static_prompt)];
     let system_prompt_text = system_blocks
         .iter()
         .map(RequestSystemBlock::text)
@@ -380,6 +426,7 @@ pub async fn from_args_with_workspace(
             tool_context_binding,
             system_blocks,
             system_prompt_text,
+            initial_git_context: prompt_parts.initial_git_context,
             user_context: prompt_parts.claude_md,
             agent_runner,
             tool_result_materializer,
@@ -407,13 +454,13 @@ pub async fn from_args_with_workspace(
         session_id,
         max_tool_concurrency,
         max_agent_concurrency,
-        _mcp_manager: mcp_manager,
         current_binding: std::sync::RwLock::new(Arc::new(binding)),
         active_run,
         workspace,
         wiring: wiring.clone(),
         config_query,
         config_writer,
+        session_management,
         event_sink_factory: Arc::new(|tx| {
             crate::application::chat::ChatEventSinkHandle::new(
                 crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
@@ -552,29 +599,48 @@ mod tests {
             context_size: 8192,
             ..Default::default()
         };
-        let config = config::wire_project_config(&root)
-            .await
-            .expect("wire config");
+        let config = config::wire_project_config(
+            &root,
+            config::NativeConfigStore::new(Arc::new(
+                storage::FileSystemBlobAdapter::new(&agents_dir).expect("create config blob"),
+            )),
+        )
+        .await
+        .expect("wire config");
         let task_wiring = task::wire_task();
         let wiring = context::test_support::wire_in_memory(
             &workspace,
             task_wiring.persist(),
             config.reader(),
             config.participant(),
+            Arc::new(context::test_support::UnavailableSessionManagement),
             Arc::new(context::ProductionMainContextFactory::new(Arc::new(
                 context::NoOpCanonicalSessionWriter,
             ))),
         )
         .await;
         let policy: Arc<dyn policy::PolicyPort> = Arc::new(policy::AllowAllPolicy);
+        let tools = tools::composition::TestCatalogExecutionFactory::empty();
+        let skill_wiring = tools::composition::wire_skills();
+        let tool_result_materializer = crate::application::testing::test_tool_result_materializer();
+        let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
         let dependencies = RuntimeBootstrapDependencies::new(
             workspace,
             wiring,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
-            tools::wire_tools(),
             Arc::new(TestReflectionHistory),
             policy.clone(),
             task_wiring.access(),
+            Arc::new(context::test_support::UnavailableSessionManagement),
+            RuntimeToolAssemblyDependencies::new(
+                tools.catalog_port(),
+                tools.execution(),
+                tools.binding(),
+                skill_wiring.catalog(),
+                skill_wiring.materializer(),
+                tool_result_materializer,
+                active_run,
+            ),
         );
         let client = from_args_with_workspace(args, dependencies)
             .await

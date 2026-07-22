@@ -10,7 +10,6 @@
 //! 全部 `pub(crate)` detail，**NEVER** 进入 crate 稳定 façade。
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -82,6 +81,8 @@ pub(crate) trait Executor: Send + Sync {
         &self,
         command: &HookCommand,
         stdin: &serde_json::Value,
+        cwd: &std::path::Path,
+        env: &HashMap<String, String>,
         timeout: Duration,
         cancellation: &CancellationToken,
     ) -> Result<RawExecution, ExecutionFault>;
@@ -98,17 +99,15 @@ pub(crate) trait Executor: Send + Sync {
 #[derive(Debug, Default)]
 pub(crate) struct ProcessDriverExecutor {
     driver: ProcessDriver,
-    cwd: PathBuf,
     env: HashMap<String, String>,
     output_limit: usize,
 }
 
 impl ProcessDriverExecutor {
-    /// 创建生产 Executor：cwd 为 hook 子进程工作目录，env 为白名单环境变量。
-    pub(crate) fn new(cwd: PathBuf, env: HashMap<String, String>) -> Self {
+    /// 创建生产 Executor：env 为 Hook adapter 提供的兼容环境投影。
+    pub(crate) fn new(env: HashMap<String, String>) -> Self {
         Self {
             driver: ProcessDriver,
-            cwd,
             env,
             output_limit: DEFAULT_OUTPUT_LIMIT,
         }
@@ -121,24 +120,36 @@ impl Executor for ProcessDriverExecutor {
         &self,
         command: &HookCommand,
         stdin: &serde_json::Value,
+        cwd: &std::path::Path,
+        env: &HashMap<String, String>,
         timeout: Duration,
         cancellation: &CancellationToken,
     ) -> Result<RawExecution, ExecutionFault> {
         let stdin_bytes = serde_json::to_vec(stdin).unwrap_or_default();
         let request = ProcessRequest {
             command: command.command.clone(),
-            cwd: self.cwd.clone(),
-            env: self.env.clone(),
+            cwd: cwd.to_path_buf(),
+            env: self
+                .env
+                .iter()
+                .chain(env)
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
             stdin: stdin_bytes,
             timeout,
             output_limit: self.output_limit,
         };
         match self.driver.execute(request, cancellation).await {
-            Ok(output) => Ok(RawExecution {
-                exit_code: output.exit_code,
-                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            }),
+            Ok(output) => {
+                // 当前 HookExecution PL 尚未发布截断字段；在 #1216 扩展环境/输出
+                // 契约前，ProcessDriver 仍负责 drain 与截断，Dispatcher 只消费正文。
+                let _output_was_truncated = output.stdout_truncated || output.stderr_truncated;
+                Ok(RawExecution {
+                    exit_code: output.exit_code,
+                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                })
+            }
             Err(failure) => Err(map_process_failure(failure)),
         }
     }
@@ -146,6 +157,7 @@ impl Executor for ProcessDriverExecutor {
 
 /// 将 `ProcessFailure` 映射到 dispatcher 的 `ExecutionFault`。
 fn map_process_failure(failure: ProcessFailure) -> ExecutionFault {
+    let _diagnostic_message = &failure.message;
     match failure.kind {
         ProcessFailureKind::Spawn => ExecutionFault::Spawn,
         ProcessFailureKind::Io => ExecutionFault::Io,

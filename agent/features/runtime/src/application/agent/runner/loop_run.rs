@@ -123,7 +123,8 @@ pub(super) struct SubAgentRun<'a> {
     pub binding: Arc<ProviderBinding>,
     pub max_tokens: u32,
     pub level: ReasoningLevel,
-    pub hook_runner: hook::api::HookRunner,
+    pub hook_port: Arc<dyn hook::HookPort>,
+    pub workspace_root: std::path::PathBuf,
     pub tool_schemas: Vec<serde_json::Value>,
     pub config_snapshot: share::config::domain::snapshot::ConfigSnapshot,
     pub language: String,
@@ -131,6 +132,7 @@ pub(super) struct SubAgentRun<'a> {
     pub committed_message_count: usize,
     pub context: ContextCoordinator,
     pub context_request: Option<crate::ports::ContextRequest>,
+    pub accepted_input: Vec<Message>,
     pub context_window: Option<crate::ports::ContextWindow>,
     pub log_request_messages: Box<dyn Fn(usize, &[Message]) + Send + Sync + 'a>,
     pub agent: Agent,
@@ -153,6 +155,14 @@ pub(super) struct SubAgentRun<'a> {
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub policy: Arc<dyn policy::PolicyPort>,
     pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
+    /// #1272: Sub's FixedInputBuffer returns the prompt as Ready on the very
+    /// first drain, then EmptyAndSealed forever after. Tracks whether the
+    /// initial prompt has already been consumed.
+    pub prompt_drained: bool,
+    /// #1272: Sub maintains its own epoch counter for per-turn drain
+    /// linearization. First drain (Ready) uses epoch 0, then advances
+    /// to 1; subsequent EmptyAndSealed uses epoch 1.
+    pub next_epoch: crate::application::loop_engine::DrainEpoch,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -173,13 +183,12 @@ impl<'a> SubAgentRun<'a> {
             request_id: crate::ports::ContextRequestId::new(uuid::Uuid::now_v7().to_string()),
             run_id: self.run_id.clone(),
             step_id: step_id.clone(),
-            pending_messages: self.messages[self.committed_message_count..].to_vec(),
+            pending_messages: self.messages
+                [self.committed_message_count + self.accepted_input.len()..]
+                .to_vec(),
             system_prompt: crate::ports::SystemPromptSpec::new(&self.system),
             model_id: self.model_name_for_log.clone(),
             effective_reasoning: self.level,
-            current_date: crate::ports::CalendarDate::new(
-                chrono::Local::now().format("%Y-%m-%d").to_string(),
-            ),
             task_reminder: crate::ports::TaskReminderSnapshot::default(),
             language: crate::ports::Language::new(&self.language),
             agent_roles: self.config_snapshot.agents().roles.clone(),
@@ -256,18 +265,17 @@ impl<'a> SubAgentRun<'a> {
             role: Some(self.role_name_for_log.clone()),
             model: self.model_name_for_log.clone(),
         };
-        let workspace_root = self.agent.ctx.workspace_read().current_workspace_root();
         let output = terminal.output();
         finalize_sub_agent(
             &outcome,
-            &self.hook_runner,
+            &self.hook_port,
+            &self.workspace_root,
             &self.session_id,
             self.prompt,
             &self.system,
             self.resolved_spec.as_deref(),
             &output,
             self.progress_sink.as_ref(),
-            &workspace_root,
         )
         .await;
 
@@ -427,6 +435,10 @@ fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal
     }
 }
 
+fn should_complete_after_model_response(has_no_tool_calls: bool) -> bool {
+    has_no_tool_calls
+}
+
 #[async_trait]
 impl RunLoopPort for SubAgentRun<'_> {
     fn freeze_step(
@@ -434,14 +446,71 @@ impl RunLoopPort for SubAgentRun<'_> {
         step_id: &sdk::RunStepId,
         _inputs: &[crate::application::loop_engine::LoopInput],
     ) {
+        self.accepted_input = if self.committed_message_count == 0 {
+            self.messages
+                .first()
+                .filter(|message| message.role == share::message::Role::User)
+                .cloned()
+                .into_iter()
+                .collect()
+        } else {
+            Vec::new()
+        };
         self.context_request = Some(self.freeze_request(step_id));
         self.context_window = None;
     }
 
+    async fn accept_step_input(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
+        let request = self
+            .context_request
+            .as_ref()
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+        debug_assert_eq!(&request.step_id, step_id);
+        if self.accepted_input.is_empty() {
+            return Ok(());
+        }
+        self.context
+            .append_accepted_input(request, self.accepted_input.clone())
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        Ok(())
+    }
+
     async fn drain_input(
         &mut self,
-    ) -> Result<Vec<crate::application::loop_engine::LoopInput>, LoopEngineError> {
-        Ok(Vec::new())
+        expected_epoch: crate::application::loop_engine::DrainEpoch,
+    ) -> Result<crate::application::loop_engine::DrainOutcome, LoopEngineError> {
+        // #1272: Sub's FixedInputBuffer returns the prompt as Ready exactly
+        // once (consumed by the first step's accepted-input handoff) at
+        // epoch 0, then EmptyAndSealed at epoch 1 forever after.
+        if !self.prompt_drained {
+            if expected_epoch != self.next_epoch {
+                return Err(LoopEngineError::Adapter(format!(
+                    "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                    expected_epoch, self.next_epoch,
+                )));
+            }
+            self.prompt_drained = true;
+            let epoch = self.next_epoch;
+            self.next_epoch = epoch.next();
+            return Ok(crate::application::loop_engine::DrainOutcome::Ready {
+                batch: vec![crate::application::loop_engine::LoopInput {
+                    text: self.prompt.to_string(),
+                    input_id: None,
+                    images: Vec::new(),
+                }],
+                epoch,
+            });
+        }
+        if expected_epoch != self.next_epoch {
+            return Err(LoopEngineError::Adapter(format!(
+                "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                expected_epoch, self.next_epoch,
+            )));
+        }
+        let epoch = self.next_epoch;
+        self.next_epoch = epoch.next();
+        Ok(crate::application::loop_engine::DrainOutcome::EmptyAndSealed { epoch })
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
@@ -534,7 +603,11 @@ impl RunLoopPort for SubAgentRun<'_> {
                             .system_blocks
                             .iter()
                             .map(|block| {
-                                if block.cacheable {
+                                if block.cache_break {
+                                    debug_assert!(
+                                        block.cacheable,
+                                        "cache breakpoint 必须位于可缓存前缀"
+                                    );
                                     RequestSystemBlock::Cacheable(block.content.clone())
                                 } else {
                                     RequestSystemBlock::Text(block.content.clone())
@@ -702,7 +775,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                     }
                 }
 
-                if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
+                if should_complete_after_model_response(tool_calls.is_empty()) {
                     return Ok((
                         ModelStep::Complete {
                             text: resp.assistant_message.text_content(),
@@ -728,7 +801,8 @@ impl RunLoopPort for SubAgentRun<'_> {
             return Ok(());
         };
         debug_assert_eq!(&request.step_id, step_id);
-        let messages = self.messages[self.committed_message_count..].to_vec();
+        let messages =
+            self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
         self.context
             .append_finalized(
                 request,
@@ -753,13 +827,15 @@ impl RunLoopPort for SubAgentRun<'_> {
             return Ok(());
         };
         debug_assert_eq!(&request.step_id, step_id);
+        let messages =
+            self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
         self.context
             .append_finalized(
                 request,
                 step_id.clone(),
                 window.backing_revision,
                 crate::ports::FinalizeCause::UserCancelledStep,
-                self.messages[self.committed_message_count..].to_vec(),
+                messages,
                 vec![],
                 self.last_total_tokens,
             )
@@ -975,6 +1051,12 @@ mod tests {
         };
 
         assert_eq!(terminal_from_domain_event(&event), None);
+    }
+
+    #[test]
+    fn model_response_with_tool_calls_is_not_completed_by_end_turn() {
+        assert!(!super::should_complete_after_model_response(false));
+        assert!(super::should_complete_after_model_response(true));
     }
 
     #[test]

@@ -14,10 +14,10 @@ use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
 use context::application::main_session::{
     MainSessionError, MainSessionWiring, MainSessionWiringBuilder,
 };
-use context::domain::session::{CanonicalSession, ChatChain, SnapshotState};
+use context::domain::session::{CanonicalSession, SnapshotState};
 use context::domain::{
-    ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause, RunStepId, SessionId,
-    SessionRevision,
+    AcceptedInputAppend, ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause,
+    RunStepId, SessionId, SessionRevision, StepReceipt, ToolOutcomeKind,
 };
 use context::ports::ContextPort;
 use memory::{
@@ -205,6 +205,8 @@ fn build_harness() -> Harness {
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::Captured(ws_ctx),
         revision: 0,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     };
 
@@ -218,6 +220,9 @@ fn build_harness() -> Harness {
             open_count: Arc::clone(&memory_opener.open_count),
             fail: Arc::clone(&memory_opener.fail),
         }),
+        session_management: Arc::new(context::adapters::AtomicBlobSessionManagement::new(
+            Arc::new(storage::FileSystemBlobAdapter::new(tmp.path()).unwrap()),
+        )),
         initial_session,
         initial_memory,
         context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
@@ -252,6 +257,8 @@ fn session_with_workspace(
         tasks,
         workspace: SnapshotState::Captured(ws.clone()),
         revision: 1,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     }
 }
@@ -331,6 +338,120 @@ async fn successful_resume_commits_all_and_updates_committed_state() {
 }
 
 #[tokio::test]
+async fn accepted_input_persists_and_is_visible_after_resume_without_outcome() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let bound = h.wiring.bind_main_run().await.expect("bind source run");
+    let context: Arc<dyn ContextPort> = bound.context();
+    let source_id = bound.session().id.clone();
+    let workspace = bound.session().workspace.clone();
+    drop(bound);
+
+    let receipt = context
+        .append_accepted_input(&AcceptedInputAppend {
+            session_id: SessionId::new(source_id.clone()),
+            run_id: RunId::new("run-accepted"),
+            step_id: RunStepId::new("step-accepted"),
+            source_request_id: ContextRequestId::new("request-accepted"),
+            messages: vec![Message::user("accepted before model")],
+            fingerprint: ContentFingerprint::new("accepted-fingerprint"),
+        })
+        .await
+        .expect("append accepted input");
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+
+    let committed = h.wiring.committed_session();
+    let step = &committed.run_slices[0].steps[0];
+    assert!(step.outcome.is_none());
+    assert_eq!(
+        step.accepted_input.as_ref().unwrap().messages[0].text_content(),
+        "accepted before model"
+    );
+
+    let mut resumed = (*committed).clone();
+    resumed.workspace = workspace;
+    h.wiring
+        .resume_prepared(resumed)
+        .await
+        .expect("resume accepted-only session");
+    let rebound = h.wiring.bind_main_run().await.expect("bind resumed run");
+    let resumed_step = &rebound.session().run_slices[0].steps[0];
+    assert!(resumed_step.outcome.is_none());
+    assert_eq!(
+        rebound.session().structured_messages()[0].text_content(),
+        "accepted before model"
+    );
+}
+
+#[tokio::test]
+async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let bound = h.wiring.bind_main_run().await.expect("bind source run");
+    let context: Arc<dyn ContextPort> = bound.context();
+    let source_id = bound.session().id.clone();
+    let workspace = bound.session().workspace.clone();
+    drop(bound);
+
+    context
+        .append_accepted_input(&AcceptedInputAppend {
+            session_id: SessionId::new(source_id.clone()),
+            run_id: RunId::new("run-finalized"),
+            step_id: RunStepId::new("step-finalized"),
+            source_request_id: ContextRequestId::new("request-finalized"),
+            messages: vec![Message::user("accepted input")],
+            fingerprint: ContentFingerprint::new("input-fingerprint"),
+        })
+        .await
+        .expect("append accepted input");
+    context
+        .append_and_persist(&ContextAppend {
+            session_id: SessionId::new(source_id.clone()),
+            expected_revision: SessionRevision::new(1),
+            run_id: RunId::new("run-finalized"),
+            step_id: RunStepId::new("step-finalized"),
+            source_request_id: ContextRequestId::new("request-finalized"),
+            finalize_cause: FinalizeCause::RunTerminated,
+            messages: vec![Message::user("finalized partial")],
+            receipts: vec![StepReceipt::agent(
+                "agent-call",
+                0,
+                ToolOutcomeKind::CancellationUnconfirmed,
+            )],
+            api_input_tokens: Some(34),
+            fingerprint: ContentFingerprint::new("outcome-fingerprint"),
+        })
+        .await
+        .expect("append finalized outcome");
+
+    let mut resumed = (*h.wiring.committed_session()).clone();
+    resumed.workspace = workspace;
+    h.wiring
+        .resume_prepared(resumed)
+        .await
+        .expect("resume finalized session");
+    let rebound = h.wiring.bind_main_run().await.expect("bind resumed run");
+    let step = &rebound.session().run_slices[0].steps[0];
+    assert_eq!(
+        rebound
+            .session()
+            .structured_messages()
+            .iter()
+            .map(|message| message.text_content())
+            .collect::<Vec<_>>(),
+        ["accepted input", "finalized partial"]
+    );
+    let outcome = step.outcome.as_ref().expect("finalized outcome");
+    assert_eq!(outcome.finalize_cause, FinalizeCause::RunTerminated);
+    assert_eq!(outcome.api_input_tokens, Some(34));
+    assert_eq!(
+        outcome.receipts[0].outcome(),
+        ToolOutcomeKind::CancellationUnconfirmed
+    );
+    assert_eq!(outcome.committed_revision, 2);
+}
+
+#[tokio::test]
 async fn finalized_append_persists_and_is_visible_after_resume() {
     let _guard = git_lock().await;
     let h = build_harness();
@@ -362,7 +483,7 @@ async fn finalized_append_persists_and_is_visible_after_resume() {
     assert_eq!(committed.revision, 1);
     assert_eq!(committed.committed_steps.len(), 1);
     assert_eq!(
-        ChatChain::from_chats(&committed.chats).messages().len(),
+        committed.structured_messages().len(),
         1,
         "committed history must contain the finalized message"
     );
@@ -380,12 +501,7 @@ async fn finalized_append_persists_and_is_visible_after_resume() {
         rebound.session().committed_steps[0].step_id,
         RunStepId::new("step-persist").to_string()
     );
-    assert_eq!(
-        ChatChain::from_chats(&rebound.session().chats)
-            .messages()
-            .len(),
-        1
-    );
+    assert_eq!(rebound.session().structured_messages().len(), 1);
 }
 
 /// Cross-project resume is allowed: a session whose workspace belongs to a
@@ -476,6 +592,31 @@ async fn task_captured_snapshot_restores_tasks_into_task_access() {
 
     assert_eq!(target.task_store.collect_snapshot(), captured);
     assert_eq!(target.task_access.list().len(), 2);
+}
+
+#[tokio::test]
+async fn pending_task_with_legacy_started_at_restores_after_snapshot_normalization() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let snapshot = TaskSnapshot::decode(
+        br#"{"schema_version":2,"revision":"1","tasks":[{"id":"35","batch":"8","subject":"resumable","description":"","active_form":null,"session_id":null,"tags":[],"blocked_by":[],"status":"pending","priority":"high","created_at":100,"updated_at":300,"started_at":200,"completed_at":null}],"next_task_id":"36","next_batch_id":"9","current_batch":"8","batches":[{"id":"8","summary":"active","status":"active","created_at":100,"last_active_turn":0,"silence_turns":0}]}"#,
+    )
+    .expect("legacy pending task snapshot must decode");
+    let ws = h.workspace_persist.snapshot();
+    let session = session_with_workspace(&ws, SnapshotState::Captured(snapshot));
+
+    h.wiring
+        .resume_prepared(session)
+        .await
+        .expect("normalized pending task snapshot must resume");
+
+    let task = h
+        .task_access
+        .list()
+        .into_iter()
+        .next()
+        .expect("task restored");
+    assert_eq!(task.status(), task::TaskStatus::Pending);
 }
 
 /// A rejected Task snapshot must leave every already-live participant unchanged.
@@ -577,6 +718,8 @@ async fn workspace_missing_returns_typed_error() {
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::Missing,
         revision: 1,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     };
 
@@ -608,6 +751,8 @@ async fn workspace_captured_empty_returns_typed_error() {
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::CapturedEmpty,
         revision: 1,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     };
 

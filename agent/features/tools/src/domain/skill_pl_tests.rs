@@ -53,11 +53,38 @@ fn skill_descriptor_exposes_name_description_source_and_aliases() {
             "/p/.agents/skills/review.md",
         ),
         vec!["cr".to_string()],
+        Some("review".to_string()),
+        vec!["r".to_string()],
     );
     assert_eq!(desc.name(), "review");
     assert_eq!(desc.description(), "code review skill");
     assert_eq!(desc.source().kind, SkillSourceKind::ProjectAgents);
     assert_eq!(desc.aliases(), &["cr".to_string()]);
+    assert_eq!(desc.slash_command(), Some("review"));
+    assert_eq!(desc.slash_aliases(), &["r".to_string()]);
+}
+
+#[test]
+fn skill_queries_and_cache_hints_preserve_explicit_snapshot_values() {
+    let project_root = std::path::PathBuf::from("/project");
+    let extra_dirs = vec![std::path::PathBuf::from("/extra")];
+    let tools = std::collections::BTreeSet::from(["Bash".to_string()]);
+    let query = SkillQuery::new(project_root.clone(), extra_dirs.clone(), tools.clone());
+    let materialization = SkillMaterializationQuery::new(project_root, extra_dirs, tools);
+    assert_eq!(query.project_root, materialization.project_root);
+    assert_eq!(query.extra_dirs, materialization.extra_dirs);
+    assert_eq!(query.available_tools, materialization.available_tools);
+    assert_ne!(CacheHint::Stable, CacheHint::Volatile);
+}
+
+#[test]
+fn materialization_failure_is_typed_cloneable_and_exposes_its_reason() {
+    let error = SkillError::materialization_failed("adapter unavailable");
+    assert!(matches!(
+        error,
+        SkillError::MaterializationFailed { ref reason } if reason == "adapter unavailable"
+    ));
+    assert_eq!(error.to_string(), error.clone().to_string());
 }
 
 // ── SkillMaterializationRevision (content-derived) ─────────────────────

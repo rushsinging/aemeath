@@ -3,9 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::domain::{
-    AppendReceipt, CompactOutcome, CompactRequest, CompactionDecision, ContextAppend,
-    ContextAppendError, ContextPortError, ContextRequest, ContextWindow, ManualCompactRequest,
-    SessionId, SystemBlock,
+    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
+    CompactRequest, CompactionDecision, ContextAppend, ContextAppendError, ContextPortError,
+    ContextRequest, ContextWindow, ManualCompactRequest, SessionId, SystemBlock,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
@@ -58,19 +58,19 @@ impl ContextApplicationService {
                 kind: "active_summary".into(),
                 content: summary,
                 cacheable: true,
+                cache_break: false,
             });
         }
-        blocks.push(SystemBlock {
-            kind: "cache_breakpoint".into(),
-            content: String::new(),
-            cacheable: true,
-        });
+        if let Some(last_cacheable) = blocks.last_mut() {
+            last_cacheable.cache_break = true;
+        }
         blocks.extend(prompt.uncached);
         if let Some(reminder) = &request.task_reminder.text {
             blocks.push(SystemBlock {
                 kind: "task_reminder".into(),
                 content: reminder.clone(),
                 cacheable: false,
+                cache_break: false,
             });
         }
 
@@ -117,6 +117,13 @@ impl ContextPort for ContextApplicationService {
 
     async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
         self.session.clear(session_id).await
+    }
+
+    async fn append_accepted_input(
+        &self,
+        append: &AcceptedInputAppend,
+    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        self.session.append_accepted_input(append).await
     }
 
     async fn append_and_persist(

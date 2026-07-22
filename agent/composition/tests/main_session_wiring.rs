@@ -21,6 +21,7 @@ use context::domain::{
     SessionRevision,
 };
 use context::MainSessionDependencies;
+use context::SessionManagementPort;
 use sdk::{ChatBootstrapArgs, RunId};
 use share::message::Message;
 
@@ -105,6 +106,22 @@ fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInput {
     }
 }
 
+fn config_native_store() -> config::NativeConfigStore {
+    config::NativeConfigStore::new(
+        storage::api::file_system_blob(
+            share::config::paths::global_agents_dir().join("config-overrides"),
+        )
+        .expect("create config override blob"),
+    )
+}
+
+fn session_management() -> Arc<dyn SessionManagementPort> {
+    Arc::new(context::adapters::AtomicBlobSessionManagement::new(
+        storage::api::file_system_blob(share::config::paths::global_agents_dir())
+            .expect("create session blob"),
+    ))
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────
 
 #[test]
@@ -143,6 +160,7 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
         .into_views();
     let config = config::wire_project_config_with_cli(
         &root,
+        config_native_store(),
         cli_config_input(&ChatBootstrapArgs {
             api_key: Some("test-api-key".to_string()),
             base_url: Some("http://127.0.0.1:1/v1".to_string()),
@@ -168,12 +186,14 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
         legacy_factory,
     ));
 
+    let session_management = session_management();
     let deps = MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
+        session_management: session_management.clone(),
         context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
             Arc::new(context::adapters::NoOpCanonicalSessionWriter),
         )),
@@ -221,7 +241,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config(&root)
+    let config = config::wire_project_config(&root, config_native_store())
         .await
         .expect("wire config");
     let task_wiring = task::wire_task();
@@ -237,6 +257,9 @@ async fn production_context_append_reopens_from_atomic_blob() {
     ));
     let session_blob = storage::api::file_system_blob(share::config::paths::global_agents_dir())
         .expect("create session blob");
+    let session_management: Arc<dyn SessionManagementPort> = Arc::new(
+        context::adapters::AtomicBlobSessionManagement::new(session_blob.clone()),
+    );
     let writer = Arc::new(context::adapters::AtomicBlobCanonicalSessionWriter::new(
         session_blob,
     ));
@@ -246,6 +269,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
+        session_management: session_management.clone(),
         context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(writer)),
     })
     .await
@@ -272,7 +296,8 @@ async fn production_context_append_reopens_from_atomic_blob() {
         .await
         .expect("persist production append");
 
-    let exported = context::export_session_bytes(&session_id)
+    let exported = session_management
+        .export(&session_id)
         .await
         .expect("reopen canonical session bytes");
     let reopened: serde_json::Value =
@@ -284,13 +309,19 @@ async fn production_context_append_reopens_from_atomic_blob() {
         reopened["committed_steps"][0]["fingerprint"],
         "production-fingerprint"
     );
-    let segments = reopened["chats"].as_array().expect("canonical chats array");
-    let messages = segments
-        .iter()
-        .flat_map(|segment| segment["messages"].as_array().into_iter().flatten())
-        .collect::<Vec<_>>();
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0]["role"], "user");
+    let slices = reopened["run_slices"]
+        .as_array()
+        .expect("canonical run_slices array");
+    assert_eq!(slices.len(), 1);
+    let outcome = slices[0]["steps"][0]["outcome"]
+        .as_object()
+        .expect("finalized outcome projection");
+    assert_eq!(outcome["finalize_cause"], "Completed");
+    assert_eq!(outcome["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(outcome["messages"][0]["role"], "user");
+    assert_eq!(outcome["api_input_tokens"], 34);
+    assert_eq!(outcome["fingerprint"], "production-fingerprint");
+    assert_eq!(outcome["committed_revision"], 1);
 }
 
 /// The Runtime client's session id must match the wiring's committed session
@@ -307,6 +338,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         .into_views();
     let config = config::wire_project_config_with_cli(
         &root,
+        config_native_store(),
         cli_config_input(&ChatBootstrapArgs {
             api_key: Some("test-api-key".to_string()),
             base_url: Some("http://127.0.0.1:1/v1".to_string()),
@@ -340,12 +372,14 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         legacy_factory,
     ));
 
+    let session_management = session_management();
     let deps = MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
+        session_management: session_management.clone(),
         context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
             Arc::new(context::adapters::NoOpCanonicalSessionWriter),
         )),
@@ -353,18 +387,41 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     let wiring = context::wire_main_session(deps)
         .await
         .expect("wire main session");
+    assert!(Arc::ptr_eq(
+        &wiring.session_management(),
+        &session_management,
+    ));
 
     // Capture the wiring's committed session id before building the client.
     let wiring_session_id = wiring.committed_session().id.clone();
+    let tools = tools::composition::TestCatalogExecutionFactory::empty();
+    let skill_wiring = tools::composition::wire_skills();
+    let tool_result_materializer = Arc::new(runtime::ToolResultMaterializer::new(
+        Arc::new(runtime::AtomicBlobToolResultStore::new(
+            Arc::new(storage::FileSystemBlobAdapter::new(temp.path()).expect("tool result blob")),
+            temp.path().to_path_buf(),
+        )),
+        runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
+    ));
+    let active_run = Arc::new(runtime::ActiveRunRegistry::default());
 
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         workspace,
         wiring,
         composition::provider::provider_factory(),
-        tools::wire_tools(),
         reflection_history,
         Arc::new(policy::AllowAllPolicy),
         task_access,
+        session_management,
+        runtime::RuntimeToolAssemblyDependencies::new(
+            tools.catalog_port(),
+            tools.execution(),
+            tools.binding(),
+            skill_wiring.catalog(),
+            skill_wiring.materializer(),
+            tool_result_materializer,
+            active_run,
+        ),
     );
 
     let args = ChatBootstrapArgs {
@@ -401,7 +458,7 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config(&root)
+    let config = config::wire_project_config(&root, config_native_store())
         .await
         .expect("wire config");
 
@@ -419,12 +476,14 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
         legacy_factory,
     ));
 
+    let session_management = session_management();
     let deps = MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
+        session_management: session_management.clone(),
         context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
             Arc::new(context::adapters::NoOpCanonicalSessionWriter),
         )),

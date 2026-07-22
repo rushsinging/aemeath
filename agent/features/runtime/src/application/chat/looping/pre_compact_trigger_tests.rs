@@ -11,7 +11,7 @@
 
 #![allow(clippy::type_complexity)]
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -34,13 +34,14 @@ use crate::application::chat::looping::{
 use crate::application::context_coordination::ContextCoordinator;
 use crate::application::loop_engine::RunLoopPort;
 use crate::application::reflection::{
-    ReflectionTaskAdapter, ReflectionTaskSubmitOutcome, ReflectionTaskTrigger,
+    ReflectionTaskAdapter, ReflectionTaskRequest, ReflectionTaskSubmitOutcome,
+    ReflectionTaskTrigger,
 };
 use crate::ports::{
-    CalendarDate, CompactOutcome, CompactRequest, CompactResult, CompactSkipReason,
-    CompactionDecision, ContextPort, ContextPortError, ContextRequest, ContextRequestId,
-    ContextWindow, DecisionReason, Language as ContextLanguage, SessionId, SessionRevision,
-    SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, Urgency,
+    CompactOutcome, CompactRequest, CompactResult, CompactSkipReason, CompactionDecision,
+    ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
+    Language as ContextLanguage, SessionId, SessionRevision, SystemBlock, SystemPromptSpec,
+    TaskReminderSnapshot, TokenBudget, Urgency,
 };
 
 /// `submit_complete` builds its own executor closure and ignores the
@@ -65,7 +66,6 @@ fn frozen_request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: provider::ReasoningLevel::Off,
-        current_date: CalendarDate::new("2026-07-19"),
         task_reminder: TaskReminderSnapshot::default(),
         language: ContextLanguage::new("en"),
         agent_roles: HashMap::new(),
@@ -87,6 +87,7 @@ fn window_with(messages: Vec<Message>) -> ContextWindow {
             kind: "system_prompt".to_string(),
             content: "system".to_string(),
             cacheable: true,
+            cache_break: true,
         }],
         messages,
         tool_schemas: vec![],
@@ -213,6 +214,37 @@ fn noop_reflection_history() -> Arc<dyn memory::api::ReflectionHistoryStore> {
     Arc::new(NoopHistory)
 }
 
+fn failing_append_reflection_history() -> Arc<dyn memory::api::ReflectionHistoryStore> {
+    struct FailingAppendHistory;
+    #[async_trait]
+    impl memory::api::ReflectionHistoryQuery for FailingAppendHistory {
+        async fn list(
+            &self,
+            _limit: usize,
+        ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError> {
+            Ok(Vec::new())
+        }
+    }
+    #[async_trait]
+    impl memory::api::ReflectionHistoryStore for FailingAppendHistory {
+        async fn append(
+            &self,
+            _record: &memory::api::ReflectionRecord,
+        ) -> Result<(), memory::api::MemoryError> {
+            Err(memory::api::MemoryError::InvalidEntry {
+                message: "history append failed".to_string(),
+            })
+        }
+        async fn upsert(
+            &self,
+            _record: &memory::api::ReflectionRecord,
+        ) -> Result<(), memory::api::MemoryError> {
+            panic!("append failure must prevent terminal upsert")
+        }
+    }
+    Arc::new(FailingAppendHistory)
+}
+
 /// Inline builder for `MainRunPort`. Returns the port together with a
 /// `Keepalive` struct that pins every `Arc`/owned value the port borrows so
 /// the returned references stay valid for the test scope.
@@ -241,7 +273,6 @@ fn build_compact_test_port<'a>(
         context_size: 128_000,
         workspace: &harness.workspace,
         session_id: "pre-compact-test",
-        context_session_id: "pre-compact-test",
         read_files: &harness.read_files,
         session_reminders: &harness.session_reminders,
         agent_runner: &None,
@@ -258,7 +289,11 @@ fn build_compact_test_port<'a>(
         language: "en",
         reasoning: harness.reasoning.as_ref(),
         pending_input: &mut harness.pending_input,
-        deferred_user_inputs: &mut harness.deferred_user_inputs,
+        run_input_buffer: super::run_input_buffer::RunInputBuffer::new(),
+        stop_hook_feedback: None,
+        pending_stop_hook_feedback: None,
+        pending_tool_results: false,
+        per_turn_adopted: Vec::new(),
         cancel: CancellationToken::new(),
         run_id: RunId::new("run"),
         active_run: harness.active_run.as_ref(),
@@ -316,7 +351,7 @@ struct CompactHarness {
     tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     config_snapshot: ConfigSnapshot,
-    hook_runner: hook::api::HookRunner,
+    hook_runner: Arc<dyn hook::HookPort>,
     workspace: project::WorkspaceViews,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
@@ -330,7 +365,6 @@ struct CompactHarness {
     queue: EmptyQueueDrainPort,
     input_events: EmptyInputEventDrainPort,
     pending_input: PendingInputBuffer,
-    deferred_user_inputs: VecDeque<sdk::ChatInputEvent>,
     last_total_tokens: Option<u64>,
     task_reminder_state: TaskReminderState,
     tool_identity: crate::application::tool_coordination::identity::ToolIdentityRegistry,
@@ -349,9 +383,15 @@ impl CompactHarness {
         let tool_result_materializer = crate::application::testing::test_tool_result_materializer();
         let config_snapshot = ConfigSnapshot::new(Config::default());
         let hook_events = HashMap::new();
-        let hook_runner = hook::api::HookRunner::new(share::config::hooks::HooksConfig {
-            events: hook_events,
-        });
+        let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
+            hook::build_dispatcher(
+                &share::config::hooks::HooksConfig {
+                    events: hook_events,
+                },
+                std::collections::HashMap::new(),
+            )
+            .unwrap(),
+        );
         let workspace = project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views();
@@ -390,7 +430,6 @@ impl CompactHarness {
             queue: EmptyQueueDrainPort,
             input_events: EmptyInputEventDrainPort,
             pending_input: PendingInputBuffer::default(),
-            deferred_user_inputs: VecDeque::new(),
             last_total_tokens: Some(0),
             task_reminder_state: TaskReminderState::new(),
             tool_identity:
@@ -576,6 +615,51 @@ async fn submit_pre_compact_reflection_enqueues_precompact_request() {
         ReflectionTaskTrigger::PreCompact,
         "submit_pre_compact_reflection must enqueue a PreCompact job"
     );
+}
+
+#[tokio::test]
+async fn submit_pre_compact_reflection_reports_history_failure_and_releases_slot() {
+    let adapter = production_adapter();
+    let binding = pre_compact_test_binding();
+    let memory_config = share::config::MemoryConfig::default();
+    let memory: Arc<dyn memory::MemoryPort> = Arc::new(memory::NoOpMemory);
+
+    let outcome = submit_pre_compact_reflection(
+        &adapter,
+        &memory_config,
+        &[Message::user("must not invoke provider")],
+        &binding,
+        "system prompt text",
+        "en",
+        &memory,
+        &failing_append_reflection_history(),
+    );
+
+    assert_eq!(outcome, ReflectionTaskSubmitOutcome::Accepted);
+    let completions = adapter.drain().await;
+    assert_eq!(completions.len(), 1);
+    assert_eq!(completions[0].trigger, ReflectionTaskTrigger::PreCompact);
+    assert_eq!(
+        completions[0].status,
+        crate::application::reflection::ReflectionTaskCompletionStatus::Failed
+    );
+    assert_eq!(
+        completions[0]
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.error_category),
+        Some(memory::api::ReflectionErrorCategory::History)
+    );
+    assert_eq!(
+        adapter.submit(ReflectionTaskRequest::new(
+            ReflectionTaskTrigger::PreCompact,
+            vec![]
+        )),
+        ReflectionTaskSubmitOutcome::Accepted,
+        "history append failure must release the shared slot"
+    );
+    adapter.cancel().await;
+    let _ = adapter.drain().await;
 }
 
 /// Integration: `MainRunPort::compact` submits a PreCompact job exactly once

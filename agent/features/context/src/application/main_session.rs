@@ -15,7 +15,7 @@ use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidatio
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock as TokioRwLock};
 
 use crate::domain::session::{CanonicalSession, SnapshotState};
-use crate::ports::{ContextPort, MainContextFactory};
+use crate::ports::{ContextPort, MainContextFactory, SessionManagementPort};
 
 // ─── SessionSwitchGate (existing) ────────────────────────────────────
 
@@ -181,6 +181,9 @@ pub struct MainSessionDependencies {
     pub config_reader: Arc<dyn ConfigReader>,
     pub config_participant: Arc<dyn ProjectConfigParticipant>,
     pub memory_opener: Box<dyn MemoryOpener>,
+    /// Composition 注入的唯一 Session 管理 Port。Wiring 仅在 resume 时借用，
+    /// RuntimeHandle 持有同一 Arc 服务 SDK 与 idle Session 命令。
+    pub session_management: Arc<dyn SessionManagementPort>,
     pub context_factory: Arc<dyn MainContextFactory>,
 }
 
@@ -215,6 +218,8 @@ pub async fn wire_main_session(
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::Captured(ws_ctx),
         revision: 0,
+        compact: None,
+        run_slices: Vec::new(),
         committed_steps: Vec::new(),
     };
 
@@ -254,6 +259,7 @@ pub async fn wire_main_session(
         config_reader: deps.config_reader,
         config_participant: deps.config_participant,
         memory_opener: deps.memory_opener,
+        session_management: deps.session_management,
         initial_session,
         initial_memory,
         context_factory: deps.context_factory,
@@ -333,6 +339,9 @@ pub struct MainSessionWiring {
     // ── Memory BC ──
     memory_opener: Box<dyn MemoryOpener>,
 
+    // ── Context-owned Session management ──
+    session_management: Arc<dyn SessionManagementPort>,
+
     // ── Committed state holders ──
     committed_session: Arc<StdRwLock<Arc<CanonicalSession>>>,
     committed_memory: Arc<StdRwLock<Arc<dyn MemoryPort>>>,
@@ -360,6 +369,7 @@ pub struct MainSessionWiringBuilder {
     pub config_reader: Arc<dyn ConfigReader>,
     pub config_participant: Arc<dyn ProjectConfigParticipant>,
     pub memory_opener: Box<dyn MemoryOpener>,
+    pub session_management: Arc<dyn SessionManagementPort>,
     pub initial_session: CanonicalSession,
     pub initial_memory: Arc<dyn MemoryPort>,
     pub context_factory: Arc<dyn MainContextFactory>,
@@ -387,6 +397,7 @@ impl MainSessionWiring {
             config_reader: builder.config_reader,
             config_participant: builder.config_participant,
             memory_opener: builder.memory_opener,
+            session_management: builder.session_management,
             committed_session,
             committed_memory,
             context,
@@ -412,6 +423,11 @@ impl MainSessionWiring {
     /// Returns the currently committed memory port.
     pub fn committed_memory(&self) -> Arc<dyn MemoryPort> {
         Arc::clone(&self.committed_memory.read().unwrap())
+    }
+
+    /// Returns the Composition-injected Session management contract.
+    pub fn session_management(&self) -> Arc<dyn SessionManagementPort> {
+        Arc::clone(&self.session_management)
     }
 
     /// Returns the raw [`ConfigReader`] backing this wiring.
@@ -811,16 +827,83 @@ pub mod test_support {
         }
     }
 
-    /// Test helper: creates a [`MainSessionWiring`] with an
-    /// [`InMemoryTestOpener`] so tests don't need a real Memory store.
-    ///
-    /// For test use only — production code must call [`wire_main_session`]
-    /// with a real [`MemoryOpener`].
+    /// Test-only Session management Port that rejects reads and writes.
+    #[derive(Default)]
+    pub struct UnavailableSessionManagement;
+
+    #[async_trait]
+    impl SessionManagementPort for UnavailableSessionManagement {
+        async fn load_canonical(
+            &self,
+            id: &str,
+        ) -> Result<CanonicalSession, crate::domain::session::SessionManagementError> {
+            Err(crate::domain::session::SessionManagementError::NotFound(
+                id.to_string(),
+            ))
+        }
+
+        async fn list(
+            &self,
+        ) -> Result<
+            Vec<crate::domain::session::SessionListEntry>,
+            crate::domain::session::SessionManagementError,
+        > {
+            Ok(Vec::new())
+        }
+
+        async fn export(
+            &self,
+            id: &str,
+        ) -> Result<Vec<u8>, crate::domain::session::SessionManagementError> {
+            Err(crate::domain::session::SessionManagementError::NotFound(
+                id.to_string(),
+            ))
+        }
+
+        async fn import(
+            &self,
+            _bytes: &[u8],
+        ) -> Result<
+            crate::domain::session::SessionListEntry,
+            crate::domain::session::SessionManagementError,
+        > {
+            Err(crate::domain::session::SessionManagementError::Storage(
+                "test session port unavailable".to_string(),
+            ))
+        }
+
+        async fn update_metadata(
+            &self,
+            id: &str,
+            _update: crate::domain::session::SessionMetadataUpdate,
+        ) -> Result<
+            crate::domain::session::SessionListEntry,
+            crate::domain::session::SessionManagementError,
+        > {
+            Err(crate::domain::session::SessionManagementError::NotFound(
+                id.to_string(),
+            ))
+        }
+
+        async fn delete(
+            &self,
+            id: &str,
+        ) -> Result<(), crate::domain::session::SessionManagementError> {
+            Err(crate::domain::session::SessionManagementError::NotFound(
+                id.to_string(),
+            ))
+        }
+    }
+
+    /// Test-only Session management Port backed by an injected in-memory or
+    /// filesystem adapter. Test callers must provide an explicit port so a
+    /// Session consumer never silently falls back to global filesystem state.
     pub async fn wire_in_memory(
         workspace: &project::WorkspaceViews,
         task_persist: Arc<dyn task::TaskPersist>,
         config_reader: Arc<dyn ConfigReader>,
         config_participant: Arc<dyn ProjectConfigParticipant>,
+        session_management: Arc<dyn SessionManagementPort>,
         context_factory: Arc<dyn MainContextFactory>,
     ) -> Arc<MainSessionWiring> {
         wire_main_session(MainSessionDependencies {
@@ -829,6 +912,7 @@ pub mod test_support {
             config_reader,
             config_participant,
             memory_opener: Box::new(InMemoryTestOpener),
+            session_management,
             context_factory,
         })
         .await

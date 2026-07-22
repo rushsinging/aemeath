@@ -4,8 +4,8 @@ use crate::domain::{ContextRequest, SystemBlock};
 use crate::ports::{ContextPromptSource, PromptMaterialization, PromptMaterializationError};
 
 /// Context-owned baseline prompt materializer. Produces the stable, always-present
-/// system blocks (system_prompt + execution_discipline cacheable, current_date
-/// uncached). Rich guidance/skill suppliers compose around this baseline.
+/// system blocks (system_prompt + execution_discipline). Rich guidance/skill
+/// suppliers compose around this baseline.
 pub struct BaselinePromptSource;
 
 impl BaselinePromptSource {
@@ -18,6 +18,7 @@ impl BaselinePromptSource {
                 kind: "system_prompt".to_string(),
                 content: request.system_prompt.as_str().to_string(),
                 cacheable: true,
+                cache_break: false,
             },
             SystemBlock {
                 kind: "execution_discipline".to_string(),
@@ -26,14 +27,10 @@ impl BaselinePromptSource {
                 )
                 .to_string(),
                 cacheable: true,
+                cache_break: false,
             },
         ];
-        let uncached = vec![SystemBlock {
-            kind: "current_date".to_string(),
-            content: request.current_date.as_str().to_string(),
-            cacheable: false,
-        }];
-        (cacheable, uncached)
+        (cacheable, Vec::new())
     }
 }
 

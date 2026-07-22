@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use provider::{ModelToolSchema, ReasoningLevel};
 use sdk::RunId;
 pub use sdk::{RunStepId, SessionId};
+use serde::{Deserialize, Serialize};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::AgentRoleConfig;
 pub use share::message::Message as ContextMessage;
@@ -44,7 +45,6 @@ macro_rules! string_value_object {
 }
 
 string_value_object!(ContextRequestId);
-string_value_object!(CalendarDate);
 string_value_object!(Language);
 string_value_object!(SystemPromptSpec);
 string_value_object!(ContentFingerprint);
@@ -80,7 +80,6 @@ pub struct ContextRequest {
     pub system_prompt: SystemPromptSpec,
     pub model_id: String,
     pub effective_reasoning: ReasoningLevel,
-    pub current_date: CalendarDate,
     pub task_reminder: TaskReminderSnapshot,
     pub language: Language,
     pub agent_roles: HashMap<String, AgentRoleConfig>,
@@ -95,11 +94,15 @@ pub struct ContextRequest {
 }
 
 /// Context-owned system block；不是任何 Provider wire DTO。
+///
+/// `cacheable` 表示内容属于低频变化的 cacheable prefix；`cache_break` 表示
+/// prefix 的唯一逻辑断点，Provider adapter 只为该块生成 wire cache marker。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemBlock {
     pub kind: String,
     pub content: String,
     pub cacheable: bool,
+    pub cache_break: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -188,7 +191,7 @@ pub enum CompactOutcome {
 }
 
 /// finalized projection 的收口原因。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FinalizeCause {
     Completed,
     UserCancelledStep,
@@ -196,7 +199,7 @@ pub enum FinalizeCause {
 }
 
 /// Tool/Agent 调用已经收敛的稳定结果种类。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToolOutcomeKind {
     Success,
     Failure,
@@ -206,7 +209,7 @@ pub enum ToolOutcomeKind {
 }
 
 /// finalized Step 中可确定重放的 Tool/Agent receipt。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepReceipt {
     call_id: String,
     index: usize,
@@ -296,6 +299,37 @@ impl StepReceipt {
     pub fn unfinished_call_ids(&self) -> &[String] {
         &self.unfinished_call_ids
     }
+}
+
+/// 已绑定到 RunStep 的不可变 user 输入提交载荷。
+#[derive(Debug, Clone)]
+pub struct AcceptedInputAppend {
+    pub session_id: SessionId,
+    pub run_id: RunId,
+    pub step_id: RunStepId,
+    pub source_request_id: ContextRequestId,
+    pub messages: Vec<ContextMessage>,
+    pub fingerprint: ContentFingerprint,
+}
+
+/// accepted input durable commit 的确定性回执。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceptedInputReceipt {
+    pub run_id: RunId,
+    pub step_id: RunStepId,
+    pub committed_revision: SessionRevision,
+    pub fingerprint: ContentFingerprint,
+}
+
+/// accepted input append 的 typed failure。
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+pub enum AcceptedInputError {
+    #[error("RunStep 已接受输入冲突：run={run_id} step={step_id}")]
+    ContentConflict { run_id: RunId, step_id: RunStepId },
+    #[error("Session 不存在：{0}")]
+    SessionNotFound(SessionId),
+    #[error("Session 已接受输入持久化失败：{0}")]
+    Storage(String),
 }
 
 /// 单个 finalized RunStep 的不可变提交载荷。

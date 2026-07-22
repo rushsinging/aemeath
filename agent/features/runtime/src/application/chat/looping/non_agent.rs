@@ -1,30 +1,31 @@
 use crate::application::agent::{Agent, ToolCall, ToolExecution};
-use crate::application::chat::looping::hook_ui::HookUi;
+use crate::application::chat::looping::hook_ui::dispatch_hook;
 use crate::application::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
-use crate::application::tool_coordination::PreparedToolCall;
-use hook::api::{HookData, ToolHookData};
-use share::config::hooks::HookEvent;
+use crate::application::tool_coordination::{
+    apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
+};
+use hook::{HookInvocation, HookPort, PermissionInput, PreToolUseInput, TaskInput};
+use policy::PolicyPort;
 use std::path::Path;
 use std::sync::Arc;
 use tools::ToolOutcome;
 
-use super::tools::{
-    emit_json_hook_context, log_tool_result, run_post_tool_hooks, send_tool_call_status,
-    send_tool_result,
-};
+use super::tools::{log_tool_result, run_post_tool_hooks, send_tool_call_status, send_tool_result};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_non_agent<S>(
     context: &RuntimeTurnContext,
     agent: &Agent,
     sink: &S,
-    hook_ui: &HookUi<S>,
-    hook_runner: &hook::api::HookRunner,
+    hook_port: &Arc<dyn HookPort>,
     non_agent_calls: &[PreparedToolCall],
     language: &str,
     workspace_root: &Path,
+    policy: &dyn PolicyPort,
+    run_id: &sdk::RunId,
+    step_id: &sdk::RunStepId,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -46,11 +47,13 @@ where
             context,
             agent,
             sink,
-            hook_ui,
-            hook_runner,
+            hook_port,
             other_calls[0],
             language,
             workspace_root,
+            policy,
+            run_id,
+            step_id,
         )
         .await;
     }
@@ -59,11 +62,13 @@ where
         context,
         agent,
         sink,
-        hook_ui,
-        hook_runner,
+        hook_port,
         &other_calls,
         language,
         workspace_root,
+        policy,
+        run_id,
+        step_id,
     )
     .await
 }
@@ -73,11 +78,13 @@ async fn execute_multiple_non_agent<S>(
     context: &RuntimeTurnContext,
     agent: &Agent,
     sink: &S,
-    hook_ui: &HookUi<S>,
-    hook_runner: &hook::api::HookRunner,
+    hook_port: &Arc<dyn HookPort>,
     other_calls: &[&PreparedToolCall],
     language: &str,
     workspace_root: &Path,
+    policy: &dyn PolicyPort,
+    run_id: &sdk::RunId,
+    step_id: &sdk::RunStepId,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -93,8 +100,7 @@ where
             .map(|&pos| {
                 let call = other_calls[pos];
                 let sink = sink.clone();
-                let hook_ui = hook_ui.clone();
-                let hook_runner = hook_runner.clone();
+                let hook_port = hook_port.clone();
                 let sem = semaphore.clone();
                 let context = context.clone();
                 let workspace_root = workspace_root.to_path_buf();
@@ -107,11 +113,13 @@ where
                         &context,
                         agent,
                         &sink,
-                        &hook_ui,
-                        &hook_runner,
+                        &hook_port,
                         call,
                         language,
                         &workspace_root,
+                        policy,
+                        run_id,
+                        step_id,
                     )
                     .await;
                     (pos, result)
@@ -136,11 +144,13 @@ where
                 context,
                 agent,
                 sink,
-                hook_ui,
-                hook_runner,
+                hook_port,
                 call,
                 language,
                 workspace_root,
+                policy,
+                run_id,
+                step_id,
             )
             .await
         };
@@ -193,11 +203,13 @@ async fn execute_one_non_agent<S>(
     context: &RuntimeTurnContext,
     agent: &Agent,
     sink: &S,
-    hook_ui: &HookUi<S>,
-    hook_runner: &hook::api::HookRunner,
+    hook_port: &Arc<dyn HookPort>,
     prepared: &PreparedToolCall,
     language: &str,
     workspace_root: &Path,
+    policy: &dyn PolicyPort,
+    run_id: &sdk::RunId,
+    step_id: &sdk::RunStepId,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -205,18 +217,17 @@ where
     let call = &prepared.call;
     let authorization = prepared.authorization;
     if authorization.enforce_permission_hooks {
-        let _ = hook_ui
-            .run_plain(
-                hook_runner,
-                HookEvent::PermissionRequest,
-                Some(&call.name),
-                HookData::Permission(hook::api::PermissionHookData {
-                    tool_name: call.name.clone(),
-                    permission_rule: "auto".to_string(),
-                }),
-                workspace_root,
-            )
-            .await;
+        let _ = dispatch_hook(
+            hook_port,
+            sink,
+            HookInvocation::PermissionRequest(PermissionInput {
+                tool_name: call.name.clone(),
+                permission_rule: "auto".to_string(),
+            }),
+            workspace_root,
+            &agent.runtime_cancellation,
+        )
+        .await;
     }
     let owned_call = ToolCall {
         id: call.id.clone(),
@@ -233,69 +244,140 @@ where
         owned_call.index,
         owned_call.input.to_string().len(),
     );
-    let pre_results = if authorization.enforce_permission_hooks {
-        hook_ui
-            .run_plain(
-                hook_runner,
-                HookEvent::PreToolUse,
-                Some(&owned_call.name),
-                HookData::Tool(ToolHookData {
-                    tool_name: owned_call.name.clone(),
-                    tool_input: owned_call.input.clone(),
-                    tool_output: None,
-                    is_error: None,
-                }),
-                workspace_root,
-            )
-            .await
+    let pre_dispatch = if authorization.enforce_permission_hooks {
+        dispatch_hook(
+            hook_port,
+            sink,
+            HookInvocation::PreToolUse(PreToolUseInput {
+                tool_name: owned_call.name.clone(),
+                tool_input: owned_call.input.clone(),
+            }),
+            workspace_root,
+            &agent.runtime_cancellation,
+        )
+        .await
     } else {
-        Vec::new()
+        crate::application::hook_adapter::RuntimeHookDispatch {
+            directive: crate::application::hook_adapter::RuntimeHookDirective::Continue,
+            executions: Vec::new(),
+            messages: Vec::new(),
+            block_detail: None,
+        }
     };
-    if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
+    if crate::application::chat::looping::hook_ui::dispatch_is_blocking(&pre_dispatch) {
+        let last_exec = pre_dispatch.executions.last();
+        let exit_code = last_exec.and_then(|e| e.exit_code);
+        let stderr = last_exec.map(|e| e.stderr.as_str()).unwrap_or("");
         log::debug!(target: crate::LOG_TARGET,
             "pretooluse timing blocked: kind=non_agent tool_name={} runtime_id={} provider_id={} exit_code={:?} error_present={}",
             owned_call.name,
             owned_call.id,
             owned_call.provider_id,
-            blocked_result.exit_code,
-            blocked_result.error.as_ref().is_some_and(|value| !value.is_empty()),
+            exit_code,
+            !stderr.is_empty(),
         );
         let default_blocked = match language {
             "zh" => "被 PreToolUse hook 阻止",
             _ => "Blocked by PreToolUse hook",
         };
-        let error_detail = blocked_result.error.as_deref().unwrap_or(default_blocked);
+        let error_detail = if stderr.is_empty() {
+            default_blocked
+        } else {
+            stderr
+        };
         let result = ToolExecution::new(&owned_call, ToolOutcome::error(error_detail));
         send_tool_result(sink, context, &result).await;
         return vec![result];
     }
-    log::debug!(target: crate::LOG_TARGET,
-        "pretooluse timing approved: kind=non_agent tool_name={} runtime_id={} provider_id={} hook_count={}",
-        owned_call.name,
-        owned_call.id,
-        owned_call.provider_id,
-        pre_results.len(),
+    // Apply the hook directive through the canonical re-validation path (#926).
+    // Block is handled above; here we handle UpdatedInput, ContextAndInput,
+    // Context, and the error outcomes (InvalidInput, Denied, ApprovalRequired).
+    let hook_outcome = apply_hook_directive_to_tool_call(
+        &owned_call,
+        pre_dispatch.directive,
+        &agent.catalog,
+        policy,
+        run_id,
+        step_id,
+        workspace_root,
     );
-    send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Ready).await;
-    send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Running).await;
+    let (effective_call, effective_authorization, _hook_context) = match hook_outcome {
+        HookDirectiveOutcome::Continue { call, context } => (call, authorization, context),
+        HookDirectiveOutcome::Ready {
+            call,
+            authorization,
+            context,
+        } => {
+            log::debug!(target: crate::LOG_TARGET,
+                "pretooluse timing ready: kind=non_agent tool_name={} runtime_id={} provider_id={} input_updated={}",
+                call.name,
+                call.id,
+                call.provider_id,
+                call.input != owned_call.input,
+            );
+            (call, authorization, context)
+        }
+        HookDirectiveOutcome::InvalidInput { error, .. } => {
+            let msg = format!("PreToolUse hook returned invalid input: {error}");
+            let result = ToolExecution::new(&owned_call, ToolOutcome::error(msg));
+            send_tool_result(sink, context, &result).await;
+            return vec![result];
+        }
+        HookDirectiveOutcome::Denied { reason, .. } => {
+            let msg = format!("Denied by PreToolUse hook re-evaluation: {reason}");
+            let result = ToolExecution::new(&owned_call, ToolOutcome::error(msg));
+            send_tool_result(sink, context, &result).await;
+            return vec![result];
+        }
+        HookDirectiveOutcome::ApprovalRequired { reason, .. } => {
+            let msg = format!("Approval required after PreToolUse hook: {reason}");
+            let result = ToolExecution::new(&owned_call, ToolOutcome::error(msg));
+            send_tool_result(sink, context, &result).await;
+            return vec![result];
+        }
+        HookDirectiveOutcome::Blocked { reason, .. } => {
+            // Should have been caught by dispatch_is_blocking above, but
+            // be defensive: Block can also reach here if re-validation
+            // synthesizes a Blocked.
+            let msg = format!("Blocked by PreToolUse hook: {reason:?}");
+            let result = ToolExecution::new(&owned_call, ToolOutcome::error(msg));
+            send_tool_result(sink, context, &result).await;
+            return vec![result];
+        }
+    };
+    log::debug!(target: crate::LOG_TARGET,
+        "pretooluse timing approved: kind=non_agent tool_name={} runtime_id={} provider_id={} executions={}",
+        effective_call.name,
+        effective_call.id,
+        effective_call.provider_id,
+        pre_dispatch.executions.len(),
+    );
+    send_tool_call_status(sink, context, &effective_call, RuntimeToolCallStatus::Ready).await;
+    send_tool_call_status(
+        sink,
+        context,
+        &effective_call,
+        RuntimeToolCallStatus::Running,
+    )
+    .await;
     log::debug!(target: crate::LOG_TARGET,
         "tool execution timing running_sent: kind=non_agent tool_name={} runtime_id={} provider_id={}",
-        owned_call.name,
-        owned_call.id,
-        owned_call.provider_id,
+        effective_call.name,
+        effective_call.id,
+        effective_call.provider_id,
     );
     // Only Bash supports stdout streaming via progress_tx. For other tools,
     // skip the channel setup to avoid unnecessary overhead.
-    let is_bash = owned_call.name == "Bash";
+    let is_bash = effective_call.name == "Bash";
 
-    let tool_ctx = agent.ctx.with_authorization(authorization);
+    let tool_ctx = agent.ctx.with_authorization(effective_authorization);
     let exec_results = if is_bash {
         // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
         let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
         let streaming_ctx = tool_ctx.with_progress(Some(
             crate::application::tool_execution_adapters::progress(prog_tx),
         ));
-        let call_id = owned_call.id.clone();
+        let call_id = effective_call.id.clone();
         let stream_sink = sink.clone();
         let stream_context = context.clone();
         let progress_log_context = logging::capture();
@@ -313,7 +395,7 @@ where
 
         let results = vec![
             agent
-                .execute_one_with_ctx(&owned_call, &streaming_ctx)
+                .execute_one_with_ctx(&effective_call, &streaming_ctx)
                 .await,
         ];
 
@@ -334,7 +416,7 @@ where
         results
     } else {
         // Non-Bash tools: execute without progress streaming.
-        vec![agent.execute_one_with_ctx(&owned_call, &tool_ctx).await]
+        vec![agent.execute_one_with_ctx(&effective_call, &tool_ctx).await]
     };
 
     let workspace = agent.workspace_persist.snapshot();
@@ -348,25 +430,29 @@ where
     let mut out = Vec::new();
     for ex in exec_results {
         let is_error = ex.outcome.is_error;
-        log_tool_result(&ex.call_id, &owned_call.name, is_error, &ex.outcome.text);
+        log_tool_result(
+            &ex.call_id,
+            &effective_call.name,
+            is_error,
+            &ex.outcome.text,
+        );
         run_post_tool_hooks(
             sink,
-            hook_ui,
-            hook_runner,
-            &owned_call,
+            hook_port,
+            &effective_call,
             &ex,
-            workspace_root,
             &agent.runtime_cancellation,
+            workspace_root,
         )
         .await;
         run_task_hooks(
             sink,
-            hook_ui,
-            hook_runner,
-            &owned_call,
+            hook_port,
+            &effective_call,
             &ex.outcome.text,
             is_error,
             workspace_root,
+            &agent.runtime_cancellation,
         )
         .await;
         // TasksSnapshot 由 loop_runner 在 PostToolExecutionSync 之后统一推送（#642），
@@ -379,52 +465,38 @@ where
 
 async fn run_task_hooks<S>(
     sink: &S,
-    hook_ui: &HookUi<S>,
-    hook_runner: &hook::api::HookRunner,
+    hook_port: &Arc<dyn HookPort>,
     call: &ToolCall,
     output: &str,
     is_error: bool,
     workspace_root: &Path,
+    cancel: &tokio_util::sync::CancellationToken,
 ) where
     S: ChatEventSink,
 {
     if !is_error && call.name == "TaskCreate" {
-        emit_json_hook_context(
+        let _ = dispatch_hook(
+            hook_port,
             sink,
-            hook_ui
-                .run_json(
-                    hook_runner,
-                    HookEvent::TaskCreated,
-                    None,
-                    HookData::Tool(ToolHookData {
-                        tool_name: "TaskCreate".to_string(),
-                        tool_input: call.input.clone(),
-                        tool_output: Some(output.to_string()),
-                        is_error: Some(false),
-                    }),
-                    workspace_root,
-                )
-                .await,
+            HookInvocation::TaskCreated(TaskInput {
+                tool_input: call.input.clone(),
+                tool_output: output.to_string(),
+            }),
+            workspace_root,
+            cancel,
         )
         .await;
     }
     if !is_error && call.name == "TaskUpdate" && output.contains("Status: Completed") {
-        emit_json_hook_context(
+        let _ = dispatch_hook(
+            hook_port,
             sink,
-            hook_ui
-                .run_json(
-                    hook_runner,
-                    HookEvent::TaskCompleted,
-                    None,
-                    HookData::Tool(ToolHookData {
-                        tool_name: "TaskUpdate".to_string(),
-                        tool_input: call.input.clone(),
-                        tool_output: Some(output.to_string()),
-                        is_error: Some(false),
-                    }),
-                    workspace_root,
-                )
-                .await,
+            HookInvocation::TaskCompleted(TaskInput {
+                tool_input: call.input.clone(),
+                tool_output: output.to_string(),
+            }),
+            workspace_root,
+            cancel,
         )
         .await;
     }

@@ -135,6 +135,19 @@ mod tests {
     }
 
     #[test]
+    fn test_sdk_event_to_ui_event_formats_model_retry_in_english() {
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::ModelInvocationRetrying {
+            context: test_sdk_event_context(),
+            attempt: 2,
+            delay: std::time::Duration::from_millis(10_250),
+        });
+
+        assert!(
+            matches!(event, UiEvent::SystemMessage(message) if message == "Retrying model invocation (attempt 2) in 10.2s.")
+        );
+    }
+
+    #[test]
     fn test_sdk_event_to_ui_event_maps_token() {
         let event = sdk_event_to_ui_event(sdk::ChatEvent::Token {
             context: test_sdk_event_context(),
@@ -180,6 +193,22 @@ mod tests {
             }
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_sdk_event_to_ui_event_preserves_hook_message() {
+        let view = sdk::HookMessageView {
+            point: "PreToolUse".to_string(),
+            source: "matcher:Bash".to_string(),
+            execution_ordinal: 2,
+            attempt: 3,
+            kind: sdk::HookMessageKindView::AdditionalContext,
+            text: "Use formatter".to_string(),
+        };
+
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::HookMessage(view.clone()));
+
+        assert!(matches!(event, UiEvent::HookMessage(message) if message == view));
     }
 
     #[test]

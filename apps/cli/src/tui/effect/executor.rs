@@ -460,7 +460,7 @@ impl App {
             .push_input_event(sdk::ChatInputEvent::ListReminders);
     }
 
-    /// 用系统默认程序打开 URL 或本地文件路径（Ctrl+Click markdown link / 行内代码路径）。
+    /// 用系统默认程序打开 URL 或本地文件路径（Cmd+Click markdown link / 行内代码路径）。
     fn open_url_effect(&mut self, url: &str) {
         // 安全校验：允许 http/https URL 和本地文件路径
         let is_url = url.starts_with("http://") || url.starts_with("https://");

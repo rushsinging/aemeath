@@ -76,6 +76,9 @@ pub enum WorkspaceError {
         path: PathBuf,
         repo_root: PathBuf,
     },
+    NotLinkedWorktree {
+        path: PathBuf,
+    },
     EmptyStack,
     UnsupportedForNonGit,
     GitProbeFailed(GitProbeError),
@@ -120,6 +123,13 @@ impl std::fmt::Display for WorkspaceError {
                 path.display(),
                 repo_root.display()
             ),
+            WorkspaceError::NotLinkedWorktree { path } => {
+                write!(
+                    f,
+                    "路径 {} 是当前仓库的 primary checkout，不是 linked worktree",
+                    path.display()
+                )
+            }
             WorkspaceError::EmptyStack => write!(
                 f,
                 "上下文栈为空，没有可恢复的 worktree。可能已经在主工作区。"
@@ -219,6 +229,7 @@ pub trait WorkspaceControl: Send + Sync {
         &self,
         path: Option<PathBuf>,
         branch: Option<String>,
+        base: Option<String>,
     ) -> Result<WorkspaceFrame, WorkspaceError>;
     fn exit(&self) -> Result<WorkspaceFrame, WorkspaceError>;
 }

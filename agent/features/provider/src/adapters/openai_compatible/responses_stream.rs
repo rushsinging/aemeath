@@ -64,7 +64,7 @@ pub(crate) async fn parse_responses_stream(
                     Ok(0) => break,
                     Ok(_) => {}
                     Err(e) => {
-                        return Err(crate::LlmError::Stream(e.to_string()));
+                        return Err(crate::adapters::stream::stream_read_error(e));
                     }
                 }
             }
@@ -195,6 +195,12 @@ pub(crate) async fn parse_responses_stream(
                 // 忽略其他事件类型（response.created, response.in_progress, 等）
             }
         }
+    }
+
+    // 流中的 function_call 是权威信号：部分 Responses 兼容端点不会在
+    // response.completed.response.output 中重复列出它们。
+    if !function_calls.is_empty() && stop_reason != StopReason::MaxTokens {
+        stop_reason = StopReason::ToolUse;
     }
 
     // 组装 content blocks

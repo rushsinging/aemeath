@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::ports::{
-    AppendReceipt, CalendarDate, CompactOutcome, CompactRequest, CompactResult, CompactSkipReason,
-    CompactionDecision, ContentFingerprint, ContextAppend, ContextAppendError, ContextPort,
-    ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
-    FinalizeCause, Language, ManualCompactRequest, SessionId, SessionRevision, StepReceipt,
-    SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, ToolOutcomeKind, Urgency,
+    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
+    CompactRequest, CompactResult, CompactSkipReason, CompactionDecision, ContentFingerprint,
+    ContextAppend, ContextAppendError, ContextPort, ContextPortError, ContextRequest,
+    ContextRequestId, ContextWindow, DecisionReason, FinalizeCause, Language, ManualCompactRequest,
+    SessionId, SessionRevision, StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot,
+    TokenBudget, ToolOutcomeKind, Urgency,
 };
 use async_trait::async_trait;
 use provider::ReasoningLevel;
@@ -21,6 +22,7 @@ use super::ContextCoordinator;
 struct RecordingPort {
     calls: Mutex<Vec<&'static str>>,
     appends: Mutex<Vec<ContextAppend>>,
+    accepted_inputs: Mutex<Vec<AcceptedInputAppend>>,
     compact_requests: Mutex<Vec<CompactRequest>>,
 }
 
@@ -37,6 +39,7 @@ impl ContextPort for RecordingPort {
                 kind: "system_prompt".to_string(),
                 content: "system".to_string(),
                 cacheable: true,
+                cache_break: true,
             }],
             messages: request.pending_messages.clone(),
             tool_schemas: request.tool_schemas.clone(),
@@ -98,6 +101,20 @@ impl ContextPort for RecordingPort {
         Ok(())
     }
 
+    async fn append_accepted_input(
+        &self,
+        append: &AcceptedInputAppend,
+    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        self.calls.lock().unwrap().push("append_accepted_input");
+        self.accepted_inputs.lock().unwrap().push(append.clone());
+        Ok(AcceptedInputReceipt {
+            run_id: append.run_id.clone(),
+            step_id: append.step_id.clone(),
+            committed_revision: SessionRevision::new(2),
+            fingerprint: append.fingerprint.clone(),
+        })
+    }
+
     async fn append_and_persist(
         &self,
         append: &ContextAppend,
@@ -123,7 +140,6 @@ fn request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        current_date: CalendarDate::new("2026-07-19"),
         task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: HashMap::new(),
@@ -206,6 +222,29 @@ async fn coordinator_delegates_manual_compact_and_clear_session_to_port() {
         *port.calls.lock().unwrap(),
         vec!["manual_compact", "clear_session"]
     );
+}
+
+#[tokio::test]
+async fn coordinator_appends_only_accepted_input_with_stable_fingerprint() {
+    let port = Arc::new(RecordingPort::default());
+    let coordinator = ContextCoordinator::new(port.clone());
+    let frozen = request();
+    let messages = vec![Message::user("accepted")];
+
+    let receipt = coordinator
+        .append_accepted_input(&frozen, messages.clone())
+        .await
+        .unwrap();
+
+    let accepted = port.accepted_inputs.lock().unwrap();
+    assert_eq!(accepted.len(), 1);
+    assert_eq!(accepted[0].run_id, frozen.run_id);
+    assert_eq!(
+        serde_json::to_value(&accepted[0].messages).unwrap(),
+        serde_json::to_value(&messages).unwrap()
+    );
+    assert_eq!(receipt.fingerprint, accepted[0].fingerprint);
+    assert_ne!(accepted[0].fingerprint, ContentFingerprint::new(""));
 }
 
 #[tokio::test]

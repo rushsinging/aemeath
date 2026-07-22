@@ -2,19 +2,16 @@
 
 use crate::adapters::{
     agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep, lsp,
-    memory_tool, plan_mode, skill_tool, task_create, task_get, task_list, task_list_complete,
-    task_list_create, task_stop, task_update, tool_search, web_fetch, web_search, worktree,
+    memory_tool, plan_mode, task_create, task_get, task_list, task_list_complete, task_list_create,
+    task_stop, task_update, tool_search, web_fetch, web_search, worktree,
 };
 use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::published_language::ToolCapabilities as Caps;
 use crate::domain::scope_profile::{
     is_authorized, RegistryScope, RegistryScopeBuilder, ToolProfile, ToolRegistrationSpec,
 };
-use share::skill_ops::Skill;
-use std::collections::HashMap;
 use std::sync::Arc;
 use task::TaskAccess;
-use tokio::sync::Mutex;
 
 use super::tool_registry::ToolRegistry;
 
@@ -22,8 +19,6 @@ use super::tool_registry::ToolRegistry;
 pub(crate) enum BuiltinRegistryScope {
     Main,
     SubAgent,
-    /// Exact compatibility scope retained until #914.
-    LegacyNoAgent,
 }
 
 impl BuiltinRegistryScope {
@@ -31,14 +26,13 @@ impl BuiltinRegistryScope {
         match self {
             Self::Main => "main",
             Self::SubAgent => "sub-agent",
-            Self::LegacyNoAgent => "legacy-no-agent",
         }
     }
 }
 
 pub(crate) fn profile_for(scope: BuiltinRegistryScope, main_parent: &ToolProfile) -> ToolProfile {
     let requested = match scope {
-        BuiltinRegistryScope::Main | BuiltinRegistryScope::LegacyNoAgent => Caps::all(),
+        BuiltinRegistryScope::Main => Caps::all(),
         BuiltinRegistryScope::SubAgent => {
             Caps::ReadWorkspace
                 | Caps::WriteWorkspace
@@ -50,25 +44,21 @@ pub(crate) fn profile_for(scope: BuiltinRegistryScope, main_parent: &ToolProfile
 
     match scope {
         BuiltinRegistryScope::Main => *main_parent,
-        BuiltinRegistryScope::SubAgent | BuiltinRegistryScope::LegacyNoAgent => {
-            ToolProfile::derive_restricted(main_parent, requested)
-                .expect("built-in child profiles must only restrict the main profile")
-        }
+        BuiltinRegistryScope::SubAgent => ToolProfile::derive_restricted(main_parent, requested)
+            .expect("built-in child profiles must only restrict the main profile"),
     }
 }
 
-fn belongs_to(scope: BuiltinRegistryScope, main: bool, sub: bool, no_agent: bool) -> bool {
+fn belongs_to(scope: BuiltinRegistryScope, main: bool, sub: bool) -> bool {
     match scope {
         BuiltinRegistryScope::Main => main,
         BuiltinRegistryScope::SubAgent => sub,
-        BuiltinRegistryScope::LegacyNoAgent => no_agent,
     }
 }
 
 pub(crate) fn register_named_scope(
     registry: &ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
-    skills: Arc<Mutex<HashMap<String, Skill>>>,
     memory_source: Arc<dyn MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     selected_scope: BuiltinRegistryScope,
@@ -80,8 +70,8 @@ pub(crate) fn register_named_scope(
     // This macro is the single built-in registration specification: each row
     // declares identity, required capabilities, scope membership, and factory.
     macro_rules! builtin {
-        ($name:literal, $caps:expr, [$main:literal, $sub:literal, $no_agent:literal], $tool:expr) => {{
-            if belongs_to(selected_scope, $main, $sub, $no_agent) {
+        ($name:literal, $caps:expr, [$main:literal, $sub:literal], $tool:expr) => {{
+            if belongs_to(selected_scope, $main, $sub) {
                 let spec = ToolRegistrationSpec::new($name, $caps);
                 scope
                     .register_mut(spec.clone())
@@ -96,7 +86,7 @@ pub(crate) fn register_named_scope(
     builtin!(
         "Bash",
         Caps::ReadWorkspace | Caps::ExecuteProcess | Caps::WorkspaceControl,
-        [true, true, true],
+        [true, true],
         bash::BashTool {
             control: workspace_control.clone()
         }
@@ -104,61 +94,56 @@ pub(crate) fn register_named_scope(
     builtin!(
         "Read",
         Caps::ReadWorkspace,
-        [true, true, true],
+        [true, true],
         file_read::FileReadTool
     );
     builtin!(
         "Write",
         Caps::ReadWorkspace | Caps::WriteWorkspace,
-        [true, true, true],
+        [true, true],
         file_write::FileWriteTool
     );
     builtin!(
         "Edit",
         Caps::ReadWorkspace | Caps::WriteWorkspace,
-        [true, true, true],
+        [true, true],
         file_edit::FileEditTool
     );
     builtin!(
         "Glob",
         Caps::ReadWorkspace,
-        [true, true, true],
+        [true, true],
         glob_tool::GlobTool
     );
-    builtin!(
-        "Grep",
-        Caps::ReadWorkspace,
-        [true, true, true],
-        grep::GrepTool
-    );
+    builtin!("Grep", Caps::ReadWorkspace, [true, true], grep::GrepTool);
     builtin!(
         "LSP",
         Caps::ReadWorkspace | Caps::ExecuteProcess,
-        [true, true, true],
+        [true, true],
         lsp::LspTool
     );
     builtin!(
         "WebFetch",
         Caps::NetworkAccess,
-        [true, true, true],
+        [true, true],
         web_fetch::WebFetchTool
     );
     builtin!(
         "WebSearch",
         Caps::NetworkAccess,
-        [true, true, true],
+        [true, true],
         web_search::WebSearchTool
     );
     builtin!(
         "Agent",
         Caps::AgentDispatch,
-        [true, false, false],
+        [true, false],
         agent_tool::AgentTool
     );
     builtin!(
         "TaskCreate",
         Caps::TaskMutation,
-        [true, false, true],
+        [true, false],
         task_create::TaskCreateTool {
             access: task_access.clone()
         }
@@ -166,7 +151,7 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskUpdate",
         Caps::TaskMutation,
-        [true, false, true],
+        [true, false],
         task_update::TaskUpdateTool {
             access: task_access.clone()
         }
@@ -174,7 +159,7 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskList",
         Caps::TaskRead,
-        [true, false, true],
+        [true, false],
         task_list::TaskListTool {
             access: task_access.clone()
         }
@@ -182,7 +167,7 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskListCreate",
         Caps::TaskMutation,
-        [true, false, true],
+        [true, false],
         task_list_create::TaskListCreateTool {
             access: task_access.clone()
         }
@@ -190,7 +175,7 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskListComplete",
         Caps::TaskMutation,
-        [true, false, true],
+        [true, false],
         task_list_complete::TaskListCompleteTool {
             access: task_access.clone()
         }
@@ -198,7 +183,7 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskGet",
         Caps::TaskRead,
-        [true, false, true],
+        [true, false],
         task_get::TaskGetTool {
             access: task_access.clone()
         }
@@ -206,26 +191,15 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskStop",
         Caps::TaskMutation,
-        [true, false, true],
+        [true, false],
         task_stop::TaskStopTool {
             access: task_access.clone()
-        }
-    );
-    // Skill is NOT a Tool (Issue #912): it is surfaced via the Skill
-    // materialization port, never as a catalog/execution entry. Retained for
-    // LegacyNoAgent only until #914 retires that compatibility scope.
-    builtin!(
-        "Skill",
-        Caps::empty(),
-        [false, false, true],
-        skill_tool::SkillTool {
-            skills: skills.clone()
         }
     );
     builtin!(
         "Memory",
         Caps::empty(),
-        [true, true, true],
+        [true, true],
         memory_tool::MemoryTool {
             source: memory_source.clone(),
         }
@@ -233,32 +207,32 @@ pub(crate) fn register_named_scope(
     builtin!(
         "AskUserQuestion",
         Caps::UserInteraction,
-        [true, false, true],
+        [true, false],
         ask_user::AskUserQuestionTool
     );
-    builtin!("Brief", Caps::empty(), [true, true, true], brief::BriefTool);
+    builtin!("Brief", Caps::empty(), [true, true], brief::BriefTool);
     builtin!(
         "ToolSearch",
         Caps::empty(),
-        [true, true, false],
+        [true, true],
         tool_search::ToolSearchTool
     );
     builtin!(
         "EnterPlanMode",
         Caps::PlanControl,
-        [true, false, false],
+        [true, false],
         plan_mode::EnterPlanModeTool
     );
     builtin!(
         "ExitPlanMode",
         Caps::PlanControl,
-        [true, false, false],
+        [true, false],
         plan_mode::ExitPlanModeTool
     );
     builtin!(
         "EnterWorktree",
         Caps::ReadWorkspace | Caps::WorkspaceControl,
-        [true, false, true],
+        [true, false],
         worktree::EnterWorktreeTool {
             control: workspace_control.clone()
         }
@@ -266,7 +240,7 @@ pub(crate) fn register_named_scope(
     builtin!(
         "ExitWorktree",
         Caps::ReadWorkspace | Caps::WorkspaceControl,
-        [true, false, true],
+        [true, false],
         worktree::ExitWorktreeTool {
             control: workspace_control.clone()
         }
@@ -279,58 +253,6 @@ pub(crate) fn register_named_scope(
         .iter()
         .all(|spec| built_scope.get(spec.name()).is_some()));
     built_scope
-}
-
-pub fn register_all_tools(
-    registry: &ToolRegistry,
-    task_access: Arc<dyn TaskAccess>,
-    skills: Arc<Mutex<HashMap<String, Skill>>>,
-    memory_source: Arc<dyn MemoryPortSource>,
-    workspace_control: Arc<dyn project::WorkspaceControl>,
-) {
-    register_named_scope(
-        registry,
-        task_access,
-        skills,
-        memory_source,
-        workspace_control,
-        BuiltinRegistryScope::Main,
-    );
-}
-
-pub fn register_subagent_tools(
-    registry: &mut ToolRegistry,
-    task_access: Arc<dyn TaskAccess>,
-    skills: Arc<Mutex<HashMap<String, Skill>>>,
-    memory_source: Arc<dyn MemoryPortSource>,
-    workspace_control: Arc<dyn project::WorkspaceControl>,
-) {
-    register_named_scope(
-        registry,
-        task_access,
-        skills,
-        memory_source,
-        workspace_control,
-        BuiltinRegistryScope::SubAgent,
-    );
-}
-
-/// Compatibility façade preserving the historical set exactly until #914.
-pub fn register_all_tools_except_agent(
-    registry: &ToolRegistry,
-    task_access: Arc<dyn TaskAccess>,
-    skills: Arc<Mutex<HashMap<String, Skill>>>,
-    memory_source: Arc<dyn MemoryPortSource>,
-    workspace_control: Arc<dyn project::WorkspaceControl>,
-) {
-    register_named_scope(
-        registry,
-        task_access,
-        skills,
-        memory_source,
-        workspace_control,
-        BuiltinRegistryScope::LegacyNoAgent,
-    );
 }
 
 #[cfg(test)]
@@ -363,14 +285,7 @@ mod tests {
             .expect("workspace wiring")
             .into_views()
             .control();
-        register_named_scope(
-            &registry,
-            task_access,
-            Arc::new(Mutex::new(HashMap::new())),
-            test_memory_source(),
-            control,
-            scope,
-        )
+        register_named_scope(&registry, task_access, test_memory_source(), control, scope)
     }
 
     fn names_for(scope: BuiltinRegistryScope) -> BTreeSet<String> {
@@ -425,50 +340,17 @@ mod tests {
         "Brief",
         "ToolSearch",
     ];
-    const NO_AGENT: &[&str] = &[
-        "Bash",
-        "Read",
-        "Write",
-        "Edit",
-        "Glob",
-        "Grep",
-        "LSP",
-        "WebFetch",
-        "WebSearch",
-        "TaskCreate",
-        "TaskUpdate",
-        "TaskList",
-        "TaskListCreate",
-        "TaskListComplete",
-        "TaskGet",
-        "TaskStop",
-        "Skill",
-        "Memory",
-        "AskUserQuestion",
-        "Brief",
-        "EnterWorktree",
-        "ExitWorktree",
-    ];
-
     #[test]
     fn production_profiles_are_main_baseline_or_restricted_children() {
         let main = ToolProfile::baseline(Caps::all());
         let main_profile = profile_for(BuiltinRegistryScope::Main, &main);
         assert_eq!(main_profile.allowed_capabilities(), Caps::all());
 
-        for child_scope in [
-            BuiltinRegistryScope::SubAgent,
-            BuiltinRegistryScope::LegacyNoAgent,
-        ] {
-            let child = profile_for(child_scope, &main);
-            assert!(child
-                .allowed_capabilities()
-                .is_subset_of(main.allowed_capabilities()));
-        }
-        assert_ne!(
-            profile_for(BuiltinRegistryScope::SubAgent, &main).allowed_capabilities(),
-            main.allowed_capabilities()
-        );
+        let child = profile_for(BuiltinRegistryScope::SubAgent, &main);
+        assert!(child
+            .allowed_capabilities()
+            .is_subset_of(main.allowed_capabilities()));
+        assert_ne!(child.allowed_capabilities(), main.allowed_capabilities());
     }
 
     #[test]
@@ -511,13 +393,5 @@ mod tests {
     #[test]
     fn sub_agent_scope_characterization_is_exact() {
         assert_eq!(names_for(BuiltinRegistryScope::SubAgent), set(SUB_AGENT));
-    }
-
-    #[test]
-    fn legacy_no_agent_scope_characterization_is_exact() {
-        assert_eq!(
-            names_for(BuiltinRegistryScope::LegacyNoAgent),
-            set(NO_AGENT)
-        );
     }
 }

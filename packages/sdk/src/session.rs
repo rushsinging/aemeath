@@ -22,6 +22,22 @@ pub struct ChatMessage {
 pub struct ChatMessageMetadata {
     #[serde(default)]
     pub source: ChatMessageSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_hook: Option<StopHookFeedbackView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct StopHookFeedbackView {
+    pub summary: String,
+    pub command: String,
+    pub exit_code: Option<i32>,
+    pub reason: String,
+    pub stdout_preview: String,
+    pub stderr_preview: String,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
@@ -30,6 +46,7 @@ pub enum ChatMessageSource {
     #[default]
     User,
     SystemGenerated,
+    StopHook,
 }
 
 impl ChatMessage {
@@ -48,6 +65,7 @@ impl ChatMessage {
             content: vec![ContentBlock::text(text)],
             metadata: Some(ChatMessageMetadata {
                 source: ChatMessageSource::SystemGenerated,
+                stop_hook: None,
             }),
             input_id: None,
         }

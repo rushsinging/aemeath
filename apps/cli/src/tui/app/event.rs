@@ -174,6 +174,8 @@ pub enum AppEvent {
     },
     /// Unified lifecycle hook event.
     HookEvent(sdk::HookEventView),
+    /// Hook-produced context or system message for structured conversation display.
+    HookMessage(sdk::HookMessageView),
     /// 当前 turn 变化，需要由 CLI 边界记录到 runtime bootstrap。
     CurrentTurnChanged(usize),
     /// Current tool path base/working root changed.

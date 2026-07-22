@@ -117,15 +117,6 @@ fn canonical_catalog_names_hit_specialized_displays() {
     );
     assert_eq!(line_to_string(&agent), "Agent 分析主工具编排");
     assert_eq!(agent_details, vec!["只读分析三个文件"]);
-
-    let (skill, skill_details) = format_tool_call(
-        "Skill",
-        r#"{"skill":"superpowers:writing-plans"}"#,
-        None,
-        None,
-    );
-    assert_eq!(line_to_string(&skill), "Skill superpowers:writing-plans");
-    assert!(skill_details.is_empty());
 }
 
 #[test]
@@ -448,14 +439,6 @@ fn test_format_tool_call_task_list_create_empty_subject_no_question_mark() {
 }
 
 #[test]
-fn test_format_tool_call_skill_empty_no_question_mark() {
-    let (header, _details) = format_tool_call("Skill", "{}", None, None);
-    let text = line_to_string(&header);
-    assert_eq!(text, "Skill");
-    assert!(!text.contains('?'));
-}
-
-#[test]
 fn test_format_tool_call_lsp_both_empty_no_question_mark() {
     let (header, _details) = format_tool_call("LSP", "{}", None, None);
     let text = line_to_string(&header);
@@ -509,6 +492,212 @@ fn test_format_tool_call_ask_user_question_empty_no_question_mark() {
         "空 question 时应只显示 display name 'Ask': {text}"
     );
     assert!(!text.contains('?'));
+}
+
+// ── Issue #1297：EnterWorktree result 缺失时回退请求目标 ──────────
+
+#[test]
+fn enter_worktree_error_with_branch_shows_requested_branch() {
+    let payload = ToolResultPayload::new(
+        "failed to enter worktree".to_string(),
+        serde_json::Value::Null,
+        true,
+        0,
+    );
+
+    let (header, _) = format_tool_call(
+        "EnterWorktree",
+        r#"{"branch":"fix/example","path":""}"#,
+        Some(&payload),
+        None,
+    );
+
+    assert_eq!(line_to_string(&header), "Enter Worktree branch=fix/example");
+}
+
+#[test]
+fn enter_worktree_error_with_typed_content_uses_requested_target() {
+    let payload = ToolResultPayload::new(
+        "failed to enter worktree".to_string(),
+        serde_json::json!({
+            "branch": "actual/result",
+            "path_base": "/repo",
+            "workspace_root": "/repo/.worktrees/actual-result",
+            "guidance": "Use the worktree"
+        }),
+        true,
+        0,
+    );
+
+    for (raw_input, expected) in [
+        (
+            r#"{"branch":"requested/branch","path":".worktrees/requested"}"#,
+            "Enter Worktree branch=requested/branch",
+        ),
+        (
+            r#"{"branch":" \t ","path":".worktrees/requested"}"#,
+            "Enter Worktree path=.worktrees/requested",
+        ),
+    ] {
+        let (header, _) = format_tool_call("EnterWorktree", raw_input, Some(&payload), None);
+        let text = line_to_string(&header);
+
+        assert_eq!(text, expected);
+        assert!(!text.contains("actual/result"), "header: {text}");
+        assert!(
+            !text.contains("/repo/.worktrees/actual-result"),
+            "header: {text}"
+        );
+    }
+}
+
+#[test]
+fn enter_worktree_in_flight_shows_requested_branch() {
+    let (header, _) = format_tool_call(
+        "EnterWorktree",
+        r#"{"branch":"fix/in-flight","path":""}"#,
+        None,
+        None,
+    );
+
+    assert_eq!(
+        line_to_string(&header),
+        "Enter Worktree branch=fix/in-flight"
+    );
+}
+
+#[test]
+fn enter_worktree_unparseable_result_falls_back_to_requested_branch() {
+    let payload = ToolResultPayload::new(
+        "unexpected result".to_string(),
+        serde_json::json!({ "unexpected": true }),
+        false,
+        0,
+    );
+
+    let (header, _) = format_tool_call(
+        "EnterWorktree",
+        r#"{"branch":"fix/unparseable","path":""}"#,
+        Some(&payload),
+        None,
+    );
+
+    assert_eq!(
+        line_to_string(&header),
+        "Enter Worktree branch=fix/unparseable"
+    );
+}
+
+#[test]
+fn enter_worktree_error_with_path_only_shows_requested_path() {
+    let payload = ToolResultPayload::new(
+        "failed to enter worktree".to_string(),
+        serde_json::Value::Null,
+        true,
+        0,
+    );
+
+    let (header, _) = format_tool_call(
+        "EnterWorktree",
+        r#"{"path":".worktrees/existing"}"#,
+        Some(&payload),
+        None,
+    );
+
+    assert_eq!(
+        line_to_string(&header),
+        "Enter Worktree path=.worktrees/existing"
+    );
+}
+
+#[test]
+fn enter_worktree_blank_branch_falls_back_to_nonblank_path() {
+    let payload = ToolResultPayload::new(
+        "failed to enter worktree".to_string(),
+        serde_json::Value::Null,
+        true,
+        0,
+    );
+
+    let (header, _) = format_tool_call(
+        "EnterWorktree",
+        r#"{"branch":" \t ","path":".worktrees/existing"}"#,
+        Some(&payload),
+        None,
+    );
+
+    assert_eq!(
+        line_to_string(&header),
+        "Enter Worktree path=.worktrees/existing"
+    );
+}
+
+#[test]
+fn enter_worktree_blank_targets_show_only_display_name() {
+    let payload = ToolResultPayload::new(
+        "failed to enter worktree".to_string(),
+        serde_json::Value::Null,
+        true,
+        0,
+    );
+
+    let (header, _) = format_tool_call(
+        "EnterWorktree",
+        r#"{"branch":"  ","path":"\n"}"#,
+        Some(&payload),
+        None,
+    );
+
+    assert_eq!(line_to_string(&header), "Enter Worktree");
+}
+
+#[test]
+fn enter_worktree_nonblank_target_preserves_original_whitespace() {
+    let payload = ToolResultPayload::new(
+        "failed to enter worktree".to_string(),
+        serde_json::Value::Null,
+        true,
+        0,
+    );
+
+    let (header, _) = format_tool_call(
+        "EnterWorktree",
+        r#"{"branch":"  fix/example  ","path":""}"#,
+        Some(&payload),
+        None,
+    );
+
+    assert_eq!(
+        line_to_string(&header),
+        "Enter Worktree branch=  fix/example  "
+    );
+}
+
+#[test]
+fn enter_worktree_typed_success_uses_actual_branch_and_workspace_root() {
+    let payload = ToolResultPayload::new(
+        "entered worktree".to_string(),
+        serde_json::json!({
+            "branch": "actual/result",
+            "path_base": "/repo",
+            "workspace_root": "/repo/.worktrees/actual-result",
+            "guidance": "Use the worktree"
+        }),
+        false,
+        0,
+    );
+
+    let (header, _) = format_tool_call(
+        "EnterWorktree",
+        r#"{"branch":"requested/branch","path":""}"#,
+        Some(&payload),
+        None,
+    );
+
+    assert_eq!(
+        line_to_string(&header),
+        "Enter Worktree branch=actual/result (/repo/.worktrees/actual-result)"
+    );
 }
 
 // ── 回归 #273 typed payload 路径 ──────────────────────────────────

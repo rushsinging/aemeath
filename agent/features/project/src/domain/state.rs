@@ -5,7 +5,7 @@ use share::session_types::{
 };
 
 use crate::domain::git::{GitWorktreeOps, RepositoryProbe};
-use crate::domain::types::{WorkspaceError, WorkspaceFrame, WorkspaceRestoreError};
+use crate::domain::types::{GitProbeError, WorkspaceError, WorkspaceFrame, WorkspaceRestoreError};
 
 const DEFAULT_WORKTREE_BASE: &str = "main";
 const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
@@ -88,7 +88,7 @@ fn resolve_worktree_path(
     path: Option<PathBuf>,
     branch: Option<&str>,
 ) -> Result<PathBuf, WorkspaceError> {
-    match path {
+    match path.filter(|value| !value.as_os_str().is_empty()) {
         Some(p) if p.is_absolute() => Ok(p),
         Some(p) => Ok(state.path_base.join(p)),
         None => match branch {
@@ -99,6 +99,11 @@ fn resolve_worktree_path(
             _ => Err(WorkspaceError::MissingPathAndBranch),
         },
     }
+}
+
+fn resolve_worktree_base(base: Option<&str>) -> &str {
+    base.filter(|value| !value.trim().is_empty())
+        .unwrap_or(DEFAULT_WORKTREE_BASE)
 }
 
 pub fn change_directory(state: &mut WorkspaceState, path: PathBuf) -> Result<(), WorkspaceError> {
@@ -146,19 +151,26 @@ fn validate_in_repo(
             canonical_top_level,
             canonical_common_dir,
             worktree_kind,
-        } if canonical_top_level == worktree_root
-            && state
+        } => {
+            if !state
                 .project_identity
                 .git_common_dir
                 .as_deref()
-                .is_some_and(|expected| canonical_common_dir == Path::new(expected)) =>
-        {
+                .is_some_and(|expected| canonical_common_dir == Path::new(expected))
+            {
+                return Err(WorkspaceError::RepoMismatch {
+                    path: worktree_root,
+                    repo_root: state.workspace_root.clone(),
+                });
+            }
+            if canonical_top_level != worktree_root {
+                return Err(WorkspaceError::GitProbeFailed(GitProbeError::InvalidOutput));
+            }
             Ok((canonical, worktree_root, worktree_kind))
         }
-        _ => Err(WorkspaceError::RepoMismatch {
-            path: worktree_root,
-            repo_root: state.workspace_root.clone(),
-        }),
+        RepositoryProbe::NonGit => {
+            Err(WorkspaceError::GitProbeFailed(GitProbeError::InvalidOutput))
+        }
     }
 }
 
@@ -167,16 +179,18 @@ pub fn enter(
     git: &dyn GitWorktreeOps,
     path: Option<PathBuf>,
     branch: Option<String>,
+    base: Option<String>,
 ) -> Result<WorkspaceFrame, WorkspaceError> {
     if state.worktree_kind == WorktreeKind::NonGit {
         return Err(WorkspaceError::UnsupportedForNonGit);
     }
-    if !state.stack.is_empty() {
+    let mut next_stack = state.stack.clone();
+    if !next_stack.is_empty() {
         match git
             .is_linked_worktree(&state.path_base)
             .map_err(WorkspaceError::GitOperationFailed)?
         {
-            false => state.stack.clear(),
+            false => next_stack.clear(),
             true => {
                 return Err(WorkspaceError::NestedWorktree {
                     current_workspace_root: state.workspace_root.clone(),
@@ -188,24 +202,28 @@ pub fn enter(
     let target = resolve_worktree_path(state, path, branch.as_deref())?;
     if !target.exists() {
         let b = branch
+            .as_deref()
             .filter(|v| !v.trim().is_empty())
             .ok_or(WorkspaceError::MissingPathAndBranch)?;
-        git.worktree_add(&state.workspace_root, &target, &b, DEFAULT_WORKTREE_BASE)
-            .map_err(WorkspaceError::GitOperationFailed)?;
+        git.worktree_add(
+            &state.workspace_root,
+            &target,
+            b,
+            resolve_worktree_base(base.as_deref()),
+        )
+        .map_err(WorkspaceError::GitOperationFailed)?;
     }
     let (canonical, worktree_root, worktree_kind) = validate_in_repo(state, git, &target)?;
     if worktree_kind != WorktreeKind::Linked {
-        return Err(WorkspaceError::RepoMismatch {
-            path: worktree_root,
-            repo_root: state.workspace_root.clone(),
-        });
+        return Err(WorkspaceError::NotLinkedWorktree { path: canonical });
     }
     let frame = WorkspaceFrame {
         path_base: state.path_base.clone(),
         workspace_root: state.workspace_root.clone(),
         worktree_kind: state.worktree_kind,
     };
-    state.stack.push(frame.clone());
+    next_stack.push(frame.clone());
+    state.stack = next_stack;
     state.workspace_root = worktree_root;
     state.path_base = canonical;
     state.worktree_kind = worktree_kind;
@@ -246,10 +264,7 @@ pub fn exit(
         || worktree_root != prev.workspace_root
         || worktree_kind != prev.worktree_kind
     {
-        return Err(WorkspaceError::RepoMismatch {
-            path: canonical,
-            repo_root: prev.workspace_root,
-        });
+        return Err(WorkspaceError::GitProbeFailed(GitProbeError::InvalidOutput));
     }
     state.stack.pop();
     state.workspace_root = worktree_root;

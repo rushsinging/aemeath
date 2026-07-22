@@ -78,8 +78,8 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         },
         sdk::ChatEvent::ModelInvocationRetrying { attempt, delay, .. } => {
             UiEvent::SystemMessage(format!(
-                "模型调用重试：第 {attempt} 次，等待 {} ms",
-                delay.as_millis()
+                "Retrying model invocation (attempt {attempt}) in {:.1}s.",
+                delay.as_secs_f64()
             ))
         }
         sdk::ChatEvent::Usage {
@@ -148,8 +148,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             UiEvent::CurrentTurnChanged(turn)
         }
         sdk::ChatEvent::HookEvent(event) => UiEvent::HookEvent(event),
-        // Structured hook message has no dedicated UiEvent yet; intentionally ignored.
-        sdk::ChatEvent::HookMessage(_) => UiEvent::SystemMessage(String::new()),
+        sdk::ChatEvent::HookMessage(message) => UiEvent::HookMessage(message),
         sdk::ChatEvent::AskUserBatch { items, reply_tx } => {
             UiEvent::AskUserBatch { items, reply_tx }
         }

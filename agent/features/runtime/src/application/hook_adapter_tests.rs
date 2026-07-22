@@ -1,9 +1,9 @@
-//! 测试先行：Runtime application hook adapter —— 由 `hook::api::HookOutcome`
+//! 测试先行：Runtime application hook adapter —— 由 `hook::HookOutcome`
 //! 到 Runtime-owned `RuntimeHookDispatch` 的纯值投影。
 //!
 //! 这些测试固定以下不变式（对应 #925）：
 //! - directive 完整覆盖 Continue / Block(reason) / Context / UpdatedInput / ContextAndInput；
-//! - `RuntimeHookReason` 结构化对应 `hook::api::HookReason` 的全部 variant，
+//! - `RuntimeHookReason` 结构化对应 `hook::HookReason` 的全部 variant，
 //!   绝不压成 Debug 字符串；
 //! - execution 完整保留 status / attempts / exit_code / stdout / stderr / duration；
 //! - messages（#925 BC 展示消息）按源顺序 1:1 投影，point / source /
@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 
-use hook::api::{
+use hook::{
     HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecution, HookExecutionStatus,
     HookOutcome, HookPoint, HookReason,
 };
@@ -50,10 +50,11 @@ fn outcome(directive: HookDirective, executions: Vec<HookExecution>) -> HookOutc
         executions,
         directive,
         messages: Vec::new(),
+        block_detail: None,
     }
 }
 
-/// 构造一条 `hook::api::HookDisplayMessage` 测试夹具，减少新测试里的字段重复。
+/// 构造一条 `hook::HookDisplayMessage` 测试夹具，减少新测试里的字段重复。
 fn msg(
     point: HookPoint,
     source: &str,
@@ -610,6 +611,7 @@ fn messages_project_both_kinds_with_all_fields_preserved() {
                 "warn-b",
             ),
         ],
+        block_detail: None,
     };
     let dispatch = project_hook_outcome(&outcome);
 
@@ -675,6 +677,7 @@ fn messages_preserve_order_verbatim_no_merge_or_drop() {
                 "m4",
             ),
         ],
+        block_detail: None,
     };
     let dispatch = project_hook_outcome(&outcome);
 
@@ -808,6 +811,7 @@ fn dispatch_round_trips_directive_and_executions_together() {
                 input: json!({"a": 1}),
             },
             messages: Vec::new(),
+            block_detail: None,
         }
     );
 }

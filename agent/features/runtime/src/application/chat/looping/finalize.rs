@@ -1,42 +1,50 @@
 use crate::application::agent::runner::AgentRunOutcome;
-use crate::application::chat::looping::hook_ui::HookUi;
+use crate::application::chat::looping::hook_ui::dispatch_hook;
 use crate::application::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
-use hook::api::{is_blocking, HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
-use share::config::hooks::HookEvent;
-use std::path::{Path, PathBuf};
+use crate::application::hook_adapter::{
+    RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookReason,
+};
+use hook::{HookInvocation, HookPort, StopInput};
+use share::message::StopHookFeedback;
+use std::path::PathBuf;
+use std::sync::Arc;
 use task::TaskAccess;
+use tokio_util::sync::CancellationToken;
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
+const TUI_STDOUT_PREVIEW_LINES: usize = 3;
+const TUI_STDERR_PREVIEW_LINES: usize = 5;
+
+pub(crate) struct StopHookFeedbackMessage {
+    pub llm_text: String,
+    pub payload: StopHookFeedback,
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_stop_hook_before_finish<S>(
     outcome: &AgentRunOutcome,
-    _sink: &S,
-    hook_ui: &HookUi<S>,
-    hook_runner: &HookRunner,
+    sink: &S,
+    hook_port: &Arc<dyn HookPort>,
     session_id: &str,
     language: &str,
-    workspace_root: &Path,
-    cancel: &tokio_util::sync::CancellationToken,
-) -> Option<String>
+    workspace_root: &std::path::Path,
+    cancel: &CancellationToken,
+) -> Option<StopHookFeedbackMessage>
 where
     S: ChatEventSink,
 {
-    let stop_results = hook_ui
-        .run_json_with_cancel(
-            hook_runner,
-            HookEvent::Stop,
-            None,
-            HookData::Stop(StopHookData {
-                turns: outcome.turns,
-            }),
-            workspace_root,
-            cancel,
-        )
-        .await;
-    if let Some(feedback) = stop_hook_feedback(&stop_results, session_id, language).await {
-        // hook_ui.run_json 已在内部发送 HookEvent（含 Blocked 状态），
-        // 此处不再重复发送，避免 TUI 显示两次 "Hook blocked: Stop"。
+    let dispatch = dispatch_hook(
+        hook_port,
+        sink,
+        HookInvocation::Stop(StopInput {
+            turns: outcome.turns,
+        }),
+        workspace_root,
+        cancel,
+    )
+    .await;
+    if matches!(dispatch.directive, RuntimeHookDirective::Block { .. }) {
+        let feedback = stop_hook_feedback(&dispatch, session_id, language).await;
         return Some(feedback);
     }
     None
@@ -73,145 +81,91 @@ pub(crate) async fn finish_completed_loop<S>(
 }
 
 async fn stop_hook_feedback(
-    hook_results: &[(
-        share::config::hooks::HookEntry,
-        HookResult,
-        Option<HookJsonOutput>,
-    )],
+    dispatch: &RuntimeHookDispatch,
     session_id: &str,
     language: &str,
-) -> Option<String> {
-    log::debug!(target: crate::LOG_TARGET,
-        "[stop_hook_debug] session={} evaluating {} hook result(s): {:?}",
-        session_id,
-        hook_results.len(),
-        hook_results.iter().map(|(entry, result, _)| {
-            format!("cmd={} blocked={} error={:?}", entry.command, result.blocked, result.error)
-        }).collect::<Vec<_>>()
+) -> StopHookFeedbackMessage {
+    let detail = dispatch
+        .block_detail
+        .as_ref()
+        .expect("Stop hook Block must carry the blocking subscription detail");
+    let command = detail.command.clone();
+    let reason = format_reason(&dispatch.directive);
+    let (stdout_preview, stdout_truncated) =
+        truncate_lines(&detail.execution.stdout, TUI_STDOUT_PREVIEW_LINES);
+    let (stderr_preview, stderr_truncated) =
+        truncate_lines(&detail.execution.stderr, TUI_STDERR_PREVIEW_LINES);
+    let output = format!(
+        "command: {command}\nexit_code: {:?}\nreason: {reason}\n\nstdout:\n{}\n\nstderr:\n{}",
+        detail.execution.exit_code, detail.execution.stdout, detail.execution.stderr
     );
-    let (entry, result, json) = stop_hook_blocking_result(hook_results)?;
-    log::debug!(target: crate::LOG_TARGET,
-        "[stop_hook_debug] session={} BLOCKING hook cmd={} error={:?} output_len={}",
-        session_id, entry.command, result.error, result.output.len()
+    let output_file = if output.len() > INLINE_HOOK_OUTPUT_LIMIT {
+        write_long_hook_feedback(session_id, &command, &output)
+            .await
+            .map(|path| path.display().to_string())
+    } else {
+        None
+    };
+    let summary = match language {
+        "zh" => "Stop hook 阻止了停止。".to_string(),
+        _ => "Stop hook prevented stopping.".to_string(),
+    };
+    let payload = StopHookFeedback {
+        summary: summary.clone(),
+        command,
+        exit_code: detail.execution.exit_code,
+        reason,
+        stdout_preview,
+        stderr_preview,
+        stdout_truncated,
+        stderr_truncated,
+        output_file,
+    };
+    let llm_text = stop_hook_llm_text(&payload, language);
+
+    StopHookFeedbackMessage { llm_text, payload }
+}
+
+fn format_reason(directive: &RuntimeHookDirective) -> String {
+    match directive {
+        RuntimeHookDirective::Block { reason } => match reason {
+            RuntimeHookReason::ExitCode { code, .. } => format!("exit code {code}"),
+            RuntimeHookReason::JsonBlock { reason } => reason.clone(),
+            RuntimeHookReason::JsonContinueFalse { stop_reason } => stop_reason
+                .clone()
+                .unwrap_or_else(|| "hook returned continue:false".to_string()),
+            RuntimeHookReason::StopHookExecutionFailed { error }
+            | RuntimeHookReason::PolicyBlock { error } => error.clone(),
+        },
+        _ => "hook blocked completion".to_string(),
+    }
+}
+
+fn stop_hook_llm_text(payload: &StopHookFeedback, language: &str) -> String {
+    let mut text = format!(
+        "{}\nCommand: {}\nExit code: {}\nReason: {}",
+        payload.summary,
+        payload.command,
+        payload
+            .exit_code
+            .map_or_else(|| "unknown".to_string(), |code| code.to_string()),
+        payload.reason
     );
-    let details = hook_feedback_details(result, json, session_id, &entry.command, language).await;
-    let template = match language {
-        "zh" => "Stop hook 阻止了停止。你现在还不能结束本轮处理。\n你 MUST 先满足下面 Stop hook 的要求，然后才能再次尝试停止。\n命令：{cmd}\n{details}",
-        _ => "Stop hook prevented stopping. You cannot finish this turn yet.\nYou MUST first satisfy the Stop hook requirement below, then attempt to stop again.\nCommand: {cmd}\n{details}",
-    };
-    Some(
-        template
-            .replace("{cmd}", &entry.command)
-            .replace("{details}", &details),
-    )
-}
-
-fn stop_hook_blocking_result(
-    hook_results: &[(
-        share::config::hooks::HookEntry,
-        HookResult,
-        Option<HookJsonOutput>,
-    )],
-) -> Option<(
-    &share::config::hooks::HookEntry,
-    &HookResult,
-    &Option<HookJsonOutput>,
-)> {
-    hook_results
-        .iter()
-        .filter(|(_, result, json)| is_blocking(result, json))
-        .find(|(_, result, json)| has_hook_feedback(result, json))
-        .or_else(|| {
-            hook_results
-                .iter()
-                .find(|(_, result, json)| is_blocking(result, json))
-        })
-        .map(|(entry, result, json)| (entry, result, json))
-}
-
-fn has_hook_feedback(result: &HookResult, json: &Option<HookJsonOutput>) -> bool {
-    hook_json_reason(json).is_some()
-        || non_empty_text(result.error.as_deref().unwrap_or_default()).is_some()
-        || non_empty_text(&result.output).is_some()
-}
-
-fn hook_json_reason(json: &Option<HookJsonOutput>) -> Option<String> {
-    json.as_ref().and_then(|j| {
-        j.reason
-            .clone()
-            .or_else(|| j.system_message.clone())
-            .or_else(|| j.additional_context.clone())
-            .or_else(|| j.stop_reason.clone())
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn hook_feedback_details(
-    result: &HookResult,
-    json: &Option<HookJsonOutput>,
-    session_id: &str,
-    command: &str,
-    language: &str,
-) -> String {
-    let (labels, lang) = match language {
-        "zh" => (
-            HookFeedbackLabels {
-                json_feedback: "JSON 反馈：\n{}",
-                stderr_error: "stderr/错误：\n{}",
-                stdout: "stdout：\n{}",
-                no_reason: "Stop hook 阻止了停止，但没有提供原因",
-                output_too_long_file: "hook 输出过长，已保存到文件：{}\n请读取该文件查看完整 stdout/stderr。",
-                output_too_long_preview: "hook 输出过长，以下为前 {n} 字节预览：\n{preview}",
-            },
-            "zh",
-        ),
-        _ => (
-            HookFeedbackLabels {
-                json_feedback: "JSON feedback:\n{}",
-                stderr_error: "stderr/error:\n{}",
-                stdout: "stdout:\n{}",
-                no_reason: "Stop hook prevented stopping but provided no reason",
-                output_too_long_file: "Hook output too long, saved to file: {}\nPlease read that file for the full stdout/stderr.",
-                output_too_long_preview: "Hook output too long, showing first {n} bytes:\n{preview}",
-            },
-            "en",
-        ),
-    };
-    let _ = lang;
-    let json_reason = hook_json_reason(json);
-    let mut sections = Vec::new();
-    if let Some(reason) = non_empty_text(json_reason.as_deref().unwrap_or_default()) {
-        sections.push(str::replace(labels.json_feedback, "{}", &reason));
+    if let Some(path) = &payload.output_file {
+        let instruction = match language {
+            "zh" => format!("\n完整 hook 输出已保存到 {path}；请使用 Read 工具查看。"),
+            _ => format!("\nFull hook output is saved to {path}; use the Read tool to inspect it."),
+        };
+        text.push_str(&instruction);
+    } else {
+        if !payload.stderr_preview.trim().is_empty() {
+            text.push_str(&format!("\nstderr:\n{}", payload.stderr_preview));
+        }
+        if !payload.stdout_preview.trim().is_empty() {
+            text.push_str(&format!("\nstdout:\n{}", payload.stdout_preview));
+        }
     }
-    if let Some(error) = non_empty_text(result.error.as_deref().unwrap_or_default()) {
-        sections.push(str::replace(labels.stderr_error, "{}", &error));
-    }
-    if let Some(output) = non_empty_text(&result.output) {
-        sections.push(str::replace(labels.stdout, "{}", &output));
-    }
-    if sections.is_empty() {
-        return labels.no_reason.to_string();
-    }
-
-    let details = sections.join("\n\n");
-    if details.len() <= INLINE_HOOK_OUTPUT_LIMIT {
-        return details;
-    }
-
-    match write_long_hook_feedback(session_id, command, &details).await {
-        Some(path) => str::replace(
-            labels.output_too_long_file,
-            "{}",
-            &path.display().to_string(),
-        ),
-        None => labels
-            .output_too_long_preview
-            .replace("{n}", &INLINE_HOOK_OUTPUT_LIMIT.to_string())
-            .replace(
-                "{preview}",
-                truncate_utf8(&details, INLINE_HOOK_OUTPUT_LIMIT),
-            ),
-    }
+    text
 }
 
 async fn write_long_hook_feedback(
@@ -247,29 +201,17 @@ fn sanitized_file_stem(command: &str) -> String {
     }
 }
 
-fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
-    if text.len() <= max_bytes {
-        return text;
-    }
-    &text[..text.floor_char_boundary(max_bytes)]
-}
-
-fn non_empty_text(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-struct HookFeedbackLabels {
-    json_feedback: &'static str,
-    stderr_error: &'static str,
-    stdout: &'static str,
-    no_reason: &'static str,
-    output_too_long_file: &'static str,
-    output_too_long_preview: &'static str,
+fn truncate_lines(text: &str, max_lines: usize) -> (String, bool) {
+    let lines: Vec<&str> = text.lines().collect();
+    let truncated = lines.len() > max_lines;
+    (
+        lines
+            .into_iter()
+            .take(max_lines)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        truncated,
+    )
 }
 
 #[cfg(test)]

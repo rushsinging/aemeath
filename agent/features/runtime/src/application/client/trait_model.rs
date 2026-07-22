@@ -23,8 +23,15 @@ pub(crate) async fn build_provider_binding_for_switch(
         .map_err(|_| "config query unavailable (session switch in progress)".to_string())?;
 
     let runtime_model = snapshot
-        .resolve_runtime_model(Some(selection), None)
+        .resolve_runtime_model((!selection.trim().is_empty()).then_some(selection), None)
         .map_err(|e| e.to_string())?;
+    build_provider_binding_from_runtime_model(runtime_model, factory)
+}
+
+fn build_provider_binding_from_runtime_model(
+    runtime_model: share::config::models::ResolvedRuntimeModel,
+    factory: &dyn ProviderFactory,
+) -> std::result::Result<(crate::ports::ProviderBinding, sdk::ModelSwitchResult), String> {
     let resolved_model = runtime_model.resolved_model().clone();
 
     let driver = resolved_model.driver.as_str();

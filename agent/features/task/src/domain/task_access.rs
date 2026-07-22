@@ -92,6 +92,7 @@ pub trait TaskAccess: Send + Sync {
     ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
 
     fn get(&self, id: TaskId) -> Option<Task>;
+    fn current_task_by_seq(&self, seq: u64) -> Option<Task>;
     fn list(&self) -> Vec<Task>;
     fn list_batches(&self) -> Vec<Batch>;
     fn current_batch(&self) -> Option<BatchId>;

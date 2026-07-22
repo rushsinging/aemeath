@@ -6,9 +6,15 @@ pub mod application;
 pub mod domain;
 pub mod ports;
 
+pub use adapters::tool_result_blob::AtomicBlobToolResultStore;
+pub use application::active_run::ActiveRunRegistry;
+pub use application::tool_result_materialization::{
+    ToolResultMaterializationPolicy, ToolResultMaterializer,
+};
+
 pub use application::client::{
     from_args_with_workspace, resume_session_to_backing, AgentClientImpl, ResumeError,
-    RuntimeBootstrapDependencies,
+    RuntimeBootstrapDependencies, RuntimeToolAssemblyDependencies,
 };
 pub use ports::{ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort, UsageSink};
 pub use sdk::{

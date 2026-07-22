@@ -27,7 +27,32 @@ pub fn render_hook_notice(
     view: &HookNoticeBlockView,
     _ctx: &RenderCtx,
 ) -> RenderedBlock {
-    render_text_lines(block_id, &view.title, view.style)
+    let title_style = Style::default().fg(semantic_color(view.style));
+    let body_style = Style::default().fg(match view.kind {
+        crate::tui::view_model::output::HookNoticeSemanticKind::Blocked => theme::TEXT_MUTED,
+        _ => theme::TEXT,
+    });
+    let details_style = Style::default().fg(theme::TEXT_DIM);
+    let mut lines = vec![RenderedLine::new(vec![Span::styled(
+        view.title.clone(),
+        title_style,
+    )])];
+    lines.extend(
+        view.body
+            .lines()
+            .map(|line| RenderedLine::new(vec![Span::styled(line.to_string(), body_style)])),
+    );
+    if let Some(details) = &view.details {
+        lines.extend(
+            details
+                .lines()
+                .map(|line| RenderedLine::new(vec![Span::styled(line.to_string(), details_style)])),
+        );
+    }
+    RenderedBlock {
+        block_id: block_id.to_string(),
+        lines: Rc::new(lines),
+    }
 }
 
 fn render_text_lines(block_id: &str, text: &str, semantic_style: SemanticStyle) -> RenderedBlock {
@@ -91,6 +116,55 @@ mod tests {
 
         assert_eq!(block.lines.len(), 1);
         assert_eq!(block.lines[0].plain, "plain");
+    }
+
+    fn blocked_hook_notice_uses_muted_body_and_error_title() {
+        let view = HookNoticeBlockView {
+            key: "hook-blocked".into(),
+            kind: crate::tui::view_model::output::HookNoticeSemanticKind::Blocked,
+            title: "Hook blocked: Stop".into(),
+            body: "Stop hook prevented stopping.".into(),
+            details: Some("Command: check-agent-stop.sh".into()),
+            style: SemanticStyle::Error,
+        };
+
+        let block = render_hook_notice("hook-blocked", &view, &RenderCtx { text_width: 80 });
+
+        assert_eq!(block.lines[0].spans[0].style.fg, Some(theme::ERROR));
+        assert_eq!(block.lines[1].spans[0].style.fg, Some(theme::TEXT_MUTED));
+        assert_eq!(block.lines[2].spans[0].style.fg, Some(theme::TEXT_DIM));
+    }
+
+    #[test]
+    fn hook_notice_renders_title_body_and_details_with_hierarchy() {
+        let view = HookNoticeBlockView {
+            key: "hook-1".into(),
+            kind: crate::tui::view_model::output::HookNoticeSemanticKind::Info,
+            title: "Hook context: PreToolUse".into(),
+            body: "Use formatter".into(),
+            details: Some("Source: matcher:Bash\nExecution: 2\nAttempt: 3".into()),
+            style: SemanticStyle::Muted,
+        };
+
+        let block = render_hook_notice("hook-1", &view, &RenderCtx { text_width: 80 });
+
+        assert_eq!(
+            block
+                .lines
+                .iter()
+                .map(|line| line.plain.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Hook context: PreToolUse",
+                "Use formatter",
+                "Source: matcher:Bash",
+                "Execution: 2",
+                "Attempt: 3",
+            ]
+        );
+        assert_eq!(block.lines[0].spans[0].style.fg, Some(theme::TEXT_MUTED));
+        assert_eq!(block.lines[1].spans[0].style.fg, Some(theme::TEXT));
+        assert_eq!(block.lines[2].spans[0].style.fg, Some(theme::TEXT_DIM));
     }
 
     #[test]

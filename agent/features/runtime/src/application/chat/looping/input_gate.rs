@@ -119,6 +119,9 @@ pub struct GateOutcome {
     pub dropped_events: usize,
     /// 本次 gate 采用的用户消息；调用方把它们绑定到下一 RunStep。
     pub adopted_messages: Vec<(sdk::InputId, Message)>,
+    /// 本次 gate 采用的原始 UserMessage 事件（保留 InputId / text / images 三元组）。
+    /// 供 RunPort 在 Run 首 step 的 accept_step_input 成功后 emit Adopted 时反查用。
+    pub adopted_events: Vec<ChatInputEvent>,
     /// idle reset 已完成 Task 清理，请求 Context owner 清空 durable Session。
     pub reset_requested: bool,
     /// idle 时收到的待执行命令（替代 compact_requested + model_switch_requested）。
@@ -237,14 +240,15 @@ where
     let mut decision = GateDecision::Proceed;
     let mut pending_command: Option<PendingCommand> = None;
     let mut added: Vec<(sdk::InputId, Message)> = Vec::new();
+    let mut added_events: Vec<ChatInputEvent> = Vec::new();
     let mut reset_requested = false;
 
     let events = buffer.drain_all();
     let event_count = events.len();
     // [loop_debug] DEBUG 级诊断：列出本次 gate 收到的所有事件类型。排查「无用户输入
     // 却持续跑」时是关键证据——若含 UserMessage/其它事件，说明有输入被送进来（TUI 误发
-    // / LLM 输出被当输入 / 队列重放）。默认级别不输出，`RUST_LOG=aemeath:agent:runtime=debug`
-    // 拉高即可见。
+    // / LLM 输出被当输入 / 队列重放）。默认级别不输出，`AEMEATH_LOG_LEVEL=debug`
+    // 拉高即可见。日志写入 agent-runtime.log / tui.log。
     if event_count > 0 {
         let kinds: Vec<&str> = events.iter().map(event_kind_name).collect();
         log::debug!(
@@ -277,14 +281,20 @@ where
                 }
             }
             ChatInputEvent::UserMessage { id, text, images } => {
-                let text_preview: String = text.chars().take(60).collect();
+                let text_len = text.len();
+                let image_count = images.len();
                 log::debug!(
                     target: crate::LOG_TARGET,
-                    "apply_gate UserMessage id={} text_preview={:?} image_count={}",
+                    "[loop_debug] apply_gate UserMessage id={} text_len={} image_count={}",
                     id,
-                    text_preview,
-                    images.len()
+                    text_len,
+                    image_count
                 );
+                added_events.push(ChatInputEvent::UserMessage {
+                    id: id.clone(),
+                    text: text.clone(),
+                    images: images.clone(),
+                });
                 added.push(build_user_message(id, text, images));
                 appended_user_messages += 1;
             }
@@ -447,18 +457,10 @@ where
     if appended_user_messages > 0 {
         log::debug!(
             target: crate::LOG_TARGET,
-            "apply_gate sending PostToolExecutionSync + UserMessagesAdopted count={} kind={:?}",
+            "[loop_debug] apply_gate adopted_user_messages count={} kind={:?} (Adopted deferred to accept_step_input)",
             appended_user_messages,
             kind
         );
-        let messages = added.iter().map(|(_, message)| message.clone()).collect();
-        sink.send_event(RuntimeStreamEvent::PostToolExecutionSync { messages })
-            .await;
-        sink.send_event(RuntimeStreamEvent::UserMessagesAdopted {
-            items: added.clone(),
-            queued: vec![],
-        })
-        .await;
     }
 
     if decision == GateDecision::Proceed && appended_user_messages > 0 {
@@ -485,6 +487,7 @@ where
         appended_user_messages,
         dropped_events,
         adopted_messages: added,
+        adopted_events: added_events,
         reset_requested,
         pending_command,
     }
@@ -495,12 +498,12 @@ fn build_user_message(
     text: String,
     images: Vec<sdk::ChatInputImage>,
 ) -> (sdk::InputId, Message) {
-    log::info!(target: crate::LOG_TARGET, "{}",
-        serde_json::to_string(&serde_json::json!({
-            "event_type": "user_input",
-            "text": &text,
-            "image_count": images.len(),
-        })).unwrap_or_default()
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "[loop_debug] build_user_message id={} text_len={} image_count={}",
+        id,
+        text.len(),
+        images.len()
     );
     let message = user_message_with_images(text, images);
     (id, message)
@@ -515,7 +518,7 @@ fn classify_control_command(raw: &str) -> ControlCommandKind {
     }
 }
 
-fn user_message_with_images(text: String, images: Vec<sdk::ChatInputImage>) -> Message {
+pub(crate) fn user_message_with_images(text: String, images: Vec<sdk::ChatInputImage>) -> Message {
     if images.is_empty() {
         return Message::user(text);
     }

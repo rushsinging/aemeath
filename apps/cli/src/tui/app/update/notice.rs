@@ -36,7 +36,7 @@ impl App {
         text: impl Into<String>,
     ) {
         let text_str = text.into();
-        let preview: String = text_str.chars().take(60).collect();
+        let text_len = text_str.chars().count();
         let before_count = self.model.conversation.queued_submissions.len();
         self.apply_agent_intent(AgentIntent::Conversation(
             ConversationIntent::QueueSubmission(QueueSubmission {
@@ -48,9 +48,9 @@ impl App {
         self.mark_output_dirty();
         self.refresh_live_status_from_model();
         crate::tui::log_debug!(
-            "enqueue_submission_echo input_id={} preview={:?} queued_count {}->{} output_dirty={}",
+            "enqueue_submission_echo input_id={} text_len={} queued_count {}->{} output_dirty={}",
             input_id,
-            preview,
+            text_len,
             before_count,
             after_count,
             self.view_state.dirty.output

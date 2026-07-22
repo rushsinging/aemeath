@@ -6,15 +6,18 @@ use super::accessors::AgentClientImpl;
 use super::mapping;
 
 pub(super) async fn list_sessions_impl(
-    _me: &AgentClientImpl,
+    me: &AgentClientImpl,
 ) -> Result<Vec<SessionSummary>, SdkError> {
-    context::list_session_entries()
+    let session_management = me.inner.session_management.clone();
+    let sessions = me
+        .inner
+        .wiring
+        .with_shared(async move { session_management.list().await })
         .await
-        .map(|sessions| {
-            sessions
-                .into_iter()
-                .map(mapping::session_summary_from_context)
-                .collect()
-        })
-        .map_err(|error| SdkError::Session(error.to_string()))
+        .map_err(|error| SdkError::Session(error.to_string()))?
+        .map_err(|error| SdkError::Session(error.to_string()))?;
+    Ok(sessions
+        .into_iter()
+        .map(mapping::session_summary_from_context)
+        .collect())
 }

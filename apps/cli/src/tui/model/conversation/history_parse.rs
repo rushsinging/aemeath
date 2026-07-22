@@ -1,6 +1,7 @@
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum HistoryDisplayMessage {
     User { text: String },
+    StopHookNotice { body: String },
     ToolResults,
     Assistant { blocks: Vec<HistoryAssistantBlock> },
 }
@@ -42,6 +43,16 @@ impl std::fmt::Display for HistoryDisplayParseError {
 
 impl HistoryDisplayMessage {
     pub(crate) fn parse(msg: &sdk::ChatMessage) -> Result<Self, HistoryDisplayParseError> {
+        let body = msg.text_content();
+        if msg.source() == sdk::ChatMessageSource::StopHook
+            || (msg.source() == sdk::ChatMessageSource::SystemGenerated
+                && is_legacy_stop_hook_feedback(&body))
+        {
+            if body.trim().is_empty() {
+                return Err(HistoryDisplayParseError::EmptyUserText);
+            }
+            return Ok(HistoryDisplayMessage::StopHookNotice { body });
+        }
         let blocks = msg.content.as_slice();
         match msg.role.as_str() {
             "user" => parse_history_user(blocks),
@@ -49,6 +60,12 @@ impl HistoryDisplayMessage {
             role => Err(HistoryDisplayParseError::UnsupportedRole(role.to_string())),
         }
     }
+}
+
+fn is_legacy_stop_hook_feedback(text: &str) -> bool {
+    let body =
+        crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope(text);
+    body.contains("Stop hook prevented stopping") || body.contains("Stop hook 阻止了停止")
 }
 
 fn parse_history_user(
@@ -283,6 +300,60 @@ mod tests {
     }
 
     // ── parse: user 分支 ──
+
+    #[test]
+    fn test_parse_stop_hook_message_as_notice() {
+        let mut message = msg(
+            "user",
+            vec![text_block("<system-reminder>blocked</system-reminder>")],
+        );
+        message.metadata = Some(sdk::ChatMessageMetadata {
+            source: sdk::ChatMessageSource::StopHook,
+            stop_hook: None,
+        });
+
+        assert_eq!(
+            HistoryDisplayMessage::parse(&message),
+            Ok(HistoryDisplayMessage::StopHookNotice {
+                body: "<system-reminder>blocked</system-reminder>".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_legacy_system_generated_stop_hook_message_as_notice() {
+        let mut message = msg(
+            "user",
+            vec![text_block(
+                "<system-reminder>Stop hook prevented stopping. Retry.</system-reminder>",
+            )],
+        );
+        message.metadata = Some(sdk::ChatMessageMetadata {
+            source: sdk::ChatMessageSource::SystemGenerated,
+            stop_hook: None,
+        });
+
+        assert!(matches!(
+            HistoryDisplayMessage::parse(&message),
+            Ok(HistoryDisplayMessage::StopHookNotice { .. })
+        ));
+    }
+
+    #[test]
+    fn test_parse_non_stop_system_generated_message_as_user() {
+        let mut message = msg("user", vec![text_block("guidance changed")]);
+        message.metadata = Some(sdk::ChatMessageMetadata {
+            source: sdk::ChatMessageSource::SystemGenerated,
+            stop_hook: None,
+        });
+
+        assert_eq!(
+            HistoryDisplayMessage::parse(&message),
+            Ok(HistoryDisplayMessage::User {
+                text: "guidance changed".to_string(),
+            })
+        );
+    }
 
     #[test]
     fn test_parse_user_text_only() {

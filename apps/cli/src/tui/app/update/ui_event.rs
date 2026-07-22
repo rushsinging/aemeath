@@ -58,6 +58,9 @@ impl App {
                 // 此处仅更新 spinner 状态（spinner 归 RuntimeModel 管理）。
                 self.spinner_phase(hook_spinner_phase(&event));
             }
+            UiEvent::HookMessage(_) => {
+                // Hook message 已由 map_agent_event -> AppendHookNotice 注入 ConversationModel。
+            }
             UiEvent::Error(msg) => {
                 // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，
                 crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::Error → spinner_stop");
@@ -93,11 +96,11 @@ impl App {
                     before_queued
                 );
                 for item in items {
-                    let preview = item.text_content().chars().take(60).collect::<String>();
+                    let text_len = item.text_content().chars().count();
                     crate::tui::log_debug!(
-                        "UserMessagesAdopted item input_id={:?} text_preview={:?}",
+                        "UserMessagesAdopted item input_id={:?} text_len={}",
                         item.input_id.as_ref().map(|id| id.as_str().to_string()),
-                        preview
+                        text_len
                     );
                     if let Some(id) = item.input_id.as_ref() {
                         self.clear_queued_submission_echo_by_id(id);

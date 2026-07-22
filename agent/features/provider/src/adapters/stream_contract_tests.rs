@@ -120,6 +120,45 @@ async fn every_decoder_success_stream_preserves_order_and_ends_after_one_termina
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn openai_chunked_body_eof_emits_retryable_stream_interrupted_failure() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind interrupted stream fixture");
+    let address = listener.local_addr().expect("fixture address");
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("accept fixture request");
+        let mut request = [0_u8; 1024];
+        let _ = socket.read(&mut request).await;
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n20\r\ndata: {\"choices\":[{\"delta\":{\r\n",
+            )
+            .await
+            .expect("write partial chunked response");
+        // The advertised chunk is deliberately incomplete. Dropping the socket
+        // reproduces a proxy/upstream connection cut during an SSE body read.
+    });
+
+    let response = reqwest::get(format!("http://{address}/stream"))
+        .await
+        .expect("receive response headers before body interruption");
+    let events: Vec<_> = invocation_stream_from_decoder(
+        response,
+        ReasoningLevel::Off,
+        CancellationToken::new(),
+        InvocationDecoder::OpenAiChat,
+    )
+    .collect()
+    .await;
+
+    assert!(matches!(
+        events.as_slice(),
+        [InvocationEvent::Failed(error)]
+            if error.kind == ProviderErrorKind::StreamTruncated && error.retryable
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancellation_during_stream_emits_failed_cancelled_then_ends() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

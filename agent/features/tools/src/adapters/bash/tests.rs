@@ -102,6 +102,31 @@ async fn test_bash_display_field_contains_stdout_not_message() {
 }
 
 #[tokio::test]
+async fn bash_reads_eof_from_isolated_stdin() {
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+
+    let result = bash_tool(&ctx)
+        .call(json!({ "command": "IFS= read -r value; printf 'read_status=%s value=%s' \"$?\" \"$value\"" }), &ctx)
+        .await;
+
+    assert!(
+        !result.is_error,
+        "stdin 隔离后 read 收到 EOF 仍应正常返回: {}",
+        result.text
+    );
+    assert!(
+        result.text.contains("read_status=1 value="),
+        "Bash 子进程必须从 null stdin 收到 EOF，实际: {}",
+        result.text
+    );
+}
+
+#[tokio::test]
 async fn test_bash_result_cwd_reflects_cd() {
     // AC2: cd 后 result 中的 cwd 应反映新目录
     let workspace = tempdir().unwrap();

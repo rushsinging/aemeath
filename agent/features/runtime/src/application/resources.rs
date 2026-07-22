@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use hook::api::HookRunner;
+use hook::HookPort;
 use provider::RequestSystemBlock;
 use share::config::MemoryConfig;
 use task::TaskAccess;
@@ -29,7 +29,7 @@ pub struct RuntimeResources {
     /// Runtime/Tool 日常状态的唯一来源（#889）：工具 registry、reminder、
     /// status snapshot、finalize 都经此 low-privilege 端口读写 Task 状态。
     pub task_access: Arc<dyn TaskAccess>,
-    pub hook_runner: HookRunner,
+    pub hook_runner: Arc<dyn HookPort>,
     pub agent_runner: Arc<dyn AgentRunner>,
     pub tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
@@ -44,6 +44,8 @@ pub struct RuntimeResources {
     // ── 配置（值类型，session 期间不变）──
     pub system_blocks: Vec<RequestSystemBlock>,
     pub system_prompt_text: String,
+    /// 启动时采集一次的 Git 快照，作为普通上下文消息而非 system prompt 发送。
+    pub initial_git_context: String,
     pub user_context: String,
     pub memory_config: MemoryConfig,
     pub skills_map: HashMap<String, sdk::SkillView>,

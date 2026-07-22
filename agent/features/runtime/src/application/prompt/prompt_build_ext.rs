@@ -1,25 +1,26 @@
 //! Prompt 构建辅助函数（从 CLI setup.rs 迁移）。
 
 use crate::application::startup as bootstrap;
-use hook::api::HookRunner;
+use hook::HookPort;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::i18n::prompt::sections::{agent_roles_footer, agent_roles_header};
+use std::sync::Arc;
 
 pub async fn build_static_prompt(
     cwd: &std::path::Path,
     model: &str,
     reasoning: bool,
     config_file: Option<&ConfigSnapshot>,
-    hook_runner: &HookRunner,
+    hook_port: &Arc<dyn HookPort>,
     prompt_parts: crate::application::prompt::build::SystemPromptParts,
 ) -> String {
     let guidance_config = config_file
         .map(|snap| snap.models().guidance.clone())
         .unwrap_or_default();
     let language = config_file.map(|snap| snap.language()).unwrap_or("en");
-    let instructions_hook = bootstrap::InstructionsLoadedHookRunner {
-        hook_runner,
-        workspace_root: cwd,
+    let instructions_hook = bootstrap::InstructionsLoadedHook {
+        hooks: hook_port.clone(),
+        workspace_root: cwd.to_path_buf(),
     };
     let model_guidance = context::guidance::resolve_guidance_async(
         model,

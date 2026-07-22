@@ -8,15 +8,13 @@ pub mod application;
 pub mod domain;
 pub mod ports;
 
-pub use adapters::{
-    delete_session_entry, export_session_bytes, import_session_bytes, isolated_context,
-    isolated_context_with_skill, list_session_entries, update_session_metadata_entry,
-};
+pub use adapters::{isolated_context, isolated_context_with_skill};
 #[cfg(any(test, feature = "dev"))]
 pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
 pub use domain::session::{
     SessionListEntry, SessionManagementError, SessionMetadataUpdate, SessionResumeProjection,
 };
+pub use ports::SessionManagementPort;
 
 // Main Session coordinator — cross-BC wiring for Runtime bootstrap.
 #[cfg(any(test, feature = "dev"))]

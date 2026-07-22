@@ -48,6 +48,8 @@ where
     pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     pub system_blocks: Vec<provider::RequestSystemBlock>,
     pub system_prompt_text: String,
+    /// 只在本 ChatLoop 启动时投递一次的 Git 上下文普通消息。
+    pub initial_git_context: String,
     pub user_context: String,
     /// 本轮 chat loop 的初始消息（来自 user_input）。Runtime 不再持有/回写
     /// 会话链；历史由 Context backing 提供。
@@ -70,7 +72,7 @@ where
     pub task_access: Arc<dyn task::TaskAccess>,
     pub max_tool_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub hook_runner: hook::api::HookRunner,
+    pub hook_runner: std::sync::Arc<dyn hook::HookPort>,
     pub memory_config: share::config::MemoryConfig,
     /// Memory domain port（MemoryTool 使用）。
     pub memory: Arc<dyn memory::MemoryPort>,

@@ -62,10 +62,10 @@
 
 | 供应方 | 模式 | 契约与所有权 | 说明 |
 |---|---|---|---|
-| Context Management | C/S | Context-owned `ContextPort` OHS | Runtime 请求"构建本轮 Context Window"（取历史 + compact + 注入 + prompt） |
+| Context Management | C/S | Context-owned `ContextPort` + `SessionManagementPort` OHS | Runtime 请求“构建本轮 Context Window”；Composition 把同一 Session 管理实例注入 MainSessionWiring（resume）与 Runtime（SDK / idle Session 命令）。resume 成功后 Runtime 将唯一活动 Session ID 切换为恢复目标，Context / Tool / Hook / Tool Result 统一消费该 ID；TUI 只消费 SDK 事件 |
 | Workflow | C/S | Workflow-owned `ReasoningPort` OHS | Runtime 询问当前 reasoning effort（reasoning graph 观察 tool 类型 / 结果调节）；Workflow **NEVER** 阻塞 loop 或强制流程，仅作 effort 调节器。**v0.1.0 scope（#921 收缩）**：五节点固定默认 effort（Config `reasoning_graph` 已退役）；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线；是否接线由 v0.2.0 #1142 决策 |
 | Provider | C/S + **ACL**(在 Provider 内) | Runtime-owned outbound `ProviderPort` | Provider adapter 吸收各家 LLM 差异，实现 Runtime 定义的统一调用语言与有序流。**v0.1.0 scope（#921 收缩）**：option resolver 领域迁移完成但未接生产链路——Runtime 尚未在 `build_window` 前调用 resolver；是否接线由 v0.2.0 #1142 决策 |
-| Tool & Skill & Command | C/S | Tool-owned `ToolCatalogPort` + `ToolExecutionPort` OHS；Skill / Command 各自发布窄 façade | Tool 目录与函数调用分离；Skill 物化 PromptFragment；Command 按 PromptInjection / SnapshotQuery / ApplicationControl 路由；MCP 是 Tool adapter |
+| Tool & Skill & Command | C/S | Tool-owned `ToolCatalogPort` + `ToolExecutionPort` OHS；Skill / Command 各自发布窄 façade | Tool 目录与函数调用分离；Skill 物化 PromptFragment；Command 按 PromptInjection / SnapshotQuery / ApplicationControl 路由；#1294 后 Composition 一次装配并把同一 Tool Catalog/Execution/binding、Skill Catalog/materializer、Tool Result materializer 与 active-run registry 注入 Runtime Main/Sub；MCP Ready 生命周期、动态同步与 revision 由 #1327 承接 |
 | Policy | C/S | Policy-owned `PolicyPort` OHS | v0.1.0 只装配 `AllowAllPolicy`（安全审批、Deny / RequireApproval 为 **Future**，接口预留但不在 v0.1.0 验收范围）；控制流仍归 Runtime |
 | Memory | C/S | Memory-owned `MemoryPort` OHS | 检索注入 + 反思写入（Reflection 产出 Memory Suggestion） |
 | Task Management | C/S | Task-owned `TaskAccess` / `TaskPersist` OHS | Runtime / Tool 只持 Access；Context Management 只持 Persist；同一 backing 守护状态机与依赖图不变量 |
@@ -95,7 +95,7 @@ Interaction 同样不是第 16 个 BC：Runtime-owned `InteractionPort` 隔离 T
 
 | 供应方 | 消费方 | 模式 | 契约 |
 |---|---|---|---|
-| Config | 全部 BC | **CF + PL** | 各 BC 顺从消费只读 `ConfigSnapshot`（Published Language），**NEVER** 反向依赖，**NEVER** 绕过快照读裸配置 |
+| Config | 全部 BC | **CF + PL** | 各 BC 顺从消费只读 `ConfigSnapshot`（Published Language），**NEVER** 反向依赖，**NEVER** 绕过快照读裸配置。Composition 独占 `config-overrides` 的 Storage adapter 构造，并向 Config wiring 注入 Config-owned `NativeConfigStore`；其他 BC 不获得该 store 或 Storage Port。 |
 
 Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启动 / resume 的协调 ACL 把 Project-owned `ProjectIdentity` 映射成 Config-owned `ProjectConfigLocation` 后调用 Config participant；Config **NEVER** import Project PL，因此 `Config → Project` 的全局上游方向不会形成物理循环。每个 Main Run 在 shared session lease 下捕获一次 active snapshot；Provider / Tool / Hook / Policy / Reflection factory **NEVER** 回读进程级 current 配置。同步 `ConfigReader` 只是 Config-internal committed-state view，只能被 coordinator / gate-aware façade 持有；AgentClient application implementation 只消费 async `ConfigQuery` / `ConfigWriter`，非 Run query / subscribe 先取得 shared session-switch permit。TUI / CLI 只经 Runtime-owned AgentClient command 与 SDK event 投影配置，**NEVER** 直连 Config OHS、subscription 或 watch receiver。
 
@@ -103,7 +103,7 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 
 | 消费方（数据 BC） | 供应方（机制） | 模式 | 说明 |
 |---|---|---|---|
-| Context Management / Memory / Audit | Storage | C/S | Storage 通过相互独立的 `AtomicBlobPort` / `AtomicDatasetPort` OHS 与各自文件系统 adapter 提供原子写 / 损坏隔离**机制**，并通过 `SafeStorageRoot` / `SafePathSegment` 发布不含领域语义的 capability-root 路径安全 primitive，不拥有数据本体。多 member dataset 以 durable Prepared journal 为逻辑提交点，提交后只 roll-forward；无法归入完整 generation 的事务证据返回 typed `CorruptTransaction`，不得伪装为空数据。**Session 落盘时内嵌 Task / Project 快照**（Context Management 经 `TaskPersist` / Project-owned `WorkspacePersist` 收集）；TaskStore 是纯内存聚合，**NEVER** 另建 Task → Storage 路径。恢复时 Context Management 先取得同一排他 gate，再在 gate 内依次 prepare Project → Config → Memory → Task，执行无失败 commit 并发布 Session / active resources 后才释放。Project 也不单独持久化同一份 Workspace Snapshot。Memory 独立持久化 project memory；Memory active+archive 与 legacy key migration 对 `AtomicDatasetPort` 的集成 deferred 至 [#896](https://github.com/rushsinging/aemeath/issues/896)。Audit 自有 `UsageAppendStorePort` 与 File adapter，后者仅调用 Storage path-safety primitive，不消费 Storage OHS 模拟 append。Tool Result 由 Runtime-owned materialization/`ToolResultBlobPort` 决定阈值与 reference，其 adapter 只把逻辑标识翻译为 Storage `AtomicBlobPort` key/bytes。 |
+| Context Management / Memory / Audit | Storage | C/S | Storage 通过相互独立的 `AtomicBlobPort` / `AtomicDatasetPort` OHS 与各自文件系统 adapter 提供原子写 / 损坏隔离**机制**，并通过 `SafeStorageRoot` / `SafePathSegment` 发布不含领域语义的 capability-root 路径安全 primitive，不拥有数据本体。Composition 为 Session 创建一个 `AtomicBlobPort` backing，并把其包装为同一 `SessionManagementPort` Arc 注入 Context MainSessionWiring 与 Runtime；Context adapter 的 Session list 只调用 `list_primary(Session)`，不枚举物理目录或协议副文件。多 member dataset 以 durable Prepared journal 为逻辑提交点，提交后只 roll-forward；无法归入完整 generation 的事务证据返回 typed `CorruptTransaction`，不得伪装为空数据。**Session 落盘时内嵌 Task / Project 快照**（Context Management 经 `TaskPersist` / Project-owned `WorkspacePersist` 收集）；TaskStore 是纯内存聚合，**NEVER** 另建 Task → Storage 路径。恢复时 Context Management 先取得同一排他 gate，再在 gate 内依次 prepare Project → Config → Memory → Task，执行无失败 commit 并发布 Session / active resources 后才释放。Project 也不单独持久化同一份 Workspace Snapshot。Memory 独立持久化 project memory；Memory active+archive 与 legacy key migration 对 `AtomicDatasetPort` 的集成 deferred 至 [#896](https://github.com/rushsinging/aemeath/issues/896)。Audit 自有 `UsageAppendStorePort` 与 File adapter，后者仅调用 Storage path-safety primitive，不消费 Storage OHS 模拟 append。Tool Result 由 Runtime-owned materialization/`ToolResultBlobPort` 决定阈值与 reference，其 adapter 只把逻辑标识翻译为 Storage `AtomicBlobPort` key/bytes。 |
 
 ## 7. Shared Kernel（谨慎，尽量小）
 

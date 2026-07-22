@@ -2,10 +2,14 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 
-use crate::domain::session::{CanonicalSession, ChatChain, CommittedStep, SnapshotState};
+use crate::domain::session::{
+    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedStep,
+    FinalizedOutcomeProjection, SnapshotState,
+};
 use crate::domain::{
-    AppendReceipt, CompactOutcome, CompactRequest, CompactSkipReason, ContextAppend,
-    ContextAppendError, ContextPortError, ManualCompactRequest, SessionId, SessionRevision,
+    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
+    CompactRequest, CompactSkipReason, ContextAppend, ContextAppendError, ContextPortError,
+    ManualCompactRequest, SessionId, SessionRevision,
 };
 use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
 
@@ -144,6 +148,18 @@ impl CanonicalSessionRepository {
             fingerprint: append.fingerprint.clone(),
         }
     }
+
+    fn accepted_receipt(
+        append: &AcceptedInputAppend,
+        revision: SessionRevision,
+    ) -> AcceptedInputReceipt {
+        AcceptedInputReceipt {
+            run_id: append.run_id.clone(),
+            step_id: append.step_id.clone(),
+            committed_revision: revision,
+            fingerprint: append.fingerprint.clone(),
+        }
+    }
 }
 
 #[async_trait]
@@ -153,12 +169,66 @@ impl SessionRepository for CanonicalSessionRepository {
         if session.id != session_id.as_str() {
             return Err(format!("Session 不存在：{session_id}"));
         }
-        let chain = ChatChain::from_chats(&session.chats);
+        let messages = session.structured_messages();
         Ok(SessionSnapshot {
             revision: SessionRevision::new(session.revision),
-            messages: chain.messages(),
-            active_summary: chain.active_summary().map(str::to_string),
+            messages,
+            active_summary: session.active_summary().map(str::to_string),
         })
+    }
+
+    async fn append_accepted_input(
+        &self,
+        append: &AcceptedInputAppend,
+    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        let _mutation = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| AcceptedInputError::Storage(error.to_string()))?
+            .clone();
+        if current.id != append.session_id.as_str() {
+            return Err(AcceptedInputError::SessionNotFound(
+                append.session_id.clone(),
+            ));
+        }
+        if let Some(input) = current.accepted_input(append.run_id.as_ref(), append.step_id.as_str())
+        {
+            if input.fingerprint == append.fingerprint.as_str() {
+                return Ok(Self::accepted_receipt(
+                    append,
+                    SessionRevision::new(input.committed_revision),
+                ));
+            }
+            return Err(AcceptedInputError::ContentConflict {
+                run_id: append.run_id.clone(),
+                step_id: append.step_id.clone(),
+            });
+        }
+        let mut candidate = (*current).clone();
+        candidate.revision += 1;
+        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.append_accepted_input(
+            append.run_id.as_ref(),
+            append.step_id.as_str(),
+            AcceptedInputProjection::new(
+                append.messages.clone(),
+                append.fingerprint.as_str(),
+                candidate.revision,
+            ),
+        );
+        self.writer
+            .save(&candidate)
+            .await
+            .map_err(AcceptedInputError::Storage)?;
+        let revision = SessionRevision::new(candidate.revision);
+        *self
+            .session
+            .write()
+            .map_err(|error| AcceptedInputError::Storage(error.to_string()))? = Arc::new(candidate);
+        Ok(Self::accepted_receipt(append, revision))
     }
 
     async fn append_finalized(
@@ -200,28 +270,22 @@ impl SessionRepository for CanonicalSessionRepository {
         }
 
         let mut candidate = (*current).clone();
-        let active_start = candidate
-            .chats
-            .iter()
-            .rposition(|segment| segment.kind == crate::domain::session::SegmentKind::Compact)
-            .or_else(|| {
-                candidate
-                    .chats
-                    .iter()
-                    .position(|segment| segment.parent_id.is_none())
-            })
-            .unwrap_or(candidate.chats.len());
-        let frozen_prefix = candidate.chats[..active_start].to_vec();
-        let mut chain = ChatChain::from_chats(&candidate.chats);
-        for message in &append.messages {
-            chain.push(message.clone(), append.run_id.as_str());
-        }
-        candidate.chats = frozen_prefix;
-        candidate.chats.extend_from_slice(chain.active_segments());
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.append_finalized_outcome(
+            append.run_id.as_ref(),
+            append.step_id.as_str(),
+            FinalizedOutcomeProjection {
+                finalize_cause: append.finalize_cause,
+                messages: append.messages.clone(),
+                receipts: append.receipts.clone(),
+                api_input_tokens: append.api_input_tokens,
+                fingerprint: append.fingerprint.as_str().to_string(),
+                committed_revision: candidate.revision,
+            },
+        );
         candidate.committed_steps.push(CommittedStep {
             run_id: append.run_id.to_string(),
             step_id: append.step_id.as_str().to_string(),
@@ -263,8 +327,11 @@ impl SessionRepository for CanonicalSessionRepository {
                 "Session revision 冲突：期望 {source_revision:?}，实际 {actual_revision:?}"
             )));
         }
-        let chain = ChatChain::from_chats(&current.chats);
-        let messages = chain.messages();
+        let visible_steps = current.flattened_steps_from_marker();
+        let messages: Vec<_> = visible_steps
+            .iter()
+            .flat_map(|(_, messages)| messages.iter().cloned())
+            .collect();
         let Some(compacted) = crate::adapters::compact_summary::compact_messages(
             &messages,
             request.source.system_prompt.as_str(),
@@ -274,12 +341,28 @@ impl SessionRepository for CanonicalSessionRepository {
         };
         let mut candidate = (*current).clone();
         let source_revision = SessionRevision::new(candidate.revision);
-        candidate
-            .chats
-            .push(crate::domain::session::ChatSegment::compact(
-                compacted.summary.clone(),
-                compacted.recent_messages.clone(),
-            ));
+        let keep_messages = compacted.recent_messages.len();
+        let mut retained = 0usize;
+        let mut start_at = None;
+        for (cursor, step_messages) in visible_steps.iter().rev() {
+            retained += step_messages.len();
+            start_at = Some(cursor.clone());
+            if retained >= keep_messages {
+                break;
+            }
+        }
+        let summary = crate::adapters::compact_summary::build_summary_text(
+            &messages[..messages.len().saturating_sub(retained)],
+            candidate
+                .compact
+                .as_ref()
+                .map(|marker| marker.summary.as_str()),
+        );
+        candidate.compact = Some(ActiveCompactMarker {
+            summary: summary.clone(),
+            start_at,
+            source_revision: source_revision.get(),
+        });
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         self.writer
@@ -292,7 +375,7 @@ impl SessionRepository for CanonicalSessionRepository {
             .map_err(|error| ContextPortError::SessionRepository(error.to_string()))? =
             Arc::new(candidate);
         Ok(CompactOutcome::Committed(crate::domain::CompactResult {
-            summary: compacted.summary,
+            summary,
             recent_messages: compacted.recent_messages,
             source_revision,
         }))
@@ -312,8 +395,11 @@ impl SessionRepository for CanonicalSessionRepository {
                 request.session_id.clone(),
             ));
         }
-        let chain = ChatChain::from_chats(&current.chats);
-        let messages = chain.messages();
+        let visible_steps = current.flattened_steps_from_marker();
+        let messages: Vec<_> = visible_steps
+            .iter()
+            .flat_map(|(_, messages)| messages.iter().cloned())
+            .collect();
         if messages.len() <= 4 {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         }
@@ -327,12 +413,28 @@ impl SessionRepository for CanonicalSessionRepository {
         };
         let mut candidate = (*current).clone();
         let source_revision = SessionRevision::new(candidate.revision);
-        candidate
-            .chats
-            .push(crate::domain::session::ChatSegment::compact(
-                compacted.summary.clone(),
-                compacted.recent_messages.clone(),
-            ));
+        let keep_messages = compacted.recent_messages.len();
+        let mut retained = 0usize;
+        let mut start_at = None;
+        for (cursor, step_messages) in visible_steps.iter().rev() {
+            retained += step_messages.len();
+            start_at = Some(cursor.clone());
+            if retained >= keep_messages {
+                break;
+            }
+        }
+        let summary = crate::adapters::compact_summary::build_summary_text(
+            &messages[..messages.len().saturating_sub(retained)],
+            candidate
+                .compact
+                .as_ref()
+                .map(|marker| marker.summary.as_str()),
+        );
+        candidate.compact = Some(ActiveCompactMarker {
+            summary: summary.clone(),
+            start_at,
+            source_revision: source_revision.get(),
+        });
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         self.writer
@@ -345,7 +447,7 @@ impl SessionRepository for CanonicalSessionRepository {
             .map_err(|error| ContextPortError::SessionRepository(error.to_string()))? =
             Arc::new(candidate);
         Ok(CompactOutcome::Committed(crate::domain::CompactResult {
-            summary: compacted.summary,
+            summary,
             recent_messages: compacted.recent_messages,
             source_revision,
         }))
@@ -363,6 +465,8 @@ impl SessionRepository for CanonicalSessionRepository {
         }
         let mut candidate = (*current).clone();
         candidate.chats.clear();
+        candidate.compact = None;
+        candidate.run_slices.clear();
         candidate.committed_steps.clear();
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();

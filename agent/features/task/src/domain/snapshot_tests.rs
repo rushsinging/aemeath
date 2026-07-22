@@ -54,6 +54,32 @@ fn snapshot_decode_normalizes_unordered_wire_entities() {
 }
 
 #[test]
+fn snapshot_v2_normalizes_pending_task_with_stale_started_at() {
+    let legacy_pending = br#"{
+        "schema_version":2,
+        "revision":"1",
+        "tasks":[
+            {"id":"35","batch":"8","subject":"resumable","description":"","active_form":null,"session_id":null,"tags":[],"blocked_by":[],"status":"pending","priority":"high","created_at":100,"updated_at":300,"started_at":200,"completed_at":null}
+        ],
+        "next_task_id":"36",
+        "next_batch_id":"9",
+        "current_batch":"8",
+        "batches":[
+            {"id":"8","summary":"active","status":"active","created_at":100,"last_active_turn":0,"silence_turns":0}
+        ]
+    }"#;
+
+    let snapshot = decode(legacy_pending);
+    let task = snapshot.tasks().first().expect("task must decode");
+    assert_eq!(task.status(), super::TaskStatus::Pending);
+    assert_eq!(task.started_at(), None);
+    assert_eq!(task.completed_at(), None);
+    snapshot
+        .prepare()
+        .expect("legacy pending task with stale started_at must restore");
+}
+
+#[test]
 fn snapshot_from_live_state_orders_tasks_and_batches_by_typed_id() {
     let mut state = TaskStoreState::empty();
     state

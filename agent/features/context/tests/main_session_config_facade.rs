@@ -215,6 +215,8 @@ async fn build_facade_harness(
         tasks: SnapshotState::Missing,
         workspace: SnapshotState::Captured(ws_ctx),
         revision: 0,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     };
 
@@ -230,6 +232,9 @@ async fn build_facade_harness(
             last_key,
             fail,
         }),
+        session_management: Arc::new(context::adapters::AtomicBlobSessionManagement::new(
+            Arc::new(storage::FileSystemBlobAdapter::new(tmp.path()).unwrap()),
+        )),
         initial_session,
         initial_memory,
         context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
@@ -284,6 +289,8 @@ fn session_with_workspace(
         tasks,
         workspace: SnapshotState::Captured(ws.clone()),
         revision: 1,
+        compact: None,
+        run_slices: vec![],
         committed_steps: vec![],
     }
 }

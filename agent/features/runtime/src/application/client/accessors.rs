@@ -6,7 +6,6 @@ use crate::application::chat::ChatEventSinkHandle;
 use crate::ports::legacy::ChatRuntimeContext;
 use sdk::ChatEvent;
 use share::config::models::ResolvedModel;
-use tools::McpConnectionManager;
 
 // ─── 结构体定义 ───
 
@@ -28,7 +27,6 @@ pub struct RuntimeHandle {
     pub session_id: String,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
-    pub _mcp_manager: Arc<McpConnectionManager>,
 
     // ─── 可切换的客户端（switch_model 更新此处） ───
     pub(crate) current_binding: std::sync::RwLock<Arc<crate::ports::ProviderBinding>>,
@@ -46,6 +44,8 @@ pub struct RuntimeHandle {
     pub(crate) wiring: Arc<context::MainSessionWiring>,
     pub(crate) config_query: Arc<dyn config::ConfigQuery>,
     pub(crate) config_writer: Arc<dyn config::ConfigWriter>,
+    /// Same Composition-injected instance borrowed by MainSessionWiring for resume.
+    pub(crate) session_management: Arc<dyn context::SessionManagementPort>,
     pub(crate) event_sink_factory: Arc<
         dyn Fn(tokio::sync::mpsc::UnboundedSender<ChatEvent>) -> ChatEventSinkHandle + Send + Sync,
     >,
@@ -97,6 +97,7 @@ impl AgentClientImpl {
             tool_execution: ctx.resources.tool_execution,
             system_blocks: ctx.resources.system_blocks,
             system_prompt_text: ctx.resources.system_prompt_text,
+            initial_git_context: ctx.resources.initial_git_context,
             user_context: ctx.resources.user_context,
             context_size: ctx.resources.context_size,
             verbose: ctx.verbose,

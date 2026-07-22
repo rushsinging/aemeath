@@ -24,6 +24,9 @@ mod post_batch;
 mod pre_compact_trigger_tests;
 mod queue;
 pub(crate) mod reflection;
+#[cfg(test)]
+mod reflection_trigger_tests;
+mod run_input_buffer;
 mod snapshot_registry;
 pub(crate) mod stall;
 mod stream_handler;

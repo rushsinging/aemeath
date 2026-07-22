@@ -421,8 +421,8 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 
 ## 4. Composition Root
 
-- **唯一生产装配入口**：`agent/composition`。Runtime 的 `domain/application/ports/adapters` 只定义领域行为、应用用例、边界契约与 Runtime-owned 转换，**NEVER** 选择具体生产实现或触发生产 factory。
-- `agent/composition` 持有各 Port 的具体实现或模块提供的 composition-only opaque wiring（provider driver / tool registry / storage / workspace / hook …），提供 `assemble()` 所需的 `root.*()` 工厂。
+- **唯一生产装配入口**：`agent/composition`。Runtime 的 `domain/application/ports/adapters` 只定义领域行为、应用用例、边界契约与 Runtime-owned 转换，**NEVER** 选择具体生产实现或触发生产 factory。#1294 后 Composition 一次装配 Tool Catalog/Execution/binding、Skill Catalog/materializer、Tool Result materializer 与 `ActiveRunRegistry`，再经 `RuntimeBootstrapDependencies` 注入；Main/Sub 复用同一 Skill materializer、Tool Result materializer 与 active-run registry。
+- `agent/composition` 持有各 Port 的具体实现或模块提供的 composition-only opaque wiring（provider driver / tool registry / storage / workspace / hook …），提供 `assemble()` 所需的 `root.*()` 工厂。MCP Ready、连接/断连、动态 Catalog revision 和稳定身份接线由 [#1327](https://github.com/rushsinging/aemeath/issues/1327) 单独承接；#1294 不保留 Runtime 到 Tools 私有 `CatalogExecutionWiring` 的过渡 seam。
 - **Provider 构造独占（#907）**：Composition 实现 Runtime-owned `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占具体 provider client / driver / transport 构造。非 Composition crate **NEVER** 引用 `provider::composition` 或具体构造符号（`LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider`）。`check-provider-construction-ownership.sh` 守卫以零白名单与负向探针锁定此边界。
 - Runtime feature 内 **NEVER** 建立 `bootstrap/`、service locator 或第二个 Composition Root；现有 Runtime `utils/bootstrap` 的生产构造责任迁入 `agent/composition`，其余代码按单一 `agent_execution` 能力的六边形职责归位。
 - `RuntimeContext` 属 application：它只传递本 Run 的活契约，**NEVER** 进入 domain 或通用 shared，也 **NEVER** 保存具体 Provider、Registry、Store 或全局 Config reader。
@@ -464,6 +464,7 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-21 | #1294 将 Tool Catalog/Execution/binding、Skill Catalog/materializer、Tool Result materializer 与 ActiveRunRegistry 的 production assembly 上移至 Composition；MCP Ready lifecycle 接线延期至 #1327 | [#1294](https://github.com/rushsinging/aemeath/issues/1294) / [#1327](https://github.com/rushsinging/aemeath/issues/1327) |
 | 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口由 #1289（归 #860）承接 | #1285/#1289/#860 |
 | 2026-07-20 | #1284 接通 compact 成功后的 PreCompact 冻结快照单槽提交；Manual 显式入口与有界 teardown/cancel 分别由 #1289/#1285 承接 | #1284/#1289/#1285 |
 | 2026-07-20 | #1283 将 Reflection history query 收窄为 Memory 直接返回安全摘要，Runtime 只映射 SDK view，完整 record 不越过 query 边界 | #1283 |

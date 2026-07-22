@@ -53,6 +53,16 @@ impl ScriptStep {
         })
     }
 
+    pub(super) fn with_stderr(self, stderr: &str) -> Self {
+        match self {
+            Self::Ok(mut raw) => {
+                raw.stderr = stderr.to_string();
+                Self::Ok(raw)
+            }
+            Self::Fault(fault) => Self::Fault(fault),
+        }
+    }
+
     /// 构造 exit 0 + stdout（用于 JSON / 空输出场景）。
     pub(super) fn ok_json(stdout: &str) -> Self {
         ScriptStep::Ok(RawExecution {
@@ -116,6 +126,8 @@ impl Executor for Scripted {
         &self,
         command: &HookCommand,
         stdin: &serde_json::Value,
+        _cwd: &std::path::Path,
+        _env: &std::collections::HashMap<String, String>,
         _timeout: Duration,
         _cancellation: &CancellationToken,
     ) -> Result<RawExecution, ExecutionFault> {
