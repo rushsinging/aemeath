@@ -150,8 +150,9 @@ async fn test_run_loop_gate_before_finish_continues_on_user_message() {
     assert_eq!(outcome.appended_user_messages, 1);
     assert_eq!(outcome.adopted_messages.len(), 1);
     assert_eq!(outcome.adopted_messages[0].1.text_content(), "继续");
-    // 现在 append 时发 MessagesSync + UserMessagesAdopted 两个事件
-    assert_eq!(sink.events.lock().unwrap().len(), 2);
+    // #1272: apply_gate no longer emits Adopted or PostToolExecutionSync.
+    // Adopted is deferred to accept_step_input after durable Context accept.
+    assert_eq!(sink.events.lock().unwrap().len(), 0);
 }
 
 /// #402 回归 + #fix-tui-image-input-output 拆块回归：
@@ -404,15 +405,16 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
 
     assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
     assert_eq!(outcome.adopted_messages.len(), 2);
-    let added = sink.events.lock().unwrap().iter().find_map(|e| match e {
-        RuntimeStreamEvent::UserMessagesAdopted { items, .. } => Some(items.clone()),
-        _ => None,
-    });
-    let items = added.expect("应发出一个 UserMessagesAdopted 批事件");
-    assert_eq!(items.len(), 2);
-    assert_eq!(items[0].1.text_content(), "same");
-    assert_eq!(items[1].1.text_content(), "same");
-    assert_ne!(items[0].0, items[1].0, "每条提交一个独立 id");
+    // #1272: apply_gate no longer emits UserMessagesAdopted.
+    // Adopted data is carried in outcome.adopted_messages for RunPort.
+    assert_eq!(outcome.adopted_messages[0].1.text_content(), "same");
+    assert_eq!(outcome.adopted_messages[1].1.text_content(), "same");
+    assert_ne!(
+        outcome.adopted_messages[0].0, outcome.adopted_messages[1].0,
+        "每条提交一个独立 id"
+    );
+    // Verify no events were emitted through the sink.
+    assert_eq!(sink.events.lock().unwrap().len(), 0);
 }
 
 #[tokio::test]
@@ -455,11 +457,95 @@ fn test_drain_all_returns_all_events_and_clears() {
     assert!(buffer.is_empty(), "drain_all 后 buffer 应为空");
 }
 
-/// #391 S3-1：drain_all 空 → 返回空 Vec，buffer 仍空。
-#[test]
-fn test_drain_all_empty_returns_empty_vec() {
+/// #1272 回归：apply_gate adopted_events 携带原始 ChatInputEvent（含 InputId + images）。
+/// Gate 不再 emit UserMessagesAdopted，数据由 adopted_events 传入 Run 经 accept_step_input 后 emit。
+#[tokio::test]
+async fn test_apply_gate_adopted_events_preserve_input_id_and_images() {
+    let img = sdk::ChatInputImage {
+        id: "[Image #1]".to_string(),
+        base64: "Zm9vYmFy".to_string(),
+        media_type: "image/png".to_string(),
+    };
     let mut buffer = PendingInputBuffer::default();
-    let drained = buffer.drain_all();
-    assert!(drained.is_empty());
-    assert!(buffer.is_empty());
+    let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(
+        "看图[Image #1]".to_string(),
+        vec![img.clone()],
+    )]);
+    let sink = TestSink::default();
+
+    let outcome = run_loop_gate(
+        GateKind::BeforeLlm,
+        &mut buffer,
+        &EmptyQueueDrainPort,
+        &input,
+        &sink,
+        &task::TaskStore::new(),
+        false,
+    )
+    .await;
+
+    assert_eq!(outcome.appended_user_messages, 1);
+    // Gate 不再 emit 事件（Adopted deferred to accept_step_input）
+    assert_eq!(sink.events.lock().unwrap().len(), 0);
+    // adopted_events 保留原始事件（含 InputId 和 images）
+    assert_eq!(outcome.adopted_events.len(), 1);
+    match &outcome.adopted_events[0] {
+        ChatInputEvent::UserMessage {
+            id: _id,
+            text,
+            images,
+        } => {
+            assert_eq!(text, "看图[Image #1]");
+            assert_eq!(images.len(), 1);
+            assert_eq!(images[0].id, "[Image #1]");
+            assert_eq!(images[0].base64, "Zm9vYmFy");
+        }
+        _ => panic!("expected UserMessage event"),
+    }
+    // adopted_messages 保留派生 Message（含 image content block）
+    assert_eq!(outcome.adopted_messages.len(), 1);
+    assert_eq!(
+        outcome.adopted_messages[0].1.text_content(),
+        "看图[Image #1]"
+    );
+    // #1272: InputId 应与消息对中的一致（通过 extract）
+    if let ChatInputEvent::UserMessage { id: ev_id, .. } = &outcome.adopted_events[0] {
+        assert_eq!(
+            *ev_id, outcome.adopted_messages[0].0,
+            "adopted_events 和 adopted_messages 中的 InputId 应一致"
+        );
+    }
+}
+
+/// #1272：apply_gate 不再 emit UserMessagesAdopted / PostToolExecutionSync。
+/// Gate 的 adopted data 仅供 RunPort 携带，UI 投影由 accept_step_input 后发出。
+#[tokio::test]
+async fn test_apply_gate_no_premature_adopted_emission() {
+    let mut buffer = PendingInputBuffer::default();
+    let input = TestInputEventPort::new(vec![
+        ChatInputEvent::user_message("hello", Vec::new()),
+        ChatInputEvent::user_message("world", Vec::new()),
+    ]);
+    let sink = TestSink::default();
+
+    let outcome = run_loop_gate(
+        GateKind::BeforeLlm,
+        &mut buffer,
+        &EmptyQueueDrainPort,
+        &input,
+        &sink,
+        &task::TaskStore::new(),
+        false,
+    )
+    .await;
+
+    assert_eq!(outcome.appended_user_messages, 2);
+    assert_eq!(outcome.adopted_messages.len(), 2);
+    assert_eq!(outcome.adopted_events.len(), 2);
+    // 确认没有事件通过 sink 发出
+    let events = sink.events.lock().unwrap();
+    assert!(
+        events.is_empty(),
+        "apply_gate must not emit any events; Adopted is deferred to accept_step_input"
+    );
 }

@@ -495,6 +495,8 @@ impl RunLoopPort for SubAgentRun<'_> {
             return Ok(crate::application::loop_engine::DrainOutcome::Ready {
                 batch: vec![crate::application::loop_engine::LoopInput {
                     text: self.prompt.to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 epoch,
             });

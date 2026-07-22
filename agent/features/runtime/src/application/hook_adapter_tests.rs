@@ -50,6 +50,7 @@ fn outcome(directive: HookDirective, executions: Vec<HookExecution>) -> HookOutc
         executions,
         directive,
         messages: Vec::new(),
+        block_detail: None,
     }
 }
 
@@ -610,6 +611,7 @@ fn messages_project_both_kinds_with_all_fields_preserved() {
                 "warn-b",
             ),
         ],
+        block_detail: None,
     };
     let dispatch = project_hook_outcome(&outcome);
 
@@ -675,6 +677,7 @@ fn messages_preserve_order_verbatim_no_merge_or_drop() {
                 "m4",
             ),
         ],
+        block_detail: None,
     };
     let dispatch = project_hook_outcome(&outcome);
 
@@ -808,6 +811,7 @@ fn dispatch_round_trips_directive_and_executions_together() {
                 input: json!({"a": 1}),
             },
             messages: Vec::new(),
+            block_detail: None,
         }
     );
 }

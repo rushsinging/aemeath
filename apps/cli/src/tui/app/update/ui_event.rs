@@ -94,11 +94,11 @@ impl App {
                     before_queued
                 );
                 for item in items {
-                    let preview = item.text_content().chars().take(60).collect::<String>();
+                    let text_len = item.text_content().chars().count();
                     crate::tui::log_debug!(
-                        "UserMessagesAdopted item input_id={:?} text_preview={:?}",
+                        "UserMessagesAdopted item input_id={:?} text_len={}",
                         item.input_id.as_ref().map(|id| id.as_str().to_string()),
-                        preview
+                        text_len
                     );
                     if let Some(id) = item.input_id.as_ref() {
                         self.clear_queued_submission_echo_by_id(id);

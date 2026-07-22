@@ -293,6 +293,7 @@ fn build_compact_test_port<'a>(
         stop_hook_feedback: None,
         pending_stop_hook_feedback: None,
         pending_tool_results: false,
+        per_turn_adopted: Vec::new(),
         cancel: CancellationToken::new(),
         run_id: RunId::new("run"),
         active_run: harness.active_run.as_ref(),

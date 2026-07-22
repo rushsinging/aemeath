@@ -99,17 +99,28 @@ impl StepMessageOwnership {
         if inputs.is_empty() {
             messages.extend(std::mem::take(&mut self.pending));
         } else {
-            messages.extend(inputs.iter().map(|input| Message::user(input.text.clone())));
+            messages.extend(inputs.iter().map(|input| {
+                if input.images.is_empty() {
+                    Message::user(input.text.clone())
+                } else {
+                    super::super::input_gate::user_message_with_images(
+                        input.text.clone(),
+                        input.images.clone(),
+                    )
+                }
+            }));
         }
         self.active = messages.clone();
         self.accepted_input = messages
             .iter()
             .filter(|message| {
                 message.role == Role::User
-                    && message
-                        .metadata
-                        .as_ref()
-                        .is_none_or(|metadata| metadata.source != MessageSource::SystemGenerated)
+                    && message.metadata.as_ref().is_none_or(|metadata| {
+                        !matches!(
+                            metadata.source,
+                            MessageSource::SystemGenerated | MessageSource::StopHook
+                        )
+                    })
             })
             .cloned()
             .collect();
@@ -171,6 +182,28 @@ pub(crate) fn fixture_finalize_messages(
     accepted.into_iter().chain(ownership.outcome()).collect()
 }
 
+/// Simulate a two-step freeze lifecycle (first step with buffer-sourced
+/// inputs, second step with empty inputs as in an InternalContinuation).
+/// Returns `(first_accepted, second_accepted)` — the accepted user
+/// messages after each freeze.
+///
+/// Used by the idle-replay regression test to verify that gate-adopted
+/// user input is not replayed when `pending` is empty (post-fix
+/// contract).
+#[cfg(test)]
+pub(crate) fn fixture_two_step_accepted(
+    pending: Vec<Message>,
+    first_inputs: &[LoopInput],
+    second_inputs: &[LoopInput],
+) -> (Vec<Message>, Vec<Message>) {
+    let mut ownership = StepMessageOwnership::new(pending);
+    ownership.freeze(None, first_inputs);
+    let first_accepted = ownership.accepted_user_messages();
+    ownership.freeze(None, second_inputs);
+    let second_accepted = ownership.accepted_user_messages();
+    (first_accepted, second_accepted)
+}
+
 /// Main-chat adapter for the shared run loop.
 ///
 /// It owns no lifecycle state machine. `Run` is the only per-run state machine; this adapter
@@ -230,6 +263,10 @@ where
     /// #1272: 上一 Step 完成 Tools 后置位；下一次 drain 把它作为显式
     /// `InternalContinuation::ToolResults` 续跑，不与新进入的 user input 混批。
     pub(crate) pending_tool_results: bool,
+    /// #1272: Per-turn adopted (InputId, Message) pairs collected during
+    /// freeze_step from LoopInput::input_id. Emitted via UserMessagesAdopted
+    /// after accept_step_input durable success. Cleared after emission.
+    pub(crate) per_turn_adopted: Vec<(sdk::InputId, Message)>,
     pub(crate) cancel: CancellationToken,
     pub(crate) run_id: sdk::RunId,
     pub(crate) active_run: &'a dyn crate::domain::agent_run::ActiveRunPort,
@@ -371,14 +408,31 @@ where
         debug_assert!(matches!(event, sdk::ChatInputEvent::UserMessage { .. }));
         match self.run_input_buffer.push_or_reject(event) {
             Some(rejected) => {
+                let rejected_id = match &rejected {
+                    sdk::ChatInputEvent::UserMessage { id, .. } => Some(id.as_str().to_string()),
+                    _ => None,
+                };
                 log::debug!(
                     target: crate::LOG_TARGET,
-                    "MainRunPort: sealed buffer rejected UserMessage; routing to pending_input"
+                    "[loop_debug] admit_user_message run_id={} REJECTED sealed=true rejected_id={:?}",
+                    self.run_id,
+                    rejected_id,
                 );
                 self.pending_input.push(rejected);
             }
             None => {
                 let queued = self.run_input_buffer.user_message_snapshot();
+                let queued_ids: Vec<_> = queued
+                    .iter()
+                    .map(|(id, _)| id.as_str().to_string())
+                    .collect();
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "[loop_debug] admit_user_message run_id={} ACCEPTED queue_count={} queued_ids={:?}",
+                    self.run_id,
+                    queued.len(),
+                    queued_ids,
+                );
                 self.sink
                     .send_event(RuntimeStreamEvent::UserMessagesQueued { queued })
                     .await;
@@ -756,9 +810,13 @@ where
             if self.cancel.is_cancelled() {
                 return Err(LoopEngineError::Cancelled);
             }
-            let feedback = Message::system_generated_user(format!(
-                "<system-reminder>\n{feedback}\n</system-reminder>"
-            ));
+            let feedback = Message::stop_hook_feedback(
+                format!(
+                    "<system-reminder>\n{}\n</system-reminder>",
+                    feedback.llm_text
+                ),
+                feedback.payload,
+            );
             self.stop_hook_feedback = Some(feedback.clone());
             self.step_messages.record(feedback.clone());
             self.messages.push(feedback);
@@ -845,6 +903,18 @@ where
                     )));
                 }
             };
+            let input_ids: Vec<_> = batch
+                .iter()
+                .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
+                .collect();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[loop_debug] drain_input run_id={} status=InternalContinuation epoch={:?} kind=StopHookFeedback input_ids={:?} count={}",
+                self.run_id,
+                epoch,
+                input_ids,
+                batch.len(),
+            );
             return Ok(Some(DrainOutcome::InternalContinuation {
                 kind: InternalContinuationKind::StopHookFeedback { feedback: text },
                 batch,
@@ -878,6 +948,18 @@ where
                     )));
                 }
             };
+            let input_ids: Vec<_> = batch
+                .iter()
+                .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
+                .collect();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[loop_debug] drain_input run_id={} status=InternalContinuation epoch={:?} kind=ToolResults input_ids={:?} count={}",
+                self.run_id,
+                epoch,
+                input_ids,
+                batch.len(),
+            );
             return Ok(Some(DrainOutcome::InternalContinuation {
                 kind: InternalContinuationKind::ToolResults,
                 batch,
@@ -908,6 +990,39 @@ where
             self.messages
                 .extend(inputs.iter().map(|input| Message::user(input.text.clone())));
         }
+        // #1272 per-turn drain identity: collect (InputId, Message) pairs
+        // for UserMessagesAdopted emission after durable accept succeeds.
+        self.per_turn_adopted = inputs
+            .iter()
+            .filter_map(|input| {
+                input.input_id.as_ref().map(|id| {
+                    let message = if input.images.is_empty() {
+                        Message::user(input.text.clone())
+                    } else {
+                        super::super::input_gate::user_message_with_images(
+                            input.text.clone(),
+                            input.images.clone(),
+                        )
+                    };
+                    (id.clone(), message)
+                })
+            })
+            .collect();
+        if !self.per_turn_adopted.is_empty() {
+            let input_ids: Vec<_> = self
+                .per_turn_adopted
+                .iter()
+                .map(|(id, _)| id.as_str().to_string())
+                .collect();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[loop_debug] freeze_step run_id={} step_id={} input_ids={:?} count={}",
+                self.run_id,
+                step_id,
+                input_ids,
+                self.per_turn_adopted.len()
+            );
+        }
         self.context_request = Some(self.freeze_request(step_id, self.step_messages.outcome()));
         self.context_window = None;
     }
@@ -926,6 +1041,38 @@ where
             .append_accepted_input(request, accepted)
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+
+        // #1272 per-turn drain identity: emit UserMessagesAdopted strictly
+        // after durable accept succeeds. The TUI uses this to clear queued
+        // placeholders by input_id and append formal user messages.
+        let adopted = std::mem::take(&mut self.per_turn_adopted);
+        if !adopted.is_empty() {
+            let queued = self.run_input_buffer.user_message_snapshot();
+            let input_ids: Vec<_> = adopted
+                .iter()
+                .map(|(id, _)| id.as_str().to_string())
+                .collect();
+            let queued_ids: Vec<_> = queued
+                .iter()
+                .map(|(id, _)| id.as_str().to_string())
+                .collect();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[loop_debug] accept_step_input emitting UserMessagesAdopted run_id={} step_id={} adopt_ids={:?} adopt_count={} queued_ids={:?} queued_count={}",
+                self.run_id,
+                step_id,
+                input_ids,
+                adopted.len(),
+                queued_ids,
+                queued.len(),
+            );
+            self.sink
+                .send_event(RuntimeStreamEvent::UserMessagesAdopted {
+                    items: adopted,
+                    queued,
+                })
+                .await;
+        }
         Ok(())
     }
 
@@ -944,8 +1091,28 @@ where
         // instead of drain-then-check. Once sealed, late UserMessages are
         // rejected by push_or_reject (not silently buffered for next Run).
         match self.run_input_buffer.drain_or_seal(expected_epoch) {
-            BufferDrain::Ready { batch, epoch } => Ok(DrainOutcome::Ready { batch, epoch }),
+            BufferDrain::Ready { batch, epoch } => {
+                let input_ids: Vec<_> = batch
+                    .iter()
+                    .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
+                    .collect();
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "[loop_debug] drain_input run_id={} status=Ready epoch={:?} kind=per_turn input_ids={:?} count={}",
+                    self.run_id,
+                    epoch,
+                    input_ids,
+                    batch.len(),
+                );
+                Ok(DrainOutcome::Ready { batch, epoch })
+            }
             BufferDrain::EmptyAndSealed { epoch } => {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "[loop_debug] drain_input run_id={} status=EmptyAndSealed epoch={:?}",
+                    self.run_id,
+                    epoch,
+                );
                 // Buffer was empty; seal applied atomically.
                 Ok(DrainOutcome::EmptyAndSealed { epoch })
             }
