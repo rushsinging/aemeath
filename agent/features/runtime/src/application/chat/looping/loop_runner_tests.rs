@@ -698,10 +698,10 @@ fn blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookP
         vec![HookEntry {
             matcher: String::new(),
             command: format!(
-                "python3 -c 'import pathlib, sys; \
+                "python3 -c 'import pathlib, sys, json; \
                  p=pathlib.Path(\"{flag_path}\"); \
                  sys.exit(0 if p.exists() else (p.parent.mkdir(parents=True, exist_ok=True), \
-                 p.write_text(\"blocked\"), print(\"fix before stopping\"), 2)[3])'",
+                 p.write_text(\"blocked\"), print(\"{{\\\"continue\\\":false,\\\"stopReason\\\":\\\"fix before stopping\\\"}}\"), 2)[3])'",
                 flag_path = flag_path_str,
             ),
             timeout: 5,
@@ -718,10 +718,10 @@ fn delayed_blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<d
         vec![HookEntry {
             matcher: String::new(),
             command: format!(
-                "python3 -c 'import pathlib, sys, time; \
+                "python3 -c 'import pathlib, sys, time, json; \
                  p=pathlib.Path(\"{flag_path}\"); \
                  sys.exit(0 if p.exists() else (p.parent.mkdir(parents=True, exist_ok=True), \
-                 p.write_text(\"blocked\"), time.sleep(0.2), print(\"fix before stopping\"), 2)[4])'",
+                 p.write_text(\"blocked\"), time.sleep(0.2), print(\"{{\\\"continue\\\":false,\\\"stopReason\\\":\\\"fix before stopping\\\"}}\"), 2)[4])'",
                 flag_path = flag_path_str,
             ),
             timeout: 5,
@@ -821,8 +821,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
     let feedback_sync = events
         .iter()
         .position(|event| {
-            event.starts_with("StopHookBlocked:")
-                && event.contains("You MUST first satisfy the Stop hook requirement")
+            event.starts_with("StopHookBlocked:") && event.contains("Stop hook prevented stopping")
         })
         .expect("blocked Stop hook feedback should be synced into messages");
     let hook_notice = events
@@ -858,7 +857,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         .expect("blocked assistant output must remain in canonical history");
     let feedback_idx = texts
         .iter()
-        .position(|text| text.contains("You MUST first satisfy the Stop hook requirement"))
+        .position(|text| text.contains("Stop hook prevented stopping"))
         .expect("Stop hook feedback must reach the continuation request");
     assert!(
         assistant_idx < feedback_idx,
@@ -986,7 +985,7 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
         .unwrap();
     let feedback_idx = texts
         .iter()
-        .position(|text| text.contains("You MUST first satisfy the Stop hook requirement"))
+        .position(|text| text.contains("Stop hook prevented stopping"))
         .unwrap();
     let follow_up_idx = texts
         .iter()
@@ -1005,7 +1004,7 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
                 .filter(|message| {
                     message
                         .text_content()
-                        .contains("You MUST first satisfy the Stop hook requirement")
+                        .contains("Stop hook prevented stopping")
                 })
                 .count()
                 > 1
@@ -1018,7 +1017,7 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
 }
 
 #[tokio::test]
-async fn test_stop_hook_feedback_message_is_marked_system_generated() {
+async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
     let flag_path = std::env::temp_dir().join(format!(
         "aemeath_stop_hook_metadata_{}.flag",
         std::time::SystemTime::now()
@@ -1108,12 +1107,12 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         .find(|message| {
             message
                 .text_content()
-                .contains("You MUST first satisfy the Stop hook requirement")
+                .contains("Stop hook prevented stopping")
         })
         .expect("blocked Stop hook feedback should be synced into messages");
 
     assert_eq!(feedback.role, Role::User);
-    assert_eq!(feedback.source(), MessageSource::SystemGenerated);
+    assert_eq!(feedback.source(), MessageSource::StopHook);
 }
 
 #[tokio::test]

@@ -513,6 +513,106 @@ mod started_tests {
 }
 
 #[test]
+fn test_stop_hook_blocked_maps_to_blocked_hook_notice() {
+    let reminder = sdk::ChatMessage::system_generated_user_text(
+        "<system-reminder>Stop hook blocked stopping.</system-reminder>",
+    );
+    let mut messages = vec![sdk::ChatMessage::user_text("user input"), reminder];
+    messages[1].metadata = Some(sdk::ChatMessageMetadata {
+        source: sdk::ChatMessageSource::StopHook,
+        stop_hook: Some(sdk::StopHookFeedbackView {
+            summary: "Stop hook blocked stopping.".to_string(),
+            command: ".agents/hooks/check-agent-stop.sh".to_string(),
+            exit_code: Some(2),
+            reason: "exit code 2: blocked".to_string(),
+            stdout_preview: "short stdout".to_string(),
+            stderr_preview: "short stderr".to_string(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            output_file: Some("/tmp/stop-hook-output.txt".to_string()),
+        }),
+    });
+
+    let mapping = map_agent_event(&UiEvent::StopHookBlocked { messages });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::AppendHookNotice(AppendHookNotice { content })]
+            if content.kind == crate::tui::model::conversation::block::HookNoticeKind::Blocked
+                && content.title == "Hook blocked: Stop"
+                && content.body == "Stop hook blocked stopping."
+                && content.details.as_deref().is_some_and(|details|
+                    details.contains("Command: .agents/hooks/check-agent-stop.sh")
+                        && details.contains("Exit code: 2")
+                        && details.contains("Full output: /tmp/stop-hook-output.txt")
+                )
+    ));
+}
+
+#[test]
+fn stop_hook_notice_reports_line_preview_truncation_and_output_file() {
+    let reminder =
+        sdk::ChatMessage::system_generated_user_text("<system-reminder>blocked</system-reminder>");
+    let mut messages = vec![reminder];
+    messages[0].metadata = Some(sdk::ChatMessageMetadata {
+        source: sdk::ChatMessageSource::StopHook,
+        stop_hook: Some(sdk::StopHookFeedbackView {
+            summary: "blocked".to_string(),
+            command: "check.sh".to_string(),
+            exit_code: Some(2),
+            reason: "exit code 2".to_string(),
+            stdout_preview: "one\ntwo\nthree".to_string(),
+            stderr_preview: "a\nb\nc\nd\ne".to_string(),
+            stdout_truncated: true,
+            stderr_truncated: true,
+            output_file: Some("/tmp/full-stop-hook.txt".to_string()),
+        }),
+    });
+
+    let mapping = map_agent_event(&UiEvent::StopHookBlocked { messages });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::AppendHookNotice(AppendHookNotice { content })]
+            if content.details.as_deref().is_some_and(|details|
+                details.contains("stdout preview truncated")
+                    && details.contains("stderr preview truncated")
+                    && details.contains("Full output: /tmp/full-stop-hook.txt")
+            )
+    ));
+}
+
+#[test]
+fn test_stop_hook_blocked_without_stop_hook_message_does_not_render_notice() {
+    let mapping = map_agent_event(&UiEvent::StopHookBlocked {
+        messages: vec![sdk::ChatMessage::user_text("user input")],
+    });
+
+    assert!(mapping.conversation.is_empty());
+    assert!(matches!(
+        mapping.session.as_slice(),
+        [
+            crate::tui::model::runtime::session_intent::SessionIntent::MessagesSynced {
+                message_count: 1
+            }
+        ]
+    ));
+}
+
+#[test]
+fn test_blocked_stop_hook_event_is_suppressed_until_stop_hook_notice() {
+    let mapping = map_agent_event(&UiEvent::HookEvent(sdk::HookEventView {
+        hook_name: "Stop".to_string(),
+        status: sdk::HookEventStatus::Blocked,
+        matcher: None,
+        command: None,
+        result: None,
+    }));
+
+    assert!(mapping.conversation.is_empty());
+}
+
+#[test]
 fn test_hook_message_maps_to_info_notice_with_typed_metadata() {
     let mapping = map_agent_event(&UiEvent::HookMessage(sdk::HookMessageView {
         point: "PreToolUse".to_string(),

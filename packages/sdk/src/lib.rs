@@ -73,6 +73,7 @@ pub use run::{
 };
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, SessionSnapshot, SessionSummary,
+    StopHookFeedbackView,
 };
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,

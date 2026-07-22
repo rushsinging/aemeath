@@ -124,7 +124,12 @@ pub(crate) fn classify_output(
         return Ok((HookDirective::Continue, None));
     }
 
-    // ── exit 0 + 尝试解析 JSON；非法 JSON → typed InvalidJson ──
+    // ── exit 0 + 普通日志 → Continue；仅 `{` 前缀声明 JSON 协议输出 ──
+    if !trimmed.starts_with('{') {
+        return Ok((HookDirective::Continue, None));
+    }
+
+    // ── exit 0 + JSON 候选输出：非法 JSON → typed InvalidJson ──
     let json: HookJsonOutput = match serde_json::from_str(trimmed) {
         Ok(j) => j,
         Err(e) => {

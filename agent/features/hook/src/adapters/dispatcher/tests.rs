@@ -373,9 +373,9 @@ async fn retry_invalid_json_up_to_three() {
     // exit 0 + 非法 JSON → classify InvalidJson → ExecutionFailed 重试。
     let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
-        ScriptStep::ok_json("not json"),
-        ScriptStep::ok_json("not json"),
-        ScriptStep::ok_json("not json"),
+        ScriptStep::ok_json("{not json"),
+        ScriptStep::ok_json("{not json"),
+        ScriptStep::ok_json("{not json"),
     ]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
 
@@ -532,6 +532,29 @@ async fn exit_code_127_blocks_once_without_retry() {
             reason: HookReason::ExitCode { code: 127, .. }
         }
     ));
+}
+
+#[tokio::test]
+async fn stop_block_detail_keeps_blocking_subscription() {
+    let subs = vec![
+        sub(HookPoint::Stop, "blocking-stop.sh").with_order(0),
+        sub(HookPoint::Stop, "passing-stop.sh").with_order(1),
+    ];
+    let scripted = Scripted::from_steps([
+        ScriptStep::ok_exit(2, "").with_stderr("must finish work"),
+        ScriptStep::ok_exit(0, "All guards passed"),
+    ]);
+    let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
+
+    let outcome = dispatcher
+        .dispatch(stop(1), &CancellationToken::new())
+        .await;
+
+    assert_eq!(scripted.commands(), vec!["blocking-stop.sh"]);
+    let detail = outcome.block_detail.expect("block detail");
+    assert_eq!(detail.command, "blocking-stop.sh");
+    assert_eq!(detail.execution.exit_code, Some(2));
+    assert_eq!(detail.execution.stderr, "must finish work");
 }
 
 // ════════════════════════════════════════════════════════════

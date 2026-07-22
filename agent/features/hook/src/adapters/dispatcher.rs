@@ -32,8 +32,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domain::invocation::{HookInvocation, HookPoint, StopFailureInput};
 use crate::domain::outcome::{
-    HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecution, HookExecutionStatus,
-    HookOutcome,
+    HookBlockDetail, HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecution,
+    HookExecutionStatus, HookOutcome,
 };
 use crate::domain::protocol::classify_output;
 use crate::domain::subscription::{HookCommand, HookSubscription, SubscriptionError};
@@ -212,10 +212,19 @@ impl HookPort for Dispatcher {
                     match directive {
                         HookDirective::Continue => {}
                         HookDirective::Block { reason } => {
+                            let execution = all_executions
+                                .last()
+                                .expect("Block 成功执行必须保留最终 execution")
+                                .clone();
                             return HookOutcome {
                                 executions: all_executions,
                                 directive: HookDirective::Block { reason },
                                 messages,
+                                block_detail: Some(HookBlockDetail {
+                                    command: sub.command.command.clone(),
+                                    execution_ordinal,
+                                    execution,
+                                }),
                             };
                         }
                         HookDirective::ContinueWithContext { context } => {
@@ -255,6 +264,15 @@ impl HookPort for Dispatcher {
                     // Block 短路：Stop（固定 Block，用户不可覆盖）或配置
                     // failure_policy=Block 的前置闸门。后续 subscription 不再执行。
                     if let HookDirective::Block { .. } = directive {
+                        let execution = all_executions
+                            .last()
+                            .expect("耗尽 Block 必须保留最终 execution")
+                            .clone();
+                        let block_detail = HookBlockDetail {
+                            command: sub.command.command.clone(),
+                            execution_ordinal: all_executions.len() as u32,
+                            execution,
+                        };
                         // Stop point 耗尽后尽力派发一次 StopFailure（不递归），
                         // 其执行明细并入原 Stop HookOutcome.executions。
                         if point == HookPoint::Stop {
@@ -274,6 +292,7 @@ impl HookPort for Dispatcher {
                             executions: all_executions,
                             directive,
                             messages,
+                            block_detail: Some(block_detail),
                         };
                     }
                     // 默认 / Continue policy：重试耗尽后不阻断流程。
@@ -284,10 +303,20 @@ impl HookPort for Dispatcher {
                     // Cancelled 同样是一次 attempt：保留 ExecutionFailed 明细后再合成 directive。
                     all_executions.extend(executions);
                     let directive = synthesize_cancelled_directive(point, sub.failure_policy);
+                    let execution_ordinal = all_executions.len() as u32;
+                    let execution = all_executions
+                        .last()
+                        .expect("取消 Block 必须保留最终 execution")
+                        .clone();
                     return HookOutcome {
                         executions: all_executions,
                         directive,
                         messages,
+                        block_detail: Some(HookBlockDetail {
+                            command: sub.command.command.clone(),
+                            execution_ordinal,
+                            execution,
+                        }),
                     };
                 }
             }
@@ -307,6 +336,7 @@ impl HookPort for Dispatcher {
             executions: all_executions,
             directive,
             messages,
+            block_detail: None,
         }
     }
 }
@@ -558,6 +588,7 @@ impl Dispatcher {
             executions: all_executions,
             directive: HookDirective::Continue,
             messages: Vec::new(),
+            block_detail: None,
         }
     }
 }
