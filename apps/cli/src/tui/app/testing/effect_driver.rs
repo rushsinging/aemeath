@@ -35,6 +35,20 @@ impl ScriptedEffectDriver {
                 self.effects.push(effect);
                 continue;
             }
+            if let Effect::ResolveWorkspaceMetadata { ref root, revision } = effect {
+                replies.push(TuiMsg::Ui(
+                    crate::tui::app::event::UiEvent::WorkspaceMetadataResolved(
+                        crate::tui::app::event::WorkspaceMetadataResolved {
+                            root: root.clone(),
+                            revision,
+                            branch: None,
+                            kind: crate::tui::model::conversation::workspace::WorktreeKind::Unknown,
+                        },
+                    ),
+                ));
+                self.effects.push(effect);
+                continue;
+            }
             let expected = self
                 .expected
                 .pop_front()
