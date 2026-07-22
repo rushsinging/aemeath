@@ -550,6 +550,39 @@ fn test_stop_hook_blocked_maps_to_blocked_hook_notice() {
 }
 
 #[test]
+fn stop_hook_notice_reports_line_preview_truncation_and_output_file() {
+    let reminder =
+        sdk::ChatMessage::system_generated_user_text("<system-reminder>blocked</system-reminder>");
+    let mut messages = vec![reminder];
+    messages[0].metadata = Some(sdk::ChatMessageMetadata {
+        source: sdk::ChatMessageSource::StopHook,
+        stop_hook: Some(sdk::StopHookFeedbackView {
+            summary: "blocked".to_string(),
+            command: "check.sh".to_string(),
+            exit_code: Some(2),
+            reason: "exit code 2".to_string(),
+            stdout_preview: "one\ntwo\nthree".to_string(),
+            stderr_preview: "a\nb\nc\nd\ne".to_string(),
+            stdout_truncated: true,
+            stderr_truncated: true,
+            output_file: Some("/tmp/full-stop-hook.txt".to_string()),
+        }),
+    });
+
+    let mapping = map_agent_event(&UiEvent::StopHookBlocked { messages });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::AppendHookNotice(AppendHookNotice { content })]
+            if content.details.as_deref().is_some_and(|details|
+                details.contains("stdout preview truncated")
+                    && details.contains("stderr preview truncated")
+                    && details.contains("Full output: /tmp/full-stop-hook.txt")
+            )
+    ));
+}
+
+#[test]
 fn test_stop_hook_blocked_without_stop_hook_message_does_not_render_notice() {
     let mapping = map_agent_event(&UiEvent::StopHookBlocked {
         messages: vec![sdk::ChatMessage::user_text("user input")],

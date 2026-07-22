@@ -12,7 +12,8 @@ use task::TaskAccess;
 use tokio_util::sync::CancellationToken;
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
-const TUI_HOOK_OUTPUT_PREVIEW_LIMIT: usize = 1_000;
+const TUI_STDOUT_PREVIEW_LINES: usize = 3;
+const TUI_STDERR_PREVIEW_LINES: usize = 5;
 
 pub(crate) struct StopHookFeedbackMessage {
     pub llm_text: String,
@@ -90,12 +91,10 @@ async fn stop_hook_feedback(
         .expect("Stop hook Block must carry the blocking subscription detail");
     let command = detail.command.clone();
     let reason = format_reason(&dispatch.directive);
-    let stdout_preview =
-        truncate_utf8(&detail.execution.stdout, TUI_HOOK_OUTPUT_PREVIEW_LIMIT).to_string();
-    let stderr_preview =
-        truncate_utf8(&detail.execution.stderr, TUI_HOOK_OUTPUT_PREVIEW_LIMIT).to_string();
-    let stdout_truncated = detail.execution.stdout.len() > stdout_preview.len();
-    let stderr_truncated = detail.execution.stderr.len() > stderr_preview.len();
+    let (stdout_preview, stdout_truncated) =
+        truncate_lines(&detail.execution.stdout, TUI_STDOUT_PREVIEW_LINES);
+    let (stderr_preview, stderr_truncated) =
+        truncate_lines(&detail.execution.stderr, TUI_STDERR_PREVIEW_LINES);
     let output = format!(
         "command: {command}\nexit_code: {:?}\nreason: {reason}\n\nstdout:\n{}\n\nstderr:\n{}",
         detail.execution.exit_code, detail.execution.stdout, detail.execution.stderr
@@ -202,11 +201,17 @@ fn sanitized_file_stem(command: &str) -> String {
     }
 }
 
-fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
-    if text.len() <= max_bytes {
-        return text;
-    }
-    &text[..text.floor_char_boundary(max_bytes)]
+fn truncate_lines(text: &str, max_lines: usize) -> (String, bool) {
+    let lines: Vec<&str> = text.lines().collect();
+    let truncated = lines.len() > max_lines;
+    (
+        lines
+            .into_iter()
+            .take(max_lines)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        truncated,
+    )
 }
 
 #[cfg(test)]
