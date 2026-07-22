@@ -339,40 +339,44 @@ where
 
             'session: loop {
                 // Busy user messages are no longer deferred to the session. They
-                // accumulate in the Run-scoped buffer and are consumed within the
-                // same Run (#1272).
-                let idle_result = if !pending_input.is_empty() {
-                    // Busy control events are serviced at idle before the next queued user Run. They are
-                    // never appended to model context.
-                    let next_segment = ChatId::new_v7().to_string();
-                    let gate = apply_gate(
-                        GateKind::BeforeLlm,
-                        &mut pending_input,
-                        &sink,
-                        task_access.as_ref(),
-                        true,
-                    )
-                    .await;
-                    if gate.reset_requested {
-                        IdleResult::ResetRequested
-                    } else if let Some(command) = gate.pending_command {
-                        IdleResult::CommandRequested(command)
-                    } else if gate.appended_user_messages > 0 {
-                        IdleResult::Resumed(next_segment, gate.adopted_messages)
-                    } else {
-                        continue;
-                    }
-                } else {
-                    idle_until_resume_or_shutdown(
-                        &input_events,
-                        &sink,
-                        &mut pending_input,
-                        task_access.as_ref(),
-                    )
-                    .await
-                };
+                          // accumulate in the Run-scoped buffer and are consumed within the
+                          // same Run (#1272).
+                          let idle_result = if !pending_input.is_empty() {
+                              // Busy control events are serviced at idle before the next queued user Run. They are
+                              // never appended to model context.
+                              let next_segment = ChatId::new_v7().to_string();
+                              let gate = apply_gate(
+                                  GateKind::BeforeLlm,
+                                  &mut pending_input,
+                                  &sink,
+                                  task_access.as_ref(),
+                                  true,
+                              )
+                              .await;
+                              if gate.reset_requested {
+                                  IdleResult::ResetRequested
+                              } else if let Some(command) = gate.pending_command {
+                                  IdleResult::CommandRequested(command)
+                              } else if gate.appended_user_messages > 0 {
+                                  IdleResult::Resumed {
+                                      segment_id: next_segment,
+                                      adopted_messages: gate.adopted_messages,
+                                      adopted_events: gate.adopted_events,
+                                  }
+                              } else {
+                                  continue;
+                              }
+                          } else {
+                              idle_until_resume_or_shutdown(
+                                  &input_events,
+                                  &sink,
+                                  &mut pending_input,
+                                  task_access.as_ref(),
+                              )
+                              .await
+                          };
 
-                let segment_id = match idle_result {
+                let (segment_id, adopted_events) = match idle_result {
                     IdleResult::Shutdown => break 'session,
                     IdleResult::ResetRequested => {
                         let bound = match wiring.bind_main_run().await {
@@ -402,10 +406,18 @@ where
                         continue;
                     }
                     IdleResult::CommandRequested(command) => handle_pending_command!(command),
-                    IdleResult::Resumed(next_segment, adopted) => {
+                    IdleResult::Resumed {
+                        segment_id: next_segment,
+                        adopted_messages: adopted,
+                        adopted_events,
+                    } => {
                         // 新 Run 只取得本轮 adopted 输入；已提交历史由 Context backing 提供。
                         messages = adopted.into_iter().map(|(_, message)| message).collect();
-                        next_segment
+                        let segment = next_segment;
+                        // #1272: seed run_input_buffer with real events (not synthetic)
+                        // to preserve InputId and images through the drain→freeze→adopt pipeline.
+                        let _ = adopted_events; // consumed in seeding below
+                        (segment, adopted_events)
                     }
                 };
 
@@ -474,7 +486,15 @@ where
                 };
                 let mut port = MainRunPort {
                     messages: messages.clone(),
-                    step_messages: main_run_port::StepMessageOwnership::new(messages.clone()),
+                    // #1272: gate-adopted user input enters the Run exclusively
+                    // via RunInputBuffer (seeded below). StepMessageOwnership
+                    // pending must be empty — otherwise, when the first step's
+                    // drain returns Ready (non-empty inputs from the buffer),
+                    // pending stays untouched and leaks into a subsequent step
+                    // with empty inputs (InternalContinuation), causing double
+                    // durable accept and LLM context replay of the same user
+                    // messages.
+                    step_messages: main_run_port::StepMessageOwnership::new(Vec::new()),
                     sink: &sink,
                     queue: &queue,
                     input_events: &input_events,
@@ -510,6 +530,7 @@ where
                     stop_hook_feedback: None,
                     pending_stop_hook_feedback: None,
                     pending_tool_results: false,
+                    per_turn_adopted: Vec::new(),
                     cancel: cancel.clone(),
                     run_id: run_id.clone(),
                     active_run: active_run.as_ref(),
@@ -522,16 +543,21 @@ where
                 };
                 // #1272: the idle gate consumed the user input from the channel
                 // and placed it in `messages`.  Seed the run_input_buffer with
-                // the last user message so drain_input returns Ready (not
-                // EmptyAndSealed) on the first drain call.
-                if let Some(last_msg) = port.messages.last() {
-                    let text = last_msg.text_content();
-                    if !text.is_empty() {
-                        port.run_input_buffer.push(sdk::ChatInputEvent::user_message(
-                            text, Vec::new(),
-                        ));
-                    }
-                }
+                // the original gate-adopted events (not synthetic) so that
+                // InputId and images are preserved through drain→freeze→adopt.
+                // This ensures drain_input returns Ready (not EmptyAndSealed)
+                // on the first drain call, and freeze_step captures the correct
+                // (InputId, Message) pairs for accept_step_input's Adopted emission.
+                for event in adopted_events {
+                      if let sdk::ChatInputEvent::UserMessage { id, text, images } = &event {
+                          log::debug!(
+                              target: crate::LOG_TARGET,
+                              "[loop_debug] idle_initial seeding run_input_buffer id={} text_len={} image_count={}",
+                              id, text.len(), images.len()
+                          );
+                      }
+                      port.run_input_buffer.push(event);
+                  }
                 // #1272: Re-enter run_loop after AwaitUser within the same Run.
                 // The engine returns LoopDirective::AwaitUser when the Run is
                 // awaiting user input; the session actor waits for input and

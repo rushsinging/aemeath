@@ -28,6 +28,13 @@ impl DrainEpoch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopInput {
     pub text: String,
+    /// Per-turn user message InputId (from `ChatInputEvent::UserMessage::id`).
+    /// `None` for engine-driven continuations (StopHookFeedback, ToolResults)
+    /// and fixed-sub-agent prompts (#1272 per-turn drain identity).
+    pub input_id: Option<sdk::InputId>,
+    /// Per-turn user message images (from `ChatInputEvent::UserMessage::images`).
+    /// Empty for engine-driven continuations.
+    pub images: Vec<sdk::ChatInputImage>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -95,8 +102,9 @@ pub enum LoopDirective {
 /// Each variant carries a [`DrainEpoch`] for per-turn linearization.
 #[derive(Debug, Clone)]
 pub enum DrainOutcome {
-    /// User input is ready for the next step. The batch MUST be non-empty;
-    /// use [`DrainOutcome::ready`] to construct.
+    /// User input is ready for the next step. The batch SHOULD be non-empty;
+    /// use [`DrainOutcome::ready`] to construct. An empty batch is detected
+    /// by `run_loop` and reported as `LoopEngineError::Adapter` (#1272).
     Ready {
         batch: Vec<LoopInput>,
         epoch: DrainEpoch,
@@ -116,14 +124,12 @@ pub enum DrainOutcome {
 }
 
 impl DrainOutcome {
-    /// Construct a `Ready` outcome. Panics if `batch` is empty — empty Ready
-    /// is contractually invalid (#1272). For no-work seal, use
-    /// `DrainOutcome::EmptyAndSealed` directly.
+    /// Construct a `Ready` outcome. Does not panic on empty batch — an
+    /// empty `Ready` is detected by `run_loop` at the shared consumption
+    /// point and reported as `LoopEngineError::Adapter` (#1272 close-out).
+    /// Adapters should still avoid producing empty Ready; for no-work seal
+    /// use `DrainOutcome::EmptyAndSealed` directly.
     pub fn ready(batch: Vec<LoopInput>, epoch: DrainEpoch) -> Self {
-        assert!(
-            !batch.is_empty(),
-            "DrainOutcome::Ready requires a non-empty user batch (#1272)"
-        );
         Self::Ready { batch, epoch }
     }
 
@@ -170,13 +176,27 @@ pub trait RunLoopPort: Send {
     /// epoch when no user input is available — the buffer must stay
     /// receptive to future input within the same Run.
     ///
-    /// Default impl delegates to `drain_input` (adapters that never
-    /// reach AwaitingUser don't need to override this).
+    /// The default impl returns an `Adapter` error: an adapter that can
+    /// reach `AwaitingUser` MUST override this to ensure empty input
+    /// returns `NoInput` (not `EmptyAndSealed`) and never seals the buffer.
+    /// Adapters that never enter `AwaitingUser` (e.g. Sub agents with a
+    /// fixed prompt) do not need to override this.
     async fn await_user_input(
         &mut self,
         expected_epoch: DrainEpoch,
     ) -> Result<DrainOutcome, LoopEngineError> {
-        self.drain_input(expected_epoch).await
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "RunLoopPort::await_user_input 使用默认实现（epoch {:?}）：\
+             该 adapter 未覆写 await_user_input，无法安全处理 AwaitingUser",
+            expected_epoch,
+        );
+        Err(LoopEngineError::Adapter(format!(
+            "该 adapter 未覆写 await_user_input（epoch {:?}）：\
+             可进入 AwaitingUser 的 adapter 必须实现该方法，\
+             保证空输入时返回 NoInput 而非 seal buffer",
+            expected_epoch,
+        )))
     }
     fn freeze_step(&mut self, _step_id: &sdk::RunStepId, _inputs: &[LoopInput]) {}
     async fn accept_step_input(
@@ -322,6 +342,24 @@ where
 
         match outcome {
             DrainOutcome::Ready { batch, .. } => {
+                // #1272 close-out: an empty Ready batch is a contract
+                // violation (Ready must carry non-empty user input).
+                // Detect it here — before any epoch advance or state
+                // transition — and return a descriptive Adapter error
+                // instead of panicking.
+                if batch.is_empty() {
+                    log::error!(
+                        target: crate::LOG_TARGET,
+                        "[run_loop] adapter 返回了空 Ready batch（epoch {:?}），\
+                         这违反了 Ready 必须携带非空用户输入的契约",
+                        expected_epoch,
+                    );
+                    return Err(LoopEngineError::Adapter(format!(
+                        "drain_or_seal 在 epoch {:?} 返回了空的 Ready batch：\
+                         Ready 必须携带非空用户输入，请改用 EmptyAndSealed 或 NoInput",
+                        expected_epoch,
+                    )));
+                }
                 // #1272: advance epoch BEFORE apply_drain_decision so that
                 // epoch is incremented even if the decision fails (the
                 // buffer already advanced its epoch; keeping them in sync

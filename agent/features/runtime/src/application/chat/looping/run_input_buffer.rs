@@ -158,8 +158,14 @@ impl RunInputBuffer {
         let mut retained = VecDeque::new();
         while let Some(event) = self.events.pop_front() {
             match event {
-                ChatInputEvent::UserMessage { text, .. } => {
-                    inputs.push(LoopInput { text });
+                ChatInputEvent::UserMessage {
+                    id, text, images, ..
+                } => {
+                    inputs.push(LoopInput {
+                        text,
+                        input_id: Some(id),
+                        images,
+                    });
                 }
                 other => retained.push_back(other),
             }
