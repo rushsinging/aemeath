@@ -125,6 +125,32 @@ fn long_stop_hook_output_uses_file_pointer_for_llm_text() {
 }
 
 #[test]
+fn stop_hook_preview_limits_stdout_to_three_lines_and_stderr_to_five_lines() {
+    let stdout = "one\ntwo\nthree\nfour";
+    let stderr = "a\nb\nc\nd\ne\nf";
+    let dispatch = block_dispatch("check-agent-stop.sh", stdout, Some(stderr), None);
+
+    let feedback = stop_hook_feedback_for_test(&dispatch).unwrap();
+
+    assert_eq!(feedback.payload.stdout_preview, "one\ntwo\nthree");
+    assert!(feedback.payload.stdout_truncated);
+    assert_eq!(feedback.payload.stderr_preview, "a\nb\nc\nd\ne");
+    assert!(feedback.payload.stderr_truncated);
+}
+
+#[test]
+fn stop_hook_preview_keeps_exact_stdout_and_stderr_line_limits() {
+    let stdout = "one\ntwo\nthree";
+    let stderr = "a\nb\nc\nd\ne";
+    let dispatch = block_dispatch("check-agent-stop.sh", stdout, Some(stderr), None);
+
+    let feedback = stop_hook_feedback_for_test(&dispatch).unwrap();
+
+    assert!(!feedback.payload.stdout_truncated);
+    assert!(!feedback.payload.stderr_truncated);
+}
+
+#[test]
 fn test_stop_hook_feedback_uses_system_message_when_blocked() {
     let dispatch = block_dispatch("line-check.sh", "", None, Some("line limit exceeded"));
 
