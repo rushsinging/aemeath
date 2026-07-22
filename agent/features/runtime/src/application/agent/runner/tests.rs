@@ -82,6 +82,30 @@ struct CapturingProvider {
     captured: Arc<std::sync::Mutex<CapturedInvocation>>,
 }
 
+struct CapturingBuildFactory {
+    binding: Arc<crate::ports::ProviderBinding>,
+    spec: Arc<std::sync::Mutex<Option<crate::ports::ProviderBuildSpec>>>,
+}
+
+impl crate::ports::ProviderFactory for CapturingBuildFactory {
+    fn build(
+        &self,
+        spec: crate::ports::ProviderBuildSpec,
+    ) -> Result<crate::ports::ProviderBinding, crate::ports::ProviderError> {
+        *self.spec.lock().unwrap() = Some(spec);
+        Ok(self.binding.as_ref().clone())
+    }
+}
+
+impl CapturingBuildFactory {
+    fn new(
+        binding: Arc<crate::ports::ProviderBinding>,
+        spec: Arc<std::sync::Mutex<Option<crate::ports::ProviderBuildSpec>>>,
+    ) -> Self {
+        Self { binding, spec }
+    }
+}
+
 #[async_trait]
 impl LlmProvider for CapturingProvider {
     async fn invocation_stream(
@@ -763,6 +787,107 @@ async fn unknown_sub_agent_role_fails_before_provider_invocation() {
                 .to_string(),
         }
     );
+}
+
+#[tokio::test]
+async fn sub_agent_provider_spec_inherits_model_owned_settings() {
+    let mut runner = test_runner(ProviderError::fatal(ProviderErrorKind::Network, "stop"));
+    let mut models = (*runner.models_config).clone();
+    let model = models
+        .providers
+        .get_mut("test-provider")
+        .expect("test provider")
+        .models
+        .first_mut()
+        .expect("test model");
+    model.api_style = Some("responses".to_string());
+    model.reasoning = Some(false);
+    model.reasoning_effort = Some("high".to_string());
+    model.context_window = 64_000;
+    model.max_tokens = 16_384;
+    runner.models_config = Arc::new(models);
+
+    let captured_spec = Arc::new(std::sync::Mutex::new(None));
+    let binding = crate::application::testing::binding_from_llm_provider(Arc::new(ErrorProvider {
+        error: ProviderError::fatal(ProviderErrorKind::Network, "stop"),
+    }));
+    runner.factory = Arc::new(CapturingBuildFactory::new(binding, captured_spec.clone()));
+    let ctx = test_ctx();
+
+    let result = runner
+        .run_agent(AgentRunRequest {
+            prompt: "p",
+            system: "s",
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
+            timeout: std::time::Duration::from_secs(30),
+            role: "coder",
+        })
+        .await;
+
+    assert!(matches!(result, tools::AgentRunTerminal::Failed { .. }));
+    let spec = captured_spec
+        .lock()
+        .unwrap()
+        .take()
+        .expect("provider build spec");
+    assert_eq!(spec.api_style.as_deref(), Some("responses"));
+    assert_eq!(spec.requested_reasoning, provider::ReasoningLevel::High);
+    assert_eq!(spec.context_window, Some(64_000));
+    assert_eq!(spec.max_tokens, 16_384);
+}
+
+#[tokio::test]
+async fn sub_agent_provider_spec_maps_model_reasoning_to_medium_without_effort() {
+    let mut runner = test_runner(ProviderError::fatal(ProviderErrorKind::Network, "stop"));
+    let mut models = (*runner.models_config).clone();
+    let model = models
+        .providers
+        .get_mut("test-provider")
+        .expect("test provider")
+        .models
+        .first_mut()
+        .expect("test model");
+    model.reasoning = Some(true);
+    runner.models_config = Arc::new(models);
+
+    let captured_spec = Arc::new(std::sync::Mutex::new(None));
+    let binding = crate::application::testing::binding_from_llm_provider(Arc::new(ErrorProvider {
+        error: ProviderError::fatal(ProviderErrorKind::Network, "stop"),
+    }));
+    runner.factory = Arc::new(CapturingBuildFactory::new(binding, captured_spec.clone()));
+    let ctx = test_ctx();
+
+    let result = runner
+        .run_agent(AgentRunRequest {
+            prompt: "p",
+            system: "s",
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
+            timeout: std::time::Duration::from_secs(30),
+            role: "coder",
+        })
+        .await;
+
+    assert!(matches!(result, tools::AgentRunTerminal::Failed { .. }));
+    let spec = captured_spec
+        .lock()
+        .unwrap()
+        .take()
+        .expect("provider build spec");
+    assert_eq!(spec.requested_reasoning, provider::ReasoningLevel::Medium);
 }
 
 #[tokio::test]
