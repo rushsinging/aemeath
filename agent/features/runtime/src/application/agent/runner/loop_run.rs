@@ -438,6 +438,10 @@ fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal
     }
 }
 
+fn should_complete_after_model_response(has_no_tool_calls: bool) -> bool {
+    has_no_tool_calls
+}
+
 #[async_trait]
 impl RunLoopPort for SubAgentRun<'_> {
     fn freeze_step(
@@ -770,7 +774,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                     }
                 }
 
-                if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
+                if should_complete_after_model_response(tool_calls.is_empty()) {
                     return Ok((
                         ModelStep::Complete {
                             text: resp.assistant_message.text_content(),
@@ -1046,6 +1050,12 @@ mod tests {
         };
 
         assert_eq!(terminal_from_domain_event(&event), None);
+    }
+
+    #[test]
+    fn model_response_with_tool_calls_is_not_completed_by_end_turn() {
+        assert!(!super::should_complete_after_model_response(false));
+        assert!(super::should_complete_after_model_response(true));
     }
 
     #[test]
