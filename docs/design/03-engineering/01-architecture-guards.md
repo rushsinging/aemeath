@@ -49,6 +49,7 @@
 | 6e | `check-provider-usage-capability.sh` | Provider PL 语义 | pull-stream usage 禁止把未报告字段默认成零；OpenAI-compatible reasoning maximum 与 legacy clamp 必须从唯一 `ReasoningCapability` 派生 |
 | 6f | `check-provider-driver-acl.sh` | Provider Driver ACL | driver 解析、协议族/API style 选择与实现配置必须留在 Provider；Runtime/Composition/CLI 禁止解析 driver 或引用内部配置 |
 | 6g | `check-session-management-ownership.sh` | Context / Composition 构造权 | Composition 唯一创建 Session AtomicBlob backing 与 `SessionManagementPort`；Context / Runtime 只消费同一注入 Port，禁止 Context filesystem 构造、legacy free-function façade 或 Runtime 直连 façade |
+| 6h | `check-hook-target-facade.sh` | Hook / Runtime 边界 | Hook 只从 crate-root 发布稳定 PL 与 `HookPort`；禁止 `hook::api`、legacy re-export 与 Runtime 生产消费 `hook::api::*` |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
 | 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
@@ -66,11 +67,13 @@
 | 18 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |
 | 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
 | 19a | `check-config-adapter-boundary.sh` | 配置架构 | Config application 禁止直接 fs/JSON 解析；adapter stub/TODO 禁止回流 |
+| 19b | `check-config-store-ownership.sh` | Config / Composition 构造权 | Composition 唯一选择 `config-overrides` filesystem backing 并注入 `NativeConfigStore`；Config application 禁止构造 blob adapter，且 wiring 必须显式要求 injected store |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
 | 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()`、同步 `cancel_run(run_id)`、Runtime-owned `reply_interaction` / `cancel_interaction` 与 Config control-plane；禁止恢复 `ChatInputEvent::Cancel` |
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
+| 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution/binding、Skill ports、Tool Result materializer 与 ActiveRunRegistry；Runtime bootstrap 只消费 injected resources，禁止恢复 Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
@@ -185,10 +188,10 @@
 - **允许的顶层源码**：`lib.rs`, `app.rs`, `audit.rs`, `provider.rs`, `runtime.rs`, `tools.rs`, `update.rs`；`lib.rs` 必须且只能公开声明 `app/audit/provider/runtime/tools/update` 六个 wiring module。`audit.rs` 仅装配 #929 worker lifecycle/value extraction，Runtime UsageSink bridge 仍归 #931。
 - **禁止结构**：`domain/application/ports/adapters`、`api/business/contract/core/gateway/capabilities` 文件或目录，以及任意未登记顶层源码或子目录。
 - **白名单预算**：路径例外、整文件豁免、行级 allow、`grep -v` / exclude / skip 均为 0；允许文件集合是 Target 结构化 policy，不计 migration debt。
-- **范围边界**：本守卫证明 Composition 物理结构、façade 模块声明，以及 `FeatureGateways` 的 Provider/Tool gateway 被 Runtime 主 bootstrap 实际消费；全部 Adapter 构造上移由 #950 承接，正式跨 capability 边界替换由 #1022 承接。
+- **范围边界**：本守卫证明 Composition 物理结构、façade 模块声明，以及 `FeatureGateways` 的 Provider/Policy capability 被 Runtime 主 bootstrap 实际消费。#914 已删除无效的 Tool gateway 注入；正式跨 capability 边界替换由 #1022 承接。
 - **#1002 故意违规证据**：临时创建 `agent/composition/src/domain.rs` 时，单 Guard 与总编排均以 exit 2 命中 `forbidden Hexagonal/COLA layer`；删除探针后两者 clean pass。
-- **#948 注入规则**：`composition/src/runtime.rs` 必须把 `gateways.provider` / `gateways.tools` 传给 Runtime；Runtime 主 bootstrap 必须声明两个 trait-object 参数，并分别经 `build_llm_client_with_gateway`、`new_registry`、`register_all_tools` 消费。规则使用结构化正向断言，白名单仍为 0。
-- **#948 故意违规证据**：临时把 `gateways.provider` 改为默认 `provider::wire_provider()` 后，单 Guard 与总编排均以 exit 2 命中 `missing provider gateway forwarding`；恢复后 clean pass。
+- **#914 注入规则**：`composition/src/runtime.rs` 必须把 `gateways.provider` / `gateways.policy` 传给 Runtime；Tool Catalog/Execution 只由 Runtime bootstrap 经 `tools::composition::wire_builtin_catalog_execution` 装配，禁止恢复 `ToolCatalogGateway`、`new_registry` 或 `register_all_tools*` 兼容链。规则使用结构化正向/负向断言，白名单仍为 0。
+- **#914 故意违规证据**：在 Tools 临时恢复 `LegacyNoAgent` 后，`check-tool-catalog-execution-boundary.sh` 以 exit 2 阻断；删除探针后单 Guard 与总编排 clean pass。
 
 ## 5. check-cola-layer-purity.sh
 
@@ -261,6 +264,14 @@
   - 对仍存在的 `agent/features/*/src/api.rs`，`pub use crate::<segment>` 仅可指向 `contract` / `gateway`；
   - `CONTEXT_FORBIDDEN_PATHS` 任一路径复活立即失败。
 - **例外**：无 path 级白名单。Context、Policy 与 Storage root 集合都是结构化 façade policy，不是 migration exception。
+
+### 6h. check-hook-target-facade.sh
+
+- **功能**：锁定 #926 后 Hook 的 crate-root Published Language 与 Runtime 消费边界。
+- **扫描范围**：`agent/features/hook/src/lib.rs`、不存在性检查 `agent/features/hook/src/api.rs`，以及全部 `agent/features/runtime/src/**/*.rs` 生产源（跳过 `*_tests.rs`、`tests.rs` 与 `tests/`）。
+- **不变量**：Hook crate-root 只能发布稳定 PL、`HookPort`、`HookDispatchContext` 与生产 Dispatcher；禁止 `pub mod api`、`api.rs` 物理路径和 `adapters::legacy` re-export；Runtime 必须经登记的 Hook crate-root façade消费，禁止 `hook::api::*`。
+- **白名单预算**：迁移例外、路径/整文件豁免、行级 allow、`grep -v` / exclude / skip 均为 `0`；`policy.hook.target-facade` 与 `policy.hook.crate-root-facade` 分别是 Target façade/re-export policy，不计 migration debt。
+- **故意违规证据**：`check-hook-target-facade-tests.sh` 在隔离副本依次注入 `pub mod api`、legacy re-export 与 Runtime `hook::api` import；每类反例均以 exit 2 被单 Guard 拦截，恢复后单 Guard clean pass。总编排 fast profile 同时执行该 Guard。
 
 ### 6t. check-task-persistence-capability.sh
 
@@ -593,7 +604,7 @@
 - **Runtime 生产边界**：扫描 `agent/features/runtime/src/**/*.rs` 的生产源码，禁止 `ToolRegistry`、`Arc<dyn Tool>`、`registry.get()`、`tool.call()` 与 `input_schema()` 直取。规则没有 composition/legacy 路径白名单；Composition 可通过 Tools 提供的窄 factory 装配双端口，但 Runtime 内仍存旧路径必须迁移或退役，不能以例外隐藏。
 - **Execution adapter 边界**：`tools/src/adapters/execution.rs` 禁止引用 `policy/hook/sdk/tui/runtime`，并禁止 `timeout`、`Semaphore`、`RunStep`、`approval`；这些编排职责归 Runtime。
 - **纯值 suspension / AskUser**：`tools/src/domain/suspension.rs` 禁止 tokio、Sender/Receiver、Mutex/RwLock/Arc、RuntimeHandle、request id 与 resume token；Tools AskUser 生产 adapter 禁止 `__ASK_USER__` / `__ASK_USER_SELECT__` 魔法协议及 oneshot/channel/waiter。Runtime-owned AskUser oneshot 明确不在该 Tools 扫描范围。
-- **façade 与 validator**：Tools crate-root 禁止公开 `ToolBacking` / `RegistryScopeBuilder` / `ToolRegistry` 和具体 `CatalogAdapter` / `ExecutionAdapter`；Catalog/Execution 只能经 composition factory 形成 trait-object 端口。schema validator 唯一实现必须位于 Tools；Runtime `input_validation.rs` 只允许兼容 re-export/phase peel，不得复制实现。
+- **legacy Tools 退役**：`check-tool-catalog-execution-boundary.sh` 在 Tools 生产源码拒绝 `LegacyNoAgent` / `legacy-no-agent`、`SkillTool` / legacy Skill DTO、`register_all_tools*` / `register_subagent_tools` 及 `ToolCatalogGateway` / `DefaultToolCatalogGateway` / `wire_tools`；私有 `ToolRegistry` backing 仅可留在 Tools adapter composition。该规则无 migration exception、路径 allowlist 或 suppression。
 - **排除语义**：只排除测试路径与精确 `#[cfg(test)]` item，不提供 migration exception、路径 allowlist 或 suppression。
 - **故意违规证据**：sanity 脚本先验证 Runtime-owned oneshot 正例，再分别注入 Runtime registry 直取、Execution→Hook、Suspension Sender、AskUser 魔法字符串、具体 adapter façade 与 Runtime schema copy；六类反例均必须由单 Guard 以 exit 2 拦截，恢复后 clean pass。
 - **失败模式**：逐项输出 `path:line: reason`，汇总后 exit 2。

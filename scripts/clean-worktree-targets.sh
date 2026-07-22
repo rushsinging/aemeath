@@ -13,6 +13,7 @@
 #   ./scripts/clean-worktree-targets.sh --dry-run
 #   ./scripts/clean-worktree-targets.sh --yes
 #   ./scripts/clean-worktree-targets.sh --keep-current
+#   ./scripts/clean-worktree-targets.sh --current --yes
 #   ./scripts/clean-worktree-targets.sh --max-size-gb 50
 
 set -euo pipefail
@@ -27,6 +28,7 @@ source "$ROOT/.cargo/lib.sh"
 DRY_RUN=0
 ASSUME_YES=0
 KEEP_CURRENT=0
+CURRENT_ONLY=0
 MAX_SIZE_GB=50
 
 usage() {
@@ -39,6 +41,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=1; shift ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     --keep-current) KEEP_CURRENT=1; shift ;;
+    --current) CURRENT_ONLY=1; shift ;;
     --max-size-gb)
       [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || { echo "--max-size-gb 需要非负整数" >&2; exit 1; }
       MAX_SIZE_GB="$2"; shift 2 ;;
@@ -78,6 +81,22 @@ mapfile_compat() {
 ACTIVE_WORKTREES=()
 mapfile_compat < <(git worktree list --porcelain | awk '/^worktree / {sub(/^worktree /, ""); print}')
 current_worktree="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+
+if [[ $CURRENT_ONLY -eq 1 ]]; then
+  [[ $ASSUME_YES -eq 1 ]] || {
+    echo "--current 只能与 --yes 一起使用，避免误删当前构建缓存" >&2
+    exit 1
+  }
+  current_cache="$SHARED_CACHE/$(worktree_cache_key "$current_worktree")"
+  echo "==> 清理当前 worktree 构建缓存"
+  if [[ -d "$current_cache" ]]; then
+    echo "  current: $current_cache ($(human_size "$current_cache"))"
+    run_rm "$current_cache"
+  else
+    echo "  no current cache: $current_cache"
+  fi
+  exit 0
+fi
 
 echo "==> 1/4 清理 checkout/worktree 内遗留 target/"
 for wt_path in "${ACTIVE_WORKTREES[@]}"; do

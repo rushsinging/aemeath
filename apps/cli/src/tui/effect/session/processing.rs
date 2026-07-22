@@ -183,6 +183,22 @@ mod tests {
     }
 
     #[test]
+    fn test_sdk_event_to_ui_event_preserves_hook_message() {
+        let view = sdk::HookMessageView {
+            point: "PreToolUse".to_string(),
+            source: "matcher:Bash".to_string(),
+            execution_ordinal: 2,
+            attempt: 3,
+            kind: sdk::HookMessageKindView::AdditionalContext,
+            text: "Use formatter".to_string(),
+        };
+
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::HookMessage(view.clone()));
+
+        assert!(matches!(event, UiEvent::HookMessage(message) if message == view));
+    }
+
+    #[test]
     fn test_sdk_event_to_ui_event_maps_compact_finished() {
         let event = sdk_event_to_ui_event(sdk::ChatEvent::CompactFinished {
             messages: vec![sdk::ChatMessage::user_text("hello")],

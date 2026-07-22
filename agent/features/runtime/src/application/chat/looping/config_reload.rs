@@ -6,7 +6,6 @@
 use super::snapshot_registry::SourceSnapshotRegistry;
 use share::config::file_snapshot::{FileChange, FileChangeKind};
 use share::config::paths;
-use share::config::GuidanceReloadPolicy;
 use std::path::{Path, PathBuf};
 
 /// 配置变更差异。
@@ -28,27 +27,11 @@ impl ConfigDiff {
 /// 收集需要监控的文件路径。
 ///
 /// 包括：
-/// - 配置文件：`~/.agents/aemeath.json`、`{cwd}/.agents/aemeath.json`、`{cwd}/.claude/settings.json`
 /// - 指令文件：从 cwd 向上 5 级祖先目录，每层 `CLAUDE.md` + `AGENTS.md`；
 ///   全局指令 `~/.agents/AGENTS.md`，fallback `~/.claude/CLAUDE.md`
 /// - Guidance 文件：`~/.agents/guidance/_default.md`、`~/.agents/guidance/_reasoning.md`
 pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
-
-    // ── 配置文件 ──
-    // 全局配置
-    let global_config = expand_home(&paths::global_config_path());
-    files.push(global_config);
-
-    // 项目级配置
-    let project_config = cwd
-        .join(paths::AGENTS_DIR_NAME)
-        .join(paths::NEW_CONFIG_FILE);
-    files.push(project_config);
-
-    // Claude Code 兼容配置
-    let claude_settings = cwd.join(paths::CLAUDE_DIR_NAME).join(paths::SETTINGS_FILE);
-    files.push(claude_settings);
 
     // ── 指令文件 ──
     // 项目指令：从 cwd 向上 5 级祖先目录，每层 CLAUDE.md + AGENTS.md
@@ -129,9 +112,7 @@ fn classify_change_key(path: &Path, kind: &FileChangeKind) -> String {
 
     // 根据文件路径判断配置类型
     let path_str = path.to_string_lossy();
-    if path_str.contains("aemeath.json") || path_str.contains("settings.json") {
-        format!("config:{}:{}", prefix, file_name)
-    } else if path_str.contains("CLAUDE.md") || path_str.contains("AGENTS.md") {
+    if path_str.contains("CLAUDE.md") || path_str.contains("AGENTS.md") {
         format!("instructions:{}:{}", prefix, file_name)
     } else if path_str.contains("guidance") {
         format!("guidance:{}:{}", prefix, file_name)
@@ -149,38 +130,6 @@ fn expand_home(path: &Path) -> PathBuf {
         }
     }
     path.to_path_buf()
-}
-
-/// 解析当前 guidance reload_policy 配置。
-///
-/// 读取全局配置文件中的 `guidance.reload_policy` 字段；
-/// 若读取失败或字段缺失，返回默认值 `Remind`。
-pub fn resolve_guidance_reload_policy() -> GuidanceReloadPolicy {
-    // 尝试读取全局配置
-    let config_path = expand_home(&paths::global_config_path());
-    if let Ok(data) = std::fs::read_to_string(&config_path) {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&data) {
-            if let Some(policy_str) = value
-                .get("guidance")
-                .and_then(|g| g.get("reload_policy"))
-                .and_then(|p| p.as_str())
-            {
-                return match policy_str {
-                    "inject" => GuidanceReloadPolicy::Inject,
-                    "remind" => GuidanceReloadPolicy::Remind,
-                    "confirm" => GuidanceReloadPolicy::Confirm,
-                    _ => {
-                        log::warn!(target: crate::LOG_TARGET,
-                            "[config_reload] unknown guidance.reload_policy '{}', using default",
-                            policy_str
-                        );
-                        GuidanceReloadPolicy::Remind
-                    }
-                };
-            }
-        }
-    }
-    GuidanceReloadPolicy::default()
 }
 
 #[cfg(test)]
@@ -207,10 +156,10 @@ mod tests {
     }
 
     #[test]
-    fn test_classify_change_key_config() {
+    fn test_classify_change_key_non_prompt_asset() {
         let path = PathBuf::from("/home/user/.agents/aemeath.json");
         let key = classify_change_key(&path, &FileChangeKind::Modified);
-        assert!(key.starts_with("config:modified:"));
+        assert!(key.starts_with("other:modified:"));
     }
 
     #[test]

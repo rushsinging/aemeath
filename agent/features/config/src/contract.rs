@@ -25,9 +25,25 @@ pub struct ConfigChangeSet {
     pub snapshot: ConfigSnapshot,
 }
 
+#[async_trait]
 pub trait ConfigReader: Send + Sync {
     fn committed_snapshot(&self) -> ConfigSnapshot;
     fn subscribe_committed(&self) -> watch::Receiver<ConfigSnapshot>;
+    async fn refresh_if_sources_changed(&self) -> ConfigRefreshOutcome;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigRefreshError {
+    Io,
+    Parse,
+    Invalid,
+}
+
+#[derive(Debug, Clone)]
+pub enum ConfigRefreshOutcome {
+    Unchanged,
+    Reloaded { snapshot: ConfigSnapshot },
+    Rejected { error: ConfigRefreshError },
 }
 
 #[derive(Debug)]

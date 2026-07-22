@@ -350,7 +350,7 @@ struct CompactHarness {
     tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     config_snapshot: ConfigSnapshot,
-    hook_runner: hook::api::HookRunner,
+    hook_runner: Arc<dyn hook::HookPort>,
     workspace: project::WorkspaceViews,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
@@ -382,9 +382,15 @@ impl CompactHarness {
         let tool_result_materializer = crate::application::testing::test_tool_result_materializer();
         let config_snapshot = ConfigSnapshot::new(Config::default());
         let hook_events = HashMap::new();
-        let hook_runner = hook::api::HookRunner::new(share::config::hooks::HooksConfig {
-            events: hook_events,
-        });
+        let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
+            hook::build_dispatcher(
+                &share::config::hooks::HooksConfig {
+                    events: hook_events,
+                },
+                std::collections::HashMap::new(),
+            )
+            .unwrap(),
+        );
         let workspace = project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views();

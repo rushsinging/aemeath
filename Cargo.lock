@@ -439,6 +439,7 @@ dependencies = [
  "async-trait",
  "log",
  "serde_json",
+ "sha2",
  "share",
  "storage",
  "tempfile",

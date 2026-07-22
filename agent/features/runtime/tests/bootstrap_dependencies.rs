@@ -116,7 +116,14 @@ impl memory::api::ReflectionHistoryStore for NoopReflectionHistory {
 #[tokio::test]
 async fn bootstrap_dependencies_preserve_injected_task_views() {
     let temp = tempfile::tempdir().unwrap();
-    let config = config::wire_project_config(temp.path()).await.unwrap();
+    let config = config::wire_project_config(
+        temp.path(),
+        config::NativeConfigStore::new(Arc::new(
+            storage::FileSystemBlobAdapter::new(temp.path()).unwrap(),
+        )),
+    )
+    .await
+    .unwrap();
     let workspace = project::wire_production_workspace(temp.path().to_path_buf())
         .unwrap()
         .into_views();
@@ -143,16 +150,36 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     .unwrap();
 
     let history: Arc<dyn memory::ReflectionHistoryStore> = Arc::new(NoopReflectionHistory);
+    let tools = tools::composition::TestCatalogExecutionFactory::empty();
+    let skill_wiring = tools::composition::wire_skills();
+    let skill_catalog = skill_wiring.catalog();
+    let skill_materializer = skill_wiring.materializer();
+    let tool_result_materializer = Arc::new(runtime::ToolResultMaterializer::new(
+        Arc::new(runtime::AtomicBlobToolResultStore::new(
+            Arc::new(storage::FileSystemBlobAdapter::new(temp.path()).unwrap()),
+            temp.path().to_path_buf(),
+        )),
+        runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
+    ));
+    let active_run = Arc::new(runtime::ActiveRunRegistry::default());
 
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         workspace,
         wiring,
         Arc::new(TestProviderFactory),
-        tools::wire_tools(),
         history.clone(),
         Arc::new(policy::AllowAllPolicy),
         access.clone(),
         session_management.clone(),
+        runtime::RuntimeToolAssemblyDependencies::new(
+            tools.catalog_port(),
+            tools.execution(),
+            tools.binding(),
+            skill_catalog,
+            skill_materializer.clone(),
+            tool_result_materializer.clone(),
+            active_run.clone(),
+        ),
     );
 
     assert!(Arc::ptr_eq(
@@ -162,4 +189,25 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
 
     assert!(Arc::ptr_eq(&dependencies.reflection_history(), &history));
     assert!(Arc::ptr_eq(&dependencies.task_access(), &access));
+    assert!(Arc::ptr_eq(
+        &dependencies.skill_materializer(),
+        &skill_materializer
+    ));
+    assert!(Arc::ptr_eq(
+        &dependencies.tool_result_materializer(),
+        &tool_result_materializer
+    ));
+    assert!(Arc::ptr_eq(&dependencies.active_run(), &active_run));
+    assert_eq!(
+        dependencies
+            .tool_catalog()
+            .snapshot(
+                &tools::RegistryScopeName::new("main"),
+                &tools::ToolProfileName::new("main-full"),
+            )
+            .unwrap()
+            .tools
+            .len(),
+        0
+    );
 }

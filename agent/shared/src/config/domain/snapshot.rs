@@ -282,6 +282,10 @@ impl ConfigSnapshot {
 
     // ── Guidance ─────────────────────────────────────────────
 
+    pub fn guidance_reload_policy(&self) -> crate::config::GuidanceReloadPolicy {
+        self.inner.guidance.reload_policy
+    }
+
     pub fn language(&self) -> &str {
         &self.inner.language
     }

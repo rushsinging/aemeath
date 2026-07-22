@@ -1,15 +1,16 @@
 use crate::application::agent::{ToolCall, ToolExecution};
-use crate::application::chat::looping::hook_ui::HookUi;
+use crate::application::chat::looping::hook_ui::dispatch_hook;
 use crate::application::chat::looping::tools::{
     run_post_tool_hooks, send_tool_call_status, send_tool_result,
 };
 use crate::application::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
-use crate::application::tool_coordination::PreparedToolCall;
-use hook::api::{HookData, ToolHookData};
-use share::config::hooks::HookEvent;
-use std::path::Path;
+use crate::application::tool_coordination::{
+    apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
+};
+use hook::{HookInvocation, HookPort, PreToolUseInput};
+use policy::PolicyPort;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::ToolOutcome;
@@ -24,10 +25,13 @@ pub(crate) async fn execute_agent_calls<S>(
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
     sink: &S,
-    hook_ui: &HookUi<S>,
-    hook_runner: &hook::api::HookRunner,
+    hook_port: &Arc<dyn HookPort>,
     cancel: &CancellationToken,
-    workspace_root: &Path,
+    workspace_root: &std::path::Path,
+    catalog: &tools::ToolCatalogSnapshot,
+    policy: &dyn PolicyPort,
+    run_id: &sdk::RunId,
+    step_id: &sdk::RunStepId,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -39,15 +43,17 @@ where
             let call = prepared.call.clone();
             let authorization = prepared.authorization;
             let sink = sink.clone();
-            let hook_ui = hook_ui.clone();
-            let mut ag_ctx = agent_ctx.clone();
+            let hook_port = hook_port.clone();
+            let execution_ref = execution.clone();
             let agent_semaphore = agent_semaphore.clone();
             let workspace_persist = workspace_persist.clone();
-            let hook_runner = hook_runner.clone();
-            let execution_ref = execution.clone();
+            let mut ag_ctx = agent_ctx.clone();
             let context = context.clone();
             let cancel = cancel.clone();
             let workspace_root = workspace_root.to_path_buf();
+            let catalog = catalog.clone();
+            let run_id = run_id.clone();
+            let step_id = step_id.clone();
             async move {
                 let permit = tokio::select! {
                     permit = agent_semaphore.clone().acquire_owned() => permit.ok(),
@@ -60,14 +66,17 @@ where
                     &context,
                     call,
                     sink,
-                    hook_ui,
-                    hook_runner,
+                    hook_port,
                     execution_ref,
                     &mut ag_ctx,
                     &workspace_persist,
                     &workspace_root,
                     &cancel,
                     authorization,
+                    &catalog,
+                    policy,
+                    &run_id,
+                    &step_id,
                 )
                 .await;
                 drop(permit);
@@ -94,14 +103,17 @@ async fn execute_one_agent<S>(
     context: &RuntimeTurnContext,
     call: ToolCall,
     sink: S,
-    hook_ui: HookUi<S>,
-    hook_runner: hook::api::HookRunner,
+    hook_port: Arc<dyn HookPort>,
     execution: Arc<dyn ToolExecutionPort>,
     ag_ctx: &mut ToolExecutionContext,
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
-    workspace_root: &Path,
+    workspace_root: &std::path::Path,
     cancel: &CancellationToken,
     authorization: tools::AuthorizationContext,
+    catalog: &tools::ToolCatalogSnapshot,
+    policy: &dyn PolicyPort,
+    run_id: &sdk::RunId,
+    step_id: &sdk::RunStepId,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -114,62 +126,131 @@ where
         call.index,
         call.input.to_string().len(),
     );
-    let pre_results = if authorization.enforce_permission_hooks {
-        hook_ui
-            .run_plain(
-                &hook_runner,
-                HookEvent::PreToolUse,
-                Some(&call.name),
-                HookData::Tool(ToolHookData {
-                    tool_name: call.name.clone(),
-                    tool_input: call.input.clone(),
-                    tool_output: None,
-                    is_error: None,
-                }),
-                workspace_root,
-            )
-            .await
+    let original_input = call.input.clone();
+    let pre_dispatch = if authorization.enforce_permission_hooks {
+        dispatch_hook(
+            &hook_port,
+            &sink,
+            HookInvocation::PreToolUse(PreToolUseInput {
+                tool_name: call.name.clone(),
+                tool_input: call.input.clone(),
+            }),
+            workspace_root,
+            cancel,
+        )
+        .await
     } else {
-        Vec::new()
+        crate::application::hook_adapter::RuntimeHookDispatch {
+            directive: crate::application::hook_adapter::RuntimeHookDirective::Continue,
+            executions: Vec::new(),
+            messages: Vec::new(),
+        }
     };
-    if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
+    if crate::application::chat::looping::hook_ui::dispatch_is_blocking(&pre_dispatch) {
+        let last_exec = pre_dispatch.executions.last();
+        let exit_code = last_exec.and_then(|e| e.exit_code);
+        let stderr = last_exec.map(|e| e.stderr.as_str()).unwrap_or("");
         log::debug!(target: crate::LOG_TARGET,
             "pretooluse timing blocked: kind=agent tool_name={} runtime_id={} provider_id={} exit_code={:?} error_present={}",
             call.name,
             call.id,
             call.provider_id,
-            blocked_result.exit_code,
-            blocked_result.error.as_ref().is_some_and(|value| !value.is_empty()),
+            exit_code,
+            !stderr.is_empty(),
         );
-        let error_detail = blocked_result
-            .error
-            .as_deref()
-            .unwrap_or("Blocked by PreToolUse hook");
+        let error_detail = if stderr.is_empty() {
+            "Blocked by PreToolUse hook"
+        } else {
+            stderr
+        };
         let result = ToolExecution::new(&call, ToolOutcome::error(error_detail));
         send_tool_result(&sink, context, &result).await;
         return vec![result];
     }
-    log::debug!(target: crate::LOG_TARGET,
-        "pretooluse timing approved: kind=agent tool_name={} runtime_id={} provider_id={} hook_count={}",
-        call.name,
-        call.id,
-        call.provider_id,
-        pre_results.len(),
+    // Apply the hook directive through the canonical re-validation path (#926).
+    let hook_outcome = apply_hook_directive_to_tool_call(
+        &call,
+        pre_dispatch.directive,
+        catalog,
+        policy,
+        run_id,
+        step_id,
+        workspace_root,
     );
-    send_tool_call_status(&sink, context, &call, RuntimeToolCallStatus::Ready).await;
-    send_tool_call_status(&sink, context, &call, RuntimeToolCallStatus::Running).await;
+    let (effective_call, effective_authorization, _hook_context) = match hook_outcome {
+        HookDirectiveOutcome::Continue { call, context } => (call, authorization, context),
+        HookDirectiveOutcome::Ready {
+            call,
+            authorization,
+            context,
+        } => {
+            log::debug!(target: crate::LOG_TARGET,
+                "pretooluse timing ready: kind=agent tool_name={} runtime_id={} provider_id={} input_updated={}",
+                call.name,
+                call.id,
+                call.provider_id,
+                call.input != original_input,
+            );
+            (call, authorization, context)
+        }
+        HookDirectiveOutcome::InvalidInput { error, .. } => {
+            let msg = format!("PreToolUse hook returned invalid input: {error}");
+            let result = ToolExecution::new(&call, ToolOutcome::error(msg));
+            send_tool_result(&sink, context, &result).await;
+            return vec![result];
+        }
+        HookDirectiveOutcome::Denied { reason, .. } => {
+            let msg = format!("Denied by PreToolUse hook re-evaluation: {reason}");
+            let result = ToolExecution::new(&call, ToolOutcome::error(msg));
+            send_tool_result(&sink, context, &result).await;
+            return vec![result];
+        }
+        HookDirectiveOutcome::ApprovalRequired { reason, .. } => {
+            let msg = format!("Approval required after PreToolUse hook: {reason}");
+            let result = ToolExecution::new(&call, ToolOutcome::error(msg));
+            send_tool_result(&sink, context, &result).await;
+            return vec![result];
+        }
+        HookDirectiveOutcome::Blocked { reason, .. } => {
+            let msg = format!("Blocked by PreToolUse hook: {reason:?}");
+            let result = ToolExecution::new(&call, ToolOutcome::error(msg));
+            send_tool_result(&sink, context, &result).await;
+            return vec![result];
+        }
+    };
+    log::debug!(target: crate::LOG_TARGET,
+        "pretooluse timing approved: kind=agent tool_name={} runtime_id={} provider_id={} executions={}",
+        effective_call.name,
+        effective_call.id,
+        effective_call.provider_id,
+        pre_dispatch.executions.len(),
+    );
+    send_tool_call_status(
+        &sink,
+        context,
+        &effective_call,
+        RuntimeToolCallStatus::Ready,
+    )
+    .await;
+    send_tool_call_status(
+        &sink,
+        context,
+        &effective_call,
+        RuntimeToolCallStatus::Running,
+    )
+    .await;
     log::debug!(target: crate::LOG_TARGET,
         "tool execution timing running_sent: kind=agent tool_name={} runtime_id={} provider_id={}",
-        call.name,
-        call.id,
-        call.provider_id,
+        effective_call.name,
+        effective_call.id,
+        effective_call.provider_id,
     );
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
     *ag_ctx = ag_ctx.with_progress(Some(crate::application::tool_execution_adapters::progress(
         prog_tx,
     )));
-    let call_id = call.id.clone();
+    let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
     let progress_context = context.clone();
     let progress_log_context = logging::capture();
@@ -188,8 +269,12 @@ where
     let cancellation = ag_ctx.cancellation();
     let outcome = execution
         .execute(
-            tools::ToolInvocation::new("Agent", call.input.clone(), ag_ctx.scope().clone())
-                .with_authorization(authorization),
+            tools::ToolInvocation::new(
+                "Agent",
+                effective_call.input.clone(),
+                ag_ctx.scope().clone(),
+            )
+            .with_authorization(effective_authorization),
             cancellation.as_ref(),
         )
         .await;
@@ -202,7 +287,7 @@ where
         })
         .await;
     let execution = ToolExecution::new(
-        &call,
+        &effective_call,
         crate::application::agent::agent::legacy_outcome(outcome),
     );
     *ag_ctx = ag_ctx.with_progress(None);
@@ -210,12 +295,11 @@ where
 
     run_post_tool_hooks(
         &sink,
-        &hook_ui,
-        &hook_runner,
-        &call,
+        &hook_port,
+        &effective_call,
         &execution,
-        workspace_root,
         cancel,
+        workspace_root,
     )
     .await;
     send_tool_result(&sink, context, &execution).await;
@@ -244,6 +328,20 @@ mod tests {
         }
 
         fn try_send_event(&self, _event: RuntimeStreamEvent) {}
+    }
+
+    /// A test HookPort that always returns Continue.
+    struct NoOpHookPort;
+
+    #[async_trait]
+    impl HookPort for NoOpHookPort {
+        async fn dispatch(
+            &self,
+            _invocation: HookInvocation,
+            _cancellation: &CancellationToken,
+        ) -> hook::HookOutcome {
+            hook::HookOutcome::proceed()
+        }
     }
 
     struct ActiveGuard(Arc<AtomicUsize>);
@@ -295,6 +393,7 @@ mod tests {
 
     struct Harness {
         execution: Arc<dyn ToolExecutionPort>,
+        catalog: tools::ToolCatalogSnapshot,
         ctx: ToolExecutionContext,
         started: mpsc::UnboundedReceiver<String>,
         gates: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
@@ -323,8 +422,10 @@ mod tests {
         let ctx =
             crate::application::testing::test_tool_execution_context(cwd, CancellationToken::new());
         let ports = factory.build(ctx.clone());
+        let catalog = ports.catalog();
         Harness {
             execution: ports.execution(),
+            catalog,
             ctx,
             started,
             gates,
@@ -353,10 +454,11 @@ mod tests {
         calls: Vec<ToolCall>,
         agent_semaphore: Arc<tokio::sync::Semaphore>,
         cancel: CancellationToken,
+        catalog: tools::ToolCatalogSnapshot,
     ) -> tokio::task::JoinHandle<Vec<ToolExecution>> {
         tokio::spawn(async move {
             let sink = NoopSink;
-            let hook_ui = HookUi::new(sink.clone());
+            let hook_port: Arc<dyn HookPort> = Arc::new(NoOpHookPort);
             let prepared = calls
                 .into_iter()
                 .map(|call| PreparedToolCall {
@@ -372,10 +474,13 @@ mod tests {
                 &agent_semaphore,
                 &crate::application::testing::workspace_persist(&ctx),
                 &sink,
-                &hook_ui,
-                &hook::api::HookRunner::new(Default::default()),
+                &hook_port,
                 &cancel,
-                &std::env::current_dir().unwrap(),
+                std::path::Path::new("."),
+                &catalog,
+                &policy::AllowAllPolicy,
+                &sdk::RunId::new_v7(),
+                &sdk::RunStepId::new_v7(),
             )
             .await
         })
@@ -390,6 +495,7 @@ mod tests {
             vec![call("first", 0), call("slow", 1), call("next", 2)],
             h.agent_semaphore.clone(),
             CancellationToken::new(),
+            h.catalog.clone(),
         );
 
         let first_two = [
@@ -427,6 +533,7 @@ mod tests {
             vec![call("one", 0)],
             h.agent_semaphore.clone(),
             CancellationToken::new(),
+            h.catalog.clone(),
         );
         assert_eq!(h.started.recv().await.unwrap(), "one");
         let second = spawn_calls(
@@ -435,6 +542,7 @@ mod tests {
             vec![call("two", 0)],
             h.agent_semaphore.clone(),
             CancellationToken::new(),
+            h.catalog.clone(),
         );
 
         assert!(
@@ -461,6 +569,7 @@ mod tests {
             vec![call("running", 0), call("waiting", 1)],
             h.agent_semaphore.clone(),
             cancel.clone(),
+            h.catalog.clone(),
         );
         assert_eq!(h.started.recv().await.unwrap(), "running");
 

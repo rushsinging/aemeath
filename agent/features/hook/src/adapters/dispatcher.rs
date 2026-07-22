@@ -25,7 +25,6 @@ mod helpers;
 mod tests;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -37,9 +36,9 @@ use crate::domain::outcome::{
     HookOutcome,
 };
 use crate::domain::protocol::classify_output;
-use crate::domain::subscription::{HookSubscription, SubscriptionError};
+use crate::domain::subscription::{HookCommand, HookSubscription, SubscriptionError};
 
-use crate::ports::HookPort;
+use crate::ports::{HookDispatchContext, HookPort};
 
 pub(crate) use executor::{ExecutionFault, Executor, ProcessDriverExecutor};
 #[cfg(test)]
@@ -71,20 +70,17 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
-    /// 生产严格构造：cwd + env 白名单装配受管子进程执行器。
+    /// 生产严格构造：Hook adapter 装配受管子进程执行器。
     ///
+    /// cwd 是每次 dispatch 的 invocation context，不得在 Dispatcher 构造时冻结。
     /// 任一 subscription 配置非法（如 Stop 配 failure_policy、非前置闸门配 Block）
     /// 即返回全部错误——与设计 §4「非法组合在 Config 校验阶段拒绝，而非运行时
     /// 静默忽略」一致。**NEVER** 静默丢弃非法 subscription。
     pub fn try_new(
         subscriptions: Vec<HookSubscription>,
-        cwd: PathBuf,
         env: HashMap<String, String>,
     ) -> Result<Self, Vec<SubscriptionError>> {
-        Self::build(
-            subscriptions,
-            Box::new(ProcessDriverExecutor::new(cwd, env)),
-        )
+        Self::build(subscriptions, Box::new(ProcessDriverExecutor::new(env)))
     }
 
     /// 共用装配：严格校验全部 subscription 后装配执行器。
@@ -140,6 +136,17 @@ impl HookPort for Dispatcher {
         invocation: HookInvocation,
         cancellation: &CancellationToken,
     ) -> HookOutcome {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        self.dispatch_at(invocation, HookDispatchContext::new(cwd), cancellation)
+            .await
+    }
+
+    async fn dispatch_at(
+        &self,
+        invocation: HookInvocation,
+        context: HookDispatchContext,
+        cancellation: &CancellationToken,
+    ) -> HookOutcome {
         let point = invocation.point();
 
         // matcher 过滤 + order + 声明顺序（sort_by_key 稳定，同 order 按声明顺序）。
@@ -164,8 +171,16 @@ impl HookPort for Dispatcher {
         for sub in matching {
             let current_input =
                 serde_json::to_value(&current_invocation).unwrap_or(serde_json::json!({}));
+            let invocation_env =
+                invocation_environment(&current_invocation, context.cwd(), context.env());
             let outcome = self
-                .execute_subscription(sub, &current_input, cancellation)
+                .execute_subscription(
+                    sub,
+                    &current_input,
+                    context.cwd(),
+                    &invocation_env,
+                    cancellation,
+                )
                 .await;
 
             match outcome {
@@ -245,7 +260,13 @@ impl HookPort for Dispatcher {
                         if point == HookPoint::Stop {
                             let error = last_error_of(&all_executions).unwrap_or_default();
                             let sf_outcome = self
-                                .dispatch_stop_failure(&current_invocation, error, cancellation)
+                                .dispatch_stop_failure(
+                                    &current_invocation,
+                                    error,
+                                    context.cwd(),
+                                    context.env(),
+                                    cancellation,
+                                )
                                 .await;
                             all_executions.extend(sf_outcome.executions);
                         }
@@ -290,23 +311,109 @@ impl HookPort for Dispatcher {
     }
 }
 
+fn invocation_environment(
+    invocation: &HookInvocation,
+    cwd: &std::path::Path,
+    base: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut env = base.clone();
+    env.insert(
+        "AEMEATH_HOOK_EVENT".to_string(),
+        serde_json::to_string(&invocation.point()).unwrap_or_default(),
+    );
+    env.insert("AEMEATH_PROJECT_DIR".to_string(), cwd.display().to_string());
+    env.insert("CLAUDE_PROJECT_DIR".to_string(), cwd.display().to_string());
+    match invocation {
+        HookInvocation::PreToolUse(input) => {
+            env.insert("AEMEATH_TOOL_NAME".to_string(), input.tool_name.clone());
+            env.insert(
+                "AEMEATH_TOOL_INPUT".to_string(),
+                input.tool_input.to_string(),
+            );
+        }
+        HookInvocation::PostToolUse(input) => {
+            env.insert("AEMEATH_TOOL_NAME".to_string(), input.tool_name.clone());
+            env.insert(
+                "AEMEATH_TOOL_INPUT".to_string(),
+                input.tool_input.to_string(),
+            );
+            env.insert("AEMEATH_TOOL_OUTPUT".to_string(), input.tool_output.clone());
+            env.insert(
+                "AEMEATH_TOOL_IS_ERROR".to_string(),
+                input.is_error.to_string(),
+            );
+        }
+        HookInvocation::PostToolUseFailure(input) => {
+            env.insert("AEMEATH_TOOL_NAME".to_string(), input.tool_name.clone());
+            env.insert(
+                "AEMEATH_TOOL_INPUT".to_string(),
+                input.tool_input.to_string(),
+            );
+            env.insert("AEMEATH_TOOL_OUTPUT".to_string(), input.error.clone());
+            env.insert("AEMEATH_TOOL_IS_ERROR".to_string(), "true".to_string());
+        }
+        HookInvocation::Stop(input) => {
+            env.insert("AEMEATH_STOP_TURNS".to_string(), input.turns.to_string());
+        }
+        HookInvocation::PermissionRequest(input) | HookInvocation::PermissionDenied(input) => {
+            env.insert(
+                "AEMEATH_PERMISSION_TOOL_NAME".to_string(),
+                input.tool_name.clone(),
+            );
+            env.insert(
+                "AEMEATH_PERMISSION_RULE".to_string(),
+                input.permission_rule.clone(),
+            );
+        }
+        HookInvocation::InstructionsLoaded(input) => {
+            env.insert(
+                "AEMEATH_INSTRUCTIONS_FILE_PATH".to_string(),
+                input.file_path.clone(),
+            );
+            env.insert(
+                "AEMEATH_INSTRUCTIONS_TYPE".to_string(),
+                input.instruction_type.clone(),
+            );
+        }
+        HookInvocation::Notification(input) => {
+            env.insert(
+                "AEMEATH_NOTIFICATION_TEXT".to_string(),
+                input.notification_text.clone(),
+            );
+            env.insert(
+                "AEMEATH_NOTIFICATION_TYPE".to_string(),
+                input.notification_type.clone(),
+            );
+        }
+        _ => {}
+    }
+    env
+}
+
 impl Dispatcher {
-    /// 执行单个 subscription，内部按 MAX_ATTEMPTS 重试 ExecutionFailed。
     async fn execute_subscription(
         &self,
         sub: &HookSubscription,
         current_input: &serde_json::Value,
+        cwd: &std::path::Path,
+        env: &HashMap<String, String>,
         cancellation: &CancellationToken,
     ) -> AttemptOutcome {
         let mut attempts: u8 = 0;
         let mut executions: Vec<HookExecution> = Vec::new();
-
+        let cwd_text = cwd.display().to_string();
+        let command = HookCommand::new(
+            sub.command
+                .command
+                .replace("{AEMEATH_PROJECT_DIR}", &cwd_text)
+                .replace("{CLAUDE_PROJECT_DIR}", &cwd_text),
+        );
         loop {
             attempts += 1;
             let start = Instant::now();
             let result = self
                 .executor
-                .execute(&sub.command, current_input, sub.timeout, cancellation)
+                .execute(&command, current_input, cwd, env, sub.timeout, cancellation)
                 .await;
             let duration = start.elapsed();
 
@@ -402,6 +509,8 @@ impl Dispatcher {
         &self,
         stop_invocation: &HookInvocation,
         error: String,
+        cwd: &std::path::Path,
+        env: &HashMap<String, String>,
         cancellation: &CancellationToken,
     ) -> HookOutcome {
         let turns = match stop_invocation {
@@ -423,10 +532,11 @@ impl Dispatcher {
         matching.sort_by_key(|s| s.order);
 
         let current_input = serde_json::to_value(&invocation).unwrap_or(serde_json::json!({}));
+        let invocation_env = invocation_environment(&invocation, cwd, env);
         let mut all_executions: Vec<HookExecution> = Vec::new();
         for sub in matching {
             match self
-                .execute_subscription(sub, &current_input, cancellation)
+                .execute_subscription(sub, &current_input, cwd, &invocation_env, cancellation)
                 .await
             {
                 AttemptOutcome::Success { executions, .. } => {

@@ -100,3 +100,30 @@ fn namespaced_skill_remains_available_without_becoming_a_slash_command() {
         Err(sdk::CommandParseError::UnknownCommand { .. })
     ));
 }
+
+#[test]
+fn empty_skill_map_matches_builtin_wiring_and_builtin_conflicts_fail_closed() {
+    let empty = std::collections::HashMap::new();
+    let wiring = composition::tools::wire_commands_with_skills(&empty).unwrap();
+    assert!(matches!(
+        wiring.router().resolve(sdk::SlashInput::new("/help")),
+        Ok(sdk::CommandRoute::SnapshotQuery { .. })
+    ));
+
+    let conflicting = std::collections::HashMap::from([(
+        "conflict".to_string(),
+        sdk::SkillView {
+            name: "conflict".to_string(),
+            aliases: Vec::new(),
+            slash_command: Some("help".to_string()),
+            slash_aliases: vec!["quit".to_string()],
+            description: Some("conflict".to_string()),
+            content: "content".to_string(),
+            source: None,
+        },
+    )]);
+    assert!(matches!(
+        composition::tools::wire_commands_with_skills(&conflicting),
+        Err(sdk::CommandParseError::DuplicateName { .. })
+    ));
+}

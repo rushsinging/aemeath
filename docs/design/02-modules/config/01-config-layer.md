@@ -366,7 +366,7 @@ struct ConfigAppService {
 }
 ```
 
-`ConfigAppService` **NEVER** 以假 default project 构造。Config-owned async factory 先用未发布的 `ConfigBootstrap` 完成初始 prepare，再以已验证 candidate 一次构造 active state 与 watch sender，最后才返回 opaque wiring：
+`ConfigAppService` **NEVER** 以假 default project 构造。Config-owned async factory 显式接收 Composition 构造的 `NativeConfigStore`：Config 保留 override 的 key、codec、priority 与错误映射，Composition 独占 `config-overrides` 的 `AtomicBlobPort` / filesystem adapter 选择。factory 先用未发布的 `ConfigBootstrap` 完成初始 prepare，再以已验证 candidate 一次构造 active state 与 watch sender，最后才返回 opaque wiring：
 
 ```rust
 async fn wire_project_config(
@@ -713,4 +713,5 @@ impl ConfigTranslator for ClaudeTranslator {
 | 2026-07-14 | 将非 Run query / subscribe 收口到 async gate-aware façade，明确 #933 delivery seam 与 #871 coordinator 的所有权 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 修复 review #5/#6/#18/#19：`ConfigUpdate` 删除 `SessionSwitchGate`（gate/coordinator 明确归属 #871 composition）；hooks 字段注释与 key 级 `merge_hooks` 算法对齐；新增最高优先级 `RuntimeOverrideAdapter` layer 并定义其 project-scoped 持久化范围；无失败提交段（Memory install 与 Config install 之间）只允许 panic/crash injection，失败/取消注入收口到 handoff 前与 `persist_update` await 点 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | #921 收缩范围：`ReasoningGraphConfig`（含 `enabled`/`nodes`/`max_reasoning`）从 Config 全部退役；`ConfigPatch`/`ConfigSnapshot` 移除 `reasoning_graph` 字段与 accessor；§7 改为退役说明；Workflow 五节点采用固定默认 effort，是否保留/接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |
+| 2026-07-21 | #1293 将 Config override backing 的 filesystem 选择上移至 Composition；Config wiring 显式接收 `NativeConfigStore`，并以构造权 Guard 锁定 | [#1293](https://github.com/rushsinging/aemeath/issues/1293) |
 | 2026-07-18 | #871 回写实际实现：`ConfigQueryError` 只保留 `Unavailable`；`ConfigWriter::update` 返回 `ConfigChangeSet`；`MainSessionConfigFacade` 拆分为 `GateAwareConfigQuery` / `GateAwareConfigWriter`；§3.1 RuntimeOverride 补充实现差距说明（durable store 已存在但 chain-layer 重放未实现） | [#871](https://github.com/rushsinging/aemeath/issues/871) |

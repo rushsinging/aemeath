@@ -65,7 +65,7 @@
 | Context Management | C/S | Context-owned `ContextPort` + `SessionManagementPort` OHS | Runtime 请求“构建本轮 Context Window”；Composition 把同一 Session 管理实例注入 MainSessionWiring（resume）与 Runtime（SDK / idle Session 命令）。resume 成功后 Runtime 将唯一活动 Session ID 切换为恢复目标，Context / Tool / Hook / Tool Result 统一消费该 ID；TUI 只消费 SDK 事件 |
 | Workflow | C/S | Workflow-owned `ReasoningPort` OHS | Runtime 询问当前 reasoning effort（reasoning graph 观察 tool 类型 / 结果调节）；Workflow **NEVER** 阻塞 loop 或强制流程，仅作 effort 调节器。**v0.1.0 scope（#921 收缩）**：五节点固定默认 effort（Config `reasoning_graph` 已退役）；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线；是否接线由 v0.2.0 #1142 决策 |
 | Provider | C/S + **ACL**(在 Provider 内) | Runtime-owned outbound `ProviderPort` | Provider adapter 吸收各家 LLM 差异，实现 Runtime 定义的统一调用语言与有序流。**v0.1.0 scope（#921 收缩）**：option resolver 领域迁移完成但未接生产链路——Runtime 尚未在 `build_window` 前调用 resolver；是否接线由 v0.2.0 #1142 决策 |
-| Tool & Skill & Command | C/S | Tool-owned `ToolCatalogPort` + `ToolExecutionPort` OHS；Skill / Command 各自发布窄 façade | Tool 目录与函数调用分离；Skill 物化 PromptFragment；Command 按 PromptInjection / SnapshotQuery / ApplicationControl 路由；MCP 是 Tool adapter |
+| Tool & Skill & Command | C/S | Tool-owned `ToolCatalogPort` + `ToolExecutionPort` OHS；Skill / Command 各自发布窄 façade | Tool 目录与函数调用分离；Skill 物化 PromptFragment；Command 按 PromptInjection / SnapshotQuery / ApplicationControl 路由；#1294 后 Composition 一次装配并把同一 Tool Catalog/Execution/binding、Skill Catalog/materializer、Tool Result materializer 与 active-run registry 注入 Runtime Main/Sub；MCP Ready 生命周期、动态同步与 revision 由 #1327 承接 |
 | Policy | C/S | Policy-owned `PolicyPort` OHS | v0.1.0 只装配 `AllowAllPolicy`（安全审批、Deny / RequireApproval 为 **Future**，接口预留但不在 v0.1.0 验收范围）；控制流仍归 Runtime |
 | Memory | C/S | Memory-owned `MemoryPort` OHS | 检索注入 + 反思写入（Reflection 产出 Memory Suggestion） |
 | Task Management | C/S | Task-owned `TaskAccess` / `TaskPersist` OHS | Runtime / Tool 只持 Access；Context Management 只持 Persist；同一 backing 守护状态机与依赖图不变量 |
@@ -95,7 +95,7 @@ Interaction 同样不是第 16 个 BC：Runtime-owned `InteractionPort` 隔离 T
 
 | 供应方 | 消费方 | 模式 | 契约 |
 |---|---|---|---|
-| Config | 全部 BC | **CF + PL** | 各 BC 顺从消费只读 `ConfigSnapshot`（Published Language），**NEVER** 反向依赖，**NEVER** 绕过快照读裸配置 |
+| Config | 全部 BC | **CF + PL** | 各 BC 顺从消费只读 `ConfigSnapshot`（Published Language），**NEVER** 反向依赖，**NEVER** 绕过快照读裸配置。Composition 独占 `config-overrides` 的 Storage adapter 构造，并向 Config wiring 注入 Config-owned `NativeConfigStore`；其他 BC 不获得该 store 或 Storage Port。 |
 
 Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启动 / resume 的协调 ACL 把 Project-owned `ProjectIdentity` 映射成 Config-owned `ProjectConfigLocation` 后调用 Config participant；Config **NEVER** import Project PL，因此 `Config → Project` 的全局上游方向不会形成物理循环。每个 Main Run 在 shared session lease 下捕获一次 active snapshot；Provider / Tool / Hook / Policy / Reflection factory **NEVER** 回读进程级 current 配置。同步 `ConfigReader` 只是 Config-internal committed-state view，只能被 coordinator / gate-aware façade 持有；AgentClient application implementation 只消费 async `ConfigQuery` / `ConfigWriter`，非 Run query / subscribe 先取得 shared session-switch permit。TUI / CLI 只经 Runtime-owned AgentClient command 与 SDK event 投影配置，**NEVER** 直连 Config OHS、subscription 或 watch receiver。
 

@@ -3,11 +3,10 @@
 //! 这些函数不包含 `continue`/`break` 等跨循环控制流，
 //! 可以安全地从 async 循环体中提取为独立函数。
 
-use crate::application::chat::looping::config_reload::{
-    check_config_changes, resolve_guidance_reload_policy,
-};
+use crate::application::chat::looping::config_reload::check_config_changes;
 use crate::application::chat::looping::snapshot_registry::SourceSnapshotRegistry;
 use crate::application::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use config::{ConfigReader, ConfigRefreshOutcome};
 use share::config::GuidanceReloadPolicy;
 use share::message::Message;
 
@@ -18,14 +17,33 @@ use share::message::Message;
 /// 并按 `GuidanceReloadPolicy` 注入对应的提醒消息。
 pub(crate) async fn handle_turn_boundary_config<S>(
     config_snapshot: &mut SourceSnapshotRegistry,
+    config_reader: &dyn ConfigReader,
     turn_count: usize,
     sink: &S,
     messages: &mut Vec<Message>,
     language: &str,
     _segment_id: &str,
-) where
+) -> ConfigRefreshOutcome
+where
     S: ChatEventSink,
 {
+    let refresh = config_reader.refresh_if_sources_changed().await;
+    match &refresh {
+        ConfigRefreshOutcome::Unchanged => {}
+        ConfigRefreshOutcome::Reloaded { .. } => {
+            sink.send_event(RuntimeStreamEvent::ConfigReloaded {
+                changed_keys: vec!["config:reloaded".to_string()],
+            })
+            .await;
+        }
+        ConfigRefreshOutcome::Rejected { error } => {
+            sink.send_event(RuntimeStreamEvent::SystemMessage(format!(
+                "[config] 配置重载失败，继续使用已提交配置：{error:?}"
+            )))
+            .await;
+        }
+    }
+
     let config_diff = check_config_changes(config_snapshot);
     if config_diff.has_changes() {
         log::info!(target: crate::LOG_TARGET,
@@ -45,7 +63,7 @@ pub(crate) async fn handle_turn_boundary_config<S>(
             .iter()
             .any(|k| k.starts_with("guidance:"));
         if has_guidance_change {
-            let policy = resolve_guidance_reload_policy();
+            let policy = config_reader.committed_snapshot().guidance_reload_policy();
             match policy {
                 GuidanceReloadPolicy::Inject => {
                     // 在下一条消息前注入 guidance 更新提示
@@ -86,4 +104,5 @@ pub(crate) async fn handle_turn_boundary_config<S>(
             }
         }
     }
+    refresh
 }

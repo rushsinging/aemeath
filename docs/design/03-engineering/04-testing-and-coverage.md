@@ -710,6 +710,24 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 最终结论：#851 的创建时业务叶子及审查后新增的 #1283/#1284/#1285 均已关闭，#1299 已由 PR #1308 合入并关闭；#1298 已由 PR #1303 合入且按 owner 边界归 #1050。#1060 的 L0–L5 矩阵无未解释空白、适用证据均可追溯，#851 / #1060 已满足测试审查完成定义；Issue 关闭仍待用户确认。
 
+#### 11.12 #1085 Tool / Skill / Command L0–L5 覆盖证据
+
+父 Issue [#853](https://github.com/rushsinging/aemeath/issues/853) 的执行叶子 #908、#909、#910、#911、#912、#913、#914 与 #993 已关闭。#1085 不只审查，直接在同一 PR 补齐组合后的测试证据；不以覆盖率替代行为矩阵，也不将 #879 progress/plan Runtime 所有权收口、#947 TUI I/O Effect 化或 MCP Ready 生命周期伪装为本能力已完成。
+
+| 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
+|---|---|---|---|
+| Command 名称规范化、非法等价类、Descriptor、参数值对象与错误文本 | L1 | `tools/src/domain/command_pl_tests.rs` | 覆盖 slash/大小写/空白、非法字符、alias、序列化与参数拼接。 |
+| Command Adapter 的冲突、补全、schema 与 target 分类 | L2 | `tools/src/adapters/command_tests.rs` | 覆盖 name/alias 冲突、无效 target、大小写补全、RequiredText/positive usize 与三类 route。 |
+| builtin Command 真相、公开 router 错误与 Composition skill projection | L3 | `tools/tests/command_contract.rs`、`composition/tests/command_wiring.rs`、`apps/cli/src/command_contract_tests.rs` | 全量 builtin descriptor、公开错误和交付入口共用 router；Skill 与 builtin 的冲突语义在 Composition 层锁定。 |
+| Tool Catalog/Execution Scope/Profile、输出映射和动态成员撤销 | L2-L3 | `tools/src/adapters/catalog_execution_contract_tests.rs` | 覆盖 invocation-time authorization、success content/data/metadata、retryable failure 与 dynamic membership add/remove。 |
+| Tool private backing/adapter 不得由 Runtime 穿透 | L0 | `check-tool-catalog-execution-boundary.sh` 与 `-tests.sh` | Runtime 直引 adapters 或 ToolBacking/具体 adapter 的故意违规均 exit 2。 |
+| Skill PL、query、revision 与 typed error | L1 | `tools/src/domain/skill_pl_tests.rs` | 覆盖 slash aliases、materialization error、query snapshot 与 cache hint。 |
+| Filesystem Skill 来源、优先级、过滤和实际 materialization | L2 | `tools/src/adapters/skill_filesystem_tests.rs` | 覆盖 global/extra content、同名优先级和 primary 缺失时 fallback 可见。 |
+| Skill materialization 到 Context prompt block、slash projection | L3-L4 | `context/tests/skill_prompt_pipeline.rs`、`context/tests/isolated_context_with_skill.rs`、`composition/tests/command_wiring.rs` | Context 只经 `SkillMaterializationPort` 消费；真实 filesystem adapter 的来源/优先级/物化在 Tools owning layer 证明，跨 BC 使用 port fake 证明无 adapter 穿透。 |
+| 真进程、PTY、网络、平台或发布资产 | L5 | 不适用说明 | Tool/Skill/Command catalog、prompt 与 router 均为进程内能力；不以 L5 替代 L1-L4。 |
+
+覆盖率信号以 `cargo llvm-cov --manifest-path agent/features/tools/Cargo.toml --all-targets --summary-only` 为准；补齐后 Tools regions/functions/lines 为 **62.34% / 67.93% / 65.63%**（审查前为 62.02% / 67.64% / 65.26%），仅作风险信号。完成条件是上述矩阵无未解释空白、适用 Guard/production reachability 与定向测试通过；#879/#947/MCP Ready 仍按各自 owner 跟踪。
+
 ## 12. 相关文档
 
 - [01-architecture-guards.md](01-architecture-guards.md)：架构守卫注册表与例外治理
