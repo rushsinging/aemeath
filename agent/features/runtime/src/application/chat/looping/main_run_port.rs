@@ -758,9 +758,13 @@ where
             if self.cancel.is_cancelled() {
                 return Err(LoopEngineError::Cancelled);
             }
-            let feedback = Message::stop_hook_feedback(format!(
-                "<system-reminder>\n{feedback}\n</system-reminder>"
-            ));
+            let feedback = Message::stop_hook_feedback(
+                format!(
+                    "<system-reminder>\n{}\n</system-reminder>",
+                    feedback.llm_text
+                ),
+                feedback.payload,
+            );
             self.stop_hook_feedback = Some(feedback.clone());
             self.step_messages.record(feedback.clone());
             self.messages.push(feedback);

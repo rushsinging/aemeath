@@ -309,6 +309,7 @@ mod tests {
         );
         message.metadata = Some(sdk::ChatMessageMetadata {
             source: sdk::ChatMessageSource::StopHook,
+            stop_hook: None,
         });
 
         assert_eq!(
@@ -329,6 +330,7 @@ mod tests {
         );
         message.metadata = Some(sdk::ChatMessageMetadata {
             source: sdk::ChatMessageSource::SystemGenerated,
+            stop_hook: None,
         });
 
         assert!(matches!(
@@ -342,6 +344,7 @@ mod tests {
         let mut message = msg("user", vec![text_block("guidance changed")]);
         message.metadata = Some(sdk::ChatMessageMetadata {
             source: sdk::ChatMessageSource::SystemGenerated,
+            stop_hook: None,
         });
 
         assert_eq!(

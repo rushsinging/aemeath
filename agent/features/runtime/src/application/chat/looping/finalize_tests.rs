@@ -7,7 +7,7 @@ use crate::application::hook_adapter::{
 use hook::HookPoint;
 use std::time::Duration;
 
-fn stop_hook_feedback_for_test(dispatch: &RuntimeHookDispatch) -> Option<String> {
+fn stop_hook_feedback_for_test(dispatch: &RuntimeHookDispatch) -> Option<StopHookFeedbackMessage> {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     if matches!(dispatch.directive, RuntimeHookDirective::Block { .. }) {
         Some(runtime.block_on(stop_hook_feedback(dispatch, "test-session", "zh")))
@@ -49,6 +49,18 @@ fn block_dispatch(
             duration: Duration::from_millis(10),
         }],
         messages,
+        block_detail: Some(crate::application::hook_adapter::RuntimeHookBlockDetail {
+            command: source.to_string(),
+            execution_ordinal: 1,
+            execution: RuntimeHookExecution {
+                status: RuntimeHookExecutionStatus::Blocked,
+                attempts: 1,
+                exit_code: Some(2),
+                stdout: stdout.to_string(),
+                stderr: stderr.unwrap_or("").to_string(),
+                duration: Duration::from_millis(10),
+            },
+        }),
     }
 }
 
@@ -64,6 +76,7 @@ fn continue_dispatch() -> RuntimeHookDispatch {
             duration: Duration::from_millis(5),
         }],
         messages: Vec::new(),
+        block_detail: None,
     }
 }
 
@@ -79,8 +92,8 @@ fn test_stop_hook_feedback_uses_error_when_blocked() {
 
     let feedback = stop_hook_feedback_for_test(&dispatch).unwrap();
 
-    assert!(feedback.contains("Stop hook"));
-    assert!(feedback.contains("failed"));
+    assert!(feedback.llm_text.contains("Stop hook"));
+    assert!(feedback.llm_text.contains("failed"));
 }
 
 #[test]
@@ -89,8 +102,26 @@ fn test_stop_hook_feedback_uses_stdout_when_blocked() {
 
     let feedback = stop_hook_feedback_for_test(&dispatch).unwrap();
 
-    assert!(feedback.contains("Stop hook"));
-    assert!(feedback.contains("unsafe op found"));
+    assert!(feedback.llm_text.contains("Stop hook"));
+    assert!(feedback.llm_text.contains("unsafe op found"));
+}
+
+#[test]
+fn long_stop_hook_output_uses_file_pointer_for_llm_text() {
+    let long_output = "x".repeat(INLINE_HOOK_OUTPUT_LIMIT + 1);
+    let dispatch = block_dispatch("check-agent-stop.sh", &long_output, None, None);
+
+    let feedback = stop_hook_feedback_for_test(&dispatch).unwrap();
+
+    let path = feedback
+        .payload
+        .output_file
+        .as_deref()
+        .expect("long output must be persisted");
+    assert!(std::path::Path::new(path).is_file());
+    assert!(feedback.llm_text.contains(path));
+    assert!(!feedback.llm_text.contains(&long_output));
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -99,6 +130,6 @@ fn test_stop_hook_feedback_uses_system_message_when_blocked() {
 
     let feedback = stop_hook_feedback_for_test(&dispatch).unwrap();
 
-    assert!(feedback.contains("line-check.sh"));
-    assert!(feedback.contains("line limit exceeded"));
+    assert!(feedback.payload.command.contains("line-check.sh"));
+    assert_eq!(feedback.payload.reason, "exit code 2");
 }

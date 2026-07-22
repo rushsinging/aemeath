@@ -120,6 +120,16 @@
         "source": {
           "$ref": "#/$defs/ChatMessageSource",
           "default": "user"
+        },
+        "stop_hook": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopHookFeedbackView"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "type": "object"
@@ -1072,6 +1082,54 @@
         "summary"
       ],
       "title": "SessionSummary",
+      "type": "object"
+    },
+    "StopHookFeedbackView": {
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "exit_code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output_file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "stderr_preview": {
+          "type": "string"
+        },
+        "stderr_truncated": {
+          "type": "boolean"
+        },
+        "stdout_preview": {
+          "type": "string"
+        },
+        "stdout_truncated": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "summary",
+        "command",
+        "reason",
+        "stdout_preview",
+        "stderr_preview",
+        "stdout_truncated",
+        "stderr_truncated"
+      ],
       "type": "object"
     },
     "StuckDiagnostic": {

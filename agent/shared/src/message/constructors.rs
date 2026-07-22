@@ -18,16 +18,18 @@ impl Message {
             content: vec![ContentBlock::Text { text: text.into() }],
             metadata: Some(MessageMetadata {
                 source: MessageSource::SystemGenerated,
+                stop_hook: None,
             }),
         }
     }
 
-    pub fn stop_hook_feedback(text: impl Into<String>) -> Self {
+    pub fn stop_hook_feedback(text: impl Into<String>, payload: StopHookFeedback) -> Self {
         Self {
             role: Role::User,
             content: vec![ContentBlock::Text { text: text.into() }],
             metadata: Some(MessageMetadata {
                 source: MessageSource::StopHook,
+                stop_hook: Some(payload),
             }),
         }
     }

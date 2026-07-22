@@ -7,7 +7,7 @@ use super::intent::*;
 use super::model::ConversationModel;
 use super::processing_job::{ProcessingJob, ProcessingStatus};
 use super::runtime_state::RuntimeState;
-use super::system_reminder::strip_system_reminder_envelope_owned;
+use super::stop_hook_notice::stop_hook_notice_content;
 use super::task_status::TaskStatusSnapshot;
 use super::tool_observe::ToolCallUpdateObservation;
 use super::update::ConversationUpdate;
@@ -24,7 +24,6 @@ impl ConversationUpdate for StartChat {
 
 impl ConversationUpdate for ResumeConversation {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        use super::block::{HookNoticeContent, HookNoticeKind};
         use super::history_parse::{
             collect_following_tool_results, normalize_tool_result_content,
             tool_result_content_to_string, tool_result_image_count, HistoryAssistantBlock,
@@ -44,14 +43,9 @@ impl ConversationUpdate for ResumeConversation {
                     // 直接调 model.start_chat（不走 StartChat intent），避免 spinner 副作用。
                     all_changes.extend(model.start_chat(text));
                 }
-                Ok(HistoryDisplayMessage::StopHookNotice { body }) => {
+                Ok(HistoryDisplayMessage::StopHookNotice { .. }) => {
                     all_changes.extend(model.apply(AppendHookNotice {
-                        content: HookNoticeContent {
-                            kind: HookNoticeKind::Blocked,
-                            title: "Hook blocked: Stop".to_string(),
-                            body: strip_system_reminder_envelope_owned(body),
-                            details: None,
-                        },
+                        content: stop_hook_notice_content(msg),
                     }));
                 }
                 Ok(HistoryDisplayMessage::ToolResults) => {}
@@ -617,6 +611,17 @@ mod tests {
         );
         message.metadata = Some(sdk::ChatMessageMetadata {
             source: sdk::ChatMessageSource::StopHook,
+            stop_hook: Some(sdk::StopHookFeedbackView {
+                summary: "blocked by hook".to_string(),
+                command: "check-agent-stop.sh".to_string(),
+                exit_code: Some(2),
+                reason: "exit code 2".to_string(),
+                stdout_preview: String::new(),
+                stderr_preview: "blocked".to_string(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+                output_file: None,
+            }),
         });
 
         ResumeConversation {
@@ -630,6 +635,10 @@ mod tests {
                 if content.kind == HookNoticeKind::Blocked
                     && content.title == "Hook blocked: Stop"
                     && content.body == "blocked by hook"
+                    && content.details.as_deref().is_some_and(|details|
+                        details.contains("Command: check-agent-stop.sh")
+                            && details.contains("Exit code: 2")
+                    )
         ));
         assert!(model.timeline.items().iter().all(|item| {
             !matches!(item, OutputTimelineItem::UserMessage { text, .. } if text == "<system-reminder>blocked by hook</system-reminder>")
@@ -644,6 +653,7 @@ mod tests {
         );
         stop_hook.metadata = Some(sdk::ChatMessageMetadata {
             source: sdk::ChatMessageSource::StopHook,
+            stop_hook: None,
         });
         let assistant = sdk::ChatMessage::assistant_text("assistant reply");
         let mut model = ConversationModel::default();

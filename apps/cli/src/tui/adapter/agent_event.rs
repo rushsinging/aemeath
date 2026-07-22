@@ -1,8 +1,8 @@
 use crate::tui::adapter::hook_notice::{hook_event_notice, hook_message_notice};
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::effect::effect::Effect;
-use crate::tui::model::conversation::block::{HookNoticeContent, HookNoticeKind};
 use crate::tui::model::conversation::intent::*;
+use crate::tui::model::conversation::stop_hook_notice::stop_hook_notice_content;
 use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
@@ -320,13 +320,7 @@ where
                 mapping
                     .conversation
                     .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                        content: HookNoticeContent {
-                            kind: HookNoticeKind::Blocked,
-                            title: "Hook blocked: Stop".to_string(),
-                            body: strip_system_reminder_envelope(&message.text_content())
-                                .to_string(),
-                            details: None,
-                        },
+                        content: stop_hook_notice_content(message),
                     }));
             }
             mapping

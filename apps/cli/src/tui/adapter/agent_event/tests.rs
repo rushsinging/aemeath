@@ -520,6 +520,17 @@ fn test_stop_hook_blocked_maps_to_blocked_hook_notice() {
     let mut messages = vec![sdk::ChatMessage::user_text("user input"), reminder];
     messages[1].metadata = Some(sdk::ChatMessageMetadata {
         source: sdk::ChatMessageSource::StopHook,
+        stop_hook: Some(sdk::StopHookFeedbackView {
+            summary: "Stop hook blocked stopping.".to_string(),
+            command: ".agents/hooks/check-agent-stop.sh".to_string(),
+            exit_code: Some(2),
+            reason: "exit code 2: blocked".to_string(),
+            stdout_preview: "short stdout".to_string(),
+            stderr_preview: "short stderr".to_string(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            output_file: Some("/tmp/stop-hook-output.txt".to_string()),
+        }),
     });
 
     let mapping = map_agent_event(&UiEvent::StopHookBlocked { messages });
@@ -530,7 +541,11 @@ fn test_stop_hook_blocked_maps_to_blocked_hook_notice() {
             if content.kind == crate::tui::model::conversation::block::HookNoticeKind::Blocked
                 && content.title == "Hook blocked: Stop"
                 && content.body == "Stop hook blocked stopping."
-                && content.details.is_none()
+                && content.details.as_deref().is_some_and(|details|
+                    details.contains("Command: .agents/hooks/check-agent-stop.sh")
+                        && details.contains("Exit code: 2")
+                        && details.contains("Full output: /tmp/stop-hook-output.txt")
+                )
     ));
 }
 

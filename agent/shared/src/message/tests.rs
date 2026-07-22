@@ -22,7 +22,20 @@ fn assistant_with_tools(ids: &[&str]) -> Message {
 
 #[test]
 fn stop_hook_feedback_carries_distinct_message_source() {
-    let message = Message::stop_hook_feedback("blocked");
+    let message = Message::stop_hook_feedback(
+        "blocked",
+        StopHookFeedback {
+            summary: "blocked".to_string(),
+            command: "check-agent-stop.sh".to_string(),
+            exit_code: Some(2),
+            reason: "exit code 2".to_string(),
+            stdout_preview: String::new(),
+            stderr_preview: "blocked".to_string(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            output_file: None,
+        },
+    );
 
     assert_eq!(
         message.metadata.as_ref().map(|metadata| metadata.source),

@@ -99,6 +99,17 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
                 }
                 share::message::MessageSource::StopHook => sdk::ChatMessageSource::StopHook,
             },
+            stop_hook: metadata.stop_hook.map(|payload| sdk::StopHookFeedbackView {
+                summary: payload.summary,
+                command: payload.command,
+                exit_code: payload.exit_code,
+                reason: payload.reason,
+                stdout_preview: payload.stdout_preview,
+                stderr_preview: payload.stderr_preview,
+                stdout_truncated: payload.stdout_truncated,
+                stderr_truncated: payload.stderr_truncated,
+                output_file: payload.output_file,
+            }),
         }),
         // input_id 不来自 share::Message；由 runtime→TUI 边界（UserMessagesAdded 事件）
         // 在 event.rs 处按 (InputId, Message) 元组注入（#507 修复）。
@@ -118,6 +129,32 @@ pub(crate) fn model_display(source_key: &str, model_name: &str, model_id: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn message_mapping_preserves_stop_hook_payload() {
+        let message = share::message::Message::stop_hook_feedback(
+            "<system-reminder>blocked</system-reminder>",
+            share::message::StopHookFeedback {
+                summary: "blocked".to_string(),
+                command: "check-agent-stop.sh".to_string(),
+                exit_code: Some(2),
+                reason: "exit code 2".to_string(),
+                stdout_preview: "out".to_string(),
+                stderr_preview: "err".to_string(),
+                stdout_truncated: false,
+                stderr_truncated: true,
+                output_file: Some("/tmp/hook.txt".to_string()),
+            },
+        );
+
+        let mapped = message_to_sdk(message);
+        let payload = mapped.metadata.unwrap().stop_hook.unwrap();
+
+        assert_eq!(payload.command, "check-agent-stop.sh");
+        assert_eq!(payload.exit_code, Some(2));
+        assert!(payload.stderr_truncated);
+        assert_eq!(payload.output_file.as_deref(), Some("/tmp/hook.txt"));
+    }
 
     #[test]
     fn config_snapshot_mapping_preserves_sdk_visible_fields() {
