@@ -3,6 +3,7 @@ use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
 use super::chat_turn::ChatTurn;
 use super::ids::{ChatId, ChatTurnId};
+use super::interaction::{AgentRunState, InteractionState, UiRunId};
 use super::queued_submission::QueuedSubmission;
 use super::runtime_state::RuntimeState;
 use super::update::ConversationUpdate;
@@ -28,6 +29,8 @@ pub struct ConversationModel {
     pub(super) active_thinking_block_id: Option<String>,
     pub(super) active_thinking_context: Option<(ChatId, ChatTurnId)>,
     pub model_stream_placeholder: Option<ModelStreamWaitingView>,
+    pub(super) active_interaction: Option<InteractionState>,
+    pub(super) agent_runs: Vec<AgentRunState>,
 
     // ── 运行态 ──
     pub runtime: RuntimeState,
@@ -49,6 +52,8 @@ impl Default for ConversationModel {
             active_thinking_block_id: None,
             active_thinking_context: None,
             model_stream_placeholder: None,
+            active_interaction: None,
+            agent_runs: Vec::new(),
             runtime: RuntimeState::default(),
         }
     }
@@ -77,6 +82,52 @@ impl ConversationModel {
     /// 当前内容版本号，供渲染层 memo。
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    pub(crate) fn agent_run(&self, run_id: &UiRunId) -> Option<&AgentRunState> {
+        self.agent_runs.iter().find(|run| run.run_id() == run_id)
+    }
+
+    pub(super) fn start_agent_run(&mut self, run_id: UiRunId) -> bool {
+        if self.agent_run(&run_id).is_some() {
+            return false;
+        }
+        self.agent_runs.push(AgentRunState::new(run_id));
+        true
+    }
+
+    pub(super) fn transition_agent_run(
+        &mut self,
+        run_id: &UiRunId,
+        phase: super::interaction::AgentRunPhase,
+    ) -> bool {
+        self.agent_runs
+            .iter_mut()
+            .find(|run| run.run_id() == run_id)
+            .is_some_and(|run| run.transition_to(phase))
+    }
+
+    pub(super) fn start_agent_run_step(
+        &mut self,
+        run_id: &UiRunId,
+        step_id: super::interaction::UiRunStepId,
+        tool_reference: Option<String>,
+    ) -> bool {
+        self.agent_runs
+            .iter_mut()
+            .find(|run| run.run_id() == run_id)
+            .is_some_and(|run| run.start_step(step_id, tool_reference))
+    }
+
+    pub(super) fn complete_agent_run_step(
+        &mut self,
+        run_id: &UiRunId,
+        step_id: &super::interaction::UiRunStepId,
+    ) -> bool {
+        self.agent_runs
+            .iter_mut()
+            .find(|run| run.run_id() == run_id)
+            .is_some_and(|run| run.complete_step(step_id))
     }
 
     pub(super) fn clear_model_stream_placeholder(&mut self) -> Vec<ConversationChange> {
@@ -247,7 +298,10 @@ impl ConversationModel {
     }
 
     /// 以 runtime 返回的全量 queued 快照为准重渲染 queue 区域。
-    pub fn sync_queued_from_runtime(&mut self, queued: &[sdk::ChatMessage]) {
+    pub(super) fn sync_queued_submissions(
+        &mut self,
+        queued: Vec<sdk::ChatMessage>,
+    ) -> Vec<ConversationChange> {
         self.queued_submissions.clear();
         self.timeline
             .retain(|it| !matches!(it, OutputTimelineItem::QueuedUserMessage { .. }));
@@ -267,7 +321,14 @@ impl ConversationModel {
             self.timeline
                 .push(OutputTimelineItem::QueuedUserMessage { id, input_id, text });
         }
-        self.revision = self.revision.wrapping_add(1);
+        vec![ConversationChange::QueuedSubmissionsSynced {
+            count: self.queued_submissions.len(),
+        }]
+    }
+
+    pub(super) fn clear_compact_runtime(&mut self) -> Vec<ConversationChange> {
+        self.runtime.clear_compact_runtime();
+        vec![ConversationChange::CompactRuntimeCleared]
     }
 
     pub(super) fn next_block_id(&mut self, prefix: &str) -> String {

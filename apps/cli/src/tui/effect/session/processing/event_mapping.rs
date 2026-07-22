@@ -171,8 +171,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             workspace_root: crate::tui::app::display_status_path(std::path::Path::new(
                 &workspace_root,
             )),
-            branch: crate::tui::app::git_branch_for(std::path::Path::new(&workspace_root)),
-            kind: crate::tui::app::worktree_kind_for(std::path::Path::new(&workspace_root)),
             raw_path_base: std::path::PathBuf::from(path_base),
             raw_workspace_root: std::path::PathBuf::from(workspace_root),
             workspace,

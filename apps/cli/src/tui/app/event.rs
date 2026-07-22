@@ -1,4 +1,5 @@
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::workspace::WorktreeKind;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -20,11 +21,17 @@ impl From<sdk::ChatEventContext> for UiTurnContext {
 pub struct StatusContextUpdate {
     pub path_base: String,
     pub workspace_root: String,
-    pub branch: Option<String>,
-    pub kind: crate::tui::model::runtime::workspace::WorktreeKind,
     pub raw_path_base: PathBuf,
     pub raw_workspace_root: PathBuf,
     pub workspace: sdk::WorkspaceContextView,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct WorkspaceMetadataResolved {
+    pub root: String,
+    pub revision: u64,
+    pub branch: Option<String>,
+    pub kind: WorktreeKind,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -171,6 +178,7 @@ pub enum AppEvent {
     CurrentTurnChanged(usize),
     /// Current tool path base/working root changed.
     WorkingDirectoryChanged(StatusContextUpdate),
+    WorkspaceMetadataResolved(WorkspaceMetadataResolved),
     /// Runtime task store changed; refresh TUI task list window.
     TaskStatusChanged(sdk::TaskStatusView),
     /// 版本检查结果（后台 spawn 完成后回送）。

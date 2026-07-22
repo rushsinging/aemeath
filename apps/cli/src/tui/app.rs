@@ -6,10 +6,12 @@ mod runtime;
 pub mod state;
 
 use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
+use crate::tui::model::config_provider::ConfigIntent;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::root::TuiModel;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
+use crate::tui::model::workspace_provider::WorkspaceIntent;
 use crate::tui::render::input::input_area::suggestions::SuggestionViewState;
 use crate::tui::render::input::input_area::InputArea;
 use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
@@ -22,7 +24,6 @@ use ratatui::{
     Terminal,
 };
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -90,50 +91,6 @@ pub(crate) fn display_status_path(path: &Path) -> String {
     }
 }
 
-pub(crate) fn git_branch_for(path: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .args(["branch", "--show-current"])
-        .current_dir(path)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let branch = String::from_utf8(output.stdout).ok()?;
-    let branch = branch.trim();
-    if branch.is_empty() {
-        None
-    } else {
-        Some(branch.to_string())
-    }
-}
-
-pub(crate) fn worktree_kind_for(
-    path: &Path,
-) -> crate::tui::model::runtime::workspace::WorktreeKind {
-    let is_worktree = Command::new("git")
-        .args(["rev-parse", "--git-dir", "--git-common-dir"])
-        .current_dir(path)
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|stdout| {
-            let mut lines = stdout.lines().map(str::trim);
-            match (lines.next(), lines.next()) {
-                (Some(git_dir), Some(common_dir)) => git_dir != common_dir,
-                _ => false,
-            }
-        })
-        .unwrap_or(false);
-
-    if is_worktree {
-        crate::tui::model::runtime::workspace::WorktreeKind::LinkedWorktree
-    } else {
-        crate::tui::model::runtime::workspace::WorktreeKind::MainCheckout
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn status_context_for_paths(path_base: &Path, workspace_root: &Path) -> UiEvent {
     status_context_for_workspace(sdk::WorkspaceContextView {
@@ -150,8 +107,6 @@ pub(crate) fn status_context_for_workspace(workspace: sdk::WorkspaceContextView)
     UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
         path_base: display_status_path(&path_base),
         workspace_root: display_status_path(&workspace_root),
-        branch: git_branch_for(&workspace_root),
-        kind: worktree_kind_for(&workspace_root),
         raw_path_base: path_base,
         raw_workspace_root: workspace_root,
         workspace,
@@ -165,17 +120,26 @@ impl App {
 
         let mut model_state = TuiModel::default();
         // 经聚合根 apply(intent) 初始化，不直接写内部字段（保持单一变更入口）。
-        model_state.session.apply(SessionIntent::SetCurrentSession {
-            id: session_id.clone(),
-        });
-        model_state.conversation.apply(SetProviderModel {
-            provider: None,
-            model_id: Some(model.clone()),
-        });
-        model_state.conversation.apply(UpdateWorkspace {
-            cwd: cwd.display().to_string(),
-            worktree: None,
-        });
+        crate::tui::update::root_reducer::reduce_intent(
+            &mut model_state,
+            crate::tui::update::intent::AgentIntent::Session(SessionIntent::SetCurrentSession {
+                id: session_id.clone(),
+            }),
+        );
+        crate::tui::update::root_reducer::reduce_intent(
+            &mut model_state,
+            crate::tui::update::intent::AgentIntent::Config(ConfigIntent::SetProviderModel {
+                provider: None,
+                model_id: Some(model.clone()),
+            }),
+        );
+        crate::tui::update::root_reducer::reduce_intent(
+            &mut model_state,
+            crate::tui::update::intent::AgentIntent::Workspace(WorkspaceIntent::SetCurrent {
+                cwd: cwd.display().to_string(),
+                worktree: None,
+            }),
+        );
         // 启动横幅纳入单一真相源 ConversationModel，经 document 渲染。
         model_state.conversation.seed_banner();
 
@@ -216,9 +180,11 @@ impl App {
                 >= update::CTRL_C_TIMEOUT_SECS
             {
                 self.layout.clear_ctrlc();
-                self.model
-                    .conversation
-                    .apply(SetStatusNotice(StatusNotice::success("Ready")));
+                self.apply_agent_intent(crate::tui::update::intent::AgentIntent::Conversation(
+                    ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::success(
+                        "Ready",
+                    ))),
+                ));
             }
         }
     }
@@ -271,11 +237,11 @@ impl App {
             }))
             .is_err()
             {
-                self.model
-                    .conversation
-                    .apply(SetStatusNotice(StatusNotice::warning(
+                self.apply_agent_intent(crate::tui::update::intent::AgentIntent::Conversation(
+                    ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
                         "Render error, try resizing",
-                    )));
+                    ))),
+                ));
                 status_view = self.status_view_model();
             }
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

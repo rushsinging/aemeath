@@ -1,6 +1,7 @@
 use crate::tui::app::App;
 use crate::tui::model::input::intent::InputIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
+use crate::tui::update::intent::AgentIntent;
 
 impl App {
     pub(crate) fn resume_session_messages(
@@ -13,19 +14,18 @@ impl App {
         self.session.session_created_at = Some(created_at);
         self.session.rename_session(session_id);
         // session_id 真相归 SessionModel，StatusBar 渲染时直接消费 StatusViewModel。
-        self.model.session.apply(SessionIntent::SetCurrentSession {
+        self.apply_agent_intent(AgentIntent::Session(SessionIntent::SetCurrentSession {
             id: session_id.to_string(),
-        });
+        }));
         self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
         // 走 ResumeConversation intent，不触发 spinner 副作用
-        self.model.conversation.apply(
+        self.apply_agent_intent(AgentIntent::Conversation(
             crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
                 crate::tui::model::conversation::intent::ResumeConversation {
                     messages: messages.clone(),
                 },
             ),
-        );
-        self.mark_output_dirty();
+        ));
         apply_resume_input_history(self, &messages);
         self.append_system_notice(format!(
             "[resumed session {} ({} messages)]",
@@ -36,7 +36,7 @@ impl App {
 
 pub(crate) fn apply_resume_input_history(app: &mut App, messages: &[sdk::ChatMessage]) {
     let history = extract_user_input_history(messages);
-    app.model.input.apply(InputIntent::ReplaceHistory(history));
+    app.apply_agent_intent(AgentIntent::Input(InputIntent::ReplaceHistory(history)));
 }
 
 fn extract_user_input_history(messages: &[sdk::ChatMessage]) -> Vec<String> {

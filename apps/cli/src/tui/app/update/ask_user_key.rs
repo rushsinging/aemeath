@@ -4,6 +4,7 @@ use crate::tui::model::conversation::block::AskUserPhase;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::output_timeline::OutputTimelineItem;
+use crate::tui::update::intent::AgentIntent;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 impl App {
@@ -40,12 +41,11 @@ impl App {
                     let text = self.model.input.document.buffer.clone();
                     if !text.is_empty() {
                         if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
-                            self.model.conversation.apply(
+                            self.apply_agent_intent(AgentIntent::Conversation(
                                 ConversationIntent::AnswerCurrentAskUser(AnswerCurrentAskUser {
                                     answer: text.clone(),
                                 }),
-                            );
-                            self.mark_output_dirty();
+                            ));
                             self.handle_input_intent(
                                 crate::tui::model::input::intent::InputIntent::Clear,
                             );
@@ -170,14 +170,11 @@ impl App {
                     answer
                 };
 
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::AnswerCurrentAskUser(
-                        AnswerCurrentAskUser {
-                            answer: final_answer,
-                        },
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::AnswerCurrentAskUser(AnswerCurrentAskUser {
+                        answer: final_answer,
+                    }),
+                ));
                 self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                 self.maybe_auto_submit_ask_user();
             }
@@ -211,31 +208,28 @@ impl App {
                 } else {
                     confirm_cursor - 1
                 };
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::SetAskUserConfirmCursor(
-                        SetAskUserConfirmCursor { cursor: next },
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::SetAskUserConfirmCursor(SetAskUserConfirmCursor {
+                        cursor: next,
+                    }),
+                ));
             }
             KeyCode::Down if key.modifiers == KeyModifiers::NONE => {
                 let next = (confirm_cursor + 1) % (n + 2);
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::SetAskUserConfirmCursor(
-                        SetAskUserConfirmCursor { cursor: next },
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::SetAskUserConfirmCursor(SetAskUserConfirmCursor {
+                        cursor: next,
+                    }),
+                ));
             }
             KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
                 if confirm_cursor < n {
                     // 导航回某题重新作答
-                    self.model
-                        .conversation
-                        .apply(ConversationIntent::NavigateAskUserTo(NavigateAskUserTo {
+                    self.apply_agent_intent(AgentIntent::Conversation(
+                        ConversationIntent::NavigateAskUserTo(NavigateAskUserTo {
                             index: confirm_cursor,
-                        }));
-                    self.mark_output_dirty();
+                        }),
+                    ));
                 } else if confirm_cursor == n {
                     // 全部确认提交
                     self.submit_ask_user_batch();
@@ -285,10 +279,9 @@ impl App {
                     .unwrap_or_default()
             })
             .collect();
-        self.model
-            .conversation
-            .apply(ConversationIntent::ConfirmAskUserBatch(ConfirmAskUserBatch));
-        self.mark_output_dirty();
+        self.apply_agent_intent(AgentIntent::Conversation(
+            ConversationIntent::ConfirmAskUserBatch(ConfirmAskUserBatch),
+        ));
         let _ = state.reply_tx.send(sdk::AskUserReply::Answers(answers));
         self.spinner_phase(SpinnerPhase::Generating);
     }
@@ -317,12 +310,11 @@ impl App {
                     .unwrap_or_default();
                 if !text.is_empty() {
                     self.set_ask_user_chat_input(false);
-                    self.model
-                        .conversation
-                        .apply(ConversationIntent::AnswerCurrentAskUser(
-                            AnswerCurrentAskUser { answer: text },
-                        ));
-                    self.mark_output_dirty();
+                    self.apply_agent_intent(AgentIntent::Conversation(
+                        ConversationIntent::AnswerCurrentAskUser(AnswerCurrentAskUser {
+                            answer: text,
+                        }),
+                    ));
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     self.maybe_auto_submit_ask_user();
                 }
@@ -332,84 +324,62 @@ impl App {
             }
             // Ctrl+ 修饰键优先匹配
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::DeleteAskUserChatWord(
-                        DeleteAskUserChatWord,
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::DeleteAskUserChatWord(DeleteAskUserChatWord),
+                ));
             }
             KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::MoveAskUserChatCursorEnd(
-                        MoveAskUserChatCursorEnd { to_end: false },
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::MoveAskUserChatCursorEnd(MoveAskUserChatCursorEnd {
+                        to_end: false,
+                    }),
+                ));
             }
             KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::MoveAskUserChatCursorEnd(
-                        MoveAskUserChatCursorEnd { to_end: true },
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::MoveAskUserChatCursorEnd(MoveAskUserChatCursorEnd {
+                        to_end: true,
+                    }),
+                ));
             }
             KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::DeleteAskUserChatWord(
-                        DeleteAskUserChatWord,
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::DeleteAskUserChatWord(DeleteAskUserChatWord),
+                ));
             }
             KeyCode::Backspace if key.modifiers == KeyModifiers::NONE => {
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::DeleteAskUserChatChar(
-                        DeleteAskUserChatChar,
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::DeleteAskUserChatChar(DeleteAskUserChatChar),
+                ));
             }
             KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::AppendAskUserChatChar(
-                        AppendAskUserChatChar { ch: c },
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::AppendAskUserChatChar(AppendAskUserChatChar { ch: c }),
+                ));
             }
             KeyCode::Left if key.modifiers == KeyModifiers::NONE => {
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::MoveAskUserChatCursor(
-                        MoveAskUserChatCursor { delta: -1 },
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::MoveAskUserChatCursor(MoveAskUserChatCursor { delta: -1 }),
+                ));
             }
             KeyCode::Right if key.modifiers == KeyModifiers::NONE => {
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::MoveAskUserChatCursor(
-                        MoveAskUserChatCursor { delta: 1 },
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::MoveAskUserChatCursor(MoveAskUserChatCursor { delta: 1 }),
+                ));
             }
             KeyCode::Home if key.modifiers == KeyModifiers::NONE => {
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::MoveAskUserChatCursorEnd(
-                        MoveAskUserChatCursorEnd { to_end: false },
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::MoveAskUserChatCursorEnd(MoveAskUserChatCursorEnd {
+                        to_end: false,
+                    }),
+                ));
             }
             KeyCode::End if key.modifiers == KeyModifiers::NONE => {
-                self.model
-                    .conversation
-                    .apply(ConversationIntent::MoveAskUserChatCursorEnd(
-                        MoveAskUserChatCursorEnd { to_end: true },
-                    ));
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::MoveAskUserChatCursorEnd(MoveAskUserChatCursorEnd {
+                        to_end: true,
+                    }),
+                ));
             }
             KeyCode::Up => {
                 let snapshot = self.model.conversation.ask_user_snapshot();

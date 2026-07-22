@@ -2,6 +2,7 @@ use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::runtime::status_notice::StatusNotice;
+use crate::tui::update::intent::AgentIntent;
 use tokio::sync::mpsc;
 
 /// 随机烹饪动词，用于"完成"消息。
@@ -58,9 +59,9 @@ impl App {
         }
         self.spinner_stop();
         self.chat.stop_processing();
-        self.model
-            .conversation
-            .apply(SetStatusNotice(StatusNotice::success("Ready")));
+        self.apply_agent_intent(AgentIntent::Conversation(
+            ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::success("Ready"))),
+        ));
         let effects = Vec::new();
         // #626：NEVER 在每轮 Done 后自动发 FetchReminderRecap。
         //

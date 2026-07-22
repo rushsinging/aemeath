@@ -1,5 +1,7 @@
 use crate::tui::app::App;
+use crate::tui::model::conversation::intent::{ConversationIntent, SetSpinnerPhase, StopSpinner};
 use crate::tui::model::conversation::spinner::SpinnerPhase;
+use crate::tui::update::intent::AgentIntent;
 
 impl App {
     /// 设置 spinner phase（自动置 chat_active）。
@@ -12,8 +14,9 @@ impl App {
             prev_active,
             prev_phase,
         );
-        self.model.conversation.runtime.spinner.chat_active = true;
-        self.model.conversation.runtime.spinner.phase = Some(phase);
+        self.apply_agent_intent(AgentIntent::Conversation(
+            ConversationIntent::SetSpinnerPhase(SetSpinnerPhase { phase }),
+        ));
     }
 
     /// 停止 spinner（幂等）。
@@ -25,8 +28,8 @@ impl App {
             prev_active,
             prev_phase,
         );
-        self.model.conversation.runtime.spinner.chat_active = false;
-        self.model.conversation.runtime.spinner.phase = None;
-        self.model.conversation.runtime.spinner.running_tool_count = 0;
+        self.apply_agent_intent(AgentIntent::Conversation(ConversationIntent::StopSpinner(
+            StopSpinner,
+        )));
     }
 }

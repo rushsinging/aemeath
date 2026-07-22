@@ -4,6 +4,10 @@ pub struct SpawnAgentChatEffect {
     pub context: Option<crate::tui::effect::session::processing::SpawnContext>,
 }
 
+use crate::tui::model::conversation::interaction::{
+    UiInteractionCancelReason, UiInteractionReply, UiInteractionRequestId,
+};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Effect {
     None,
@@ -17,6 +21,18 @@ pub enum Effect {
         event: sdk::ChatInputEvent,
     },
     CancelCurrentRun,
+    ReplyInteraction {
+        request_id: UiInteractionRequestId,
+        reply: UiInteractionReply,
+    },
+    CancelInteraction {
+        request_id: UiInteractionRequestId,
+        reason: UiInteractionCancelReason,
+    },
+    ResolveWorkspaceMetadata {
+        root: String,
+        revision: u64,
+    },
     /// 保存当前会话。`notify=true`（/save 手动触发）时经 UiEvent 回灌
     /// `[session saved: id]` / 失败反馈；`false`（MessagesSync 后台自动保存）静默。
     SaveSession {

@@ -59,6 +59,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::HookEvent(_) => "HookEvent",
         UiEvent::AgentProgress { .. } => "AgentProgress",
         UiEvent::WorkingDirectoryChanged { .. } => "WorkingDirectoryChanged",
+        UiEvent::WorkspaceMetadataResolved(_) => "WorkspaceMetadataResolved",
         UiEvent::TaskStatusChanged(_) => "TaskStatusChanged",
         UiEvent::CurrentTurnChanged(_) => "CurrentTurnChanged",
         UiEvent::UpdateAvailable { .. } => "UpdateAvailable",
@@ -251,22 +252,18 @@ impl App {
     ) -> UpdateResult {
         let workspace_root = self
             .model
-            .conversation
-            .runtime
-            .workspace
-            .workspace_root
-            .as_deref()
+            .workspace_provider
+            .workspace_root()
             .map(std::path::Path::new);
         let mapping = map_agent_event_with_tool_header(&ev, |name, input| {
             format_subagent_tool_header(name, input, workspace_root)
         });
         crate::tui::log_trace!(
-            "tui.agent_event mapped event={} conversation_intents={} diagnostic_intents={} session_intents={} effects={}",
+            "tui.agent_event mapped event={} conversation_intents={} diagnostic_intents={} session_intents={}",
             ui_event_name(&ev),
             mapping.conversation.len(),
             mapping.diagnostic.len(),
-            mapping.session.len(),
-            mapping.effects.len()
+            mapping.session.len()
         );
         let model_result = if mapping == Default::default() {
             TuiUpdateResult::default()
@@ -303,12 +300,9 @@ impl App {
         let revision = self.model.conversation.revision();
         let current_workspace_root: Option<String> = self
             .model
-            .conversation
-            .runtime
-            .workspace
-            .workspace_root
-            .as_deref()
-            .map(|s| s.to_owned());
+            .workspace_provider
+            .workspace_root()
+            .map(ToOwned::to_owned);
         // memo：conversation revision 不变 且 workspace_root 不变 则复用上次 view_model，跳过全量 assemble。
         // workspace_root 来自 /worktree enter，不推进 revision，需单独纳入 key（#425 review Fix 1）。
         let need_rebuild = self
@@ -463,6 +457,15 @@ impl App {
             self.view_state.dirty.clear_status();
         }
     }
+    pub(crate) fn apply_agent_intent(
+        &mut self,
+        intent: crate::tui::update::intent::AgentIntent,
+    ) -> crate::tui::update::root_reducer::TuiUpdateResult {
+        let result = crate::tui::update::root_reducer::reduce_intent(&mut self.model, intent);
+        crate::tui::update::dirty::merge_dirty(&mut self.view_state.dirty, result.dirty.clone());
+        result
+    }
+
     pub(crate) fn mark_output_dirty(&mut self) {
         self.view_state.dirty.mark_output();
     }
@@ -470,6 +473,8 @@ impl App {
     pub(crate) fn status_view_model(&self) -> crate::tui::view_model::StatusViewModel {
         crate::tui::view_assembler::status::StatusViewAssembler::assemble_status_view(
             &self.model.conversation,
+            &self.model.config_provider,
+            &self.model.workspace_provider,
             Some(&self.model.session),
             &self.model.diagnostic,
         )
