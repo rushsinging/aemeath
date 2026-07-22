@@ -261,6 +261,7 @@ where
             directive: crate::application::hook_adapter::RuntimeHookDirective::Continue,
             executions: Vec::new(),
             messages: Vec::new(),
+            block_detail: None,
         }
     };
     if crate::application::chat::looping::hook_ui::dispatch_is_blocking(&pre_dispatch) {

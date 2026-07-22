@@ -157,6 +157,75 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
     assert_eq!(usage.output_tokens, Some(1));
 }
 
+#[tokio::test]
+async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_call() {
+    let body = concat!(
+        "event: response.output_item.added\n",
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_hello\",\"name\":\"Write\"}}\n\n",
+        "event: response.function_call_arguments.done\n",
+        "data: {\"type\":\"response.function_call_arguments.done\",\"output_index\":0,\"arguments\":\"{\\\"file_path\\\":\\\"examples/hello.rs\\\"}\"}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+    );
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let leaked = Box::leak(response.into_boxed_str());
+    let (base_url, _) = spawn_openai_counting_server(leaked).await;
+    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptions {
+        driver: crate::composition::ProviderDriverKind::OpenAI
+            .as_str()
+            .to_string(),
+        source_key: "openai".to_string(),
+        api_style: Some("responses".to_string()),
+        api_key: "test-key".to_string(),
+        base_url: Some(base_url),
+        model: "test-model".to_string(),
+        max_tokens: 8192,
+        reasoning: false,
+        reasoning_config: None,
+        timeout_secs: 60,
+    })
+    .expect("valid OpenAI responses config");
+    let scope = crate::InvocationScope::new(
+        "test-model",
+        8192,
+        crate::ReasoningLevel::Off,
+        crate::ReasoningLevel::Off,
+    )
+    .unwrap();
+
+    let events: Vec<_> = client
+        .invocation_stream(
+            &scope,
+            &[],
+            &[Message::user("create an example")],
+            &[],
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap()
+        .collect()
+        .await;
+
+    let crate::InvocationEvent::Completed(completion) = events.last().unwrap() else {
+        panic!("expected completed event");
+    };
+    assert_eq!(
+        completion.stop_reason,
+        crate::published_language::StopReason::ToolUse
+    );
+    assert!(matches!(
+        &completion.output[..],
+        [crate::ProviderContentBlock::ToolCall(call)]
+            if call.id.0 == "call_hello"
+                && call.name == "Write"
+                && call.arguments == serde_json::json!({"file_path": "examples/hello.rs"})
+    ));
+}
+
 include!("tests/common.rs");
 include!("tests/reasoning.rs");
 include!("tests/provider_config.rs");

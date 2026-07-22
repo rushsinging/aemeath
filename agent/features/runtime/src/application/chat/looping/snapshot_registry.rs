@@ -130,11 +130,11 @@ fn snapshot_file(path: &Path) -> Option<FileSnapshot> {
     }
     let mtime = meta.modified().ok()?;
     let size = meta.len();
-    // 初始快照不计算 sha256（节省 IO），仅在需要兜底比对时计算
+    // 初始快照即保存 sha256，避免首次 touch 被误判为内容变化。
     Some(FileSnapshot {
         mtime,
         size,
-        sha256: None,
+        sha256: compute_sha256(path),
     })
 }
 

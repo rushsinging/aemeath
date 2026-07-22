@@ -1,14 +1,24 @@
 use crate::application::agent::runner::AgentRunOutcome;
 use crate::application::chat::looping::hook_ui::dispatch_hook;
 use crate::application::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
-use crate::application::hook_adapter::{RuntimeHookDirective, RuntimeHookDispatch};
+use crate::application::hook_adapter::{
+    RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookReason,
+};
 use hook::{HookInvocation, HookPort, StopInput};
+use share::message::StopHookFeedback;
 use std::path::PathBuf;
 use std::sync::Arc;
 use task::TaskAccess;
 use tokio_util::sync::CancellationToken;
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
+const TUI_STDOUT_PREVIEW_LINES: usize = 3;
+const TUI_STDERR_PREVIEW_LINES: usize = 5;
+
+pub(crate) struct StopHookFeedbackMessage {
+    pub llm_text: String,
+    pub payload: StopHookFeedback,
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_stop_hook_before_finish<S>(
@@ -19,7 +29,7 @@ pub(crate) async fn run_stop_hook_before_finish<S>(
     language: &str,
     workspace_root: &std::path::Path,
     cancel: &CancellationToken,
-) -> Option<String>
+) -> Option<StopHookFeedbackMessage>
 where
     S: ChatEventSink,
 {
@@ -74,127 +84,88 @@ async fn stop_hook_feedback(
     dispatch: &RuntimeHookDispatch,
     session_id: &str,
     language: &str,
-) -> String {
-    log::debug!(target: crate::LOG_TARGET,
-        "[stop_hook_debug] session={} stop hook directive={:?} executions={} messages={}",
-        session_id,
-        dispatch.directive,
-        dispatch.executions.len(),
-        dispatch.messages.len(),
+) -> StopHookFeedbackMessage {
+    let detail = dispatch
+        .block_detail
+        .as_ref()
+        .expect("Stop hook Block must carry the blocking subscription detail");
+    let command = detail.command.clone();
+    let reason = format_reason(&dispatch.directive);
+    let (stdout_preview, stdout_truncated) =
+        truncate_lines(&detail.execution.stdout, TUI_STDOUT_PREVIEW_LINES);
+    let (stderr_preview, stderr_truncated) =
+        truncate_lines(&detail.execution.stderr, TUI_STDERR_PREVIEW_LINES);
+    let output = format!(
+        "command: {command}\nexit_code: {:?}\nreason: {reason}\n\nstdout:\n{}\n\nstderr:\n{}",
+        detail.execution.exit_code, detail.execution.stdout, detail.execution.stderr
     );
-
-    // Extract stdout, stderr from the last execution
-    let last = dispatch.executions.last();
-    let stdout = last.map(|e| e.stdout.as_str()).unwrap_or("");
-    let stderr = last.map(|e| e.stderr.as_str()).unwrap_or("");
-
-    let source = dispatch
-        .messages
-        .first()
-        .map(|m| m.source.as_str())
-        .unwrap_or("stop hook");
-
-    let details = stop_hook_feedback_details(
-        stdout,
-        stderr,
-        &dispatch.messages,
-        session_id,
-        source,
-        language,
-    )
-    .await;
-
-    let template = match language {
-        "zh" => "Stop hook 阻止了停止。你现在还不能结束本轮处理。\n你 MUST 先满足下面 Stop hook 的要求，然后才能再次尝试停止。\n命令：{cmd}\n{details}",
-        _ => "Stop hook prevented stopping. You cannot finish this turn yet.\nYou MUST first satisfy the Stop hook requirement below, then attempt to stop again.\nCommand: {cmd}\n{details}",
+    let output_file = if output.len() > INLINE_HOOK_OUTPUT_LIMIT {
+        write_long_hook_feedback(session_id, &command, &output)
+            .await
+            .map(|path| path.display().to_string())
+    } else {
+        None
     };
-    template
-        .replace("{cmd}", source)
-        .replace("{details}", &details)
+    let summary = match language {
+        "zh" => "Stop hook 阻止了停止。".to_string(),
+        _ => "Stop hook prevented stopping.".to_string(),
+    };
+    let payload = StopHookFeedback {
+        summary: summary.clone(),
+        command,
+        exit_code: detail.execution.exit_code,
+        reason,
+        stdout_preview,
+        stderr_preview,
+        stdout_truncated,
+        stderr_truncated,
+        output_file,
+    };
+    let llm_text = stop_hook_llm_text(&payload, language);
+
+    StopHookFeedbackMessage { llm_text, payload }
 }
 
-async fn stop_hook_feedback_details(
-    stdout: &str,
-    stderr: &str,
-    messages: &[crate::application::hook_adapter::RuntimeHookDisplayMessage],
-    session_id: &str,
-    command: &str,
-    language: &str,
-) -> String {
-    let (labels, _lang) = match language {
-        "zh" => (
-            HookFeedbackLabels {
-                json_feedback: "JSON 反馈：\n{}",
-                stderr_error: "stderr/错误：\n{}",
-                stdout: "stdout：\n{}",
-                no_reason: "Stop hook 阻止了停止，但没有提供原因",
-                output_too_long_file: "hook 输出过长，已保存到文件：{}\n请读取该文件查看完整 stdout/stderr。",
-                output_too_long_preview: "hook 输出过长，以下为前 {n} 字节预览：\n{preview}",
-            },
-            "zh",
-        ),
-        _ => (
-            HookFeedbackLabels {
-                json_feedback: "JSON feedback:\n{}",
-                stderr_error: "stderr/error:\n{}",
-                stdout: "stdout:\n{}",
-                no_reason: "Stop hook prevented stopping but provided no reason",
-                output_too_long_file: "Hook output too long, saved to file: {}\nPlease read that file for the full stdout/stderr.",
-                output_too_long_preview: "Hook output too long, showing first {n} bytes:\n{preview}",
-            },
-            "en",
-        ),
-    };
-    let _ = _lang;
-
-    // Collect system messages from display messages
-    let sys_msgs: Vec<&str> = messages
-        .iter()
-        .filter(|m| {
-            matches!(
-                m.kind,
-                crate::application::hook_adapter::RuntimeHookDisplayMessageKind::SystemMessage
-            )
-        })
-        .map(|m| m.text.as_str())
-        .collect();
-
-    let mut sections = Vec::new();
-
-    // System messages carry reason/feedback
-    for msg in &sys_msgs {
-        sections.push(str::replace(labels.json_feedback, "{}", msg));
+fn format_reason(directive: &RuntimeHookDirective) -> String {
+    match directive {
+        RuntimeHookDirective::Block { reason } => match reason {
+            RuntimeHookReason::ExitCode { code, .. } => format!("exit code {code}"),
+            RuntimeHookReason::JsonBlock { reason } => reason.clone(),
+            RuntimeHookReason::JsonContinueFalse { stop_reason } => stop_reason
+                .clone()
+                .unwrap_or_else(|| "hook returned continue:false".to_string()),
+            RuntimeHookReason::StopHookExecutionFailed { error }
+            | RuntimeHookReason::PolicyBlock { error } => error.clone(),
+        },
+        _ => "hook blocked completion".to_string(),
     }
+}
 
-    if let Some(error) = non_empty_text(stderr) {
-        sections.push(str::replace(labels.stderr_error, "{}", &error));
+fn stop_hook_llm_text(payload: &StopHookFeedback, language: &str) -> String {
+    let mut text = format!(
+        "{}\nCommand: {}\nExit code: {}\nReason: {}",
+        payload.summary,
+        payload.command,
+        payload
+            .exit_code
+            .map_or_else(|| "unknown".to_string(), |code| code.to_string()),
+        payload.reason
+    );
+    if let Some(path) = &payload.output_file {
+        let instruction = match language {
+            "zh" => format!("\n完整 hook 输出已保存到 {path}；请使用 Read 工具查看。"),
+            _ => format!("\nFull hook output is saved to {path}; use the Read tool to inspect it."),
+        };
+        text.push_str(&instruction);
+    } else {
+        if !payload.stderr_preview.trim().is_empty() {
+            text.push_str(&format!("\nstderr:\n{}", payload.stderr_preview));
+        }
+        if !payload.stdout_preview.trim().is_empty() {
+            text.push_str(&format!("\nstdout:\n{}", payload.stdout_preview));
+        }
     }
-    if let Some(output) = non_empty_text(stdout) {
-        sections.push(str::replace(labels.stdout, "{}", &output));
-    }
-    if sections.is_empty() {
-        return labels.no_reason.to_string();
-    }
-
-    let details = sections.join("\n\n");
-    if details.len() <= INLINE_HOOK_OUTPUT_LIMIT {
-        return details;
-    }
-
-    match write_long_hook_feedback(session_id, command, &details).await {
-        Some(path) => str::replace(
-            labels.output_too_long_file,
-            "{}",
-            &path.display().to_string(),
-        ),
-        None => labels
-            .output_too_long_preview
-            .replace("{n}", &INLINE_HOOK_OUTPUT_LIMIT.to_string())
-            .replace(
-                "{preview}",
-                truncate_utf8(&details, INLINE_HOOK_OUTPUT_LIMIT),
-            ),
-    }
+    text
 }
 
 async fn write_long_hook_feedback(
@@ -230,29 +201,17 @@ fn sanitized_file_stem(command: &str) -> String {
     }
 }
 
-fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
-    if text.len() <= max_bytes {
-        return text;
-    }
-    &text[..text.floor_char_boundary(max_bytes)]
-}
-
-fn non_empty_text(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-struct HookFeedbackLabels {
-    json_feedback: &'static str,
-    stderr_error: &'static str,
-    stdout: &'static str,
-    no_reason: &'static str,
-    output_too_long_file: &'static str,
-    output_too_long_preview: &'static str,
+fn truncate_lines(text: &str, max_lines: usize) -> (String, bool) {
+    let lines: Vec<&str> = text.lines().collect();
+    let truncated = lines.len() > max_lines;
+    (
+        lines
+            .into_iter()
+            .take(max_lines)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        truncated,
+    )
 }
 
 #[cfg(test)]

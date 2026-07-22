@@ -206,6 +206,10 @@ impl TaskAccess for TaskStore {
         self.lock().get(id)
     }
 
+    fn current_task_by_seq(&self, seq: u64) -> Option<Task> {
+        self.lock().current_task_by_seq(seq)
+    }
+
     fn list(&self) -> Vec<Task> {
         self.lock().list()
     }

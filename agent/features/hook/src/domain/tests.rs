@@ -57,7 +57,7 @@ fn test_classify_exit0_json_continue_true() {
 /// #924：exit 0 + 非法 JSON → typed `InvalidJson`。
 #[test]
 fn test_classify_exit0_invalid_json_is_typed_invalid_json() {
-    let d = classify_directive(HookPoint::PreToolUse, Some(0), "not json", "");
+    let d = classify_directive(HookPoint::PreToolUse, Some(0), "{not json", "");
     assert!(
         matches!(d, Err(ClassifyError::InvalidJson { .. })),
         "非法 JSON 应分类为 typed InvalidJson，实际 = {d:?}"
@@ -98,7 +98,7 @@ fn test_classify_none_exit_code_with_stdout_still_missing() {
 /// #924：非法 JSON 的 `raw` 携带触发解析失败的原始 stdout。
 #[test]
 fn test_classify_exit0_invalid_json_carries_raw() {
-    let d = classify_directive(HookPoint::PreToolUse, Some(0), "not json", "");
+    let d = classify_directive(HookPoint::PreToolUse, Some(0), "{not json", "");
     match d {
         Err(ClassifyError::InvalidJson { raw, error }) => {
             assert!(!raw.is_empty(), "raw 应携带原始 stdout");
@@ -142,6 +142,29 @@ fn test_classify_exit0_json_decision_block_no_reason() {
             reason: HookReason::JsonBlock { ref reason }
         } if reason.is_empty()
     ));
+}
+
+/// exit 0 + 普通成功日志 → Continue；构建/守卫日志不要求 JSON 协议。
+#[test]
+fn classify_output_stop_plain_success_log_continues() {
+    let directive = classify_directive(
+        HookPoint::Stop,
+        Some(0),
+        "Finished build\nAll fast architecture guards passed.\n",
+        "",
+    )
+    .expect("普通成功日志应视为 Continue");
+
+    assert!(matches!(directive, HookDirective::Continue));
+}
+
+/// 以 `{` 开头的 stdout 表示声明 JSON 协议；损坏 JSON 仍必须报错。
+#[test]
+fn classify_output_stop_invalid_json_candidate_fails() {
+    let error = classify_directive(HookPoint::Stop, Some(0), "{not-json", "")
+        .expect_err("JSON 候选格式损坏不能静默放行");
+
+    assert!(matches!(error, ClassifyError::InvalidJson { .. }));
 }
 
 /// exit 0 + `{"continue":false}` → Block（阻塞 point）。

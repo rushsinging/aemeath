@@ -37,7 +37,6 @@ pub enum RunStatus {
     ExecutingTools,
     AwaitingUser,
     Compacting,
-    Finishing,
     CancellingStep,
     FinalizingStep,
     Cancelling,
@@ -118,7 +117,6 @@ impl RunStep {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunTransition {
-    Start,
     StartDraining,
     DrainInputs,
     DrainInternalContinuation,
@@ -130,13 +128,11 @@ pub enum RunTransition {
     ModelContextExceeded,
     ModelInvoked,
     ResponseWithTools,
-    ResponseWithoutTools,
     ContinueAfterResponse,
     ToolsApproved,
     AwaitUser,
     UserResumed,
     ToolsCompleted,
-    Finish,
     StepCancelled,
     TerminationFinished,
     CancellationFinished,
@@ -144,7 +140,6 @@ pub enum RunTransition {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunTransitionReason {
-    Start,
     DrainStarted,
     DrainInputs,
     DrainInternalContinuation,
@@ -156,13 +151,11 @@ pub enum RunTransitionReason {
     ModelContextExceeded,
     ModelInvoked,
     ResponseWithTools,
-    ResponseWithoutTools,
     ContinueAfterResponse,
     ToolsApproved,
     AwaitUser,
     UserResumed,
     ToolsCompleted,
-    Finish,
     StepCancellationRequested,
     StepFinalizationStarted,
     StepCancelled,
@@ -176,7 +169,6 @@ pub enum RunTransitionReason {
 impl From<RunTransition> for RunTransitionReason {
     fn from(transition: RunTransition) -> Self {
         match transition {
-            RunTransition::Start => Self::Start,
             RunTransition::StartDraining => Self::DrainStarted,
             RunTransition::DrainInputs => Self::DrainInputs,
             RunTransition::DrainInternalContinuation => Self::DrainInternalContinuation,
@@ -188,13 +180,11 @@ impl From<RunTransition> for RunTransitionReason {
             RunTransition::ModelContextExceeded => Self::ModelContextExceeded,
             RunTransition::ModelInvoked => Self::ModelInvoked,
             RunTransition::ResponseWithTools => Self::ResponseWithTools,
-            RunTransition::ResponseWithoutTools => Self::ResponseWithoutTools,
             RunTransition::ContinueAfterResponse => Self::ContinueAfterResponse,
             RunTransition::ToolsApproved => Self::ToolsApproved,
             RunTransition::AwaitUser => Self::AwaitUser,
             RunTransition::UserResumed => Self::UserResumed,
             RunTransition::ToolsCompleted => Self::ToolsCompleted,
-            RunTransition::Finish => Self::Finish,
             RunTransition::StepCancelled => Self::StepCancelled,
             RunTransition::TerminationFinished => Self::TerminationFinished,
             RunTransition::CancellationFinished => Self::CancellationFinished,

@@ -41,6 +41,7 @@ fn local_domain_results_are_uncommitted_until_store_transaction() {
     let result = Task::create(
         TaskId::new(1),
         BatchId::new(1),
+        1,
         TaskCreateSpec::try_new("任务".into(), String::new(), None, TaskPriority::Normal).unwrap(),
         1,
     );
@@ -52,6 +53,7 @@ fn task_create_and_local_fields_preserve_private_state() {
     let result = Task::create(
         TaskId::new(2),
         BatchId::new(3),
+        1,
         TaskCreateSpec::try_new(
             "任务".into(),
             "描述".into(),
@@ -81,6 +83,7 @@ fn task_subject_and_description_updates_are_typed_and_idempotent() {
     let mut task = Task::create(
         TaskId::new(1),
         BatchId::new(1),
+        1,
         TaskCreateSpec::try_new(
             "原始标题".into(),
             "原始描述".into(),

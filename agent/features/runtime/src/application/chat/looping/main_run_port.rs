@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -17,6 +17,7 @@ use crate::application::chat::looping::post_batch::run_post_tool_batch;
 use crate::application::chat::looping::reflection::{
     maybe_submit_pre_compact_reflection, should_run_turn_reflection, submit_interval_reflection,
 };
+use crate::application::chat::looping::run_input_buffer::{BufferDrain, RunInputBuffer};
 use crate::application::chat::looping::stream_handler::{
     should_emit_model_stream_waiting, InvocationEventReducer,
 };
@@ -28,8 +29,8 @@ use crate::application::chat::looping::{
 };
 use crate::application::context_coordination::ContextCoordinator;
 use crate::application::loop_engine::{
-    split_input_events, LoopEngineError, LoopInput, ModelStep, RunLoopPort, ToolGuardDecision,
-    ToolStep,
+    DrainEpoch, DrainOutcome, InternalContinuationKind, LoopEngineError, LoopInput, ModelStep,
+    RunLoopPort, ToolGuardDecision, ToolStep,
 };
 use crate::domain::agent_run::RunDomainEvent;
 use crate::ports::{
@@ -37,6 +38,14 @@ use crate::ports::{
     SystemPromptSpec, TaskReminderSnapshot,
 };
 use workflow::api::{ReasoningPort, ReasoningSignal};
+
+/// Test-only static: when set to `true` before constructing `MainRunPort`,
+/// `execute_tools` returns `ToolStep::AwaitUser` for `AskUserQuestion` tool
+/// calls instead of processing them inline.  This lets session-level tests
+/// deterministically exercise the same-Run AwaitUser recovery loop (#1272).
+#[cfg(test)]
+pub(crate) static TEST_AWAIT_USER_MODE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Aborts a spawned request companion task even when the invocation future is dropped.
 struct AbortTaskOnDrop(tokio::task::JoinHandle<()>);
@@ -90,17 +99,28 @@ impl StepMessageOwnership {
         if inputs.is_empty() {
             messages.extend(std::mem::take(&mut self.pending));
         } else {
-            messages.extend(inputs.iter().map(|input| Message::user(input.text.clone())));
+            messages.extend(inputs.iter().map(|input| {
+                if input.images.is_empty() {
+                    Message::user(input.text.clone())
+                } else {
+                    super::super::input_gate::user_message_with_images(
+                        input.text.clone(),
+                        input.images.clone(),
+                    )
+                }
+            }));
         }
         self.active = messages.clone();
         self.accepted_input = messages
             .iter()
             .filter(|message| {
                 message.role == Role::User
-                    && message
-                        .metadata
-                        .as_ref()
-                        .is_none_or(|metadata| metadata.source != MessageSource::SystemGenerated)
+                    && message.metadata.as_ref().is_none_or(|metadata| {
+                        !matches!(
+                            metadata.source,
+                            MessageSource::SystemGenerated | MessageSource::StopHook
+                        )
+                    })
             })
             .cloned()
             .collect();
@@ -162,6 +182,28 @@ pub(crate) fn fixture_finalize_messages(
     accepted.into_iter().chain(ownership.outcome()).collect()
 }
 
+/// Simulate a two-step freeze lifecycle (first step with buffer-sourced
+/// inputs, second step with empty inputs as in an InternalContinuation).
+/// Returns `(first_accepted, second_accepted)` — the accepted user
+/// messages after each freeze.
+///
+/// Used by the idle-replay regression test to verify that gate-adopted
+/// user input is not replayed when `pending` is empty (post-fix
+/// contract).
+#[cfg(test)]
+pub(crate) fn fixture_two_step_accepted(
+    pending: Vec<Message>,
+    first_inputs: &[LoopInput],
+    second_inputs: &[LoopInput],
+) -> (Vec<Message>, Vec<Message>) {
+    let mut ownership = StepMessageOwnership::new(pending);
+    ownership.freeze(None, first_inputs);
+    let first_accepted = ownership.accepted_user_messages();
+    ownership.freeze(None, second_inputs);
+    let second_accepted = ownership.accepted_user_messages();
+    (first_accepted, second_accepted)
+}
+
 /// Main-chat adapter for the shared run loop.
 ///
 /// It owns no lifecycle state machine. `Run` is the only per-run state machine; this adapter
@@ -209,9 +251,22 @@ where
     pub(crate) language: &'a str,
     pub(crate) reasoning: &'a dyn ReasoningPort,
     pub(crate) pending_input: &'a mut PendingInputBuffer,
-    pub(crate) deferred_user_inputs: &'a mut VecDeque<sdk::ChatInputEvent>,
+    /// Run-scoped input buffer: user messages received during this Run are
+    /// accumulated here and drained per-step within the same Run (#1272).
+    pub(crate) run_input_buffer: RunInputBuffer,
     /// Stop hook 阻断后，作为下一 Step 系统前缀投递且恰好消费一次的反馈。
     pub(crate) stop_hook_feedback: Option<Message>,
+    /// #1272: 桥接 drain_input→freeze_step 的 stop hook feedback relay。
+    /// drain_input 从 [`stop_hook_feedback`] 取走后写入此字段；freeze_step
+    /// 从此字段消费一次（不作为 accepted input）。避免 double-take 丢失。
+    pub(crate) pending_stop_hook_feedback: Option<Message>,
+    /// #1272: 上一 Step 完成 Tools 后置位；下一次 drain 把它作为显式
+    /// `InternalContinuation::ToolResults` 续跑，不与新进入的 user input 混批。
+    pub(crate) pending_tool_results: bool,
+    /// #1272: Per-turn adopted (InputId, Message) pairs collected during
+    /// freeze_step from LoopInput::input_id. Emitted via UserMessagesAdopted
+    /// after accept_step_input durable success. Cleared after emission.
+    pub(crate) per_turn_adopted: Vec<(sdk::InputId, Message)>,
     pub(crate) cancel: CancellationToken,
     pub(crate) run_id: sdk::RunId,
     pub(crate) active_run: &'a dyn crate::domain::agent_run::ActiveRunPort,
@@ -230,6 +285,30 @@ where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
+    /// Drain any remaining events from the Run-scoped buffer back to the
+    /// session's `pending_input`. Called after `run_loop` returns so that
+    /// unconsumed control events are not lost (#1272).
+    ///
+    /// #1272: When the buffer was sealed by `drain_or_seal`, UserMessage
+    /// events should not be present (all admission paths now use
+    /// `push_or_reject`). If any are found, they are logged and routed to
+    /// `pending_input` explicitly rather than silently forwarded.
+    pub(crate) fn drain_remaining_events(&mut self) {
+        let sealed = self.run_input_buffer.is_sealed();
+        for event in self.run_input_buffer.drain_all() {
+            match &event {
+                sdk::ChatInputEvent::UserMessage { .. } if sealed => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "MainRunPort: sealed buffer contained unconsumed UserMessage; routing to pending_input"
+                    );
+                    self.pending_input.push(event);
+                }
+                _ => self.pending_input.push(event),
+            }
+        }
+    }
+
     fn freeze_request(
         &self,
         step_id: &RunStepId,
@@ -320,33 +399,57 @@ where
         Ok(())
     }
 
-    async fn queue_busy_event(&mut self, event: sdk::ChatInputEvent) {
-        match event {
-            sdk::ChatInputEvent::UserMessage { .. } => {
-                self.deferred_user_inputs.push_back(event);
-                let queued = self
-                    .deferred_user_inputs
+    /// Unify UserMessage admission into the active Run's input buffer.
+    /// Uses `push_or_reject`: when the buffer is sealed, the message is
+    /// routed to `pending_input` for the next Run; when accepted,
+    /// `UserMessagesQueued` is emitted.
+    async fn admit_user_message(&mut self, event: sdk::ChatInputEvent) {
+        debug_assert!(matches!(event, sdk::ChatInputEvent::UserMessage { .. }));
+        match self.run_input_buffer.push_or_reject(event) {
+            Some(rejected) => {
+                let rejected_id = match &rejected {
+                    sdk::ChatInputEvent::UserMessage { id, .. } => Some(id.as_str().to_string()),
+                    _ => None,
+                };
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "[loop_debug] admit_user_message run_id={} REJECTED sealed=true rejected_id={:?}",
+                    self.run_id,
+                    rejected_id,
+                );
+                self.pending_input.push(rejected);
+            }
+            None => {
+                let queued = self.run_input_buffer.user_message_snapshot();
+                let queued_ids: Vec<_> = queued
                     .iter()
-                    .filter_map(|event| match event {
-                        sdk::ChatInputEvent::UserMessage { id, text, .. } => {
-                            Some((id.clone(), Message::user(text.clone())))
-                        }
-                        _ => None,
-                    })
+                    .map(|(id, _)| id.as_str().to_string())
                     .collect();
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "[loop_debug] admit_user_message run_id={} ACCEPTED queue_count={} queued_ids={:?}",
+                    self.run_id,
+                    queued.len(),
+                    queued_ids,
+                );
                 self.sink
                     .send_event(RuntimeStreamEvent::UserMessagesQueued { queued })
                     .await;
             }
+        }
+    }
+
+    /// Route events received during a Run. User messages accumulate in the
+    /// Run-scoped buffer and are consumed in-step within the same Run (#1272).
+    /// Control events (commands, WithdrawAll) are handled immediately or
+    /// forwarded to session `pending_input`.
+    async fn queue_busy_event(&mut self, event: sdk::ChatInputEvent) {
+        match event {
+            sdk::ChatInputEvent::UserMessage { .. } => {
+                self.admit_user_message(event).await;
+            }
             sdk::ChatInputEvent::WithdrawAll => {
-                let texts = self
-                    .deferred_user_inputs
-                    .drain(..)
-                    .filter_map(|event| match event {
-                        sdk::ChatInputEvent::UserMessage { text, .. } => Some(text),
-                        _ => None,
-                    })
-                    .collect();
+                let texts = self.run_input_buffer.withdraw_all_user_texts();
                 self.sink
                     .send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts })
                     .await;
@@ -707,9 +810,13 @@ where
             if self.cancel.is_cancelled() {
                 return Err(LoopEngineError::Cancelled);
             }
-            let feedback = Message::system_generated_user(format!(
-                "<system-reminder>\n{feedback}\n</system-reminder>"
-            ));
+            let feedback = Message::stop_hook_feedback(
+                format!(
+                    "<system-reminder>\n{}\n</system-reminder>",
+                    feedback.llm_text
+                ),
+                feedback.payload,
+            );
             self.stop_hook_feedback = Some(feedback.clone());
             self.step_messages.record(feedback.clone());
             self.messages.push(feedback);
@@ -732,6 +839,137 @@ where
             token_usage,
         ))
     }
+
+    /// #1272: Shared drain logic: collect events, check stop-hook feedback
+    /// and tool results. Returns `Some(outcome)` if the drain is complete
+    /// (stop hook or tool results consumed), or `None` if control falls
+    /// through to the normal drain path (`drain_or_seal` / `try_drain_unsealed`).
+    async fn drain_collect_and_check_continuations(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<Option<DrainOutcome>, LoopEngineError> {
+        let mut events = self.input_events.drain_input_events().await;
+        if let Some(queued) = self.queue.drain_queued_input().await {
+            events.extend(
+                queued
+                    .into_iter()
+                    .map(|text| sdk::ChatInputEvent::classify_text(text, Vec::new())),
+            );
+        }
+        for event in events {
+            match event {
+                sdk::ChatInputEvent::UserMessage { .. } => self.admit_user_message(event).await,
+                sdk::ChatInputEvent::WithdrawAll => {
+                    let texts = self.run_input_buffer.withdraw_all_user_texts();
+                    if !texts.is_empty() {
+                        self.sink
+                            .send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts })
+                            .await;
+                    }
+                }
+                other => self.pending_input.push(other),
+            }
+        }
+
+        // #1272 Per-turn drain-or-seal contract:
+        //   StopHookFeedback > ToolResults > user input (Ready) > EmptyAndSealed.
+        if let Some(feedback) = self.stop_hook_feedback.take() {
+            let text = feedback.text_content();
+            self.pending_stop_hook_feedback = Some(feedback);
+            let (batch, epoch) = match self
+                .run_input_buffer
+                .take_internal_continuation(expected_epoch)
+            {
+                BufferDrain::Ready { batch, epoch } => (batch, epoch),
+                BufferDrain::EmptyAndSealed { .. } | BufferDrain::Empty { .. } => {
+                    // Shouldn't happen: take_internal_continuation never seals
+                    // and never returns Empty.
+                    return Err(LoopEngineError::Adapter(
+                        "internal continuation 意外返回 EmptyAndSealed/Empty".to_string(),
+                    ));
+                }
+                BufferDrain::AlreadySealed { epoch } => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "MainRunPort: take_internal_continuation returned AlreadySealed at epoch {:?}",
+                        epoch,
+                    );
+                    return Ok(Some(DrainOutcome::EmptyAndSealed { epoch }));
+                }
+                BufferDrain::EpochMismatch { expected, actual } => {
+                    return Err(LoopEngineError::Adapter(format!(
+                        "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                        expected, actual,
+                    )));
+                }
+            };
+            let input_ids: Vec<_> = batch
+                .iter()
+                .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
+                .collect();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[loop_debug] drain_input run_id={} status=InternalContinuation epoch={:?} kind=StopHookFeedback input_ids={:?} count={}",
+                self.run_id,
+                epoch,
+                input_ids,
+                batch.len(),
+            );
+            return Ok(Some(DrainOutcome::InternalContinuation {
+                kind: InternalContinuationKind::StopHookFeedback { feedback: text },
+                batch,
+                epoch,
+            }));
+        }
+        if self.pending_tool_results {
+            self.pending_tool_results = false;
+            let (batch, epoch) = match self
+                .run_input_buffer
+                .take_internal_continuation(expected_epoch)
+            {
+                BufferDrain::Ready { batch, epoch } => (batch, epoch),
+                BufferDrain::EmptyAndSealed { .. } | BufferDrain::Empty { .. } => {
+                    return Err(LoopEngineError::Adapter(
+                        "internal continuation 意外返回 EmptyAndSealed/Empty".to_string(),
+                    ));
+                }
+                BufferDrain::AlreadySealed { epoch } => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "MainRunPort: take_internal_continuation returned AlreadySealed at epoch {:?}",
+                        epoch,
+                    );
+                    return Ok(Some(DrainOutcome::EmptyAndSealed { epoch }));
+                }
+                BufferDrain::EpochMismatch { expected, actual } => {
+                    return Err(LoopEngineError::Adapter(format!(
+                        "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                        expected, actual,
+                    )));
+                }
+            };
+            let input_ids: Vec<_> = batch
+                .iter()
+                .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
+                .collect();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[loop_debug] drain_input run_id={} status=InternalContinuation epoch={:?} kind=ToolResults input_ids={:?} count={}",
+                self.run_id,
+                epoch,
+                input_ids,
+                batch.len(),
+            );
+            return Ok(Some(DrainOutcome::InternalContinuation {
+                kind: InternalContinuationKind::ToolResults,
+                batch,
+                epoch,
+            }));
+        }
+
+        // Fall through to normal drain path
+        Ok(None)
+    }
 }
 
 #[async_trait]
@@ -742,12 +980,48 @@ where
     I: InputEventDrainPort,
 {
     fn freeze_step(&mut self, step_id: &RunStepId, inputs: &[LoopInput]) {
-        let feedback = self.stop_hook_feedback.take();
+        // #1272: consume from pending_stop_hook_feedback — drain_input took
+        // from stop_hook_feedback and relayed here so freeze_step can
+        // inject the feedback as a system-prefix message.
+        let feedback = self.pending_stop_hook_feedback.take();
         let has_stop_hook_feedback = feedback.is_some();
         let _pending_messages = self.step_messages.freeze(feedback, inputs);
         if has_stop_hook_feedback {
             self.messages
                 .extend(inputs.iter().map(|input| Message::user(input.text.clone())));
+        }
+        // #1272 per-turn drain identity: collect (InputId, Message) pairs
+        // for UserMessagesAdopted emission after durable accept succeeds.
+        self.per_turn_adopted = inputs
+            .iter()
+            .filter_map(|input| {
+                input.input_id.as_ref().map(|id| {
+                    let message = if input.images.is_empty() {
+                        Message::user(input.text.clone())
+                    } else {
+                        super::super::input_gate::user_message_with_images(
+                            input.text.clone(),
+                            input.images.clone(),
+                        )
+                    };
+                    (id.clone(), message)
+                })
+            })
+            .collect();
+        if !self.per_turn_adopted.is_empty() {
+            let input_ids: Vec<_> = self
+                .per_turn_adopted
+                .iter()
+                .map(|(id, _)| id.as_str().to_string())
+                .collect();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[loop_debug] freeze_step run_id={} step_id={} input_ids={:?} count={}",
+                self.run_id,
+                step_id,
+                input_ids,
+                self.per_turn_adopted.len()
+            );
         }
         self.context_request = Some(self.freeze_request(step_id, self.step_messages.outcome()));
         self.context_window = None;
@@ -767,40 +1041,159 @@ where
             .append_accepted_input(request, accepted)
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+
+        // #1272 per-turn drain identity: emit UserMessagesAdopted strictly
+        // after durable accept succeeds. The TUI uses this to clear queued
+        // placeholders by input_id and append formal user messages.
+        let adopted = std::mem::take(&mut self.per_turn_adopted);
+        if !adopted.is_empty() {
+            let queued = self.run_input_buffer.user_message_snapshot();
+            let input_ids: Vec<_> = adopted
+                .iter()
+                .map(|(id, _)| id.as_str().to_string())
+                .collect();
+            let queued_ids: Vec<_> = queued
+                .iter()
+                .map(|(id, _)| id.as_str().to_string())
+                .collect();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[loop_debug] accept_step_input emitting UserMessagesAdopted run_id={} step_id={} adopt_ids={:?} adopt_count={} queued_ids={:?} queued_count={}",
+                self.run_id,
+                step_id,
+                input_ids,
+                adopted.len(),
+                queued_ids,
+                queued.len(),
+            );
+            self.sink
+                .send_event(RuntimeStreamEvent::UserMessagesAdopted {
+                    items: adopted,
+                    queued,
+                })
+                .await;
+        }
         Ok(())
     }
 
-    async fn drain_input(&mut self) -> Result<Vec<LoopInput>, LoopEngineError> {
-        let accepts_continuation_inputs = self.stop_hook_feedback.is_some();
-        let mut events = self.input_events.drain_input_events().await;
-        if let Some(queued) = self.queue.drain_queued_input().await {
-            events.extend(
-                queued
-                    .into_iter()
-                    .map(|text| sdk::ChatInputEvent::classify_text(text, Vec::new())),
-            );
+    async fn drain_input(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        if let Some(outcome) = self
+            .drain_collect_and_check_continuations(expected_epoch)
+            .await?
+        {
+            return Ok(outcome);
         }
-        let batch = split_input_events(events.clone());
-        let inputs = if accepts_continuation_inputs {
-            batch
-                .user_inputs
-                .iter()
-                .map(|input| LoopInput {
-                    text: input.text.clone(),
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        for event in events {
-            if accepts_continuation_inputs
-                && matches!(event, sdk::ChatInputEvent::UserMessage { .. })
-            {
-                continue;
+
+        // #1272: atomic drain-or-seal — a single synchronous decision point
+        // instead of drain-then-check. Once sealed, late UserMessages are
+        // rejected by push_or_reject (not silently buffered for next Run).
+        match self.run_input_buffer.drain_or_seal(expected_epoch) {
+            BufferDrain::Ready { batch, epoch } => {
+                let input_ids: Vec<_> = batch
+                    .iter()
+                    .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
+                    .collect();
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "[loop_debug] drain_input run_id={} status=Ready epoch={:?} kind=per_turn input_ids={:?} count={}",
+                    self.run_id,
+                    epoch,
+                    input_ids,
+                    batch.len(),
+                );
+                Ok(DrainOutcome::Ready { batch, epoch })
             }
-            self.queue_busy_event(event).await;
+            BufferDrain::EmptyAndSealed { epoch } => {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "[loop_debug] drain_input run_id={} status=EmptyAndSealed epoch={:?}",
+                    self.run_id,
+                    epoch,
+                );
+                // Buffer was empty; seal applied atomically.
+                Ok(DrainOutcome::EmptyAndSealed { epoch })
+            }
+            BufferDrain::Empty { .. } => {
+                // Shouldn't happen: drain_or_seal never returns Empty.
+                Err(LoopEngineError::Adapter(
+                    "drain_or_seal 意外返回 Empty".to_string(),
+                ))
+            }
+            BufferDrain::AlreadySealed { epoch } => {
+                // Defensive: buffer already sealed (should not reach here).
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "MainRunPort: drain_or_seal returned AlreadySealed — buffer was already sealed"
+                );
+                Ok(DrainOutcome::EmptyAndSealed { epoch })
+            }
+            BufferDrain::EpochMismatch { expected, actual } => {
+                log::error!(
+                    target: crate::LOG_TARGET,
+                    "MainRunPort: drain_or_seal epoch mismatch — expected {:?}, actual {:?}",
+                    expected,
+                    actual,
+                );
+                Err(LoopEngineError::Adapter(format!(
+                    "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                    expected, actual,
+                )))
+            }
         }
-        Ok(inputs)
+    }
+
+    /// #1272: Drain input while the Run is AwaitingUser. Unlike
+    /// `drain_input`, uses `try_drain_unsealed` which NEVER seals the
+    /// buffer — when no user input is available, returns `NoInput` and
+    /// keeps the buffer receptive to future input in the same Run.
+    async fn await_user_input(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        if let Some(outcome) = self
+            .drain_collect_and_check_continuations(expected_epoch)
+            .await?
+        {
+            return Ok(outcome);
+        }
+
+        match self.run_input_buffer.try_drain_unsealed(expected_epoch) {
+            BufferDrain::Ready { batch, epoch } => Ok(DrainOutcome::Ready { batch, epoch }),
+            BufferDrain::Empty { epoch } => {
+                // No user input; buffer is NOT sealed. Return NoInput so
+                // the engine stays in AwaitUser without advancing epoch.
+                Ok(DrainOutcome::NoInput { epoch })
+            }
+            BufferDrain::EmptyAndSealed { .. } => {
+                // Shouldn't happen: try_drain_unsealed never seals.
+                Err(LoopEngineError::Adapter(
+                    "try_drain_unsealed 意外返回 EmptyAndSealed".to_string(),
+                ))
+            }
+            BufferDrain::AlreadySealed { epoch } => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "MainRunPort: try_drain_unsealed returned AlreadySealed at epoch {:?}",
+                    epoch,
+                );
+                Ok(DrainOutcome::EmptyAndSealed { epoch })
+            }
+            BufferDrain::EpochMismatch { expected, actual } => {
+                log::error!(
+                    target: crate::LOG_TARGET,
+                    "MainRunPort: try_drain_unsealed epoch mismatch — expected {:?}, actual {:?}",
+                    expected,
+                    actual,
+                );
+                Err(LoopEngineError::Adapter(format!(
+                    "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                    expected, actual,
+                )))
+            }
+        }
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
@@ -913,6 +1306,17 @@ where
     ) -> Result<ToolStep, LoopEngineError> {
         if calls.is_empty() {
             return Ok(ToolStep::Continue);
+        }
+        // #1272 test hook: when TEST_AWAIT_USER_MODE is set and any call is
+        // AskUserQuestion, return AwaitUser so the session actor exercises
+        // its same-Run recovery loop.  The normal inline ask_user path is
+        // bypassed — the test driver injects user input through the
+        // channel instead.
+        #[cfg(test)]
+        if TEST_AWAIT_USER_MODE.load(std::sync::atomic::Ordering::Relaxed)
+            && calls.iter().any(|(call, _)| call.name == "AskUserQuestion")
+        {
+            return Ok(ToolStep::AwaitUser);
         }
         let raw_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
         let agent = Self::make_agent(
@@ -1029,8 +1433,13 @@ where
         )
         .await;
         Ok(if fuse_bypassed.is_empty() {
+            // #1272: tool results are an explicit InternalContinuation, not a
+            // fresh batch of user input. Mark the port so the next drain will
+            // emit `InternalContinuation::ToolResults` instead of an empty Ready.
+            self.pending_tool_results = true;
             ToolStep::Continue
         } else {
+            self.pending_tool_results = true;
             ToolStep::ContinueWithFuseBypass(fuse_bypassed)
         })
     }
