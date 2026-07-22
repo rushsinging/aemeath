@@ -246,7 +246,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn anthropic_invocation_stream_returns_retryable_error_after_one_request() {
+    async fn anthropic_invocation_stream_returns_non_retryable_rate_limited_error_after_one_request(
+    ) {
         let response =
             "HTTP/1.1 429 Too Many Requests\r\nretry-after: 2\r\ncontent-length: 8\r\n\r\nsensitive";
         let (base_url, request_count) = spawn_counting_server(response).await;
@@ -278,7 +279,7 @@ mod tests {
 
         assert_eq!(request_count.load(Ordering::SeqCst), 1);
         assert_eq!(error.kind, crate::ProviderErrorKind::RateLimited);
-        assert!(error.retryable);
+        assert!(!error.retryable);
         assert_eq!(error.retry_after, Some(std::time::Duration::from_secs(2)));
         assert!(!error.safe_message.contains("sensitive"));
     }
@@ -486,11 +487,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invocation_stream_returns_retryable_rate_limited_on_429() {
-        // 429 → HttpAttemptFailure::Http { kind: RateLimited } → driver maps to
-        // a single-attempt retryable ProviderError::RateLimited. P6 retry
-        // ownership is intentionally out of scope here (Runtime owns retry),
-        // so we only assert the typed single-attempt classification.
+    async fn invocation_stream_returns_non_retryable_rate_limited_on_429() {
+        // 429 is surfaced as a terminal ProviderError::RateLimited. Runtime
+        // must not retry rate limits, while Retry-After remains diagnostic data.
         let response = "HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n";
         let (base_url, request_count) = spawn_counting_server(response).await;
 
@@ -520,8 +519,8 @@ mod tests {
             "expected RateLimited, got {err:?}"
         );
         assert!(
-            err.retryable,
-            "429 must surface as retryable to Runtime (P6 owns retry)"
+            !err.retryable,
+            "429 must remain terminal even when Runtime owns other retries"
         );
         assert_eq!(
             request_count.load(Ordering::SeqCst),

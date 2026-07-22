@@ -298,7 +298,7 @@ async fn invoke_propagates_provider_error() {
     };
     let fake = Arc::new(
         FakeLlmProvider::new("bad-provider", "bad-model", captured).with_error(
-            provider::ProviderError::retryable(
+            provider::ProviderError::fatal(
                 provider::ProviderErrorKind::RateLimited,
                 "too many requests",
             ),
@@ -325,8 +325,8 @@ async fn invoke_propagates_provider_error() {
 
     let result = port.invoke(request, &cancel).await;
     assert!(
-        matches!(result, Err(ref e) if e.kind == provider::ProviderErrorKind::RateLimited && e.retryable),
-        "expected rate-limited error"
+        matches!(result, Err(ref e) if e.kind == provider::ProviderErrorKind::RateLimited && !e.retryable),
+        "expected terminal rate-limited error"
     );
 }
 

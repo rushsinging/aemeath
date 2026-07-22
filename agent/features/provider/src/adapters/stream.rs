@@ -373,7 +373,6 @@ fn provider_error_from_legacy(error: crate::LlmError) -> ProviderError {
     let retryable = matches!(
         error,
         crate::LlmError::Network(_)
-            | crate::LlmError::RateLimited
             | crate::LlmError::StreamInterrupted(_)
             | crate::LlmError::StreamTruncated { .. }
     );

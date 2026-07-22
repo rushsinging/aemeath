@@ -281,7 +281,7 @@ impl HttpAttemptFailure {
                     ),
                     HttpFailureKind::RateLimited => (
                         ProviderErrorKind::RateLimited,
-                        true,
+                        false,
                         "provider rate limit exceeded",
                     ),
                     HttpFailureKind::ContextTooLong => (
@@ -609,7 +609,7 @@ mod tests {
             (
                 429,
                 crate::ProviderErrorKind::RateLimited,
-                true,
+                false,
                 Some(3_000),
             ),
             (404, crate::ProviderErrorKind::ModelUnavailable, false, None),
