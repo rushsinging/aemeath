@@ -27,7 +27,7 @@ pub struct RenderCtx {
     pub text_width: u16,
 }
 
-/// 行内 link 的位置与 URL，用于 Ctrl+Click 打开。
+/// 行内 link 的位置与 URL，用于 Cmd+Click 打开。
 /// `col_start` / `col_end` 是 **plain 文本**中的字符偏移（与 `RenderedLine::plain` 对齐）。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LinkSpan {
@@ -42,7 +42,7 @@ pub struct LinkSpan {
 /// `gutter_cols` 记录前导 gutter 占用的显示列 / span 字符数（gutter 不进 plain）。
 /// 选区高亮与点击列→plain 字符映射据此补偿（gutter 是 chrome，不参与选中/复制）。
 ///
-/// `links` 记录行内 link 的位置与 URL，用于 Ctrl+Click 打开。
+/// `links` 记录行内 link 的位置与 URL，用于 Cmd+Click 打开。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RenderedLine {
     pub spans: Vec<Span<'static>>,
@@ -104,7 +104,7 @@ impl RenderedLine {
         }
     }
 
-    /// 显式提供 plain 和 links（用于 markdown link Ctrl+Click）。
+    /// 显式提供 plain 和 links（用于 markdown link Cmd+Click）。
     pub fn with_plain_and_links(
         spans: Vec<Span<'static>>,
         plain: String,
