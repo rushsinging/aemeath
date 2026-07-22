@@ -87,6 +87,8 @@ struct SnapshotWireV2 {
 struct TaskWireV2 {
     id: String,
     batch: String,
+    #[serde(default)]
+    seq: u64,
     subject: String,
     description: String,
     active_form: Option<String>,
@@ -116,6 +118,7 @@ impl From<&Task> for TaskWireV2 {
         Self {
             id: task.id().get().to_string(),
             batch: task.batch().get().to_string(),
+            seq: task.seq(),
             subject: task.subject().to_owned(),
             description: task.description().to_owned(),
             active_form: task.active_form().map(str::to_owned),
@@ -163,6 +166,16 @@ fn decode_v2(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodec
         .enumerate()
         .map(|(index, task)| task_from_v2(task, index))
         .collect::<Result<Vec<_>, _>>()?;
+    let mut legacy_seq_by_batch = std::collections::HashMap::<BatchId, u64>::new();
+    let mut tasks = tasks;
+    tasks.sort_unstable_by_key(Task::id);
+    for task in &mut tasks {
+        if task.seq() == 0 {
+            let seq = legacy_seq_by_batch.entry(task.batch()).or_insert(1);
+            task.set_seq_for_restore(*seq);
+            *seq = seq.checked_add(1).unwrap_or(u64::MAX);
+        }
+    }
     let batches = wire
         .batches
         .into_iter()
@@ -201,6 +214,7 @@ fn task_from_v2(mut wire: TaskWireV2, index: usize) -> Result<Task, TaskSnapshot
     Ok(Task::from_snapshot(TaskSnapshotFields {
         id: TaskId::new(id),
         batch: BatchId::new(batch),
+        seq: wire.seq,
         subject: wire.subject,
         description: wire.description,
         active_form: wire.active_form,
@@ -369,6 +383,7 @@ fn decode_v1(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodec
             Ok(Task::from_snapshot(TaskSnapshotFields {
                 id: TaskId::new(id),
                 batch: BatchId::new(task.batch),
+                seq: id,
                 subject: task.subject,
                 description: task.description,
                 active_form: task.active_form,

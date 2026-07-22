@@ -87,12 +87,12 @@ impl TypedTool for TaskCreateTool {
             Ok(result) => result.value,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
-        let id = created.id().to_string();
+        let display_id = created.seq().to_string();
         TypedToolResult::success(
-            format!("Task #{} created: {}", id, created.subject()),
+            format!("Task #{} created: {}", display_id, created.subject()),
             TaskCreateResult {
-                task_id: id.clone(),
-                display_id: id,
+                task_id: display_id.clone(),
+                display_id,
                 subject: created.subject().to_owned(),
                 status: status_label(created.status()).to_owned(),
                 priority: priority_label(created.priority()).to_owned(),
