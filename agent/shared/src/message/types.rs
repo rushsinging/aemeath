@@ -58,6 +58,7 @@ pub enum MessageSource {
     #[default]
     User,
     SystemGenerated,
+    StopHook,
 }
 
 impl Role {

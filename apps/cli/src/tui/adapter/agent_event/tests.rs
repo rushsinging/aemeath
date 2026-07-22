@@ -513,6 +513,58 @@ mod started_tests {
 }
 
 #[test]
+fn test_stop_hook_blocked_maps_to_blocked_hook_notice() {
+    let reminder = sdk::ChatMessage::system_generated_user_text(
+        "<system-reminder>Stop hook blocked stopping.</system-reminder>",
+    );
+    let mut messages = vec![sdk::ChatMessage::user_text("user input"), reminder];
+    messages[1].metadata = Some(sdk::ChatMessageMetadata {
+        source: sdk::ChatMessageSource::StopHook,
+    });
+
+    let mapping = map_agent_event(&UiEvent::StopHookBlocked { messages });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::AppendHookNotice(AppendHookNotice { content })]
+            if content.kind == crate::tui::model::conversation::block::HookNoticeKind::Blocked
+                && content.title == "Hook blocked: Stop"
+                && content.body == "Stop hook blocked stopping."
+                && content.details.is_none()
+    ));
+}
+
+#[test]
+fn test_stop_hook_blocked_without_stop_hook_message_does_not_render_notice() {
+    let mapping = map_agent_event(&UiEvent::StopHookBlocked {
+        messages: vec![sdk::ChatMessage::user_text("user input")],
+    });
+
+    assert!(mapping.conversation.is_empty());
+    assert!(matches!(
+        mapping.session.as_slice(),
+        [
+            crate::tui::model::runtime::session_intent::SessionIntent::MessagesSynced {
+                message_count: 1
+            }
+        ]
+    ));
+}
+
+#[test]
+fn test_blocked_stop_hook_event_is_suppressed_until_stop_hook_notice() {
+    let mapping = map_agent_event(&UiEvent::HookEvent(sdk::HookEventView {
+        hook_name: "Stop".to_string(),
+        status: sdk::HookEventStatus::Blocked,
+        matcher: None,
+        command: None,
+        result: None,
+    }));
+
+    assert!(mapping.conversation.is_empty());
+}
+
+#[test]
 fn test_hook_message_maps_to_info_notice_with_typed_metadata() {
     let mapping = map_agent_event(&UiEvent::HookMessage(sdk::HookMessageView {
         point: "PreToolUse".to_string(),

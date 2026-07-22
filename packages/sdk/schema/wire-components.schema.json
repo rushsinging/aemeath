@@ -127,7 +127,8 @@
     "ChatMessageSource": {
       "enum": [
         "user",
-        "system_generated"
+        "system_generated",
+        "stop_hook"
       ],
       "type": "string"
     },

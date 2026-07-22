@@ -97,6 +97,7 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
                 share::message::MessageSource::SystemGenerated => {
                     sdk::ChatMessageSource::SystemGenerated
                 }
+                share::message::MessageSource::StopHook => sdk::ChatMessageSource::StopHook,
             },
         }),
         // input_id 不来自 share::Message；由 runtime→TUI 边界（UserMessagesAdded 事件）

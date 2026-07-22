@@ -106,10 +106,12 @@ impl StepMessageOwnership {
             .iter()
             .filter(|message| {
                 message.role == Role::User
-                    && message
-                        .metadata
-                        .as_ref()
-                        .is_none_or(|metadata| metadata.source != MessageSource::SystemGenerated)
+                    && message.metadata.as_ref().is_none_or(|metadata| {
+                        !matches!(
+                            metadata.source,
+                            MessageSource::SystemGenerated | MessageSource::StopHook
+                        )
+                    })
             })
             .cloned()
             .collect();
@@ -756,7 +758,7 @@ where
             if self.cancel.is_cancelled() {
                 return Err(LoopEngineError::Cancelled);
             }
-            let feedback = Message::system_generated_user(format!(
+            let feedback = Message::stop_hook_feedback(format!(
                 "<system-reminder>\n{feedback}\n</system-reminder>"
             ));
             self.stop_hook_feedback = Some(feedback.clone());

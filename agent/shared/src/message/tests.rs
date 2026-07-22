@@ -21,6 +21,16 @@ fn assistant_with_tools(ids: &[&str]) -> Message {
 // ── 1. Message constructors ────────────────────────────────────
 
 #[test]
+fn stop_hook_feedback_carries_distinct_message_source() {
+    let message = Message::stop_hook_feedback("blocked");
+
+    assert_eq!(
+        message.metadata.as_ref().map(|metadata| metadata.source),
+        Some(MessageSource::StopHook)
+    );
+}
+
+#[test]
 fn test_user_constructor() {
     let msg = Message::user("hello");
     assert_eq!(msg.role, Role::User);

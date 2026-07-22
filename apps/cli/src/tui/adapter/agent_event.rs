@@ -1,6 +1,7 @@
 use crate::tui::adapter::hook_notice::{hook_event_notice, hook_message_notice};
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::effect::effect::Effect;
+use crate::tui::model::conversation::block::{HookNoticeContent, HookNoticeKind};
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
@@ -302,12 +303,34 @@ where
         )),
         UiEvent::TurnStarted { messages }
         | UiEvent::MicrocompactDone { messages, .. }
-        | UiEvent::StopHookBlocked { messages }
         | UiEvent::PostToolExecutionSync { messages }
         | UiEvent::CompactRollback { messages }
         | UiEvent::CompactFinished { messages } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
+        UiEvent::StopHookBlocked { messages } => {
+            let mut mapping = session(SessionIntent::MessagesSynced {
+                message_count: messages.len(),
+            });
+            if let Some(message) = messages
+                .iter()
+                .rev()
+                .find(|message| message.source() == sdk::ChatMessageSource::StopHook)
+            {
+                mapping
+                    .conversation
+                    .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
+                        content: HookNoticeContent {
+                            kind: HookNoticeKind::Blocked,
+                            title: "Hook blocked: Stop".to_string(),
+                            body: strip_system_reminder_envelope(&message.text_content())
+                                .to_string(),
+                            details: None,
+                        },
+                    }));
+            }
+            mapping
+        }
         UiEvent::ApiError { messages, .. } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
@@ -315,7 +338,9 @@ where
 
         // ── HookEvent → notice via conversation ──
         UiEvent::HookEvent(event) => {
-            if event.hook_name == "PostCompact" {
+            if event.hook_name == "PostCompact"
+                || (event.hook_name == "Stop" && event.status == sdk::HookEventStatus::Blocked)
+            {
                 return AgentEventMapping::default();
             }
             let mut mapping = AgentEventMapping::default();
@@ -329,6 +354,9 @@ where
             mapping
         }
         UiEvent::HookMessage(message) => {
+            if message.point == "Stop" {
+                return AgentEventMapping::default();
+            }
             let mut mapping = AgentEventMapping::default();
             if let Some(notice) = hook_message_notice(message) {
                 mapping

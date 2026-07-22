@@ -994,7 +994,7 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
 }
 
 #[tokio::test]
-async fn test_stop_hook_feedback_message_is_marked_system_generated() {
+async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
     let flag_path = std::env::temp_dir().join(format!(
         "aemeath_stop_hook_metadata_{}.flag",
         std::time::SystemTime::now()
@@ -1089,7 +1089,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         .expect("blocked Stop hook feedback should be synced into messages");
 
     assert_eq!(feedback.role, Role::User);
-    assert_eq!(feedback.source(), MessageSource::SystemGenerated);
+    assert_eq!(feedback.source(), MessageSource::StopHook);
 }
 
 #[tokio::test]

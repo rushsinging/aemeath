@@ -22,6 +22,16 @@ impl Message {
         }
     }
 
+    pub fn stop_hook_feedback(text: impl Into<String>) -> Self {
+        Self {
+            role: Role::User,
+            content: vec![ContentBlock::Text { text: text.into() }],
+            metadata: Some(MessageMetadata {
+                source: MessageSource::StopHook,
+            }),
+        }
+    }
+
     pub fn user_with_image(
         text: impl Into<String>,
         image_base64: String,

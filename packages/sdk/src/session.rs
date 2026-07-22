@@ -30,6 +30,7 @@ pub enum ChatMessageSource {
     #[default]
     User,
     SystemGenerated,
+    StopHook,
 }
 
 impl ChatMessage {
