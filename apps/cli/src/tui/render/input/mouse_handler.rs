@@ -1,5 +1,13 @@
-use crossterm::event::{MouseEvent, MouseEventKind};
+use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
 use std::time::Instant;
+
+#[cfg(test)]
+#[path = "mouse_handler_tests.rs"]
+mod tests;
+
+fn should_open_link(modifiers: KeyModifiers) -> bool {
+    modifiers.contains(KeyModifiers::SUPER)
+}
 
 /// 判断点 (row, col) 是否在 rect 内
 fn point_in_rect(row: u16, col: u16, rect: &ratatui::layout::Rect) -> bool {
@@ -42,8 +50,8 @@ impl crate::tui::app::App {
 
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                // 输出区：检测是否点击在 markdown link / 行内代码路径上
-                if point_in_rect(row, col, &output_area) {
+                // 仅 Cmd+Click 打开链接，普通点击必须进入选区流程。
+                if should_open_link(mouse.modifiers) && point_in_rect(row, col, &output_area) {
                     if let Some(url) = self.output_area.link_at(row, col, &output_area) {
                         return vec![crate::tui::effect::effect::Effect::OpenUrl {
                             url: url.to_string(),
