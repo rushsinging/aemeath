@@ -282,16 +282,25 @@ fn queued_snapshot_intent_replaces_queue_bumps_revision_and_marks_output_dirty()
     let mut model = TuiModel::default();
     let before_revision = model.conversation.revision();
 
+    let input_id = sdk::InputId::new_v7();
     let result = reduce_intent(
         &mut model,
         AgentIntent::Conversation(ConversationIntent::SyncQueuedSubmissions(
             SyncQueuedSubmissions {
-                queued: vec![sdk::ChatMessage::user_text("queued")],
+                queued: vec![sdk::ChatMessage {
+                    role: "user".to_string(),
+                    content: vec![sdk::ContentBlock::Text {
+                        text: "queued".to_string(),
+                    }],
+                    input_id: Some(input_id.clone()),
+                    metadata: None,
+                }],
             },
         )),
     );
 
     assert_eq!(model.conversation.queued_submissions.len(), 1);
+    assert_eq!(model.conversation.queued_submissions[0].input_id, input_id);
     assert_eq!(model.conversation.revision(), before_revision + 1);
     assert!(result.dirty.output);
 }
