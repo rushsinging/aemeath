@@ -370,17 +370,37 @@ fn completion_from_legacy(
 }
 
 fn provider_error_from_legacy(error: crate::LlmError) -> ProviderError {
+    let retryable = matches!(
+        error,
+        crate::LlmError::Network(_)
+            | crate::LlmError::StreamInterrupted(_)
+            | crate::LlmError::StreamTruncated { .. }
+    );
     let kind = match error {
         crate::LlmError::Cancelled => ProviderErrorKind::Cancelled,
         crate::LlmError::RateLimited => ProviderErrorKind::RateLimited,
         crate::LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
         crate::LlmError::Network(_) => ProviderErrorKind::Network,
         crate::LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
-        crate::LlmError::StreamTruncated { .. } => ProviderErrorKind::StreamTruncated,
+        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
+            ProviderErrorKind::StreamTruncated
+        }
         crate::LlmError::Stream(_) => ProviderErrorKind::Protocol,
         crate::LlmError::Config(_) => ProviderErrorKind::Configuration,
     };
-    ProviderError::fatal(kind, error.to_string())
+    if retryable {
+        ProviderError::retryable(kind, error.to_string())
+    } else {
+        ProviderError::fatal(kind, error.to_string())
+    }
+}
+
+pub(crate) fn stream_read_error(error: io::Error) -> crate::LlmError {
+    if error.kind() == io::ErrorKind::Other {
+        crate::LlmError::StreamInterrupted(error.to_string())
+    } else {
+        crate::LlmError::Stream(error.to_string())
+    }
 }
 
 /// Parse Anthropic-style SSE stream
@@ -437,7 +457,7 @@ pub async fn parse_stream(
                 )));
             }
             result = lines.next_line() => {
-                match result.map_err(|e| crate::LlmError::Stream(e.to_string()))? {
+                match result.map_err(crate::adapters::stream::stream_read_error)? {
                     Some(line) => line,
                     None => break,
                 }

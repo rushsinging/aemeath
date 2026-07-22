@@ -53,7 +53,7 @@ pub(crate) async fn parse_ollama_stream(
                               )));
                           }
             result = lines.next_line() => {
-                match result.map_err(|e| crate::LlmError::Stream(e.to_string()))? {
+                match result.map_err(crate::adapters::stream::stream_read_error)? {
                     Some(line) => line,
                     None => break,
                 }

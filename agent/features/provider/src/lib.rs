@@ -61,6 +61,8 @@ pub enum LlmError {
     Cancelled,
     #[error("stream error: {0}")]
     Stream(String),
+    #[error("stream connection interrupted: {0}")]
+    StreamInterrupted(String),
     #[error("config error: {0}")]
     Config(String),
     #[error(

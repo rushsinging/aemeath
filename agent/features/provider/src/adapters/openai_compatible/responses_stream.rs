@@ -64,7 +64,7 @@ pub(crate) async fn parse_responses_stream(
                     Ok(0) => break,
                     Ok(_) => {}
                     Err(e) => {
-                        return Err(crate::LlmError::Stream(e.to_string()));
+                        return Err(crate::adapters::stream::stream_read_error(e));
                     }
                 }
             }
