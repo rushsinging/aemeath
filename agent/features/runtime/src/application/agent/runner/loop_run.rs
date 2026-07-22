@@ -189,9 +189,6 @@ impl<'a> SubAgentRun<'a> {
             system_prompt: crate::ports::SystemPromptSpec::new(&self.system),
             model_id: self.model_name_for_log.clone(),
             effective_reasoning: self.level,
-            current_date: crate::ports::CalendarDate::new(
-                chrono::Local::now().format("%Y-%m-%d").to_string(),
-            ),
             task_reminder: crate::ports::TaskReminderSnapshot::default(),
             language: crate::ports::Language::new(&self.language),
             agent_roles: self.config_snapshot.agents().roles.clone(),
@@ -606,7 +603,11 @@ impl RunLoopPort for SubAgentRun<'_> {
                             .system_blocks
                             .iter()
                             .map(|block| {
-                                if block.cacheable {
+                                if block.cache_break {
+                                    debug_assert!(
+                                        block.cacheable,
+                                        "cache breakpoint 必须位于可缓存前缀"
+                                    );
                                     RequestSystemBlock::Cacheable(block.content.clone())
                                 } else {
                                     RequestSystemBlock::Text(block.content.clone())

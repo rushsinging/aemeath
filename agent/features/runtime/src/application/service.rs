@@ -182,6 +182,7 @@ mod tests {
                     .binding(),
                 system_blocks: Vec::new(),
                 system_prompt_text: String::new(),
+                initial_git_context: String::new(),
                 user_context: String::new(),
                 agent_runner: Arc::new(NoopAgentRunner),
                 policy: Arc::new(policy::AllowAllPolicy),

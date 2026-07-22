@@ -38,10 +38,10 @@ use crate::application::reflection::{
     ReflectionTaskTrigger,
 };
 use crate::ports::{
-    CalendarDate, CompactOutcome, CompactRequest, CompactResult, CompactSkipReason,
-    CompactionDecision, ContextPort, ContextPortError, ContextRequest, ContextRequestId,
-    ContextWindow, DecisionReason, Language as ContextLanguage, SessionId, SessionRevision,
-    SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, Urgency,
+    CompactOutcome, CompactRequest, CompactResult, CompactSkipReason, CompactionDecision,
+    ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
+    Language as ContextLanguage, SessionId, SessionRevision, SystemBlock, SystemPromptSpec,
+    TaskReminderSnapshot, TokenBudget, Urgency,
 };
 
 /// `submit_complete` builds its own executor closure and ignores the
@@ -66,7 +66,6 @@ fn frozen_request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: provider::ReasoningLevel::Off,
-        current_date: CalendarDate::new("2026-07-19"),
         task_reminder: TaskReminderSnapshot::default(),
         language: ContextLanguage::new("en"),
         agent_roles: HashMap::new(),
@@ -88,6 +87,7 @@ fn window_with(messages: Vec<Message>) -> ContextWindow {
             kind: "system_prompt".to_string(),
             content: "system".to_string(),
             cacheable: true,
+            cache_break: true,
         }],
         messages,
         tool_schemas: vec![],

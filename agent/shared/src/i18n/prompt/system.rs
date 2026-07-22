@@ -1,6 +1,6 @@
 //! 系统提示文案：静态 system prompt 模板 + 日期标签。
 //!
-//! 迁自 runtime `prompt_build.rs` 的 `STATIC_SYSTEM_PROMPT_EN/ZH` 与 `date_label`。
+//! 迁自 runtime `prompt_build.rs` 的 `STATIC_SYSTEM_PROMPT_EN/ZH`。
 //! 面向 LLM 注入的核心 system prompt 片段。
 
 /// 静态系统提示模板（英文），含 `{cwd_str}` / `{is_git}` 占位符。
@@ -147,14 +147,6 @@ pub fn static_system_prompt(lang: &str) -> &'static str {
     }
 }
 
-/// 日期标签模板，含 `{date}` 占位符。未知 lang 回退英文。
-pub fn date_label(lang: &str) -> &'static str {
-    match lang {
-        "zh" => "# currentDate\n今天是 {date}。",
-        _ => "# currentDate\nToday's date is {date}.",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,18 +167,6 @@ mod tests {
             assert!(s.contains("{is_git}"));
             assert!(s.contains("path_base"));
             assert!(s.contains("workspace_root"));
-        }
-    }
-
-    #[test]
-    fn date_label_bilingual_and_fallback_en() {
-        let zh = date_label("zh");
-        let en = date_label("en");
-        assert!(zh.contains("今天"));
-        assert!(en.contains("Today's date"));
-        assert_eq!(date_label("xx"), en);
-        for s in [zh, en] {
-            assert!(s.contains("{date}"));
         }
     }
 

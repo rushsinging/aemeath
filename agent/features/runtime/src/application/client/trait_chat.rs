@@ -71,6 +71,7 @@ pub(super) async fn chat_impl(
             tool_context_binding: inner.context.resources.tool_context_binding.clone(),
             system_blocks: inner.context.resources.system_blocks.clone(),
             system_prompt_text: inner.context.resources.system_prompt_text.clone(),
+            initial_git_context: inner.context.resources.initial_git_context.clone(),
             user_context: inner.context.resources.user_context.clone(),
             initial_messages,
             context_size: inner.context.resources.context_size,

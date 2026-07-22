@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use sdk::ids::{ChatId, ChatTurnId};
+use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
 use crate::application::chat::looping::idle_lifecycle::{
@@ -51,8 +52,9 @@ where
                 tool_catalog,
                 tool_execution,
                 tool_context_binding,
-                system_blocks: _,
+                system_blocks,
                 system_prompt_text,
+                initial_git_context,
                 user_context,
                 initial_messages,
                 mut context_size,
@@ -82,6 +84,8 @@ where
             } = ctx;
             let mut binding = binding;
             let mut messages = initial_messages;
+            let mut initial_git_context = (!initial_git_context.is_empty())
+                .then_some(Message::system_generated_user(initial_git_context));
             // Interval and PreCompact share this single session-scoped slot.
             let reflection_tasks =
                 crate::application::reflection::ReflectionTaskAdapter::production(
@@ -412,12 +416,14 @@ where
                         adopted_events,
                     } => {
                         // 新 Run 只取得本轮 adopted 输入；已提交历史由 Context backing 提供。
-                        messages = adopted.into_iter().map(|(_, message)| message).collect();
-                        let segment = next_segment;
+                        messages = initial_git_context
+                            .take()
+                            .into_iter()
+                            .chain(adopted.into_iter().map(|(_, message)| message))
+                            .collect();
                         // #1272: seed run_input_buffer with real events (not synthetic)
                         // to preserve InputId and images through the drain→freeze→adopt pipeline.
-                        let _ = adopted_events; // consumed in seeding below
-                        (segment, adopted_events)
+                        (next_segment, adopted_events)
                     }
                 };
 
@@ -479,11 +485,12 @@ where
                 let run_memory_config = bound_main_run.config().memory().clone();
                 let run_id = run.id().clone();
                 active_run.activate(run_id.clone(), cancel.clone());
-                let combined_system_prompt = if user_context.is_empty() {
-                    system_prompt_text.clone()
-                } else {
-                    format!("{system_prompt_text}\n\n{user_context}")
-                };
+                let cacheable_system_prompt = system_blocks
+                    .iter()
+                    .map(|block| block.text())
+                    .chain((!user_context.is_empty()).then_some(user_context.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
                 let mut port = MainRunPort {
                     messages: messages.clone(),
                     // #1272: gate-adopted user input enters the Run exclusively
@@ -502,7 +509,7 @@ where
                     tool_catalog: &tool_catalog,
                     tool_execution: &tool_execution,
                     tool_context_binding: &tool_context_binding,
-                    system_prompt_text: &combined_system_prompt,
+                    system_prompt_text: &cacheable_system_prompt,
                     config_snapshot: bound_main_run.config(),
                     context: &context,
                     context_request: None,

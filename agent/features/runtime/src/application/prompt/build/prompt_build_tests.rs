@@ -247,20 +247,19 @@ fn test_project_instruction_walk_does_not_scan_descendants_when_climbing_parents
 }
 
 #[tokio::test]
-async fn test_build_system_prompt_parts_includes_commit_guidance() {
-    let cwd = std::env::temp_dir().join(format!(
-        "aemeath_commit_guidance_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&cwd).unwrap();
+async fn build_system_prompt_parts_captures_git_once_without_changing_static_prompt() {
+    let cwd = tempfile::tempdir().unwrap();
+    let init = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(cwd.path())
+        .status()
+        .unwrap();
+    assert!(init.success());
     let hook_runner: Arc<dyn HookPort> = Arc::new(
         hook::build_dispatcher(&HooksConfig::default(), std::collections::HashMap::new()).unwrap(),
     );
     let context = PromptContext::new(
-        &cwd,
+        cwd.path(),
         Some("deepseek"),
         Some("deepseek-chat"),
         share::config::PermissionModeConfig::Ask,
@@ -268,17 +267,9 @@ async fn test_build_system_prompt_parts_includes_commit_guidance() {
 
     let parts = build_system_prompt_parts(&context, &hook_runner, "en").await;
 
-    // cleanup 失败不应让测试 FAIL（cwd 可能被外部环境清理，见 #637）
-    let _ = std::fs::remove_dir_all(&cwd);
-
-    assert!(parts.dynamic_part.contains("# Commit Message Guidance"));
-    assert!(parts
-        .dynamic_part
-        .contains("Before creating any git commit, invoke the built-in `commit` skill"));
-    assert!(parts
-        .dynamic_part
-        .contains("Co-Authored-By: Aemeath (deepseek/deepseek-chat) <github:rushsinging/aemeath>"));
-    assert!(!parts.dynamic_part.contains("Commit Style Context:"));
+    assert!(!parts.initial_git_context.is_empty());
+    assert!(!parts.static_part.contains(&parts.initial_git_context));
+    assert!(!parts.static_part.contains("# Commit Message Guidance"));
 }
 
 #[tokio::test]

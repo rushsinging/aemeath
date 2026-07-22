@@ -87,7 +87,6 @@ fn base_request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("base system prompt"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        current_date: CalendarDate::new("2026-07-15"),
         task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("en"),
         agent_roles: Default::default(),
@@ -119,7 +118,7 @@ async fn baseline_blocks_are_preserved() {
 
     assert!(kinds(&result).iter().any(|k| k == "system_prompt"));
     assert!(kinds(&result).iter().any(|k| k == "execution_discipline"));
-    assert!(result.uncached.iter().any(|b| b.kind == "current_date"));
+    assert!(result.uncached.is_empty());
 }
 
 #[tokio::test]

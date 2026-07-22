@@ -54,7 +54,8 @@ impl MemoryRetrieveAdapter {
             blocks: vec![SystemBlock {
                 kind: "memory_context".to_string(),
                 content,
-                cacheable: false,
+                cacheable: true,
+                cache_break: false,
             }],
         })
     }
@@ -177,9 +178,7 @@ mod tests {
     use share::message::Message;
 
     use super::*;
-    use crate::domain::{
-        CalendarDate, ContextRequestId, Language, SystemPromptSpec, TaskReminderSnapshot,
-    };
+    use crate::domain::{ContextRequestId, Language, SystemPromptSpec, TaskReminderSnapshot};
 
     struct FakeMemory {
         result: MemorySearchResult,
@@ -275,7 +274,6 @@ mod tests {
             system_prompt: SystemPromptSpec::new("system"),
             model_id: "fake/model".into(),
             effective_reasoning: ReasoningLevel::Off,
-            current_date: CalendarDate::new("2026-07-15"),
             task_reminder: TaskReminderSnapshot::default(),
             language: Language::new("en"),
             agent_roles: HashMap::new(),

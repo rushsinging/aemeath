@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::ports::{
-    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CalendarDate,
-    CompactOutcome, CompactRequest, CompactResult, CompactSkipReason, CompactionDecision,
-    ContentFingerprint, ContextAppend, ContextAppendError, ContextPort, ContextPortError,
-    ContextRequest, ContextRequestId, ContextWindow, DecisionReason, FinalizeCause, Language,
-    ManualCompactRequest, SessionId, SessionRevision, StepReceipt, SystemBlock, SystemPromptSpec,
-    TaskReminderSnapshot, TokenBudget, ToolOutcomeKind, Urgency,
+    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
+    CompactRequest, CompactResult, CompactSkipReason, CompactionDecision, ContentFingerprint,
+    ContextAppend, ContextAppendError, ContextPort, ContextPortError, ContextRequest,
+    ContextRequestId, ContextWindow, DecisionReason, FinalizeCause, Language, ManualCompactRequest,
+    SessionId, SessionRevision, StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot,
+    TokenBudget, ToolOutcomeKind, Urgency,
 };
 use async_trait::async_trait;
 use provider::ReasoningLevel;
@@ -39,6 +39,7 @@ impl ContextPort for RecordingPort {
                 kind: "system_prompt".to_string(),
                 content: "system".to_string(),
                 cacheable: true,
+                cache_break: true,
             }],
             messages: request.pending_messages.clone(),
             tool_schemas: request.tool_schemas.clone(),
@@ -139,7 +140,6 @@ fn request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        current_date: CalendarDate::new("2026-07-19"),
         task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: HashMap::new(),

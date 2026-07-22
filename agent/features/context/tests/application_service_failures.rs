@@ -4,8 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use context::application::ContextApplicationService;
 use context::domain::{
-    CalendarDate, ContextAppend, ContextRequest, ContextRequestId, Language, SessionId,
-    SessionRevision, SystemPromptSpec, TaskReminderSnapshot,
+    ContextAppend, ContextRequest, ContextRequestId, Language, SessionId, SessionRevision,
+    SystemPromptSpec, TaskReminderSnapshot,
 };
 use context::ports::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
@@ -100,7 +100,6 @@ fn request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        current_date: CalendarDate::new("2026-07-15"),
         task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: Default::default(),

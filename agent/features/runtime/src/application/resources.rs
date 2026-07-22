@@ -44,6 +44,8 @@ pub struct RuntimeResources {
     // ── 配置（值类型，session 期间不变）──
     pub system_blocks: Vec<RequestSystemBlock>,
     pub system_prompt_text: String,
+    /// 启动时采集一次的 Git 快照，作为普通上下文消息而非 system prompt 发送。
+    pub initial_git_context: String,
     pub user_context: String,
     pub memory_config: MemoryConfig,
     pub skills_map: HashMap<String, sdk::SkillView>,

@@ -362,7 +362,8 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
     );
     // Provider-neutral system blocks: one cacheable, one dynamic.
     request.system = vec![
-        provider::RequestSystemBlock::Cacheable("you are an assistant".to_string()),
+        provider::RequestSystemBlock::Text("stable prefix first part".to_string()),
+        provider::RequestSystemBlock::Cacheable("stable prefix boundary".to_string()),
         provider::RequestSystemBlock::Text("today is monday".to_string()),
     ];
     // A tool schema with full {name, description, input_schema}.
@@ -392,7 +393,8 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
     assert_eq!(
         c.system_blocks,
         vec![
-            ("you are an assistant".to_string(), true),
+            ("stable prefix first part".to_string(), false),
+            ("stable prefix boundary".to_string(), true),
             ("today is monday".to_string(), false),
         ]
     );
