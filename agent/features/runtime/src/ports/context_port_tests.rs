@@ -19,7 +19,6 @@ fn request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        current_date: CalendarDate::new("2026-07-15"),
         task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: HashMap::new(),

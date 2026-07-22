@@ -33,8 +33,8 @@ use crate::application::loop_engine::{
 };
 use crate::domain::agent_run::RunDomainEvent;
 use crate::ports::{
-    CalendarDate, ContextRequest, ContextRequestId, Language as ContextLanguage, RunStepId,
-    SessionId, SystemPromptSpec, TaskReminderSnapshot,
+    ContextRequest, ContextRequestId, Language as ContextLanguage, RunStepId, SessionId,
+    SystemPromptSpec, TaskReminderSnapshot,
 };
 use workflow::api::{ReasoningPort, ReasoningSignal};
 
@@ -274,7 +274,6 @@ where
             system_prompt: SystemPromptSpec::new(self.system_prompt_text),
             model_id: self.binding.model.model.clone(),
             effective_reasoning: self.reasoning.current_requested_level(),
-            current_date: CalendarDate::new(chrono::Local::now().format("%Y-%m-%d").to_string()),
             task_reminder: TaskReminderSnapshot {
                 text: task_reminder,
             },
@@ -477,7 +476,8 @@ where
             .system_blocks
             .iter()
             .map(|block| {
-                if block.cacheable {
+                if block.cache_break {
+                    debug_assert!(block.cacheable, "cache breakpoint 必须位于可缓存前缀");
                     provider::RequestSystemBlock::Cacheable(block.content.clone())
                 } else {
                     provider::RequestSystemBlock::Text(block.content.clone())
