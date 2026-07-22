@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -11,12 +10,13 @@ use crate::application::chat::looping::idle_lifecycle::{
 };
 use crate::application::chat::looping::input_gate::apply_gate;
 use crate::application::chat::looping::loop_phases::handle_turn_boundary_config;
+use crate::application::chat::looping::run_input_buffer::RunInputBuffer;
 use crate::application::chat::looping::task_reminder::TaskReminderState;
 use crate::application::chat::looping::{
     ChatEventSink, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
     QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
-use crate::application::loop_engine::run_loop;
+use crate::application::loop_engine::{run_loop, LoopDirective};
 use crate::domain::agent_run::{Run, RunSpec};
 use workflow::api::ReasoningSignal;
 
@@ -93,7 +93,6 @@ where
             let mut last_total_tokens = None;
             let mut turn_count = 0;
             let mut pending_input = PendingInputBuffer::default();
-            let mut deferred_user_inputs = VecDeque::new();
             let mut task_reminder_state = TaskReminderState::new();
             let tool_identity =
                 crate::application::tool_coordination::identity::ToolIdentityRegistry::new();
@@ -341,30 +340,12 @@ where
     }
 
             'session: loop {
-                // Busy user messages are deliberately adopted one at a time: each starts a distinct Run.
+                // Busy user messages are no longer deferred to the session. They
+                // accumulate in the Run-scoped buffer and are consumed within the
+                // same Run (#1272).
                 let idle_result = if !pending_input.is_empty() {
                     // Busy control events are serviced at idle before the next queued user Run. They are
                     // never appended to model context.
-                    let next_segment = ChatId::new_v7().to_string();
-                    let gate = apply_gate(
-                        GateKind::BeforeLlm,
-                        &mut pending_input,
-                        &sink,
-                        task_access.as_ref(),
-                        true,
-                    )
-                    .await;
-                    if gate.reset_requested {
-                        IdleResult::ResetRequested
-                    } else if let Some(command) = gate.pending_command {
-                        IdleResult::CommandRequested(command)
-                    } else if gate.appended_user_messages > 0 {
-                        IdleResult::Resumed(next_segment, gate.adopted_messages)
-                    } else {
-                        continue;
-                    }
-                } else if let Some(event) = deferred_user_inputs.pop_front() {
-                    pending_input.push(event);
                     let next_segment = ChatId::new_v7().to_string();
                     let gate = apply_gate(
                         GateKind::BeforeLlm,
@@ -526,8 +507,10 @@ where
                     language: &language,
                     reasoning: reasoning.as_ref(),
                     pending_input: &mut pending_input,
-                    deferred_user_inputs: &mut deferred_user_inputs,
+                    run_input_buffer: RunInputBuffer::new(),
                     stop_hook_feedback: None,
+                    pending_stop_hook_feedback: None,
+                    pending_tool_results: false,
                     cancel: cancel.clone(),
                     run_id: run_id.clone(),
                     active_run: active_run.as_ref(),
@@ -538,17 +521,120 @@ where
                     tool_identity: &tool_identity,
                     started_at,
                 };
-                let run_result = logging::within(
-                    logging::LogContextPatch {
-                        turn: logging::FieldPatch::Set(turn_count),
-                        ..logging::LogContextPatch::default()
-                    },
-                    run_loop(&mut run, &cancel, &mut port),
-                )
-                .await;
-                if let Err(error) = run_result {
-                    log::error!(target: crate::LOG_TARGET, "main shared run loop failed: {error}");
+                // #1272: the idle gate consumed the user input from the channel
+                // and placed it in `messages`.  Seed the run_input_buffer with
+                // the last user message so drain_input returns Ready (not
+                // EmptyAndSealed) on the first drain call.
+                if let Some(last_msg) = port.messages.last() {
+                    let text = last_msg.text_content();
+                    if !text.is_empty() {
+                        port.run_input_buffer.push(sdk::ChatInputEvent::user_message(
+                            text, Vec::new(),
+                        ));
+                    }
                 }
+                // #1272: Re-enter run_loop after AwaitUser within the same Run.
+                // The engine returns LoopDirective::AwaitUser when the Run is
+                // awaiting user input; the session actor waits for input and
+                // feeds it to the Run's buffer, then re-enters run_loop with
+                // the same &mut run / &mut port. On Terminal or error the Run
+                // is drained and the active registration is cleared.
+                loop {
+                    let directive = logging::within(
+                        logging::LogContextPatch {
+                            turn: logging::FieldPatch::Set(turn_count),
+                            ..logging::LogContextPatch::default()
+                        },
+                        run_loop(&mut run, &cancel, &mut port),
+                    )
+                    .await;
+                    match directive {
+                        Ok(LoopDirective::Terminal) => break,
+                        Err(error) => {
+                            log::error!(target: crate::LOG_TARGET, "main shared run loop failed: {error}");
+                            break;
+                        }
+                        Ok(LoopDirective::AwaitUser) => {
+                            // #1272: run_loop may have drained control
+                            // events into pending_input during its
+                            // internal await_user_input call.  If
+                            // pending_input is already non-empty, break
+                            // immediately so the session idle gate can
+                            // process those events without blocking.
+                            if !port.pending_input.is_empty() {
+                                break;
+                            }
+
+                            // Wait for input within the same Run, but also
+                            // monitor the cancel token so that a cancel
+                            // request does not leave the session actor stuck
+                            // (#1272).
+                            //
+                            // UserMessage events are fed into the Run-scoped
+                            // buffer and the engine is re-entered.
+                            //
+                            // Non-UserMessage control events are pushed to
+                            // session pending_input and the AwaitUser inner
+                            // loop is exited so the session idle gate can
+                            // process them.
+                            //
+                            // Channel close (None) cleanly exits.
+                            //
+                            // #1272: biased select guarantees deterministic
+                            // input-first ordering.  Without biased, a fair
+                            // select could pick cancel over a ready
+                            // UserMessage, silently dropping it.  With
+                            // biased, a received UserMessage always enters
+                            // run_input_buffer first; cancel is then
+                            // detected on re-entry via handle_interrupt,
+                            // and drain_remaining_events routes the message
+                            // to pending_input for the next Run.
+                            let event = tokio::select! {
+                                biased;
+                                result = input_events.recv_next_input() => result,
+                                _ = cancel.cancelled() => {
+                                    // Cancel triggered: re-enter run_loop so
+                                    // the engine handles cancellation and
+                                    // returns Terminal.  The engine's
+                                    // await_interruptible / handle_interrupt
+                                    // will call cancel_run and finalize the
+                                    // Run through the same unified path.
+                                    continue;
+                                }
+                            };
+                            match event {
+                                None => {
+                                    // Channel closed — clean exit
+                                    break;
+                                }
+                                Some(event) => {
+                                    match &event {
+                                        sdk::ChatInputEvent::UserMessage { .. } => {
+                                            port.run_input_buffer.push(event);
+                                            // Continue loop → re-enter run_loop
+                                        }
+                                        _ => {
+                                            port.pending_input.push(event);
+                                            // Non-UserMessage control events:
+                                            // exit the AwaitUser inner loop so
+                                            // the session idle gate processes
+                                            // them.  The engine is NOT
+                                            // re-entered directly — control
+                                            // commands take the session-level
+                                            // path through apply_gate.
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // #1272: Return any remaining Run-scoped events (control commands
+                // buffered during execution) to the session idle gate. User messages
+                // should have been consumed within the Run; any leftovers are
+                // incidental.
+                port.drain_remaining_events();
                 // Runtime 不保留跨 Run 的语义消息；已提交历史只存在于 Context backing。
                 messages.clear();
                 active_run.clear(&run_id);

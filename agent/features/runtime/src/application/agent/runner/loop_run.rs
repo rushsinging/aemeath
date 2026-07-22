@@ -154,6 +154,14 @@ pub(super) struct SubAgentRun<'a> {
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub policy: Arc<dyn policy::PolicyPort>,
     pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
+    /// #1272: Sub's FixedInputBuffer returns the prompt as Ready on the very
+    /// first drain, then EmptyAndSealed forever after. Tracks whether the
+    /// initial prompt has already been consumed.
+    pub prompt_drained: bool,
+    /// #1272: Sub maintains its own epoch counter for per-turn drain
+    /// linearization. First drain (Ready) uses epoch 0, then advances
+    /// to 1; subsequent EmptyAndSealed uses epoch 1.
+    pub next_epoch: crate::application::loop_engine::DrainEpoch,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -469,8 +477,37 @@ impl RunLoopPort for SubAgentRun<'_> {
 
     async fn drain_input(
         &mut self,
-    ) -> Result<Vec<crate::application::loop_engine::LoopInput>, LoopEngineError> {
-        Ok(Vec::new())
+        expected_epoch: crate::application::loop_engine::DrainEpoch,
+    ) -> Result<crate::application::loop_engine::DrainOutcome, LoopEngineError> {
+        // #1272: Sub's FixedInputBuffer returns the prompt as Ready exactly
+        // once (consumed by the first step's accepted-input handoff) at
+        // epoch 0, then EmptyAndSealed at epoch 1 forever after.
+        if !self.prompt_drained {
+            if expected_epoch != self.next_epoch {
+                return Err(LoopEngineError::Adapter(format!(
+                    "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                    expected_epoch, self.next_epoch,
+                )));
+            }
+            self.prompt_drained = true;
+            let epoch = self.next_epoch;
+            self.next_epoch = epoch.next();
+            return Ok(crate::application::loop_engine::DrainOutcome::Ready {
+                batch: vec![crate::application::loop_engine::LoopInput {
+                    text: self.prompt.to_string(),
+                }],
+                epoch,
+            });
+        }
+        if expected_epoch != self.next_epoch {
+            return Err(LoopEngineError::Adapter(format!(
+                "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                expected_epoch, self.next_epoch,
+            )));
+        }
+        let epoch = self.next_epoch;
+        self.next_epoch = epoch.next();
+        Ok(crate::application::loop_engine::DrainOutcome::EmptyAndSealed { epoch })
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {

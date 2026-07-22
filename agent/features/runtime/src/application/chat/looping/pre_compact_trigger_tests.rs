@@ -11,7 +11,7 @@
 
 #![allow(clippy::type_complexity)]
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -289,8 +289,10 @@ fn build_compact_test_port<'a>(
         language: "en",
         reasoning: harness.reasoning.as_ref(),
         pending_input: &mut harness.pending_input,
-        deferred_user_inputs: &mut harness.deferred_user_inputs,
+        run_input_buffer: super::run_input_buffer::RunInputBuffer::new(),
         stop_hook_feedback: None,
+        pending_stop_hook_feedback: None,
+        pending_tool_results: false,
         cancel: CancellationToken::new(),
         run_id: RunId::new("run"),
         active_run: harness.active_run.as_ref(),
@@ -362,7 +364,6 @@ struct CompactHarness {
     queue: EmptyQueueDrainPort,
     input_events: EmptyInputEventDrainPort,
     pending_input: PendingInputBuffer,
-    deferred_user_inputs: VecDeque<sdk::ChatInputEvent>,
     last_total_tokens: Option<u64>,
     task_reminder_state: TaskReminderState,
     tool_identity: crate::application::tool_coordination::identity::ToolIdentityRegistry,
@@ -422,7 +423,6 @@ impl CompactHarness {
             queue: EmptyQueueDrainPort,
             input_events: EmptyInputEventDrainPort,
             pending_input: PendingInputBuffer::default(),
-            deferred_user_inputs: VecDeque::new(),
             last_total_tokens: Some(0),
             task_reminder_state: TaskReminderState::new(),
             tool_identity:
