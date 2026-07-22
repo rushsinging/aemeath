@@ -98,7 +98,9 @@ fn provider_error_from_llm(error: crate::LlmError) -> crate::ProviderError {
         crate::LlmError::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
         crate::LlmError::Network(_) => crate::ProviderErrorKind::Network,
         crate::LlmError::Api { .. } => crate::ProviderErrorKind::UpstreamUnavailable,
-        crate::LlmError::StreamTruncated { .. } => crate::ProviderErrorKind::StreamTruncated,
+        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
+            crate::ProviderErrorKind::StreamTruncated
+        }
         crate::LlmError::Stream(_) => crate::ProviderErrorKind::Protocol,
         crate::LlmError::Config(_) => crate::ProviderErrorKind::Configuration,
     };
