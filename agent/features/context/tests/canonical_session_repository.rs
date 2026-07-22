@@ -7,10 +7,9 @@ use context::domain::session::{
     SnapshotState,
 };
 use context::domain::{
-    AcceptedInputAppend, AcceptedInputError, CalendarDate, CompactRequest, CompactTrigger,
-    ContentFingerprint, ContextAppend, ContextAppendError, ContextRequest, ContextRequestId,
-    FinalizeCause, Language, RunStepId, SessionId, SessionRevision, SystemPromptSpec,
-    TaskReminderSnapshot,
+    AcceptedInputAppend, AcceptedInputError, CompactRequest, CompactTrigger, ContentFingerprint,
+    ContextAppend, ContextAppendError, ContextRequest, ContextRequestId, FinalizeCause, Language,
+    RunStepId, SessionId, SessionRevision, SystemPromptSpec, TaskReminderSnapshot,
 };
 use context::ports::SessionRepository;
 use project::{PreparedWorkspaceRestore, WorkspacePersist, WorkspaceRestoreError};
@@ -124,7 +123,6 @@ fn compact_request(session_id: SessionId) -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        current_date: CalendarDate::new("2026-07-19"),
         task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: Default::default(),

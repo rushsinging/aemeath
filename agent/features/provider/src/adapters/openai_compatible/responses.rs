@@ -241,6 +241,36 @@ mod tests {
     }
 
     #[test]
+    fn responses_instructions_omit_anthropic_cache_control() {
+        use crate::adapters::client::OpenAIProviderConfig;
+        use crate::ProviderDriverKind;
+
+        let config = OpenAIProviderConfig::from_driver(ProviderDriverKind::OpenAI, "test");
+        let provider = super::super::OpenAICompatibleProvider::new(
+            config,
+            "test-key".to_string(),
+            Some("https://example.com".to_string()),
+            Some("test-model".to_string()),
+            8192,
+            false,
+            None,
+            60,
+        );
+        let scope = InvocationScope::new(
+            "test-model",
+            8192,
+            crate::ports::ReasoningLevel::Off,
+            crate::ports::ReasoningLevel::Off,
+        )
+        .expect("valid scope");
+        let system = vec![SystemBlock::cached("stable instructions".to_string())];
+
+        let body = provider.build_responses_request_body(&scope, &system, &[], &[], false);
+        assert_eq!(body["instructions"], "stable instructions");
+        assert!(body.get("cache_control").is_none());
+    }
+
+    #[test]
     fn test_build_responses_request_body_injects_tools_from_flat_schema() {
         use crate::adapters::client::OpenAIProviderConfig;
         use crate::ProviderDriverKind;

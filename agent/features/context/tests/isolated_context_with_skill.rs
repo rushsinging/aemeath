@@ -72,7 +72,6 @@ fn base_request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("base system prompt"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        current_date: CalendarDate::new("2026-07-15"),
         task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("en"),
         agent_roles: Default::default(),
@@ -125,6 +124,13 @@ async fn isolated_context_with_skill_builds_window_containing_skills() {
     assert!(skills_block.content.contains("do beta"));
     // skills 块可缓存
     assert!(skills_block.cacheable);
+    assert!(
+        window
+            .system_blocks
+            .iter()
+            .all(|block| block.kind != "dynamic_system_context"),
+        "动态系统上下文不得进入 LLM system blocks"
+    );
 }
 
 // ── 对照：isolated_context（不带 skill）不含 skills 块 ──────────────────────

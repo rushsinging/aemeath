@@ -2,6 +2,23 @@ use super::OpenAICompatibleProvider;
 use share::message::{ContentBlock, Message, Role};
 
 #[test]
+fn system_message_uses_stable_prefix_without_anthropic_cache_control() {
+    let system = vec![crate::domain::invoke::SystemBlock::dynamic(
+        "stable instructions".to_string(),
+    )];
+    let converted = OpenAICompatibleProvider::convert_messages(&system, &[], false).unwrap();
+
+    assert_eq!(
+        converted,
+        vec![serde_json::json!({
+            "role": "system",
+            "content": "stable instructions"
+        })]
+    );
+    assert!(converted[0].get("cache_control").is_none());
+}
+
+#[test]
 fn test_convert_messages_preserves_real_reasoning_content_with_tool_calls() {
     let messages = vec![Message {
         role: Role::Assistant,

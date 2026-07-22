@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use context::adapters::CommittedMemoryRetrieveAdapter;
 use context::application::ContextApplicationService;
 use context::domain::{
-    CalendarDate, ContextAppend, ContextRequest, ContextRequestId, FinalizeCause, Language,
-    RunStepId, SessionId, SessionRevision, SystemBlock, SystemPromptSpec, TaskReminderSnapshot,
+    ContextAppend, ContextRequest, ContextRequestId, FinalizeCause, Language, RunStepId, SessionId,
+    SessionRevision, SystemBlock, SystemPromptSpec, TaskReminderSnapshot,
 };
 use context::ports::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
@@ -81,7 +81,7 @@ impl ContextPromptSource for FakePrompt {
     ) -> Result<PromptMaterialization, context::ports::PromptMaterializationError> {
         Ok(PromptMaterialization {
             cacheable: vec![block("system_prompt"), block("user_guidance")],
-            uncached: vec![block("current_date"), block("git_context")],
+            uncached: Vec::new(),
             revision: 7,
         })
     }
@@ -106,6 +106,7 @@ fn block(kind: &str) -> SystemBlock {
         kind: kind.into(),
         content: kind.into(),
         cacheable: true,
+        cache_break: false,
     }
 }
 
@@ -119,7 +120,6 @@ fn request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        current_date: CalendarDate::new("2026-07-15"),
         task_reminder: TaskReminderSnapshot {
             text: Some("reminder".into()),
         },
@@ -168,6 +168,7 @@ async fn committed_memory_adapter_switches_from_noop_to_active_memory_for_contex
     let after = source.materialize(&request()).await.unwrap();
     assert_eq!(after.blocks.len(), 1);
     assert_eq!(after.blocks[0].kind, "memory_context");
+    assert!(after.blocks[0].cacheable);
     assert!(after.blocks[0].content.contains("active memory fact"));
 }
 
@@ -187,12 +188,26 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
             "user_guidance",
             "memory_context",
             "active_summary",
-            "cache_breakpoint",
-            "current_date",
-            "git_context",
             "task_reminder",
         ]
     );
+    let cache_breaks: Vec<_> = window
+        .system_blocks
+        .iter()
+        .filter(|block| block.cache_break)
+        .map(|block| block.kind.as_str())
+        .collect();
+    assert_eq!(cache_breaks, vec!["active_summary"]);
+}
+
+#[tokio::test]
+async fn build_window_omits_date_and_dynamic_system_context() {
+    let window = service().build_window(&request()).await.unwrap();
+
+    assert!(window.system_blocks.iter().all(|block| !matches!(
+        block.kind.as_str(),
+        "current_date" | "dynamic_system_context"
+    )));
 }
 
 #[tokio::test]
