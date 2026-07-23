@@ -1218,8 +1218,12 @@ where
                 }
                 Some(other) => {
                     // Non-UserMessage command: defer to session idle gate.
+                    // Return EmptyAndSealed so the Run completes and the
+                    // session gate can process the command.
                     self.pending_input.push(other);
-                    // Continue async park — keep waiting for UserMessage.
+                    return Ok(DrainOutcome::EmptyAndSealed {
+                        epoch: expected_epoch,
+                    });
                 }
             }
         }
