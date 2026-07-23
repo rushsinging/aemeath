@@ -215,48 +215,31 @@ impl App {
                 );
                 self.spinner_stop();
 
-                let n = items.len();
-                if n == 1 && items[0].options.is_empty() {
-                    // 单问 + 无选项：自由输入模式，走 reply_tx
-                    let item = &items[0];
-                    let slot = crate::tui::model::conversation::block::AskUserSlot {
-                        id: item.id.clone(),
-                        question: item.question.clone(),
-                        options: Vec::new(),
-                        llm_option_count: 0,
-                        multi_select: item.multi_select,
-                        default: item.default.clone(),
-                        answer: None,
-                    };
-                    self.show_ask_user_batch(vec![slot]);
-                    self.input.ask_user_reply_tx = Some(reply_tx);
-                } else {
-                    // 构建 AskUserSlot 列表
-                    let slots: Vec<_> = items
-                        .iter()
-                        .map(|item| {
-                            let llm_count = item.options.len();
-                            let mut all_options = item.options.clone();
-                            if item.allow_free_input && llm_count >= 1 {
-                                all_options.push(sdk::OptionItem::title_only(
-                                    crate::tui::app::state::BUILTIN_OPTION_CHAT,
-                                ));
-                            }
-                            crate::tui::model::conversation::block::AskUserSlot {
-                                id: item.id.clone(),
-                                question: item.question.clone(),
-                                options: all_options,
-                                llm_option_count: llm_count,
-                                multi_select: item.multi_select,
-                                default: item.default.clone(),
-                                answer: None,
-                            }
-                        })
-                        .collect();
-                    self.show_ask_user_batch(slots);
-                    self.input.ask_user_state =
-                        Some(crate::tui::app::state::AskUserState { reply_tx, items });
-                }
+                let slots: Vec<_> = items
+                    .iter()
+                    .map(|item| {
+                        let llm_count = item.options.len();
+                        let mut all_options = item.options.clone();
+                        if item.allow_free_input && llm_count >= 1 {
+                            all_options.push(sdk::OptionItem::title_only(
+                                crate::tui::app::state::BUILTIN_OPTION_CHAT,
+                            ));
+                        }
+                        crate::tui::model::conversation::block::AskUserSlot {
+                            id: item.id.clone(),
+                            question_seq: item.question_seq,
+                            question: item.question.clone(),
+                            options: all_options,
+                            llm_option_count: llm_count,
+                            multi_select: item.multi_select,
+                            default: item.default.clone(),
+                            answer: None,
+                        }
+                    })
+                    .collect();
+                self.show_ask_user_batch(slots);
+                self.input.ask_user_state =
+                    Some(crate::tui::app::state::AskUserState { reply_tx, items });
                 crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::AskUserBatch(show) → spinner_stop");
                 self.spinner_stop();
             }

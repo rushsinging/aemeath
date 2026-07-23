@@ -57,8 +57,8 @@ pub fn exit_plan_mode(lang: &str) -> &'static str {
 /// AskUserQuestion description。
 pub fn ask_user(lang: &str) -> &'static str {
     match lang {
-        "zh" => "向用户提问并等待响应。用 `options` 数组提供预定义选项；永远不要在问题文本中内嵌选项。",
-        _ => "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text.",
+        "zh" => "向用户提问并等待响应。用 `options` 数组提供预定义选项；永远不要在问题文本中内嵌选项。自由输入默认启用；存在预设选项时，系统会固定提供 `Type something...` 入口。不要自行把该项放入 options，只有必须限制为预设选项时才显式设为 false。",
+        _ => "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text. Free-text input defaults to enabled; when options are present, the system provides a `Type something...` entry. Do not add it to options yourself, and set false only when answers must be restricted to predefined choices.",
     }
 }
 

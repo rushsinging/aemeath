@@ -29,6 +29,7 @@ fn maps_user_interaction_fields_losslessly_in_stable_order() {
 
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].id, "runtime-tool-call-7");
+    assert_eq!(items[0].question_seq, 0);
     assert_eq!(items[0].question, "First");
     assert_eq!(items[0].options[0].title, "alpha");
     assert_eq!(items[0].options[0].description, None);
@@ -42,6 +43,7 @@ fn maps_user_interaction_fields_losslessly_in_stable_order() {
     assert_eq!(items[0].default.as_deref(), Some("beta"));
 
     assert_eq!(items[1].question, "Second");
+    assert_eq!(items[1].question_seq, 1);
     assert_eq!(items[1].options[0].title, "gamma");
     assert_eq!(
         items[1].options[0].description.as_deref(),
