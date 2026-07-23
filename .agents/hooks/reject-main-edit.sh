@@ -5,10 +5,10 @@
 
 set -euo pipefail
 
-# 读取 Claude Code PreToolUse stdin（JSON 上下文）
+# 读取 PreToolUse stdin（兼容 Claude Code 顶层 envelope 与 Aemeath 的嵌套 envelope）。
 hook_input="$(cat || true)"
-tool_name="$(printf '%s' "$hook_input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
-file_path="$(printf '%s' "$hook_input" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)"
+tool_name="$(printf '%s' "$hook_input" | jq -r '.tool_name // .PreToolUse.tool_name // empty' 2>/dev/null || true)"
+file_path="$(printf '%s' "$hook_input" | jq -r '.tool_input.file_path // .PreToolUse.tool_input.file_path // empty' 2>/dev/null || true)"
 
 # 仅对 Edit/Write 生效；其他工具（Read/Bash/...）放行
 case "$tool_name" in
