@@ -33,12 +33,12 @@
 
 ## 文件结构
 
-- Modify: `agent/features/runtime/src/application/chat/looping/tools.rs` — 废除 `ask_user()` 调用，改为 InteractionBridge 逐个 resolve。
-- Modify: `agent/features/runtime/src/application/chat/looping/events.rs` — 不再在生产路径发 `AskUserBatch { reply_tx }`。
-- Modify: `agent/features/runtime/src/application/chat/looping/main_run_port.rs` — 接入 InteractionBridge 引用。
+- Modify: `agent/features/runtime/src/application/main_loop/looping/tools.rs` — 废除 `ask_user()` 调用，改为 InteractionBridge 逐个 resolve。
+- Modify: `agent/features/runtime/src/application/main_loop/looping/events.rs` — 不再在生产路径发 `AskUserBatch { reply_tx }`。
+- Modify: `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs` — 接入 InteractionBridge 引用。
 - Modify: `agent/features/runtime/src/application/client/{accessors.rs,trait_impl.rs}` — reply/cancel 委托 bridge。
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_runner.rs` — 传入 bridge 或通过 accessors 获取。
-- Modify/Test: `agent/features/runtime/src/application/chat/looping/loop_runner_tests.rs` — L4 场景。
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_runner.rs` — 传入 bridge 或通过 accessors 获取。
+- Modify/Test: `agent/features/runtime/src/application/main_loop/looping/loop_runner_tests.rs` — L4 场景。
 - Modify/Test: `agent/features/runtime/src/application/interaction.rs` — 如需适配 Main adapter 用法。
 - Modify/Test: `apps/cli/src/tui/effect/session/processing/event_mapping.rs` — 映射 `InteractionRequested`。
 - Modify: `docs/design/02-modules/runtime/{01-domain-model.md,03-loop-and-state-machine.md,06-ports-and-adapters.md}` — 回写。
@@ -66,11 +66,11 @@
 ## Task 2: 废除 ask_user() oneshot，改用 InteractionBridge（L2/L4）
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/chat/looping/tools.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/main_run_port.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_runner.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/events.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_runner_tests.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/tools.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_runner.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/events.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_runner_tests.rs`
 
 - [ ] **Step 1: 写失败测试：InteractionBridge resolve 后返回正确 Tool result**
 
@@ -111,7 +111,7 @@
 ## Task 4: 生产可达测试与 reply/cancel race（L4）
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_runner_tests.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_runner_tests.rs`
 
 - [ ] **Step 1: 写生产可达测试**
 

@@ -180,10 +180,10 @@ Expected: both threshold tests pass.
 ### Task 3: Use Latest Total in Main Runtime
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_runner.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/main_run_port.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/compact.rs`
-- Test: `agent/features/runtime/src/application/chat/looping/loop_runner_tests.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_runner.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/compact.rs`
+- Test: `agent/features/runtime/src/application/main_loop/looping/loop_runner_tests.rs`
 
 - [x] **Step 1: Write failing pure-decision tests**
 
@@ -254,9 +254,9 @@ Expected: all matching tests pass.
 ### Task 4: Use Latest Total in Sub Runtime
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/agent/runner/loop_run.rs`
-- Modify: `agent/features/runtime/src/application/agent/runner/setup.rs`
-- Test: `agent/features/runtime/src/application/agent/runner/loop_run.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/loop_run.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/setup.rs`
+- Test: `agent/features/runtime/src/application/subagent/runner/loop_run.rs`
 
 - [x] **Step 1: Write a failing Sub compact state test**
 

@@ -503,7 +503,7 @@ pub async fn from_args_with_workspace(
         config_writer,
         session_management,
         event_sink_factory: Arc::new(|tx| {
-            crate::application::chat::ChatEventSinkHandle::new(
+            crate::application::main_loop::ChatEventSinkHandle::new(
                 crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
             )
         }),

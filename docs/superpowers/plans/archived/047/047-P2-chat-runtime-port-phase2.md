@@ -14,13 +14,13 @@
 
 Create:
 
-- `cli/src/application/chat/mod.rs`
+- `cli/src/application/main_loop/mod.rs`
   - Chat application 子模块出口，导出 request、port、service。
-- `cli/src/application/chat/request.rs`
+- `cli/src/application/main_loop/request.rs`
   - `ChatLaunchMode`、`ChatLaunchRequest` 与 validate tests。
-- `cli/src/application/chat/port.rs`
+- `cli/src/application/main_loop/port.rs`
   - `ChatRuntimePort`、`NoTuiChatDependencies`、`TuiChatDependencies`、`TuiChatOutcome`。
-- `cli/src/application/chat/service.rs`
+- `cli/src/application/main_loop/service.rs`
   - `ChatApplicationService`，只执行 validate + port dispatch。
 
 Modify:
@@ -50,8 +50,8 @@ Verification:
 ### Task 1: Split Chat Application Module Into Focused Files
 
 **Files:**
-- Create: `cli/src/application/chat/mod.rs`
-- Create: `cli/src/application/chat/request.rs`
+- Create: `cli/src/application/main_loop/mod.rs`
+- Create: `cli/src/application/main_loop/request.rs`
 - Modify/Delete: `cli/src/application/chat.rs`
 
 - [x] **Step 1: Read current source**
@@ -65,7 +65,7 @@ git status --short --branch
 
 Expected: branch is `feature/47-chat-runtime-port-phase2` and working tree has no unrelated user changes.
 
-- [x] **Step 2: Create `cli/src/application/chat/mod.rs`**
+- [x] **Step 2: Create `cli/src/application/main_loop/mod.rs`**
 
 Create file with exactly:
 
@@ -75,7 +75,7 @@ pub(crate) mod request;
 pub(crate) use request::{ChatLaunchMode, ChatLaunchRequest};
 ```
 
-- [x] **Step 3: Move request code and tests to `cli/src/application/chat/request.rs`**
+- [x] **Step 3: Move request code and tests to `cli/src/application/main_loop/request.rs`**
 
 Create file with exactly:
 
@@ -200,7 +200,7 @@ mod tests {
 
 - [x] **Step 4: Temporarily leave old `cli/src/application/chat.rs` empty-deleted**
 
-Delete `cli/src/application/chat.rs`. The module is now resolved through `cli/src/application/chat/mod.rs`.
+Delete `cli/src/application/chat.rs`. The module is now resolved through `cli/src/application/main_loop/mod.rs`.
 
 - [x] **Step 5: Run targeted test and expect compile errors from missing service types**
 
@@ -217,9 +217,9 @@ Expected: FAIL because `ChatApplicationService`, `NoTuiChatDependencies`, and `T
 ### Task 2: Add Chat Runtime Port and Service Dispatch
 
 **Files:**
-- Create: `cli/src/application/chat/port.rs`
-- Create: `cli/src/application/chat/service.rs`
-- Modify: `cli/src/application/chat/mod.rs`
+- Create: `cli/src/application/main_loop/port.rs`
+- Create: `cli/src/application/main_loop/service.rs`
+- Modify: `cli/src/application/main_loop/mod.rs`
 - Modify: `cli/Cargo.toml`
 
 - [x] **Step 1: Add async-trait dependency to `cli/Cargo.toml`**
@@ -230,7 +230,7 @@ In `[dependencies]`, add:
 async-trait = { workspace = true }
 ```
 
-- [x] **Step 2: Update `cli/src/application/chat/mod.rs`**
+- [x] **Step 2: Update `cli/src/application/main_loop/mod.rs`**
 
 Replace contents with exactly:
 
@@ -244,7 +244,7 @@ pub(crate) use request::{ChatLaunchMode, ChatLaunchRequest};
 pub(crate) use service::ChatApplicationService;
 ```
 
-- [x] **Step 3: Create `cli/src/application/chat/port.rs`**
+- [x] **Step 3: Create `cli/src/application/main_loop/port.rs`**
 
 Create file with exactly:
 
@@ -314,7 +314,7 @@ pub(crate) trait ChatRuntimePort {
 }
 ```
 
-- [x] **Step 4: Create `cli/src/application/chat/service.rs`**
+- [x] **Step 4: Create `cli/src/application/main_loop/service.rs`**
 
 Create file with exactly:
 

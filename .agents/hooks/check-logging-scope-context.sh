@@ -49,7 +49,7 @@ fi
 
 for file in \
   "$RUNTIME_SRC/application/client/trait_chat.rs" \
-  "$RUNTIME_SRC/application/chat/looping/main_run_port.rs"; do
+  "$RUNTIME_SRC/application/main_loop/looping/main_run_port.rs"; do
   if grep -nE 'tokio::spawn[[:space:]]*\(' "$file" >/dev/null; then
     grep -nE 'tokio::spawn[[:space:]]*\(' "$file" >&2 || true
     echo "Logging scope context guard FAILED: controlled Runtime production tasks must use logging::spawn_instrumented." >&2
@@ -58,8 +58,8 @@ for file in \
 done
 
 for file in \
-  "$RUNTIME_SRC/application/chat/looping/agent_calls.rs" \
-  "$RUNTIME_SRC/application/chat/looping/non_agent.rs"; do
+  "$RUNTIME_SRC/application/main_loop/looping/agent_calls.rs" \
+  "$RUNTIME_SRC/application/main_loop/looping/non_agent.rs"; do
   production_prefix="$(awk '/^#\[cfg\(test\)\]/{exit} {print}' "$file")"
   if printf '%s\n' "$production_prefix" | grep -nE 'tokio::spawn[[:space:]]*\(' >/dev/null; then
     printf '%s\n' "$production_prefix" | grep -nE 'tokio::spawn[[:space:]]*\(' >&2 || true

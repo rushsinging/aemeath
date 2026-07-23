@@ -19,8 +19,8 @@
 - Modify: `agent/features/context/src/domain/session/envelope.rs` — 将 accepted input 写入已有 Step、marker 后可见性。
 - Modify: `agent/features/runtime/src/application/context_coordination.rs` — Runtime façade、指纹计算。
 - Modify: `agent/features/runtime/src/application/loop_engine/{engine.rs,tests.rs}` — `freeze_step → accept_step_input → needs_compaction` 共享时序。
-- Modify: `agent/features/runtime/src/application/chat/looping/main_run_port.rs` — Main adapter 提取 user-only accepted facts。
-- Modify: `agent/features/runtime/src/application/agent/runner/loop_run.rs` — Sub adapter 提取 user-only accepted facts。
+- Modify: `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs` — Main adapter 提取 user-only accepted facts。
+- Modify: `agent/features/runtime/src/application/subagent/runner/loop_run.rs` — Sub adapter 提取 user-only accepted facts。
 - Modify: Context/Runtime 既有测试与 fake 实现 — 新端口契约。
 - Modify: `docs/design/02-modules/{context-management/01-session.md,runtime/03-loop-and-state-machine.md}`、`docs/design/03-engineering/03-migration-governance.md` — 两阶段语义与迁移责任。
 
@@ -145,8 +145,8 @@ Expected: PASS。
 ## Task 4: 接入 Main / Sub 已绑定 user input
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/chat/looping/main_run_port.rs`
-- Modify: `agent/features/runtime/src/application/agent/runner/loop_run.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/loop_run.rs`
 - Test: Main/Sub 相邻 loop tests
 
 - [ ] **Step 1: 写 Main adapter 失败测试**

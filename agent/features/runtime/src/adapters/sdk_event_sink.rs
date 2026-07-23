@@ -14,7 +14,10 @@ impl SdkChatEventSink {
         Self { tx, change_tx }
     }
 
-    fn project_and_mark(&self, event: crate::application::chat::RuntimeStreamEvent) -> ChatEvent {
+    fn project_and_mark(
+        &self,
+        event: crate::application::main_loop::RuntimeStreamEvent,
+    ) -> ChatEvent {
         let projected = project_stream_event(event);
         if matches!(projected, ChatEvent::WorkingDirectoryChanged { .. }) {
             let previous = *self.change_tx.borrow();
@@ -24,24 +27,24 @@ impl SdkChatEventSink {
     }
 }
 
-impl crate::application::chat::ChatEventSink for SdkChatEventSink {
+impl crate::application::main_loop::ChatEventSink for SdkChatEventSink {
     fn send_event<'a>(
         &'a self,
-        event: crate::application::chat::RuntimeStreamEvent,
-    ) -> crate::application::chat::EventFuture<'a> {
+        event: crate::application::main_loop::RuntimeStreamEvent,
+    ) -> crate::application::main_loop::EventFuture<'a> {
         Box::pin(async move {
             let _ = self.tx.send(self.project_and_mark(event));
         })
     }
 
-    fn try_send_event(&self, event: crate::application::chat::RuntimeStreamEvent) {
+    fn try_send_event(&self, event: crate::application::main_loop::RuntimeStreamEvent) {
         let _ = self.tx.send(self.project_and_mark(event));
     }
 
     fn send_domain_event<'a>(
         &'a self,
         event: crate::domain::agent_run::RunDomainEvent,
-    ) -> crate::application::chat::EventFuture<'a> {
+    ) -> crate::application::main_loop::EventFuture<'a> {
         Box::pin(async move {
             let _ = self
                 .tx

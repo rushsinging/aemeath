@@ -66,8 +66,8 @@ for path in sorted((root / "apps" / "cli" / "src").rglob("*.rs")):
             )
 
 step_files = [
-    root / "agent" / "features" / "runtime" / "src" / "application" / "chat" / "looping" / "main_run_port.rs",
-    root / "agent" / "features" / "runtime" / "src" / "application" / "agent" / "runner" / "loop_run.rs",
+    root / "agent" / "features" / "runtime" / "src" / "application" / "main_loop" / "looping" / "main_run_port.rs",
+    root / "agent" / "features" / "runtime" / "src" / "application" / "subagent" / "runner" / "loop_run.rs",
 ]
 step_contracts = re.compile(r"\b(ConfigReader|ConfigQuery|ConfigWriter|refresh_if_sources_changed)\b")
 for path in step_files:

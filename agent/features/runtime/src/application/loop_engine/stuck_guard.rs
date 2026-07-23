@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
-use crate::application::agent::ToolCall;
-use crate::application::chat::looping::stall::StallDetector;
+use crate::application::main_loop::looping::stall::StallDetector;
+use crate::application::subagent::ToolCall;
 use crate::application::tool_coordination::loop_guard::{ToolCallFuse, ToolFuseDecision};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

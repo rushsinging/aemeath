@@ -37,7 +37,7 @@
 - Modify: `agent/features/runtime/src/domain/agent_run.rs` — Main control delivery seam；不增加 Sub 专用模型。
 - Modify/Create: `agent/features/runtime/src/application/{active_run.rs,active_run_tests.rs}` — Main typed registry 与外置 L1/L2 测试。
 - Modify: `agent/features/runtime/src/application/loop_engine/{engine.rs,tests.rs}` — 保持 #1272 contract 的 typed barrier。
-- Modify: `agent/features/runtime/src/application/chat/looping/{loop_runner.rs,main_run_port.rs,loop_runner_tests.rs}` — Main registration、Step scope、Context finalization 与 L4 场景。
+- Modify: `agent/features/runtime/src/application/main_loop/looping/{loop_runner.rs,main_run_port.rs,loop_runner_tests.rs}` — Main registration、Step scope、Context finalization 与 L4 场景。
 - Modify: `agent/features/runtime/src/application/client/{accessors.rs,trait_impl.rs}` — SDK 命令委托 registry。
 - Modify/Test: `apps/cli/src/tui/effect/session/{processing.rs,processing/handle.rs}` 及相邻 mock — stop effect 切换。
 - Modify: `docs/design/02-modules/runtime/{01-domain-model.md,03-loop-and-state-machine.md,06-ports-and-adapters.md}` — Main production 入口与 Sub 承接边界。
@@ -209,9 +209,9 @@ Expected: PASS。
 ## Task 4: 接通 Main adapter、Context 收口与 AgentClient 委托（L2/L4）
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_runner.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/main_run_port.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_runner_tests.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_runner.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_runner_tests.rs`
 - Modify: `agent/features/runtime/src/application/client/{accessors.rs,trait_impl.rs}`
 
 - [ ] **Step 1: 写 Main 生产路径失败场景**

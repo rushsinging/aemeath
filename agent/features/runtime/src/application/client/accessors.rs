@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::application::chat::ChatEventSinkHandle;
+use crate::application::main_loop::ChatEventSinkHandle;
 use crate::ports::legacy::ChatRuntimeContext;
 use sdk::ChatEvent;
 use share::config::models::ResolvedModel;

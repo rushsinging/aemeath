@@ -9,7 +9,7 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/agent/features/context/src/ports" \
   "$TMP/agent/features/context/src/adapters" \
   "$TMP/agent/features/runtime/src/application/client" \
-  "$TMP/agent/features/runtime/src/application/chat/looping"
+  "$TMP/agent/features/runtime/src/application/main_loop/looping"
 cat >"$TMP/agent/features/context/src/ports/session_management.rs" <<'RS'
 trait SessionManagementPort {
     fn load_for_project(&self) {}
@@ -26,7 +26,7 @@ RS
 cat >"$TMP/agent/features/runtime/src/application/client/trait_session.rs" <<'RS'
 fn list() { list_for_project(); }
 RS
-cat >"$TMP/agent/features/runtime/src/application/chat/looping/idle_commands.rs" <<'RS'
+cat >"$TMP/agent/features/runtime/src/application/main_loop/looping/idle_commands.rs" <<'RS'
 fn execute() {
     list_for_project();
     update_metadata_for_project();
@@ -53,18 +53,18 @@ sed -i.bak 's/load_for_project/load_canonical/' "$TMP/agent/features/context/src
 expect_failure resume-load 'MainSessionWiring resume must use project-scoped session load'
 mv "$TMP/agent/features/context/src/adapters/session_resume.rs.bak" "$TMP/agent/features/context/src/adapters/session_resume.rs"
 
-sed -i.bak 's/export_for_project/export/' "$TMP/agent/features/runtime/src/application/chat/looping/idle_commands.rs"
+sed -i.bak 's/export_for_project/export/' "$TMP/agent/features/runtime/src/application/main_loop/looping/idle_commands.rs"
 expect_failure runtime-export 'Runtime session export must use project-scoped export'
-mv "$TMP/agent/features/runtime/src/application/chat/looping/idle_commands.rs.bak" "$TMP/agent/features/runtime/src/application/chat/looping/idle_commands.rs"
+mv "$TMP/agent/features/runtime/src/application/main_loop/looping/idle_commands.rs.bak" "$TMP/agent/features/runtime/src/application/main_loop/looping/idle_commands.rs"
 
-sed -i.bak 's/update_metadata_for_project/update_metadata/' "$TMP/agent/features/runtime/src/application/chat/looping/idle_commands.rs"
+sed -i.bak 's/update_metadata_for_project/update_metadata/' "$TMP/agent/features/runtime/src/application/main_loop/looping/idle_commands.rs"
 expect_failure runtime-rename 'Runtime session rename must use project-scoped metadata update'
 
-sed -i.bak 's/import_for_project/import/' "$TMP/agent/features/runtime/src/application/chat/looping/idle_commands.rs"
+sed -i.bak 's/import_for_project/import/' "$TMP/agent/features/runtime/src/application/main_loop/looping/idle_commands.rs"
 expect_failure runtime-import 'Runtime session import must use project-scoped import'
-mv "$TMP/agent/features/runtime/src/application/chat/looping/idle_commands.rs.bak" "$TMP/agent/features/runtime/src/application/chat/looping/idle_commands.rs"
+mv "$TMP/agent/features/runtime/src/application/main_loop/looping/idle_commands.rs.bak" "$TMP/agent/features/runtime/src/application/main_loop/looping/idle_commands.rs"
 
-sed -i.bak 's/delete_for_project/delete/' "$TMP/agent/features/runtime/src/application/chat/looping/idle_commands.rs"
+sed -i.bak 's/delete_for_project/delete/' "$TMP/agent/features/runtime/src/application/main_loop/looping/idle_commands.rs"
 expect_failure runtime-delete 'Runtime session delete must use project-scoped delete'
 
 echo 'Session project scope guard sanity checks passed.'

@@ -18,8 +18,8 @@
 - Modify: `agent/features/context/src/application/service.rs` — outcome append 的纯委托。
 - Modify: `agent/features/context/src/adapters/{canonical_session.rs,in_memory_session.rs}` — outcome durable-before-publish、同键幂等/冲突、revision 与 snapshot 行为。
 - Modify: `agent/features/runtime/src/application/context_coordination.rs` — 唯一 outcome append façade 与稳定 fingerprint 输入。
-- Modify: `agent/features/runtime/src/application/chat/looping/main_run_port.rs` — Main finalized facts 只经 coordinator 提交。
-- Modify: `agent/features/runtime/src/application/agent/runner/loop_run.rs` — Sub finalized facts 只经 coordinator 提交。
+- Modify: `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs` — Main finalized facts 只经 coordinator 提交。
+- Modify: `agent/features/runtime/src/application/subagent/runner/loop_run.rs` — Sub finalized facts 只经 coordinator 提交。
 - Modify: Context/Runtime 的相邻测试 — L1–L4 证据。
 - Modify: `docs/design/02-modules/context-management/{01-session.md,02-compact.md}`、`docs/design/02-modules/runtime/03-loop-and-state-machine.md`、`docs/design/03-engineering/03-migration-governance.md` — Target 和迁移责任回写。
 
@@ -186,8 +186,8 @@ Expected: PASS。
 ## Task 5: 接入 Main/Sub finalized facts，并锁定 Stop Hook 边界
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/chat/looping/main_run_port.rs`
-- Modify: `agent/features/runtime/src/application/agent/runner/loop_run.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/loop_run.rs`
 - Test: Main/Sub 相邻 loop tests
 
 - [ ] **Step 1: 写 Main adapter 失败测试**

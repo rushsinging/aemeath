@@ -27,7 +27,7 @@
 | `agent/features/hook/src/adapters/legacy/**`（删除） | 删除旧 DTO、Runner、JSON 解析、事件便捷方法及其测试。 |
 | `agent/features/runtime/src/application/hook_adapter.rs` | 将 `hook::api::*` 类型引用改为 crate-root PL，不改变纯投影职责。 |
 | `agent/features/runtime/src/application/**` | 把 `HookRunner` / `HookUi` 持有与手工推断切为 `Arc<dyn HookPort>` + `RuntimeHookDispatch`。 |
-| `agent/features/runtime/src/application/chat/looping/hook_ui.rs`（删除或以纯 glue 替代） | 删除运行器直调与 `HookResult` / JSON 推断。 |
+| `agent/features/runtime/src/application/main_loop/looping/hook_ui.rs`（删除或以纯 glue 替代） | 删除运行器直调与 `HookResult` / JSON 推断。 |
 | `agent/features/runtime/src/adapters/runtime.rs`、`agent/shared/src/adapter/hook.rs` | 删除或将 Notification compatibility adapter 切到 HookPort。 |
 | `.agents/hooks/check-hook-target-facade.sh`（新建） | 零白名单 Guard：禁止 legacy façade/re-export/Runtime `hook::api` 消费。 |
 | `.agents/hooks/check-hook-target-facade-tests.sh`（新建） | 在临时副本注入反例，验证单 Guard exit 2。 |
@@ -73,13 +73,13 @@ Expected: exit 0；Hook ports/domain 不依赖 adapters。
 **Files:**
 - Modify: `agent/features/runtime/src/application/startup/runtime_support.rs`
 - Modify: `agent/features/runtime/src/application/resources.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_context.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/main_run_port.rs`
-- Modify: `agent/features/runtime/src/application/agent/runner.rs`
-- Modify: `agent/features/runtime/src/application/agent/runner/loop_run.rs`
-- Modify: `agent/features/runtime/src/application/agent/runner/setup.rs`
-- Modify: `agent/features/runtime/src/application/agent/runner/finalize.rs`
-- Test: `agent/features/runtime/src/application/agent/runner/tests.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_context.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/loop_run.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/setup.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/finalize.rs`
+- Test: `agent/features/runtime/src/application/subagent/runner/tests.rs`
 
 - [ ] **Step 1: 写 Runtime 装配失败测试**
 
@@ -103,13 +103,13 @@ Expected: 通过，并且不再依赖 legacy 类型。
 
 **Files:**
 - Modify: `agent/features/runtime/src/application/hook_adapter.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/finalize.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/tools.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/post_batch.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/non_agent.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/agent_calls.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/ask_user.rs`
-- Delete: `agent/features/runtime/src/application/chat/looping/hook_ui.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/finalize.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/tools.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/post_batch.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/non_agent.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/agent_calls.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/ask_user.rs`
+- Delete: `agent/features/runtime/src/application/main_loop/looping/hook_ui.rs`
 - Modify/Create: 对应 `*_tests.rs`
 
 - [ ] **Step 1: 为 Stop、PreToolUse、Permission、PostTool、PostToolBatch 写失败的邻接契约测试**
@@ -141,11 +141,11 @@ Expected: 更新输入在进入工具执行前经过既有 Tools schema validato
 - Modify: `agent/features/runtime/src/application/prompt/build/prompt_build.rs`
 - Modify: `agent/features/runtime/src/application/prompt/prompt_build_ext.rs`
 - Modify: `agent/features/runtime/src/application/prompt/build/prompt_build_tests.rs`
-- Modify: `agent/features/runtime/src/application/agent/runner/setup.rs`
-- Modify: `agent/features/runtime/src/application/agent/runner/finalize.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/setup.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/finalize.rs`
 - Modify: `agent/features/runtime/src/adapters/runtime.rs`
 - Modify/Delete: `agent/shared/src/adapter/hook.rs`
-- Test: `agent/features/runtime/src/application/agent/runner/tests.rs`
+- Test: `agent/features/runtime/src/application/subagent/runner/tests.rs`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -168,16 +168,16 @@ Expected: 通过。
 ### Task 5: 结构化 HookMessage 事件与展示投影
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/chat/looping/finalize.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/tools.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/post_batch.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/non_agent.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/agent_calls.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/ask_user.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/finalize.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/tools.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/post_batch.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/non_agent.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/agent_calls.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/ask_user.rs`
 - Modify: `agent/features/runtime/src/adapters/event_projection.rs`
-- Test: `agent/features/runtime/src/application/chat/looping/finalize_tests.rs`
-- Test: `agent/features/runtime/src/application/chat/looping/loop_runner_tests.rs`
-- Test: `agent/features/runtime/src/application/chat/looping/pre_compact_trigger_tests.rs`
+- Test: `agent/features/runtime/src/application/main_loop/looping/finalize_tests.rs`
+- Test: `agent/features/runtime/src/application/main_loop/looping/loop_runner_tests.rs`
+- Test: `agent/features/runtime/src/application/main_loop/looping/pre_compact_trigger_tests.rs`
 - Test: `agent/features/runtime/src/adapters/event_projection_tests.rs`
 - Test: `apps/cli/src/tui/adapter/event_adapter_tests.rs`（若该现有事件适配测试承载 HookMessage 消费）
 

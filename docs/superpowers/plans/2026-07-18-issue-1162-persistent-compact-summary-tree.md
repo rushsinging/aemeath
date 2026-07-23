@@ -32,7 +32,7 @@ agent/features/context/src/
     └── persistent_compact_lifecycle.rs     # #1119 L4 生命周期
 
 agent/composition/src/runtime.rs               # #1168 唯一 scheduler 装配
-agent/features/runtime/src/application/chat/looping/
+agent/features/runtime/src/application/main_loop/looping/
 ├── compact.rs                                 # #1166 ContextPort 接入
 └── events.rs                                  # #1167 status/usage PL
 agent/features/runtime/src/adapters/event_projection.rs
@@ -547,7 +547,7 @@ git push -u origin feat/1168-compact-scheduler
 - Modify: `agent/features/context/src/domain.rs`
 - Modify: `agent/features/runtime/src/ports/context_port.rs`
 - Modify: `agent/features/runtime/src/application/context_coordination.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/compact.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/compact.rs`
 - Test: `agent/features/context/src/application/summary_projection_tests.rs`
 - Test: `agent/features/runtime/src/ports/context_port_tests.rs`
 
@@ -657,7 +657,7 @@ git push -u origin feat/1166-compact-projection
 
 - Modify: `agent/features/context/src/domain/compact/summary_tree.rs`
 - Modify: `agent/features/context/src/ports/context_port.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/events.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/events.rs`
 - Modify: `agent/features/runtime/src/adapters/event_projection.rs`
 - Modify: `packages/sdk/src/chat_event.rs`
 - Modify: `apps/cli/src/tui/app/event.rs`
@@ -801,8 +801,8 @@ git push -u origin feat/1167-compact-usage
 
 - Modify: `agent/features/context/src/adapters/compact_summary.rs`
 - Modify: `agent/features/context/src/adapters/compact_summary_tests.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/compact.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/events.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/compact.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/events.rs`
 - Modify: `packages/sdk/src/chat_event.rs`
 - Modify: `apps/cli/src/tui/model/conversation/compact_progress.rs`
 - Create: `agent/features/context/tests/persistent_compact_lifecycle.rs`

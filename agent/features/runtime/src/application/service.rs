@@ -1,4 +1,4 @@
-use crate::application::chat::request::{NoTuiChatLaunch, TuiChatLaunch};
+use crate::application::main_loop::request::{NoTuiChatLaunch, TuiChatLaunch};
 use crate::ports::legacy::{ChatRuntimeContext, ChatRuntimePort, TuiChatOutcome};
 
 pub struct ChatApplicationService<P> {
@@ -43,7 +43,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::chat::request::ChatLaunchOptions;
+    use crate::application::main_loop::request::ChatLaunchOptions;
     use async_trait::async_trait;
     use hook::HookPort;
     use share::config::MemoryConfig;

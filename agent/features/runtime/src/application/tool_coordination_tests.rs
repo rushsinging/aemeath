@@ -1,7 +1,7 @@
 use super::*;
-use crate::application::agent::ToolCall;
 use crate::application::hook_adapter::{RuntimeHookDirective, RuntimeHookReason};
 use crate::application::loop_engine::ToolGuardDecision;
+use crate::application::subagent::ToolCall;
 use policy::{ApprovalSubject, PolicyDecision, PolicyPort, PolicyReason, PolicyRequest};
 use sdk::ids::ToolCallId;
 use std::sync::Mutex;
@@ -267,7 +267,7 @@ fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
 #[test]
 fn complete_cancelled_tool_round_preserves_finished_results_and_fills_missing_calls() {
     let calls = vec![call("Allowed", 0), call("Allowed", 1)];
-    let completed = crate::application::agent::ToolExecution::new(
+    let completed = crate::application::subagent::ToolExecution::new(
         &calls[0],
         tools::ToolOutcome::new("finished", serde_json::Value::Null, Vec::new()),
     );
@@ -286,15 +286,15 @@ fn complete_cancelled_tool_round_preserves_finished_results_and_fills_missing_ca
 fn restore_tool_call_order_uses_original_call_order() {
     let calls = vec![call("Allowed", 0), call("Allowed", 1), call("Allowed", 2)];
     let results = vec![
-        crate::application::agent::ToolExecution::new(
+        crate::application::subagent::ToolExecution::new(
             &calls[2],
             tools::ToolOutcome::new("third", serde_json::Value::Null, Vec::new()),
         ),
-        crate::application::agent::ToolExecution::new(
+        crate::application::subagent::ToolExecution::new(
             &calls[0],
             tools::ToolOutcome::new("first", serde_json::Value::Null, Vec::new()),
         ),
-        crate::application::agent::ToolExecution::new(
+        crate::application::subagent::ToolExecution::new(
             &calls[1],
             tools::ToolOutcome::new("second", serde_json::Value::Null, Vec::new()),
         ),
