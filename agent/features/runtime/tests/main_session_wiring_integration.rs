@@ -106,7 +106,7 @@ async fn seed_session(wiring: &MainSessionWiring, workspace: &project::Workspace
     .expect("encode legacy seed");
     let session_management = wiring.session_management();
     session_management
-        .import(&bytes)
+        .import_for_project(&bytes, &workspace.read().project_identity())
         .await
         .expect("import seed session");
 }
@@ -335,7 +335,7 @@ fn make_target_project(temp: &tempfile::TempDir) -> std::path::PathBuf {
 }
 
 #[tokio::test]
-async fn cross_project_resume_bound_run_sees_target_memory_config() {
+async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let _env = EnvGuard::set(
         "AEMEATH_AGENTS_DIR",
@@ -374,50 +374,35 @@ async fn cross_project_resume_bound_run_sees_target_memory_config() {
         assert_eq!(bound.config().memory().inject_count, 5);
     }
 
-    // Cross-project resume into project B.
-    resume_session_to_backing("cross-project-memory-target", &wiring)
-        .await
-        .expect("cross-project resume should succeed");
+    // Cross-project resume is rejected before Config/Memory switching.
+    assert!(matches!(
+        resume_session_to_backing("cross-project-memory-target", &wiring).await,
+        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "cross-project-memory-target"
+    ));
 
-    // After resume, committed_config must reflect project B.
+    // The committed and newly bound config must remain on project A.
     let committed = wiring.committed_config();
-    assert!(
-        !committed.memory().enabled,
-        "memory should be disabled after resume to project B"
-    );
+    assert!(committed.memory().enabled, "memory must remain enabled");
     assert_eq!(
-        committed.memory().reflection.interval_turns,
-        7,
-        "reflection interval_turns should be 7 after resume to project B"
+        committed.memory().inject_count,
+        5,
+        "memory inject_count must remain on project A"
     );
-
-    // bind_main_run after resume must also reflect project B — this is the
-    // exact value the loop_runner passes to MainRunPort (H3 fix).
     let bound = wiring
         .bind_main_run()
         .await
-        .expect("bind after resume should succeed");
-    assert!(
-        !bound.config().memory().enabled,
-        "bound config memory should be disabled"
-    );
-    assert_eq!(
-        bound.config().memory().reflection.interval_turns,
-        7,
-        "bound config reflection interval_turns should be 7"
-    );
+        .expect("bind after rejected resume should succeed");
+    assert!(bound.config().memory().enabled);
+    assert_eq!(bound.config().memory().inject_count, 5);
 }
 
-// ─── Test 7: Cross-project resume — model/MemoryConfig from target config ─
+// ─── Test 7: Cross-project resume preserves current Config/Memory ─────────
 //
-// Verifies the invariant the from_args reordering (H3) depends on:
-// after startup resume, wiring.committed_config() returns the target
-// project's config — not the bootstrap project's. The from_args function
-// reads committed_config() AFTER resume, so model resolution, API key
-// derivation, and MemoryConfig all come from the target project.
+// Runtime uses the same helper for startup and runtime resume. Context rejects
+// a foreign ProjectIdentity before Config/Memory can switch.
 
 #[tokio::test]
-async fn cross_project_resume_committed_config_has_target_model_and_memory() {
+async fn cross_project_resume_keeps_current_model_and_memory() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let _env = EnvGuard::set(
         "AEMEATH_AGENTS_DIR",
@@ -442,27 +427,32 @@ async fn cross_project_resume_committed_config_has_target_model_and_memory() {
         "project A should NOT have target-model as default"
     );
 
-    // Resume into project B.
-    resume_session_to_backing("cross-project-config-target", &wiring)
-        .await
-        .expect("cross-project resume should succeed");
+    // Cross-project resume must not switch to project B's model or memory.
+    assert!(matches!(
+        resume_session_to_backing("cross-project-config-target", &wiring).await,
+        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "cross-project-config-target"
+    ));
 
-    // After resume: committed_config must reflect project B's model and memory.
     let after = wiring.committed_config();
-    let after_default = after
-        .resolve_model_selection(&after.models().default)
-        .expect("resolve default model after resume");
     assert_eq!(
-        after_default.model.id, "target-model",
-        "after resume, default model should be project B's target-model"
+        after.models().default,
+        before.models().default,
+        "default model must remain on project A"
     );
     assert_eq!(
-        after_default.source_key, "local",
-        "after resume, source_key should be local"
+        after.memory().enabled,
+        before.memory().enabled,
+        "memory enabled state must remain on project A"
     );
-    assert!(
-        !after.memory().enabled,
-        "after resume, memory should be disabled"
+    assert_eq!(
+        after.memory().inject_count,
+        before.memory().inject_count,
+        "memory inject_count must remain on project A"
+    );
+    assert_eq!(
+        after.memory().reflection.interval_turns,
+        before.memory().reflection.interval_turns,
+        "memory reflection interval must remain on project A"
     );
 }
 

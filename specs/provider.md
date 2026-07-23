@@ -5,7 +5,7 @@
 **次触发**：新增 provider。
 **配套**：provider 的默认 base URL / 默认 model / API key 环境变量名等**配置**在 `agent/shared/src/config/`，见 `config-compat.md`；model guidance 文件见 `prompt.md`。
 
-## 支持的 provider
+## 3.8.1. 支持的 provider
 
 Anthropic、OpenAI、OpenRouter、DeepSeek、Moonshot、Zhipu、DashScope、MiniMax、Ollama、OpenAICompatible。
 
@@ -20,7 +20,7 @@ Anthropic、OpenAI、OpenRouter、DeepSeek、Moonshot、Zhipu、DashScope、Mini
 - `adapters/openai_compatible.rs`（+ `adapters/openai_compatible/`）：覆盖其余 OpenAI 兼容 provider。
 - `lib.rs`：跨 crate 使用的窄 façade；消费方 **MUST** 从 crate root 导入，**NEVER** 穿透 `domain` / `ports` / `adapters`。
 
-## 新增 provider
+## 3.8.2. 新增 provider
 
 1. 在 `agent/features/provider/src/adapters/` 添加实现（或复用 OpenAI 兼容 driver）。
 2. 在 `agent/shared/src/config/`（见 `config-compat.md`）补默认 base URL / 默认 model / API key 环境变量名。

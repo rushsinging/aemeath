@@ -6,8 +6,7 @@ use sdk::SdkError;
 use crate::application::prompt::build::{build_system_prompt_parts, PromptContext};
 use crate::application::startup::ChatBootstrapArgs;
 use crate::application::startup::{
-    build_agent_runner, build_hook_runner, resolve_concurrency_limits,
-    resolve_model_runtime_settings,
+    build_agent_runner, resolve_concurrency_limits, resolve_model_runtime_settings,
 };
 use crate::ports::legacy::ChatRuntimeContext;
 use crate::ports::{ProviderBuildSpec, ProviderFactory, RequestSystemBlock};
@@ -50,6 +49,42 @@ impl RuntimeToolAssemblyDependencies {
     }
 }
 
+/// 由 Composition 装配、供 Runtime bootstrap 转发的基础运行资源。
+pub struct RuntimeCoreDependencies {
+    workspace: project::WorkspaceViews,
+    wiring: Arc<context::MainSessionWiring>,
+    provider_factory: Arc<dyn ProviderFactory>,
+    reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
+    policy: Arc<dyn policy::PolicyPort>,
+    task_access: Arc<dyn task::TaskAccess>,
+    session_management: Arc<dyn context::SessionManagementPort>,
+    hook_runner: Arc<dyn hook::HookPort>,
+}
+
+impl RuntimeCoreDependencies {
+    pub fn new(
+        workspace: project::WorkspaceViews,
+        wiring: Arc<context::MainSessionWiring>,
+        provider_factory: Arc<dyn ProviderFactory>,
+        reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
+        policy: Arc<dyn policy::PolicyPort>,
+        task_access: Arc<dyn task::TaskAccess>,
+        session_management: Arc<dyn context::SessionManagementPort>,
+        hook_runner: Arc<dyn hook::HookPort>,
+    ) -> Self {
+        Self {
+            workspace,
+            wiring,
+            provider_factory,
+            reflection_history,
+            policy,
+            task_access,
+            session_management,
+            hook_runner,
+        }
+    }
+}
+
 /// Runtime bootstrap 所需的活依赖；由 Composition 一次性构造并注入。
 pub struct RuntimeBootstrapDependencies {
     workspace: project::WorkspaceViews,
@@ -59,6 +94,7 @@ pub struct RuntimeBootstrapDependencies {
     policy: Arc<dyn policy::PolicyPort>,
     task_access: Arc<dyn task::TaskAccess>,
     session_management: Arc<dyn context::SessionManagementPort>,
+    hook_runner: Arc<dyn hook::HookPort>,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
     tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
@@ -71,15 +107,19 @@ pub struct RuntimeBootstrapDependencies {
 
 impl RuntimeBootstrapDependencies {
     pub fn new(
-        workspace: project::WorkspaceViews,
-        wiring: Arc<context::MainSessionWiring>,
-        provider_factory: Arc<dyn ProviderFactory>,
-        reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
-        policy: Arc<dyn policy::PolicyPort>,
-        task_access: Arc<dyn task::TaskAccess>,
-        session_management: Arc<dyn context::SessionManagementPort>,
+        core: RuntimeCoreDependencies,
         tool_assembly: RuntimeToolAssemblyDependencies,
     ) -> Self {
+        let RuntimeCoreDependencies {
+            workspace,
+            wiring,
+            provider_factory,
+            reflection_history,
+            policy,
+            task_access,
+            session_management,
+            hook_runner,
+        } = core;
         let RuntimeToolAssemblyDependencies {
             tool_catalog,
             tool_execution,
@@ -97,6 +137,7 @@ impl RuntimeBootstrapDependencies {
             policy,
             task_access,
             session_management,
+            hook_runner,
             tool_catalog,
             tool_execution,
             tool_context_binding,
@@ -117,6 +158,10 @@ impl RuntimeBootstrapDependencies {
 
     pub fn session_management(&self) -> Arc<dyn context::SessionManagementPort> {
         self.session_management.clone()
+    }
+
+    pub fn hook_runner(&self) -> Arc<dyn hook::HookPort> {
+        self.hook_runner.clone()
     }
 
     pub fn wiring(&self) -> Arc<context::MainSessionWiring> {
@@ -164,6 +209,7 @@ pub async fn from_args_with_workspace(
         policy,
         task_access,
         session_management,
+        hook_runner,
         tool_catalog,
         tool_execution,
         tool_context_binding,
@@ -188,10 +234,8 @@ pub async fn from_args_with_workspace(
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    // 3. Session — startup resume FIRST, so the committed config snapshot read
-    //    below reflects the target project's config (model, API key, hooks,
-    //    memory, etc.) after a cross-project resume. For non-resume,
-    //    committed_config() is unchanged so behavior is identical.
+    // 3. Session — startup resume is scoped to the current project identity.
+    // A rejected cross-project id leaves the committed snapshot unchanged.
     let session_id = if let Some(resume_id) = args.resume.as_ref() {
         match crate::application::client::resume_helper::resume_session_to_backing(
             resume_id, &wiring,
@@ -215,12 +259,10 @@ pub async fn from_args_with_workspace(
         log::info!(target: crate::LOG_TARGET, "session started");
         session_id
     };
-    // Session id determined above; committed_config read below reflects
-    // the target project after any cross-project resume.
+    // Session id determined above; committed_config remains bound to the
+    // current project because cross-project resume is rejected.
 
-    // 4. Read committed config AFTER any startup resume so the snapshot
-    //    reflects the target project. For non-resume this is identical to
-    //    reading before — committed_config() is unchanged.
+    // 4. Read the current committed config snapshot.
     let snapshot = wiring.committed_config();
 
     // 5. 日志已由 Composition 在进入 Runtime 前初始化。
@@ -335,9 +377,7 @@ pub async fn from_args_with_workspace(
     // #1327 承接 MCP Ready lifecycle / Catalog 同步；#1294 不保留 MCP manager 或
     // Tools 私有 CatalogExecutionWiring 接线。
 
-    // 12. Hook runner
-    let hook_runner = build_hook_runner(Some(snapshot.hooks()), &cwd);
-    let _hook_runner_before = hook_runner.clone();
+    // 12. Hook runner 由 Composition 注入，Main/Sub 共享同一实例。
 
     // 13. Tool Result materializer 与 14. active-run registry 由 Composition 注入。
 
@@ -624,14 +664,24 @@ mod tests {
         let skill_wiring = tools::composition::wire_skills();
         let tool_result_materializer = crate::application::testing::test_tool_result_materializer();
         let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
+        let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
+            hook::build_dispatcher(
+                &share::config::hooks::HooksConfig::default(),
+                std::collections::HashMap::new(),
+            )
+            .expect("test hook dispatcher"),
+        );
         let dependencies = RuntimeBootstrapDependencies::new(
-            workspace,
-            wiring,
-            Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
-            Arc::new(TestReflectionHistory),
-            policy.clone(),
-            task_wiring.access(),
-            Arc::new(context::test_support::UnavailableSessionManagement),
+            RuntimeCoreDependencies::new(
+                workspace,
+                wiring,
+                Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
+                Arc::new(TestReflectionHistory),
+                policy.clone(),
+                task_wiring.access(),
+                Arc::new(context::test_support::UnavailableSessionManagement),
+                hook_runner.clone(),
+            ),
             RuntimeToolAssemblyDependencies::new(
                 tools.catalog_port(),
                 tools.execution(),
@@ -647,8 +697,8 @@ mod tests {
             .expect("build client with workspace");
 
         assert!(
-            Arc::ptr_eq(&client.inner.context.resources.policy, &policy),
-            "Main Run 必须保留 Composition 注入的同一 PolicyPort 实例"
+            Arc::ptr_eq(&client.inner.context.resources.hook_runner, &hook_runner),
+            "Main Run 必须保留 Composition 注入的同一 HookRunner 实例"
         );
         assert_eq!(
             client.inner.workspace.read().current_path_base(),
@@ -665,15 +715,11 @@ mod tests {
         );
     }
 
-    /// Structural guard (H3): startup resume must happen BEFORE the committed
-    /// config snapshot is read, so the snapshot reflects the target project
-    /// after a cross-project resume.
-    ///
-    /// The ordering invariant: `resume_session_to_backing` (the resume block)
-    /// must appear textually before `committed_config()` in
-    /// `from_args_with_workspace`.
+    /// Startup resume must run before the committed snapshot is read, while
+    /// Context rejects any session whose ProjectIdentity differs from the
+    /// live workspace; a failed resume therefore cannot change Config/Memory.
     #[test]
-    fn startup_resume_precedes_committed_config_read() {
+    fn startup_resume_precedes_current_project_config_read() {
         let source = include_str!("from_args.rs");
         let resume_pos = source
             .find("startup resume")
@@ -691,9 +737,8 @@ mod tests {
         );
         assert!(
             resume_call_pos < snapshot_pos,
-            "resume_session_to_backing (post-resume) should precede the committed_config snapshot read — \
-           H3: snapshot must be determined after startup resume so model/API key/MemoryConfig \
-           come from the target project"
+            "resume_session_to_backing must precede the committed_config snapshot read — \
+           Context rejects cross-project sessions before this snapshot can change"
         );
     }
 }

@@ -6,7 +6,7 @@
 **Scope**：日志 target 命名、14 字段 JSON Lines schema、日志级别策略、preview/脱敏策略。
 **不适用**：日志 crate 内部实现细节（rotation、context 全局变量）见 `packages/global/logging/src/` 源码。
 
-## target 命名
+## 3.4.1. target 命名
 
 - 统一前缀 `aemeath:`，当前使用二级或三级结构，例如 `aemeath:context`、`aemeath:agent:runtime`。
 - 所有 `log::xxx!` 调用的 target 值 **MUST** 来自 `packages/global/logging/src/domain/routing.rs` 的 TargetCatalog，**NEVER** 使用旧前缀（如 `runtime::`、`cli::`、`tools::`）。
@@ -14,13 +14,13 @@
 - 纯契约 `packages/sdk`、纯函数 `packages/global/utils`、Logging 实现自身与未接入 UnifiedLogger 的 `tools/xtask` **MUST NOT** 定义应用 target 或匿名常量保活；其边界分别由执行 owner、direct emergency diagnostics 或 CLI stdout/stderr 负责。
 - 守卫脚本 `.agents/hooks/check-log-target-prefix.sh` 强制检查。
 
-### TargetCatalog
+### 3.4.1.1. TargetCatalog
 
 合法 target、owner、sink ID 和日志文件名只在 `packages/global/logging/src/domain/routing.rs` 定义一次。Catalog 覆盖具有独立运行时边界的 owner；Provider 另有专用的 LLM API Error target，Runtime 的 Prompt target保留为专用子能力路由。#941 已将生产调用迁到 owner 常量，并启用从 workspace members 反向校验 runtime owner 与非 runtime member 分类的全仓 Guard。
 
 下表是 TargetCatalog 的非规范性可读投影；代码 catalog 是唯一真相，测试负责校验 target、sink ID 与文件名唯一。
 
-## 文件映射表
+## 3.4.2. 文件映射表
 
 UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，一行一个 JSON 对象）：
 
@@ -49,7 +49,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | — | emergency | `emergency.log` | logging 自身 | File 模式下 sink degrade / fallback 的兜底输出（**NEVER** 写 stderr，避免污染 TUI alternate screen，见 #1215） |
 | — | `panic.log` | `panic.log` | panic_hook.rs 直写 | panic 信息（不纳入 UnifiedLogger） |
 
-### 已废弃文件
+### 3.4.2.1. 已废弃文件
 
 以下文件已在日志系统重设计中废弃，**NEVER** 再使用：
 
@@ -60,7 +60,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | `tool.log` | tool 日志已路由到 `agent-tools.log`（`aemeath:agent:tools`） | `agent-tools.log` |
 | `audit.log` / `agent-audit.log` | Audit Fact 不能伪装成 DiagnosticRecord | Audit 自有 Usage append store；模块运行诊断使用 `audit-diagnostic.log` |
 
-## 14 字段 schema
+## 3.4.3. 14 字段 schema
 
 所有 DiagnosticRecord 使用 14 个字段和 compact JSON Lines 格式，统一走 `log::log!` → `UnifiedLogger::log()` → `format_diag_json_line`。Audit Event / Usage Fact 使用 Audit 自有 PL 与 append store，**NEVER** 进入该管线。Audit 模块自身的运行故障是普通诊断，使用 `aemeath:diagnostic:audit`。
 
@@ -84,9 +84,9 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 > 部分日志的 `msg` 字段包含序列化后的 JSON payload（诊断行为自由文本，或 LLM I/O 等结构化内容）。
 > 消费者可用 `jq 'select(.msg | startswith("{")) | .msg | fromjson' *.log` 解析。
 
-## 日志级别策略（Issue #338）
+## 3.4.4. 日志级别策略（Issue #338）
 
-### 总则
+### 3.4.4.1. 总则
 
 | Level | 语义 | 频率约束 |
 |---|---|---|
@@ -96,7 +96,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | `debug` | 开发调试需要的**中等粒度**细节 | 中频，可含安全截断后的 preview |
 | `trace` | 高频、细粒度、默认关闭的诊断 | 无频率上限，但 **NEVER** 泄露未截断的敏感完整内容 |
 
-### `error`
+### 3.4.4.2. `error`
 
 **NEVER** 在正常控制流中频繁出现。用于：
 
@@ -105,7 +105,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 - provider 请求失败且已返回给用户（最终失败，非中间重试）；
 - hook / tool / runtime 关键流程失败（如 task panic）。
 
-### `warn`
+### 3.4.4.3. `warn`
 
 可恢复但值得关注的异常或降级。用于：
 
@@ -117,7 +117,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 
 **重试场景降噪**：重试循环中的中间失败 **SHOULD** 用 `debug`，仅末次汇总用 `warn`。
 
-### `info`
+### 3.4.4.4. `info`
 
 用户或运维可能关心的关键生命周期事件。用于：
 
@@ -132,7 +132,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 - 完整 LLM 请求/响应 JSON payload（应为 `debug`）；
 - per-chunk / per-turn / per-hook 事件级日志（应为 `debug` 或 `trace`）。
 
-### `debug`
+### 3.4.4.5. `debug`
 
 开发调试需要的中等粒度细节。用于：
 
@@ -144,7 +144,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 - 重试循环中的中间失败；
 - 可包含安全截断后的 preview（**SHOULD** 用 `truncate_preview` 或等价机制截断 body）。
 
-### `trace`
+### 3.4.4.6. `trace`
 
 高频、细粒度、默认关闭的诊断。用于：
 
@@ -156,9 +156,9 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 
 **NEVER** 泄露未截断的敏感完整内容（如完整用户输入、完整 API key、完整 LLM body）。
 
-### Per-Layer 细则
+### 3.4.4.7. Per-Layer 细则
 
-#### provider 层（`agent/features/provider/**`）
+#### 3.4.4.7.1. provider 层（`agent/features/provider/**`）
 
 | 场景 | Level | 说明 |
 |---|---|---|
@@ -173,7 +173,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 流截断（`StreamTruncated`）返回 | `warn`（已容错）或 `error`（最终失败） | 视是否终止主流程 |
 | 孤儿 tool message 丢弃 | `warn` | 数据一致性 |
 
-#### runtime 层（`agent/features/runtime/**`）
+#### 3.4.4.7.2. runtime 层（`agent/features/runtime/**`）
 
 | 场景 | Level | 说明 |
 |---|---|---|
@@ -191,7 +191,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 数据持久化失败且影响后续正确性 | `warn` 或 `error` | 视是否终止 |
 | runtime→sdk 事件转换（per-stream-event） | `trace` | 高频 |
 
-#### tui 层（`apps/cli/src/tui/**` + `apps/cli/src/chat/**`）
+#### 3.4.4.7.3. tui 层（`apps/cli/src/tui/**` + `apps/cli/src/chat/**`）
 
 | 场景 | Level | 说明 |
 |---|---|---|
@@ -205,7 +205,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | auto-save 失败（可能丢失用户会话） | `warn` 或 `error` | 视严重性 |
 | 排队消息丢弃图片（设计预期） | `debug` | 非异常 |
 
-#### hook / tools / storage / prompt / update 层
+#### 3.4.4.7.4. hook / tools / storage / prompt / update 层
 
 | 场景 | Level |
 |---|---|
@@ -220,7 +220,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 更新检测命中、下载完成、校验通过 | `info` |
 | 更新缓存写入/序列化失败（次要持久化） | `warn` |
 
-### 强制约束（MUST / NEVER / SHOULD）
+### 3.4.4.8. 强制约束（MUST / NEVER / SHOULD）
 
 - **MUST** 选择 level 时对照本节 Per-Layer 细则表。
 - **NEVER** 在 `info!` 中输出完整 LLM I/O JSON payload——用 `debug!`。
@@ -230,7 +230,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 - **SHOULD** 数据持久化失败视影响升 `error!`。
 - **MUST** 新增日志调用时在 PR 描述中标注所遵循的 level 规则条目。
 
-### 待设计点决策（#338 遗留）
+### 3.4.4.9. 待设计点决策（#338 遗留）
 
 | 待设计点 | 决策 | 理由 |
 |---|---|---|
@@ -241,7 +241,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 建立 lint/test 防止错误 level 扩散 | **文档 + code review 为主**；`domain/routing_guard.rs` 仅强制 target 合规 | level 选择存在语义判断，机器化检测收益有限；新增日志的 level 由 PR review 把关 |
 | provider/tool/runtime/TUI 补充细则 | **已在本节 Per-Layer 细则落地** | 见上 |
 
-## preview / 脱敏策略
+## 3.4.5. preview / 脱敏策略
 
 为防止日志膨胀（曾出现 85MB 日志），所有大文本内容 **MUST** 遵循以下策略：
 
@@ -251,12 +251,12 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | DEBUG | preview 摘要 | 前 200 字符 + 总长度（如 `role(user, 1500chars):Hello, I need help with...`） |
 | TRACE | 完整内容 | 可记录完整 JSON、chunk 文本 |
 
-### preview 函数
+### 3.4.5.1. preview 函数
 
 - `preview_messages(messages)` — 遍历 messages 列表，每条只记 `role` + content 前 100 字符 + 总长度
 - LLM I/O 日志的 `msg` 字段包含完整 JSON payload，由调用方通过 `log::debug!` 传入（见下方级别策略）
 
-### request_id 生命周期
+### 3.4.5.2. request_id 生命周期
 
 - **生成**：每次 LLM 请求前（`loop_run.rs` 中 `uuid::Uuid::new_v4()`）
 - **贯穿**：每次物理请求创建不可变 child `LogContext`，该 scope 覆盖请求开始到最后一个 chunk / 终态响应

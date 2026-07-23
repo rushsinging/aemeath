@@ -14,6 +14,7 @@ update = { path = "../features/update" }
 audit = { path = "../features/audit" }
 storage = { path = "../features/storage" }
 context = { path = "../features/context" }
+hook = { path = "../features/hook" }
 memory = { path = "../features/memory" }
 task = { path = "../features/task" }
 share = { path = "../shared" }
