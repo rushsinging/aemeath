@@ -81,44 +81,6 @@ impl App {
             AppendError { text: text.into() },
         )));
     }
-
-    /// 显示 AskUserBatch 交互块（批量问题 + 选项），作为渲染单一真相进入 ConversationModel。
-    pub(crate) fn show_ask_user_batch(
-        &mut self,
-        slots: Vec<crate::tui::model::conversation::block::AskUserSlot>,
-    ) {
-        self.apply_agent_intent(AgentIntent::Conversation(
-            ConversationIntent::ShowAskUserBatch(ShowAskUserBatch { slots }),
-        ));
-    }
-
-    /// 更新 AskUser 块光标位置（选项导航高亮），并刷新文档。
-    pub(crate) fn set_ask_user_cursor(&mut self, cursor: usize) {
-        self.apply_agent_intent(AgentIntent::Conversation(
-            ConversationIntent::SetAskUserCursor(SetAskUserCursor { cursor }),
-        ));
-    }
-
-    /// 切换 AskUser 块某选项勾选状态（multi_select），并刷新文档。
-    pub(crate) fn toggle_ask_user_selected(&mut self, index: usize) {
-        self.apply_agent_intent(AgentIntent::Conversation(
-            ConversationIntent::ToggleAskUserSelected(ToggleAskUserSelected { index }),
-        ));
-    }
-
-    /// 设置 AskUser 块是否处于「Chat about this...」自由输入子态，并刷新文档。
-    pub(crate) fn set_ask_user_chat_input(&mut self, active: bool) {
-        self.apply_agent_intent(AgentIntent::Conversation(
-            ConversationIntent::SetAskUserChatInput(SetAskUserChatInput { active }),
-        ));
-    }
-
-    /// 移除 AskUserBatch 交互块（用户提交/取消后折叠），并刷新文档。
-    pub(crate) fn dismiss_ask_user_block(&mut self) {
-        self.apply_agent_intent(AgentIntent::Conversation(
-            ConversationIntent::DismissAskUserBatch(DismissAskUserBatch),
-        ));
-    }
 }
 
 #[cfg(test)]

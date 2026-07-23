@@ -1,8 +1,4 @@
 //! 聊天相关纯数据状态
-//!
-//! start_tool_activity/register_tool_call/has_active_tool_call 是 #943 阶段 3
-//! 后的死代码（Runtime 事件不再走 update_ui），#944 5B 物理删除。
-#![allow(dead_code)]
 
 /// 聊天会话的所有可变数据（不含视图组件 output_area）
 #[derive(Debug, Default)]
@@ -19,26 +15,6 @@ impl ChatState {
     pub(crate) fn clear_tool_activity(&mut self) {
         self.tool_call_active = false;
         self.active_tool_call_ids.clear();
-    }
-
-    pub(crate) fn start_tool_activity(&mut self) {
-        self.tool_call_active = true;
-    }
-
-    pub(crate) fn register_tool_call(&mut self, id: sdk::ids::ToolCallId) {
-        self.tool_call_active = true;
-        self.active_tool_call_ids.insert(id);
-    }
-
-    pub(crate) fn has_active_tool_call(&self, id: &sdk::ids::ToolCallId) -> bool {
-        self.active_tool_call_ids.contains(id)
-    }
-
-    pub(crate) fn finish_tool_call(&mut self, id: &sdk::ids::ToolCallId) -> usize {
-        self.active_tool_call_ids.remove(id);
-        let remaining = self.active_tool_call_ids.len();
-        self.tool_call_active = remaining > 0;
-        remaining
     }
 
     pub(crate) fn start_input_event_buffer(

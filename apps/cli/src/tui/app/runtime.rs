@@ -24,7 +24,6 @@ impl App {
         self.apply_agent_intent(AgentIntent::Conversation(
             ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::ready())),
         ));
-        self.input.ask_user_state = None;
         // Reset 事件由 runtime gate 处理（清 chain + clear_tasks）。
         self.apply_agent_intent(AgentIntent::Conversation(
             ConversationIntent::UpdateTaskLines(UpdateTaskLines(Vec::new())),

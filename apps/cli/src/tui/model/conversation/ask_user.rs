@@ -81,6 +81,8 @@ impl ConversationModel {
     }
 
     /// 显示 AskUserBatch 交互块；若已存在则替换。
+    /// #944 5B: dead code after AskUserBatch reply_tx retirement.
+    #[allow(dead_code)]
     pub(super) fn show_ask_user_batch(
         &mut self,
         slots: Vec<AskUserSlot>,

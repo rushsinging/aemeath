@@ -63,13 +63,11 @@ fn event_mapping_is_the_only_sdk_chat_event_match_point() {
         source.contains("fn sdk_event_to_tui_event"),
         "event_mapping.rs must contain the sole sdk::ChatEvent exhaustive converter"
     );
-    // oneshot::Sender is permitted only in the LegacyAskUser resource bridge
-    // (reply_tx), which is exempted until #1246 publishes InteractionRequested.
-    // After that, #944 5B removes it entirely.
+    // #944 5B: LegacyAskUser bridge removed. Zero oneshot::Sender allowed.
     let oneshot_count = source.matches("oneshot::Sender").count();
-    assert!(
-        oneshot_count <= 2,
-        "event_mapping.rs may have at most 2 oneshot::Sender references (LegacyAskUser reply_tx type + conversion); found {oneshot_count}"
+    assert_eq!(
+        oneshot_count, 0,
+        "event_mapping.rs must have zero oneshot::Sender after #944 5B; found {oneshot_count}"
     );
 }
 

@@ -1,4 +1,3 @@
-mod ask_user_key;
 mod done;
 mod enter;
 mod key;
@@ -58,7 +57,6 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ModelStreamWaiting { .. } => "ModelStreamWaiting",
         UiEvent::SessionSaved { .. } => "SessionSaved",
         UiEvent::ReflectionHistory { .. } => "ReflectionHistory",
-        UiEvent::AskUserBatch { .. } => "AskUserBatch",
         UiEvent::InteractionRequested { .. } => "InteractionRequested",
         UiEvent::HookEvent(_) => "HookEvent",
         UiEvent::HookMessage(_) => "HookMessage",
@@ -155,16 +153,7 @@ impl App {
                 UpdateResult::none()
             }
             TuiMsg::Paste(text) => {
-                // Paste while in AskUserQuestion free-input mode: route text to the Ask block.
-                if self.input.ask_user_state.is_some() {
-                    self.input.just_pasted = true;
-                    for ch in text.chars() {
-                        self.apply_agent_intent(AgentIntent::Conversation(
-                            ConversationIntent::AppendAskUserChatChar(AppendAskUserChatChar { ch }),
-                        ));
-                    }
-                    return UpdateResult::none();
-                } // Paste while processing: insert into input area so it can be queued
+                // Paste while processing: insert into input area so it can be queued
                 match sdk::classify_paste(&text) {
                     sdk::PasteKind::Empty => {
                         self.input.just_pasted = true;

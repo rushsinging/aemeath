@@ -26,7 +26,6 @@ mod tests {
     fn test_input_state_default() {
         let state = InputState::default();
         assert!(!state.just_pasted);
-        assert!(state.ask_user_state.is_none());
     }
 
     // === SessionState ===

@@ -12,6 +12,10 @@ use tools::{ToolOutcome, ToolSuspension};
 /// Runtime continues to own tool-call identity, hooks, event delivery, waiting,
 /// replies, and ToolExecution materialization. The Tool suspension owns only the
 /// pure interaction specification.
+/// #944 5B: Legacy AskUser bridge. Production path is `resolve_ask_user_via_bridge`
+/// in tools.rs (InteractionRequested + InteractionBridge). This function is dead
+/// code, retained for reference until physical removal.
+#[allow(dead_code)]
 pub(crate) async fn ask_user<S>(
     context: &RuntimeTurnContext,
     sink: &S,
