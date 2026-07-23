@@ -602,6 +602,44 @@ async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
 }
 
 #[tokio::test]
+async fn run_agent_rejects_disabled_role_from_frozen_run_config() {
+    let mut config = share::config::Config {
+        agents: (*test_agents_config()).clone(),
+        models: (*test_models_config()).clone(),
+        ..Default::default()
+    };
+    config.api.timeout = 30;
+    config.agents.roles.get_mut("coder").unwrap().enabled = false;
+    let mut runner = test_runner(ProviderError::cancelled());
+    runner.config_reader =
+        FixedConfigReader::new(share::config::domain::snapshot::ConfigSnapshot::new(config));
+    let ctx = test_ctx();
+
+    let result = runner
+        .run_agent(AgentRunRequest {
+            prompt: "prompt",
+            system: "system",
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
+            timeout: std::time::Duration::from_secs(30),
+            role: "coder",
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        tools::AgentRunTerminal::Failed { ref error }
+            if error.contains("agents.roles.coder.enabled=false")
+    ));
+}
+
+#[tokio::test]
 async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
     let runner = test_runner(ProviderError::cancelled());
     let ctx = test_ctx();
@@ -1086,9 +1124,11 @@ fn test_models_config() -> Arc<share::config::ModelsConfig> {
 }
 
 fn test_config_snapshot() -> share::config::domain::snapshot::ConfigSnapshot {
-    let mut config = share::config::Config::default();
-    config.agents = (*test_agents_config()).clone();
-    config.models = (*test_models_config()).clone();
+    let mut config = share::config::Config {
+        agents: (*test_agents_config()).clone(),
+        models: (*test_models_config()).clone(),
+        ..Default::default()
+    };
     config.api.timeout = 30;
     share::config::domain::snapshot::ConfigSnapshot::new(config)
 }

@@ -191,7 +191,14 @@ impl<'a> SubAgentRun<'a> {
             effective_reasoning: self.level,
             task_reminder: crate::ports::TaskReminderSnapshot::default(),
             language: crate::ports::Language::new(&self.language),
-            agent_roles: self.config_snapshot.agents().roles.clone(),
+            agent_roles: self
+                .config_snapshot
+                .agents()
+                .roles
+                .iter()
+                .filter(|(_, role)| role.enabled)
+                .map(|(name, role)| (name.clone(), role.clone()))
+                .collect(),
             config_snapshot: self.config_snapshot.clone(),
             context_size: self.ctx_context_size,
             max_output_tokens: self.max_tokens as usize,

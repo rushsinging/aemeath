@@ -32,7 +32,14 @@ impl AgentRunner for CliAgentRunner {
         );
         let config_snapshot = run_config.config();
         let role = match config_snapshot.agents().roles.get(role_name) {
-            Some(role) => role,
+            Some(role) if role.enabled => role,
+            Some(_) => {
+                return tools::AgentRunTerminal::Failed {
+                    error: format!(
+                        "子代理角色 `{role_name}` 已禁用（agents.roles.{role_name}.enabled=false)"
+                    ),
+                };
+            }
             None => {
                 let mut available = config_snapshot
                     .agents()
