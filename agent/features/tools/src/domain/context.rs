@@ -173,6 +173,7 @@ pub struct ToolExecutionPorts {
     parent_session_id: Option<String>,
     reminders: Option<Arc<Mutex<SessionReminders>>>,
     guidance: Arc<dyn Guidance>,
+    user_agent: String,
     authorization: AuthorizationContext,
 }
 impl ToolExecutionPorts {
@@ -196,6 +197,7 @@ impl ToolExecutionPorts {
             parent_session_id: None,
             reminders: None,
             guidance,
+            user_agent: share::config::Config::default().api.user_agent,
             authorization: AuthorizationContext::STANDARD,
         }
     }
@@ -211,6 +213,11 @@ impl ToolExecutionPorts {
         self.progress = progress;
         self
     }
+    pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
+        self.user_agent = user_agent.into();
+        self
+    }
+
     pub fn with_memory_context(
         mut self,
         parent_session_id: Option<String>,
@@ -268,6 +275,9 @@ impl ToolExecutionContext {
     }
     pub fn guidance(&self) -> Arc<dyn Guidance> {
         self.ports.guidance.clone()
+    }
+    pub fn user_agent(&self) -> &str {
+        &self.ports.user_agent
     }
     pub fn authorization(&self) -> AuthorizationContext {
         self.ports.authorization

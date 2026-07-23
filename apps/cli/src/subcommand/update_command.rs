@@ -5,8 +5,8 @@
 
 use sdk::UpdateResult;
 
-pub(crate) async fn run_update_command(check: bool) {
-    let service = composition::update::wire_update();
+pub(crate) async fn run_update_command(check: bool, user_agent: String) {
+    let service = composition::update::wire_update(user_agent);
 
     // --check 模式忽略缓存，强制查 API
     match service.force_check().await {

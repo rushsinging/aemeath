@@ -72,6 +72,7 @@ pub(crate) async fn run_chat(args: Args) {
         let mut app =
             crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
         app.agent_client = Some(bootstrap.client.clone());
+        app.user_agent = bootstrap.user_agent;
         app.session.memory_config = bootstrap.memory_config;
         app.set_skills(bootstrap.skills_map);
         app.set_commands(bootstrap.command_catalog, bootstrap.command_router);

@@ -132,7 +132,27 @@ fn parse_history_assistant(
 #[derive(Clone, Copy)]
 pub(crate) struct HistoryToolResult<'a> {
     pub content: &'a serde_json::Value,
+    pub text: Option<&'a str>,
     pub is_error: bool,
+}
+
+pub(crate) fn restored_ask_answer(result: HistoryToolResult<'_>) -> Option<String> {
+    if result.is_error {
+        return None;
+    }
+    result
+        .content
+        .get("answer")
+        .and_then(serde_json::Value::as_str)
+        .filter(|answer| !answer.trim().is_empty())
+        .or(result.text.filter(|text| !text.trim().is_empty()))
+        .or_else(|| {
+            result
+                .content
+                .as_str()
+                .filter(|content| !content.trim().is_empty())
+        })
+        .map(ToOwned::to_owned)
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -146,6 +166,7 @@ enum HistoryUserBlock<'a> {
     ToolResult {
         tool_use_id: &'a str,
         content: &'a serde_json::Value,
+        text: Option<&'a str>,
         is_error: bool,
     },
 }
@@ -160,11 +181,13 @@ fn parse_history_user_blocks(
             sdk::ContentBlock::ToolResult {
                 tool_use_id,
                 content,
+                text,
                 is_error,
                 ..
             } => Ok(HistoryUserBlock::ToolResult {
                 tool_use_id: tool_use_id.as_str(),
                 content,
+                text: text.as_deref(),
                 is_error: *is_error,
             }),
             sdk::ContentBlock::Thinking { .. } => Err(
@@ -204,8 +227,16 @@ pub(crate) fn collect_following_tool_results(
             HistoryUserBlock::ToolResult {
                 tool_use_id,
                 content,
+                text,
                 is_error,
-            } => Some((tool_use_id, HistoryToolResult { content, is_error })),
+            } => Some((
+                tool_use_id,
+                HistoryToolResult {
+                    content,
+                    text,
+                    is_error,
+                },
+            )),
         })
         .collect()
 }

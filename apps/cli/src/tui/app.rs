@@ -64,6 +64,8 @@ pub struct App {
     pub command_catalog: Option<Arc<dyn sdk::CommandCatalogPort>>,
     pub command_router: Option<Arc<dyn sdk::CommandRouterPort>>,
     pub agent_client: Option<Arc<dyn sdk::AgentClient>>,
+    /// Session 初始化时固定的 HTTP User-Agent。
+    pub user_agent: String,
     /// 缓存的配置视图（由 runtime 推送，TUI 只读）
     pub config_view: sdk::ConfigView,
 }
@@ -172,6 +174,7 @@ impl App {
             command_router: command_wiring.map(|wiring| wiring.router()),
             config_view: sdk::ConfigView::default(),
             agent_client: None,
+            user_agent: composition::update::default_user_agent(),
         }
     }
 

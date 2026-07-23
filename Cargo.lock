@@ -439,6 +439,7 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "log",
+ "reqwest",
  "serde_json",
  "sha2",
  "share",

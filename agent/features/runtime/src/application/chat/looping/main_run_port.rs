@@ -466,6 +466,7 @@ where
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory: &Arc<dyn memory::MemoryPort>,
         language: &str,
+        user_agent: &str,
         workspace: &project::WorkspaceViews,
         cancel: &CancellationToken,
         read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
@@ -504,6 +505,7 @@ where
                         language: language.to_string(),
                     }),
                 )
+                .with_user_agent(user_agent)
                 .with_memory_context(
                     Some(session_id.to_string()),
                     Some(session_reminders.clone()),
@@ -1325,6 +1327,7 @@ where
             self.agent_runner,
             self.memory,
             self.language,
+            self.run_config.config().user_agent(),
             self.workspace,
             &self.cancel,
             self.read_files,

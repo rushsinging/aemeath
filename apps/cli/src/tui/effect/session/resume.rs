@@ -113,6 +113,30 @@ mod tests {
     }
 
     #[test]
+    fn resume_session_history_leaves_runtime_spinner_idle() {
+        let mut app = App::new(
+            "new-session".to_string(),
+            PathBuf::from("/tmp/aemeath"),
+            "test-model".to_string(),
+        );
+
+        app.resume_session_messages(
+            "resumed-session",
+            vec![
+                sdk::ChatMessage::user_text("历史问题"),
+                sdk::ChatMessage::assistant_text("历史回答"),
+            ],
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+
+        assert!(
+            !app.model.conversation.runtime.spinner.chat_active,
+            "SessionResumed 仅恢复历史，不能表示 Runtime 正在执行"
+        );
+        assert_eq!(app.model.conversation.runtime.spinner.phase, None);
+        assert_eq!(app.model.conversation.runtime.spinner.running_tool_count, 0);
+    }
+    #[test]
     fn test_apply_resume_input_history_populates_app_history() {
         let mut app = App::new(
             "new-session".to_string(),

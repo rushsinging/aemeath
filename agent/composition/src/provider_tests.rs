@@ -548,6 +548,7 @@ fn valid_spec() -> ProviderBuildSpec {
         requested_reasoning: ReasoningLevel::Off,
         context_window: Some(200_000),
         timeout: std::time::Duration::from_secs(60),
+        user_agent: "aemeath-test/1.0".to_string(),
     }
 }
 

@@ -54,6 +54,7 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
         reasoning: false,
         reasoning_config: None,
         timeout_secs: 60,
+        user_agent: None,
     })
     .expect("valid OpenAI chat config");
     let scope = crate::InvocationScope::new(
@@ -117,6 +118,7 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
         reasoning: false,
         reasoning_config: None,
         timeout_secs: 60,
+        user_agent: None,
     })
     .expect("valid OpenAI responses config");
     let scope = crate::InvocationScope::new(
@@ -187,6 +189,7 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
         reasoning: false,
         reasoning_config: None,
         timeout_secs: 60,
+        user_agent: None,
     })
     .expect("valid OpenAI responses config");
     let scope = crate::InvocationScope::new(

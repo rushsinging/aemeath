@@ -36,7 +36,7 @@ impl TypedTool for WebSearchTool {
     async fn call(
         &self,
         input: serde_json::Value,
-        _ctx: &ToolExecutionContext,
+        ctx: &ToolExecutionContext,
     ) -> TypedToolResult<WebSearchResult> {
         let args: WebSearchInput = match serde_json::from_value(input) {
             Ok(a) => a,
@@ -70,7 +70,7 @@ impl TypedTool for WebSearchTool {
 
         let client = match reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
-            .user_agent("Mozilla/5.0 (compatible; AemeathCLI/1.0)")
+            .user_agent(ctx.user_agent())
             .build()
         {
             Ok(c) => c,

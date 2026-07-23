@@ -34,43 +34,6 @@ impl App {
                 AskUserPhase::Answering => self.update_ask_user_answering_key(key, &snapshot),
                 AskUserPhase::Confirming => self.update_ask_user_confirming_key(key),
             };
-        } else if self.input.ask_user_reply_tx.is_some() {
-            // AskUserQuestion 自由输入模式（无选项列表，等待 reply_tx）
-            match key.code {
-                KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
-                    let text = self.model.input.document.buffer.clone();
-                    if !text.is_empty() {
-                        if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
-                            self.apply_agent_intent(AgentIntent::Conversation(
-                                ConversationIntent::AnswerCurrentAskUser(AnswerCurrentAskUser {
-                                    answer: text.clone(),
-                                }),
-                            ));
-                            self.handle_input_intent(
-                                crate::tui::model::input::intent::InputIntent::Clear,
-                            );
-                            let _ = reply_tx.send(sdk::AskUserReply::Answers(vec![text]));
-                            self.spinner_phase(SpinnerPhase::Generating);
-                        }
-                    }
-                    return Some(UpdateResult::none());
-                }
-                KeyCode::Esc => {
-                    if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
-                        self.dismiss_ask_user_block();
-                        self.handle_input_intent(
-                            crate::tui::model::input::intent::InputIntent::Clear,
-                        );
-                        let _ = reply_tx.send(sdk::AskUserReply::Cancelled);
-                        self.spinner_phase(SpinnerPhase::Generating);
-                    }
-                    return Some(UpdateResult::none());
-                }
-                _ => {
-                    self.update_ask_user_input_key(key);
-                    return Some(UpdateResult::none());
-                }
-            }
         }
 
         None
@@ -131,7 +94,6 @@ impl App {
                 let answer = if cursor >= llm_option_count && options_count > 0 {
                     // "Type something..." 被选中 → 切换到自由输入子态
                     self.set_ask_user_chat_input(true);
-                    self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     return Some(UpdateResult::none());
                 } else if multi_select {
                     // Multi-select: 返回已选项目，逗号分隔
@@ -159,8 +121,7 @@ impl App {
                         .map(|o| o.title.clone())
                         .unwrap_or_default()
                 } else {
-                    // 无选项自由输入模式
-                    self.model.input.document.buffer.clone()
+                    return Some(UpdateResult::none());
                 };
 
                 let final_answer = if answer.is_empty() {
@@ -175,7 +136,6 @@ impl App {
                         answer: final_answer,
                     }),
                 ));
-                self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                 self.maybe_auto_submit_ask_user();
             }
             KeyCode::Esc => {
@@ -246,10 +206,10 @@ impl App {
         Some(UpdateResult::none())
     }
 
-    /// 单问题 batch 被 model 直接 confirmed 时自动提交。
+    /// 单问题 Ask 在 answer intent 后已进入确认态，直接提交当前 batch。
     fn maybe_auto_submit_ask_user(&mut self) {
-        let snap = self.model.conversation.ask_user_snapshot();
-        if snap.as_ref().map(|s| s.confirmed).unwrap_or(false) {
+        let has_active_batch = self.model.conversation.ask_user_snapshot().is_some();
+        if !has_active_batch {
             self.submit_ask_user_batch();
         }
     }
@@ -257,12 +217,10 @@ impl App {
     /// 提交整个 batch：收集所有答案并回传。
     fn submit_ask_user_batch(&mut self) {
         let state = self.input.ask_user_state.take().unwrap();
-        let answers: Vec<String> = state
+        let answers: Vec<sdk::AskUserAnswer> = state
             .items
             .iter()
-            .enumerate()
-            .map(|(i, item)| {
-                // 从 timeline 读取答案（timeline 是状态真相源）
+            .filter_map(|item| {
                 self.model
                     .conversation
                     .timeline
@@ -270,13 +228,23 @@ impl App {
                     .iter()
                     .find_map(|tl_item| {
                         if let OutputTimelineItem::AskUserBatch { slots, .. } = tl_item {
-                            slots.get(i).and_then(|slot| slot.answer.clone())
+                            slots
+                                .iter()
+                                .find(|slot| {
+                                    slot.id == item.id && slot.question_seq == item.question_seq
+                                })
+                                .and_then(|slot| {
+                                    slot.answer.clone().or_else(|| item.default.clone())
+                                })
+                                .map(|answer| sdk::AskUserAnswer {
+                                    tool_call_id: item.id.clone(),
+                                    question_seq: item.question_seq,
+                                    answer,
+                                })
                         } else {
                             None
                         }
                     })
-                    .or_else(|| item.default.clone())
-                    .unwrap_or_default()
             })
             .collect();
         self.apply_agent_intent(AgentIntent::Conversation(
@@ -290,7 +258,6 @@ impl App {
     fn cancel_ask_user_batch(&mut self) {
         if let Some(state) = self.input.ask_user_state.take() {
             self.dismiss_ask_user_block();
-            self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
             let _ = state.reply_tx.send(sdk::AskUserReply::Cancelled);
             self.spinner_phase(SpinnerPhase::Generating);
         }
@@ -315,7 +282,6 @@ impl App {
                             answer: text,
                         }),
                     ));
-                    self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     self.maybe_auto_submit_ask_user();
                 }
             }
@@ -352,9 +318,16 @@ impl App {
                     ConversationIntent::DeleteAskUserChatChar(DeleteAskUserChatChar),
                 ));
             }
-            KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
+            KeyCode::Char(c)
+                if matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) =>
+            {
+                let ch = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    c.to_ascii_uppercase()
+                } else {
+                    c
+                };
                 self.apply_agent_intent(AgentIntent::Conversation(
-                    ConversationIntent::AppendAskUserChatChar(AppendAskUserChatChar { ch: c }),
+                    ConversationIntent::AppendAskUserChatChar(AppendAskUserChatChar { ch }),
                 ));
             }
             KeyCode::Left if key.modifiers == KeyModifiers::NONE => {
@@ -394,48 +367,6 @@ impl App {
             _ => {}
         }
         Some(UpdateResult::none())
-    }
-
-    pub(super) fn update_ask_user_input_key(&mut self, key: crossterm::event::KeyEvent) {
-        // Shift+Enter / Alt+Enter = 换行
-        if key.code == KeyCode::Enter
-            && key
-                .modifiers
-                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
-        {
-            self.handle_input_intent(crate::tui::model::input::intent::InputIntent::InsertNewline);
-            return;
-        }
-        match (key.modifiers, key.code) {
-            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
-                let ch = if key.modifiers.contains(KeyModifiers::SHIFT) {
-                    c.to_ascii_uppercase()
-                } else {
-                    c
-                };
-                self.handle_input_intent(
-                    crate::tui::model::input::intent::InputIntent::InsertChar(ch),
-                );
-            }
-            (KeyModifiers::NONE, KeyCode::Backspace) => {
-                self.handle_input_intent(
-                    crate::tui::model::input::intent::InputIntent::DeleteBackward,
-                );
-            }
-            (KeyModifiers::NONE, KeyCode::Left) => self
-                .handle_input_intent(crate::tui::model::input::intent::InputIntent::MoveCursorLeft),
-            (KeyModifiers::NONE, KeyCode::Right) => self.handle_input_intent(
-                crate::tui::model::input::intent::InputIntent::MoveCursorRight,
-            ),
-            (KeyModifiers::CONTROL, KeyCode::Char('a')) => self
-                .handle_input_intent(crate::tui::model::input::intent::InputIntent::MoveCursorHome),
-            (KeyModifiers::CONTROL, KeyCode::Char('e')) => self
-                .handle_input_intent(crate::tui::model::input::intent::InputIntent::MoveCursorEnd),
-            (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.handle_input_intent(
-                crate::tui::model::input::intent::InputIntent::DeleteWordBeforeCursor,
-            ),
-            _ => {}
-        }
     }
 }
 

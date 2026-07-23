@@ -43,6 +43,13 @@ fn provider_and_hooks_are_run_scoped() {
 }
 
 #[test]
+fn user_agent_change_is_run_scoped() {
+    let scopes = changed(|config| config.api.user_agent = "aemeath-test/1.0".into());
+
+    assert_eq!(scopes, vec![ConfigApplicationScope::Run]);
+}
+
+#[test]
 fn unchanged_config_has_no_application_scope() {
     assert!(classify_application_scopes(&Config::default(), &Config::default()).is_empty());
 }

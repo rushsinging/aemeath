@@ -2,6 +2,7 @@ use crate::tui::adapter::agent_event::AgentEventMapping;
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::change::{dirty_from_model_changes, ModelChange};
 use crate::tui::model::conversation::change::ConversationChange;
+use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::root::TuiModel;
 use crate::tui::update::intent::AgentIntent;
 use crate::tui::view_state::ViewModelDirty;
@@ -40,6 +41,14 @@ pub(crate) fn reduce_intent(model: &mut TuiModel, intent: AgentIntent) -> TuiUpd
     let mut result = TuiUpdateResult::default();
 
     match intent {
+        AgentIntent::Conversation(ConversationIntent::ResumeConversation(intent)) => {
+            let changes = model
+                .conversation
+                .apply(ConversationIntent::ResumeConversation(intent));
+            apply_history_conversation_changes(&mut result, &changes);
+            model.conversation.runtime.force_idle();
+            result.dirty.mark_status();
+        }
         AgentIntent::Conversation(intent) => {
             let changes = model.conversation.apply(intent);
             apply_conversation_changes(&mut result, &changes, &mut model.conversation.runtime);
@@ -123,6 +132,23 @@ pub(crate) fn reduce_agent_event(
         result.push_render_request_once();
     }
     result
+}
+
+fn apply_history_conversation_changes(
+    result: &mut TuiUpdateResult,
+    changes: &[ConversationChange],
+) {
+    for change in changes {
+        result
+            .effects
+            .extend(crate::tui::update::coordinator::effects_for_conversation_change(change));
+    }
+    let model_changes: Vec<ModelChange> = changes.iter().map(ModelChange::from).collect();
+    let dirty = dirty_from_model_changes(&model_changes);
+    result.dirty.merge(&dirty);
+    if dirty.output || dirty.status {
+        result.push_render_request_once();
+    }
 }
 
 fn apply_conversation_changes(
