@@ -1455,6 +1455,22 @@ where
         Ok(())
     }
 
+    fn register_step_scope(
+        &self,
+        run_id: &sdk::RunId,
+        step_id: sdk::RunStepId,
+        cancel: CancellationToken,
+    ) {
+        debug_assert_eq!(run_id, &self.run_id);
+        self.active_run
+            .set_main_active_step(run_id, step_id, cancel);
+    }
+
+    fn take_control(&self, run_id: &sdk::RunId) -> Option<crate::domain::agent_run::RunControl> {
+        debug_assert_eq!(run_id, &self.run_id);
+        self.active_run.take_control(run_id)
+    }
+
     fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
         debug_assert_eq!(run_id, &self.run_id);
         self.active_run.claim_terminal(run_id)

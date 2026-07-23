@@ -62,7 +62,30 @@ impl ProcessingHandle {
         };
         run_id
             .as_ref()
-            .map(|run_id| self.agent_client.cancel_run(run_id))
+            .map(|run_id| {
+                let deadline = sdk::ControlDeadline::from_unix_millis(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64 + 10_000)
+                        .unwrap_or(0),
+                );
+                let outcome = self.agent_client.cancel_run_step(run_id, None, deadline);
+                match outcome {
+                    sdk::CancelRunStepOutcome::Accepted => sdk::CancelRunOutcome::Accepted,
+                    sdk::CancelRunStepOutcome::AlreadyCancelling => {
+                        sdk::CancelRunOutcome::AlreadyCancelling
+                    }
+                    sdk::CancelRunStepOutcome::RunTerminal
+                    | sdk::CancelRunStepOutcome::NotFound => sdk::CancelRunOutcome::NotFound,
+                    sdk::CancelRunStepOutcome::NoActiveStep
+                    | sdk::CancelRunStepOutcome::RunTerminating => {
+                        // #1247: Run is alive but no active Step (e.g. between
+                        // Steps). Fall back to legacy cancel_run to ensure the
+                        // Run stops; #879 will retire this fallback.
+                        self.agent_client.cancel_run(run_id)
+                    }
+                }
+            })
             .unwrap_or(sdk::CancelRunOutcome::Accepted)
     }
 

@@ -234,6 +234,16 @@ pub trait RunLoopPort: Send {
     fn claim_cancellation(&self, _run_id: &sdk::RunId) -> bool {
         true
     }
+    fn take_control(&self, _run_id: &sdk::RunId) -> Option<crate::domain::agent_run::RunControl> {
+        None
+    }
+    fn register_step_scope(
+        &self,
+        _run_id: &sdk::RunId,
+        _step_id: sdk::RunStepId,
+        _cancel: CancellationToken,
+    ) {
+    }
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError>;
 }
 
@@ -301,6 +311,12 @@ where
     // Complete→drain→EmptyAndSealed loses the result.
     let mut terminal_text: Option<String> = None;
     loop {
+        if let Some(control) = handle_pending_control(run, port).await? {
+            if matches!(control, ControlDirective::Terminal) {
+                return Ok(LoopDirective::Terminal);
+            }
+            continue;
+        }
         if handle_interrupt(run, cancel, port).await? {
             return Ok(LoopDirective::Terminal);
         }
@@ -322,6 +338,12 @@ where
         let outcome = match await_interruptible(run, cancel, drain_future).await {
             Interrupt::Completed(result) => result?,
             Interrupt::Cancelled => {
+                if let Some(control) = handle_pending_control(run, port).await? {
+                    return Ok(match control {
+                        ControlDirective::Continue => LoopDirective::AwaitUser,
+                        ControlDirective::Terminal => LoopDirective::Terminal,
+                    });
+                }
                 cancel_run(run, port).await?;
                 return Ok(LoopDirective::Terminal);
             }
@@ -453,31 +475,36 @@ where
     P: RunLoopPort,
 {
     let step_id = sdk::RunStepId::new_v7();
+    let step_cancel = cancel.child_token();
+    port.register_step_scope(run.id(), step_id.clone(), step_cancel.clone());
     port.freeze_step(&step_id, inputs);
     if let Err(error) = port.accept_step_input(&step_id).await {
         fail_run(run, port, error.to_string()).await?;
         return Ok(());
     }
+    let step_id = run.begin_step_with_id(step_id)?;
+    emit_events(run, port).await?;
     // -- compaction check --
-    let needs_compaction = match await_interruptible(run, cancel, port.needs_compaction()).await {
-        Interrupt::Completed(result) => result?,
-        Interrupt::Cancelled => {
-            cancel_run(run, port).await?;
-            return Ok(());
-        }
-        Interrupt::TimedOut => {
-            timeout_run(run, port).await?;
-            return Ok(());
-        }
-    };
-    if needs_compaction {
-        run.transition(RunTransition::BeginCompaction)?;
-        match await_interruptible(run, cancel, port.compact(cancel)).await {
+    let needs_compaction =
+        match await_interruptible(run, &step_cancel, port.needs_compaction()).await {
             Interrupt::Completed(result) => result?,
             Interrupt::Cancelled => {
-                cancel_run(run, port).await?;
+                handle_step_control(run, port).await?;
                 return Ok(());
             }
+            Interrupt::TimedOut => {
+                timeout_run(run, port).await?;
+                return Ok(());
+            }
+        };
+    if needs_compaction {
+        run.transition(RunTransition::BeginCompaction)?;
+        match await_interruptible(run, &step_cancel, port.compact(&step_cancel)).await {
+            Interrupt::Completed(Ok(())) => {}
+            Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
+                return handle_step_control(run, port).await;
+            }
+            Interrupt::Completed(Err(error)) => return Err(error),
             Interrupt::TimedOut => {
                 timeout_run(run, port).await?;
                 return Ok(());
@@ -490,14 +517,12 @@ where
         return Ok(());
     }
     run.transition(RunTransition::ContextPrepared)?;
-    let step_id = run.begin_step_with_id(step_id)?;
-    emit_events(run, port).await?;
     let mut compacted_after_context_too_long = false;
     let (model_step, token_usage) = loop {
-        match await_interruptible(run, cancel, port.invoke_model(cancel)).await {
+        match await_interruptible(run, &step_cancel, port.invoke_model(&step_cancel)).await {
             Interrupt::Completed(Ok(result)) => break result,
             Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
-                cancel_run(run, port).await?;
+                handle_step_control(run, port).await?;
                 return Ok(());
             }
             Interrupt::Completed(Err(LoopEngineError::NeedsCompaction(error))) => {
@@ -511,12 +536,14 @@ where
                     return Ok(());
                 }
                 run.transition(RunTransition::ModelContextExceeded)?;
-                match await_interruptible(run, cancel, port.compact(cancel)).await {
-                    Interrupt::Completed(result) => result?,
-                    Interrupt::Cancelled => {
-                        cancel_run(run, port).await?;
+                match await_interruptible(run, &step_cancel, port.compact(&step_cancel)).await {
+                    Interrupt::Completed(Ok(())) => {}
+                    Interrupt::Completed(Err(LoopEngineError::Cancelled))
+                    | Interrupt::Cancelled => {
+                        handle_step_control(run, port).await?;
                         return Ok(());
                     }
+                    Interrupt::Completed(Err(error)) => return Err(error),
                     Interrupt::TimedOut => {
                         timeout_run(run, port).await?;
                         return Ok(());
@@ -700,14 +727,14 @@ where
             );
             let tool_step = match await_interruptible(
                 run,
-                cancel,
-                port.execute_tools(run.id(), &step_id, &guarded_calls, cancel),
+                &step_cancel,
+                port.execute_tools(run.id(), &step_id, &guarded_calls, &step_cancel),
             )
             .await
             {
                 Interrupt::Completed(Ok(step)) => step,
                 Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
-                    cancel_run(run, port).await?;
+                    handle_step_control(run, port).await?;
                     return Ok(());
                 }
                 Interrupt::Completed(Err(error)) => {
@@ -793,6 +820,90 @@ where
     run.mark_stuck(reason)?;
     emit_events(run, port).await?;
     port.on_stuck(decision).await
+}
+
+enum ControlDirective {
+    Continue,
+    Terminal,
+}
+
+async fn handle_pending_control<P>(
+    run: &mut Run,
+    port: &mut P,
+) -> Result<Option<ControlDirective>, LoopEngineError>
+where
+    P: RunLoopPort,
+{
+    let Some(control) = port.take_control(run.id()) else {
+        return Ok(None);
+    };
+    let active_step = run.active_step_id();
+    match control {
+        crate::domain::agent_run::RunControl::CancelStep { step_id, .. } => {
+            if active_step.as_ref() != Some(&step_id) {
+                return Err(LoopEngineError::Adapter(
+                    "CancelRunStep 与当前 Step identity 不匹配".to_string(),
+                ));
+            }
+            finish_cancelled_step(run, port, &step_id).await?;
+            Ok(Some(ControlDirective::Continue))
+        }
+        crate::domain::agent_run::RunControl::Terminate { reason, deadline } => {
+            match run.request_termination(reason, deadline) {
+                crate::domain::agent_run::RunTerminationRequest::Accepted => {}
+                crate::domain::agent_run::RunTerminationRequest::AlreadyTerminating
+                | crate::domain::agent_run::RunTerminationRequest::AlreadyTerminal => {
+                    return Ok(Some(ControlDirective::Terminal));
+                }
+            }
+            emit_events(run, port).await?;
+            if let Some(step_id) = active_step {
+                port.finalize_cancelled_step(&step_id).await?;
+            }
+            run.finish_termination()?;
+            emit_events(run, port).await?;
+            Ok(Some(ControlDirective::Terminal))
+        }
+    }
+}
+
+async fn finish_cancelled_step<P>(
+    run: &mut Run,
+    port: &mut P,
+    step_id: &sdk::RunStepId,
+) -> Result<(), LoopEngineError>
+where
+    P: RunLoopPort,
+{
+    match run.request_step_cancellation(step_id) {
+        crate::domain::agent_run::RunStepCancellationRequest::Accepted => {}
+        crate::domain::agent_run::RunStepCancellationRequest::AlreadyCancelling => return Ok(()),
+        outcome => {
+            return Err(LoopEngineError::Adapter(format!(
+                "取消当前 Step 时获得了非预期结果：{outcome:?}"
+            )));
+        }
+    }
+    emit_events(run, port).await?;
+    run.begin_step_finalization(step_id)?;
+    emit_events(run, port).await?;
+    port.finalize_cancelled_step(step_id).await?;
+    run.finish_cancelled_step(step_id)?;
+    emit_events(run, port).await
+}
+
+async fn handle_step_control<P>(run: &mut Run, port: &mut P) -> Result<(), LoopEngineError>
+where
+    P: RunLoopPort,
+{
+    match handle_pending_control(run, port).await? {
+        Some(ControlDirective::Continue) => Ok(()),
+        Some(ControlDirective::Terminal) => Ok(()),
+        None => {
+            cancel_run(run, port).await?;
+            Ok(())
+        }
+    }
 }
 
 async fn handle_interrupt<P>(

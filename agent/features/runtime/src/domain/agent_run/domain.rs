@@ -313,7 +313,7 @@ impl Run {
         &mut self,
         step_id: RunStepId,
     ) -> Result<RunStepId, RunTransitionError> {
-        if self.status != RunStatus::InvokingModel {
+        if self.status != RunStatus::PreparingContext && self.status != RunStatus::InvokingModel {
             return Err(RunTransitionError::RunNotActive(self.status));
         }
         if self.steps.iter().any(RunStep::is_active) {

@@ -3,7 +3,9 @@
 use async_trait::async_trait;
 
 use crate::{
-    CancelRunOutcome, ChatRequest, ChatStream, ConfigUpdate, ConfigUpdateResult, ConfigView, RunId,
+    CancelRunOutcome, CancelRunStepOutcome, ChatRequest, ChatStream, ConfigUpdate,
+    ConfigUpdateResult, ConfigView, ControlDeadline, RunId, RunStepId, RunTerminationReason,
+    TerminateRunOutcome,
 };
 
 #[cfg(test)]
@@ -18,7 +20,33 @@ mod tests;
 #[async_trait]
 pub trait AgentClient: Send + Sync + 'static {
     /// 同步、幂等地打断指定 Run。返回前 Runtime 已进入 Cancelling 并触发 cancellation scope。
+    ///
+    /// 迁移期兼容入口；#879 负责在所有生产调用迁移至 Main typed control 后物理退役。
     fn cancel_run(&self, run_id: &RunId) -> CancelRunOutcome;
+
+    /// 同步、幂等地取消 Main Run 的当前 Step。
+    ///
+    /// 返回 Accepted 时 Main Runtime 已记录控制、取消当前 Step scope 并停止新工作调度。
+    fn cancel_run_step(
+        &self,
+        _run_id: &RunId,
+        _step_id: Option<&RunStepId>,
+        _deadline: ControlDeadline,
+    ) -> CancelRunStepOutcome {
+        CancelRunStepOutcome::NotFound
+    }
+
+    /// 同步、幂等地终止 Main Run。
+    ///
+    /// 返回 Accepted 时 Main Runtime 已记录控制、取消 Run root scope 并停止新工作调度。
+    fn terminate_run(
+        &self,
+        _run_id: &RunId,
+        _reason: RunTerminationReason,
+        _deadline: ControlDeadline,
+    ) -> TerminateRunOutcome {
+        TerminateRunOutcome::NotFound
+    }
 
     /// 完成 Runtime-owned interaction waiter。
     fn reply_interaction(

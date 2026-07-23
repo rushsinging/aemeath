@@ -1,10 +1,19 @@
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
+struct MainStepScope {
+    id: sdk::RunStepId,
+    cancel: CancellationToken,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct ActiveRun {
     pub cancel: CancellationToken,
     pub cancelling: bool,
     pub terminal: bool,
+    main_step: Option<MainStepScope>,
+    control: Option<crate::domain::agent_run::RunControl>,
+    control_delivered: bool,
 }
 
 #[derive(Debug, Default)]
@@ -24,8 +33,37 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
                 cancel,
                 cancelling: false,
                 terminal: false,
+                main_step: None,
+                control: None,
+                control_delivered: false,
             },
         );
+    }
+
+    fn activate_main(&self, run_id: sdk::RunId, cancel: CancellationToken) {
+        self.activate(run_id, cancel);
+    }
+
+    fn set_main_active_step(
+        &self,
+        run_id: &sdk::RunId,
+        step_id: sdk::RunStepId,
+        cancel: CancellationToken,
+    ) {
+        let mut guard = self
+            .active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(active) = guard.get_mut(run_id) {
+            active.main_step = Some(MainStepScope {
+                id: step_id,
+                cancel,
+            });
+        }
+    }
+
+    fn take_control(&self, run_id: &sdk::RunId) -> Option<crate::domain::agent_run::RunControl> {
+        ActiveRunRegistry::take_control(self, run_id)
     }
 
     fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
@@ -68,6 +106,93 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
 }
 
 impl ActiveRunRegistry {
+    pub fn cancel_step(
+        &self,
+        run_id: &sdk::RunId,
+        step_id: Option<&sdk::RunStepId>,
+        deadline: sdk::ControlDeadline,
+    ) -> sdk::CancelRunStepOutcome {
+        let mut guard = self
+            .active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Some(active) = guard.get_mut(run_id) else {
+            return sdk::CancelRunStepOutcome::NotFound;
+        };
+        if active.terminal {
+            return sdk::CancelRunStepOutcome::RunTerminal;
+        }
+        if matches!(
+            active.control,
+            Some(crate::domain::agent_run::RunControl::Terminate { .. })
+        ) {
+            return sdk::CancelRunStepOutcome::RunTerminating;
+        }
+        if active.control.is_some() || active.cancelling {
+            return sdk::CancelRunStepOutcome::AlreadyCancelling;
+        }
+        let Some(current_step) = active.main_step.as_ref() else {
+            return sdk::CancelRunStepOutcome::NoActiveStep;
+        };
+        if step_id.is_some_and(|requested| requested != &current_step.id) {
+            return sdk::CancelRunStepOutcome::NoActiveStep;
+        }
+        let step_id = current_step.id.clone();
+        current_step.cancel.cancel();
+        active.control =
+            Some(crate::domain::agent_run::RunControl::CancelStep { step_id, deadline });
+        active.control_delivered = false;
+        sdk::CancelRunStepOutcome::Accepted
+    }
+
+    pub fn terminate(
+        &self,
+        run_id: &sdk::RunId,
+        reason: sdk::RunTerminationReason,
+        deadline: sdk::ControlDeadline,
+    ) -> sdk::TerminateRunOutcome {
+        let mut guard = self
+            .active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Some(active) = guard.get_mut(run_id) else {
+            return sdk::TerminateRunOutcome::NotFound;
+        };
+        if active.terminal {
+            return sdk::TerminateRunOutcome::AlreadyTerminal;
+        }
+        if matches!(
+            active.control,
+            Some(crate::domain::agent_run::RunControl::Terminate { .. })
+        ) {
+            return sdk::TerminateRunOutcome::AlreadyTerminating;
+        }
+        active.cancel.cancel();
+        if let Some(step) = &active.main_step {
+            step.cancel.cancel();
+        }
+        active.control = Some(crate::domain::agent_run::RunControl::Terminate { reason, deadline });
+        active.control_delivered = false;
+        sdk::TerminateRunOutcome::Accepted
+    }
+
+    pub fn take_control(
+        &self,
+        run_id: &sdk::RunId,
+    ) -> Option<crate::domain::agent_run::RunControl> {
+        let mut guard = self
+            .active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let active = guard.get_mut(run_id)?;
+        if active.control_delivered {
+            return None;
+        }
+        let control = active.control.clone()?;
+        active.control_delivered = true;
+        Some(control)
+    }
+
     pub fn cancel(&self, run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
         let mut guard = self
             .active
@@ -105,103 +230,5 @@ impl ActiveRunRegistry {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::agent_run::ActiveRunPort;
-
-    #[test]
-    fn registry_tracks_parent_and_multiple_sub_runs_independently() {
-        let registry = ActiveRunRegistry::default();
-        let parent = sdk::RunId::new_v7();
-        let sub_a = sdk::RunId::new_v7();
-        let sub_b = sdk::RunId::new_v7();
-        let parent_token = CancellationToken::new();
-        let sub_a_token = parent_token.child_token();
-        let sub_b_token = parent_token.child_token();
-
-        registry.activate(parent.clone(), parent_token.clone());
-        registry.activate(sub_a.clone(), sub_a_token.clone());
-        registry.activate(sub_b.clone(), sub_b_token.clone());
-
-        assert_eq!(registry.active_ids().len(), 3);
-        assert_eq!(registry.cancel(&sub_a), sdk::CancelRunOutcome::Accepted);
-        assert!(sub_a_token.is_cancelled());
-        assert!(!parent_token.is_cancelled());
-        assert!(!sub_b_token.is_cancelled());
-
-        registry.clear(&sub_a);
-        assert_eq!(registry.active_ids().len(), 2);
-        assert_eq!(registry.cancel(&parent), sdk::CancelRunOutcome::Accepted);
-        assert!(parent_token.is_cancelled());
-        assert!(sub_b_token.is_cancelled());
-    }
-
-    #[test]
-    fn cancel_is_synchronous_and_id_scoped() {
-        let registry = ActiveRunRegistry::default();
-        let run_id = sdk::RunId::new_v7();
-        let other = sdk::RunId::new_v7();
-        let token = CancellationToken::new();
-        registry.activate(run_id.clone(), token.clone());
-
-        assert_eq!(registry.cancel(&other), sdk::CancelRunOutcome::NotFound);
-        assert!(!token.is_cancelled());
-        assert_eq!(registry.cancel(&run_id), sdk::CancelRunOutcome::Accepted);
-        assert!(
-            token.is_cancelled(),
-            "token must be cancelled before return"
-        );
-        assert_eq!(
-            registry.cancel(&run_id),
-            sdk::CancelRunOutcome::AlreadyCancelling
-        );
-    }
-
-    #[test]
-    fn terminal_claim_is_visible_to_late_cancel_until_clear() {
-        let registry = ActiveRunRegistry::default();
-        let run_id = sdk::RunId::new_v7();
-        registry.activate(run_id.clone(), CancellationToken::new());
-
-        assert!(registry.claim_terminal(&run_id));
-        assert_eq!(
-            registry.cancel(&run_id),
-            sdk::CancelRunOutcome::AlreadyTerminal
-        );
-        registry.clear(&run_id);
-        assert_eq!(registry.cancel(&run_id), sdk::CancelRunOutcome::NotFound);
-    }
-
-    #[test]
-    fn terminal_claim_blocks_late_cancellation_claim() {
-        let registry = ActiveRunRegistry::default();
-        let run_id = sdk::RunId::new_v7();
-        registry.activate(run_id.clone(), CancellationToken::new());
-
-        assert!(registry.claim_terminal(&run_id));
-        assert!(!registry.claim_cancellation(&run_id));
-    }
-
-    #[test]
-    fn cancellation_wins_over_terminal_claim() {
-        let registry = ActiveRunRegistry::default();
-        let run_id = sdk::RunId::new_v7();
-        registry.activate(run_id.clone(), CancellationToken::new());
-
-        assert_eq!(registry.cancel(&run_id), sdk::CancelRunOutcome::Accepted);
-        assert!(!registry.claim_terminal(&run_id));
-    }
-
-    #[test]
-    fn clear_only_removes_matching_run() {
-        let registry = ActiveRunRegistry::default();
-        let run_id = sdk::RunId::new_v7();
-        let other = sdk::RunId::new_v7();
-        registry.activate(run_id.clone(), CancellationToken::new());
-
-        registry.clear(&other);
-        assert_eq!(registry.active_ids(), vec![run_id.clone()]);
-        registry.clear(&run_id);
-        assert!(registry.active_ids().is_empty());
-    }
-}
+#[path = "active_run_tests.rs"]
+mod tests;

@@ -9,12 +9,19 @@ use tokio_util::sync::CancellationToken;
 use crate::application::loop_engine::engine::{
     DrainEpoch, DrainOutcome, InternalContinuationKind, LoopInput,
 };
-use crate::domain::agent_run::{Run, RunDomainEvent, RunSpec, RunStatus};
+use crate::domain::agent_run::{Run, RunControl, RunDomainEvent, RunSpec, RunStatus};
 
 struct ScriptedPort {
     model_steps: VecDeque<ModelStep>,
     model_errors: VecDeque<LoopEngineError>,
     tool_steps: VecDeque<ToolStep>,
+    controls: std::sync::Mutex<VecDeque<RunControl>>,
+    registered_step: std::sync::Mutex<Option<sdk::RunStepId>>,
+    cancel_when_compact_starts: bool,
+    cancel_when_model_starts: bool,
+    cancel_when_tools_starts: bool,
+    terminate_when_compact_starts: bool,
+    step_cancel: std::sync::Arc<std::sync::Mutex<Option<CancellationToken>>>,
     calls: Vec<&'static str>,
     events: Vec<RunDomainEvent>,
     guarded_calls: Vec<Vec<ToolGuardDecision>>,
@@ -52,6 +59,13 @@ impl Default for ScriptedPort {
             model_steps: Default::default(),
             model_errors: Default::default(),
             tool_steps: Default::default(),
+            controls: Default::default(),
+            registered_step: Default::default(),
+            cancel_when_compact_starts: false,
+            cancel_when_model_starts: false,
+            cancel_when_tools_starts: false,
+            terminate_when_compact_starts: false,
+            step_cancel: Default::default(),
             calls: Default::default(),
             events: Default::default(),
             guarded_calls: Default::default(),
@@ -159,6 +173,32 @@ impl RunLoopPort for ScriptedPort {
 
     async fn compact(&mut self, cancel: &CancellationToken) -> Result<(), LoopEngineError> {
         self.calls.push("compact");
+        if self.cancel_when_compact_starts {
+            let step_id = self
+                .registered_step
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("step scope must be registered before compact");
+            self.controls
+                .lock()
+                .unwrap()
+                .push_back(RunControl::CancelStep {
+                    step_id,
+                    deadline: sdk::ControlDeadline::from_unix_millis(1_725_000_000_123),
+                });
+            cancel.cancel();
+        }
+        if self.terminate_when_compact_starts {
+            self.controls
+                .lock()
+                .unwrap()
+                .push_back(RunControl::Terminate {
+                    reason: sdk::RunTerminationReason::UserExit,
+                    deadline: sdk::ControlDeadline::from_unix_millis(1_725_000_000_456),
+                });
+            cancel.cancel();
+        }
         if self.block_compact_until_cancelled {
             cancel.cancelled().await;
             return Err(LoopEngineError::Cancelled);
@@ -171,6 +211,23 @@ impl RunLoopPort for ScriptedPort {
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
         self.calls.push("model");
+        if self.cancel_when_model_starts {
+            let step_id = self
+                .registered_step
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("step scope must be registered before model");
+            self.controls
+                .lock()
+                .unwrap()
+                .push_back(RunControl::CancelStep {
+                    step_id,
+                    deadline: sdk::ControlDeadline::from_unix_millis(1_725_000_000_123),
+                });
+            cancel.cancel();
+            return Err(LoopEngineError::Cancelled);
+        }
         if self.block_model_forever {
             std::future::pending::<()>().await;
         }
@@ -207,11 +264,28 @@ impl RunLoopPort for ScriptedPort {
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
         calls: &[(ToolCall, ToolGuardDecision)],
-        _cancel: &CancellationToken,
+        cancel: &CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
         self.calls.push("tools");
         self.guarded_calls
             .push(calls.iter().map(|(_, decision)| decision.clone()).collect());
+        if self.cancel_when_tools_starts {
+            let step_id = self
+                .registered_step
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("step scope must be registered before tools");
+            self.controls
+                .lock()
+                .unwrap()
+                .push_back(RunControl::CancelStep {
+                    step_id,
+                    deadline: sdk::ControlDeadline::from_unix_millis(1_725_000_000_123),
+                });
+            cancel.cancel();
+            return Err(LoopEngineError::Cancelled);
+        }
         self.tool_steps
             .pop_front()
             .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))
@@ -220,6 +294,20 @@ impl RunLoopPort for ScriptedPort {
     async fn on_stuck(&mut self, _decision: &StuckDecision) -> Result<(), LoopEngineError> {
         self.calls.push("stuck");
         Ok(())
+    }
+
+    fn take_control(&self, _run_id: &sdk::RunId) -> Option<RunControl> {
+        self.controls.lock().unwrap().pop_front()
+    }
+
+    fn register_step_scope(
+        &self,
+        _run_id: &sdk::RunId,
+        step_id: sdk::RunStepId,
+        cancel: CancellationToken,
+    ) {
+        *self.registered_step.lock().unwrap() = Some(step_id);
+        *self.step_cancel.lock().unwrap() = Some(cancel);
     }
 
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
@@ -361,8 +449,8 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
             "input",
             "freeze_step",
             "accept_step_input",
-            "needs_compaction",
             "emit",
+            "needs_compaction",
             "model",
             "finalize_step",
             "input",
@@ -520,8 +608,8 @@ async fn provider_context_too_long_compacts_then_rebuilds_before_reinvoking() {
             "input",
             "freeze_step",
             "accept_step_input",
-            "needs_compaction",
             "emit",
+            "needs_compaction",
             "model",
             "compact",
             "model",
@@ -557,6 +645,32 @@ async fn provider_context_too_long_after_compaction_fails_without_looping() {
     );
 }
 
+#[tokio::test]
+async fn cancel_step_during_compaction_finalizes_then_returns_to_drain() {
+    let mut run = new_run(Duration::ZERO);
+    let root = CancellationToken::new();
+    let mut port = ScriptedPort {
+        needs_compaction: true,
+        block_compact_until_cancelled: true,
+        cancel_when_compact_starts: true,
+        ..Default::default()
+    };
+
+    run_loop(&mut run, &root, &mut port).await.unwrap();
+
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert_eq!(port.cancelled_steps, port.frozen_steps);
+    assert!(port.calls.contains(&"compact"));
+    assert!(!port.calls.contains(&"model"));
+    assert!(!port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+    assert!(port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+}
 #[tokio::test]
 async fn engine_cancels_in_flight_compaction_and_emits_terminal_ack() {
     let mut run = new_run(Duration::ZERO);
@@ -1419,4 +1533,130 @@ async fn default_await_user_input_returns_error_not_delegating_to_drain() {
     // Run must be in AwaitingUser (the step produced AwaitUser before
     // the error interrupted the loop).
     assert_eq!(run.status(), RunStatus::AwaitingUser);
+}
+
+// ── #1247 typed Run control scenario tests ─────────────────────────────
+
+#[tokio::test]
+async fn terminate_run_during_compaction_finishes_as_terminated() {
+    let mut run = new_run(Duration::ZERO);
+    let root = CancellationToken::new();
+    let mut port = ScriptedPort {
+        needs_compaction: true,
+        block_compact_until_cancelled: true,
+        terminate_when_compact_starts: true,
+        ..Default::default()
+    };
+
+    let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+
+    assert_eq!(directive, LoopDirective::Terminal);
+    assert_eq!(run.status(), RunStatus::Terminated);
+    assert!(port.calls.contains(&"compact"));
+    assert!(!port.calls.contains(&"model"));
+    assert!(!port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+    assert!(port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+}
+
+#[tokio::test]
+async fn cancel_step_during_model_finalizes_then_returns_to_drain() {
+    let mut run = new_run(Duration::ZERO);
+    let root = CancellationToken::new();
+    let mut port = ScriptedPort {
+        cancel_when_model_starts: true,
+        model_steps: VecDeque::from([ModelStep::Complete {
+            text: "should-not-complete".to_string(),
+        }]),
+        ..Default::default()
+    };
+
+    run_loop(&mut run, &root, &mut port).await.unwrap();
+
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert!(port.calls.contains(&"model"));
+    assert_eq!(port.cancelled_steps, port.frozen_steps);
+    assert!(!port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+    assert!(port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+}
+
+#[tokio::test]
+async fn cancel_step_during_tools_finalizes_then_returns_to_drain() {
+    let mut run = new_run(Duration::ZERO);
+    let root = CancellationToken::new();
+    let mut port = ScriptedPort {
+        cancel_when_tools_starts: true,
+        model_steps: VecDeque::from([ModelStep::Tools {
+            text: "calling".to_string(),
+            calls: vec![call("Read", json!({"file_path": "a.rs"}))],
+        }]),
+        tool_steps: VecDeque::from([ToolStep::Continue]),
+        ..Default::default()
+    };
+
+    run_loop(&mut run, &root, &mut port).await.unwrap();
+
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert!(port.calls.contains(&"tools"));
+    assert_eq!(port.cancelled_steps, port.frozen_steps);
+    assert!(!port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+    assert!(port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+}
+
+#[tokio::test]
+async fn terminate_while_awaiting_user_finishes_as_terminated() {
+    let mut run = new_run(Duration::ZERO);
+    let root = CancellationToken::new();
+    let mut port = ScriptedPort {
+        model_steps: VecDeque::from([ModelStep::Tools {
+            text: "question".to_string(),
+            calls: vec![call("AskUserQuestion", json!({}))],
+        }]),
+        tool_steps: VecDeque::from([ToolStep::AwaitUser]),
+        ..Default::default()
+    };
+
+    // First run_loop: enters AwaitingUser.
+    let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+    assert_eq!(directive, LoopDirective::AwaitUser);
+    assert_eq!(run.status(), RunStatus::AwaitingUser);
+
+    // Inject TerminateRun control; root cancel fires so drain is interrupted.
+    port.controls
+        .lock()
+        .unwrap()
+        .push_back(RunControl::Terminate {
+            reason: sdk::RunTerminationReason::SessionShutdown,
+            deadline: sdk::ControlDeadline::from_unix_millis(1_725_000_000_789),
+        });
+    root.cancel();
+
+    let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+    assert_eq!(directive, LoopDirective::Terminal);
+    assert_eq!(run.status(), RunStatus::Terminated);
+    assert!(!port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+    assert!(port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
 }
