@@ -1,11 +1,9 @@
 use super::UpdateResult;
-use crate::tui::adapter::hook_notice::hook_spinner_phase;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::config_provider::ConfigIntent;
 use crate::tui::model::conversation::intent::*;
-use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::update::intent::AgentIntent;
 use tokio::sync::mpsc;
 

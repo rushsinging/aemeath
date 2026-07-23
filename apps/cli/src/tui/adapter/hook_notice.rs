@@ -1,5 +1,7 @@
+#[cfg(test)]
+use crate::tui::adapter::tui_runtime_event::TuiHookResult;
 use crate::tui::adapter::tui_runtime_event::{
-    TuiHookEvent, TuiHookMessage, TuiHookMessageKind, TuiHookResult, TuiHookStatus,
+    TuiHookEvent, TuiHookMessage, TuiHookMessageKind, TuiHookStatus,
 };
 use crate::tui::model::conversation::block::{HookNoticeContent, HookNoticeKind};
 use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;

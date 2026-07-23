@@ -1,4 +1,3 @@
-use crate::tui::adapter::hook_notice::{hook_event_notice, hook_message_notice};
 use crate::tui::adapter::runtime_view::TuiMessageSource;
 use crate::tui::adapter::tui_runtime_event::{
     TuiAgentProgressKind, TuiHookStatus, TuiRuntimeEvent, TuiToolCallStatus,
