@@ -212,18 +212,9 @@ impl<'a> SubAgentRun<'a> {
 
     /// Runs a sub-agent through the same loop engine used by every agent run.
     pub async fn run_loop(mut self) -> AgentRunTerminal {
-        let mut run = Run::with_id(
-            self.run_id.clone(),
-            RunSpec::sub(self.role_name_for_log.clone(), self.timeout),
-            self.parent_run_id.clone(),
-        );
-        let cancel = self.runtime_cancellation.clone();
-        let _signal_propagation =
-            CancellationPropagationGuard::new(self.agent.ctx.cancellation(), cancel.clone());
-        let _registration = ActiveRunRegistration::new(
-            self.active_run.clone(),
-            self.run_id.clone(),
-            cancel.clone(),
+        let _signal_propagation = CancellationPropagationGuard::new(
+            self.agent.ctx.cancellation(),
+            self.runtime_cancellation.clone(),
         );
         let _binding = match tools::ToolExecutionContextBindingGuard::bind(
             self.tool_context_binding.clone(),
@@ -232,7 +223,23 @@ impl<'a> SubAgentRun<'a> {
             Ok(binding) => binding,
             Err(error) => return AgentRunTerminal::Failed { error },
         };
-        let loop_result = shared_run_loop(&mut run, &cancel, &mut self).await;
+
+        let input = crate::application::run_launcher::RunLaunchInput {
+            run_id: self.run_id.clone(),
+            spec: RunSpec::sub(self.role_name_for_log.clone(), self.timeout),
+            parent_run_id: self.parent_run_id.clone(),
+            cancel: self.runtime_cancellation.clone(),
+        };
+        let active_run = self.active_run.clone();
+
+        let launch_result =
+            crate::application::run_launcher::launch(input, active_run, &mut self).await;
+
+        let loop_result = match launch_result {
+            crate::application::run_launcher::RunLaunchResult::Terminal => Ok(()),
+            crate::application::run_launcher::RunLaunchResult::AwaitUser => Ok(()),
+            crate::application::run_launcher::RunLaunchResult::Failed(error) => Err(error),
+        };
 
         // A normal terminal path is recorded by `emit` from the authoritative
         // RunDomainEvent. Keep an infrastructure fallback so finalization still
@@ -249,25 +256,19 @@ impl<'a> SubAgentRun<'a> {
                     }),
             });
 
-        let turns = run
-            .steps()
-            .iter()
-            .filter(|step| step.status() == crate::domain::agent_run::RunStepStatus::Done)
-            .count();
-        let status = match &terminal {
-            AgentRunTerminal::Completed { .. } => AgentRunStatus::Completed,
-            AgentRunTerminal::Failed { error } => {
-                if error.starts_with("run timed out after ") {
-                    AgentRunStatus::TimedOut
-                } else {
-                    AgentRunStatus::Failed(error.clone())
-                }
-            }
-            AgentRunTerminal::Cancelled => AgentRunStatus::Cancelled,
-        };
         let outcome = AgentRunOutcome {
-            status,
-            turns,
+            status: match &terminal {
+                AgentRunTerminal::Completed { .. } => AgentRunStatus::Completed,
+                AgentRunTerminal::Failed { error } => {
+                    if error.starts_with("run timed out after ") {
+                        AgentRunStatus::TimedOut
+                    } else {
+                        AgentRunStatus::Failed(error.clone())
+                    }
+                }
+                AgentRunTerminal::Cancelled => AgentRunStatus::Cancelled,
+            },
+            turns: self.turn_count,
             duration: self.start_time.elapsed(),
             role: Some(self.role_name_for_log.clone()),
             model: self.model_name_for_log.clone(),
