@@ -18,9 +18,9 @@
 
 | 文件 | 职责 |
 |------|------|
-| `cli/src/application/chat/request.rs` | DTO：`ChatLaunchOptions`、`NoTuiChatLaunch`、`TuiChatLaunch` |
-| `cli/src/application/chat/port.rs` | Port trait：`ChatRuntimePort`、`ChatRuntimeContext`、`TuiChatOutcome` |
-| `cli/src/application/chat/service.rs` | Application Service：`ChatApplicationService` |
+| `cli/src/application/main_loop/request.rs` | DTO：`ChatLaunchOptions`、`NoTuiChatLaunch`、`TuiChatLaunch` |
+| `cli/src/application/main_loop/port.rs` | Port trait：`ChatRuntimePort`、`ChatRuntimeContext`、`TuiChatOutcome` |
+| `cli/src/application/main_loop/service.rs` | Application Service：`ChatApplicationService` |
 | `cli/src/run_orchestration/runtime.rs` | Adapter 层：`NoTuiChatRuntimeAdapter`、`TuiChatRuntimeAdapter` + 入口函数 |
 | `cli/src/run_orchestration.rs` | 主编排函数 `run_chat`（未改动） |
 

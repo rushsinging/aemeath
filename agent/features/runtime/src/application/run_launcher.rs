@@ -109,7 +109,7 @@ mod tests {
             &mut self,
             _run_id: &RunId,
             _step_id: &RunStepId,
-            _calls: &[(crate::application::agent::ToolCall, ToolGuardDecision)],
+            _calls: &[(crate::application::subagent::ToolCall, ToolGuardDecision)],
             _cancel: &CancellationToken,
         ) -> Result<ToolStep, LoopEngineError> {
             Ok(ToolStep::Continue)

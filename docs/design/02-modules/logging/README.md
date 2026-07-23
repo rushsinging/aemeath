@@ -244,7 +244,7 @@ src/
 | 14 字段 schema、空值与 compact JSONL | L1/L3 | `adapters/formatter_tests.rs` | 字段集合、显式 context、无 scope 默认值与单行格式均覆盖 |
 | `FieldPatch` 的 Inherit/Set/Clear | L1 | `domain/context_tests.rs` | 父快照不可变与默认继承覆盖 |
 | task-local 嵌套、并发、取消、panic、spawn 传播 | L2 | `adapters/context_scope_tests.rs` | scope 恢复和并发隔离覆盖 |
-| Main/Sub/physical request 与 retry request ID | L2/L4 | Runtime `application/agent/runner/tests.rs`、`application/chat/looping/*_tests.rs` | Main/Sub 相邻边界、并发角色与 retry ID 覆盖 |
+| Main/Sub/physical request 与 retry request ID | L2/L4 | Runtime `application/subagent/runner/tests.rs`、`application/main_loop/looping/*_tests.rs` | Main/Sub 相邻边界、并发角色与 retry ID 覆盖 |
 | Provider blocking stream bridge | L3/L4 | Provider `adapters/stream.rs` 的 producer/event/consumer context 场景 | 同一不可变 context 跨同步 bridge 完整传播 |
 | TargetCatalog 唯一性、最长合法前缀与 fallback | L1/L3 | `domain/routing_tests.rs`、`domain/routing_guard_tests.rs` | target/sink/file 唯一和 fail-closed 边界覆盖 |
 | Audit Fact 与诊断路由隔离 | L0/L3 | `audit_facts_have_no_diagnostic_route`、`audit_facts_are_forbidden_from_diagnostic_catalog`、target guard | 旧 target/file 被拒绝，Audit 运行诊断使用独立 target/file |

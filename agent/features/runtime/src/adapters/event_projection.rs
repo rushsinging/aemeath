@@ -1,7 +1,7 @@
 //! Runtime-owned projections to the SDK Published Language.
 
-use crate::application::chat::looping::RuntimeTurnContext;
-use crate::application::chat::{
+use crate::application::main_loop::looping::RuntimeTurnContext;
+use crate::application::main_loop::{
     RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookMessage, RuntimeHookMessageKind,
 };
 use crate::domain::agent_run::RunDomainEvent;
@@ -157,38 +157,42 @@ fn turn_context_to_sdk(context: RuntimeTurnContext) -> ChatEventContext {
 }
 
 fn tool_call_status_to_sdk(
-    status: crate::application::chat::RuntimeToolCallStatus,
+    status: crate::application::main_loop::RuntimeToolCallStatus,
 ) -> ToolCallStatusView {
     match status {
-        crate::application::chat::RuntimeToolCallStatus::PendingArgs => {
+        crate::application::main_loop::RuntimeToolCallStatus::PendingArgs => {
             ToolCallStatusView::PendingArgs
         }
-        crate::application::chat::RuntimeToolCallStatus::Ready => ToolCallStatusView::Ready,
-        crate::application::chat::RuntimeToolCallStatus::Running => ToolCallStatusView::Running,
+        crate::application::main_loop::RuntimeToolCallStatus::Ready => ToolCallStatusView::Ready,
+        crate::application::main_loop::RuntimeToolCallStatus::Running => {
+            ToolCallStatusView::Running
+        }
     }
 }
 
 pub(crate) fn project_stream_event(
-    event: crate::application::chat::RuntimeStreamEvent,
+    event: crate::application::main_loop::RuntimeStreamEvent,
 ) -> ChatEvent {
     match event {
-        crate::application::chat::RuntimeStreamEvent::Text { context, text } => ChatEvent::Token {
-            context: turn_context_to_sdk(context),
-            text,
-        },
-        crate::application::chat::RuntimeStreamEvent::Thinking { context, text } => {
+        crate::application::main_loop::RuntimeStreamEvent::Text { context, text } => {
+            ChatEvent::Token {
+                context: turn_context_to_sdk(context),
+                text,
+            }
+        }
+        crate::application::main_loop::RuntimeStreamEvent::Thinking { context, text } => {
             ChatEvent::Thinking {
                 context: turn_context_to_sdk(context),
                 text,
             }
         }
-        crate::application::chat::RuntimeStreamEvent::BlockComplete { context, text } => {
+        crate::application::main_loop::RuntimeStreamEvent::BlockComplete { context, text } => {
             ChatEvent::BlockComplete {
                 context: turn_context_to_sdk(context),
                 text,
             }
         }
-        crate::application::chat::RuntimeStreamEvent::ToolCallStart {
+        crate::application::main_loop::RuntimeStreamEvent::ToolCallStart {
             context,
             id,
             provider_id,
@@ -201,7 +205,7 @@ pub(crate) fn project_stream_event(
             name,
             index,
         },
-        crate::application::chat::RuntimeStreamEvent::ToolCallUpdate {
+        crate::application::main_loop::RuntimeStreamEvent::ToolCallUpdate {
             context,
             id,
             provider_id,
@@ -220,7 +224,7 @@ pub(crate) fn project_stream_event(
             arguments,
             status: tool_call_status_to_sdk(status),
         },
-        crate::application::chat::RuntimeStreamEvent::ToolResult {
+        crate::application::main_loop::RuntimeStreamEvent::ToolResult {
             context,
             id,
             provider_id,
@@ -245,10 +249,10 @@ pub(crate) fn project_stream_event(
                 })
                 .collect(),
         },
-        crate::application::chat::RuntimeStreamEvent::SystemMessage(msg) => {
+        crate::application::main_loop::RuntimeStreamEvent::SystemMessage(msg) => {
             ChatEvent::SystemMessage(msg)
         }
-        crate::application::chat::RuntimeStreamEvent::ModelStreamWaiting {
+        crate::application::main_loop::RuntimeStreamEvent::ModelStreamWaiting {
             context,
             elapsed_secs,
             phase,
@@ -257,7 +261,7 @@ pub(crate) fn project_stream_event(
             elapsed_secs,
             phase,
         },
-        crate::application::chat::RuntimeStreamEvent::ModelInvocationRetrying {
+        crate::application::main_loop::RuntimeStreamEvent::ModelInvocationRetrying {
             context,
             attempt,
             delay,
@@ -266,7 +270,7 @@ pub(crate) fn project_stream_event(
             attempt,
             delay,
         },
-        crate::application::chat::RuntimeStreamEvent::Usage {
+        crate::application::main_loop::RuntimeStreamEvent::Usage {
             input,
             output,
             last_input,
@@ -277,7 +281,7 @@ pub(crate) fn project_stream_event(
             last_input,
             elapsed_secs,
         },
-        crate::application::chat::RuntimeStreamEvent::TurnStarted { messages } => {
+        crate::application::main_loop::RuntimeStreamEvent::TurnStarted { messages } => {
             ChatEvent::TurnStarted {
                 messages: messages
                     .into_iter()
@@ -285,7 +289,7 @@ pub(crate) fn project_stream_event(
                     .collect(),
             }
         }
-        crate::application::chat::RuntimeStreamEvent::MicrocompactDone {
+        crate::application::main_loop::RuntimeStreamEvent::MicrocompactDone {
             messages,
             cleared_count,
         } => ChatEvent::MicrocompactDone {
@@ -295,7 +299,7 @@ pub(crate) fn project_stream_event(
                 .collect(),
             cleared_count,
         },
-        crate::application::chat::RuntimeStreamEvent::StopHookBlocked { messages } => {
+        crate::application::main_loop::RuntimeStreamEvent::StopHookBlocked { messages } => {
             ChatEvent::StopHookBlocked {
                 messages: messages
                     .into_iter()
@@ -303,7 +307,7 @@ pub(crate) fn project_stream_event(
                     .collect(),
             }
         }
-        crate::application::chat::RuntimeStreamEvent::PostToolExecutionSync { messages } => {
+        crate::application::main_loop::RuntimeStreamEvent::PostToolExecutionSync { messages } => {
             ChatEvent::PostToolExecutionSync {
                 messages: messages
                     .into_iter()
@@ -311,7 +315,7 @@ pub(crate) fn project_stream_event(
                     .collect(),
             }
         }
-        crate::application::chat::RuntimeStreamEvent::ApiError { messages, error } => {
+        crate::application::main_loop::RuntimeStreamEvent::ApiError { messages, error } => {
             ChatEvent::ApiError {
                 messages: messages
                     .into_iter()
@@ -320,7 +324,7 @@ pub(crate) fn project_stream_event(
                 error,
             }
         }
-        crate::application::chat::RuntimeStreamEvent::CompactRollback { messages } => {
+        crate::application::main_loop::RuntimeStreamEvent::CompactRollback { messages } => {
             ChatEvent::CompactRollback {
                 messages: messages
                     .into_iter()
@@ -328,7 +332,7 @@ pub(crate) fn project_stream_event(
                     .collect(),
             }
         }
-        crate::application::chat::RuntimeStreamEvent::CompactFinished { messages } => {
+        crate::application::main_loop::RuntimeStreamEvent::CompactFinished { messages } => {
             ChatEvent::CompactFinished {
                 messages: messages
                     .into_iter()
@@ -336,27 +340,28 @@ pub(crate) fn project_stream_event(
                     .collect(),
             }
         }
-        crate::application::chat::RuntimeStreamEvent::UserMessagesAdopted { items, queued } => {
-            ChatEvent::UserMessagesAdopted {
-                items: items
-                    .into_iter()
-                    .map(|(id, message)| {
-                        let mut value = crate::application::client::message_to_sdk(message);
-                        value.input_id = Some(id);
-                        value
-                    })
-                    .collect(),
-                queued: queued
-                    .into_iter()
-                    .map(|(id, message)| {
-                        let mut value = crate::application::client::message_to_sdk(message);
-                        value.input_id = Some(id);
-                        value
-                    })
-                    .collect(),
-            }
-        }
-        crate::application::chat::RuntimeStreamEvent::UserMessagesQueued { queued } => {
+        crate::application::main_loop::RuntimeStreamEvent::UserMessagesAdopted {
+            items,
+            queued,
+        } => ChatEvent::UserMessagesAdopted {
+            items: items
+                .into_iter()
+                .map(|(id, message)| {
+                    let mut value = crate::application::client::message_to_sdk(message);
+                    value.input_id = Some(id);
+                    value
+                })
+                .collect(),
+            queued: queued
+                .into_iter()
+                .map(|(id, message)| {
+                    let mut value = crate::application::client::message_to_sdk(message);
+                    value.input_id = Some(id);
+                    value
+                })
+                .collect(),
+        },
+        crate::application::main_loop::RuntimeStreamEvent::UserMessagesQueued { queued } => {
             ChatEvent::UserMessagesQueued {
                 queued: queued
                     .into_iter()
@@ -368,50 +373,51 @@ pub(crate) fn project_stream_event(
                     .collect(),
             }
         }
-        crate::application::chat::RuntimeStreamEvent::Done { context } => ChatEvent::Done {
+        crate::application::main_loop::RuntimeStreamEvent::Done { context } => ChatEvent::Done {
             context: turn_context_to_sdk(context),
         },
-        crate::application::chat::RuntimeStreamEvent::DoneWithDuration { context, duration } => {
-            ChatEvent::DoneWithDurationMs {
-                context: turn_context_to_sdk(context),
-                duration_ms: duration.as_millis() as u64,
-            }
-        }
-        crate::application::chat::RuntimeStreamEvent::RunStarted {
+        crate::application::main_loop::RuntimeStreamEvent::DoneWithDuration {
+            context,
+            duration,
+        } => ChatEvent::DoneWithDurationMs {
+            context: turn_context_to_sdk(context),
+            duration_ms: duration.as_millis() as u64,
+        },
+        crate::application::main_loop::RuntimeStreamEvent::RunStarted {
             run_id,
             parent_run_id,
         } => ChatEvent::RunStarted {
             run_id,
             parent_run_id,
         },
-        crate::application::chat::RuntimeStreamEvent::RunCancelling { run_id } => {
+        crate::application::main_loop::RuntimeStreamEvent::RunCancelling { run_id } => {
             ChatEvent::RunCancelling { run_id }
         }
-        crate::application::chat::RuntimeStreamEvent::RunCancelled { run_id } => {
+        crate::application::main_loop::RuntimeStreamEvent::RunCancelled { run_id } => {
             ChatEvent::RunCancelled { run_id }
         }
-        crate::application::chat::RuntimeStreamEvent::Cancelled { context } => {
+        crate::application::main_loop::RuntimeStreamEvent::Cancelled { context } => {
             ChatEvent::Cancelled {
                 context: turn_context_to_sdk(context),
             }
         }
-        crate::application::chat::RuntimeStreamEvent::LiveTps(tps) => ChatEvent::LiveTps(tps),
-        crate::application::chat::RuntimeStreamEvent::TurnChanged(turn) => {
+        crate::application::main_loop::RuntimeStreamEvent::LiveTps(tps) => ChatEvent::LiveTps(tps),
+        crate::application::main_loop::RuntimeStreamEvent::TurnChanged(turn) => {
             ChatEvent::CurrentTurnChanged(turn)
         }
-        crate::application::chat::RuntimeStreamEvent::HookEvent(event) => {
+        crate::application::main_loop::RuntimeStreamEvent::HookEvent(event) => {
             ChatEvent::HookEvent(project_hook_event(event))
         }
-        crate::application::chat::RuntimeStreamEvent::HookMessage(message) => {
+        crate::application::main_loop::RuntimeStreamEvent::HookMessage(message) => {
             ChatEvent::HookMessage(project_hook_message(message))
         }
-        crate::application::chat::RuntimeStreamEvent::AskUserBatch { items, reply_tx } => {
+        crate::application::main_loop::RuntimeStreamEvent::AskUserBatch { items, reply_tx } => {
             ChatEvent::AskUserBatch { items, reply_tx }
         }
-        crate::application::chat::RuntimeStreamEvent::InteractionRequested { request } => {
+        crate::application::main_loop::RuntimeStreamEvent::InteractionRequested { request } => {
             ChatEvent::InteractionRequested { request }
         }
-        crate::application::chat::RuntimeStreamEvent::AgentProgress {
+        crate::application::main_loop::RuntimeStreamEvent::AgentProgress {
             context,
             tool_id,
             event,
@@ -420,7 +426,7 @@ pub(crate) fn project_stream_event(
             tool_id,
             event: project_agent_progress_event(event),
         },
-        crate::application::chat::RuntimeStreamEvent::WorkingDirectoryChanged {
+        crate::application::main_loop::RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base,
             workspace_root,
             workspace,
@@ -429,7 +435,7 @@ pub(crate) fn project_stream_event(
             workspace_root,
             workspace: crate::application::client::workspace_context_to_sdk(workspace),
         },
-        crate::application::chat::RuntimeStreamEvent::ConfigReloaded { changed_keys } => {
+        crate::application::main_loop::RuntimeStreamEvent::ConfigReloaded { changed_keys } => {
             let scopes = changed_keys
                 .iter()
                 .filter_map(|key| match key.as_str() {
@@ -447,18 +453,20 @@ pub(crate) fn project_stream_event(
                 },
             }
         }
-        crate::application::chat::RuntimeStreamEvent::GraphPhaseChanged { node, effort, prev } => {
-            ChatEvent::GraphPhaseChanged {
-                node: format!("{node}"),
-                effort: format!("{effort:?}").to_lowercase(),
-                prev: format!("{prev}"),
-            }
-        }
-        crate::application::chat::RuntimeStreamEvent::SessionReset => ChatEvent::SessionReset,
-        crate::application::chat::RuntimeStreamEvent::UserMessagesWithdrawn { texts } => {
+        crate::application::main_loop::RuntimeStreamEvent::GraphPhaseChanged {
+            node,
+            effort,
+            prev,
+        } => ChatEvent::GraphPhaseChanged {
+            node: format!("{node}"),
+            effort: format!("{effort:?}").to_lowercase(),
+            prev: format!("{prev}"),
+        },
+        crate::application::main_loop::RuntimeStreamEvent::SessionReset => ChatEvent::SessionReset,
+        crate::application::main_loop::RuntimeStreamEvent::UserMessagesWithdrawn { texts } => {
             ChatEvent::UserMessagesWithdrawn { texts }
         }
-        crate::application::chat::RuntimeStreamEvent::CompactProgress {
+        crate::application::main_loop::RuntimeStreamEvent::CompactProgress {
             stage,
             current,
             total,
@@ -467,23 +475,23 @@ pub(crate) fn project_stream_event(
             current: current.map(|n| n as u32),
             total: total.map(|n| n as u32),
         },
-        crate::application::chat::RuntimeStreamEvent::ModelSwitched { result } => {
+        crate::application::main_loop::RuntimeStreamEvent::ModelSwitched { result } => {
             ChatEvent::ModelSwitched { result }
         }
-        crate::application::chat::RuntimeStreamEvent::ThinkingChanged { enabled } => {
+        crate::application::main_loop::RuntimeStreamEvent::ThinkingChanged { enabled } => {
             ChatEvent::ThinkingChanged { enabled }
         }
-        crate::application::chat::RuntimeStreamEvent::ContextEstimated {
+        crate::application::main_loop::RuntimeStreamEvent::ContextEstimated {
             estimate,
             message_count,
         } => ChatEvent::ContextEstimated {
             estimate,
             message_count,
         },
-        crate::application::chat::RuntimeStreamEvent::CommandResultText { text, is_error } => {
+        crate::application::main_loop::RuntimeStreamEvent::CommandResultText { text, is_error } => {
             ChatEvent::CommandResultText { text, is_error }
         }
-        crate::application::chat::RuntimeStreamEvent::SessionResumed {
+        crate::application::main_loop::RuntimeStreamEvent::SessionResumed {
             messages,
             session_id,
             created_at,
@@ -495,28 +503,30 @@ pub(crate) fn project_stream_event(
             session_id,
             created_at,
         },
-        crate::application::chat::RuntimeStreamEvent::SessionResumeFailed { kind, id, message } => {
-            ChatEvent::SessionResumeFailed { kind, id, message }
-        }
-        crate::application::chat::RuntimeStreamEvent::ReflectionHistory { records } => {
+        crate::application::main_loop::RuntimeStreamEvent::SessionResumeFailed {
+            kind,
+            id,
+            message,
+        } => ChatEvent::SessionResumeFailed { kind, id, message },
+        crate::application::main_loop::RuntimeStreamEvent::ReflectionHistory { records } => {
             ChatEvent::ReflectionHistory { records }
         }
-        crate::application::chat::RuntimeStreamEvent::ModelList { models } => {
+        crate::application::main_loop::RuntimeStreamEvent::ModelList { models } => {
             ChatEvent::ModelList { models }
         }
-        crate::application::chat::RuntimeStreamEvent::ReminderList { reminders } => {
+        crate::application::main_loop::RuntimeStreamEvent::ReminderList { reminders } => {
             ChatEvent::ReminderList { reminders }
         }
-        crate::application::chat::RuntimeStreamEvent::SessionList { sessions } => {
+        crate::application::main_loop::RuntimeStreamEvent::SessionList { sessions } => {
             ChatEvent::SessionList { sessions }
         }
-        crate::application::chat::RuntimeStreamEvent::ProjectInfo { project } => {
+        crate::application::main_loop::RuntimeStreamEvent::ProjectInfo { project } => {
             ChatEvent::ProjectInfo { project }
         }
-        crate::application::chat::RuntimeStreamEvent::TasksSnapshot { tasks } => {
+        crate::application::main_loop::RuntimeStreamEvent::TasksSnapshot { tasks } => {
             ChatEvent::TasksSnapshot { tasks }
         }
-        crate::application::chat::RuntimeStreamEvent::CostUpdate { cost } => {
+        crate::application::main_loop::RuntimeStreamEvent::CostUpdate { cost } => {
             ChatEvent::CostUpdate { cost }
         }
     }

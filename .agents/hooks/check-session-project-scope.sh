@@ -15,7 +15,7 @@ root = Path.cwd()
 ports = root / "agent/features/context/src/ports/session_management.rs"
 resume = root / "agent/features/context/src/adapters/session_resume.rs"
 runtime_list = root / "agent/features/runtime/src/application/client/trait_session.rs"
-runtime_commands = root / "agent/features/runtime/src/application/chat/looping/idle_commands.rs"
+runtime_commands = root / "agent/features/runtime/src/application/main_loop/looping/idle_commands.rs"
 violations = []
 
 required = [

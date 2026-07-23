@@ -57,12 +57,12 @@
 
 文件：
 - `agent/features/runtime/src/application/resources.rs`
-- `agent/features/runtime/src/application/chat/looping/loop_context.rs`
-- `agent/features/runtime/src/application/chat/looping/tools.rs`
-- `agent/features/runtime/src/application/chat/looping/main_run_port.rs`
-- `agent/features/runtime/src/application/agent/runner/loop_helpers.rs`
-- `agent/features/runtime/src/application/agent/runner/loop_run.rs`
-- `agent/features/runtime/src/application/agent/runner/setup.rs`
+- `agent/features/runtime/src/application/main_loop/looping/loop_context.rs`
+- `agent/features/runtime/src/application/main_loop/looping/tools.rs`
+- `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs`
+- `agent/features/runtime/src/application/subagent/runner/loop_helpers.rs`
+- `agent/features/runtime/src/application/subagent/runner/loop_run.rs`
+- `agent/features/runtime/src/application/subagent/runner/setup.rs`
 - `agent/features/runtime/src/application/client/from_args.rs`
 - 受构造字段影响的现有测试夹具
 

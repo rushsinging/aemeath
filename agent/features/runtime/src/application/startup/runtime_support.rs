@@ -1,6 +1,6 @@
-use crate::application::agent::runner as agent_runner;
 #[cfg(test)]
 use crate::application::startup::config_paths;
+use crate::application::subagent::runner as agent_runner;
 use crate::ports::ProviderFactory;
 use hook::HookPort;
 #[cfg(test)]
@@ -111,7 +111,7 @@ mod tests {
         let skill_materializer = skill_wiring.materializer();
         let snapshot = share::config::domain::snapshot::ConfigSnapshot::new(Config::default());
         let config_reader: Arc<dyn config::ConfigReader> = Arc::new(
-            crate::application::agent::runner::test_config_reader::FixedConfigReader::from_snapshot(
+            crate::application::subagent::runner::test_config_reader::FixedConfigReader::from_snapshot(
                 snapshot,
             ),
         );

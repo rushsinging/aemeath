@@ -19,10 +19,10 @@
 - Create: `crates/runtime/src/chat/service.rs`
 - Modify: `crates/runtime/src/lib.rs`
 - Modify: `crates/runtime/src/api.rs`
-- Modify: `apps/cli/src/application/chat/mod.rs`
-- Modify: `apps/cli/src/application/chat/request.rs`
-- Modify: `apps/cli/src/application/chat/port.rs`
-- Modify: `apps/cli/src/application/chat/service.rs`
+- Modify: `apps/cli/src/application/main_loop/mod.rs`
+- Modify: `apps/cli/src/application/main_loop/request.rs`
+- Modify: `apps/cli/src/application/main_loop/port.rs`
+- Modify: `apps/cli/src/application/main_loop/service.rs`
 - Modify: `apps/cli/src/run_orchestration/setup.rs`
 - Modify: `apps/cli/src/run_orchestration/runtime.rs`
 
@@ -32,9 +32,9 @@ Run:
 
 ```bash
 mkdir -p crates/runtime/src/chat
-mv apps/cli/src/application/chat/request.rs crates/runtime/src/chat/request.rs
-mv apps/cli/src/application/chat/port.rs crates/runtime/src/chat/port.rs
-mv apps/cli/src/application/chat/service.rs crates/runtime/src/chat/service.rs
+mv apps/cli/src/application/main_loop/request.rs crates/runtime/src/chat/request.rs
+mv apps/cli/src/application/main_loop/port.rs crates/runtime/src/chat/port.rs
+mv apps/cli/src/application/main_loop/service.rs crates/runtime/src/chat/service.rs
 ```
 
 Expected: files exist under `crates/runtime/src/chat`.
@@ -89,7 +89,7 @@ In moved runtime files, replace:
 
 - [x] **Step 5: Turn CLI chat module into re-export shim**
 
-Write `apps/cli/src/application/chat/mod.rs`:
+Write `apps/cli/src/application/main_loop/mod.rs`:
 
 ```rust
 pub(crate) use ::runtime::api::chat::{
@@ -98,7 +98,7 @@ pub(crate) use ::runtime::api::chat::{
 };
 ```
 
-Delete empty `apps/cli/src/application/chat/request.rs`, `port.rs`, and `service.rs` from the CLI tree after updating `mod.rs`.
+Delete empty `apps/cli/src/application/main_loop/request.rs`, `port.rs`, and `service.rs` from the CLI tree after updating `mod.rs`.
 
 - [x] **Step 6: Verify chat contract moved**
 

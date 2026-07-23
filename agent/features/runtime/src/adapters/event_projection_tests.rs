@@ -1,5 +1,5 @@
 use super::event_projection::project_stream_event;
-use crate::application::chat::looping::{
+use crate::application::main_loop::looping::{
     RuntimeHookMessage, RuntimeHookMessageKind, RuntimeStreamEvent, RuntimeTurnContext,
 };
 

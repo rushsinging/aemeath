@@ -73,9 +73,9 @@ Dispatcher 在发现 `HookDirective::Block` 时，记录当前 subscription 的 
 | `packages/sdk/src/session.rs` | 发布对等 Stop hook feedback DTO，保留 serde 兼容。 |
 | `packages/sdk/schema/wire-components.schema.json` | xtask 生成的 schema 更新。 |
 | `agent/features/runtime/src/application/hook_adapter.rs` | 将 hook block detail 投影为 Runtime payload。 |
-| `agent/features/runtime/src/application/chat/looping/finalize.rs` | 构造双表示、分别截断 stdout/stderr、必要时写文件指针。 |
-| `agent/features/runtime/src/application/chat/looping/main_run_port.rs` | 持久化带 payload 的 Stop feedback，并继续将 LLM text 放入本轮 continuation。 |
-| `agent/features/runtime/src/application/chat/looping/{finalize_tests.rs,loop_runner_tests.rs}` | 验证 actual blocker、文件指针、continuation 和正常放行。 |
+| `agent/features/runtime/src/application/main_loop/looping/finalize.rs` | 构造双表示、分别截断 stdout/stderr、必要时写文件指针。 |
+| `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs` | 持久化带 payload 的 Stop feedback，并继续将 LLM text 放入本轮 continuation。 |
+| `agent/features/runtime/src/application/main_loop/looping/{finalize_tests.rs,loop_runner_tests.rs}` | 验证 actual blocker、文件指针、continuation 和正常放行。 |
 | `agent/features/runtime/src/application/client/mapping.rs` | share → SDK 的 Stop hook payload 映射。 |
 | `apps/cli/src/tui/adapter/agent_event.rs` | 实时 `StopHookBlocked` 从结构化 payload 生成 notice。 |
 | `apps/cli/src/tui/model/conversation/{history_parse.rs,intent_impls.rs}` | resume 从 payload 重建同构 notice；旧文本 fallback 保留。 |
@@ -184,10 +184,10 @@ Expected: PASS。
 ### Task 4: Runtime 构造 LLM text 与 TUI payload
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/chat/looping/finalize.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/finalize_tests.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/main_run_port.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_runner_tests.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/finalize.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/finalize_tests.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_runner_tests.rs`
 
 - [ ] **Step 1: 写失败测试：长 stdout/stderr 分别截断**
 

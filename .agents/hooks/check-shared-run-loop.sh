@@ -6,12 +6,12 @@ ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 ENGINE="agent/features/runtime/src/application/loop_engine/engine.rs"
-MAIN="agent/features/runtime/src/application/chat/looping/loop_runner.rs"
-SUB="agent/features/runtime/src/application/agent/runner/loop_run.rs"
+MAIN="agent/features/runtime/src/application/main_loop/looping/loop_runner.rs"
+SUB="agent/features/runtime/src/application/subagent/runner/loop_run.rs"
 LAUNCHER="agent/features/runtime/src/application/run_launcher.rs"
-MAIN_PORT="agent/features/runtime/src/application/chat/looping/main_run_port.rs"
+MAIN_PORT="agent/features/runtime/src/application/main_loop/looping/main_run_port.rs"
 CONTEXT_COORDINATION="agent/features/runtime/src/application/context_coordination.rs"
-OLD_FSM="agent/features/runtime/src/application/chat/looping/state.rs"
+OLD_FSM="agent/features/runtime/src/application/main_loop/looping/state.rs"
 
 for path in "$ENGINE" "$MAIN" "$MAIN_PORT" "$SUB" "$LAUNCHER" "$CONTEXT_COORDINATION"; do
   if [ ! -f "$path" ]; then

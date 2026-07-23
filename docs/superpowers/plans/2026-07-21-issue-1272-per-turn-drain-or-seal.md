@@ -17,8 +17,8 @@
 - Modify: `agent/features/runtime/src/ports/input_buffer.rs` — Runtime-owned drain-or-seal PL。
 - Create: `agent/features/runtime/src/ports/input_buffer_tests.rs` — L2 原子 epoch/seal contract。
 - Modify: `agent/features/runtime/src/application/loop_engine/{engine.rs,tests.rs}` — shared Loop 的唯一 drain epilogue。
-- Modify: `agent/features/runtime/src/application/chat/looping/{input_gate.rs,main_run_port.rs,loop_runner.rs}` — Main live adapter、busy admission、Stop continuation 与 session boundary。
-- Modify: `agent/features/runtime/src/application/agent/runner/{loop_run.rs,setup.rs}` — Sub fixed input adapter。
+- Modify: `agent/features/runtime/src/application/main_loop/looping/{input_gate.rs,main_run_port.rs,loop_runner.rs}` — Main live adapter、busy admission、Stop continuation 与 session boundary。
+- Modify: `agent/features/runtime/src/application/subagent/runner/{loop_run.rs,setup.rs}` — Sub fixed input adapter。
 - Modify/Test: existing looping/runner test files — L3 adapter/L4 journey 证据。
 - Modify: `docs/design/02-modules/runtime/03-loop-and-state-machine.md` — Target 状态机与 Stop Hook 语义。
 - Modify: `docs/design/03-engineering/03-migration-governance.md` — #1272 current→target 与 #1278 ownership。
@@ -268,9 +268,9 @@ git commit -m "refactor(runtime): #1272 以 drain decision 驱动共享 Loop"
 
 **Files:**
 - Modify: `agent/features/runtime/src/application/loop_engine/engine.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/main_run_port.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/main_run_port.rs`
 - Test: `agent/features/runtime/src/application/loop_engine/tests.rs`
-- Test: `agent/features/runtime/src/application/chat/looping/loop_runner_tests.rs`
+- Test: `agent/features/runtime/src/application/main_loop/looping/loop_runner_tests.rs`
 
 - [x] **Step 1: 写 Stop Hook Block 的失败测试**
 
@@ -302,16 +302,16 @@ Expected: PASS。
 - [x] **Step 5: 提交**
 
 ```bash
-git add agent/features/runtime/src/application/loop_engine agent/features/runtime/src/application/chat/looping
+git add agent/features/runtime/src/application/loop_engine agent/features/runtime/src/application/main_loop/looping
 git commit -m "fix(runtime): #1272 经 drain 续跑 Stop Hook continuation"
 ```
 
 ## Task 5: 用单一 Main InputBuffer 替代 busy deferred queue
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/chat/looping/{input_gate.rs,main_run_port.rs,loop_runner.rs}`
-- Test: `agent/features/runtime/src/application/chat/looping/loop_runner_tests.rs`
-- Test: `agent/features/runtime/src/application/chat/looping/input_gate_tests.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/{input_gate.rs,main_run_port.rs,loop_runner.rs}`
+- Test: `agent/features/runtime/src/application/main_loop/looping/loop_runner_tests.rs`
+- Test: `agent/features/runtime/src/application/main_loop/looping/input_gate_tests.rs`
 
 - [x] **Step 1: 写 busy follow-up 失败场景**
 
@@ -346,15 +346,15 @@ Expected: PASS。
 - [x] **Step 5: 提交**
 
 ```bash
-git add agent/features/runtime/src/application/chat/looping
+git add agent/features/runtime/src/application/main_loop/looping
 git commit -m "refactor(runtime): #1272 统一 Main busy 输入 admission"
 ```
 
 ## Task 6: 以 FixedInputBuffer 统一 Sub 首轮输入与收敛
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/agent/runner/{setup.rs,loop_run.rs}`
-- Test: `agent/features/runtime/src/application/agent/runner/tests.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/{setup.rs,loop_run.rs}`
+- Test: `agent/features/runtime/src/application/subagent/runner/tests.rs`
 - Test: `agent/features/runtime/src/application/loop_engine/tests.rs`
 
 - [x] **Step 1: 写 Sub fixed input 的失败测试**
@@ -380,7 +380,7 @@ Expected: PASS。
 - [x] **Step 5: 提交**
 
 ```bash
-git add agent/features/runtime/src/application/agent/runner
+git add agent/features/runtime/src/application/subagent/runner
 git commit -m "refactor(runtime): #1272 统一 Sub fixed input drain"
 ```
 

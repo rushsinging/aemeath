@@ -8,11 +8,11 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p \
-  "$TMP/agent/features/runtime/src/application/chat/looping" \
+  "$TMP/agent/features/runtime/src/application/main_loop/looping" \
   "$TMP/agent/features/tools/src/adapters" \
   "$TMP/agent/features/tools/src/domain"
 
-cat >"$TMP/agent/features/runtime/src/application/chat/looping/ask_user.rs" <<'RS'
+cat >"$TMP/agent/features/runtime/src/application/main_loop/looping/ask_user.rs" <<'RS'
 // Runtime owns this waiter; the Tools-only AskUser rule must not reject it.
 async fn await_reply() {
     let (_tx, _rx) = tokio::sync::oneshot::channel::<String>();

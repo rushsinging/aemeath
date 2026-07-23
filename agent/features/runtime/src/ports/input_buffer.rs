@@ -17,8 +17,8 @@ impl RuntimeQueueDrainPort {
     }
 }
 
-impl crate::application::chat::QueueDrainPort for RuntimeQueueDrainPort {
-    fn drain_queued_input<'a>(&'a self) -> crate::application::chat::QueueFuture<'a> {
+impl crate::application::main_loop::QueueDrainPort for RuntimeQueueDrainPort {
+    fn drain_queued_input<'a>(&'a self) -> crate::application::main_loop::QueueFuture<'a> {
         Box::pin(async move {
             match &self.inner {
                 Some(inner) => inner.drain_queued_input().await,
@@ -39,8 +39,8 @@ impl RuntimeInputEventDrainPort {
     }
 }
 
-impl crate::application::chat::InputEventDrainPort for RuntimeInputEventDrainPort {
-    fn drain_input_events<'a>(&'a self) -> crate::application::chat::InputEventFuture<'a> {
+impl crate::application::main_loop::InputEventDrainPort for RuntimeInputEventDrainPort {
+    fn drain_input_events<'a>(&'a self) -> crate::application::main_loop::InputEventFuture<'a> {
         Box::pin(async move {
             match &self.inner {
                 Some(inner) => inner.drain_input_events().await,
@@ -49,7 +49,7 @@ impl crate::application::chat::InputEventDrainPort for RuntimeInputEventDrainPor
         })
     }
 
-    fn recv_next_input<'a>(&'a self) -> crate::application::chat::InputEventOptFuture<'a> {
+    fn recv_next_input<'a>(&'a self) -> crate::application::main_loop::InputEventOptFuture<'a> {
         Box::pin(async move {
             match &self.inner {
                 Some(port) => port.recv_next().await,

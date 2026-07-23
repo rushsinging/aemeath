@@ -14,15 +14,15 @@
 
 Modify:
 
-- `cli/src/application/chat/request.rs`
+- `cli/src/application/main_loop/request.rs`
   - 用 `ChatLaunchOptions`、`NoTuiChatLaunch`、`TuiChatLaunch` 替代 `ChatLaunchMode` + `ChatLaunchRequest`。
   - 校验共同启动选项，TUI 专属必填项由非空 `String` 字段表达并校验非空。
-- `cli/src/application/chat/port.rs`
+- `cli/src/application/main_loop/port.rs`
   - 用 `ChatRuntimeContext` 替代 `NoTuiChatDependencies` / `TuiChatDependencies` 的重复字段。
   - port 方法改为接收 mode-specific launch DTO + shared context。
-- `cli/src/application/chat/service.rs`
+- `cli/src/application/main_loop/service.rs`
   - `ChatApplicationService` 分别 validate `NoTuiChatLaunch` / `TuiChatLaunch` 后分发到 port。
-- `cli/src/application/chat/mod.rs`
+- `cli/src/application/main_loop/mod.rs`
   - 更新 re-export。
 - `cli/src/run_orchestration/runtime.rs`
   - 构造 `ChatLaunchOptions`、`NoTuiChatLaunch`、`TuiChatLaunch` 和 `ChatRuntimeContext`。
@@ -43,8 +43,8 @@ Verification:
 ### Task 1: Introduce Chat Launch DTOs
 
 **Files:**
-- Modify: `cli/src/application/chat/request.rs`
-- Modify: `cli/src/application/chat/mod.rs`
+- Modify: `cli/src/application/main_loop/request.rs`
+- Modify: `cli/src/application/main_loop/mod.rs`
 
 - [x] **Step 1: Read current files**
 
@@ -57,7 +57,7 @@ git status --short --branch
 
 Expected: branch is `feature/47-chat-runtime-context-phase3` and working tree has only planned docs changes if this plan has already been written.
 
-- [x] **Step 2: Replace `cli/src/application/chat/request.rs`**
+- [x] **Step 2: Replace `cli/src/application/main_loop/request.rs`**
 
 Replace the entire file with:
 
@@ -210,7 +210,7 @@ mod tests {
 }
 ```
 
-- [x] **Step 3: Update `cli/src/application/chat/mod.rs` re-export**
+- [x] **Step 3: Update `cli/src/application/main_loop/mod.rs` re-export**
 
 Replace the request re-export line with:
 
@@ -235,10 +235,10 @@ Expected: FAIL because port/service/runtime still reference `ChatLaunchRequest` 
 ### Task 2: Replace Dependency Bundles With ChatRuntimeContext
 
 **Files:**
-- Modify: `cli/src/application/chat/port.rs`
-- Modify: `cli/src/application/chat/mod.rs`
+- Modify: `cli/src/application/main_loop/port.rs`
+- Modify: `cli/src/application/main_loop/mod.rs`
 
-- [x] **Step 1: Replace `cli/src/application/chat/port.rs`**
+- [x] **Step 1: Replace `cli/src/application/main_loop/port.rs`**
 
 Replace the entire file with:
 
@@ -292,7 +292,7 @@ pub(crate) trait ChatRuntimePort {
 }
 ```
 
-- [x] **Step 2: Update `cli/src/application/chat/mod.rs` port re-export**
+- [x] **Step 2: Update `cli/src/application/main_loop/mod.rs` port re-export**
 
 Replace the port re-export block with:
 
@@ -315,9 +315,9 @@ Expected: FAIL because service/runtime still reference old dependency bundle nam
 ### Task 3: Update ChatApplicationService
 
 **Files:**
-- Modify: `cli/src/application/chat/service.rs`
+- Modify: `cli/src/application/main_loop/service.rs`
 
-- [x] **Step 1: Replace `cli/src/application/chat/service.rs`**
+- [x] **Step 1: Replace `cli/src/application/main_loop/service.rs`**
 
 Replace the entire file with:
 

@@ -1,4 +1,4 @@
-use crate::application::chat::request::{NoTuiChatLaunch, TuiChatLaunch};
+use crate::application::main_loop::request::{NoTuiChatLaunch, TuiChatLaunch};
 use async_trait::async_trait;
 
 /// `ChatRuntimePort` 方法的入参——runtime 启动时的一次性配置包。

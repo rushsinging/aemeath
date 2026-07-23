@@ -4,7 +4,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
-use crate::application::agent::ToolCall;
+use crate::application::subagent::ToolCall;
 use crate::domain::agent_run::{
     DrainDecision, ModelInvocation, Run, RunCancellationRequest, RunDomainEvent, RunStatus,
     RunTransition, RunTransitionError, ToolCallStatus,

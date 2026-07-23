@@ -27,15 +27,15 @@
 | `agent/features/config/src/contract.rs` | 发布 reload port、结果与错误契约；保留 Reader 的只读语义。 |
 | `agent/features/config/src/application.rs` | Config source fingerprint、reload candidate、有效值比较、原子 commit。 |
 | `agent/features/config/src/application_tests.rs`（新建） | Config reload、优先级、失败回退、revision 与 watch 契约测试。 |
-| `agent/features/runtime/src/application/chat/looping/config_reload.rs` | 缩减为独立 prompt asset 内容检测与提醒构造；移除 JSON 直接读取。 |
-| `agent/features/runtime/src/application/chat/looping/config_reload_tests.rs`（新建） | prompt asset hash / reminder 路径、无 touch 噪声测试。 |
+| `agent/features/runtime/src/application/main_loop/looping/config_reload.rs` | 缩减为独立 prompt asset 内容检测与提醒构造；移除 JSON 直接读取。 |
+| `agent/features/runtime/src/application/main_loop/looping/config_reload_tests.rs`（新建） | prompt asset hash / reminder 路径、无 touch 噪声测试。 |
 | `agent/features/runtime/src/application/client/from_args.rs` | 装配动态 runtime reconfiguration coordinator 与 refresh port。 |
 | `agent/features/runtime/src/application/client/trait_chat.rs` | 将 refresh/reconfiguration 能力送入 chat loop。 |
-| `agent/features/runtime/src/application/chat/looping/loop_runner.rs` | 每 turn 先 refresh、再协调资源、再 bind run；使用当前 binding。 |
-| `agent/features/runtime/src/application/chat/looping/loop_phases.rs` | 接收 Config refresh 结果与 prompt asset change，发布 SDK event / LLM reminder。 |
+| `agent/features/runtime/src/application/main_loop/looping/loop_runner.rs` | 每 turn 先 refresh、再协调资源、再 bind run；使用当前 binding。 |
+| `agent/features/runtime/src/application/main_loop/looping/loop_phases.rs` | 接收 Config refresh 结果与 prompt asset change，发布 SDK event / LLM reminder。 |
 | `agent/features/runtime/src/application/reconfiguration.rs`（新建） | revision 驱动的 Main binding、hooks、并发、agent runner 等候选构造和原子替换。 |
 | `agent/features/runtime/src/application/reconfiguration_tests.rs`（新建） | Main/Sub binding 生效边界与失败回退测试。 |
-| `agent/features/runtime/src/application/agent/runner.rs`、`setup.rs` | 新建 Subagent 时经动态配置/binding factory 获取当前 snapshot，不永久冻结启动时配置。 |
+| `agent/features/runtime/src/application/subagent/runner.rs`、`setup.rs` | 新建 Subagent 时经动态配置/binding factory 获取当前 snapshot，不永久冻结启动时配置。 |
 | `agent/shared/src/config/domain/config.rs`、`snapshot.rs`、`merge.rs` | 为规范化有效配置 fingerprint、reload policy accessor 与优先级补齐领域能力。 |
 | `specs/config-compat.md` | 更新精确优先级、热重载边界和 restart-required 规则。 |
 
@@ -140,12 +140,12 @@ git commit -m "feat(config): reload effective configuration per turn"
 ### Task 3: 将 Runtime 文件轮询拆为 Config refresh 与 prompt asset detector
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/chat/looping/config_reload.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_phases.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_runner.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/config_reload.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_phases.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_runner.rs`
 - Modify: `agent/features/runtime/src/application/client/trait_chat.rs`
-- Test: `agent/features/runtime/src/application/chat/looping/config_reload_tests.rs` (create)
-- Test: `agent/features/runtime/src/application/chat/looping/loop_phases_tests.rs`
+- Test: `agent/features/runtime/src/application/main_loop/looping/config_reload_tests.rs` (create)
+- Test: `agent/features/runtime/src/application/main_loop/looping/loop_phases_tests.rs`
 
 - [ ] **Step 1: 写失败的 prompt asset 检测与 reminder 测试**
 
@@ -184,7 +184,7 @@ Expected: PASS。
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/features/runtime/src/application/chat/looping/config_reload.rs agent/features/runtime/src/application/chat/looping/config_reload_tests.rs agent/features/runtime/src/application/chat/looping/loop_phases.rs agent/features/runtime/src/application/chat/looping/loop_phases_tests.rs agent/features/runtime/src/application/chat/looping/loop_runner.rs agent/features/runtime/src/application/client/trait_chat.rs
+git add agent/features/runtime/src/application/main_loop/looping/config_reload.rs agent/features/runtime/src/application/main_loop/looping/config_reload_tests.rs agent/features/runtime/src/application/main_loop/looping/loop_phases.rs agent/features/runtime/src/application/main_loop/looping/loop_phases_tests.rs agent/features/runtime/src/application/main_loop/looping/loop_runner.rs agent/features/runtime/src/application/client/trait_chat.rs
 git commit -m "feat(runtime): refresh config and notify changed guidance"
 ```
 
@@ -195,7 +195,7 @@ git commit -m "feat(runtime): refresh config and notify changed guidance"
 - Create: `agent/features/runtime/src/application/reconfiguration_tests.rs`
 - Modify: `agent/features/runtime/src/application/resources.rs`
 - Modify: `agent/features/runtime/src/application/client/from_args.rs`
-- Modify: `agent/features/runtime/src/application/chat/looping/loop_runner.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_runner.rs`
 - Modify: `agent/features/runtime/src/application/client/accessors.rs`
 - Test: `agent/features/runtime/tests/config_reconfiguration.rs` (create)
 
@@ -253,18 +253,18 @@ Expected: PASS。
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agent/features/runtime/src/application/reconfiguration.rs agent/features/runtime/src/application/reconfiguration_tests.rs agent/features/runtime/src/application/resources.rs agent/features/runtime/src/application/client/from_args.rs agent/features/runtime/src/application/chat/looping/loop_runner.rs agent/features/runtime/src/application/client/accessors.rs agent/features/runtime/tests/config_reconfiguration.rs
+git add agent/features/runtime/src/application/reconfiguration.rs agent/features/runtime/src/application/reconfiguration_tests.rs agent/features/runtime/src/application/resources.rs agent/features/runtime/src/application/client/from_args.rs agent/features/runtime/src/application/main_loop/looping/loop_runner.rs agent/features/runtime/src/application/client/accessors.rs agent/features/runtime/tests/config_reconfiguration.rs
 git commit -m "feat(runtime): reconcile config at invocation boundary"
 ```
 
 ### Task 5: 让新建 Subagent 使用与 Main 相同的动态 binding factory
 
 **Files:**
-- Modify: `agent/features/runtime/src/application/agent/runner.rs`
-- Modify: `agent/features/runtime/src/application/agent/runner/setup.rs`
-- Modify: `agent/features/runtime/src/application/agent/runner/loop_run.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/setup.rs`
+- Modify: `agent/features/runtime/src/application/subagent/runner/loop_run.rs`
 - Modify: `agent/features/runtime/src/application/startup/runtime_support.rs`
-- Test: `agent/features/runtime/src/application/agent/runner_tests.rs`
+- Test: `agent/features/runtime/src/application/subagent/runner_tests.rs`
 - Test: `agent/features/runtime/tests/subagent_config_reconfiguration.rs` (create)
 
 - [ ] **Step 1: 写失败的 Main/Sub 一致性测试**
@@ -300,7 +300,7 @@ Expected: PASS。
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agent/features/runtime/src/application/agent/runner.rs agent/features/runtime/src/application/agent/runner/setup.rs agent/features/runtime/src/application/agent/runner/loop_run.rs agent/features/runtime/src/application/startup/runtime_support.rs agent/features/runtime/src/application/agent/runner_tests.rs agent/features/runtime/tests/subagent_config_reconfiguration.rs
+git add agent/features/runtime/src/application/subagent/runner.rs agent/features/runtime/src/application/subagent/runner/setup.rs agent/features/runtime/src/application/subagent/runner/loop_run.rs agent/features/runtime/src/application/startup/runtime_support.rs agent/features/runtime/src/application/subagent/runner_tests.rs agent/features/runtime/tests/subagent_config_reconfiguration.rs
 git commit -m "feat(runtime): use current config for new subagents"
 ```
 
