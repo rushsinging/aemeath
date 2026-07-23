@@ -8,11 +8,12 @@ cd "$ROOT"
 ENGINE="agent/features/runtime/src/application/loop_engine/engine.rs"
 MAIN="agent/features/runtime/src/application/chat/looping/loop_runner.rs"
 SUB="agent/features/runtime/src/application/agent/runner/loop_run.rs"
+LAUNCHER="agent/features/runtime/src/application/run_launcher.rs"
 MAIN_PORT="agent/features/runtime/src/application/chat/looping/main_run_port.rs"
 CONTEXT_COORDINATION="agent/features/runtime/src/application/context_coordination.rs"
 OLD_FSM="agent/features/runtime/src/application/chat/looping/state.rs"
 
-for path in "$ENGINE" "$MAIN" "$MAIN_PORT" "$SUB" "$CONTEXT_COORDINATION"; do
+for path in "$ENGINE" "$MAIN" "$MAIN_PORT" "$SUB" "$LAUNCHER" "$CONTEXT_COORDINATION"; do
   if [ ! -f "$path" ]; then
     echo "{\"decision\":\"block\",\"reason\":\"共享 Loop Engine 守卫缺少文件：$path\"}"
     exit 2
@@ -31,13 +32,22 @@ if [ "$engine_defs" -ne 1 ]; then
   exit 2
 fi
 
-if ! grep -q 'run_loop(&mut run, &cancel, &mut port)' "$MAIN"; then
-  echo '{"decision":"block","reason":"Main Run 未调用共享 loop_engine::run_loop。"}'
+# #1280: Main/Sub may call run_launcher::launch / reenter_run_loop instead of
+# calling run_loop directly. The launcher itself must call run_loop.
+if ! grep -q 'run_loop(' "$LAUNCHER"; then
+  echo '{"decision":"block","reason":"RunLauncher 未调用共享 loop_engine::run_loop。"}'
   exit 2
 fi
 
-if ! grep -q 'shared_run_loop(&mut run, &cancel, &mut self).await' "$SUB"; then
-  echo '{"decision":"block","reason":"Sub Run 未调用共享 loop_engine::run_loop。"}'
+# Main: accept either direct run_loop or via run_launcher.
+if ! grep -qE 'run_loop\(&mut run, &cancel, &mut port\)|run_launcher::(launch|reenter_run_loop)' "$MAIN"; then
+  echo '{"decision":"block","reason":"Main Run 未调用共享 loop_engine::run_loop 或 RunLauncher。"}'
+  exit 2
+fi
+
+# Sub: accept either direct shared_run_loop or via run_launcher.
+if ! grep -qE 'shared_run_loop\(&mut run, &cancel, &mut self\)\.await|run_launcher::launch' "$SUB"; then
+  echo '{"decision":"block","reason":"Sub Run 未调用共享 loop_engine::run_loop 或 RunLauncher。"}'
   exit 2
 fi
 

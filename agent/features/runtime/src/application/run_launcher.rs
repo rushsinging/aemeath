@@ -22,13 +22,13 @@ pub struct RunLaunchInput {
 pub enum RunLaunchResult {
     /// Run 正常终止（Completed / Failed / Terminated）。
     Terminal,
-    /// Run 进入 AwaitingUser，需要外部喂入输入后重新 launch。
+    /// Run 进入 AwaitingUser，Run 归还 caller 做 re-entry。
     AwaitUser,
     /// shared run_loop 返回引擎错误。
     Failed(LoopEngineError),
 }
 
-/// 唯一启动入口。
+/// 唯一启动入口（首次创建 Run）。
 ///
 /// 创建 `Run`、注册 ActiveRun、调用 shared `run_loop`、返回 typed result。
 /// Main/Sub 的所有 Run 生命周期启动经此函数。
@@ -36,16 +36,44 @@ pub async fn launch<P>(
     input: RunLaunchInput,
     active_run: Arc<dyn ActiveRunPort>,
     port: &mut P,
-) -> RunLaunchResult
+) -> (RunLaunchResult, Run)
 where
     P: RunLoopPort,
 {
     let mut run = Run::with_id(input.run_id, input.spec, input.parent_run_id);
-    let cancel = input.cancel;
+    let result = run_loop_with_registration(&mut run, &input.cancel, active_run, port).await;
+    (result, run)
+}
+
+/// Re-entry 入口（AwaitUser 后同一 Run 继续执行）。
+///
+/// 接受已有 `Run`，activate/clear + run_loop。
+/// Main session 的 AwaitUser re-entry 经此函数。
+pub async fn reenter_run_loop<P>(
+    run: &mut Run,
+    cancel: &CancellationToken,
+    active_run: Arc<dyn ActiveRunPort>,
+    port: &mut P,
+) -> RunLaunchResult
+where
+    P: RunLoopPort,
+{
+    run_loop_with_registration(run, cancel, active_run, port).await
+}
+
+async fn run_loop_with_registration<P>(
+    run: &mut Run,
+    cancel: &CancellationToken,
+    active_run: Arc<dyn ActiveRunPort>,
+    port: &mut P,
+) -> RunLaunchResult
+where
+    P: RunLoopPort,
+{
     let run_id = run.id().clone();
     active_run.activate(run_id.clone(), cancel.clone());
 
-    let result = match run_loop(&mut run, &cancel, port).await {
+    let result = match run_loop(run, cancel, port).await {
         Ok(LoopDirective::Terminal) => RunLaunchResult::Terminal,
         Ok(LoopDirective::AwaitUser) => RunLaunchResult::AwaitUser,
         Err(error) => {
@@ -57,7 +85,11 @@ where
         }
     };
 
-    active_run.clear(&run_id);
+    // #1280: Only clear registration on Terminal/Failed — AwaitUser keeps
+    // the Run alive for re-entry (reenter_run_loop will re-activate).
+    if !matches!(result, RunLaunchResult::AwaitUser) {
+        active_run.clear(&run_id);
+    }
     result
 }
 
@@ -135,7 +167,7 @@ mod tests {
             cancel: CancellationToken::new(),
         };
 
-        let result = launch(input, registry.clone(), &mut port).await;
+        let (result, _run) = launch(input, registry.clone(), &mut port).await;
         assert!(matches!(result, RunLaunchResult::Terminal));
     }
 

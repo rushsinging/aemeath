@@ -503,7 +503,6 @@ where
                     session_id = bound_session_id;
                 }
                 let cancel = CancellationToken::new();
-                let mut run = Run::new(RunSpec::main(), None);
                 let run_config = crate::application::run_config::RunConfigSnapshot::capture(
                     bound_main_run.config().clone(),
                 );
@@ -514,8 +513,7 @@ where
                 );
                 let run_memory = bound_main_run.memory_arc();
                 let run_memory_config = run_config.config().memory().clone();
-                let run_id = run.id().clone();
-                active_run.activate_main(run_id.clone(), cancel.clone());
+                let run_id = sdk::RunId::new_v7();
                 let cacheable_system_prompt = system_blocks
                     .iter()
                     .map(|block| block.text())
@@ -597,28 +595,39 @@ where
                       }
                       port.run_input_buffer.push(event);
                   }
-                // #1272: Re-enter run_loop after AwaitUser within the same Run.
-                // The engine returns LoopDirective::AwaitUser when the Run is
-                // awaiting user input; the session actor waits for input and
-                // feeds it to the Run's buffer, then re-enters run_loop with
-                // the same &mut run / &mut port. On Terminal or error the Run
-                // is drained and the active registration is cleared.
-                loop {
-                    let directive = logging::within(
-                        logging::LogContextPatch {
-                            turn: logging::FieldPatch::Set(turn_count),
-                            ..logging::LogContextPatch::default()
+                // #1280: Main Run creation, ActiveRun registration and shared
+                // run_loop invocation are owned by RunLauncher. First call
+                // creates the Run; AwaitUser re-entry uses reenter_run_loop
+                // with the returned Run.
+                let main_active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort> =
+                    active_run.clone();
+                let (first_result, mut run) = logging::within(
+                    logging::LogContextPatch {
+                        turn: logging::FieldPatch::Set(turn_count),
+                        ..logging::LogContextPatch::default()
+                    },
+                    crate::application::run_launcher::launch(
+                        crate::application::run_launcher::RunLaunchInput {
+                            run_id: run_id.clone(),
+                            spec: RunSpec::main(),
+                            parent_run_id: None,
+                            cancel: cancel.clone(),
                         },
-                        run_loop(&mut run, &cancel, &mut port),
-                    )
-                    .await;
-                    match directive {
-                        Ok(LoopDirective::Terminal) => break,
-                        Err(error) => {
+                        main_active_run.clone(),
+                        &mut port,
+                    ),
+                )
+                .await;
+                // Handle first result immediately.
+                let mut last_result = first_result;
+                loop {
+                    match last_result {
+                        crate::application::run_launcher::RunLaunchResult::Terminal => break,
+                        crate::application::run_launcher::RunLaunchResult::Failed(error) => {
                             log::error!(target: crate::LOG_TARGET, "main shared run loop failed: {error}");
                             break;
                         }
-                        Ok(LoopDirective::AwaitUser) => {
+                        crate::application::run_launcher::RunLaunchResult::AwaitUser => {
                             // #1272: run_loop may have drained control
                             // events into pending_input during its
                             // internal await_user_input call.  If
@@ -659,10 +668,20 @@ where
                                 _ = cancel.cancelled() => {
                                     // Cancel triggered: re-enter run_loop so
                                     // the engine handles cancellation and
-                                    // returns Terminal.  The engine's
-                                    // await_interruptible / handle_interrupt
-                                    // will call cancel_run and finalize the
-                                    // Run through the same unified path.
+                                    // returns Terminal.
+                                    last_result = logging::within(
+                                        logging::LogContextPatch {
+                                            turn: logging::FieldPatch::Set(turn_count),
+                                            ..logging::LogContextPatch::default()
+                                        },
+                                        crate::application::run_launcher::reenter_run_loop(
+                                            &mut run,
+                                            &cancel,
+                                            main_active_run.clone(),
+                                            &mut port,
+                                        ),
+                                    )
+                                    .await;
                                     continue;
                                 }
                             };
@@ -693,6 +712,20 @@ where
                             }
                         }
                     }
+                    // Re-enter run_loop with the same Run after receiving user input.
+                    last_result = logging::within(
+                        logging::LogContextPatch {
+                            turn: logging::FieldPatch::Set(turn_count),
+                            ..logging::LogContextPatch::default()
+                        },
+                        crate::application::run_launcher::reenter_run_loop(
+                            &mut run,
+                            &cancel,
+                            main_active_run.clone(),
+                            &mut port,
+                        ),
+                    )
+                    .await;
                 }
                 // #1272: Return any remaining Run-scoped events (control commands
                 // buffered during execution) to the session idle gate. User messages

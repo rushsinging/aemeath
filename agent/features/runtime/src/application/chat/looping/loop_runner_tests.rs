@@ -346,7 +346,13 @@ fn main_production_path_is_wired_to_shared_run_loop_without_legacy_fsm() {
     // Architecture guard: behavioral tests below exercise this entry point, while this assertion
     // prevents a future reintroduction of the retired Main-only orchestration state machine.
     let source = include_str!("loop_runner.rs");
-    assert!(source.contains("run_loop(&mut run, &cancel, &mut port)"));
+    // #1280: Main may call run_launcher::launch/reenter_run_loop instead of
+    // calling run_loop directly.
+    assert!(
+        source.contains("run_loop(&mut run, &cancel, &mut port)")
+            || source.contains("run_launcher::launch")
+            || source.contains("run_launcher::reenter_run_loop")
+    );
     assert!(!source.contains("ChatLoopFsm"));
     assert!(!source.contains("StallDetector"));
     assert!(!source.contains("ChatLoopTransition"));

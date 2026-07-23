@@ -232,7 +232,7 @@ impl<'a> SubAgentRun<'a> {
         };
         let active_run = self.active_run.clone();
 
-        let launch_result =
+        let (launch_result, _run) =
             crate::application::run_launcher::launch(input, active_run, &mut self).await;
 
         let loop_result = match launch_result {
