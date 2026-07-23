@@ -318,9 +318,16 @@ impl App {
                     ConversationIntent::DeleteAskUserChatChar(DeleteAskUserChatChar),
                 ));
             }
-            KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
+            KeyCode::Char(c)
+                if matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) =>
+            {
+                let ch = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    c.to_ascii_uppercase()
+                } else {
+                    c
+                };
                 self.apply_agent_intent(AgentIntent::Conversation(
-                    ConversationIntent::AppendAskUserChatChar(AppendAskUserChatChar { ch: c }),
+                    ConversationIntent::AppendAskUserChatChar(AppendAskUserChatChar { ch }),
                 ));
             }
             KeyCode::Left if key.modifiers == KeyModifiers::NONE => {
