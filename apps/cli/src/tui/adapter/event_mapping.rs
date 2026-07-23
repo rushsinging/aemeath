@@ -4,12 +4,11 @@ use super::runtime_view::{
 use super::tui_runtime_event::*;
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
 
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum SdkEventMapping {
     Runtime(TuiRuntimeEvent),
-    LegacyAskUser {
-        items: Vec<sdk::AskUserQuestionItem>,
-        reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,
-    },
+    /// Events that have been fully retired and carry no TUI-relevant payload.
+    Nop,
 }
 
 pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
@@ -268,9 +267,8 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         }
         ChatEvent::HookEvent(event) => TuiRuntimeEvent::HookEvent(hook_event(event)),
         ChatEvent::HookMessage(message) => TuiRuntimeEvent::HookMessage(hook_message(message)),
-        ChatEvent::AskUserBatch { items, reply_tx } => {
-            return SdkEventMapping::LegacyAskUser { items, reply_tx }
-        }
+        // #944 5B: AskUserBatch legacy bridge removed.
+        ChatEvent::AskUserBatch { .. } => return SdkEventMapping::Nop,
         ChatEvent::AgentProgress {
             context,
             tool_id,

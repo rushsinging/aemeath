@@ -331,7 +331,6 @@ where
         UiEvent::ApiError { messages, .. } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
-        UiEvent::AskUserBatch { .. } => AgentEventMapping::default(),
 
         // ── HookEvent → notice via conversation ──
         UiEvent::HookEvent(_) => AgentEventMapping::default(),

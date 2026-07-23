@@ -5,7 +5,6 @@ mod logging;
 
 use crate::tui::adapter::event_mapping::{sdk_event_to_tui_event, SdkEventMapping};
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
-use crate::tui::app::event::UiEvent;
 use std::sync::Arc;
 
 pub(crate) use handle::{
@@ -90,18 +89,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
                             return;
                         }
                     }
-                    // Transitional resource bridge. It is the only permitted sender path
-                    // until #1246 publishes Main suspension as InteractionRequested.
-                    SdkEventMapping::LegacyAskUser { items, reply_tx } => {
-                        if ctx
-                            .local_tx
-                            .send(UiEvent::AskUserBatch { items, reply_tx })
-                            .await
-                            .is_err()
-                        {
-                            return;
-                        }
-                    }
+                    SdkEventMapping::Nop => {}
                 }
             }
         },

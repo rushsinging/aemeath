@@ -166,8 +166,9 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         }
         sdk::ChatEvent::HookEvent(event) => UiEvent::HookEvent(event),
         sdk::ChatEvent::HookMessage(message) => UiEvent::HookMessage(message),
-        sdk::ChatEvent::AskUserBatch { items, reply_tx } => {
-            UiEvent::AskUserBatch { items, reply_tx }
+        // #944 5B: AskUserBatch legacy bridge removed.
+        sdk::ChatEvent::AskUserBatch { .. } => {
+            UiEvent::SystemMessage("AskUserBatch retired".to_string())
         }
         sdk::ChatEvent::AgentProgress {
             context,

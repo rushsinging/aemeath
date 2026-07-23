@@ -1,8 +1,8 @@
 //! 交互式批量提问状态
 //!
-//! 导航高亮的可变状态（cursor/selected/chat_input_active）由
-//! `ConversationModel` 的 `AskUserBatch` 块管理；本结构仅保留
-//! 应答回传所需的 reply_tx 和原始问题列表。
+//! #944 5B: Legacy AskUser reply_tx bridge removed. AskUserState is now dead
+//! code (never constructed); retained until key.rs routing is cleaned up.
+#![allow(dead_code)]
 
 /// Built-in options appended after LLM options in AskUserQuestion.
 pub(crate) const BUILTIN_OPTION_CHAT: &str = "Type something...";

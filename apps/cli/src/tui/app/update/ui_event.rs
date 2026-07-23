@@ -97,45 +97,6 @@ impl App {
                     self.append_system_notice(format_reflection_history(&records));
                 }
             }
-            UiEvent::AskUserBatch { items, reply_tx } => {
-                // 完成每个 item 关联的 tool_call
-                for item in &items {
-                    self.chat
-                        .finish_tool_call(&sdk::ids::ToolCallId::new(&item.id));
-                }
-                crate::tui::log_info!(
-                    "[SPINNER_DEBUG] UiEvent::AskUserBatch(finish_tool_calls) → spinner_stop"
-                );
-                self.spinner_stop();
-
-                let slots: Vec<_> = items
-                    .iter()
-                    .map(|item| {
-                        let llm_count = item.options.len();
-                        let mut all_options = item.options.clone();
-                        if item.allow_free_input && llm_count >= 1 {
-                            all_options.push(sdk::OptionItem::title_only(
-                                crate::tui::app::state::BUILTIN_OPTION_CHAT,
-                            ));
-                        }
-                        crate::tui::model::conversation::block::AskUserSlot {
-                            id: item.id.clone(),
-                            question_seq: item.question_seq,
-                            question: item.question.clone(),
-                            options: all_options,
-                            llm_option_count: llm_count,
-                            multi_select: item.multi_select,
-                            default: item.default.clone(),
-                            answer: None,
-                        }
-                    })
-                    .collect();
-                self.show_ask_user_batch(slots);
-                self.input.ask_user_state =
-                    Some(crate::tui::app::state::AskUserState { reply_tx, items });
-                crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::AskUserBatch(show) → spinner_stop");
-                self.spinner_stop();
-            }
             UiEvent::InteractionRequested { request } => {
                 // #1246: Map SDK typed interaction request to TUI model intent.
                 let tui_request = sdk_interaction_to_tui(&request);

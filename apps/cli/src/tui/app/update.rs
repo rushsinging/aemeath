@@ -58,7 +58,6 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ModelStreamWaiting { .. } => "ModelStreamWaiting",
         UiEvent::SessionSaved { .. } => "SessionSaved",
         UiEvent::ReflectionHistory { .. } => "ReflectionHistory",
-        UiEvent::AskUserBatch { .. } => "AskUserBatch",
         UiEvent::InteractionRequested { .. } => "InteractionRequested",
         UiEvent::HookEvent(_) => "HookEvent",
         UiEvent::HookMessage(_) => "HookMessage",

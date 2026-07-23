@@ -166,12 +166,8 @@ pub enum AppEvent {
     ReflectionHistory {
         records: Vec<sdk::ReflectionHistoryView>,
     },
-    /// AskUserQuestion 批量请求——一次携带多个问题。
-    AskUserBatch {
-        items: Vec<sdk::AskUserQuestionItem>,
-        reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,
-    },
     /// #1246: Typed interaction request from Runtime (pure value, no sender).
+    /// #944 5B: Legacy AskUserBatch removed; InteractionRequested is the sole path.
     InteractionRequested {
         request: sdk::InteractionRequest,
     },

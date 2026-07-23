@@ -2,89 +2,10 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
 use crate::tui::app::event::UiEvent;
+use crate::tui::update::msg::TuiMsg;
 
 use super::super::testing::{input, ExpectedEffect, TuiScenarioHarness};
 
-#[test]
-fn ask_user_selects_option_and_submits_reply() {
-    let mut harness = TuiScenarioHarness::new(100, 30);
-    let (reply_tx, mut reply_rx) = tokio::sync::oneshot::channel();
-    harness.ui(UiEvent::AskUserBatch {
-        items: vec![sdk::AskUserQuestionItem {
-            id: "ask-1".into(),
-            question_seq: 0,
-            question: "Pick A or B".into(),
-            options: vec![
-                sdk::OptionItem::title_only("A"),
-                sdk::OptionItem::title_only("B"),
-            ],
-            multi_select: false,
-            allow_free_input: true,
-            default: None,
-        }],
-        reply_tx,
-    });
-    harness.render();
-    assert!(harness.screen().contains("Pick A or B"));
-    insta::assert_snapshot!("ask_user__shown__100x30", harness.screen());
-
-    harness.key(input::press(KeyCode::Down, KeyModifiers::NONE));
-    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
-    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
-    assert_eq!(
-        reply_rx.try_recv().expect("ask reply"),
-        sdk::AskUserReply::Answers(vec![sdk::AskUserAnswer {
-            tool_call_id: "ask-1".to_string(),
-            question_seq: 0,
-            answer: "B".to_string(),
-        }])
-    );
-    harness.render();
-    insta::assert_snapshot!("ask_user__confirmed__100x30", harness.screen());
-    harness.assert_idle();
-}
-
-#[test]
-fn ask_user_type_something_submits_uppercase_text() {
-    let mut harness = TuiScenarioHarness::new(100, 30);
-    let (reply_tx, mut reply_rx) = tokio::sync::oneshot::channel();
-    harness.ui(UiEvent::AskUserBatch {
-        items: vec![sdk::AskUserQuestionItem {
-            id: "ask-uppercase".into(),
-            question_seq: 0,
-            question: "Describe the environment".into(),
-            options: vec![sdk::OptionItem::title_only("Use defaults")],
-            multi_select: false,
-            allow_free_input: true,
-            default: None,
-        }],
-        reply_tx,
-    });
-
-    harness.key(input::press(KeyCode::Down, KeyModifiers::NONE));
-    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
-    harness.key(input::press(KeyCode::Char('x'), KeyModifiers::SHIFT));
-    assert_eq!(
-        harness
-            .app
-            .model
-            .conversation
-            .ask_user_chat_text()
-            .as_deref(),
-        Some("X")
-    );
-
-    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
-    assert_eq!(
-        reply_rx.try_recv().expect("ask reply"),
-        sdk::AskUserReply::Answers(vec![sdk::AskUserAnswer {
-            tool_call_id: "ask-uppercase".to_string(),
-            question_seq: 0,
-            answer: "X".to_string(),
-        }])
-    );
-    harness.assert_idle();
-}
 #[test]
 fn cancel_and_quit_effects_are_explicit() {
     let mut busy = TuiScenarioHarness::new(100, 30);
@@ -108,51 +29,6 @@ fn cancel_and_quit_effects_are_explicit() {
         .iter()
         .any(|effect| matches!(effect, crate::tui::effect::effect::Effect::QuitApplication)));
     idle.assert_idle();
-}
-
-use crate::tui::update::msg::TuiMsg;
-
-#[test]
-fn ask_user_free_text_stays_in_ask_block() {
-    let mut harness = TuiScenarioHarness::new(100, 30);
-    let (reply_tx, mut reply_rx) = tokio::sync::oneshot::channel();
-    harness.ui(UiEvent::AskUserBatch {
-        items: vec![sdk::AskUserQuestionItem {
-            id: "ask-free-text".into(),
-            question_seq: 0,
-            question: "Tell me more".into(),
-            options: Vec::new(),
-            multi_select: false,
-            allow_free_input: true,
-            default: None,
-        }],
-        reply_tx,
-    });
-
-    for ch in "222".chars() {
-        harness.key(input::press(KeyCode::Char(ch), KeyModifiers::NONE));
-    }
-    assert_eq!(
-        harness
-            .app
-            .model
-            .conversation
-            .ask_user_chat_text()
-            .as_deref(),
-        Some("222")
-    );
-    assert!(harness.app.model.input.document.buffer.is_empty());
-
-    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
-    assert_eq!(
-        reply_rx.try_recv().expect("ask reply"),
-        sdk::AskUserReply::Answers(vec![sdk::AskUserAnswer {
-            tool_call_id: "ask-free-text".to_string(),
-            question_seq: 0,
-            answer: "222".to_string(),
-        }])
-    );
-    harness.assert_idle();
 }
 
 #[test]

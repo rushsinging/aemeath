@@ -83,6 +83,8 @@ impl App {
     }
 
     /// 显示 AskUserBatch 交互块（批量问题 + 选项），作为渲染单一真相进入 ConversationModel。
+    /// #944 5B: dead code after AskUserBatch reply_tx retirement.
+    #[allow(dead_code)]
     pub(crate) fn show_ask_user_batch(
         &mut self,
         slots: Vec<crate::tui::model::conversation::block::AskUserSlot>,

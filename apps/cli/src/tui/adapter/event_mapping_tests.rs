@@ -46,7 +46,7 @@ fn interaction_request_keeps_request_run_and_body_identity() {
 }
 
 #[test]
-fn ask_user_sender_is_explicitly_split_out_of_runtime_event() {
+fn ask_user_batch_is_retired_and_mapped_to_nop() {
     let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
 
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::AskUserBatch {
@@ -54,5 +54,5 @@ fn ask_user_sender_is_explicitly_split_out_of_runtime_event() {
         reply_tx,
     });
 
-    assert!(matches!(mapped, SdkEventMapping::LegacyAskUser { items, .. } if items.is_empty()));
+    assert!(matches!(mapped, SdkEventMapping::Nop));
 }
