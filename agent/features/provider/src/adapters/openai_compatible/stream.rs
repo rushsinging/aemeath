@@ -114,7 +114,7 @@ pub(crate) async fn parse_openai_stream(
                     Ok(None) => break,
                     Err(e) => {
                         log::warn!(target: crate::LOG_TARGET, "[openai-compat stream] failed to read SSE line: {}", e);
-                        return Err(crate::LlmError::Stream(e.to_string()));
+                        return Err(crate::adapters::stream::stream_read_error(e));
                     }
                 }            }
         };

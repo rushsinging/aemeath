@@ -6,46 +6,78 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::model::conversation::intent::{
-        RecordUsage, SetContextSize, SetProviderModel, SetStatusNotice, SetThinking,
-        WorkspaceSnapshotReceived,
-    };
+    use crate::tui::model::config_provider::ConfigIntent;
+    use crate::tui::model::conversation::intent::{RecordUsage, SetStatusNotice};
     use crate::tui::model::conversation::status_notice::{StatusNotice, StatusNoticeKind};
     use crate::tui::model::conversation::workspace::WorktreeKind;
     use crate::tui::model::diagnostic::intent::DiagnosticIntent;
     use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
     use crate::tui::model::root::TuiModel;
     use crate::tui::model::runtime::session_intent::SessionIntent;
+    use crate::tui::model::workspace_provider::WorkspaceIntent;
+    use crate::tui::update::intent::AgentIntent;
+    use crate::tui::update::root_reducer::reduce_intent;
     use crate::tui::view_assembler::status::StatusViewAssembler;
     use crate::tui::view_model::{StatusNoticeViewKind, StatusSeverity};
 
     #[test]
     fn test_status_view_projects_runtime_usage_and_context() {
         let mut model = TuiModel::default();
-        model.conversation.apply(SetProviderModel {
-            provider: None,
-            model_id: Some("glm-5.1".to_string()),
-        });
-        model.conversation.apply(RecordUsage {
-            input_tokens: 12_400,
-            output_tokens: 1_800,
-            last_input_tokens: 74_000,
-            cost_usd: 0.0,
-        });
-        model.conversation.apply(SetContextSize(200_000));
-        model.conversation.apply(WorkspaceSnapshotReceived {
-            path_base: Some("~/repo".to_string()),
-            workspace_root: Some("~/repo".to_string()),
-            branch: Some("main".to_string()),
-            kind: WorktreeKind::MainCheckout,
-        });
-        model.session.apply(SessionIntent::SetCurrentSession {
-            id: "s-1".to_string(),
-        });
-        model.conversation.apply(SetThinking(true));
+        reduce_intent(
+            &mut model,
+            AgentIntent::Config(ConfigIntent::SetProviderModel {
+                provider: None,
+                model_id: Some("glm-5.1".to_string()),
+            }),
+        );
+        reduce_intent(
+            &mut model,
+            AgentIntent::Conversation(
+                crate::tui::model::conversation::intent::ConversationIntent::RecordUsage(
+                    RecordUsage {
+                        input_tokens: 12_400,
+                        output_tokens: 1_800,
+                        last_input_tokens: 74_000,
+                        cost_usd: 0.0,
+                    },
+                ),
+            ),
+        );
+        reduce_intent(
+            &mut model,
+            AgentIntent::Config(ConfigIntent::SetContextSize(200_000)),
+        );
+        reduce_intent(
+            &mut model,
+            AgentIntent::Workspace(WorkspaceIntent::ApplySnapshot {
+                path_base: Some("~/repo".to_string()),
+                workspace_root: Some("~/repo".to_string()),
+            }),
+        );
+        reduce_intent(
+            &mut model,
+            AgentIntent::Workspace(WorkspaceIntent::ApplyMetadata {
+                root: "~/repo".to_string(),
+                revision: 1,
+                branch: Some("main".to_string()),
+                kind: WorktreeKind::MainCheckout,
+            }),
+        );
+        reduce_intent(
+            &mut model,
+            AgentIntent::Session(SessionIntent::SetCurrentSession {
+                id: "s-1".to_string(),
+            }),
+        );
+        reduce_intent(
+            &mut model,
+            AgentIntent::Config(ConfigIntent::SetThinking(true)),
+        );
 
         let view = StatusViewAssembler::assemble_status_view(
             &model.conversation,
+            &model.config_provider,
+            &model.workspace_provider,
             Some(&model.session),
             &model.diagnostic,
         );
@@ -65,13 +97,26 @@ mod tests {
     #[test]
     fn test_status_view_projects_status_notice() {
         let mut model = TuiModel::default();
-        model
-            .conversation
-            .apply(SetStatusNotice(StatusNotice::warning("Interrupted")));
-        model.conversation.apply(SetThinking(false));
+        reduce_intent(
+            &mut model,
+            AgentIntent::Conversation(
+                crate::tui::model::conversation::intent::ConversationIntent::SetStatusNotice(
+                    SetStatusNotice(StatusNotice::warning("Interrupted")),
+                ),
+            ),
+        );
+        reduce_intent(
+            &mut model,
+            AgentIntent::Config(ConfigIntent::SetThinking(false)),
+        );
 
-        let view =
-            StatusViewAssembler::assemble_status_view(&model.conversation, None, &model.diagnostic);
+        let view = StatusViewAssembler::assemble_status_view(
+            &model.conversation,
+            &model.config_provider,
+            &model.workspace_provider,
+            None,
+            &model.diagnostic,
+        );
 
         assert_eq!(view.notice.text, "Interrupted");
         assert_eq!(view.notice.kind, StatusNoticeViewKind::Warning);
@@ -101,13 +146,21 @@ mod tests {
     #[test]
     fn test_status_view_projects_diagnostic_severity() {
         let mut model = TuiModel::default();
-        model.diagnostic.apply(DiagnosticIntent::RecordNotice {
-            severity: DiagnosticSeverity::Error,
-            message: "boom".to_string(),
-        });
+        reduce_intent(
+            &mut model,
+            AgentIntent::Diagnostic(DiagnosticIntent::RecordNotice {
+                severity: DiagnosticSeverity::Error,
+                message: "boom".to_string(),
+            }),
+        );
 
-        let view =
-            StatusViewAssembler::assemble_status_view(&model.conversation, None, &model.diagnostic);
+        let view = StatusViewAssembler::assemble_status_view(
+            &model.conversation,
+            &model.config_provider,
+            &model.workspace_provider,
+            None,
+            &model.diagnostic,
+        );
 
         assert_eq!(view.line.severity, StatusSeverity::Error);
     }

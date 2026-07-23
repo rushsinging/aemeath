@@ -3,8 +3,10 @@ use crate::tui::adapter::hook_notice::hook_spinner_phase;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
+use crate::tui::model::config_provider::ConfigIntent;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::spinner::SpinnerPhase;
+use crate::tui::update::intent::AgentIntent;
 use tokio::sync::mpsc;
 
 impl App {
@@ -94,21 +96,22 @@ impl App {
                     before_queued
                 );
                 for item in items {
-                    let preview = item.text_content().chars().take(60).collect::<String>();
+                    let text_len = item.text_content().chars().count();
                     crate::tui::log_debug!(
-                        "UserMessagesAdopted item input_id={:?} text_preview={:?}",
+                        "UserMessagesAdopted item input_id={:?} text_len={}",
                         item.input_id.as_ref().map(|id| id.as_str().to_string()),
-                        preview
+                        text_len
                     );
                     if let Some(id) = item.input_id.as_ref() {
                         self.clear_queued_submission_echo_by_id(id);
                     }
                     self.append_user_echo(item.text_content());
                 }
-                self.model.conversation.sync_queued_from_runtime(&queued);
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::SyncQueuedSubmissions(SyncQueuedSubmissions { queued }),
+                ));
                 let after_queued = self.model.conversation.queued_submissions.len();
                 crate::tui::log_debug!("UserMessagesAdopted done after_queued={}", after_queued);
-                self.mark_output_dirty();
             }
             UiEvent::UserMessagesQueued { queued } => {
                 crate::tui::log_debug!(
@@ -116,8 +119,9 @@ impl App {
                     queued.len(),
                     self.chat.is_processing
                 );
-                self.model.conversation.sync_queued_from_runtime(&queued);
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::SyncQueuedSubmissions(SyncQueuedSubmissions { queued }),
+                ));
             }
             UiEvent::TurnStarted { messages: _ } => {
                 // Turn 启动：启动 spinner(Thinking)。
@@ -162,14 +166,16 @@ impl App {
             }
             UiEvent::CompactRollback { messages: _ } => {
                 // Compact 失败回滚：不动 spinner（turn 仍在进行）。
-                self.model.conversation.runtime.clear_compact_runtime();
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
+                ));
             }
             UiEvent::CompactFinished { messages: _ } => {
                 // Compact 成功完成：清 compact 状态。
                 // 不停 spinner——compact 后 turn 仍在进行，LLM 会继续生成。
-                self.model.conversation.runtime.clear_compact_runtime();
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
+                ));
             }
             UiEvent::ClipboardImage(img) => {
                 self.handle_input_intent(
@@ -258,12 +264,13 @@ impl App {
                 return UpdateResult::one(Effect::SetCurrentTurn { turn });
             }
             UiEvent::WorkingDirectoryChanged(ctx) => {
-                // 工作目录上下文已由 map_agent_event -> RuntimeIntent::WorkspaceSnapshotReceived
-                // 注入 RuntimeModel，经 adapter 单向写回 status_bar，此处仅同步会话 cwd。
-                self.session.cwd = ctx.raw_path_base.clone();
+                self.session.cwd = ctx.raw_path_base;
             }
+            UiEvent::WorkspaceMetadataResolved(_) => {}
             UiEvent::TaskStatusChanged(view) => {
-                self.model.conversation.apply(UpdateTaskLines(view.lines));
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::UpdateTaskLines(UpdateTaskLines(view.lines)),
+                ));
             }
             UiEvent::UpdateAvailable {
                 current,
@@ -293,45 +300,44 @@ impl App {
                 // Graph 阶段变化 → 更新 graph_phase（model.apply 会同步 status_notice，
                 // 除非当前是临时 notice）
                 let phase = if node == "idle" { None } else { Some(node) };
-                self.model.conversation.apply(SetGraphPhase(phase));
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::SetGraphPhase(SetGraphPhase(phase)),
+                ));
             }
             UiEvent::CompactProgress {
                 stage,
                 current,
                 total,
             } => {
-                self.model.conversation.apply(SetCompactProgress {
-                    stage,
-                    current,
-                    total,
-                });
-                // #540：进度条嵌在 spinner 行（output 区），dirty 归类为 output_dirty。
-                // ui_event.rs 直接 apply 绕开 reduce_agent_event 的 dirty 归类，
-                // 必须在此显式 mark_output_dirty 驱动刷新，否则依赖 SpinnerTick 兜底不可靠。
-                self.mark_output_dirty();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::SetCompactProgress(SetCompactProgress {
+                        stage,
+                        current,
+                        total,
+                    }),
+                ));
             }
             UiEvent::ModelSwitched { result } => {
                 // #497：模型切换走事件流，TUI 在此更新本地状态（与原 slash.rs RPC 路径对齐）。
                 if result.context_window > 0 {
-                    self.chat.context_size = result.context_window;
-                    self.model
-                        .conversation
-                        .apply(SetContextSize(result.context_window as u64));
+                    self.apply_agent_intent(AgentIntent::Config(ConfigIntent::SetContextSize(
+                        result.context_window as u64,
+                    )));
                 }
                 self.session.current_model_display = result.display_name.clone();
-                self.model.conversation.apply(SetProviderModel {
-                    provider: self.model.conversation.runtime.provider.clone(),
+                self.apply_agent_intent(AgentIntent::Config(ConfigIntent::SetProviderModel {
+                    provider: self.model.config_provider.provider().map(ToOwned::to_owned),
                     model_id: Some(result.display_name.clone()),
-                });
+                }));
                 if let Some(ra) = result.reasoning_active {
-                    self.model.conversation.apply(SetThinking(ra));
+                    self.apply_agent_intent(AgentIntent::Config(ConfigIntent::SetThinking(ra)));
                 }
                 self.append_system_notice(format!("[switched to {}]", result.display_name));
             }
             UiEvent::ThinkingChanged { enabled } => {
                 // #497：reasoning 模式切换走事件流。SystemMessage("[thinking mode: ON/OFF]")
                 // 已由 runtime 发回，TUI 只需更新 thinking 状态。
-                self.model.conversation.apply(SetThinking(enabled));
+                self.apply_agent_intent(AgentIntent::Config(ConfigIntent::SetThinking(enabled)));
             }
             UiEvent::ContextEstimated {
                 estimate,

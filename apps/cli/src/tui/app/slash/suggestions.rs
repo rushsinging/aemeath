@@ -1,5 +1,6 @@
 use crate::tui::model::input::completion::{generate_suggestions, SuggestionContext};
 use crate::tui::model::input::completion_item::CompletionItem;
+use crate::tui::update::intent::AgentIntent;
 
 impl super::super::App {
     /// Update suggestions based on current input
@@ -56,7 +57,7 @@ impl super::super::App {
 
         let suggestions = generate_suggestions(&ctx);
         // Completion changes update the model only; InputArea renders from model-derived state.
-        let _changes = self.model.input.apply(
+        self.apply_agent_intent(AgentIntent::Input(
             crate::tui::model::input::intent::InputIntent::SetCompletions {
                 query: ctx.input.clone(),
                 items: suggestions
@@ -70,6 +71,6 @@ impl super::super::App {
                     })
                     .collect(),
             },
-        );
+        ));
     }
 }

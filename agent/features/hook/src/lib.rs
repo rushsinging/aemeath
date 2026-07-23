@@ -12,9 +12,9 @@ pub use adapters::config::build_dispatcher;
 pub use adapters::dispatcher::{Dispatcher, MAX_ATTEMPTS};
 pub use domain::invocation::*;
 pub use domain::{
-    classify_directive, ClassifyError, HookClass, HookCommand, HookDirective, HookDisplayMessage,
-    HookDisplayMessageKind, HookExecution, HookExecutionStatus, HookFailurePolicy, HookInvocation,
-    HookMatcher, HookOutcome, HookPoint, HookPointMetadata, HookReason, HookSubscription,
-    ProtocolViolation, SubscriptionError,
+    classify_directive, ClassifyError, HookBlockDetail, HookClass, HookCommand, HookDirective,
+    HookDisplayMessage, HookDisplayMessageKind, HookExecution, HookExecutionStatus,
+    HookFailurePolicy, HookInvocation, HookMatcher, HookOutcome, HookPoint, HookPointMetadata,
+    HookReason, HookSubscription, ProtocolViolation, SubscriptionError,
 };
 pub use ports::{HookDispatchContext, HookPort};

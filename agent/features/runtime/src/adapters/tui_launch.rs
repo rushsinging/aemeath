@@ -21,6 +21,7 @@ pub struct TuiLaunchContext {
     pub tool_execution: Arc<dyn ToolExecutionPort>,
     pub system_blocks: Vec<RequestSystemBlock>,
     pub system_prompt_text: String,
+    pub initial_git_context: String,
     pub user_context: String,
     pub context_size: usize,
     pub verbose: bool,

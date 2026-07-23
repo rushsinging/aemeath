@@ -59,10 +59,13 @@ impl ConversationModel {
         let block_id = self.next_block_id("error");
         self.timeline.push(OutputTimelineItem::Error {
             id: block_id.clone(),
-            text,
+            text: text.clone(),
         });
         vec![
-            ConversationChange::ErrorAppended { block_id },
+            ConversationChange::ErrorAppended {
+                block_id,
+                message: text,
+            },
             ConversationChange::StyleBoundaryResetRequired,
             ConversationChange::OutputDirty,
         ]

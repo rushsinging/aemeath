@@ -16,6 +16,32 @@ fn cmd(raw: &str) -> ChatInputEvent {
     }
 }
 
+/// Helper: assert a BufferDrain::Ready result matches expected texts and epoch,
+/// verifying that input_ids are present (from drain_user_inputs preserving
+/// ChatInputEvent::UserMessage::id).
+fn assert_drain_ready(result: &BufferDrain, expected_epoch: DrainEpoch, expected_texts: &[&str]) {
+    match result {
+        BufferDrain::Ready { batch, epoch } => {
+            assert_eq!(*epoch, expected_epoch, "epoch mismatch");
+            assert_eq!(
+                batch.len(),
+                expected_texts.len(),
+                "batch length mismatch: {:?}",
+                batch.iter().map(|i| &i.text).collect::<Vec<_>>()
+            );
+            for (input, &expected_text) in batch.iter().zip(expected_texts.iter()) {
+                assert_eq!(input.text, expected_text, "text mismatch");
+                assert!(
+                    input.input_id.is_some(),
+                    "input_id should be Some for user messages from drain: text={:?}",
+                    input.text
+                );
+            }
+        }
+        other => panic!("expected Ready, got {:?}", other),
+    }
+}
+
 #[test]
 fn new_buffer_is_empty() {
     let buf = RunInputBuffer::new();
@@ -44,6 +70,20 @@ fn drain_user_inputs_returns_loop_inputs_and_keeps_non_user() {
     assert_eq!(inputs.len(), 2);
     assert_eq!(inputs[0].text, "first");
     assert_eq!(inputs[1].text, "second");
+    // #1272: input_id from ChatInputEvent::UserMessage::id must be preserved
+    assert!(
+        inputs[0].input_id.is_some(),
+        "input_id must be Some for user messages"
+    );
+    assert!(
+        inputs[1].input_id.is_some(),
+        "input_id must be Some for user messages"
+    );
+    // IDs must be distinct (each um() generates a unique UUIDv7)
+    assert_ne!(
+        inputs[0].input_id, inputs[1].input_id,
+        "input_ids must be distinct"
+    );
     assert!(!buf.is_empty());
     assert_eq!(buf.pending_user_count(), 0);
 }
@@ -102,15 +142,7 @@ fn drain_or_seal_returns_ready_when_user_inputs_present() {
     buf.push(um("input"));
 
     let result = buf.drain_or_seal(DrainEpoch(0));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![super::LoopInput {
-                text: "input".to_string()
-            }],
-            epoch: DrainEpoch(0),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(0), &["input"]);
     assert!(!buf.is_sealed());
     assert!(buf.is_empty());
     assert_eq!(buf.current_epoch(), DrainEpoch(1));
@@ -185,23 +217,7 @@ fn drain_or_seal_preserves_fifo_order_of_user_messages() {
     buf.push(um("third"));
 
     let result = buf.drain_or_seal(DrainEpoch(0));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![
-                super::LoopInput {
-                    text: "first".to_string()
-                },
-                super::LoopInput {
-                    text: "second".to_string()
-                },
-                super::LoopInput {
-                    text: "third".to_string()
-                },
-            ],
-            epoch: DrainEpoch(0),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(0), &["first", "second", "third"]);
 }
 
 // ── #1272 test inject hook ─────────────────────────────────────────────
@@ -214,15 +230,7 @@ fn inject_after_drain_turns_empty_seal_into_ready() {
     buf.test_inject_after_drain = vec![um("late arrival")];
 
     let result = buf.drain_or_seal(DrainEpoch(0));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![super::LoopInput {
-                text: "late arrival".to_string()
-            }],
-            epoch: DrainEpoch(0),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(0), &["late arrival"]);
     assert!(!buf.is_sealed());
 }
 
@@ -235,20 +243,7 @@ fn inject_after_drain_merges_with_existing_batch_preserving_fifo_order() {
     buf.test_inject_after_drain = vec![um("injected")];
 
     let result = buf.drain_or_seal(DrainEpoch(0));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![
-                super::LoopInput {
-                    text: "existing".to_string()
-                },
-                super::LoopInput {
-                    text: "injected".to_string()
-                },
-            ],
-            epoch: DrainEpoch(0),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(0), &["existing", "injected"]);
     assert!(!buf.is_sealed());
 }
 
@@ -416,15 +411,7 @@ fn initial_epoch_is_zero_ready_then_empty_at_epoch_one() {
     // First drain: Ready at epoch 0
     buf.push(um("hello"));
     let result = buf.drain_or_seal(DrainEpoch(0));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![super::LoopInput {
-                text: "hello".to_string(),
-            }],
-            epoch: DrainEpoch(0),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(0), &["hello"]);
     assert!(!buf.is_sealed());
     assert_eq!(buf.current_epoch(), DrainEpoch(1));
 
@@ -462,15 +449,7 @@ fn epoch_mismatch_rejects_without_consuming_input() {
 
     // Correct epoch now succeeds
     let result = buf.drain_or_seal(DrainEpoch(0));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![super::LoopInput {
-                text: "should not be consumed".to_string(),
-            }],
-            epoch: DrainEpoch(0),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(0), &["should not be consumed"]);
     assert_eq!(buf.current_epoch(), DrainEpoch(1));
 }
 
@@ -481,29 +460,13 @@ fn test_injection_preserves_fifo_with_correct_epochs() {
     // First drain at epoch 0: Ready with one input
     buf.push(um("first"));
     let result = buf.drain_or_seal(DrainEpoch(0));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![super::LoopInput {
-                text: "first".to_string(),
-            }],
-            epoch: DrainEpoch(0),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(0), &["first"]);
     assert_eq!(buf.current_epoch(), DrainEpoch(1));
 
     // Epoch 1: inject after drain — should be Ready with correct epoch
     buf.test_inject_after_drain = vec![um("injected")];
     let result = buf.drain_or_seal(DrainEpoch(1));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![super::LoopInput {
-                text: "injected".to_string(),
-            }],
-            epoch: DrainEpoch(1),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(1), &["injected"]);
     assert!(!buf.is_sealed());
     assert_eq!(buf.current_epoch(), DrainEpoch(2));
 
@@ -511,23 +474,7 @@ fn test_injection_preserves_fifo_with_correct_epochs() {
     buf.push(um("existing"));
     buf.test_inject_after_drain = vec![um("late"), um("also late")];
     let result = buf.drain_or_seal(DrainEpoch(2));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![
-                super::LoopInput {
-                    text: "existing".to_string(),
-                },
-                super::LoopInput {
-                    text: "late".to_string(),
-                },
-                super::LoopInput {
-                    text: "also late".to_string(),
-                },
-            ],
-            epoch: DrainEpoch(2),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(2), &["existing", "late", "also late"]);
     assert!(!buf.is_sealed());
     assert_eq!(buf.current_epoch(), DrainEpoch(3));
 }
@@ -544,15 +491,7 @@ fn take_internal_continuation_advances_epoch_then_drain_or_seal_increments() {
     // Step 1: take_internal_continuation at epoch 0 with one user message
     buf.push(um("continuation input"));
     let result = buf.take_internal_continuation(DrainEpoch(0));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![super::LoopInput {
-                text: "continuation input".to_string(),
-            }],
-            epoch: DrainEpoch(0),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(0), &["continuation input"]);
     assert!(!buf.is_sealed(), "take_internal_continuation never seals");
     assert_eq!(buf.current_epoch(), DrainEpoch(1));
 
@@ -619,15 +558,7 @@ fn try_drain_unsealed_returns_ready_when_user_inputs_present() {
     let mut buf = RunInputBuffer::new();
     buf.push(um("hello"));
     let result = buf.try_drain_unsealed(DrainEpoch(0));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![super::LoopInput {
-                text: "hello".to_string(),
-            }],
-            epoch: DrainEpoch(0),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(0), &["hello"]);
     assert!(!buf.is_sealed());
     assert_eq!(buf.current_epoch(), DrainEpoch(1));
 }
@@ -665,15 +596,7 @@ fn try_drain_unsealed_empty_then_retry_same_epoch() {
     // Push input after the empty drain
     buf.push(um("late input"));
     let result = buf.try_drain_unsealed(DrainEpoch(0));
-    assert_eq!(
-        result,
-        BufferDrain::Ready {
-            batch: vec![super::LoopInput {
-                text: "late input".to_string(),
-            }],
-            epoch: DrainEpoch(0),
-        }
-    );
+    assert_drain_ready(&result, DrainEpoch(0), &["late input"]);
     assert!(!buf.is_sealed());
     assert_eq!(buf.current_epoch(), DrainEpoch(1));
 }

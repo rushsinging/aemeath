@@ -58,19 +58,19 @@ impl ContextApplicationService {
                 kind: "active_summary".into(),
                 content: summary,
                 cacheable: true,
+                cache_break: false,
             });
         }
-        blocks.push(SystemBlock {
-            kind: "cache_breakpoint".into(),
-            content: String::new(),
-            cacheable: true,
-        });
+        if let Some(last_cacheable) = blocks.last_mut() {
+            last_cacheable.cache_break = true;
+        }
         blocks.extend(prompt.uncached);
         if let Some(reminder) = &request.task_reminder.text {
             blocks.push(SystemBlock {
                 kind: "task_reminder".into(),
                 content: reminder.clone(),
                 cacheable: false,
+                cache_break: false,
             });
         }
 

@@ -13,9 +13,13 @@ pub struct TaskStopTool {
 #[path = "task_stop_tests.rs"]
 mod tests;
 
-fn parse_task_id(value: &str) -> Result<TaskId, String> {
-    TaskId::parse_tool_input(value)
-        .map_err(|_| format!("Task ID must be a non-zero decimal number: {value}"))
+fn current_task(access: &dyn TaskAccess, value: &str) -> Result<task::Task, String> {
+    let seq = TaskId::parse_tool_input(value)
+        .map(TaskId::get)
+        .map_err(|_| format!("Task ID must be a non-zero decimal number: {value}"))?;
+    access
+        .current_task_by_seq(seq)
+        .ok_or_else(|| format!("Task not found: {value}"))
 }
 
 #[async_trait]
@@ -54,23 +58,20 @@ impl TypedTool for TaskStopTool {
             Ok(args) => args,
             Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
-        let id = match parse_task_id(&args.task_id) {
-            Ok(id) => id,
+        let task = match current_task(self.access.as_ref(), &args.task_id) {
+            Ok(task) => task,
             Err(error) => return TypedToolResult::error(error),
         };
-        let task = match self.access.get(id) {
-            Some(task) => task,
-            None => return TypedToolResult::error(format!("Task not found: {}", args.task_id)),
-        };
+        let id = task.id();
         match task.status() {
             TaskStatus::Completed => {
                 return TypedToolResult::error(format!(
                     "Task #{} is already completed and cannot be stopped",
-                    id
+                    task.seq()
                 ))
             }
             TaskStatus::Deleted => {
-                return TypedToolResult::error(format!("Task #{} is already deleted", id))
+                return TypedToolResult::error(format!("Task #{} is already deleted", task.seq()))
             }
             _ => {}
         }
@@ -81,9 +82,9 @@ impl TypedTool for TaskStopTool {
             return TypedToolResult::error(error.to_string());
         }
         TypedToolResult::success(
-            format!("Task #{} stopped and marked as deleted", id),
+            format!("Task #{} stopped and marked as deleted", task.seq()),
             TaskStopResult {
-                task_id: id.to_string(),
+                task_id: task.seq().to_string(),
             },
         )
     }

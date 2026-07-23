@@ -29,7 +29,8 @@ use tokio_util::sync::CancellationToken;
 
 /// One initial invocation plus at most ten retries.
 const DEFAULT_MAX_ATTEMPTS: u32 = 11;
-const MAX_BACKOFF: Duration = Duration::from_secs(60);
+const INITIAL_BACKOFF: Duration = Duration::from_secs(10);
+const MAX_BACKOFF: Duration = Duration::from_secs(120);
 
 /// 一次 Provider attempt 的 usage 归属信息。
 ///
@@ -164,21 +165,21 @@ impl RetryPolicy {
         if error.kind == ProviderErrorKind::ContextTooLong {
             return RetryDecision::Compact;
         }
-        if visible_delta || !error.retryable || attempt >= self.max_attempts {
+        if error.kind == ProviderErrorKind::RateLimited
+            || visible_delta
+            || !error.retryable
+            || attempt >= self.max_attempts
+        {
             return RetryDecision::Fail;
         }
 
-        let exponential = if attempt == 1 {
-            Duration::ZERO
-        } else {
-            Duration::from_secs(
-                1u64.checked_shl(attempt.saturating_sub(2))
-                    .unwrap_or(u64::MAX),
-            )
-        };
-        let delay = exponential
+        let exponential = INITIAL_BACKOFF.saturating_mul(
+            1u32.checked_shl(attempt.saturating_sub(1))
+                .unwrap_or(u32::MAX),
+        );
+        let base_delay = error.retry_after.unwrap_or(exponential);
+        let delay = base_delay
             .saturating_add(Duration::from_millis(jitter_millis))
-            .max(error.retry_after.unwrap_or(Duration::ZERO))
             .min(self.max_backoff);
         RetryDecision::RetryAfter(delay)
     }
@@ -466,33 +467,41 @@ mod tests {
     }
 
     #[test]
-    fn first_retry_is_immediate_then_backoff_uses_jitter_and_retry_after() {
+    fn retry_policy_rejects_rate_limits_and_uses_retry_after_or_capped_exponential_backoff() {
         let policy = RetryPolicy::default();
         assert_eq!(
-            policy.decide(1, false, &retryable(ProviderErrorKind::Timeout), 0),
-            RetryDecision::RetryAfter(Duration::ZERO)
+            policy.decide(1, false, &retryable(ProviderErrorKind::RateLimited), 0),
+            RetryDecision::Fail
         );
         assert_eq!(
-            policy.decide(3, false, &retryable(ProviderErrorKind::Network), 250),
-            RetryDecision::RetryAfter(Duration::from_millis(2_250))
+            policy.decide(1, false, &retryable(ProviderErrorKind::Timeout), 250),
+            RetryDecision::RetryAfter(Duration::from_millis(10_250))
+        );
+        assert_eq!(
+            policy.decide(4, false, &retryable(ProviderErrorKind::Network), 0),
+            RetryDecision::RetryAfter(Duration::from_secs(80))
+        );
+        assert_eq!(
+            policy.decide(8, false, &retryable(ProviderErrorKind::Network), 999),
+            RetryDecision::RetryAfter(Duration::from_secs(120))
         );
 
-        let mut rate_limited = retryable(ProviderErrorKind::RateLimited);
-        rate_limited.retry_after = Some(Duration::from_secs(9));
+        let mut retry_after = retryable(ProviderErrorKind::Timeout);
+        retry_after.retry_after = Some(Duration::from_secs(30));
         assert_eq!(
-            policy.decide(2, false, &rate_limited, 0),
-            RetryDecision::RetryAfter(Duration::from_secs(9))
+            policy.decide(4, false, &retry_after, 250),
+            RetryDecision::RetryAfter(Duration::from_millis(30_250))
         );
     }
 
     #[test]
-    fn retry_policy_clamps_wait_and_allows_ten_retries_after_first_attempt() {
+    fn retry_policy_clamps_retry_after_and_allows_ten_retries_after_first_attempt() {
         let policy = RetryPolicy::default();
-        let mut error = retryable(ProviderErrorKind::RateLimited);
+        let mut error = retryable(ProviderErrorKind::Timeout);
         error.retry_after = Some(Duration::from_secs(900));
         assert_eq!(
             policy.decide(10, false, &error, 999),
-            RetryDecision::RetryAfter(Duration::from_secs(60))
+            RetryDecision::RetryAfter(Duration::from_secs(120))
         );
         assert_eq!(policy.decide(11, false, &error, 0), RetryDecision::Fail);
     }
@@ -563,7 +572,7 @@ mod tests {
 
         assert!(matches!(outcome, InvocationAttempt::Completed("ok")));
         assert_eq!(attempts.get(), 2);
-        assert_eq!(retries.into_inner(), vec![(2, Duration::ZERO)]);
+        assert_eq!(retries.into_inner(), vec![(2, Duration::from_secs(10))]);
     }
 
     #[tokio::test]
@@ -639,10 +648,10 @@ mod tests {
         assert_eq!(error.kind, ProviderErrorKind::StreamTruncated);
         assert!(error.retryable);
         assert!(!committed_delta);
-        assert!(matches!(
+        assert_eq!(
             coordinator.policy.decide(1, committed_delta, &error, 0),
-            RetryDecision::RetryAfter(Duration::ZERO)
-        ));
+            RetryDecision::RetryAfter(Duration::from_secs(10))
+        );
     }
 
     #[tokio::test]

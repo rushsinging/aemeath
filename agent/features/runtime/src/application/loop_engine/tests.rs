@@ -40,6 +40,8 @@ impl Default for ScriptedPort {
         drain_outcomes.push_back(DrainOutcome::ready(
             vec![LoopInput {
                 text: "test-input".to_string(),
+                input_id: None,
+                images: Vec::new(),
             }],
             DrainEpoch(0),
         ));
@@ -425,12 +427,16 @@ async fn engine_executes_tools_then_reenters_the_same_loop() {
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "first".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(0),
             ),
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "second".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(1),
             ),
@@ -619,24 +625,32 @@ async fn engine_passes_soft_block_decision_to_the_single_tool_adapter() {
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "one".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(0),
             ),
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "two".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(1),
             ),
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "three".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(2),
             ),
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "four".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(3),
             ),
@@ -810,6 +824,8 @@ async fn internal_continuation_while_awaiting_user_without_input_stays_awaiting(
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "first".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(0),
             ),
@@ -880,6 +896,8 @@ async fn internal_continuation_while_awaiting_user_with_input_resumes() {
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "first".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(0),
             ),
@@ -917,6 +935,8 @@ async fn internal_continuation_while_awaiting_user_with_input_resumes() {
             },
             batch: vec![LoopInput {
                 text: "yes".to_string(),
+                input_id: None,
+                images: Vec::new(),
             }],
             epoch: DrainEpoch(1),
         },
@@ -981,12 +1001,16 @@ async fn engine_terminal_text_is_the_last_assistant_text_not_the_first() {
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "first".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(0),
             ),
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "second".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(1),
             ),
@@ -1039,6 +1063,8 @@ async fn engine_rejects_wrong_epoch() {
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "test".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(5), // Engine expects 0
             ),
@@ -1071,6 +1097,8 @@ async fn await_user_input_empty_preserves_run_epoch() {
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "first".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(0),
             ),
@@ -1113,6 +1141,8 @@ async fn await_user_input_empty_then_input_same_epoch_reenter() {
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "first".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(0),
             ),
@@ -1141,6 +1171,8 @@ async fn await_user_input_empty_then_input_same_epoch_reenter() {
         DrainOutcome::ready(
             vec![LoopInput {
                 text: "user response".to_string(),
+                input_id: None,
+                images: Vec::new(),
             }],
             DrainEpoch(1),
         ),
@@ -1173,6 +1205,8 @@ async fn drain_input_epoch_mismatch_does_not_advance_run_epoch() {
             DrainOutcome::ready(
                 vec![LoopInput {
                     text: "wrong-epoch-input".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 DrainEpoch(5),
             ),
@@ -1189,4 +1223,200 @@ async fn drain_input_epoch_mismatch_does_not_advance_run_epoch() {
         epoch_before,
         "epoch must NOT advance on drain_input error"
     );
+}
+
+// ── #1272 close-out: empty Ready + default await_user_input tests ─────
+
+/// `DrainOutcome::ready(vec![])` must NOT panic — the assert has been
+/// removed and empty-batch detection lives in `run_loop`.
+#[test]
+fn drain_outcome_ready_empty_does_not_panic() {
+    // If this panics, the test itself fails.
+    let outcome = DrainOutcome::ready(vec![], DrainEpoch(0));
+    match &outcome {
+        DrainOutcome::Ready { batch, .. } => assert!(batch.is_empty()),
+        _ => panic!("expected Ready variant, got {outcome:?}"),
+    }
+}
+
+/// When `run_loop` receives an empty `Ready` batch from the adapter, it
+/// must return `Err(Adapter)` WITHOUT advancing epoch, transitioning state,
+/// or calling `freeze_step` / `invoke_model`.
+#[tokio::test]
+async fn run_loop_empty_ready_returns_err_without_executing_step() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = ScriptedPort {
+        // First (and only) drain returns an empty Ready batch.
+        drain_outcomes: VecDeque::from([DrainOutcome::Ready {
+            batch: vec![],
+            epoch: DrainEpoch(0),
+        }]),
+        // Provide a model step that should NEVER be invoked.
+        model_steps: VecDeque::from([ModelStep::Complete {
+            text: "should-not-run".to_string(),
+        }]),
+        ..Default::default()
+    };
+
+    let epoch_before = run.next_drain_epoch();
+    let result = run_loop(&mut run, &cancel, &mut port).await;
+
+    let err = result.expect_err("empty Ready must produce an error");
+    assert!(
+        matches!(&err, LoopEngineError::Adapter(msg) if msg.contains("空的 Ready batch")),
+        "Expected Chinese empty-Ready Adapter error, got: {err:?}"
+    );
+
+    // Epoch must NOT have advanced.
+    assert_eq!(
+        run.next_drain_epoch(),
+        epoch_before,
+        "epoch must NOT advance for empty Ready"
+    );
+    // Run must NOT be terminal (no Completed/Failed transition).
+    assert!(
+        !run.status().is_terminal(),
+        "Run must not be terminal after empty Ready error"
+    );
+    // freeze_step / model must NOT have been called.
+    assert!(
+        !port.calls.contains(&"freeze_step"),
+        "freeze_step must not be called for empty Ready"
+    );
+    assert!(
+        !port.calls.contains(&"model"),
+        "invoke_model must not be called for empty Ready"
+    );
+}
+
+// ── DrainOnlyPort: implements only drain_input (no await_user_input) ──
+
+/// A minimal port that implements `drain_input` but does NOT override
+/// `await_user_input`, relying on the trait default. Used to verify that
+/// entering `AwaitingUser` with the default impl returns an Adapter error
+/// instead of delegating to `drain_input` (which could seal the buffer).
+struct DrainOnlyPort {
+    drain_outcomes: VecDeque<DrainOutcome>,
+    drain_epoch: DrainEpoch,
+    model_steps: VecDeque<ModelStep>,
+    tool_steps: VecDeque<ToolStep>,
+    events: Vec<RunDomainEvent>,
+    calls: Vec<&'static str>,
+}
+
+#[async_trait::async_trait]
+impl RunLoopPort for DrainOnlyPort {
+    async fn drain_input(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        self.calls.push("drain_input");
+        if expected_epoch != self.drain_epoch {
+            return Err(LoopEngineError::Adapter(format!(
+                "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                expected_epoch, self.drain_epoch,
+            )));
+        }
+        let outcome =
+            self.drain_outcomes
+                .pop_front()
+                .unwrap_or_else(|| DrainOutcome::EmptyAndSealed {
+                    epoch: self.drain_epoch,
+                });
+        self.drain_epoch = self.drain_epoch.next();
+        Ok(outcome)
+    }
+    // await_user_input: NOT overridden — uses the default impl.
+    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
+        Ok(false)
+    }
+    async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {
+        Ok(())
+    }
+    async fn invoke_model(
+        &mut self,
+        _cancel: &CancellationToken,
+    ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
+        self.calls.push("model");
+        self.model_steps
+            .pop_front()
+            .map(|step| (step, StepTokenUsage::default()))
+            .ok_or_else(|| LoopEngineError::Adapter("missing model step".to_string()))
+    }
+    async fn execute_tools(
+        &mut self,
+        _run_id: &sdk::RunId,
+        _step_id: &sdk::RunStepId,
+        _calls: &[(ToolCall, ToolGuardDecision)],
+        _cancel: &CancellationToken,
+    ) -> Result<ToolStep, LoopEngineError> {
+        self.calls.push("tools");
+        self.tool_steps
+            .pop_front()
+            .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))
+    }
+    async fn on_stuck(&mut self, _decision: &StuckDecision) -> Result<(), LoopEngineError> {
+        Ok(())
+    }
+    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+        self.events.extend(events);
+        Ok(())
+    }
+}
+
+/// A port that only implements `drain_input` (no `await_user_input` override)
+/// must receive a Chinese Adapter error when the Run enters `AwaitingUser`,
+/// NOT a silent delegation to `drain_input` (which would seal the buffer).
+#[tokio::test]
+async fn default_await_user_input_returns_error_not_delegating_to_drain() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = DrainOnlyPort {
+        drain_outcomes: VecDeque::from([
+            DrainOutcome::ready(
+                vec![LoopInput {
+                    text: "first".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
+                }],
+                DrainEpoch(0),
+            ),
+            // This would be consumed by drain_input if the default impl
+            // delegated — but it should NOT be reached.
+            DrainOutcome::EmptyAndSealed {
+                epoch: DrainEpoch(1),
+            },
+        ]),
+        drain_epoch: DrainEpoch(0),
+        model_steps: VecDeque::from([ModelStep::Tools {
+            text: "question".to_string(),
+            calls: vec![call("AskUserQuestion", json!({}))],
+        }]),
+        tool_steps: VecDeque::from([ToolStep::AwaitUser]),
+        events: Vec::new(),
+        calls: Vec::new(),
+    };
+
+    let result = run_loop(&mut run, &cancel, &mut port).await;
+    let err = result.expect_err("default await_user_input must return Err");
+
+    assert!(
+        matches!(&err, LoopEngineError::Adapter(msg)
+            if msg.contains("未覆写 await_user_input")),
+        "Expected Chinese 'not overridden' Adapter error, got: {err:?}"
+    );
+
+    // drain_input was called exactly once (for the first Ready).
+    // It must NOT have been called a second time when AwaitingUser
+    // triggered await_user_input.
+    let drain_count = port.calls.iter().filter(|&&c| c == "drain_input").count();
+    assert_eq!(
+        drain_count, 1,
+        "drain_input must be called exactly once (first Ready), \
+         NOT delegated to by await_user_input"
+    );
+    // Run must be in AwaitingUser (the step produced AwaitUser before
+    // the error interrupted the loop).
+    assert_eq!(run.status(), RunStatus::AwaitingUser);
 }

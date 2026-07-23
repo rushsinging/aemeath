@@ -189,9 +189,6 @@ impl<'a> SubAgentRun<'a> {
             system_prompt: crate::ports::SystemPromptSpec::new(&self.system),
             model_id: self.model_name_for_log.clone(),
             effective_reasoning: self.level,
-            current_date: crate::ports::CalendarDate::new(
-                chrono::Local::now().format("%Y-%m-%d").to_string(),
-            ),
             task_reminder: crate::ports::TaskReminderSnapshot::default(),
             language: crate::ports::Language::new(&self.language),
             agent_roles: self.config_snapshot.agents().roles.clone(),
@@ -438,6 +435,10 @@ fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal
     }
 }
 
+fn should_complete_after_model_response(has_no_tool_calls: bool) -> bool {
+    has_no_tool_calls
+}
+
 #[async_trait]
 impl RunLoopPort for SubAgentRun<'_> {
     fn freeze_step(
@@ -495,6 +496,8 @@ impl RunLoopPort for SubAgentRun<'_> {
             return Ok(crate::application::loop_engine::DrainOutcome::Ready {
                 batch: vec![crate::application::loop_engine::LoopInput {
                     text: self.prompt.to_string(),
+                    input_id: None,
+                    images: Vec::new(),
                 }],
                 epoch,
             });
@@ -600,7 +603,11 @@ impl RunLoopPort for SubAgentRun<'_> {
                             .system_blocks
                             .iter()
                             .map(|block| {
-                                if block.cacheable {
+                                if block.cache_break {
+                                    debug_assert!(
+                                        block.cacheable,
+                                        "cache breakpoint 必须位于可缓存前缀"
+                                    );
                                     RequestSystemBlock::Cacheable(block.content.clone())
                                 } else {
                                     RequestSystemBlock::Text(block.content.clone())
@@ -768,7 +775,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                     }
                 }
 
-                if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
+                if should_complete_after_model_response(tool_calls.is_empty()) {
                     return Ok((
                         ModelStep::Complete {
                             text: resp.assistant_message.text_content(),
@@ -1044,6 +1051,12 @@ mod tests {
         };
 
         assert_eq!(terminal_from_domain_event(&event), None);
+    }
+
+    #[test]
+    fn model_response_with_tool_calls_is_not_completed_by_end_turn() {
+        assert!(!super::should_complete_after_model_response(false));
+        assert!(super::should_complete_after_model_response(true));
     }
 
     #[test]

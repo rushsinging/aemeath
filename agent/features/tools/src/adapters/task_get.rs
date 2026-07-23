@@ -13,9 +13,13 @@ pub struct TaskGetTool {
 #[path = "task_get_tests.rs"]
 mod tests;
 
-fn parse_task_id(value: &str) -> Result<TaskId, String> {
-    TaskId::parse_tool_input(value)
-        .map_err(|_| format!("Task ID must be a non-zero decimal number: {value}"))
+fn current_task(access: &dyn TaskAccess, value: &str) -> Result<task::Task, String> {
+    let seq = TaskId::parse_tool_input(value)
+        .map(TaskId::get)
+        .map_err(|_| format!("Task ID must be a non-zero decimal number: {value}"))?;
+    access
+        .current_task_by_seq(seq)
+        .ok_or_else(|| format!("Task not found: {value}"))
 }
 
 #[async_trait]
@@ -54,18 +58,19 @@ impl TypedTool for TaskGetTool {
             Ok(args) => args,
             Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
-        let id = match parse_task_id(&args.task_id) {
-            Ok(id) => id,
+        let task = match current_task(self.access.as_ref(), &args.task_id) {
+            Ok(task) => task,
             Err(error) => return TypedToolResult::error(error),
         };
-        let task = match self.access.get(id) {
-            Some(task) if task.status() != task::TaskStatus::Deleted => task,
-            _ => return TypedToolResult::error(format!("Task not found: {}", args.task_id)),
-        };
+        let blocked_by = task
+            .blocked_by()
+            .iter()
+            .filter_map(|id| self.access.get(*id).map(|task| task.seq().to_string()))
+            .collect();
         TypedToolResult::success(
-            format!("Task #{}: {}", task.id(), task.subject()),
+            format!("Task #{}: {}", task.seq(), task.subject()),
             TaskGetResult {
-                task: TaskView::from(&task),
+                task: TaskView::from_task(&task, blocked_by),
             },
         )
     }

@@ -97,6 +97,7 @@ impl AgentClientImpl {
             tool_execution: ctx.resources.tool_execution,
             system_blocks: ctx.resources.system_blocks,
             system_prompt_text: ctx.resources.system_prompt_text,
+            initial_git_context: ctx.resources.initial_git_context,
             user_context: ctx.resources.user_context,
             context_size: ctx.resources.context_size,
             verbose: ctx.verbose,

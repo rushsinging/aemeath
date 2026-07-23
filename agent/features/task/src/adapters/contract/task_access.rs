@@ -102,19 +102,31 @@ pub(super) fn assert_task_access_contract(
     assert!(no_op.events.is_empty());
     assert_eq!(access.revision(), before_queries);
 
-    // ---- A second concurrent Batch is rejected atomically: no new Batch is
-    // admitted and the active-conflict failure never reserves a revision ----
-    let revision_before_conflict = access.revision();
-    let batches_before_conflict = access.list_batches();
+    // ---- Creating a new task list atomically archives the prior active batch
+    // and promotes the new one without exposing a second active batch. ----
+    let revision_before_replacement = access.revision();
+    let replacement = access
+        .create_batch(batch_spec("replacement"), 5)
+        .expect("new task list replaces active batch");
+    assert_eq!(replacement.value.status(), BatchStatus::Active);
     assert_eq!(
-        access.create_batch(batch_spec("conflict"), 5),
-        Err(TaskCommandError::ActiveBatchConflict {
-            active: batch.value.id(),
-            requested: BatchId::new(batch.value.id().get() + 1),
-        })
+        access.revision(),
+        TaskRevision::new(revision_before_replacement.get() + 1)
     );
-    assert_eq!(access.revision(), revision_before_conflict);
-    assert_eq!(access.list_batches(), batches_before_conflict);
+    assert_eq!(
+        access.get(first.value.id()).unwrap().batch(),
+        batch.value.id(),
+        "existing task remains attached to archived list"
+    );
+    assert_eq!(
+        access
+            .list_batches()
+            .iter()
+            .find(|candidate| candidate.id() == batch.value.id())
+            .unwrap()
+            .status(),
+        BatchStatus::Archived
+    );
 
     // ---- Multi-entity dependency add/remove and delete: revision, events,
     // and every touched entity's edges stay consistent within one commit ----
@@ -350,9 +362,10 @@ pub(super) fn assert_task_access_contract(
     );
 
     // ---- record_batch_turn: Active admission plus idempotent no-op ----
+    let active_batch_id = replacement.value.id();
     let revision_before_turn = access.revision();
     let turned = access
-        .record_batch_turn(batch.value.id(), 1, true)
+        .record_batch_turn(active_batch_id, 1, true)
         .expect("active batch admits turn");
     assert_eq!(
         turned.revision(),
@@ -363,14 +376,14 @@ pub(super) fn assert_task_access_contract(
 
     let revision_after_first_turn = access.revision();
     let repeated_turn = access
-        .record_batch_turn(batch.value.id(), 1, true)
+        .record_batch_turn(active_batch_id, 1, true)
         .expect("idempotent turn succeeds");
     assert_eq!(repeated_turn.revision(), None);
     assert!(repeated_turn.events.is_empty());
     assert_eq!(access.revision(), revision_after_first_turn);
 
     let silent_turn = access
-        .record_batch_turn(batch.value.id(), 2, false)
+        .record_batch_turn(active_batch_id, 2, false)
         .expect("silence turn recorded");
     assert_eq!(
         silent_turn.revision(),
@@ -381,9 +394,7 @@ pub(super) fn assert_task_access_contract(
     // ---- Batch lifecycle: pause -> resume -> archive, where a duplicate
     // archive is the sole idempotent no-op terminal transition ----
     let revision_before_pause = access.revision();
-    let paused = access
-        .pause_batch(batch.value.id())
-        .expect("pause succeeds");
+    let paused = access.pause_batch(active_batch_id).expect("pause succeeds");
     assert_eq!(
         paused.revision(),
         Some(TaskRevision::new(revision_before_pause.get() + 1))
@@ -393,9 +404,9 @@ pub(super) fn assert_task_access_contract(
     // A Paused batch can no longer record turns; the rejection is atomic.
     let observable_before_paused_turn = observable(access);
     assert_eq!(
-        access.record_batch_turn(batch.value.id(), 3, true),
+        access.record_batch_turn(active_batch_id, 3, true),
         Err(TaskCommandError::BatchNotActive {
-            id: batch.value.id(),
+            id: active_batch_id,
             status: BatchStatus::Paused,
         })
     );
@@ -403,7 +414,7 @@ pub(super) fn assert_task_access_contract(
 
     let revision_before_resume = access.revision();
     let resumed = access
-        .resume_batch(batch.value.id())
+        .resume_batch(active_batch_id)
         .expect("resume succeeds");
     assert_eq!(
         resumed.revision(),
@@ -413,7 +424,7 @@ pub(super) fn assert_task_access_contract(
 
     let revision_before_archive = access.revision();
     let archived = access
-        .archive_batch(batch.value.id())
+        .archive_batch(active_batch_id)
         .expect("archive succeeds");
     assert_eq!(
         archived.revision(),
@@ -426,7 +437,7 @@ pub(super) fn assert_task_access_contract(
     // terminal transition attempted again below.
     let revision_after_archive = access.revision();
     let duplicate_archive = access
-        .archive_batch(batch.value.id())
+        .archive_batch(active_batch_id)
         .expect("duplicate archive succeeds");
     assert_eq!(duplicate_archive.revision(), None);
     assert!(duplicate_archive.events.is_empty());

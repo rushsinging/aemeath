@@ -48,6 +48,8 @@ where
     pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     pub system_blocks: Vec<provider::RequestSystemBlock>,
     pub system_prompt_text: String,
+    /// 只在本 ChatLoop 启动时投递一次的 Git 上下文普通消息。
+    pub initial_git_context: String,
     pub user_context: String,
     /// 本轮 chat loop 的初始消息（来自 user_input）。Runtime 不再持有/回写
     /// 会话链；历史由 Context backing 提供。

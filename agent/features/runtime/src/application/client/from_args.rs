@@ -436,10 +436,7 @@ pub async fn from_args_with_workspace(
         prompt_parts.clone(),
     )
     .await;
-    let system_blocks = vec![
-        RequestSystemBlock::Cacheable(static_prompt),
-        RequestSystemBlock::Text(prompt_parts.dynamic_part),
-    ];
+    let system_blocks = vec![RequestSystemBlock::Cacheable(static_prompt)];
     let system_prompt_text = system_blocks
         .iter()
         .map(RequestSystemBlock::text)
@@ -469,6 +466,7 @@ pub async fn from_args_with_workspace(
             tool_context_binding,
             system_blocks,
             system_prompt_text,
+            initial_git_context: prompt_parts.initial_git_context,
             user_context: prompt_parts.claude_md,
             agent_runner,
             tool_result_materializer,

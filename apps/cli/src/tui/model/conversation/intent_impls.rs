@@ -7,6 +7,7 @@ use super::intent::*;
 use super::model::ConversationModel;
 use super::processing_job::{ProcessingJob, ProcessingStatus};
 use super::runtime_state::RuntimeState;
+use super::stop_hook_notice::stop_hook_notice_content;
 use super::task_status::TaskStatusSnapshot;
 use super::tool_observe::ToolCallUpdateObservation;
 use super::update::ConversationUpdate;
@@ -41,6 +42,11 @@ impl ConversationUpdate for ResumeConversation {
                 Ok(HistoryDisplayMessage::User { text }) => {
                     // 直接调 model.start_chat（不走 StartChat intent），避免 spinner 副作用。
                     all_changes.extend(model.start_chat(text));
+                }
+                Ok(HistoryDisplayMessage::StopHookNotice { .. }) => {
+                    all_changes.extend(model.apply(AppendHookNotice {
+                        content: stop_hook_notice_content(msg),
+                    }));
                 }
                 Ok(HistoryDisplayMessage::ToolResults) => {}
                 Ok(HistoryDisplayMessage::Assistant { blocks }) => {
@@ -342,6 +348,54 @@ impl ConversationUpdate for DismissAskUserBatch {
     }
 }
 
+impl ConversationUpdate for ShowInteraction {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.show_interaction(self.request)
+    }
+}
+
+impl ConversationUpdate for UpdateInteractionDraft {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.update_interaction_draft(&self.request_id, self.action)
+    }
+}
+
+impl ConversationUpdate for ConfirmInteraction {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.confirm_interaction(&self.request_id)
+    }
+}
+
+impl ConversationUpdate for CancelInteraction {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.cancel_interaction(&self.request_id)
+    }
+}
+
+impl ConversationUpdate for InteractionReplyAccepted {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.accept_interaction(&self.request_id)
+    }
+}
+
+impl ConversationUpdate for InteractionCancelAccepted {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.accept_interaction(&self.request_id)
+    }
+}
+
+impl ConversationUpdate for InteractionReplyRejected {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.reject_interaction_reply(&self.request_id, self.failure)
+    }
+}
+
+impl ConversationUpdate for InteractionCancelRejected {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.reject_interaction_cancel(&self.request_id, self.failure)
+    }
+}
+
 impl ConversationUpdate for CompleteChat {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.complete_chat(self.chat_id, self.turn_id)
@@ -353,43 +407,6 @@ impl ConversationUpdate for CompleteChat {
 //  操作 ConversationModel 字段，返回 ConversationChange）
 // ════════════════════════════════════════════════════════════════════
 
-impl ConversationUpdate for SetProviderModel {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.provider = self.provider.clone();
-        model.runtime.model_id = self.model_id.clone();
-        vec![ConversationChange::ProviderModelChanged {
-            provider: self.provider,
-            model_id: self.model_id,
-        }]
-    }
-}
-
-impl ConversationUpdate for UpdateWorkspace {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.workspace.cwd = Some(self.cwd.clone());
-        model.runtime.workspace.worktree = self.worktree.clone();
-        vec![ConversationChange::WorkspaceChanged {
-            cwd: self.cwd,
-            worktree: self.worktree,
-        }]
-    }
-}
-
-impl ConversationUpdate for WorkspaceSnapshotReceived {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.workspace.path_base = self.path_base.clone();
-        model.runtime.workspace.workspace_root = self.workspace_root.clone();
-        model.runtime.workspace.branch = self.branch.clone();
-        model.runtime.workspace.kind = self.kind;
-        vec![ConversationChange::WorkspaceSnapshotChanged {
-            path_base: self.path_base,
-            workspace_root: self.workspace_root,
-            branch: self.branch,
-            kind: self.kind,
-        }]
-    }
-}
-
 impl ConversationUpdate for RecordUsage {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.runtime.usage.input_tokens += self.input_tokens;
@@ -397,17 +414,6 @@ impl ConversationUpdate for RecordUsage {
         model.runtime.usage.last_input_tokens = self.last_input_tokens;
         model.runtime.usage.api_calls += 1;
         model.runtime.usage.cost_usd += self.cost_usd;
-        vec![ConversationChange::UsageChanged {
-            input_tokens: model.runtime.usage.input_tokens,
-            output_tokens: model.runtime.usage.output_tokens,
-            cost_usd: model.runtime.usage.cost_usd,
-        }]
-    }
-}
-
-impl ConversationUpdate for SetContextSize {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.usage.context_size = self.0;
         vec![ConversationChange::UsageChanged {
             input_tokens: model.runtime.usage.input_tokens,
             output_tokens: model.runtime.usage.output_tokens,
@@ -502,13 +508,6 @@ impl ConversationUpdate for SetTransientStatusNotice {
     }
 }
 
-impl ConversationUpdate for SetThinking {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.thinking = self.0;
-        vec![ConversationChange::ThinkingChanged]
-    }
-}
-
 impl ConversationUpdate for SetGraphPhase {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.runtime.graph_phase = self.0.clone();
@@ -531,10 +530,103 @@ impl ConversationUpdate for SetCompactProgress {
     }
 }
 
+impl ConversationUpdate for SetSpinnerPhase {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.runtime.set_spinner_phase(self.phase);
+        vec![ConversationChange::SpinnerPhaseChanged]
+    }
+}
+
+impl ConversationUpdate for StopSpinner {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.runtime.stop_spinner();
+        vec![ConversationChange::SpinnerStopped]
+    }
+}
+
+impl ConversationUpdate for SyncQueuedSubmissions {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.sync_queued_submissions(self.queued)
+    }
+}
+
+impl ConversationUpdate for ClearCompactRuntime {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.clear_compact_runtime()
+    }
+}
+
+impl ConversationUpdate for RunStarted {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        if model.start_agent_run(self.run_id.clone()) {
+            vec![ConversationChange::AgentRunChanged {
+                run_id: self.run_id,
+                phase: super::interaction::AgentRunPhase::Running,
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+macro_rules! impl_run_transition {
+    ($intent:ident, $phase:expr) => {
+        impl ConversationUpdate for $intent {
+            fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+                if model.transition_agent_run(&self.run_id, $phase) {
+                    vec![ConversationChange::AgentRunChanged {
+                        run_id: self.run_id,
+                        phase: $phase,
+                    }]
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+    };
+}
+
+impl_run_transition!(
+    RunAwaitingUser,
+    super::interaction::AgentRunPhase::AwaitingUser
+);
+impl_run_transition!(RunResumed, super::interaction::AgentRunPhase::Running);
+impl_run_transition!(RunCancelling, super::interaction::AgentRunPhase::Cancelling);
+impl_run_transition!(RunCancelled, super::interaction::AgentRunPhase::Cancelled);
+impl_run_transition!(RunCompleted, super::interaction::AgentRunPhase::Completed);
+impl_run_transition!(RunFailed, super::interaction::AgentRunPhase::Failed);
+
+impl ConversationUpdate for RunStepStarted {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        if model.start_agent_run_step(&self.run_id, self.step_id.clone(), self.tool_reference) {
+            vec![ConversationChange::AgentRunStepChanged {
+                run_id: self.run_id,
+                step_id: self.step_id,
+                phase: super::interaction::AgentRunStepPhase::Running,
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl ConversationUpdate for RunStepCompleted {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        if model.complete_agent_run_step(&self.run_id, &self.step_id) {
+            vec![ConversationChange::AgentRunStepChanged {
+                run_id: self.run_id,
+                step_id: self.step_id,
+                phase: super::interaction::AgentRunStepPhase::Completed,
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
 // ════════════════════════════════════════════════════════════════════
 //  ConversationIntent enum 的 ConversationUpdate 转发
 // ════════════════════════════════════════════════════════════════════
-
 impl ConversationUpdate for ConversationIntent {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         match self {
@@ -571,12 +663,25 @@ impl ConversationUpdate for ConversationIntent {
             Self::SetAskUserConfirmCursor(s) => s.update(model),
             Self::ConfirmAskUserBatch(s) => s.update(model),
             Self::DismissAskUserBatch(s) => s.update(model),
+            Self::ShowInteraction(s) => s.update(model),
+            Self::UpdateInteractionDraft(s) => s.update(model),
+            Self::ConfirmInteraction(s) => s.update(model),
+            Self::CancelInteraction(s) => s.update(model),
+            Self::InteractionReplyAccepted(s) => s.update(model),
+            Self::InteractionCancelAccepted(s) => s.update(model),
+            Self::InteractionReplyRejected(s) => s.update(model),
+            Self::InteractionCancelRejected(s) => s.update(model),
+            Self::RunStarted(s) => s.update(model),
+            Self::RunAwaitingUser(s) => s.update(model),
+            Self::RunResumed(s) => s.update(model),
+            Self::RunCancelling(s) => s.update(model),
+            Self::RunCancelled(s) => s.update(model),
+            Self::RunCompleted(s) => s.update(model),
+            Self::RunFailed(s) => s.update(model),
+            Self::RunStepStarted(s) => s.update(model),
+            Self::RunStepCompleted(s) => s.update(model),
             Self::CompleteChat(s) => s.update(model),
-            Self::SetProviderModel(s) => s.update(model),
-            Self::UpdateWorkspace(s) => s.update(model),
-            Self::WorkspaceSnapshotReceived(s) => s.update(model),
             Self::RecordUsage(s) => s.update(model),
-            Self::SetContextSize(s) => s.update(model),
             Self::UpdateLastInputTokens(s) => s.update(model),
             Self::RecordLiveTps(s) => s.update(model),
             Self::UpdateTaskStatus(s) => s.update(model),
@@ -585,9 +690,89 @@ impl ConversationUpdate for ConversationIntent {
             Self::UpdateTaskLines(s) => s.update(model),
             Self::SetStatusNotice(s) => s.update(model),
             Self::SetTransientStatusNotice(s) => s.update(model),
-            Self::SetThinking(s) => s.update(model),
             Self::SetGraphPhase(s) => s.update(model),
             Self::SetCompactProgress(s) => s.update(model),
+            Self::SetSpinnerPhase(s) => s.update(model),
+            Self::StopSpinner(s) => s.update(model),
+            Self::SyncQueuedSubmissions(s) => s.update(model),
+            Self::ClearCompactRuntime(s) => s.update(model),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::model::conversation::block::HookNoticeKind;
+    use crate::tui::model::output_timeline::OutputTimelineItem;
+
+    #[test]
+    fn resume_projects_stop_hook_feedback_as_hook_notice() {
+        let mut model = ConversationModel::default();
+        let mut message = sdk::ChatMessage::system_generated_user_text(
+            "<system-reminder>blocked by hook</system-reminder>",
+        );
+        message.metadata = Some(sdk::ChatMessageMetadata {
+            source: sdk::ChatMessageSource::StopHook,
+            stop_hook: Some(sdk::StopHookFeedbackView {
+                summary: "blocked by hook".to_string(),
+                command: "check-agent-stop.sh".to_string(),
+                exit_code: Some(2),
+                reason: "exit code 2".to_string(),
+                stdout_preview: String::new(),
+                stderr_preview: "blocked".to_string(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+                output_file: None,
+            }),
+        });
+
+        ResumeConversation {
+            messages: vec![message],
+        }
+        .update(&mut model);
+
+        assert!(matches!(
+            model.timeline.items().last(),
+            Some(OutputTimelineItem::HookNotice { content, .. })
+                if content.kind == HookNoticeKind::Blocked
+                    && content.title == "Hook blocked: Stop"
+                    && content.body == "blocked by hook"
+                    && content.details.as_deref().is_some_and(|details|
+                        details.contains("Command: check-agent-stop.sh")
+                            && details.contains("Exit code: 2")
+                    )
+        ));
+        assert!(model.timeline.items().iter().all(|item| {
+            !matches!(item, OutputTimelineItem::UserMessage { text, .. } if text == "<system-reminder>blocked by hook</system-reminder>")
+        }));
+    }
+
+    #[test]
+    fn resume_interleaves_stop_hook_notice_without_user_message_projection() {
+        let user = sdk::ChatMessage::user_text("user question");
+        let mut stop_hook = sdk::ChatMessage::system_generated_user_text(
+            "<system-reminder>blocked by hook</system-reminder>",
+        );
+        stop_hook.metadata = Some(sdk::ChatMessageMetadata {
+            source: sdk::ChatMessageSource::StopHook,
+            stop_hook: None,
+        });
+        let assistant = sdk::ChatMessage::assistant_text("assistant reply");
+        let mut model = ConversationModel::default();
+
+        ResumeConversation {
+            messages: vec![user, stop_hook, assistant],
+        }
+        .update(&mut model);
+
+        assert!(matches!(
+            model.timeline.items().get(1),
+            Some(OutputTimelineItem::HookNotice { content, .. })
+                if content.kind == HookNoticeKind::Blocked && content.body == "blocked by hook"
+        ));
+        assert!(model.timeline.items().iter().all(|item| {
+            !matches!(item, OutputTimelineItem::UserMessage { text, .. } if text.contains("blocked by hook"))
+        }));
     }
 }

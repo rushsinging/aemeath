@@ -1,4 +1,7 @@
 pub mod agent_progress;
+#[cfg(test)]
+#[path = "conversation/agent_run_state_tests.rs"]
+mod agent_run_state_tests;
 pub mod ask_user;
 pub mod block;
 pub mod change;
@@ -9,6 +12,10 @@ pub mod history_parse;
 pub mod ids;
 pub mod intent;
 mod intent_impls;
+pub mod interaction;
+#[cfg(test)]
+#[path = "conversation/interaction_tests.rs"]
+mod interaction_tests;
 pub mod model;
 #[cfg(test)]
 mod model_extra_tests;
@@ -20,6 +27,7 @@ pub mod queued_submission;
 pub mod runtime_state;
 pub mod spinner;
 pub mod status_notice;
+pub mod stop_hook_notice;
 pub mod stream;
 pub mod streaming_preview;
 pub mod system_reminder;

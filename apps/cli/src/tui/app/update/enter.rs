@@ -1,7 +1,6 @@
 use super::UpdateResult;
 use crate::tui::app::App;
 use crate::tui::effect::effect::Effect;
-use crate::tui::model::input::change::submitted_submission_from_changes;
 use crate::tui::model::input::submission::InputSubmission;
 
 impl App {
@@ -11,11 +10,7 @@ impl App {
     /// 提交统一经 input_events 通道发往常驻 loop（`submit_user_input_event`）。
     /// 仅 slash 命令仍走 `pending_slash` 单独处理（slash 永不作为 user message）。
     pub(super) fn update_enter(&mut self) -> UpdateResult {
-        let changes = self
-            .model
-            .input
-            .apply(crate::tui::model::input::intent::InputIntent::Submit);
-        let Some(submission) = submitted_submission_from_changes(&changes) else {
+        let Some(submission) = self.submit_input_intent() else {
             return UpdateResult::none();
         };
         if submission.text.is_empty() && submission.images.is_empty() {
@@ -57,12 +52,12 @@ impl App {
             .collect();
         // 生成一次 InputId，同时用于事件 id 与占位块 input_id——两者必须相同（#390 A3）。
         let input_id = sdk::InputId::new_v7();
-        let text_preview: String = submission.text.chars().take(60).collect();
+        let text_len = submission.text.chars().count();
         let image_count = images.len();
         crate::tui::log_debug!(
-            "submit_user_input_event input_id={} text_preview={:?} image_count={} is_processing={}",
+            "submit_user_input_event input_id={} text_len={} image_count={} is_processing={}",
             input_id,
-            text_preview,
+            text_len,
             image_count,
             self.chat.is_processing
         );

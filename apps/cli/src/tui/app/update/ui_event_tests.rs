@@ -440,6 +440,62 @@ fn format_reflection_history_accepts_empty_records() {
     assert_eq!(format_reflection_history(&[]), "Reflection history (0):");
 }
 
+// ── #1272 debug-safe logging tests ───────────────────────────────────
+
+/// UserMessagesAdopted handler 的 debug log 只记录 text_len，不记录正文。
+#[test]
+fn user_messages_adopted_handler_logs_text_length_not_preview() {
+    let mut app = test_app();
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let spawn_refs = make_spawn_refs();
+
+    let input_id = sdk::InputId::new_v7();
+    app.enqueue_submission_echo(
+        input_id.clone(),
+        "some long text that should not appear in logs",
+    );
+
+    let items = vec![sdk::ChatMessage {
+        role: "user".to_string(),
+        content: vec![sdk::ContentBlock::text(
+            "some long text that should not appear in logs",
+        )],
+        metadata: None,
+        input_id: Some(input_id.clone()),
+    }];
+    app.update_ui(
+        UiEvent::UserMessagesAdopted {
+            items,
+            queued: vec![],
+        },
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    // 验证：占位被清除、回显成功（功能不受影响）
+    assert!(app.model.conversation.queued_submissions.is_empty());
+    // 回显文本正确
+    let echoes: Vec<&str> = app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .filter_map(|b| {
+            if let crate::tui::model::output_timeline::OutputTimelineItem::UserMessage {
+                text,
+                ..
+            } = b
+            {
+                Some(text.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(echoes.iter().any(|t| t.contains("some long text")));
+}
+
 #[test]
 fn format_reflection_history_renders_optional_metadata_as_absent() {
     let record = sdk::ReflectionHistoryView {

@@ -302,7 +302,7 @@ async fn build_window(
 }
 ```
 
-`CompactionFingerprint` 的幂等范围只是纯 compact 投影与对应 hook / scan 去重。每轮顺序固定为 L2-L4 投影 → await Prompt guidance / Skill → Memory 检索 → active summary → 最终 block 编排。最终 blocks 则严格采用 `system_prompt → execution_discipline → model_guidance → skills → agent_roles → user_guidance → memory_context → active_summary → breakpoint → current_date → git_context → task_reminder`；Prompt Guidance、Skill materialization、Memory、Task reminder 与 project snapshot 不得因 compact fingerprint 命中而跳过，否则外部 revision 已变时会返回陈旧窗口。
+`CompactionFingerprint` 的幂等范围只是纯 compact 投影与对应 hook / scan 去重。每轮顺序固定为 L2-L4 投影 → await Prompt guidance / Skill → Memory 检索 → active summary → 最终 block 编排。最终 system blocks 严格采用 `system_prompt → execution_discipline → model_guidance → skills → agent_roles → user_guidance → memory_context → active_summary → breakpoint → task_reminder`；Git 首次快照由 Runtime 在 session 首个 Run 作为普通系统生成消息投递一次，日期、工作区变化和 commit guidance 不进入 LLM。Prompt Guidance、Skill materialization、Memory 与 Task reminder 不得因 compact fingerprint 命中而跳过，否则外部 revision 已变时会返回陈旧窗口。
 
 ### 5.4 Hook 去重
 

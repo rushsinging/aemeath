@@ -5,50 +5,66 @@ fn test_ctx() -> ToolExecutionContext {
         .build()
 }
 
-fn seeded_access() -> Arc<dyn task::TaskAccess> {
+#[tokio::test]
+async fn task_list_uses_current_batch_sequences_for_ids_and_dependencies() {
     let access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
     access
-        .create_batch(task::BatchCreateSpec::try_new("batch".into()).unwrap(), 1)
+        .create_batch(task::BatchCreateSpec::try_new("旧请求".into()).unwrap(), 1)
         .unwrap();
     access
         .create_task(
             task::TaskCreateSpec::try_new(
-                "高优先级".into(),
+                "旧任务".into(),
                 String::new(),
                 None,
-                task::TaskPriority::High,
+                task::TaskPriority::Normal,
             )
             .unwrap(),
             2,
         )
         .unwrap();
     access
+        .create_batch(
+            task::BatchCreateSpec::try_new("当前请求".into()).unwrap(),
+            3,
+        )
+        .unwrap();
+    let first = access
         .create_task(
             task::TaskCreateSpec::try_new(
-                "普通优先级".into(),
+                "前置".into(),
                 String::new(),
                 None,
                 task::TaskPriority::Normal,
             )
             .unwrap(),
-            3,
+            4,
         )
-        .unwrap();
-    access
-}
+        .unwrap()
+        .value;
+    let second = access
+        .create_task(
+            task::TaskCreateSpec::try_new(
+                "后续".into(),
+                String::new(),
+                None,
+                task::TaskPriority::Normal,
+            )
+            .unwrap(),
+            5,
+        )
+        .unwrap()
+        .value;
+    access.add_dependency(second.id(), first.id(), 6).unwrap();
 
-#[tokio::test]
-async fn task_list_filters_live_tasks_by_priority() {
-    let tool = TaskListTool {
-        access: seeded_access(),
-    };
-
-    let result = tool
-        .call(serde_json::json!({"priority": "high"}), &test_ctx())
+    let result = TaskListTool { access }
+        .call(serde_json::json!({}), &test_ctx())
         .await;
 
     assert!(!result.is_error, "{}", result.text);
-    let value = serde_json::to_value(result.data.unwrap()).expect("serialize task list result");
-    assert_eq!(value["tasks"].as_array().unwrap().len(), 1);
-    assert_eq!(value["tasks"][0]["subject"], "高优先级");
+    let tasks = serde_json::to_value(result.data.unwrap()).unwrap()["tasks"].clone();
+    assert_eq!(tasks.as_array().unwrap().len(), 2);
+    assert_eq!(tasks[0]["id"], "1");
+    assert_eq!(tasks[1]["id"], "2");
+    assert_eq!(tasks[1]["blocked_by"], serde_json::json!(["1"]));
 }

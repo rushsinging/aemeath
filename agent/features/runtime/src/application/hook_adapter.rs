@@ -34,6 +34,16 @@ pub struct RuntimeHookDispatch {
     pub executions: Vec<RuntimeHookExecution>,
     /// BC 保留的展示消息（按源顺序 1:1 投影，不合并、不丢失来源，#925）。
     pub messages: Vec<RuntimeHookDisplayMessage>,
+    /// 最终 Block 的实际 subscription 与 execution；其它 directive 为 None。
+    pub block_detail: Option<RuntimeHookBlockDetail>,
+}
+
+/// Runtime 视角下实际触发 Block 的 subscription 与 execution。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeHookBlockDetail {
+    pub command: String,
+    pub execution_ordinal: u32,
+    pub execution: RuntimeHookExecution,
 }
 
 /// Runtime 视角下的 hook directive。
@@ -185,6 +195,14 @@ pub fn project_hook_outcome(outcome: &hook::HookOutcome) -> RuntimeHookDispatch 
         directive: project_directive(&outcome.directive),
         executions: outcome.executions.iter().map(project_execution).collect(),
         messages: outcome.messages.iter().map(project_message).collect(),
+        block_detail: outcome
+            .block_detail
+            .as_ref()
+            .map(|detail| RuntimeHookBlockDetail {
+                command: detail.command.clone(),
+                execution_ordinal: detail.execution_ordinal,
+                execution: project_execution(&detail.execution),
+            }),
     }
 }
 

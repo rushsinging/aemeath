@@ -45,7 +45,6 @@ macro_rules! string_value_object {
 }
 
 string_value_object!(ContextRequestId);
-string_value_object!(CalendarDate);
 string_value_object!(Language);
 string_value_object!(SystemPromptSpec);
 string_value_object!(ContentFingerprint);
@@ -81,7 +80,6 @@ pub struct ContextRequest {
     pub system_prompt: SystemPromptSpec,
     pub model_id: String,
     pub effective_reasoning: ReasoningLevel,
-    pub current_date: CalendarDate,
     pub task_reminder: TaskReminderSnapshot,
     pub language: Language,
     pub agent_roles: HashMap<String, AgentRoleConfig>,
@@ -96,11 +94,15 @@ pub struct ContextRequest {
 }
 
 /// Context-owned system block；不是任何 Provider wire DTO。
+///
+/// `cacheable` 表示内容属于低频变化的 cacheable prefix；`cache_break` 表示
+/// prefix 的唯一逻辑断点，Provider adapter 只为该块生成 wire cache marker。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemBlock {
     pub kind: String,
     pub content: String,
     pub cacheable: bool,
+    pub cache_break: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

@@ -3,8 +3,88 @@ use crate::tui::app::App;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing;
 use crate::tui::model::conversation::intent::*;
+use crate::tui::model::conversation::interaction::{
+    InteractionCommandFailure, UiInteractionCancelReason, UiInteractionReply,
+    UiInteractionRequestId,
+};
+use crate::tui::model::conversation::workspace::WorktreeKind;
 use crate::tui::model::runtime::status_notice::StatusNotice;
+use crate::tui::update::intent::AgentIntent;
 use tokio::sync::mpsc;
+
+fn interaction_reply_to_sdk(reply: UiInteractionReply) -> sdk::InteractionReply {
+    match reply {
+        UiInteractionReply::UserAnswers(answers) => {
+            sdk::InteractionReply::UserQuestions(answers.into_iter().map(sdk::UserAnswer).collect())
+        }
+        UiInteractionReply::ToolApproval { approved, reason } => {
+            sdk::InteractionReply::ToolApproval(if approved {
+                sdk::ApprovalDecision::Approve
+            } else {
+                sdk::ApprovalDecision::Deny { reason }
+            })
+        }
+        UiInteractionReply::PlanApproval { approved, reason } => {
+            sdk::InteractionReply::PlanApproval(if approved {
+                sdk::ApprovalDecision::Approve
+            } else {
+                sdk::ApprovalDecision::Deny { reason }
+            })
+        }
+        UiInteractionReply::ContinueHardPause => sdk::InteractionReply::HardPauseContinue,
+    }
+}
+
+fn interaction_failure_from_sdk(
+    outcome: sdk::InteractionCommandOutcome,
+) -> InteractionCommandFailure {
+    match outcome {
+        sdk::InteractionCommandOutcome::InvalidReply(error) => {
+            InteractionCommandFailure::InvalidReply(format!("{error:?}"))
+        }
+        sdk::InteractionCommandOutcome::NotFound => InteractionCommandFailure::NotFound,
+        sdk::InteractionCommandOutcome::AlreadyCompleted => {
+            InteractionCommandFailure::AlreadyCompleted
+        }
+        sdk::InteractionCommandOutcome::RunCancelling => InteractionCommandFailure::RunCancelling,
+        sdk::InteractionCommandOutcome::Accepted => {
+            unreachable!("accepted outcome is handled first")
+        }
+    }
+}
+
+fn resolve_workspace_metadata(root: &str) -> (Option<String>, WorktreeKind) {
+    let branch = std::process::Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|branch| branch.trim().to_string())
+        .filter(|branch| !branch.is_empty());
+
+    let kind = std::process::Command::new("git")
+        .args(["rev-parse", "--git-dir", "--git-common-dir"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|stdout| {
+            let mut lines = stdout.lines().map(str::trim);
+            match (lines.next(), lines.next()) {
+                (Some(git_dir), Some(common_dir)) if git_dir != common_dir => {
+                    WorktreeKind::LinkedWorktree
+                }
+                (Some(_), Some(_)) => WorktreeKind::MainCheckout,
+                _ => WorktreeKind::Unknown,
+            }
+        })
+        .unwrap_or(WorktreeKind::Unknown);
+
+    (branch, kind)
+}
 
 impl App {
     pub(crate) fn execute_spawn_effect(&mut self, effect: SpawnAgentChatEffect) {
@@ -26,6 +106,15 @@ impl App {
             Effect::SpawnAgentChat { .. } => {}
             Effect::SendChatInputEvent { event } => self.send_chat_input_event(event),
             Effect::CancelCurrentRun => self.cancel_current_run(),
+            Effect::ReplyInteraction { request_id, reply } => {
+                self.execute_interaction_reply(request_id, reply)
+            }
+            Effect::CancelInteraction { request_id, reason } => {
+                self.execute_interaction_cancel(request_id, reason)
+            }
+            Effect::ResolveWorkspaceMetadata { root, revision } => {
+                self.resolve_workspace_metadata_effect(root, revision, ui_tx)
+            }
             Effect::SaveSession { notify } => self.save_session_effect(notify, ui_tx),
             Effect::RunHook { message, name } => self.run_hook_effect(message, name),
             Effect::ReadClipboardImage => self.read_clipboard_image_effect(ui_tx),
@@ -42,6 +131,141 @@ impl App {
         }
     }
 
+    fn resolve_workspace_metadata_effect(
+        &self,
+        root: String,
+        revision: u64,
+        ui_tx: &mpsc::Sender<UiEvent>,
+    ) {
+        let ui_tx = ui_tx.clone();
+        crate::tui::effect::spawn_guard::spawn_guarded("workspace_metadata", async move {
+            let query_root = root.clone();
+            let metadata =
+                tokio::task::spawn_blocking(move || resolve_workspace_metadata(&query_root))
+                    .await
+                    .unwrap_or((None, WorktreeKind::Unknown));
+            let _ = ui_tx
+                .send(UiEvent::WorkspaceMetadataResolved(
+                    crate::tui::app::event::WorkspaceMetadataResolved {
+                        root,
+                        revision,
+                        branch: metadata.0,
+                        kind: metadata.1,
+                    },
+                ))
+                .await;
+        });
+    }
+
+    fn execute_interaction_reply(
+        &mut self,
+        request_id: UiInteractionRequestId,
+        reply: UiInteractionReply,
+    ) {
+        let sdk_request_id = match sdk::InteractionRequestId::parse_uuid7(request_id.as_str()) {
+            Ok(value) => value,
+            Err(_) => {
+                self.apply_interaction_failure(
+                    request_id,
+                    InteractionCommandFailure::InvalidRequestId("交互请求标识无效".to_string()),
+                );
+                return;
+            }
+        };
+        let outcome = match self.agent_client.as_ref() {
+            Some(client) => {
+                client.reply_interaction(&sdk_request_id, interaction_reply_to_sdk(reply))
+            }
+            None => {
+                self.apply_interaction_failure(
+                    request_id,
+                    InteractionCommandFailure::CommandClientUnavailable,
+                );
+                return;
+            }
+        };
+        self.apply_interaction_outcome(request_id, outcome, false);
+    }
+
+    fn execute_interaction_cancel(
+        &mut self,
+        request_id: UiInteractionRequestId,
+        reason: UiInteractionCancelReason,
+    ) {
+        let sdk_request_id = match sdk::InteractionRequestId::parse_uuid7(request_id.as_str()) {
+            Ok(value) => value,
+            Err(_) => {
+                self.apply_interaction_failure(
+                    request_id,
+                    InteractionCommandFailure::InvalidRequestId("交互请求标识无效".to_string()),
+                );
+                return;
+            }
+        };
+        let outcome = match self.agent_client.as_ref() {
+            Some(client) => client.cancel_interaction(
+                &sdk_request_id,
+                match reason {
+                    UiInteractionCancelReason::UserCancelled => {
+                        sdk::InteractionCancelReason::UserCancelled
+                    }
+                },
+            ),
+            None => {
+                self.apply_interaction_failure(
+                    request_id,
+                    InteractionCommandFailure::CommandClientUnavailable,
+                );
+                return;
+            }
+        };
+        self.apply_interaction_outcome(request_id, outcome, true);
+    }
+
+    fn apply_interaction_failure(
+        &mut self,
+        request_id: UiInteractionRequestId,
+        failure: InteractionCommandFailure,
+    ) {
+        self.apply_agent_intent(AgentIntent::Conversation(
+            ConversationIntent::InteractionReplyRejected(InteractionReplyRejected {
+                request_id,
+                failure,
+            }),
+        ));
+    }
+
+    fn apply_interaction_outcome(
+        &mut self,
+        request_id: UiInteractionRequestId,
+        outcome: sdk::InteractionCommandOutcome,
+        is_cancel: bool,
+    ) {
+        let intent = match outcome {
+            sdk::InteractionCommandOutcome::Accepted if is_cancel => {
+                ConversationIntent::InteractionCancelAccepted(InteractionCancelAccepted {
+                    request_id,
+                })
+            }
+            sdk::InteractionCommandOutcome::Accepted => {
+                ConversationIntent::InteractionReplyAccepted(InteractionReplyAccepted {
+                    request_id,
+                })
+            }
+            outcome if is_cancel => {
+                ConversationIntent::InteractionCancelRejected(InteractionCancelRejected {
+                    request_id,
+                    failure: interaction_failure_from_sdk(outcome),
+                })
+            }
+            outcome => ConversationIntent::InteractionReplyRejected(InteractionReplyRejected {
+                request_id,
+                failure: interaction_failure_from_sdk(outcome),
+            }),
+        };
+        self.apply_agent_intent(AgentIntent::Conversation(intent));
+    }
+
     fn cancel_current_run(&mut self) {
         let outcome = self
             .chat
@@ -54,11 +278,11 @@ impl App {
             sdk::CancelRunOutcome::Accepted | sdk::CancelRunOutcome::AlreadyCancelling
         ) {
             self.chat.start_cancelling();
-            self.model
-                .conversation
-                .apply(SetStatusNotice(StatusNotice::warning(
+            self.apply_agent_intent(AgentIntent::Conversation(
+                ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
                     "Cancelling current response… Press Ctrl+C again to exit",
-                )));
+                ))),
+            ));
         }
     }
 
@@ -236,7 +460,7 @@ impl App {
             .push_input_event(sdk::ChatInputEvent::ListReminders);
     }
 
-    /// 用系统默认程序打开 URL 或本地文件路径（Ctrl+Click markdown link / 行内代码路径）。
+    /// 用系统默认程序打开 URL 或本地文件路径（Cmd+Click markdown link / 行内代码路径）。
     fn open_url_effect(&mut self, url: &str) {
         // 安全校验：允许 http/https URL 和本地文件路径
         let is_url = url.starts_with("http://") || url.starts_with("https://");
@@ -291,6 +515,14 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "executor_workspace_tests.rs"]
+mod workspace_tests;
+
+#[cfg(test)]
+#[path = "executor_interaction_tests.rs"]
+mod interaction_tests;
 
 #[cfg(test)]
 mod tests {

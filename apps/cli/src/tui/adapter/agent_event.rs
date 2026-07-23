@@ -1,12 +1,13 @@
 use crate::tui::adapter::hook_notice::{hook_event_notice, hook_message_notice};
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
-use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::*;
+use crate::tui::model::conversation::stop_hook_notice::stop_hook_notice_content;
 use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::session_intent::SessionIntent;
+use crate::tui::model::workspace_provider::WorkspaceIntent;
 
 mod progress;
 mod sanitize;
@@ -25,7 +26,7 @@ pub struct AgentEventMapping {
     pub conversation: Vec<ConversationIntent>,
     pub diagnostic: Vec<DiagnosticIntent>,
     pub session: Vec<SessionIntent>,
-    pub effects: Vec<Effect>,
+    pub workspace: Vec<WorkspaceIntent>,
 }
 
 #[cfg(test)]
@@ -262,10 +263,6 @@ where
                 severity: DiagnosticSeverity::Error,
                 message: message.clone(),
             });
-            mapping.effects.push(Effect::RunHook {
-                name: "error".to_string(),
-                message: message.clone(),
-            });
             mapping
         }
 
@@ -302,12 +299,28 @@ where
         )),
         UiEvent::TurnStarted { messages }
         | UiEvent::MicrocompactDone { messages, .. }
-        | UiEvent::StopHookBlocked { messages }
         | UiEvent::PostToolExecutionSync { messages }
         | UiEvent::CompactRollback { messages }
         | UiEvent::CompactFinished { messages } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
+        UiEvent::StopHookBlocked { messages } => {
+            let mut mapping = session(SessionIntent::MessagesSynced {
+                message_count: messages.len(),
+            });
+            if let Some(message) = messages
+                .iter()
+                .rev()
+                .find(|message| message.source() == sdk::ChatMessageSource::StopHook)
+            {
+                mapping
+                    .conversation
+                    .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
+                        content: stop_hook_notice_content(message),
+                    }));
+            }
+            mapping
+        }
         UiEvent::ApiError { messages, .. } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
@@ -315,7 +328,9 @@ where
 
         // ── HookEvent → notice via conversation ──
         UiEvent::HookEvent(event) => {
-            if event.hook_name == "PostCompact" {
+            if event.hook_name == "PostCompact"
+                || (event.hook_name == "Stop" && event.status == sdk::HookEventStatus::Blocked)
+            {
                 return AgentEventMapping::default();
             }
             let mut mapping = AgentEventMapping::default();
@@ -329,6 +344,9 @@ where
             mapping
         }
         UiEvent::HookMessage(message) => {
+            if message.point == "Stop" {
+                return AgentEventMapping::default();
+            }
             let mut mapping = AgentEventMapping::default();
             if let Some(notice) = hook_message_notice(message) {
                 mapping
@@ -340,19 +358,27 @@ where
             mapping
         }
         UiEvent::WorkingDirectoryChanged(update) => map_status_context(update),
+        UiEvent::WorkspaceMetadataResolved(metadata) => AgentEventMapping {
+            workspace: vec![WorkspaceIntent::ApplyMetadata {
+                root: metadata.root.clone(),
+                revision: metadata.revision,
+                branch: metadata.branch.clone(),
+                kind: metadata.kind,
+            }],
+            ..AgentEventMapping::default()
+        },
         _ => AgentEventMapping::default(),
     }
 }
 
 fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
-    conversation(ConversationIntent::WorkspaceSnapshotReceived(
-        WorkspaceSnapshotReceived {
-            path_base: Some(update.path_base.clone()),
-            workspace_root: Some(update.workspace_root.clone()),
-            branch: update.branch.clone(),
-            kind: update.kind,
-        },
-    ))
+    AgentEventMapping {
+        workspace: vec![WorkspaceIntent::ApplySnapshot {
+            path_base: Some(update.raw_path_base.to_string_lossy().to_string()),
+            workspace_root: Some(update.raw_workspace_root.to_string_lossy().to_string()),
+        }],
+        ..AgentEventMapping::default()
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════

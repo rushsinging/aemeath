@@ -3,7 +3,6 @@
 /// 聊天会话的所有可变数据（不含视图组件 output_area）
 #[derive(Debug)]
 pub(crate) struct ChatState {
-    pub context_size: usize,
     pub tool_call_active: bool,
     pub active_tool_call_ids: std::collections::HashSet<sdk::ids::ToolCallId>,
     pub input_event_tx: Option<tokio::sync::mpsc::UnboundedSender<sdk::ChatInputEvent>>,
@@ -116,7 +115,6 @@ impl ChatState {
 impl Default for ChatState {
     fn default() -> Self {
         Self {
-            context_size: 200_000,
             tool_call_active: false,
             active_tool_call_ids: std::collections::HashSet::new(),
             input_event_tx: None,
