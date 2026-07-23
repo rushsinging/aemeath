@@ -6,7 +6,9 @@ use std::time::Instant;
 mod tests;
 
 fn should_open_link(modifiers: KeyModifiers) -> bool {
-    modifiers.contains(KeyModifiers::SUPER)
+    // Cmd/Super 是首选，但终端鼠标协议不保留 Super bit（只有 Shift/Meta/Control），
+    // 因此同时接受 Control 和 Alt 作为备选触发键。
+    modifiers.intersects(KeyModifiers::SUPER | KeyModifiers::CONTROL | KeyModifiers::ALT)
 }
 
 /// 判断点 (row, col) 是否在 rect 内
@@ -50,7 +52,8 @@ impl crate::tui::app::App {
 
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                // 仅 Cmd+Click 打开链接，普通点击必须进入选区流程。
+                // 仅 Cmd/Ctrl/Alt+Click 打开链接，普通点击进入选区流程。
+                // 终端鼠标协议不保留 Super(Cmd) bit，因此同时接受 Control 和 Alt。
                 if should_open_link(mouse.modifiers) && point_in_rect(row, col, &output_area) {
                     if let Some(url) = self.output_area.link_at(row, col, &output_area) {
                         return vec![crate::tui::effect::effect::Effect::OpenUrl {
