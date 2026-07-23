@@ -40,7 +40,7 @@ impl App {
         let before_count = self.model.conversation.queued_submissions.len();
         self.apply_agent_intent(AgentIntent::Conversation(
             ConversationIntent::QueueSubmission(QueueSubmission {
-                input_id: input_id.clone(),
+                input_id: input_id.as_str().to_string(),
                 text: text_str,
             }),
         ));
@@ -65,7 +65,7 @@ impl App {
     pub(crate) fn clear_queued_submission_echo_by_id(&mut self, input_id: &sdk::InputId) {
         self.apply_agent_intent(AgentIntent::Conversation(
             ConversationIntent::ClearQueuedSubmissionById(ClearQueuedSubmissionById {
-                input_id: input_id.clone(),
+                input_id: input_id.as_str().to_string(),
             }),
         ));
         self.refresh_live_status_from_model();

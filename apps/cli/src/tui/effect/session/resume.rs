@@ -1,3 +1,4 @@
+use crate::tui::adapter::runtime_view::TuiChatMessage;
 use crate::tui::app::App;
 use crate::tui::model::input::intent::InputIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
@@ -7,7 +8,7 @@ impl App {
     pub(crate) fn resume_session_messages(
         &mut self,
         session_id: &str,
-        messages: Vec<sdk::ChatMessage>,
+        messages: Vec<TuiChatMessage>,
         created_at: String,
     ) {
         let msg_count = messages.len();
@@ -34,21 +35,21 @@ impl App {
     }
 }
 
-pub(crate) fn apply_resume_input_history(app: &mut App, messages: &[sdk::ChatMessage]) {
+pub(crate) fn apply_resume_input_history(app: &mut App, messages: &[TuiChatMessage]) {
     let history = extract_user_input_history(messages);
     app.apply_agent_intent(AgentIntent::Input(InputIntent::ReplaceHistory(history)));
 }
 
-fn extract_user_input_history(messages: &[sdk::ChatMessage]) -> Vec<String> {
+fn extract_user_input_history(messages: &[TuiChatMessage]) -> Vec<String> {
     messages
         .iter()
-        .filter(|message| message.role == "user")
+        .filter(|message| message.is_user_input())
         .filter_map(extract_user_input_text)
         .filter(|text| !text.is_empty())
         .collect()
 }
 
-fn extract_user_input_text(message: &sdk::ChatMessage) -> Option<String> {
+fn extract_user_input_text(message: &TuiChatMessage) -> Option<String> {
     let text = message.text_content();
     if text.trim().is_empty() {
         None

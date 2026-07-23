@@ -1,5 +1,9 @@
 use crate::tui::adapter::hook_notice::{hook_event_notice, hook_message_notice};
-use crate::tui::app::event::{StatusContextUpdate, UiEvent};
+use crate::tui::adapter::runtime_view::TuiMessageSource;
+use crate::tui::adapter::tui_runtime_event::{
+    TuiAgentProgressKind, TuiHookStatus, TuiRuntimeEvent, TuiToolCallStatus, TuiTurnContext,
+};
+use crate::tui::app::event::StatusContextUpdate;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::stop_hook_notice::stop_hook_notice_content;
 use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
@@ -57,21 +61,21 @@ fn truncate_agent_progress_json(raw: &str) -> String {
     output
 }
 
-fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus {
+fn tool_call_status(status: TuiToolCallStatus) -> ToolCallStatus {
     match status {
-        sdk::ToolCallStatusView::PendingArgs => ToolCallStatus::PendingArgs,
-        sdk::ToolCallStatusView::Ready => ToolCallStatus::Ready,
-        sdk::ToolCallStatusView::Running => ToolCallStatus::Running,
+        TuiToolCallStatus::PendingArgs => ToolCallStatus::PendingArgs,
+        TuiToolCallStatus::Ready => ToolCallStatus::Ready,
+        TuiToolCallStatus::Running => ToolCallStatus::Running,
     }
 }
 
 #[cfg(test)]
-pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
+pub fn map_agent_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
     map_agent_event_with_tool_header(event, default_subagent_tool_header)
 }
 
 pub fn map_agent_event_with_tool_header<F>(
-    event: &UiEvent,
+    event: &TuiRuntimeEvent,
     mut format_subagent_tool_header: F,
 ) -> AgentEventMapping
 where

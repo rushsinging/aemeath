@@ -84,7 +84,7 @@ pub enum ConversationBlock {
     },
     QueuedUserMessage {
         id: String,
-        input_id: sdk::InputId,
+        input_id: String,
         text: String,
     },
     AgentProgress {

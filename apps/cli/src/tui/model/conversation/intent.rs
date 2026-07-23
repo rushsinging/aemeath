@@ -10,6 +10,7 @@ use super::interaction::{
 };
 use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
+use crate::tui::adapter::runtime_view::TuiChatMessage;
 use crate::tui::app::event::ModelStreamWaitingView;
 use std::time::Instant;
 
@@ -28,7 +29,7 @@ pub struct StartChat {
 /// 传入完整消息列表，内部逐条 apply 已有 intent 灌入 ConversationModel。
 #[derive(Clone, Debug)]
 pub struct ResumeConversation {
-    pub messages: Vec<sdk::ChatMessage>,
+    pub messages: Vec<TuiChatMessage>,
 }
 
 impl PartialEq for ResumeConversation {
@@ -125,13 +126,13 @@ pub struct AppendError {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueueSubmission {
-    pub input_id: sdk::InputId,
+    pub input_id: String,
     pub text: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClearQueuedSubmissionById {
-    pub input_id: sdk::InputId,
+    pub input_id: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -392,7 +393,7 @@ pub struct StopSpinner;
 
 #[derive(Clone, Debug)]
 pub struct SyncQueuedSubmissions {
-    pub queued: Vec<sdk::ChatMessage>,
+    pub queued: Vec<TuiChatMessage>,
 }
 
 impl PartialEq for SyncQueuedSubmissions {

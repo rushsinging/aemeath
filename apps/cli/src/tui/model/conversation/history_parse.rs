@@ -1,3 +1,5 @@
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
+
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum HistoryDisplayMessage {
     User { text: String },
@@ -42,10 +44,10 @@ impl std::fmt::Display for HistoryDisplayParseError {
 }
 
 impl HistoryDisplayMessage {
-    pub(crate) fn parse(msg: &sdk::ChatMessage) -> Result<Self, HistoryDisplayParseError> {
+    pub(crate) fn parse(msg: &TuiChatMessage) -> Result<Self, HistoryDisplayParseError> {
         let body = msg.text_content();
-        if msg.source() == sdk::ChatMessageSource::StopHook
-            || (msg.source() == sdk::ChatMessageSource::SystemGenerated
+        if msg.source == TuiMessageSource::StopHook
+            || (msg.source == TuiMessageSource::SystemGenerated
                 && is_legacy_stop_hook_feedback(&body))
         {
             if body.trim().is_empty() {
@@ -69,7 +71,7 @@ fn is_legacy_stop_hook_feedback(text: &str) -> bool {
 }
 
 fn parse_history_user(
-    blocks: &[sdk::ContentBlock],
+    blocks: &[TuiContentBlock],
 ) -> Result<HistoryDisplayMessage, HistoryDisplayParseError> {
     let parsed_blocks = parse_history_user_blocks(blocks)?;
     let mut text = String::new();
@@ -93,30 +95,30 @@ fn parse_history_user(
 }
 
 fn parse_history_assistant(
-    blocks: &[sdk::ContentBlock],
+    blocks: &[TuiContentBlock],
 ) -> Result<HistoryDisplayMessage, HistoryDisplayParseError> {
     let mut parsed = Vec::new();
     for block in blocks {
         match block {
-            sdk::ContentBlock::Text { text } => {
+            TuiContentBlock::Text { text } => {
                 parsed.push(HistoryAssistantBlock::Text(text.clone()));
             }
-            sdk::ContentBlock::Thinking { thinking, .. } => {
+            TuiContentBlock::Thinking { thinking, .. } => {
                 parsed.push(HistoryAssistantBlock::Thinking(thinking.clone()));
             }
-            sdk::ContentBlock::ToolUse { id, name, input } => {
+            TuiContentBlock::ToolUse { id, name, input } => {
                 parsed.push(HistoryAssistantBlock::ToolUse {
                     id: id.clone(),
                     name: name.clone(),
                     input: input.clone(),
                 });
             }
-            sdk::ContentBlock::ToolResult { .. } => {
+            TuiContentBlock::ToolResult { .. } => {
                 return Err(HistoryDisplayParseError::UnsupportedAssistantBlock(
                     "tool_result".to_string(),
                 ))
             }
-            sdk::ContentBlock::Image { .. } => {
+            TuiContentBlock::Image { .. } => {
                 return Err(HistoryDisplayParseError::UnsupportedAssistantBlock(
                     "image".to_string(),
                 ))
@@ -151,13 +153,13 @@ enum HistoryUserBlock<'a> {
 }
 
 fn parse_history_user_blocks(
-    blocks: &[sdk::ContentBlock],
+    blocks: &[TuiContentBlock],
 ) -> Result<Vec<HistoryUserBlock<'_>>, HistoryDisplayParseError> {
     blocks
         .iter()
         .map(|block| match block {
-            sdk::ContentBlock::Text { text } => Ok(HistoryUserBlock::Text(text.as_str())),
-            sdk::ContentBlock::ToolResult {
+            TuiContentBlock::Text { text } => Ok(HistoryUserBlock::Text(text.as_str())),
+            TuiContentBlock::ToolResult {
                 tool_use_id,
                 content,
                 is_error,
@@ -167,13 +169,13 @@ fn parse_history_user_blocks(
                 content,
                 is_error: *is_error,
             }),
-            sdk::ContentBlock::Thinking { .. } => Err(
+            TuiContentBlock::Thinking { .. } => Err(
                 HistoryDisplayParseError::UnsupportedUserBlock("thinking".to_string()),
             ),
-            sdk::ContentBlock::ToolUse { .. } => Err(
-                HistoryDisplayParseError::UnsupportedUserBlock("tool_use".to_string()),
-            ),
-            sdk::ContentBlock::Image { placeholder, .. } => {
+            TuiContentBlock::ToolUse { .. } => Err(HistoryDisplayParseError::UnsupportedUserBlock(
+                "tool_use".to_string(),
+            )),
+            TuiContentBlock::Image { placeholder, .. } => {
                 // #fix-tui-image-input-output：image block 渲染为占位符（[Image #N]），
                 // 保留 round-trip 时原占位符；如果 placeholder 为 None（旧 history），
                 // 用 `[Image]` 作为兜底。`placeholder` 是 `&Option<String>`，
@@ -187,7 +189,7 @@ fn parse_history_user_blocks(
 }
 
 pub(crate) fn collect_following_tool_results(
-    subsequent_msg: Option<&sdk::ChatMessage>,
+    subsequent_msg: Option<&TuiChatMessage>,
 ) -> std::collections::HashMap<&str, HistoryToolResult<'_>> {
     let Some(user_msg) = subsequent_msg else {
         return std::collections::HashMap::new();
