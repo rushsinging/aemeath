@@ -413,6 +413,7 @@ dependencies = [
  "config",
  "context",
  "futures-util",
+ "hook",
  "log",
  "logging",
  "memory",

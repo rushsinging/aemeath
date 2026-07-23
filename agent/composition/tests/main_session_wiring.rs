@@ -263,6 +263,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let writer = Arc::new(context::adapters::AtomicBlobCanonicalSessionWriter::new(
         session_blob,
     ));
+    let session_project = workspace.read().project_identity();
     let wiring = context::wire_main_session(MainSessionDependencies {
         workspace,
         task_persist: task_wiring.persist(),
@@ -297,7 +298,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
         .expect("persist production append");
 
     let exported = session_management
-        .export(&session_id)
+        .export_for_project(&session_id, &session_project)
         .await
         .expect("reopen canonical session bytes");
     let reopened: serde_json::Value =
@@ -404,15 +405,25 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
     ));
     let active_run = Arc::new(runtime::ActiveRunRegistry::default());
+    let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
+        hook::build_dispatcher(
+            &share::config::hooks::HooksConfig::default(),
+            std::collections::HashMap::new(),
+        )
+        .expect("test hook dispatcher"),
+    );
 
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
-        workspace,
-        wiring,
-        composition::provider::provider_factory(),
-        reflection_history,
-        Arc::new(policy::AllowAllPolicy),
-        task_access,
-        session_management,
+        runtime::RuntimeCoreDependencies::new(
+            workspace,
+            wiring,
+            composition::provider::provider_factory(),
+            reflection_history,
+            Arc::new(policy::AllowAllPolicy),
+            task_access,
+            session_management,
+            hook_runner,
+        ),
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),
             tools.execution(),

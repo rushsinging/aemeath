@@ -14,7 +14,7 @@ pub use application::tool_result_materialization::{
 
 pub use application::client::{
     from_args_with_workspace, resume_session_to_backing, AgentClientImpl, ResumeError,
-    RuntimeBootstrapDependencies, RuntimeToolAssemblyDependencies,
+    RuntimeBootstrapDependencies, RuntimeCoreDependencies, RuntimeToolAssemblyDependencies,
 };
 pub use ports::{ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort, UsageSink};
 pub use sdk::{

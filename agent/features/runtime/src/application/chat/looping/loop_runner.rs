@@ -191,13 +191,16 @@ where
                         }
                     } else {
                         let port = wiring.session_management();
+                        let project = wiring.project_identity();
                         let args = args.clone();
+                        let deleted_session = args.trim_start().starts_with("delete ");
                         let active_session_id = session_id.clone();
                         let result = wiring
                             .with_shared(async move {
                                 super::idle_commands::execute_session(
                                     &args,
                                     &active_session_id,
+                                    &project,
                                     port.as_ref(),
                                 )
                                 .await
@@ -212,6 +215,23 @@ where
                                 is_error,
                             })
                             .await;
+                        if !is_error && deleted_session {
+                            match list_sessions().await {
+                                Ok(sessions) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::SessionList { sessions })
+                                        .await;
+                                }
+                                Err(error) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("List sessions failed: {error}"),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            }
+                        }
                     }
                     continue;
                 }
@@ -258,7 +278,8 @@ where
                         Err(error) => {
                             use sdk::SessionResumeFailureKind;
                             let kind = match error {
-                                context::SessionManagementError::NotFound(_) => {
+                                context::SessionManagementError::NotFound(_)
+                                | context::SessionManagementError::ProjectMismatch(_) => {
                                     SessionResumeFailureKind::NotFound
                                 }
                                 context::SessionManagementError::Corrupt(_)

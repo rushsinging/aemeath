@@ -16,7 +16,8 @@ pub use envelope::{
     SessionCodec, SessionCodecError, SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };
 pub use management::{
-    SessionListEntry, SessionManagementError, SessionMetadataUpdate, SessionResumeProjection,
+    same_project_identity, session_matches_project, SessionListEntry, SessionManagementError,
+    SessionMetadataUpdate, SessionResumeProjection,
 };
 pub use restore::SessionRestore;
 pub use types::{

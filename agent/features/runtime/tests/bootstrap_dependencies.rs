@@ -47,41 +47,53 @@ struct NoopSessionManagement;
 
 #[async_trait::async_trait]
 impl context::SessionManagementPort for NoopSessionManagement {
-    async fn load_canonical(
+    async fn load_for_project(
         &self,
         id: &str,
+        _project: &share::session_types::ProjectIdentity,
     ) -> Result<context::session::CanonicalSession, context::SessionManagementError> {
         Err(context::SessionManagementError::NotFound(id.to_string()))
     }
 
-    async fn list(
+    async fn list_for_project(
         &self,
+        _project: &share::session_types::ProjectIdentity,
     ) -> Result<Vec<context::SessionListEntry>, context::SessionManagementError> {
         Ok(Vec::new())
     }
 
-    async fn export(&self, id: &str) -> Result<Vec<u8>, context::SessionManagementError> {
+    async fn export_for_project(
+        &self,
+        id: &str,
+        _project: &share::session_types::ProjectIdentity,
+    ) -> Result<Vec<u8>, context::SessionManagementError> {
         Err(context::SessionManagementError::NotFound(id.to_string()))
     }
 
-    async fn import(
+    async fn import_for_project(
         &self,
         _bytes: &[u8],
+        _project: &share::session_types::ProjectIdentity,
     ) -> Result<context::SessionListEntry, context::SessionManagementError> {
         Err(context::SessionManagementError::Storage(
             "test port".to_string(),
         ))
     }
 
-    async fn update_metadata(
+    async fn update_metadata_for_project(
         &self,
         id: &str,
+        _project: &share::session_types::ProjectIdentity,
         _update: context::SessionMetadataUpdate,
     ) -> Result<context::SessionListEntry, context::SessionManagementError> {
         Err(context::SessionManagementError::NotFound(id.to_string()))
     }
 
-    async fn delete(&self, id: &str) -> Result<(), context::SessionManagementError> {
+    async fn delete_for_project(
+        &self,
+        id: &str,
+        _project: &share::session_types::ProjectIdentity,
+    ) -> Result<(), context::SessionManagementError> {
         Err(context::SessionManagementError::NotFound(id.to_string()))
     }
 }
@@ -162,15 +174,25 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
     ));
     let active_run = Arc::new(runtime::ActiveRunRegistry::default());
+    let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
+        hook::build_dispatcher(
+            &share::config::hooks::HooksConfig::default(),
+            std::collections::HashMap::new(),
+        )
+        .unwrap(),
+    );
 
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
-        workspace,
-        wiring,
-        Arc::new(TestProviderFactory),
-        history.clone(),
-        Arc::new(policy::AllowAllPolicy),
-        access.clone(),
-        session_management.clone(),
+        runtime::RuntimeCoreDependencies::new(
+            workspace,
+            wiring,
+            Arc::new(TestProviderFactory),
+            history.clone(),
+            Arc::new(policy::AllowAllPolicy),
+            access.clone(),
+            session_management.clone(),
+            hook_runner.clone(),
+        ),
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),
             tools.execution(),
@@ -189,6 +211,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
 
     assert!(Arc::ptr_eq(&dependencies.reflection_history(), &history));
     assert!(Arc::ptr_eq(&dependencies.task_access(), &access));
+    assert!(Arc::ptr_eq(&dependencies.hook_runner(), &hook_runner));
     assert!(Arc::ptr_eq(
         &dependencies.skill_materializer(),
         &skill_materializer
