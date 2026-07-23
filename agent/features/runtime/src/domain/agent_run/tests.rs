@@ -169,6 +169,30 @@ fn run_control_clears_pending_interaction_before_terminal_or_step_finalization()
 }
 
 #[test]
+fn preparing_context_creates_step_before_compaction_and_can_cancel_it() {
+    let mut run = run();
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
+
+    let step_id = run.begin_step().unwrap();
+
+    assert_eq!(run.status(), RunStatus::PreparingContext);
+    assert_eq!(run.active_step_id(), Some(step_id.clone()));
+    run.transition(RunTransition::BeginCompaction).unwrap();
+    assert_eq!(run.status(), RunStatus::Compacting);
+    assert_eq!(
+        run.request_step_cancellation(&step_id),
+        RunStepCancellationRequest::Accepted
+    );
+    run.begin_step_finalization(&step_id).unwrap();
+    run.finish_cancelled_step(&step_id).unwrap();
+
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+    assert_eq!(run.steps()[0].status(), RunStepStatus::Cancelled);
+}
+
+#[test]
 fn new_control_path_drains_before_work_and_after_cancelled_step() {
     let mut run = run();
 

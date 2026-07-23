@@ -514,7 +514,7 @@ where
                 let run_memory = bound_main_run.memory_arc();
                 let run_memory_config = run_config.config().memory().clone();
                 let run_id = run.id().clone();
-                active_run.activate(run_id.clone(), cancel.clone());
+                active_run.activate_main(run_id.clone(), cancel.clone());
                 let cacheable_system_prompt = system_blocks
                     .iter()
                     .map(|block| block.text())

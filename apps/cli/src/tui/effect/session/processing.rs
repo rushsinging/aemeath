@@ -265,14 +265,29 @@ mod tests {
     async fn test_processing_handle_cancels_the_active_run_id_synchronously() {
         #[derive(Default)]
         struct RecordingCancelClient {
-            cancelled: std::sync::Mutex<Vec<sdk::RunId>>,
+            cancel_step_called: std::sync::atomic::AtomicUsize,
         }
 
         #[async_trait]
         impl sdk::AgentClient for RecordingCancelClient {
-            fn cancel_run(&self, run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
-                self.cancelled.lock().unwrap().push(run_id.clone());
-                sdk::CancelRunOutcome::Accepted
+            fn cancel_run(&self, _run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
+                unreachable!("should use cancel_run_step")
+            }
+
+            fn cancel_run_step(
+                &self,
+                _run_id: &sdk::RunId,
+                _step_id: Option<&sdk::RunStepId>,
+                _deadline: sdk::ControlDeadline,
+            ) -> sdk::CancelRunStepOutcome {
+                let count = self
+                    .cancel_step_called
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if count == 0 {
+                    sdk::CancelRunStepOutcome::Accepted
+                } else {
+                    sdk::CancelRunStepOutcome::AlreadyCancelling
+                }
             }
 
             async fn chat(
@@ -295,13 +310,24 @@ mod tests {
 
         assert_eq!(handle.cancel_current_run(), sdk::CancelRunOutcome::Accepted);
         assert_eq!(
-            client.cancelled.lock().unwrap().as_slice(),
-            std::slice::from_ref(&run_id)
+            client
+                .cancel_step_called
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "cancel_current_run must call cancel_run_step"
         );
-        assert_eq!(handle.cancel_current_run(), sdk::CancelRunOutcome::Accepted);
+
+        // Second call: cancel_run_step returns AlreadyCancelling -> AlreadyCancelling
         assert_eq!(
-            client.cancelled.lock().unwrap().as_slice(),
-            &[run_id.clone(), run_id]
+            handle.cancel_current_run(),
+            sdk::CancelRunOutcome::AlreadyCancelling
+        );
+        assert_eq!(
+            client
+                .cancel_step_called
+                .load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "second cancel_current_run must call cancel_run_step again"
         );
     }
 
@@ -392,6 +418,15 @@ mod tests {
             sdk::CancelRunOutcome::NotFound
         }
 
+        fn cancel_run_step(
+            &self,
+            _run_id: &sdk::RunId,
+            _step_id: Option<&sdk::RunStepId>,
+            _deadline: sdk::ControlDeadline,
+        ) -> sdk::CancelRunStepOutcome {
+            sdk::CancelRunStepOutcome::NotFound
+        }
+
         async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
             if let Some(tx) = self.observed.lock().unwrap().take() {
                 let _ = tx.send(composition::delivery_logging::capture());
@@ -440,6 +475,15 @@ mod tests {
     impl sdk::AgentClient for DoneOnlyAgentClient {
         fn cancel_run(&self, _run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
             sdk::CancelRunOutcome::NotFound
+        }
+
+        fn cancel_run_step(
+            &self,
+            _run_id: &sdk::RunId,
+            _step_id: Option<&sdk::RunStepId>,
+            _deadline: sdk::ControlDeadline,
+        ) -> sdk::CancelRunStepOutcome {
+            sdk::CancelRunStepOutcome::NotFound
         }
 
         async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
