@@ -496,6 +496,7 @@ pub async fn from_args_with_workspace(
         max_agent_concurrency,
         current_binding: std::sync::RwLock::new(Arc::new(binding)),
         active_run,
+        interaction_bridge: Arc::new(crate::application::interaction::InteractionBridge::new()),
         workspace,
         wiring: wiring.clone(),
         config_query,
