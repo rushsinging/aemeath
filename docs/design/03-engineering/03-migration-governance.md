@@ -1,6 +1,6 @@
 # 迁移治理 · Current → Target 追踪
 
-> 层级：03-engineering（横切工程）
+> 层级：03-engineering（工程守则）
 > 状态：过渡追踪｜Milestone：v0.1.0｜对应 Issue：#743 / #761（S2 盘点）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > **本文是 Current → Target 差距、迁移责任、进度与退出条件的唯一真相源**。01-system / 02-modules 设计文档只写目标态；已启用守卫的脚本行为、常量与白名单以 [Architecture Guards](01-architecture-guards.md) 为真相源；开发者当前 **MUST** 遵守的 Project 操作约束见 [`specs/project.md`](../../../specs/project.md)。
 >
@@ -333,7 +333,7 @@ Out-of-scope 必须保留精确 owner：#947 承接 TUI slash I/O 全 Effect 化
 - Policy 目标设计：[../02-modules/policy/README.md](../02-modules/policy/README.md)
 - Hook 目标设计：[../02-modules/hook/README.md](../02-modules/hook/README.md)
 - Audit Usage 目标设计：[../02-modules/audit/README.md](../02-modules/audit/README.md)
-- 横切工程总览：[README.md](README.md)
+- 工程守则总览：[README.md](README.md)
 
 ## 修改历史
 

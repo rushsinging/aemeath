@@ -1,8 +1,8 @@
-# 03-engineering · 横切工程
+# 03-engineering · 工程守则
 
-> 层级：03-engineering（横切工程关注点）
-> 状态：Target｜Milestone：v0.1.0（S2+ 填充实质内容）
-> 本层承载**跨模块的横切关注点**：架构守卫、agent 工程方法论、reasoning graph、可观测性、迁移治理等。不属于单一 BC 的知识落在这里。**设计类文档只描述目标态；迁移治理文档专门承载过渡期的 Current→Target 追踪。**
+> 层级：03-engineering（工程守则与规范）
+> 状态：Target｜Milestone：v0.1.0
+> 本层承载**工程层面的守则、测试规范与 Agent 设计方法论**：架构守卫（依赖铁律拦截）、Agent 编排范式（Context / Harness / Loop / Workflow / Graph）、测试架构与覆盖率治理，以及 Current→Target 迁移追踪。**设计类文档只描述目标态；迁移治理文档专门承载过渡期的 Current→Target 追踪。**
 
 ## 文档索引
 
