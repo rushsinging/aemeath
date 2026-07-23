@@ -1,4 +1,3 @@
-use crate::tui::model::config_provider::ConfigProvider;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::diagnostic::model::DiagnosticModel;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
@@ -6,6 +5,7 @@ use crate::tui::model::runtime::processing_job::ProcessingStatus;
 use crate::tui::model::runtime::session_model::SessionModel;
 use crate::tui::model::runtime::status_notice::{StatusNotice, StatusNoticeKind};
 use crate::tui::model::runtime::workspace::WorktreeKind as ModelWorktreeKind;
+use crate::tui::model::runtime_presentation::RuntimePresentation;
 use crate::tui::model::workspace_provider::WorkspaceProvider;
 use crate::tui::view_model::{
     SemanticStyle, StatusContextViewModel, StatusLineViewModel, StatusNoticeViewKind,
@@ -18,22 +18,22 @@ pub struct StatusViewAssembler;
 impl StatusViewAssembler {
     pub fn assemble_status_view(
         conversation: &ConversationModel,
-        config: &ConfigProvider,
+        presentation: &RuntimePresentation,
         workspace: &WorkspaceProvider,
         session: Option<&SessionModel>,
         diagnostics: &DiagnosticModel,
     ) -> StatusViewModel {
         StatusViewModel {
             notice: Self::assemble_notice_view(&conversation.runtime.status_notice),
-            runtime: Self::assemble_runtime_view(conversation, config, workspace, session),
+            runtime: Self::assemble_runtime_view(conversation, presentation, workspace, session),
             line: Self::assemble_from_runtime_session(
                 conversation,
-                config,
+                presentation,
                 workspace,
                 session,
                 diagnostics,
             ),
-            thinking: config.thinking(),
+            thinking: presentation.thinking(),
         }
     }
 
@@ -55,18 +55,18 @@ impl StatusViewAssembler {
     /// permission_mode 为启动期配置，不在本派生范围内。
     pub fn assemble_runtime_view(
         conversation: &ConversationModel,
-        config: &ConfigProvider,
+        presentation: &RuntimePresentation,
         workspace: &WorkspaceProvider,
         session: Option<&SessionModel>,
     ) -> StatusRuntimeViewModel {
         StatusRuntimeViewModel {
-            model: config.model_id().map(ToOwned::to_owned),
+            model: presentation.model_id().map(ToOwned::to_owned),
             session_id: session.and_then(|s| s.current_session_id.clone()),
             input_tokens: conversation.runtime.usage.input_tokens,
             output_tokens: conversation.runtime.usage.output_tokens,
             last_input_tokens: conversation.runtime.usage.last_input_tokens,
             api_calls: conversation.runtime.usage.api_calls,
-            context_size: config.context_size(),
+            context_size: presentation.context_size(),
             tps: conversation.runtime.live_tps.unwrap_or(0.0),
             context: StatusContextViewModel {
                 path_base: workspace.path_base().unwrap_or_default().to_string(),
@@ -84,13 +84,13 @@ impl StatusViewAssembler {
     }
     pub fn assemble_from_runtime_session(
         conversation: &ConversationModel,
-        config: &ConfigProvider,
+        presentation: &RuntimePresentation,
         workspace: &WorkspaceProvider,
         session: Option<&SessionModel>,
         diagnostic: &DiagnosticModel,
     ) -> StatusLineViewModel {
         let mut vm = StatusLineViewModel::default();
-        if let Some(provider) = config.provider() {
+        if let Some(provider) = presentation.provider() {
             vm.left.push(StatusSegment {
                 key: "provider".to_string(),
                 text: provider.to_string(),
@@ -98,7 +98,7 @@ impl StatusViewAssembler {
                 priority: 5,
             });
         }
-        if let Some(model_id) = config.model_id() {
+        if let Some(model_id) = presentation.model_id() {
             vm.left.push(StatusSegment {
                 key: "model".to_string(),
                 text: model_id.to_string(),
@@ -220,13 +220,13 @@ impl StatusViewAssembler {
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::model::config_provider::{ConfigIntent, ConfigProvider};
     use crate::tui::model::conversation::intent::RecordLiveTps;
     use crate::tui::model::conversation::model::ConversationModel;
     use crate::tui::model::conversation::workspace::WorktreeKind;
     use crate::tui::model::diagnostic::intent::DiagnosticIntent;
     use crate::tui::model::diagnostic::model::DiagnosticModel;
     use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
+    use crate::tui::model::runtime_presentation::{RuntimePresentation, RuntimePresentationIntent};
     use crate::tui::model::workspace_provider::{WorkspaceIntent, WorkspaceProvider};
 
     use super::StatusViewAssembler;
@@ -236,8 +236,8 @@ mod tests {
     #[test]
     fn test_assemble_runtime_view_normal_path_derives_all_fields() {
         let mut conversation = ConversationModel::default();
-        let mut config = ConfigProvider::default();
-        config.apply(ConfigIntent::SetProviderModel {
+        let mut presentation = RuntimePresentation::default();
+        presentation.apply(RuntimePresentationIntent::ProviderModel {
             provider: None,
             model_id: Some("glm-5.1".to_string()),
         });
@@ -260,7 +260,7 @@ mod tests {
 
         let vm = StatusViewAssembler::assemble_runtime_view(
             &conversation,
-            &config,
+            &presentation,
             &workspace,
             Some(&session),
         );
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn test_assemble_runtime_view_boundary_empty_branch_becomes_none() {
         let conversation = ConversationModel::default();
-        let config = ConfigProvider::default();
+        let presentation = RuntimePresentation::default();
         let mut workspace = WorkspaceProvider::default();
         workspace.apply(WorkspaceIntent::ApplySnapshot {
             path_base: Some("/repo".to_string()),
@@ -292,8 +292,12 @@ mod tests {
             kind: WorktreeKind::MainCheckout,
         });
 
-        let vm =
-            StatusViewAssembler::assemble_runtime_view(&conversation, &config, &workspace, None);
+        let vm = StatusViewAssembler::assemble_runtime_view(
+            &conversation,
+            &presentation,
+            &workspace,
+            None,
+        );
 
         assert!(vm.context.branch.is_none());
         assert_eq!(
@@ -305,11 +309,15 @@ mod tests {
     #[test]
     fn test_assemble_runtime_view_error_path_missing_model_and_session() {
         let conversation = ConversationModel::default();
-        let config = ConfigProvider::default();
+        let presentation = RuntimePresentation::default();
         let workspace = WorkspaceProvider::default();
 
-        let vm =
-            StatusViewAssembler::assemble_runtime_view(&conversation, &config, &workspace, None);
+        let vm = StatusViewAssembler::assemble_runtime_view(
+            &conversation,
+            &presentation,
+            &workspace,
+            None,
+        );
 
         assert!(vm.model.is_none());
         assert!(vm.session_id.is_none());
@@ -320,8 +328,8 @@ mod tests {
     #[test]
     fn test_status_assembler_reads_runtime_and_diagnostic() {
         let conversation = ConversationModel::default();
-        let mut config = ConfigProvider::default();
-        config.apply(ConfigIntent::SetProviderModel {
+        let mut presentation = RuntimePresentation::default();
+        presentation.apply(RuntimePresentationIntent::ProviderModel {
             provider: None,
             model_id: Some("gpt-5.5".to_string()),
         });
@@ -339,7 +347,7 @@ mod tests {
 
         let vm = StatusViewAssembler::assemble_from_runtime_session(
             &conversation,
-            &config,
+            &presentation,
             &workspace,
             None,
             &diagnostic,

@@ -9,6 +9,7 @@
 
 TUI **NEVER** 读取 `ConfigReader`、watch 或配置文件。只消费 SDK `ConfigReloadedEvent`：
 
+- 根模型的 `RuntimePresentation` 只保存由启动与 SDK 事件推送的模型、上下文窗口和 thinking 等运行展示数据；它不是 Config BC 的 reader、watch 或 provider；
 - 包含 `run` scope 时显示“下次 Run 生效”；
 - 包含 `session_restart_required` scope 时显示“重启 Session 后生效”；
 - 展示逻辑不得重建 TUI、logger、MCP 或存储基础设施。

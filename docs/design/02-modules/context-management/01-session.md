@@ -177,6 +177,7 @@ Context Management 还负责会话 identity：session 列表、元数据、`/res
 ## 修改历史
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-23 | #1296 以聚合 Guard 验收 #1292 已落地的 Session backing Composition-only construction；聚合 Guard 不取代 Session Port/Adapter 契约测试 | [#1296](https://github.com/rushsinging/aemeath/issues/1296) |
 | 2026-07-11 | 初稿：Session 聚合、ChatChain/ChatSegment、跨 BC 快照组装、与 Run 关系、恢复边界 | #761 |
 | 2026-07-12 | 补充 ContextPort 相关文档交叉引用 | #786 |
 | 2026-07-14 | Session 快照组装改为直接消费 Project-owned WorkspacePersist；以联合 prepare / gate 内无失败 commit 原子切换 Task、Workspace、Memory 与 Session identity，并复用 active Main session slot scope | [#972](https://github.com/rushsinging/aemeath/issues/972) |

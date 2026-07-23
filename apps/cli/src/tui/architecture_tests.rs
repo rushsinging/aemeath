@@ -223,7 +223,7 @@ fn test_phase_four_acl_only_produces_intents() {
 }
 
 #[test]
-fn test_phase_four_config_provider_owns_config_fields() {
+fn runtime_presentation_owns_runtime_display_fields() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let runtime = fs::read_to_string(root.join("model/conversation/runtime_state.rs"))
         .expect("read conversation runtime");
@@ -237,22 +237,20 @@ fn test_phase_four_config_provider_owns_config_fields() {
     for forbidden in ["provider:", "model_id:", "thinking:"] {
         assert!(
             !runtime.contains(forbidden),
-            "Conversation RuntimeState must not own ConfigProvider field {forbidden}"
+            "Conversation RuntimeState must not own RuntimePresentation field {forbidden}"
         );
     }
     assert!(
         !usage.contains("context_size:"),
-        "Conversation usage must not own ConfigProvider context_size"
+        "Conversation usage must not own RuntimePresentation context_size"
     );
-    for forbidden in ["SetProviderModel", "SetContextSize", "SetThinking"] {
-        assert!(
-            !intent.contains(forbidden),
-            "ConversationIntent must not retain ConfigProvider intent {forbidden}"
-        );
-    }
     assert!(
-        status.contains("config: &ConfigProvider"),
-        "Status assembler must receive ConfigProvider explicitly"
+        !intent.contains("RuntimePresentationIntent"),
+        "ConversationIntent must not retain RuntimePresentation intent"
+    );
+    assert!(
+        status.contains("presentation: &RuntimePresentation"),
+        "Status assembler must receive RuntimePresentation explicitly"
     );
 }
 

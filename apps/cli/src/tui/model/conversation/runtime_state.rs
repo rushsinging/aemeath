@@ -14,7 +14,7 @@ use std::time::Instant;
 /// 会话运行态聚合——spinner / usage / workspace / status 等基础设施关注点。
 ///
 /// TODO: 字段将逐步私有化，改为只经业务方法操作。
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct RuntimeState {
     pub spinner: SpinnerModel,
     pub usage: UsageSummary,
@@ -25,22 +25,6 @@ pub struct RuntimeState {
     pub graph_phase: Option<String>,
     pub transient_notice_expiry: Option<Instant>,
     pub compact_progress: Option<CompactProgressModel>,
-}
-
-impl Default for RuntimeState {
-    fn default() -> Self {
-        Self {
-            spinner: SpinnerModel::default(),
-            usage: UsageSummary::default(),
-            live_tps: None,
-            task_status: TaskStatusSnapshot::default(),
-            processing_jobs: Vec::new(),
-            status_notice: StatusNotice::default(),
-            graph_phase: None,
-            transient_notice_expiry: None,
-            compact_progress: None,
-        }
-    }
 }
 
 // ── 只读访问器（供 view assembler 读取） ──

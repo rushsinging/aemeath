@@ -464,6 +464,7 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-23 | #1296 以聚合 Guard 验收 Session、Config Store、Runtime Tool 与 Hook 的 Composition-only concrete construction；MCP lifecycle 继续唯一归 #1327 | [#1296](https://github.com/rushsinging/aemeath/issues/1296) / [#1327](https://github.com/rushsinging/aemeath/issues/1327) |
 | 2026-07-22 | #1295 将 Hook dispatcher 的 production construction 上移至 Composition；Runtime Main/Sub 只复用 injected HookPort；MCP lifecycle 仍由 #1327 承接 | [#1295](https://github.com/rushsinging/aemeath/issues/1295) / [#1327](https://github.com/rushsinging/aemeath/issues/1327) |
 | 2026-07-21 | #1294 将 Tool Catalog/Execution/binding、Skill Catalog/materializer、Tool Result materializer 与 ActiveRunRegistry 的 production assembly 上移至 Composition；MCP Ready lifecycle 接线延期至 #1327 | [#1294](https://github.com/rushsinging/aemeath/issues/1294) / [#1327](https://github.com/rushsinging/aemeath/issues/1327) |
 | 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口由 #1289（归 #860）承接 | #1285/#1289/#860 |

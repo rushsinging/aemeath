@@ -1,14 +1,14 @@
-use crate::tui::model::config_provider::ConfigProvider;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::diagnostic::model::DiagnosticModel;
 use crate::tui::model::input::model::InputModel;
 use crate::tui::model::runtime::session_model::SessionModel;
+use crate::tui::model::runtime_presentation::RuntimePresentation;
 use crate::tui::model::workspace_provider::WorkspaceProvider;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TuiModel {
     pub conversation: ConversationModel,
-    pub config_provider: ConfigProvider,
+    pub runtime_presentation: RuntimePresentation,
     pub diagnostic: DiagnosticModel,
     pub input: InputModel,
     pub session: SessionModel,

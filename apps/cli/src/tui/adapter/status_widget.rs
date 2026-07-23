@@ -6,7 +6,6 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::model::config_provider::ConfigIntent;
     use crate::tui::model::conversation::intent::{RecordUsage, SetStatusNotice};
     use crate::tui::model::conversation::status_notice::{StatusNotice, StatusNoticeKind};
     use crate::tui::model::conversation::workspace::WorktreeKind;
@@ -14,6 +13,7 @@ mod tests {
     use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
     use crate::tui::model::root::TuiModel;
     use crate::tui::model::runtime::session_intent::SessionIntent;
+    use crate::tui::model::runtime_presentation::RuntimePresentationIntent;
     use crate::tui::model::workspace_provider::WorkspaceIntent;
     use crate::tui::update::intent::AgentIntent;
     use crate::tui::update::root_reducer::reduce_intent;
@@ -25,7 +25,7 @@ mod tests {
         let mut model = TuiModel::default();
         reduce_intent(
             &mut model,
-            AgentIntent::Config(ConfigIntent::SetProviderModel {
+            AgentIntent::RuntimePresentation(RuntimePresentationIntent::ProviderModel {
                 provider: None,
                 model_id: Some("glm-5.1".to_string()),
             }),
@@ -45,7 +45,7 @@ mod tests {
         );
         reduce_intent(
             &mut model,
-            AgentIntent::Config(ConfigIntent::SetContextSize(200_000)),
+            AgentIntent::RuntimePresentation(RuntimePresentationIntent::ContextSize(200_000)),
         );
         reduce_intent(
             &mut model,
@@ -71,12 +71,12 @@ mod tests {
         );
         reduce_intent(
             &mut model,
-            AgentIntent::Config(ConfigIntent::SetThinking(true)),
+            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking(true)),
         );
 
         let view = StatusViewAssembler::assemble_status_view(
             &model.conversation,
-            &model.config_provider,
+            &model.runtime_presentation,
             &model.workspace_provider,
             Some(&model.session),
             &model.diagnostic,
@@ -107,12 +107,12 @@ mod tests {
         );
         reduce_intent(
             &mut model,
-            AgentIntent::Config(ConfigIntent::SetThinking(false)),
+            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking(false)),
         );
 
         let view = StatusViewAssembler::assemble_status_view(
             &model.conversation,
-            &model.config_provider,
+            &model.runtime_presentation,
             &model.workspace_provider,
             None,
             &model.diagnostic,
@@ -156,7 +156,7 @@ mod tests {
 
         let view = StatusViewAssembler::assemble_status_view(
             &model.conversation,
-            &model.config_provider,
+            &model.runtime_presentation,
             &model.workspace_provider,
             None,
             &model.diagnostic,

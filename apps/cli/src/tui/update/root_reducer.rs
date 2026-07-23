@@ -44,8 +44,8 @@ pub(crate) fn reduce_intent(model: &mut TuiModel, intent: AgentIntent) -> TuiUpd
             let changes = model.conversation.apply(intent);
             apply_conversation_changes(&mut result, &changes, &mut model.conversation.runtime);
         }
-        AgentIntent::Config(intent) => {
-            model.config_provider.apply(intent);
+        AgentIntent::RuntimePresentation(intent) => {
+            model.runtime_presentation.apply(intent);
             result.dirty.mark_status();
         }
         AgentIntent::Input(intent) => {

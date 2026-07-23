@@ -110,8 +110,11 @@ mod tests {
         let skill_wiring = tools::composition::wire_skills();
         let skill_materializer = skill_wiring.materializer();
         let snapshot = share::config::domain::snapshot::ConfigSnapshot::new(Config::default());
-        let config_reader =
-            crate::application::agent::runner::test_config_reader::FixedConfigReader::new(snapshot);
+        let config_reader: Arc<dyn config::ConfigReader> = Arc::new(
+            crate::application::agent::runner::test_config_reader::FixedConfigReader::from_snapshot(
+                snapshot,
+            ),
+        );
         let hook_runner: Arc<dyn HookPort> =
             Arc::new(hook::build_dispatcher(&HooksConfig::default(), HashMap::new()).unwrap());
         let runner = build_agent_runner(
