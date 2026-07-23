@@ -25,7 +25,7 @@ impl ConversationUpdate for StartChat {
 impl ConversationUpdate for ResumeConversation {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         use super::history_parse::{
-            collect_following_tool_results, normalize_tool_result_content,
+            collect_following_tool_results, normalize_tool_result_content, restored_ask_answer,
             tool_result_content_to_string, tool_result_image_count, HistoryAssistantBlock,
             HistoryDisplayMessage,
         };
@@ -57,6 +57,7 @@ impl ConversationUpdate for ResumeConversation {
                     let turn_id = ChatTurnId::from_legacy_or_new("turn-1");
                     model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
                     let tool_results = collect_following_tool_results(subsequent);
+                    let mut restored_ask_slots = Vec::new();
                     for (block_index, block) in blocks.into_iter().enumerate() {
                         match block {
                             HistoryAssistantBlock::Text(text) => {
@@ -82,6 +83,15 @@ impl ConversationUpdate for ResumeConversation {
                                 }));
                             }
                             HistoryAssistantBlock::ToolUse { id, name, input } => {
+                                let ask_question = (name == "AskUserQuestion")
+                                    .then(|| input.get("question").and_then(|value| value.as_str()))
+                                    .flatten()
+                                    .filter(|question| !question.trim().is_empty())
+                                    .map(ToOwned::to_owned);
+                                let restored_answer = tool_results
+                                    .get(id.as_str())
+                                    .copied()
+                                    .and_then(restored_ask_answer);
                                 let input_json = input.to_string();
                                 let tool_call_id = ToolCallId::from_legacy_or_new(&id);
                                 all_changes.extend(model.apply(ToolCallStart {
@@ -102,6 +112,19 @@ impl ConversationUpdate for ResumeConversation {
                                     arguments: Some(input_json),
                                     status: ToolCallStatus::Ready,
                                 }));
+                                if let (Some(question), Some(answer)) =
+                                    (ask_question, restored_answer)
+                                {
+                                    restored_ask_slots.push(super::block::AskUserSlot {
+                                        id: id.clone(),
+                                        question,
+                                        options: Vec::new(),
+                                        llm_option_count: 0,
+                                        multi_select: false,
+                                        default: None,
+                                        answer: Some(answer),
+                                    });
+                                }
                                 if let Some(result) = tool_results.get(id.as_str()) {
                                     all_changes.extend(model.apply(ToolResult {
                                         chat_id: chat_id.clone(),
@@ -117,6 +140,10 @@ impl ConversationUpdate for ResumeConversation {
                                 }
                             }
                         }
+                    }
+                    if !restored_ask_slots.is_empty() {
+                        all_changes
+                            .extend(model.restore_answered_ask_user_batch(restored_ask_slots));
                     }
                 }
                 Err(error) => {
@@ -706,6 +733,70 @@ mod tests {
     use crate::tui::model::conversation::block::HookNoticeKind;
     use crate::tui::model::output_timeline::OutputTimelineItem;
 
+    fn ask_tool_use(id: &str, question: &str) -> sdk::ContentBlock {
+        sdk::ContentBlock::ToolUse {
+            id: id.to_string(),
+            name: "AskUserQuestion".to_string(),
+            input: serde_json::json!({ "question": question }),
+        }
+    }
+
+    fn ask_result(id: &str, answer: serde_json::Value) -> sdk::ChatMessage {
+        sdk::ChatMessage {
+            role: "user".to_string(),
+            content: vec![sdk::ContentBlock::ToolResult {
+                tool_use_id: id.to_string(),
+                content: answer,
+                is_error: false,
+                text: None,
+            }],
+            metadata: None,
+            input_id: None,
+        }
+    }
+
+    #[test]
+    fn resume_restores_answered_ask_batches_in_assistant_message_order() {
+        let assistant_one = sdk::ChatMessage {
+            role: "assistant".to_string(),
+            content: vec![ask_tool_use("ask-1", "第一问")],
+            metadata: None,
+            input_id: None,
+        };
+        let assistant_two = sdk::ChatMessage {
+            role: "assistant".to_string(),
+            content: vec![ask_tool_use("ask-2", "第二问")],
+            metadata: None,
+            input_id: None,
+        };
+        let mut model = ConversationModel::default();
+
+        ResumeConversation {
+            messages: vec![
+                assistant_one,
+                ask_result("ask-1", serde_json::json!({ "answer": "答案一" })),
+                assistant_two,
+                ask_result("ask-2", serde_json::json!("答案二")),
+            ],
+        }
+        .update(&mut model);
+
+        let restored = model
+            .timeline
+            .items()
+            .iter()
+            .filter_map(|item| match item {
+                OutputTimelineItem::AskUserBatch {
+                    slots, confirmed, ..
+                } if *confirmed => Some((slots[0].question.as_str(), slots[0].answer.as_deref())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            restored,
+            vec![("第一问", Some("答案一")), ("第二问", Some("答案二"))]
+        );
+    }
     #[test]
     fn resume_projects_stop_hook_feedback_as_hook_notice() {
         let mut model = ConversationModel::default();

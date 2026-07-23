@@ -20,6 +20,7 @@ use crate::tui::model::conversation::intent::*;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::output::tool_display::format_subagent_tool_header;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
+use crate::tui::update::intent::AgentIntent;
 use crate::tui::update::msg::TuiMsg;
 use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
 use crate::tui::view_assembler::output::OutputViewAssembler;
@@ -150,12 +151,14 @@ impl App {
                 UpdateResult::none()
             }
             TuiMsg::Paste(text) => {
-                // Paste while in AskUserQuestion free-input mode: insert into input area only
-                if self.input.ask_user_state.is_some() || self.input.ask_user_reply_tx.is_some() {
+                // Paste while in AskUserQuestion free-input mode: route text to the Ask block.
+                if self.input.ask_user_state.is_some() {
                     self.input.just_pasted = true;
-                    self.handle_input_intent(
-                        crate::tui::model::input::intent::InputIntent::InsertText(text),
-                    );
+                    for ch in text.chars() {
+                        self.apply_agent_intent(AgentIntent::Conversation(
+                            ConversationIntent::AppendAskUserChatChar(AppendAskUserChatChar { ch }),
+                        ));
+                    }
                     return UpdateResult::none();
                 } // Paste while processing: insert into input area so it can be queued
                 match sdk::classify_paste(&text) {

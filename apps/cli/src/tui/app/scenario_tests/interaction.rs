@@ -64,3 +64,111 @@ fn cancel_and_quit_effects_are_explicit() {
 }
 
 use crate::tui::update::msg::TuiMsg;
+
+#[test]
+fn ask_user_free_text_stays_in_ask_block() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    let (reply_tx, mut reply_rx) = tokio::sync::oneshot::channel();
+    harness.ui(UiEvent::AskUserBatch {
+        items: vec![sdk::AskUserQuestionItem {
+            id: "ask-free-text".into(),
+            question: "Tell me more".into(),
+            options: Vec::new(),
+            multi_select: false,
+            allow_free_input: true,
+            default: None,
+        }],
+        reply_tx,
+    });
+
+    for ch in "222".chars() {
+        harness.key(input::press(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+    assert_eq!(
+        harness
+            .app
+            .model
+            .conversation
+            .ask_user_chat_text()
+            .as_deref(),
+        Some("222")
+    );
+    assert!(harness.app.model.input.document.buffer.is_empty());
+
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(
+        reply_rx.try_recv().expect("ask reply"),
+        sdk::AskUserReply::Answers(vec!["222".to_string()])
+    );
+    harness.assert_idle();
+}
+
+#[test]
+fn resume_restores_all_answered_ask_batches() {
+    fn ask_tool_use(id: &str, question: &str) -> sdk::ContentBlock {
+        sdk::ContentBlock::ToolUse {
+            id: id.to_string(),
+            name: "AskUserQuestion".to_string(),
+            input: serde_json::json!({ "question": question }),
+        }
+    }
+    fn ask_result(id: &str, answer: &str) -> sdk::ChatMessage {
+        sdk::ChatMessage {
+            role: "user".to_string(),
+            content: vec![sdk::ContentBlock::ToolResult {
+                tool_use_id: id.to_string(),
+                content: serde_json::json!({ "answer": answer }),
+                is_error: false,
+                text: None,
+            }],
+            metadata: None,
+            input_id: None,
+        }
+    }
+
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.app.model.conversation.apply(
+        crate::tui::model::conversation::intent::ResumeConversation {
+            messages: vec![
+                sdk::ChatMessage {
+                    role: "assistant".to_string(),
+                    content: vec![ask_tool_use("resume-ask-1", "恢复问题一")],
+                    metadata: None,
+                    input_id: None,
+                },
+                ask_result("resume-ask-1", "恢复答案一"),
+                sdk::ChatMessage {
+                    role: "assistant".to_string(),
+                    content: vec![ask_tool_use("resume-ask-2", "恢复问题二")],
+                    metadata: None,
+                    input_id: None,
+                },
+                ask_result("resume-ask-2", "恢复答案二"),
+            ],
+        },
+    );
+    let restored_count = harness
+        .app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .filter(|item| {
+            matches!(
+                item,
+                crate::tui::model::output_timeline::OutputTimelineItem::AskUserBatch {
+                    confirmed: true,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(restored_count, 2);
+    harness.app.view_state.output.auto_scroll = false;
+    harness.app.mark_output_dirty();
+    harness.render();
+    let screen = harness.screen();
+    assert!(!screen.is_empty());
+    assert_eq!(restored_count, 2);
+}

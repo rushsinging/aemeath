@@ -7,6 +7,5 @@ use crate::tui::app::state::AskUserState;
 pub(crate) struct InputState {
     pub just_pasted: bool,
     pub last_click: Option<(std::time::Instant, u16, u16)>,
-    pub ask_user_reply_tx: Option<tokio::sync::oneshot::Sender<sdk::AskUserReply>>,
     pub ask_user_state: Option<AskUserState>,
 }
