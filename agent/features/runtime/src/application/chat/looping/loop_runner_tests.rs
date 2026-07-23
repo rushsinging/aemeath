@@ -537,6 +537,7 @@ impl RecordingSink {
             RuntimeStreamEvent::ToolResult { .. } => "ToolResult".to_string(),
             RuntimeStreamEvent::LiveTps(_) => "LiveTps".to_string(),
             RuntimeStreamEvent::AskUserBatch { .. } => "AskUserBatch".to_string(),
+            RuntimeStreamEvent::InteractionRequested { .. } => "InteractionRequested".to_string(),
             RuntimeStreamEvent::AgentProgress { .. } => "AgentProgress".to_string(),
             RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                 "WorkingDirectoryChanged".to_string()
@@ -797,6 +798,9 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -950,6 +954,9 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1082,6 +1089,9 @@ async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1271,6 +1281,9 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1368,6 +1381,9 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1546,6 +1562,9 @@ async fn test_continue_false_json_treated_as_block() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1670,6 +1689,9 @@ async fn test_stall_triggers_stop_hook_check() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1833,6 +1855,9 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1998,6 +2023,9 @@ async fn test_stall_detector_resets_across_user_turns() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2195,6 +2223,9 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2317,6 +2348,9 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2419,6 +2453,9 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2500,6 +2537,9 @@ async fn test_stop_hook_block_limit_stops_loop() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2685,6 +2725,9 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: active_run.clone(),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2899,6 +2942,9 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: active_run.clone(),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -3084,6 +3130,9 @@ async fn test_chat_impl_idle_until_first_input_event() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -3208,6 +3257,9 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -3305,6 +3357,9 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -3382,6 +3437,9 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -3529,6 +3587,9 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -3780,6 +3841,9 @@ async fn test_await_user_same_run_recovery() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -3929,6 +3993,9 @@ async fn test_control_event_during_await_user_exits_to_session() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: active_run.clone(),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -4080,6 +4147,9 @@ async fn test_cancel_during_await_user_terminates_run() {
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: active_run.clone(),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -4239,6 +4309,9 @@ async fn test_biased_select_preserves_queued_input_when_cancel_and_message_both_
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: active_run.clone(),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -4796,6 +4869,9 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -4955,6 +5031,9 @@ async fn per_turn_drain_seal_input_id_preserved_when_run_returns_tool_results_wi
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -5080,6 +5159,9 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: std::sync::Arc::new(
+            crate::application::interaction::InteractionBridge::new(),
+        ),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),

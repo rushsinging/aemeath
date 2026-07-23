@@ -408,6 +408,9 @@ pub(crate) fn project_stream_event(
         crate::application::chat::RuntimeStreamEvent::AskUserBatch { items, reply_tx } => {
             ChatEvent::AskUserBatch { items, reply_tx }
         }
+        crate::application::chat::RuntimeStreamEvent::InteractionRequested { request } => {
+            ChatEvent::InteractionRequested { request }
+        }
         crate::application::chat::RuntimeStreamEvent::AgentProgress {
             context,
             tool_id,

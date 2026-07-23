@@ -171,6 +171,10 @@ pub enum AppEvent {
         items: Vec<sdk::AskUserQuestionItem>,
         reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,
     },
+    /// #1246: Typed interaction request from Runtime (pure value, no sender).
+    InteractionRequested {
+        request: sdk::InteractionRequest,
+    },
     /// Sub-agent progress update (streams per-turn output to TUI)
     AgentProgress {
         context: UiTurnContext,

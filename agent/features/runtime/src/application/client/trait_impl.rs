@@ -68,6 +68,22 @@ impl AgentClient for AgentClientImpl {
         self.inner.active_run.terminate(run_id, reason, deadline)
     }
 
+    fn reply_interaction(
+        &self,
+        request_id: &sdk::InteractionRequestId,
+        reply: sdk::InteractionReply,
+    ) -> sdk::InteractionCommandOutcome {
+        self.inner.interaction_bridge.reply(request_id, reply)
+    }
+
+    fn cancel_interaction(
+        &self,
+        request_id: &sdk::InteractionRequestId,
+        reason: sdk::InteractionCancelReason,
+    ) -> sdk::InteractionCommandOutcome {
+        self.inner.interaction_bridge.cancel(request_id, reason)
+    }
+
     async fn chat(&self, input: ChatRequest) -> Result<ChatStream, SdkError> {
         super::trait_chat::chat_impl(self, input).await
     }

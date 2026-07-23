@@ -35,6 +35,9 @@ pub struct RuntimeHandle {
     /// 当前 active Run 的唯一注册表。同步 cancel_run(run_id) 在同一锁内校验 ID、
     /// 标记 Cancelling 并触发该 Run 的 token。
     pub(crate) active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
+    /// Interaction bridge：拥有 typed interaction waiter，
+    /// 由 `AgentClient::reply_interaction` / `cancel_interaction` 委托。
+    pub(crate) interaction_bridge: Arc<crate::application::interaction::InteractionBridge>,
     /// Resume 标志：load_session 后设为 true，chat_impl 消费后重置为 false。
     ///
     /// loop-top idle 门据此在首次遇到 pending user turn 时强制 idle 等待，

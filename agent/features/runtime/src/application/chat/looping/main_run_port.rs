@@ -270,6 +270,8 @@ where
     pub(crate) cancel: CancellationToken,
     pub(crate) run_id: sdk::RunId,
     pub(crate) active_run: &'a dyn crate::domain::agent_run::ActiveRunPort,
+    /// #1246: Typed interaction bridge for AskUserQuestion suspension.
+    pub(crate) interaction_bridge: &'a Arc<crate::application::interaction::InteractionBridge>,
     pub(crate) turn_count: usize,
     pub(crate) turn_context: RuntimeTurnContext,
     pub(crate) last_total_tokens: &'a mut Option<u64>,
@@ -1357,6 +1359,7 @@ where
             self.language,
             &self.current_cwd(),
             calls,
+            self.interaction_bridge,
         )
         .await;
         let cancelled = cancel.is_cancelled();
