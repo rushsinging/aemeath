@@ -1,29 +1,32 @@
+use crate::tui::adapter::tui_runtime_event::{
+    TuiHookEvent, TuiHookMessage, TuiHookMessageKind, TuiHookResult, TuiHookStatus,
+};
 use crate::tui::model::conversation::block::{HookNoticeContent, HookNoticeKind};
 use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
 
-pub fn hook_event_notice(event: &sdk::HookEventView) -> Option<HookNoticeContent> {
+pub fn hook_event_notice(event: &TuiHookEvent) -> Option<HookNoticeContent> {
     match event.status {
-        sdk::HookEventStatus::Blocked => Some(HookNoticeContent {
+        TuiHookStatus::Blocked => Some(HookNoticeContent {
             kind: HookNoticeKind::Blocked,
             title: format!("Hook blocked: {}", event.hook_name),
             body: "Hook returned a block decision.".to_string(),
             details: hook_summary_details(event),
         }),
-        sdk::HookEventStatus::Failed => Some(HookNoticeContent {
+        TuiHookStatus::Failed => Some(HookNoticeContent {
             kind: HookNoticeKind::Failed,
             title: format!("Hook failed: {}", event.hook_name),
             body: "Hook execution failed.".to_string(),
             details: hook_summary_details(event),
         }),
-        sdk::HookEventStatus::Running | sdk::HookEventStatus::Succeeded => None,
+        TuiHookStatus::Running | TuiHookStatus::Succeeded => None,
     }
 }
 
-pub fn hook_message_notice(message: &sdk::HookMessageView) -> Option<HookNoticeContent> {
+pub fn hook_message_notice(message: &TuiHookMessage) -> Option<HookNoticeContent> {
     let body = non_empty(&message.text)?;
     let kind = match message.kind {
-        sdk::HookMessageKindView::AdditionalContext => "context",
-        sdk::HookMessageKindView::SystemMessage => "message",
+        TuiHookMessageKind::AdditionalContext => "context",
+        TuiHookMessageKind::SystemMessage => "message",
     };
     Some(HookNoticeContent {
         kind: HookNoticeKind::Info,
@@ -37,7 +40,7 @@ pub fn hook_message_notice(message: &sdk::HookMessageView) -> Option<HookNoticeC
 }
 
 pub fn hook_spinner_phase(
-    event: &sdk::HookEventView,
+    event: &TuiHookEvent,
 ) -> crate::tui::model::conversation::spinner::SpinnerPhase {
     use crate::tui::model::conversation::spinner::{HookOutcome, SpinnerPhase};
 
@@ -52,10 +55,10 @@ pub fn hook_spinner_phase(
     // 但我们需要在调用方处理停止 spinner 的逻辑
 
     let outcome = match event.status {
-        sdk::HookEventStatus::Running => HookOutcome::Running,
-        sdk::HookEventStatus::Succeeded => HookOutcome::Done,
-        sdk::HookEventStatus::Blocked => HookOutcome::Blocked,
-        sdk::HookEventStatus::Failed => HookOutcome::Failed,
+        TuiHookStatus::Running => HookOutcome::Running,
+        TuiHookStatus::Succeeded => HookOutcome::Done,
+        TuiHookStatus::Blocked => HookOutcome::Blocked,
+        TuiHookStatus::Failed => HookOutcome::Failed,
     };
     SpinnerPhase::Hook {
         event: event.hook_name.clone(),
@@ -64,7 +67,7 @@ pub fn hook_spinner_phase(
     }
 }
 
-fn hook_summary_details(event: &sdk::HookEventView) -> Option<String> {
+fn hook_summary_details(event: &TuiHookEvent) -> Option<String> {
     let mut lines = Vec::new();
     push_field(&mut lines, "Matcher", event.matcher.as_deref());
     push_field(&mut lines, "Command", event.command.as_deref());
@@ -77,7 +80,7 @@ fn hook_summary_details(event: &sdk::HookEventView) -> Option<String> {
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-fn hook_spinner_detail(event: &sdk::HookEventView) -> String {
+fn hook_spinner_detail(event: &TuiHookEvent) -> String {
     if let Some(command) = event.command.as_deref().and_then(non_empty) {
         return truncate_for_spinner(&display_command_name(&command), 48);
     }
@@ -130,11 +133,8 @@ fn truncate_for_spinner(text: &str, limit: usize) -> String {
 mod tests {
     use super::*;
 
-    fn event(
-        status: sdk::HookEventStatus,
-        result: sdk::HookExecutionResultView,
-    ) -> sdk::HookEventView {
-        sdk::HookEventView {
+    fn event(status: TuiHookStatus, result: TuiHookResult) -> TuiHookEvent {
+        TuiHookEvent {
             hook_name: "Stop".to_string(),
             status,
             matcher: Some("*".to_string()),
@@ -143,8 +143,8 @@ mod tests {
         }
     }
 
-    fn result() -> sdk::HookExecutionResultView {
-        sdk::HookExecutionResultView {
+    fn result() -> TuiHookResult {
+        TuiHookResult {
             exit_code: Some(2),
             stdout: "out".to_string(),
             stderr: "err".to_string(),
@@ -156,12 +156,12 @@ mod tests {
 
     #[test]
     fn additional_context_message_builds_info_notice_with_metadata() {
-        let notice = hook_message_notice(&sdk::HookMessageView {
+        let notice = hook_message_notice(&TuiHookMessage {
             point: "PreToolUse".to_string(),
             source: "matcher:Bash".to_string(),
             execution_ordinal: 2,
             attempt: 3,
-            kind: sdk::HookMessageKindView::AdditionalContext,
+            kind: TuiHookMessageKind::AdditionalContext,
             text: "Use formatter".to_string(),
         })
         .expect("non-empty hook message must render");
@@ -177,12 +177,12 @@ mod tests {
 
     #[test]
     fn empty_hook_message_is_not_rendered() {
-        assert!(hook_message_notice(&sdk::HookMessageView {
+        assert!(hook_message_notice(&TuiHookMessage {
             point: "PreToolUse".to_string(),
             source: "matcher:Bash".to_string(),
             execution_ordinal: 0,
             attempt: 1,
-            kind: sdk::HookMessageKindView::SystemMessage,
+            kind: TuiHookMessageKind::SystemMessage,
             text: "<system-reminder>\n</system-reminder>".to_string(),
         })
         .is_none());
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn blocked_event_builds_blocked_notice() {
-        let notice = hook_event_notice(&event(sdk::HookEventStatus::Blocked, result())).unwrap();
+        let notice = hook_event_notice(&event(TuiHookStatus::Blocked, result())).unwrap();
         assert_eq!(notice.kind, HookNoticeKind::Blocked);
         assert_eq!(notice.title, "Hook blocked: Stop");
         assert_eq!(notice.body, "Hook returned a block decision.");
@@ -205,7 +205,7 @@ mod tests {
     fn failed_event_uses_summary_without_stderr() {
         let mut result = result();
         result.reason = None;
-        let notice = hook_event_notice(&event(sdk::HookEventStatus::Failed, result)).unwrap();
+        let notice = hook_event_notice(&event(TuiHookStatus::Failed, result)).unwrap();
         assert_eq!(notice.kind, HookNoticeKind::Failed);
         assert_eq!(notice.title, "Hook failed: Stop");
         assert_eq!(notice.body, "Hook execution failed.");
@@ -214,14 +214,14 @@ mod tests {
 
     #[test]
     fn succeeded_event_does_not_build_notice() {
-        assert!(hook_event_notice(&event(sdk::HookEventStatus::Succeeded, result())).is_none());
+        assert!(hook_event_notice(&event(TuiHookStatus::Succeeded, result())).is_none());
     }
 
     #[test]
     fn spinner_detail_displays_command_basename_for_project_template_path() {
-        let event = sdk::HookEventView {
+        let event = TuiHookEvent {
             hook_name: "Stop".to_string(),
-            status: sdk::HookEventStatus::Running,
+            status: TuiHookStatus::Running,
             matcher: None,
             command: Some("{AEMEATH_PROJECT_DIR}/build_cli.sh".to_string()),
             result: None,
@@ -241,9 +241,9 @@ mod tests {
 
     #[test]
     fn spinner_detail_strips_wrapping_quote_after_basename() {
-        let event = sdk::HookEventView {
+        let event = TuiHookEvent {
             hook_name: "Stop".to_string(),
-            status: sdk::HookEventStatus::Running,
+            status: TuiHookStatus::Running,
             matcher: None,
             command: Some("\"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-verify.sh\"".to_string()),
             result: None,
@@ -265,7 +265,7 @@ mod tests {
     fn notice_body_does_not_display_system_reminder_payload() {
         let mut result = result();
         result.reason = Some("<system-reminder>\nblocked\n</system-reminder>".to_string());
-        let notice = hook_event_notice(&event(sdk::HookEventStatus::Blocked, result)).unwrap();
+        let notice = hook_event_notice(&event(TuiHookStatus::Blocked, result)).unwrap();
         assert_eq!(notice.body, "Hook returned a block decision.");
     }
 
@@ -275,7 +275,7 @@ mod tests {
         result.reason = None;
         result.stdout.clear();
         result.stderr = "stop hook stderr".to_string();
-        let notice = hook_event_notice(&event(sdk::HookEventStatus::Blocked, result)).unwrap();
+        let notice = hook_event_notice(&event(TuiHookStatus::Blocked, result)).unwrap();
 
         assert_eq!(notice.body, "Hook returned a block decision.");
         assert!(!notice.details.unwrap().contains("Stderr:"));

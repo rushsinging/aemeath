@@ -366,6 +366,7 @@ pub(crate) enum TuiRuntimeEvent {
         last_input: u32,
         elapsed_secs: f64,
     },
+    Error(String),
     TurnStarted {
         messages: Vec<TuiChatMessage>,
     },

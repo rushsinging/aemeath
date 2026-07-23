@@ -59,7 +59,43 @@ pub(crate) struct TuiChatMessage {
     pub(crate) stop_hook: Option<TuiStopHookFeedback>,
 }
 
+impl TuiContentBlock {
+    pub(crate) fn text(text: impl Into<String>) -> Self {
+        Self::Text { text: text.into() }
+    }
+}
+
 impl TuiChatMessage {
+    pub(crate) fn user_text(text: impl Into<String>) -> Self {
+        Self {
+            role: "user".to_string(),
+            content: vec![TuiContentBlock::text(text)],
+            input_id: None,
+            source: TuiMessageSource::User,
+            stop_hook: None,
+        }
+    }
+
+    pub(crate) fn system_generated_user_text(text: impl Into<String>) -> Self {
+        Self {
+            role: "user".to_string(),
+            content: vec![TuiContentBlock::text(text)],
+            input_id: None,
+            source: TuiMessageSource::SystemGenerated,
+            stop_hook: None,
+        }
+    }
+
+    pub(crate) fn assistant_text(text: impl Into<String>) -> Self {
+        Self {
+            role: "assistant".to_string(),
+            content: vec![TuiContentBlock::text(text)],
+            input_id: None,
+            source: TuiMessageSource::User,
+            stop_hook: None,
+        }
+    }
+
     pub(crate) fn text_content(&self) -> String {
         self.content
             .iter()

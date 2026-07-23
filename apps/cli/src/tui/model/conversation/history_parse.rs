@@ -283,38 +283,39 @@ pub(crate) fn tool_result_image_count(content: &serde_json::Value) -> usize {
 mod tests {
     use super::*;
 
-    fn msg(role: &str, content: Vec<sdk::ContentBlock>) -> sdk::ChatMessage {
-        sdk::ChatMessage {
+    fn msg(role: &str, content: Vec<TuiContentBlock>) -> TuiChatMessage {
+        TuiChatMessage {
             role: role.to_string(),
             content,
-            metadata: None,
+            source: TuiMessageSource::User,
+            stop_hook: None,
             input_id: None,
         }
     }
 
-    fn text_block(s: &str) -> sdk::ContentBlock {
-        sdk::ContentBlock::Text {
+    fn text_block(s: &str) -> TuiContentBlock {
+        TuiContentBlock::Text {
             text: s.to_string(),
         }
     }
 
-    fn thinking_block(s: &str) -> sdk::ContentBlock {
-        sdk::ContentBlock::Thinking {
+    fn thinking_block(s: &str) -> TuiContentBlock {
+        TuiContentBlock::Thinking {
             thinking: s.to_string(),
             signature: None,
         }
     }
 
-    fn tool_use_block(id: &str, name: &str) -> sdk::ContentBlock {
-        sdk::ContentBlock::ToolUse {
+    fn tool_use_block(id: &str, name: &str) -> TuiContentBlock {
+        TuiContentBlock::ToolUse {
             id: id.to_string(),
             name: name.to_string(),
             input: serde_json::json!({}),
         }
     }
 
-    fn tool_result_block(id: &str, content: serde_json::Value) -> sdk::ContentBlock {
-        sdk::ContentBlock::ToolResult {
+    fn tool_result_block(id: &str, content: serde_json::Value) -> TuiContentBlock {
+        TuiContentBlock::ToolResult {
             tool_use_id: id.to_string(),
             content,
             is_error: false,
@@ -322,12 +323,10 @@ mod tests {
         }
     }
 
-    fn image_block() -> sdk::ContentBlock {
-        sdk::ContentBlock::Image {
-            source: sdk::ImageSource::Base64 {
-                media_type: "image/png".to_string(),
-                data: "iVBOR".to_string(),
-            },
+    fn image_block() -> TuiContentBlock {
+        TuiContentBlock::Image {
+            media_type: "image/png".to_string(),
+            base64: "iVBOR".to_string(),
             placeholder: Some("[Image #1]".to_string()),
         }
     }
@@ -340,10 +339,7 @@ mod tests {
             "user",
             vec![text_block("<system-reminder>blocked</system-reminder>")],
         );
-        message.metadata = Some(sdk::ChatMessageMetadata {
-            source: sdk::ChatMessageSource::StopHook,
-            stop_hook: None,
-        });
+        message.source = TuiMessageSource::StopHook;
 
         assert_eq!(
             HistoryDisplayMessage::parse(&message),
@@ -361,10 +357,7 @@ mod tests {
                 "<system-reminder>Stop hook prevented stopping. Retry.</system-reminder>",
             )],
         );
-        message.metadata = Some(sdk::ChatMessageMetadata {
-            source: sdk::ChatMessageSource::SystemGenerated,
-            stop_hook: None,
-        });
+        message.source = TuiMessageSource::SystemGenerated;
 
         assert!(matches!(
             HistoryDisplayMessage::parse(&message),
@@ -375,10 +368,7 @@ mod tests {
     #[test]
     fn test_parse_non_stop_system_generated_message_as_user() {
         let mut message = msg("user", vec![text_block("guidance changed")]);
-        message.metadata = Some(sdk::ChatMessageMetadata {
-            source: sdk::ChatMessageSource::SystemGenerated,
-            stop_hook: None,
-        });
+        message.source = TuiMessageSource::SystemGenerated;
 
         assert_eq!(
             HistoryDisplayMessage::parse(&message),

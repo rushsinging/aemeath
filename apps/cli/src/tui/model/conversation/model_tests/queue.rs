@@ -4,7 +4,7 @@ fn test_queue_submission_pushes_queued_user_message_block() {
     // OutputArea::queued_messages 命令式显示路径）。
     let mut model = ConversationModel::default();
     let changes = model.apply(QueueSubmission {
-        input_id: sdk::InputId::new_v7(),
+        input_id: "queue-1".to_string(),
         text: "排队的消息".to_string(),
     });
 
@@ -23,9 +23,9 @@ fn test_clear_queued_by_id_removes_only_matching_entry() {
     // 入队 3 条占位（A/B/C），按 B 的 input_id 精确清除后，
     // queued_submissions / blocks / timeline 三处各只剩 A 和 C。
     let mut model = ConversationModel::default();
-    let id_a = sdk::InputId::new_v7();
-    let id_b = sdk::InputId::new_v7();
-    let id_c = sdk::InputId::new_v7();
+    let id_a = "input-a".to_string();
+    let id_b = "input-b".to_string();
+    let id_c = "input-c".to_string();
 
     model.apply(QueueSubmission {
         input_id: id_a.clone(),

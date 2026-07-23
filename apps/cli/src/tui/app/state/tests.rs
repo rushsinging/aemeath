@@ -1,6 +1,7 @@
 #[allow(clippy::module_inception)]
 #[cfg(test)]
 mod tests {
+    use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
     use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
     use crate::tui::app::{App, UiEvent};
     use crate::tui::effect::session::processing::SpawnContextRefs;
@@ -147,7 +148,7 @@ mod tests {
         app.model.conversation.apply(
             crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
                 crate::tui::model::conversation::intent::ResumeConversation {
-                    messages: vec![sdk::ChatMessage::user_text("late")],
+                    messages: vec![TuiChatMessage::user_text("late")],
                 },
             ),
         );
@@ -186,15 +187,16 @@ mod tests {
         );
 
         // 模拟 runtime 回传 UserMessagesAdopted（归宿事件，携带 InputId，驱动 TUI 回显）。
-        let input_id = sdk::InputId::new_v7();
+        let input_id = "state-input-a".to_string();
         app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
             TuiMsg::Ui(UiEvent::UserMessagesAdopted {
-                items: vec![sdk::ChatMessage {
+                items: vec![TuiChatMessage {
                     role: "user".to_string(),
-                    content: vec![sdk::ContentBlock::text("search bug 76")],
-                    metadata: None,
+                    content: vec![TuiContentBlock::text("search bug 76")],
                     input_id: Some(input_id),
+                    source: TuiMessageSource::User,
+                    stop_hook: None,
                 }],
                 queued: vec![],
             }),
@@ -227,7 +229,7 @@ mod tests {
             .count();
         let _ = app.update(
             TuiMsg::Ui(UiEvent::TurnStarted {
-                messages: vec![sdk::ChatMessage::user_text("search bug 76")],
+                messages: vec![TuiChatMessage::user_text("search bug 76")],
             }),
             &ui_tx,
             &spawn_refs,
@@ -271,15 +273,16 @@ mod tests {
         let _ = app.update(TuiMsg::Key(enter_key()), &ui_tx, &spawn_refs);
         // A3 Task 4：用户回显改由 UserMessagesAdopted 归宿事件驱动（MessagesSync 已退出 display）。
         // 先建占位，再触发 UserMessagesAdopted，使 `> search bug 76` 回显。
-        let input_id = sdk::InputId::new_v7();
+        let input_id = "state-input-a".to_string();
         app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
             TuiMsg::Ui(UiEvent::UserMessagesAdopted {
-                items: vec![sdk::ChatMessage {
+                items: vec![TuiChatMessage {
                     role: "user".to_string(),
-                    content: vec![sdk::ContentBlock::text("search bug 76")],
-                    metadata: None,
+                    content: vec![TuiContentBlock::text("search bug 76")],
                     input_id: Some(input_id),
+                    source: TuiMessageSource::User,
+                    stop_hook: None,
                 }],
                 queued: vec![],
             }),

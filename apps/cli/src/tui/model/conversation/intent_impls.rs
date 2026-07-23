@@ -731,44 +731,50 @@ impl ConversationUpdate for ConversationIntent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::adapter::runtime_view::{
+        TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiStopHookFeedback,
+    };
     use crate::tui::model::conversation::block::HookNoticeKind;
     use crate::tui::model::output_timeline::OutputTimelineItem;
 
-    fn ask_tool_use(id: &str, question: &str) -> sdk::ContentBlock {
-        sdk::ContentBlock::ToolUse {
+    fn ask_tool_use(id: &str, question: &str) -> TuiContentBlock {
+        TuiContentBlock::ToolUse {
             id: id.to_string(),
             name: "AskUserQuestion".to_string(),
             input: serde_json::json!({ "question": question }),
         }
     }
 
-    fn ask_result(id: &str, answer: serde_json::Value) -> sdk::ChatMessage {
-        sdk::ChatMessage {
+    fn ask_result(id: &str, answer: serde_json::Value) -> TuiChatMessage {
+        TuiChatMessage {
             role: "user".to_string(),
-            content: vec![sdk::ContentBlock::ToolResult {
+            content: vec![TuiContentBlock::ToolResult {
                 tool_use_id: id.to_string(),
                 content: answer,
                 is_error: false,
                 text: None,
             }],
-            metadata: None,
             input_id: None,
+            source: TuiMessageSource::User,
+            stop_hook: None,
         }
     }
 
     #[test]
     fn resume_restores_answered_ask_batches_in_assistant_message_order() {
-        let assistant_one = sdk::ChatMessage {
+        let assistant_one = TuiChatMessage {
             role: "assistant".to_string(),
             content: vec![ask_tool_use("ask-1", "第一问")],
-            metadata: None,
             input_id: None,
+            source: TuiMessageSource::User,
+            stop_hook: None,
         };
-        let assistant_two = sdk::ChatMessage {
+        let assistant_two = TuiChatMessage {
             role: "assistant".to_string(),
             content: vec![ask_tool_use("ask-2", "第二问")],
-            metadata: None,
             input_id: None,
+            source: TuiMessageSource::User,
+            stop_hook: None,
         };
         let mut model = ConversationModel::default();
 
@@ -801,12 +807,14 @@ mod tests {
     #[test]
     fn resume_projects_stop_hook_feedback_as_hook_notice() {
         let mut model = ConversationModel::default();
-        let mut message = sdk::ChatMessage::system_generated_user_text(
-            "<system-reminder>blocked by hook</system-reminder>",
-        );
-        message.metadata = Some(sdk::ChatMessageMetadata {
-            source: sdk::ChatMessageSource::StopHook,
-            stop_hook: Some(sdk::StopHookFeedbackView {
+        let message = TuiChatMessage {
+            role: "user".to_string(),
+            content: vec![TuiContentBlock::text(
+                "<system-reminder>blocked by hook</system-reminder>",
+            )],
+            input_id: None,
+            source: TuiMessageSource::StopHook,
+            stop_hook: Some(TuiStopHookFeedback {
                 summary: "blocked by hook".to_string(),
                 command: "check-agent-stop.sh".to_string(),
                 exit_code: Some(2),
@@ -817,7 +825,7 @@ mod tests {
                 stderr_truncated: false,
                 output_file: None,
             }),
-        });
+        };
 
         ResumeConversation {
             messages: vec![message],
@@ -842,15 +850,17 @@ mod tests {
 
     #[test]
     fn resume_interleaves_stop_hook_notice_without_user_message_projection() {
-        let user = sdk::ChatMessage::user_text("user question");
-        let mut stop_hook = sdk::ChatMessage::system_generated_user_text(
-            "<system-reminder>blocked by hook</system-reminder>",
-        );
-        stop_hook.metadata = Some(sdk::ChatMessageMetadata {
-            source: sdk::ChatMessageSource::StopHook,
+        let user = TuiChatMessage::user_text("user question");
+        let stop_hook = TuiChatMessage {
+            role: "user".to_string(),
+            content: vec![TuiContentBlock::text(
+                "<system-reminder>blocked by hook</system-reminder>",
+            )],
+            input_id: None,
+            source: TuiMessageSource::StopHook,
             stop_hook: None,
-        });
-        let assistant = sdk::ChatMessage::assistant_text("assistant reply");
+        };
+        let assistant = TuiChatMessage::assistant_text("assistant reply");
         let mut model = ConversationModel::default();
 
         ResumeConversation {

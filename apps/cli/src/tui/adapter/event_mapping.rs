@@ -303,9 +303,9 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             changed_fields: event.changed_fields.into_iter().map(config_field).collect(),
             view: config_view(event.view),
         },
-        ChatEvent::ConfigReloaded { changed_keys } => {
-            TuiRuntimeEvent::ConfigReloaded { changed_keys }
-        }
+        ChatEvent::ConfigReloaded { event } => TuiRuntimeEvent::ConfigReloaded {
+            changed_keys: event.changed_keys,
+        },
         ChatEvent::SessionReset => TuiRuntimeEvent::SessionReset,
         ChatEvent::UserMessagesWithdrawn { texts } => {
             TuiRuntimeEvent::UserMessagesWithdrawn { texts }
@@ -517,7 +517,7 @@ fn interaction_request(value: sdk::InteractionRequest) -> TuiInteractionRequest 
     }
 }
 
-fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
+pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
     let (source, stop_hook) = match value.metadata {
         Some(metadata) => (
             match metadata.source {

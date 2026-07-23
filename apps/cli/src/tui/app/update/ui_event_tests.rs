@@ -1,5 +1,7 @@
 use super::*;
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
 use crate::tui::effect::session::processing::SpawnContextRefs;
+use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
 use std::path::PathBuf;
 
 fn make_spawn_refs() -> SpawnContextRefs {
@@ -19,11 +21,11 @@ fn test_app() -> App {
 #[test]
 fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
     let mut app = test_app();
-    let echo_id = sdk::InputId::new_v7();
-    app.enqueue_submission_echo(echo_id.clone(), "[Copied Text 1]");
+    let echo_id = "echo-1".to_string();
+    app.enqueue_submission_echo(echo_id, "[Copied Text 1]");
     let messages = vec![
-        sdk::ChatMessage::user_text("first"),
-        sdk::ChatMessage::user_text("a\nb\nc"),
+        TuiChatMessage::user_text("first"),
+        TuiChatMessage::user_text("a\nb\nc"),
     ];
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
@@ -54,8 +56,8 @@ fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
     let mut app = test_app();
     let reminder = "<system-reminder>\nStop hook blocked stopping.\n</system-reminder>";
     let messages = vec![
-        sdk::ChatMessage::user_text("first"),
-        sdk::ChatMessage::system_generated_user_text(reminder),
+        TuiChatMessage::user_text("first"),
+        TuiChatMessage::system_generated_user_text(reminder),
     ];
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
@@ -85,12 +87,12 @@ fn test_post_tool_sync_no_display() {
     let spawn_refs = make_spawn_refs();
 
     // 入队一条占位
-    let id_a = sdk::InputId::new_v7();
-    app.enqueue_submission_echo(id_a.clone(), "hello");
+    let id_a = "input-a".to_string();
+    app.enqueue_submission_echo(id_a, "hello");
     assert_eq!(app.model.conversation.queued_submissions.len(), 1);
 
     // 构造包含该 user message 的 msgs
-    let msgs = vec![sdk::ChatMessage::user_text("hello")];
+    let msgs = vec![TuiChatMessage::user_text("hello")];
     app.update_ui(
         UiEvent::PostToolExecutionSync {
             messages: msgs.clone(),
@@ -141,8 +143,8 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
     let spawn_refs = make_spawn_refs();
 
     // 入队两条占位（id_a / id_b）
-    let id_a = sdk::InputId::new_v7();
-    let id_b = sdk::InputId::new_v7();
+    let id_a = "input-a".to_string();
+    let id_b = "input-b".to_string();
     app.enqueue_submission_echo(id_a.clone(), "hi");
     app.enqueue_submission_echo(id_b.clone(), "yo");
 
@@ -151,17 +153,19 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
 
     // 触发 handler
     let items = vec![
-        sdk::ChatMessage {
+        TuiChatMessage {
             role: "user".to_string(),
-            content: vec![sdk::ContentBlock::text("hi")],
-            metadata: None,
+            content: vec![TuiContentBlock::text("hi")],
             input_id: Some(id_a.clone()),
+            source: TuiMessageSource::User,
+            stop_hook: None,
         },
-        sdk::ChatMessage {
+        TuiChatMessage {
             role: "user".to_string(),
-            content: vec![sdk::ContentBlock::text("yo")],
-            metadata: None,
+            content: vec![TuiContentBlock::text("yo")],
             input_id: Some(id_b.clone()),
+            source: TuiMessageSource::User,
+            stop_hook: None,
         },
     ];
     app.update_ui(
@@ -230,27 +234,30 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
 /// - 用 message.text_content() 还原 "看图[Image #1]"，写入 UserMessage 回显
 #[test]
 fn test_user_messages_added_echoes_image_placeholder_from_message() {
-    use sdk::{ChatInputImage, ChatMessage};
     let mut app = test_app();
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = make_spawn_refs();
 
     // 用户提交"看图[Image #1]"——TUI 端 enqueue 占位（display_text 含占位符）
-    let input_id = sdk::InputId::new_v7();
+    let input_id = "image-input".to_string();
     app.enqueue_submission_echo(input_id.clone(), "看图[Image #1]");
     assert_eq!(app.model.conversation.queued_submissions.len(), 1);
 
     // runtime 端构造的 ChatMessage：image block 携带 placeholder（用于 text_content 还原位置）
-    let mut message = ChatMessage::user_with_images(
-        "看图[Image #1]",
-        vec![ChatInputImage {
-            id: "[Image #1]".to_string(),
-            base64: "aW1nZGF0YQ==".to_string(),
-            media_type: "image/png".to_string(),
-        }],
-    );
-    message.input_id = Some(input_id.clone());
-    let items = vec![message];
+    let items = vec![TuiChatMessage {
+        role: "user".to_string(),
+        content: vec![
+            TuiContentBlock::text("看图"),
+            TuiContentBlock::Image {
+                media_type: "image/png".to_string(),
+                base64: "aW1nZGF0YQ==".to_string(),
+                placeholder: Some("[Image #1]".to_string()),
+            },
+        ],
+        input_id: Some(input_id.clone()),
+        source: TuiMessageSource::User,
+        stop_hook: None,
+    }];
 
     app.update_ui(
         UiEvent::UserMessagesAdopted {
@@ -404,8 +411,8 @@ fn test_api_error_then_done_clears_processing() {
     app.update_ui(
         UiEvent::DoneWithDuration {
             context: crate::tui::app::event::UiTurnContext {
-                chat_id: sdk::ids::ChatId::new("chat-test"),
-                turn_id: sdk::ids::ChatTurnId::new("turn-test"),
+                chat_id: ChatId::new("chat-test"),
+                turn_id: ChatTurnId::new("turn-test"),
             },
             duration: std::time::Duration::from_secs(1),
         },
@@ -449,19 +456,20 @@ fn user_messages_adopted_handler_logs_text_length_not_preview() {
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = make_spawn_refs();
 
-    let input_id = sdk::InputId::new_v7();
+    let input_id = "debug-input".to_string();
     app.enqueue_submission_echo(
         input_id.clone(),
         "some long text that should not appear in logs",
     );
 
-    let items = vec![sdk::ChatMessage {
+    let items = vec![TuiChatMessage {
         role: "user".to_string(),
-        content: vec![sdk::ContentBlock::text(
+        content: vec![TuiContentBlock::text(
             "some long text that should not appear in logs",
         )],
-        metadata: None,
         input_id: Some(input_id.clone()),
+        source: TuiMessageSource::User,
+        stop_hook: None,
     }];
     app.update_ui(
         UiEvent::UserMessagesAdopted {

@@ -32,15 +32,16 @@ impl App {
     /// 只是 live-status 渲染镜像，由 `refresh_live_status_from_model` 经 assembler/adapter 单向写回。
     pub(crate) fn enqueue_submission_echo(
         &mut self,
-        input_id: sdk::InputId,
+        input_id: impl AsRef<str>,
         text: impl Into<String>,
     ) {
+        let input_id = input_id.as_ref();
         let text_str = text.into();
         let text_len = text_str.chars().count();
         let before_count = self.model.conversation.queued_submissions.len();
         self.apply_agent_intent(AgentIntent::Conversation(
             ConversationIntent::QueueSubmission(QueueSubmission {
-                input_id: input_id.as_str().to_string(),
+                input_id: input_id.to_string(),
                 text: text_str,
             }),
         ));
@@ -62,10 +63,10 @@ impl App {
     /// 用于 UserMessagesAdopted handler 按 input_id 逐条清除占位的场景：仅移除与
     /// 给定 `input_id` 匹配的那一条，不影响其他排队项。
     /// （A3：原「全清」版本已随文本队列废弃一并删除，回显只按 id 精确清除。）
-    pub(crate) fn clear_queued_submission_echo_by_id(&mut self, input_id: &sdk::InputId) {
+    pub(crate) fn clear_queued_submission_echo_by_id(&mut self, input_id: &str) {
         self.apply_agent_intent(AgentIntent::Conversation(
             ConversationIntent::ClearQueuedSubmissionById(ClearQueuedSubmissionById {
-                input_id: input_id.as_str().to_string(),
+                input_id: input_id.to_string(),
             }),
         ));
         self.refresh_live_status_from_model();

@@ -1,4 +1,5 @@
-use crate::tui::app::event::{UiEvent, UiTurnContext};
+use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiTurnContext};
+use crate::tui::app::event::UiEvent;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -9,10 +10,11 @@ pub(crate) struct SpawnContextRefs {
 }
 
 pub(crate) struct SpawnContext {
-    pub tx: mpsc::Sender<UiEvent>,
+    pub runtime_tx: mpsc::Sender<TuiRuntimeEvent>,
+    pub local_tx: mpsc::Sender<UiEvent>,
     pub input_event_port: TuiInputEventPort,
     pub agent_client: Arc<dyn sdk::AgentClient>,
-    pub fallback_context: UiTurnContext,
+    pub fallback_context: TuiTurnContext,
 }
 
 pub(crate) enum RunCancelState {

@@ -13,7 +13,8 @@ mod ui_event;
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
-use crate::tui::adapter::agent_event::map_agent_event_with_tool_header;
+use crate::tui::adapter::agent_event::{map_agent_event_with_tool_header, map_runtime_event};
+use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::*;
@@ -130,6 +131,7 @@ impl App {
     ) -> UpdateResult {
         match msg {
             TuiMsg::Ui(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
+            TuiMsg::Runtime(ev) => self.update_runtime_event(ev),
             TuiMsg::AgentEvent(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::Key(key) => self.update_key(key, spawn_refs),
             TuiMsg::Mouse(mouse) => {
@@ -245,6 +247,17 @@ impl App {
             TuiMsg::EffectCompleted(_) | TuiMsg::TimerTick { .. } | TuiMsg::RenderTick => {
                 UpdateResult::none()
             }
+        }
+    }
+
+    fn update_runtime_event(&mut self, event: TuiRuntimeEvent) -> UpdateResult {
+        let mapping = map_runtime_event(&event);
+        let model_result = reduce_agent_event(&mut self.model, mapping);
+        crate::tui::update::dirty::merge_dirty(&mut self.view_state.dirty, model_result.dirty);
+        UpdateResult {
+            effects: model_result.effects,
+            spawn_effect: None,
+            pending_slash: None,
         }
     }
 

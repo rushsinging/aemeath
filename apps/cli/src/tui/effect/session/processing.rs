@@ -3,17 +3,16 @@ mod handle;
 mod input_port;
 mod logging;
 
+use crate::tui::adapter::event_mapping::{sdk_event_to_tui_event, SdkEventMapping};
+use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::app::event::UiEvent;
 use std::sync::Arc;
 
-pub(crate) use event_mapping::sdk_event_to_ui_event;
 pub(crate) use handle::{
     shutdown_and_save, ProcessingHandle, RunCancelState, SpawnContext, SpawnContextRefs,
 };
 pub(crate) use input_port::TuiInputEventPort;
 pub(crate) use logging::log_sdk_event;
-
-use logging::log_ui_tool_event;
 
 pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
     let run_cancel_state = Arc::new(std::sync::Mutex::new(RunCancelState::Idle));
@@ -35,11 +34,15 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             {
                 Ok(stream) => stream,
                 Err(e) => {
-                    let _ = ctx.tx.send(UiEvent::Error(e.to_string())).await;
                     let _ = ctx
-                        .tx
-                        .send(UiEvent::Done {
+                        .runtime_tx
+                        .send(TuiRuntimeEvent::Error(e.to_string()))
+                        .await;
+                    let _ = ctx
+                        .runtime_tx
+                        .send(TuiRuntimeEvent::Done {
                             context: ctx.fallback_context.clone(),
+                            duration_ms: None,
                         })
                         .await;
                     return;
@@ -80,11 +83,25 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
                     }
                     _ => {}
                 }
-                log_sdk_event(&event, "sdk->ui.recv");
-                let ui_event = sdk_event_to_ui_event(event);
-                log_ui_tool_event(&ui_event, "sdk->ui.mapped");
-                if ctx.tx.send(ui_event).await.is_err() {
-                    return;
+                log_sdk_event(&event, "sdk->tui.recv");
+                match sdk_event_to_tui_event(event) {
+                    SdkEventMapping::Runtime(runtime_event) => {
+                        if ctx.runtime_tx.send(runtime_event).await.is_err() {
+                            return;
+                        }
+                    }
+                    // Transitional resource bridge. It is the only permitted sender path
+                    // until #1246 publishes Main suspension as InteractionRequested.
+                    SdkEventMapping::LegacyAskUser { items, reply_tx } => {
+                        if ctx
+                            .local_tx
+                            .send(UiEvent::AskUserBatch { items, reply_tx })
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
                 }
             }
         },
@@ -99,7 +116,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::app::event::UiTurnContext;
+    use crate::tui::adapter::tui_runtime_event::TuiTurnContext;
     use async_trait::async_trait;
     use sdk::ChatInputEventPort as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -135,35 +152,40 @@ mod tests {
     }
 
     #[test]
-    fn test_sdk_event_to_ui_event_formats_model_retry_in_english() {
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::ModelInvocationRetrying {
+    fn sdk_event_to_tui_runtime_event_preserves_model_retry() {
+        let event = sdk_event_to_tui_event(sdk::ChatEvent::ModelInvocationRetrying {
             context: test_sdk_event_context(),
             attempt: 2,
             delay: std::time::Duration::from_millis(10_250),
         });
 
-        assert!(
-            matches!(event, UiEvent::SystemMessage(message) if message == "Retrying model invocation (attempt 2) in 10.2s.")
-        );
+        assert!(matches!(
+            event,
+            SdkEventMapping::Runtime(TuiRuntimeEvent::ModelInvocationRetrying {
+                attempt: 2,
+                delay_ms: 10_250,
+                ..
+            })
+        ));
     }
 
     #[test]
-    fn test_sdk_event_to_ui_event_maps_token() {
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::Token {
+    fn sdk_event_to_tui_runtime_event_maps_token() {
+        let event = sdk_event_to_tui_event(sdk::ChatEvent::Token {
             context: test_sdk_event_context(),
             text: "hello".to_string(),
         });
 
-        match event {
-            UiEvent::Text { text, .. } => assert_eq!(text, "hello"),
-            other => panic!("unexpected event: {other:?}"),
-        }
+        assert!(matches!(
+            event,
+            SdkEventMapping::Runtime(TuiRuntimeEvent::Text { text, .. }) if text == "hello"
+        ));
     }
 
     #[test]
-    fn test_sdk_event_to_ui_event_preserves_agent_progress_context() {
+    fn sdk_event_to_tui_runtime_event_preserves_agent_progress_identity() {
         let expected_tool_id = sdk::ids::ToolCallId::new("tool-1");
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::AgentProgress {
+        let event = sdk_event_to_tui_event(sdk::ChatEvent::AgentProgress {
             context: sdk::ChatEventContext::new(
                 sdk::ids::ChatId::new("chat-progress"),
                 sdk::ids::ChatTurnId::new("turn-progress"),
@@ -177,57 +199,52 @@ mod tests {
             },
         });
 
-        match event {
-            UiEvent::AgentProgress {
-                context, tool_id, ..
-            } => {
-                assert_eq!(
-                    context.chat_id,
-                    crate::tui::model::conversation::ids::ChatId::new("chat-progress")
-                );
-                assert_eq!(
-                    context.turn_id,
-                    crate::tui::model::conversation::ids::ChatTurnId::new("turn-progress")
-                );
-                assert_eq!(tool_id, expected_tool_id);
-            }
-            other => panic!("unexpected event: {other:?}"),
-        }
+        assert!(matches!(
+            event,
+            SdkEventMapping::Runtime(TuiRuntimeEvent::AgentProgress {
+                context,
+                tool_id,
+                ..
+            }) if context.chat_id == sdk::ids::ChatId::new("chat-progress").as_str()
+                && context.turn_id == sdk::ids::ChatTurnId::new("turn-progress").as_str()
+                && tool_id == expected_tool_id.as_str()
+        ));
     }
 
     #[test]
-    fn test_sdk_event_to_ui_event_preserves_hook_message() {
-        let view = sdk::HookMessageView {
+    fn sdk_event_to_tui_runtime_event_preserves_hook_message() {
+        let event = sdk_event_to_tui_event(sdk::ChatEvent::HookMessage(sdk::HookMessageView {
             point: "PreToolUse".to_string(),
             source: "matcher:Bash".to_string(),
             execution_ordinal: 2,
             attempt: 3,
             kind: sdk::HookMessageKindView::AdditionalContext,
             text: "Use formatter".to_string(),
-        };
+        }));
 
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::HookMessage(view.clone()));
-
-        assert!(matches!(event, UiEvent::HookMessage(message) if message == view));
+        assert!(matches!(
+            event,
+            SdkEventMapping::Runtime(TuiRuntimeEvent::HookMessage(message))
+                if message.point == "PreToolUse" && message.text == "Use formatter"
+        ));
     }
 
     #[test]
-    fn test_sdk_event_to_ui_event_maps_compact_finished() {
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::CompactFinished {
+    fn sdk_event_to_tui_runtime_event_maps_compact_finished() {
+        let event = sdk_event_to_tui_event(sdk::ChatEvent::CompactFinished {
             messages: vec![sdk::ChatMessage::user_text("hello")],
         });
 
-        match event {
-            UiEvent::CompactFinished { messages } => {
-                assert_eq!(messages[0].text_content(), "hello")
-            }
-            other => panic!("unexpected event: {other:?}"),
-        }
+        assert!(matches!(
+            event,
+            SdkEventMapping::Runtime(TuiRuntimeEvent::CompactFinished { messages })
+                if messages[0].text_content() == "hello"
+        ));
     }
 
     #[test]
-    fn test_sdk_event_to_ui_event_maps_working_directory_changed() {
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::WorkingDirectoryChanged {
+    fn sdk_event_to_tui_runtime_event_maps_working_directory_changed() {
+        let event = sdk_event_to_tui_event(sdk::ChatEvent::WorkingDirectoryChanged {
             path_base: "/tmp".to_string(),
             workspace_root: "/tmp".to_string(),
             workspace: sdk::WorkspaceContextView {
@@ -237,28 +254,26 @@ mod tests {
             },
         });
 
-        match event {
-            UiEvent::WorkingDirectoryChanged(update) => {
-                assert_eq!(update.raw_path_base, std::path::PathBuf::from("/tmp"));
-                assert_eq!(update.workspace.path_base, std::path::PathBuf::from("/tmp"));
-            }
-            other => panic!("unexpected event: {other:?}"),
-        }
+        assert!(matches!(
+            event,
+            SdkEventMapping::Runtime(TuiRuntimeEvent::WorkspaceSnapshot(snapshot))
+                if snapshot.path_base == "/tmp" && snapshot.workspace_root == "/tmp"
+        ));
     }
 
     #[test]
-    fn test_sdk_event_to_ui_event_maps_tasks_snapshot() {
-        let view = sdk::TaskStatusView {
-            lines: vec!["[ ] #1 task".to_string()],
-        };
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::TasksSnapshot {
-            tasks: Box::new(view.clone()),
+    fn sdk_event_to_tui_runtime_event_maps_tasks_snapshot() {
+        let event = sdk_event_to_tui_event(sdk::ChatEvent::TasksSnapshot {
+            tasks: Box::new(sdk::TaskStatusView {
+                lines: vec!["[ ] #1 task".to_string()],
+            }),
         });
 
-        match event {
-            UiEvent::TaskStatusChanged(v) => assert_eq!(v.lines, view.lines),
-            other => panic!("unexpected event: {other:?}"),
-        }
+        assert!(matches!(
+            event,
+            SdkEventMapping::Runtime(TuiRuntimeEvent::TasksSnapshot { lines })
+                if lines == vec!["[ ] #1 task".to_string()]
+        ));
     }
 
     #[tokio::test]
@@ -345,7 +360,8 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_processing_propagates_captured_context() {
-        let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel(16);
+        let (runtime_tx, _runtime_rx) = tokio::sync::mpsc::channel(16);
+        let (local_tx, _local_rx) = tokio::sync::mpsc::channel(16);
         let (observed_tx, observed_rx) = tokio::sync::oneshot::channel();
         let client = Arc::new(ContextCapturingAgentClient::new(observed_tx));
         let (_input_tx, input_port) = TuiInputEventPort::channel();
@@ -356,12 +372,13 @@ mod tests {
 
         composition::delivery_logging::instrument(expected.clone(), async move {
             spawn_processing(SpawnContext {
-                tx: ui_tx,
+                runtime_tx,
+                local_tx,
                 input_event_port: input_port,
                 agent_client: client,
-                fallback_context: UiTurnContext {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new("fallback-chat"),
-                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("fallback-turn"),
+                fallback_context: TuiTurnContext {
+                    chat_id: "fallback-chat".to_string(),
+                    turn_id: "fallback-turn".to_string(),
                 },
             });
         })
@@ -403,30 +420,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_processing_done_emits_done_event() {
-        let (ui_tx, mut ui_rx) = tokio::sync::mpsc::channel(16);
+        let (runtime_tx, mut runtime_rx) = tokio::sync::mpsc::channel(16);
+        let (local_tx, _local_rx) = tokio::sync::mpsc::channel(16);
         let client = Arc::new(DoneOnlyAgentClient::default());
 
         let (_input_tx, input_port) = TuiInputEventPort::channel();
         spawn_processing(SpawnContext {
-            tx: ui_tx,
+            runtime_tx,
+            local_tx,
             input_event_port: input_port,
             agent_client: client.clone(),
-            fallback_context: UiTurnContext {
-                chat_id: crate::tui::model::conversation::ids::ChatId::new("fallback-chat"),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("fallback-turn"),
+            fallback_context: TuiTurnContext {
+                chat_id: "fallback-chat".to_string(),
+                turn_id: "fallback-turn".to_string(),
             },
         });
 
-        let event = tokio::time::timeout(std::time::Duration::from_secs(1), ui_rx.recv())
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), runtime_rx.recv())
             .await
             .expect("Done event should be forwarded")
-            .expect("ui channel should receive Done");
-        let expected_chat = crate::tui::model::conversation::ids::ChatId::new("chat-test");
-        let expected_turn = crate::tui::model::conversation::ids::ChatTurnId::new("turn-test");
+            .expect("runtime channel should receive Done");
         assert!(matches!(
             event,
-            UiEvent::Done { context }
-                if context.chat_id == expected_chat && context.turn_id == expected_turn
+            TuiRuntimeEvent::Done { context, .. }
+                if context.chat_id == sdk::ids::ChatId::new("chat-test").as_str()
+                    && context.turn_id == sdk::ids::ChatTurnId::new("turn-test").as_str()
         ));
         assert_eq!(client.sync_calls.load(Ordering::SeqCst), 0);
     }

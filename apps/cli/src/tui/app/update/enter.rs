@@ -311,7 +311,8 @@ mod tests {
         let block_input_id = block_input_id.expect("应产生 QueuedUserMessage 占位块");
 
         assert_eq!(
-            event_id, block_input_id,
+            event_id.as_str(),
+            block_input_id,
             "占位块 input_id 必须与事件 id 相同"
         );
     }

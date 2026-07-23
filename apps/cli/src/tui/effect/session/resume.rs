@@ -61,14 +61,15 @@ fn extract_user_input_text(message: &TuiChatMessage) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
     use std::path::PathBuf;
 
     #[test]
     fn test_extract_user_input_history_keeps_user_text_in_order() {
         let messages = vec![
-            sdk::ChatMessage::user_text("first"),
-            sdk::ChatMessage::assistant_text("answer"),
-            sdk::ChatMessage::user_text("second"),
+            TuiChatMessage::user_text("first"),
+            TuiChatMessage::assistant_text("answer"),
+            TuiChatMessage::user_text("second"),
         ];
 
         let history = extract_user_input_history(&messages);
@@ -79,9 +80,9 @@ mod tests {
     #[test]
     fn test_extract_user_input_history_skips_empty_user_text() {
         let messages = vec![
-            sdk::ChatMessage::user_text(""),
-            sdk::ChatMessage::user_text("   "),
-            sdk::ChatMessage::user_text("keep"),
+            TuiChatMessage::user_text(""),
+            TuiChatMessage::user_text("   "),
+            TuiChatMessage::user_text("keep"),
         ];
 
         let history = extract_user_input_history(&messages);
@@ -91,20 +92,19 @@ mod tests {
 
     #[test]
     fn test_extract_user_input_history_joins_text_blocks_only() {
-        let messages = vec![sdk::ChatMessage {
+        let messages = vec![TuiChatMessage {
             role: "user".to_string(),
             content: vec![
-                sdk::ContentBlock::text("hello "),
-                sdk::ContentBlock::Image {
-                    source: sdk::ImageSource::Base64 {
-                        media_type: "image/png".to_string(),
-                        data: "abc".to_string(),
-                    },
+                TuiContentBlock::text("hello "),
+                TuiContentBlock::Image {
+                    media_type: "image/png".to_string(),
+                    base64: "abc".to_string(),
                     placeholder: None,
                 },
-                sdk::ContentBlock::text("world"),
+                TuiContentBlock::text("world"),
             ],
-            metadata: None,
+            source: TuiMessageSource::User,
+            stop_hook: None,
             input_id: None,
         }];
 
@@ -124,8 +124,8 @@ mod tests {
         app.resume_session_messages(
             "resumed-session",
             vec![
-                sdk::ChatMessage::user_text("历史问题"),
-                sdk::ChatMessage::assistant_text("历史回答"),
+                TuiChatMessage::user_text("历史问题"),
+                TuiChatMessage::assistant_text("历史回答"),
             ],
             "2026-01-01T00:00:00Z".to_string(),
         );
@@ -145,9 +145,9 @@ mod tests {
             "test-model".to_string(),
         );
         let messages = vec![
-            sdk::ChatMessage::user_text("first"),
-            sdk::ChatMessage::assistant_text("answer"),
-            sdk::ChatMessage::user_text("second"),
+            TuiChatMessage::user_text("first"),
+            TuiChatMessage::assistant_text("answer"),
+            TuiChatMessage::user_text("second"),
         ];
 
         apply_resume_input_history(&mut app, &messages);

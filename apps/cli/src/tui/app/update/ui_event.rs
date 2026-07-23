@@ -53,10 +53,9 @@ impl App {
                 // AgentProgress 已由 map_agent_event -> RecordAgentProgress 注入
                 // ConversationModel，经 document 渲染（消除命令式写 output_area.lines）。
             }
-            UiEvent::HookEvent(event) => {
-                // Hook notice 已由 map_agent_event -> AppendHookNotice 注入 ConversationModel，
-                // 此处仅更新 spinner 状态（spinner 归 RuntimeModel 管理）。
-                self.spinner_phase(hook_spinner_phase(&event));
+            UiEvent::HookEvent(_) => {
+                // Runtime Hook events now arrive through TuiRuntimeEvent and are
+                // projected by the pure second-layer mapper.
             }
             UiEvent::HookMessage(_) => {
                 // Hook message 已由 map_agent_event -> AppendHookNotice 注入 ConversationModel。

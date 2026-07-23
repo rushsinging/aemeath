@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
 use crate::tui::app::event::UiEvent;
 
 use super::super::testing::{input, ExpectedEffect, TuiScenarioHarness};
@@ -115,24 +116,25 @@ fn ask_user_free_text_stays_in_ask_block() {
 
 #[test]
 fn resume_restores_all_answered_ask_batches() {
-    fn ask_tool_use(id: &str, question: &str) -> sdk::ContentBlock {
-        sdk::ContentBlock::ToolUse {
+    fn ask_tool_use(id: &str, question: &str) -> TuiContentBlock {
+        TuiContentBlock::ToolUse {
             id: id.to_string(),
             name: "AskUserQuestion".to_string(),
             input: serde_json::json!({ "question": question }),
         }
     }
-    fn ask_result(id: &str, answer: &str) -> sdk::ChatMessage {
-        sdk::ChatMessage {
+    fn ask_result(id: &str, answer: &str) -> TuiChatMessage {
+        TuiChatMessage {
             role: "user".to_string(),
-            content: vec![sdk::ContentBlock::ToolResult {
+            content: vec![TuiContentBlock::ToolResult {
                 tool_use_id: id.to_string(),
                 content: serde_json::json!({ "answer": answer }),
                 is_error: false,
                 text: None,
             }],
-            metadata: None,
             input_id: None,
+            source: TuiMessageSource::User,
+            stop_hook: None,
         }
     }
 
@@ -140,18 +142,20 @@ fn resume_restores_all_answered_ask_batches() {
     harness.app.model.conversation.apply(
         crate::tui::model::conversation::intent::ResumeConversation {
             messages: vec![
-                sdk::ChatMessage {
+                TuiChatMessage {
                     role: "assistant".to_string(),
                     content: vec![ask_tool_use("resume-ask-1", "恢复问题一")],
-                    metadata: None,
                     input_id: None,
+                    source: TuiMessageSource::User,
+                    stop_hook: None,
                 },
                 ask_result("resume-ask-1", "恢复答案一"),
-                sdk::ChatMessage {
+                TuiChatMessage {
                     role: "assistant".to_string(),
                     content: vec![ask_tool_use("resume-ask-2", "恢复问题二")],
-                    metadata: None,
                     input_id: None,
+                    source: TuiMessageSource::User,
+                    stop_hook: None,
                 },
                 ask_result("resume-ask-2", "恢复答案二"),
             ],

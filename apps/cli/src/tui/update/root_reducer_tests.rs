@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::adapter::runtime_view::TuiChatMessage;
 use crate::tui::model::conversation::intent::{
     ConversationIntent, ResumeConversation, SetCompactProgress, StartChat, ToolCallStart,
     ToolCallUpdate,
@@ -30,8 +31,8 @@ fn session_history_restore_does_not_activate_runtime_spinner() {
         &mut model,
         AgentIntent::Conversation(ConversationIntent::ResumeConversation(ResumeConversation {
             messages: vec![
-                sdk::ChatMessage::user_text("历史问题"),
-                sdk::ChatMessage::assistant_text("历史回答"),
+                TuiChatMessage::user_text("历史问题"),
+                TuiChatMessage::assistant_text("历史回答"),
             ],
         })),
     );

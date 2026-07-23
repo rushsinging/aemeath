@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::{
     ClearCompactRuntime, ConfirmInteraction, ConversationIntent, RunAwaitingUser, RunStarted,
@@ -282,18 +283,19 @@ fn queued_snapshot_intent_replaces_queue_bumps_revision_and_marks_output_dirty()
     let mut model = TuiModel::default();
     let before_revision = model.conversation.revision();
 
-    let input_id = sdk::InputId::new_v7();
+    let input_id = "input-queued".to_string();
     let result = reduce_intent(
         &mut model,
         AgentIntent::Conversation(ConversationIntent::SyncQueuedSubmissions(
             SyncQueuedSubmissions {
-                queued: vec![sdk::ChatMessage {
+                queued: vec![TuiChatMessage {
                     role: "user".to_string(),
-                    content: vec![sdk::ContentBlock::Text {
+                    content: vec![TuiContentBlock::Text {
                         text: "queued".to_string(),
                     }],
                     input_id: Some(input_id.clone()),
-                    metadata: None,
+                    source: TuiMessageSource::User,
+                    stop_hook: None,
                 }],
             },
         )),

@@ -136,7 +136,7 @@ fn test_enqueue_submission_echo_renders_queued_block_into_model() {
     // 正常路径：入队即时显示——派发后 QueuedUserMessage 块进入模型。
     // 渲染不再经 document block，改为 live-status projection。
     let mut app = make_app();
-    app.enqueue_submission_echo(sdk::InputId::new_v7(), "排队中的输入");
+    app.enqueue_submission_echo("notice-1", "排队中的输入");
 
     let has_queued = app.model.conversation.timeline.items().iter().any(|item| {
         matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::QueuedUserMessage { text, .. } if text == "排队中的输入")
@@ -163,7 +163,7 @@ fn test_enqueue_submission_echo_renders_queued_block_into_model() {
 #[test]
 fn test_enqueue_submission_echo_refreshes_live_status_projection() {
     let mut app = make_app();
-    app.enqueue_submission_echo(sdk::InputId::new_v7(), "排队中的输入");
+    app.enqueue_submission_echo("notice-1", "排队中的输入");
 
     assert_eq!(
         app.live_status_view_model().queued_lines,
@@ -175,7 +175,7 @@ fn test_enqueue_submission_echo_refreshes_live_status_projection() {
 #[test]
 fn test_enqueue_submission_echo_uses_display_text_for_copied_text() {
     let mut app = make_app();
-    app.enqueue_submission_echo(sdk::InputId::new_v7(), "[Copied Text 1]");
+    app.enqueue_submission_echo("notice-clip", "[Copied Text 1]");
 
     let has_queued = app.model.conversation.timeline.items().iter().any(|item| {
         matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::QueuedUserMessage { text, .. } if text == "[Copied Text 1]")
