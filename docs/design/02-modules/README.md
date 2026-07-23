@@ -62,7 +62,7 @@
 ## 相关文档
 
 - 系统级总体设计：[../01-system/](../01-system/)
-- 横切工程：[../03-engineering/README.md](../03-engineering/README.md)
+- 工程守则：[../03-engineering/README.md](../03-engineering/README.md)
 - Current → Target 迁移治理：[../03-engineering/03-migration-governance.md](../03-engineering/03-migration-governance.md)
 - 目录总览：[../README.md](../README.md)
 
