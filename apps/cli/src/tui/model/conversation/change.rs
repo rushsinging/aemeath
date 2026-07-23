@@ -1,5 +1,5 @@
+use super::interaction::{InteractionCommandFailure, UiInteractionReply, UiInteractionRequestId};
 use super::tool_call::ToolCallStatus;
-use super::workspace::WorktreeKind;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConversationChange {
@@ -41,6 +41,7 @@ pub enum ConversationChange {
     },
     ErrorAppended {
         block_id: String,
+        message: String,
     },
     QueuedSubmissionAdded {
         id: String,
@@ -72,23 +73,42 @@ pub enum ConversationChange {
         id: String,
     },
     AskUserDismissed,
+    InteractionShown {
+        request_id: UiInteractionRequestId,
+    },
+    InteractionUpdated {
+        request_id: UiInteractionRequestId,
+    },
+    InteractionReplyRequested {
+        request_id: UiInteractionRequestId,
+        reply: UiInteractionReply,
+    },
+    InteractionCancelRequested {
+        request_id: UiInteractionRequestId,
+    },
+    InteractionCompleted {
+        request_id: UiInteractionRequestId,
+    },
+    InteractionCommandRejected {
+        request_id: UiInteractionRequestId,
+        failure: InteractionCommandFailure,
+    },
+    InteractionConflict {
+        active_request_id: UiInteractionRequestId,
+        received_request_id: UiInteractionRequestId,
+    },
+    AgentRunChanged {
+        run_id: super::interaction::UiRunId,
+        phase: super::interaction::AgentRunPhase,
+    },
+    AgentRunStepChanged {
+        run_id: super::interaction::UiRunId,
+        step_id: super::interaction::UiRunStepId,
+        phase: super::interaction::AgentRunStepPhase,
+    },
     OutputDirty,
     StyleBoundaryResetRequired,
     // ── 原 runtime changes（RuntimeChange 合入）──
-    ProviderModelChanged {
-        provider: Option<String>,
-        model_id: Option<String>,
-    },
-    WorkspaceChanged {
-        cwd: String,
-        worktree: Option<String>,
-    },
-    WorkspaceSnapshotChanged {
-        path_base: Option<String>,
-        workspace_root: Option<String>,
-        branch: Option<String>,
-        kind: WorktreeKind,
-    },
     UsageChanged {
         input_tokens: u64,
         output_tokens: u64,
@@ -110,8 +130,21 @@ pub enum ConversationChange {
     CompactProgressChanged,
     SpinnerPhaseChanged,
     SpinnerStopped,
+    QueuedSubmissionsSynced {
+        count: usize,
+    },
+    CompactRuntimeCleared,
     TaskLinesChanged,
     StatusNoticeChanged,
-    ThinkingChanged,
     GraphPhaseChanged,
+}
+
+impl ConversationChange {
+    pub(crate) fn is_interaction_conflict(&self) -> bool {
+        matches!(self, Self::InteractionConflict { .. })
+    }
+
+    pub(crate) fn is_interaction_reply_requested(&self) -> bool {
+        matches!(self, Self::InteractionReplyRequested { .. })
+    }
 }

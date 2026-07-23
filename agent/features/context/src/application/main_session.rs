@@ -14,7 +14,7 @@ use share::session_types::ProjectIdentity;
 use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidationError};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock as TokioRwLock};
 
-use crate::domain::session::{CanonicalSession, SnapshotState};
+use crate::domain::session::{same_project_identity, CanonicalSession, SnapshotState};
 use crate::ports::{ContextPort, MainContextFactory, SessionManagementPort};
 
 // ─── SessionSwitchGate (existing) ────────────────────────────────────
@@ -91,6 +91,11 @@ pub enum MainSessionError {
     /// workspace context is mandatory for resume — there is no safe default.
     #[error("workspace snapshot is missing or captured empty; a typed workspace context is required for resume")]
     WorkspaceMissing,
+
+    /// The session belongs to a different stable project identity than the
+    /// current workspace, so cross-project resume is forbidden.
+    #[error("session belongs to a different project")]
+    ProjectMismatch,
 
     /// `WorkspacePersist::prepare_restore` rejected the candidate.
     #[error("workspace restore prepare failed: {0}")]
@@ -298,10 +303,9 @@ pub async fn wire_main_session(
 ///    snapshot. `Missing` / `CapturedEmpty` maps to `TaskSnapshot::empty()`,
 ///    clearing any stale live tasks.
 ///
-/// **Cross-project resume is allowed.** The prepared workspace may belong to a
-/// different project than the live workspace. The canonical identity returned
-/// by `prepare_restore` drives Config and Memory — it is not compared against
-/// the live identity.
+/// **Cross-project resume is forbidden.** The persisted project identity
+/// must match the current live workspace identity; Git worktrees match by
+/// common-dir and non-git workspaces match by canonical root.
 ///
 /// If **any** prepare fails, nothing is committed and the old state is kept
 /// unchanged. If all prepares succeed, commits proceed **without await**:
@@ -434,6 +438,11 @@ impl MainSessionWiring {
         Arc::clone(&self.session_management)
     }
 
+    /// Returns the current project identity used to scope Session list/resume.
+    pub fn project_identity(&self) -> ProjectIdentity {
+        self.workspace_read.project_identity()
+    }
+
     /// Returns the raw [`ConfigReader`] backing this wiring.
     ///
     /// Runtime bootstrap uses this for one-shot snapshot reads (model resolution,
@@ -541,9 +550,9 @@ impl MainSessionWiring {
     /// → Memory → Task), and only if all succeed, commit them synchronously.
     /// Any prepare failure leaves the old state untouched.
     ///
-    /// **Cross-project resume is allowed.** The canonical identity returned by
-    /// `prepare_restore` is the sole source of truth for Config and Memory.
-    /// It is never compared against the live workspace identity.
+    /// **Cross-project resume is forbidden.** The persisted workspace identity
+    /// must match the current live workspace identity before any participant
+    /// preparation; Git worktrees match by common-dir and non-git by root.
     pub async fn resume_prepared(&self, session: CanonicalSession) -> Result<(), MainSessionError> {
         let _exclusive = self
             .gate
@@ -557,9 +566,8 @@ impl MainSessionWiring {
         // The workspace slot must carry a typed context. Missing/CapturedEmpty
         // is a hard error: there is no safe default workspace to restore.
         //
-        // The canonical identity returned here is the **single source of truth**
-        // for Config and Memory. It is NOT compared against the live workspace
-        // identity — cross-project resume is a valid operation.
+        // The prepared identity is used by downstream Config/Memory only after
+        // it has been proven to belong to the current stable project.
         let prepared_workspace: PreparedWorkspaceRestore = match &session.workspace {
             SnapshotState::Captured(dto) => self.workspace_persist.prepare_restore(dto)?,
             SnapshotState::Missing | SnapshotState::CapturedEmpty => {
@@ -570,12 +578,18 @@ impl MainSessionWiring {
         // Use the prepared canonical identity for everything downstream.
         let prepared_identity = prepared_workspace.project_identity().clone();
 
+        // The persisted identity must match the current live identity. Git
+        // worktrees share a common-dir; non-git projects compare canonical root.
+        let live_identity = self.workspace_read.project_identity();
+        if !same_project_identity(&live_identity, &prepared_identity) {
+            return Err(MainSessionError::ProjectMismatch);
+        }
+
         // ── 2. Config prepare ──
         //
-        // Derive the project-scoped config location from the prepared identity.
-        // The search root is the prepared identity's `initial_cwd`, NOT the live
-        // workspace's `initial_cwd`. This ensures Config/Memory reflect the
-        // project being resumed into, which may differ from the live project.
+        // Derive the project-scoped config location from the matching prepared
+        // identity. Its worktree root may differ while its stable project
+        // identity remains the same.
         let config_location = self.build_config_location(&prepared_identity)?;
         let prepared_config: PreparedProjectConfig = self
             .config_participant
@@ -851,17 +865,19 @@ pub mod test_support {
 
     #[async_trait]
     impl SessionManagementPort for UnavailableSessionManagement {
-        async fn load_canonical(
+        async fn load_for_project(
             &self,
             id: &str,
+            _project: &share::session_types::ProjectIdentity,
         ) -> Result<CanonicalSession, crate::domain::session::SessionManagementError> {
             Err(crate::domain::session::SessionManagementError::NotFound(
                 id.to_string(),
             ))
         }
 
-        async fn list(
+        async fn list_for_project(
             &self,
+            _project: &share::session_types::ProjectIdentity,
         ) -> Result<
             Vec<crate::domain::session::SessionListEntry>,
             crate::domain::session::SessionManagementError,
@@ -869,18 +885,20 @@ pub mod test_support {
             Ok(Vec::new())
         }
 
-        async fn export(
+        async fn export_for_project(
             &self,
             id: &str,
+            _project: &share::session_types::ProjectIdentity,
         ) -> Result<Vec<u8>, crate::domain::session::SessionManagementError> {
             Err(crate::domain::session::SessionManagementError::NotFound(
                 id.to_string(),
             ))
         }
 
-        async fn import(
+        async fn import_for_project(
             &self,
             _bytes: &[u8],
+            _project: &share::session_types::ProjectIdentity,
         ) -> Result<
             crate::domain::session::SessionListEntry,
             crate::domain::session::SessionManagementError,
@@ -890,9 +908,10 @@ pub mod test_support {
             ))
         }
 
-        async fn update_metadata(
+        async fn update_metadata_for_project(
             &self,
             id: &str,
+            _project: &share::session_types::ProjectIdentity,
             _update: crate::domain::session::SessionMetadataUpdate,
         ) -> Result<
             crate::domain::session::SessionListEntry,
@@ -903,9 +922,10 @@ pub mod test_support {
             ))
         }
 
-        async fn delete(
+        async fn delete_for_project(
             &self,
             id: &str,
+            _project: &share::session_types::ProjectIdentity,
         ) -> Result<(), crate::domain::session::SessionManagementError> {
             Err(crate::domain::session::SessionManagementError::NotFound(
                 id.to_string(),

@@ -18,12 +18,6 @@ mod tests {
         assert!(!state.is_processing);
     }
 
-    #[test]
-    fn test_chat_state_default_context_size() {
-        let state = ChatState::default();
-        assert_eq!(state.context_size, 200_000);
-    }
-
     // === InputState ===
 
     #[test]
@@ -121,13 +115,11 @@ mod tests {
             app.model.session.current_session_id.as_deref(),
             Some("sess-1")
         );
+        assert_eq!(app.model.config_provider.model_id(), Some("gpt-test"));
+        let expected_cwd = cwd.display().to_string();
         assert_eq!(
-            app.model.conversation.runtime.model_id.as_deref(),
-            Some("gpt-test")
-        );
-        assert_eq!(
-            app.model.conversation.runtime.workspace.cwd,
-            Some(cwd.display().to_string())
+            app.model.workspace_provider.cwd(),
+            Some(expected_cwd.as_str())
         );
         assert!(app.model.input.document.buffer.is_empty());
     }

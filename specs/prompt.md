@@ -4,7 +4,7 @@
 **主触发**：改 `agent/features/prompt/**`。
 **次触发**：改 provider 默认 model（影响 guidance 前缀匹配），或改系统提示注入。
 
-## Guidance 系统
+## 3.7.1. Guidance 系统
 
 - 实现：`agent/features/prompt/src/business/guidance/`（+ `guidance.rs`）。
 - Guidance 文件存放在 `~/.agents/guidance/`：
@@ -14,11 +14,11 @@
 - 首次运行自动生成默认文件，**不覆盖**用户编辑。
 - 改 provider 默认 model 时注意：model id 变化会影响 `{prefix}.md` 的命中，需确认对应 guidance 仍匹配。
 
-## 多语言一致性（Config.language）
+## 3.7.2. 多语言一致性（Config.language）
 
 所有注入 LLM context 的文本 **MUST** 按 `Config.language`（`"en"` / `"zh"`）提供对应语言版本。**NEVER** 在同一 system prompt 中混合中英文（结构性标签如 XML tag name 除外）。
 
-### 当前覆盖状态
+### 3.7.2.1. 当前覆盖状态
 
 | 注入路径 | 状态 | 位置 |
 |---|---|---|
@@ -35,7 +35,7 @@
 | guidance 重载提示 | ✅ 已双语 | `loop_runner.rs` |
 | Stop hook 反馈 | ✅ 已双语（`HookFeedbackLabels`） | `finalize.rs` |
 
-### 改造原则
+### 3.7.2.2. 改造原则
 
 1. **MUST** 在注入文本的函数签名中传入 `language: &str`（或 `Config`），按值选择对应语言版本。
 2. **MUST** 为每个文本块定义 `const XXX_EN: &str` 和 `const XXX_ZH: &str`，再通过 `fn xxx(lang) -> &'static str` 选择——**NEVER** 在调用点内联 match。

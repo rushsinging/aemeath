@@ -9,6 +9,38 @@
   },
   "entries": [
     {
+      "id": "policy.context.session-project-scope",
+      "guard": "check-session-project-scope.sh",
+      "module": "context",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/context/src"
+      },
+      "classification": "target_capability_policy",
+      "owner": "context",
+      "reason": "Session list and resume are restricted to the current ProjectIdentity; Git worktrees match by common-dir and non-git projects by canonical root",
+      "tracking_issue": 1295,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Context-owned session project scope policy",
+      "status": "active"
+    },
+    {
+      "id": "policy.runtime.hook-assembly.composition-ownership",
+      "guard": "check-runtime-hook-assembly-ownership.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "classification": "target_capability_policy",
+      "owner": "composition",
+      "reason": "Composition alone builds HookRunner from the committed ConfigSnapshot; Runtime Main and Sub consume the injected HookPort",
+      "tracking_issue": 1295,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Composition-only Hook assembly policy",
+      "status": "active"
+    },
+    {
       "id": "policy.runtime.tool-assembly.composition-ownership",
       "guard": "check-runtime-tool-assembly-ownership.sh",
       "module": "runtime",

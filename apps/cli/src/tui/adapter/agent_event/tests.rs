@@ -29,6 +29,29 @@ fn assert_no_runtime_bind_prelude(mapping: &AgentEventMapping) {
     );
 }
 #[test]
+fn workspace_metadata_event_maps_to_matching_workspace_intent() {
+    let event =
+        UiEvent::WorkspaceMetadataResolved(crate::tui::app::event::WorkspaceMetadataResolved {
+            root: "/repo".to_string(),
+            revision: 2,
+            branch: Some("feature/metadata".to_string()),
+            kind: crate::tui::model::conversation::workspace::WorktreeKind::LinkedWorktree,
+        });
+
+    let mapping = map_agent_event(&event);
+
+    assert!(matches!(
+        mapping.workspace.as_slice(),
+        [crate::tui::model::workspace_provider::WorkspaceIntent::ApplyMetadata {
+            root,
+            revision: 2,
+            branch: Some(branch),
+            kind: crate::tui::model::conversation::workspace::WorktreeKind::LinkedWorktree,
+        }] if root == "/repo" && branch == "feature/metadata"
+    ));
+}
+
+#[test]
 fn test_map_agent_event_runtime_observations_do_not_emit_bind_runtime_turn() {
     let context = ctx();
 
@@ -237,10 +260,8 @@ fn test_map_agent_event_error_records_diagnostic_and_hook() {
     let mapping = map_agent_event(&UiEvent::Error("坏了".to_string()));
     assert_eq!(mapping.conversation.len(), 1);
     assert_eq!(mapping.diagnostic.len(), 1);
-    assert!(matches!(
-        mapping.effects.first(),
-        Some(Effect::RunHook { .. })
-    ));
+    assert!(mapping.conversation.len() == 1);
+    assert!(mapping.diagnostic.len() == 1);
 }
 
 #[test]

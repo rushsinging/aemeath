@@ -2,7 +2,7 @@
 
 基于 Rust 的 AI 编程助手，带 TUI 界面。支持多 provider、多模型、子代理（sub-agent）和技能（skill）系统。
 
-## Constitution
+## 1. Constitution
 
 1. 指令使用 **NEVER**、**MUST**、**SHOULD**、**MAY** 表示约束等级：
    - **NEVER**：绝对禁止，无例外。
@@ -16,7 +16,21 @@
 6. **MUST** 遵循 TDD（测试先行）。新增或修改核心逻辑前，**MUST** 先新增或修改对应测试（feature 先写表达期望行为的测试、bug 先写复现问题的失败测试、重构先确认现有测试覆盖目标行为），再用 `cargo test` 验证修改结果；细节见 `specs/rust-coding.md`。
 7. **MUST** 跨层链路改动 **MUST** 为**每一层**补单元测试或场景测试，**NEVER** 只测首尾。跨 share → runtime → sdk → tui 的数据流改动，若只测源头 emit 和最终渲染，中间任一层（SDK 转发、adapter 分发、model 写入）的覆写 / 绕过 / 字段丢失都无法被测试捕获。典型反面教材：PR #635 数据全链路正确但 TUI 不显示，根因是 `AgentDisplay::format_header_line_with_result` 覆写了 trait 默认方法绕过了消费逻辑——因为链路中每一层都没有测试覆盖。
 
-## 渐进式披露（Progressive Disclosure）
+## 2. 工作流（路径 / 目录结构 / Git / 发版）
+
+以下内容已按渐进式披露原则移至 `specs/workflow.md`，**涉及对应场景时 MUST 加载**：
+
+- **Bug / Feature 执行流程**（issue → checklist 门禁 → 方案 → 确认 → worktree → PR → 关闭；所有 check 必须完成或记录合理理由；Agent 发现工作可能需要拆分时先询问用户，未经明确同意不得自行创建或拆分 Issue）
+- **Milestone / Release Gate 管理**（版本验收、收尾退役、大文件拆分）
+- **大型工作的拆分与跟踪**（GitHub Sub-issues 原生层级）
+- **Git 工作流**（main 开发、release 发版、PR 策略、squash / merge commit）
+- **代码修改后检查**（废弃路径 / 死代码清理）
+- **发版**（tag 触发、版本号、release notes）
+- **Hook 阻断处理**（止血 + 报告）
+
+加载触发：任何 bug 修复 / feature 实现 / PR 创建 / 发版 / Hook 阻断处理。
+
+## 3. 渐进式披露（Progressive Disclosure）
 
 根指令（本文件）覆盖全仓库，始终适用。`specs/` 下的分片承载特定工作的 detailed 规则。**开始工作前**先加载匹配的分片，再动手。
 
@@ -27,7 +41,7 @@
 
 多行命中时，加载**全部**匹配分片。分片之间若冲突，停下来问用户，**NEVER** 自行取舍。
 
-### 架构地图与触发表
+### 3.1 架构地图与触发表
 
 | 分片 | 角色 / 路径（主触发） | 同时加载（次触发） |
 |---|---|---|
@@ -49,22 +63,7 @@
 
 > `agent/shared/**`（除 `config/`）、`agent/composition/**`、`packages/**` 的改动按内容落到最相关分片；纯横切改动至少加载 `rust-coding.md`。
 
-## 工作流（路径 / 目录结构 / Git / 发版）
-
-以下内容已按渐进式披露原则移至 `specs/workflow.md`，**涉及对应场景时 MUST 加载**：
-
-- **Bug / Feature 执行流程**（issue → checklist 门禁 → 方案 → 确认 → worktree → PR → 关闭；所有 check 必须完成或记录合理理由）
-- **Milestone / Release Gate 管理**（版本验收、收尾退役、大文件拆分）
-- **大型工作的拆分与跟踪**（GitHub Sub-issues 原生层级）
-- **Git 工作流**（main 开发、release 发版、PR 策略、squash / merge commit）
-- **代码修改后检查**（废弃路径 / 死代码清理）
-- **发版**（tag 触发、版本号、release notes）
-- **Hook 阻断处理**（止血 + 报告）
-
-加载触发：任何 bug 修复 / feature 实现 / PR 创建 / 发版 / Hook 阻断处理。
-
-## 开放决策
-
+## 4. 开放决策
 
 - MCP 工具的动态加载方式（当前通过 `mcp_loader.rs` + `serde_json::Value` 配置）。
 - Skill 系统的热重载策略。

@@ -42,6 +42,7 @@ pub fn execute_init(cwd: &str, force: bool) -> (String, bool) {
 pub async fn execute_session(
     args: &str,
     session_id: &str,
+    project: &share::session_types::ProjectIdentity,
     session_management: &dyn SessionManagementPort,
 ) -> (String, bool) {
     let parts: Vec<&str> = args.split_whitespace().collect();
@@ -50,7 +51,7 @@ pub async fn execute_session(
     }
     match parts[0] {
         "list" => {
-            let sessions = match session_management.list().await {
+            let sessions = match session_management.list_for_project(project).await {
                 Ok(sessions) => sessions,
                 Err(error) => return (format!("Failed to list sessions: {error}"), true),
             };
@@ -78,8 +79,9 @@ pub async fn execute_session(
                 return ("Usage: /session rename <id> <name>".to_string(), true);
             }
             match session_management
-                .update_metadata(
+                .update_metadata_for_project(
                     parts[1],
+                    project,
                     context::SessionMetadataUpdate {
                         title: Some(parts[2..].join(" ")),
                         ..Default::default()
@@ -98,14 +100,22 @@ pub async fn execute_session(
             if parts.len() < 2 {
                 return ("Usage: /session delete <id>".to_string(), true);
             }
-            // 返回确认提示（事件流不直接执行删除，需要 TUI 二次确认）
-            (format!("[confirm:delete_session:{}]", parts[1]), false)
+            match session_management
+                .delete_for_project(parts[1], project)
+                .await
+            {
+                Ok(()) => (format!("Session {} deleted.", parts[1]), false),
+                Err(error) => (format!("Failed to delete session: {error}"), true),
+            }
         }
         "export" => {
             if parts.len() < 2 {
                 return ("Usage: /session export <id>".to_string(), true);
             }
-            match session_management.export(parts[1]).await {
+            match session_management
+                .export_for_project(parts[1], project)
+                .await
+            {
                 Ok(bytes) => match String::from_utf8(bytes) {
                     Ok(json) => (json, false),
                     Err(e) => (format!("Failed to encode session export: {e}"), true),
@@ -118,7 +128,10 @@ pub async fn execute_session(
                 return ("Usage: /session import <file>".to_string(), true);
             }
             match tokio::fs::read(parts[1]).await {
-                Ok(content) => match session_management.import(&content).await {
+                Ok(content) => match session_management
+                    .import_for_project(&content, project)
+                    .await
+                {
                     Ok(session) => (format!("Session {} imported", session.id), false),
                     Err(e) => (format!("Failed to import session: {e}"), true),
                 },

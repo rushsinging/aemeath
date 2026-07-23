@@ -9,7 +9,6 @@ use super::spinner::{SpinnerModel, SpinnerPhase};
 use super::status_notice::StatusNotice;
 use super::task_status::TaskStatusSnapshot;
 use super::usage::UsageSummary;
-use super::workspace::WorkspaceState;
 use std::time::Instant;
 
 /// 会话运行态聚合——spinner / usage / workspace / status 等基础设施关注点。
@@ -18,15 +17,11 @@ use std::time::Instant;
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeState {
     pub spinner: SpinnerModel,
-    pub provider: Option<String>,
-    pub model_id: Option<String>,
-    pub workspace: WorkspaceState,
     pub usage: UsageSummary,
     pub live_tps: Option<f64>,
     pub task_status: TaskStatusSnapshot,
     pub processing_jobs: Vec<ProcessingJob>,
     pub status_notice: StatusNotice,
-    pub thinking: bool,
     pub graph_phase: Option<String>,
     pub transient_notice_expiry: Option<Instant>,
     pub compact_progress: Option<CompactProgressModel>,
@@ -36,15 +31,11 @@ impl Default for RuntimeState {
     fn default() -> Self {
         Self {
             spinner: SpinnerModel::default(),
-            provider: None,
-            model_id: None,
-            workspace: WorkspaceState::default(),
             usage: UsageSummary::default(),
             live_tps: None,
             task_status: TaskStatusSnapshot::default(),
             processing_jobs: Vec::new(),
             status_notice: StatusNotice::default(),
-            thinking: true,
             graph_phase: None,
             transient_notice_expiry: None,
             compact_progress: None,
@@ -57,15 +48,6 @@ impl Default for RuntimeState {
 impl RuntimeState {
     pub fn spinner(&self) -> &SpinnerModel {
         &self.spinner
-    }
-    pub fn provider(&self) -> Option<&str> {
-        self.provider.as_deref()
-    }
-    pub fn model_id(&self) -> Option<&str> {
-        self.model_id.as_deref()
-    }
-    pub fn workspace(&self) -> &WorkspaceState {
-        &self.workspace
     }
     pub fn usage(&self) -> &UsageSummary {
         &self.usage
@@ -81,9 +63,6 @@ impl RuntimeState {
     }
     pub fn status_notice(&self) -> &StatusNotice {
         &self.status_notice
-    }
-    pub fn thinking(&self) -> bool {
-        self.thinking
     }
     pub fn graph_phase(&self) -> Option<&str> {
         self.graph_phase.as_deref()
@@ -168,6 +147,19 @@ impl RuntimeState {
         self.spinner.running_tool_count = 0;
     }
 
+    /// UI 触发的 spinner phase 变更，经 ConversationIntent 统一进入 reducer。
+    pub fn set_spinner_phase(&mut self, phase: SpinnerPhase) {
+        self.spinner.chat_active = true;
+        self.spinner.phase = Some(phase);
+    }
+
+    /// UI 触发的 spinner 停止，经 ConversationIntent 统一进入 reducer。
+    pub fn stop_spinner(&mut self) {
+        self.spinner.chat_active = false;
+        self.spinner.phase = None;
+        self.spinner.running_tool_count = 0;
+    }
+
     /// Compact 开始：spinner active + Compacting。
     pub fn start_compact(&mut self) {
         self.spinner.chat_active = true;
@@ -213,29 +205,6 @@ impl RuntimeState {
 // ── 运行态 intent 的直接字段操作（纯运行态 intent 不经过对话域 change 映射） ──
 
 impl RuntimeState {
-    pub fn set_provider_model(&mut self, provider: Option<String>, model_id: Option<String>) {
-        self.provider = provider;
-        self.model_id = model_id;
-    }
-
-    pub fn update_workspace(&mut self, cwd: String, worktree: Option<String>) {
-        self.workspace.cwd = Some(cwd);
-        self.workspace.worktree = worktree;
-    }
-
-    pub fn set_workspace_snapshot(
-        &mut self,
-        path_base: Option<String>,
-        workspace_root: Option<String>,
-        branch: Option<String>,
-        kind: super::workspace::WorktreeKind,
-    ) {
-        self.workspace.path_base = path_base;
-        self.workspace.workspace_root = workspace_root;
-        self.workspace.branch = branch;
-        self.workspace.kind = kind;
-    }
-
     pub fn record_usage(
         &mut self,
         input_tokens: u64,
@@ -248,15 +217,6 @@ impl RuntimeState {
         self.usage.last_input_tokens = last_input_tokens;
         self.usage.api_calls += 1;
         self.usage.cost_usd += cost_usd;
-        (
-            self.usage.input_tokens,
-            self.usage.output_tokens,
-            self.usage.cost_usd,
-        )
-    }
-
-    pub fn set_context_size(&mut self, size: u64) -> (u64, u64, f64) {
-        self.usage.context_size = size;
         (
             self.usage.input_tokens,
             self.usage.output_tokens,
@@ -318,10 +278,6 @@ impl RuntimeState {
         self.transient_notice_expiry = Some(expires_at);
     }
 
-    pub fn set_thinking(&mut self, thinking: bool) {
-        self.thinking = thinking;
-    }
-
     pub fn set_graph_phase(&mut self, phase: Option<String>) {
         self.graph_phase = phase.clone();
         if self.transient_notice_expiry.is_none() {
@@ -341,11 +297,5 @@ impl RuntimeState {
             total,
         });
         self.start_compact();
-    }
-
-    /// 为兼容 spinner.rs 注释中 `model.spinner.phase = None` 的直接写法提供逃生通道。
-    /// TODO: 逐步替换为业务方法调用后移除。
-    pub fn spinner_mut(&mut self) -> &mut SpinnerModel {
-        &mut self.spinner
     }
 }

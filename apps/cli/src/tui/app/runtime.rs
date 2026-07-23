@@ -1,7 +1,8 @@
 use super::App;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::runtime::status_notice::StatusNotice;
-use crate::tui::model::runtime::workspace::WorktreeKind;
+use crate::tui::model::workspace_provider::WorkspaceIntent;
+use crate::tui::update::intent::AgentIntent;
 
 impl App {
     /// Reset per-conversation runtime state while preserving model/provider/session environment.
@@ -20,13 +21,15 @@ impl App {
         self.view_state.output.clear_selection();
         self.view_state.status_sel.clear_selection();
         self.view_state.input_sel.clear_selection();
-        self.model
-            .conversation
-            .apply(SetStatusNotice(StatusNotice::ready()));
+        self.apply_agent_intent(AgentIntent::Conversation(
+            ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::ready())),
+        ));
         self.input.ask_user_reply_tx = None;
         self.input.ask_user_state = None;
         // Reset 事件由 runtime gate 处理（清 chain + clear_tasks）。
-        self.model.conversation.apply(UpdateTaskLines(Vec::new()));
+        self.apply_agent_intent(AgentIntent::Conversation(
+            ConversationIntent::UpdateTaskLines(UpdateTaskLines(Vec::new())),
+        ));
     }
     /// Set loaded skills for slash command alias lookup
     pub fn set_skills(&mut self, skills: std::collections::HashMap<String, sdk::SkillView>) {
@@ -58,17 +61,14 @@ impl App {
         // 项目上下文通过 ProjectInfo 事件推送（后续 PR 实现）。
         // 暂时从 session.cwd 获取。
         let workspace_root = self.session.cwd.as_path().to_path_buf();
-        let kind = WorktreeKind::MainCheckout;
-        self.model.conversation.apply(UpdateWorkspace {
+        self.apply_agent_intent(AgentIntent::Workspace(WorkspaceIntent::SetCurrent {
             cwd: self.session.cwd.to_string_lossy().to_string(),
             worktree: None,
-        });
-        self.model.conversation.apply(WorkspaceSnapshotReceived {
+        }));
+        self.apply_agent_intent(AgentIntent::Workspace(WorkspaceIntent::ApplySnapshot {
             path_base: None,
             workspace_root: Some(workspace_root.to_string_lossy().to_string()),
-            branch: None,
-            kind,
-        });
+        }));
     }
 }
 

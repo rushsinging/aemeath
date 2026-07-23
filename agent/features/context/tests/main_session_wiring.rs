@@ -505,11 +505,10 @@ async fn finalized_append_persists_and_is_visible_after_resume() {
     assert_eq!(rebound.session().structured_messages().len(), 1);
 }
 
-/// Cross-project resume is allowed: a session whose workspace belongs to a
-/// different project can be resumed. The canonical identity from
-/// `prepare_restore` drives Config/Memory, not the live identity.
+/// Cross-project resume is rejected before Config, Memory, Task or workspace
+/// state can switch. The current project's committed resources remain intact.
 #[tokio::test]
-async fn cross_project_resume_succeeds() {
+async fn cross_project_resume_is_rejected() {
     let _guard = git_lock().await;
     let h = build_harness();
 
@@ -526,49 +525,40 @@ async fn cross_project_resume_succeeds() {
         .snapshot();
     let session = session_with_workspace(&ws2, SnapshotState::Captured(TaskSnapshot::empty()));
 
-    // Resume should succeed — cross-project is allowed.
-    h.wiring
-        .resume_prepared(session)
-        .await
-        .expect("cross-project resume should succeed");
+    // Resume must reject before any participant is prepared or committed.
+    assert!(matches!(
+        h.wiring.resume_prepared(session).await,
+        Err(MainSessionError::ProjectMismatch)
+    ));
 
-    // Committed session changed.
-    assert_ne!(
+    // Committed session remains unchanged.
+    assert_eq!(
         h.wiring.committed_session().id,
         pre_session_id,
-        "committed session should change after cross-project resume"
+        "committed session must remain unchanged after cross-project rejection"
     );
 
-    // Committed memory changed (new Arc opened for the prepared identity), and
-    // the next Run captures that exact Arc under the shared lease.
+    // Committed memory and Config remain unchanged.
     let target_memory = h.wiring.committed_memory();
     assert!(
-        !Arc::ptr_eq(&target_memory, &pre_memory),
-        "committed memory should be a new Arc"
+        Arc::ptr_eq(&target_memory, &pre_memory),
+        "committed memory must remain unchanged after cross-project rejection"
     );
-    let bound = h.wiring.bind_main_run().await.expect("bind target run");
+    let bound = h.wiring.bind_main_run().await.expect("bind current run");
     assert!(
-        std::ptr::eq(bound.memory(), target_memory.as_ref()),
-        "bound run should capture the target project's committed Memory Arc"
+        std::ptr::eq(bound.memory(), pre_memory.as_ref()),
+        "bound run should retain the current project's committed Memory Arc"
     );
-    assert_eq!(bound.session().id, h.wiring.committed_session().id);
+    assert_eq!(bound.session().id, pre_session_id);
     assert_eq!(
-        bound.config().revision(),
-        h.config_service.committed_snapshot().revision()
-    );
-
-    // Config was committed (revision advances).
-    assert_ne!(
         h.config_service.committed_snapshot().revision(),
         pre_config_revision,
-        "config revision should advance"
+        "config revision must remain unchanged after cross-project rejection"
     );
-
-    // Memory opener was called exactly once for the prepared identity.
     assert_eq!(
         h.memory_opener.open_count(),
-        1,
-        "memory opener should be called once"
+        0,
+        "memory opener must not run for a rejected cross-project session"
     );
 }
 

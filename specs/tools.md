@@ -5,7 +5,7 @@
 **次触发**：新增内置 Tool，或改 MCP 工具加载 / 注册。
 **配套**：tool 在 Agent 循环中的执行编排在 `runtime.md`；工具调用的 TUI 展示在 `tui-cli.md`。
 
-## Catalog / Execution 与 Scope/Profile
+## 3.11.1. Catalog / Execution 与 Scope/Profile
 
 - `ToolCatalogPort` / `ToolExecutionPort`：`agent/features/tools/src/domain/ports.rs`；Descriptor、Invocation、Outcome 等 Published Language：`agent/features/tools/src/domain/published_language.rs`。
 - #911 已把生产 Runtime 切到 Catalog / Execution 双端口：Runtime 不再取得 `ToolRegistry` 或 `Tool` 实例。两端由 `agent/features/tools/src/adapters/composition.rs` 的窄 factory 基于同一个私有 `ToolBacking` 装配；具体 backing、registry 与 adapter 不从 crate root 暴露。
@@ -14,7 +14,7 @@
 - `ToolRegistry` 当前仍是 Tools adapter 内部 backing；#912 已让正式 Main/Sub Catalog 与 Execution 不再发布或执行 Skill，并以 Skill-owned Catalog/Materialization 双端口接入 Context。`legacy-no-agent`、历史 `register_all_tools*`、内部 Profile/Registry 与 `SkillTool` 文件的最终物理退役仍属于 #914。
 - Skill Published Language 与端口位于 `agent/features/tools/src/domain/{skill_pl,skill_ports}.rs`；filesystem adapter 每次按 query 的 project/config/tool snapshot 物化，返回确定性内容 revision。Context 直接复用唯一 `PromptFragment`，不读取 Skill 文件。
 
-## ExecutionScope、资源与 suspension
+## 3.11.2. ExecutionScope、资源与 suspension
 
 - `ExecutionScope` 是固定八字段纯值对象：run/parent id、workspace id/root 快照、invocation source、registry scope、profile、deadline；**NEVER** 放入 registry/store/channel/token/semaphore 或 Project wiring。
 - `ToolExecutionContext` 只含私有 `scope + ports`。文件工具只经 `WorkspaceRead` 解析路径；`WorkspaceControl` 仅允许 Bash、EnterWorktree、ExitWorktree 使用，accessor 保持 crate-private。
@@ -23,7 +23,7 @@
 - Command Published Language 与端口位于 `agent/features/tools/src/domain/{command_pl,command_ports}.rs`；唯一生产 adapter 位于 `adapters/command.rs`，由 `tools::composition::wire_commands` 装配。SDK 只 re-export，CLI/TUI/no-TUI **NEVER** 定义第二份 Descriptor、Catalog 或 parser。
 - #912/#913 的 Skill materialization 与 Command Catalog/Router 边界已切线；#914 继续承接旧 Registry/Profile/SkillTool 物理退役。
 
-## MCP 工具
+## 3.11.3. MCP 工具
 
 - MCP 主体在 `agent/features/tools/src/adapters/`：`mcp_manager.rs`、`mcp_tool.rs`、`mcp.rs`、`read_mcp_resource.rs`、`list_mcp_resources.rs`。
 - MCP 加载器：`agent/features/runtime/src/application/startup/mcp_loader.rs`；MCP 外部协议 adapter：`agent/shared/src/adapter/mcp.rs`。

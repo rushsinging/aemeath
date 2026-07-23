@@ -1,1 +1,1 @@
-pub use crate::tui::model::conversation::workspace::{WorkspaceState, WorktreeKind};
+pub use crate::tui::model::conversation::workspace::WorktreeKind;

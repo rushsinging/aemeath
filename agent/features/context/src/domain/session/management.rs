@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use share::message::{Message, Role};
+use share::session_types::ProjectIdentity;
 
-use super::{CanonicalSession, SessionMetadata};
+use super::{CanonicalSession, SessionMetadata, SnapshotState};
 
 /// Context-owned session list projection published to Runtime/SDK adapters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,6 +44,27 @@ impl SessionListEntry {
             summary,
         }
     }
+}
+
+/// Compares stable project identity without treating individual worktree roots
+/// as distinct projects. Git projects use `git_common_dir`; non-git projects use
+/// their canonical `initial_cwd`.
+pub fn same_project_identity(current: &ProjectIdentity, persisted: &ProjectIdentity) -> bool {
+    match (
+        current.git_common_dir.as_deref(),
+        persisted.git_common_dir.as_deref(),
+    ) {
+        (Some(current_git), Some(stored_git)) => current_git == stored_git,
+        (None, None) => current.initial_cwd == persisted.initial_cwd,
+        _ => false,
+    }
+}
+
+pub fn session_matches_project(session: &CanonicalSession, current: &ProjectIdentity) -> bool {
+    let SnapshotState::Captured(workspace) = &session.workspace else {
+        return false;
+    };
+    same_project_identity(current, &workspace.project_identity)
 }
 
 fn first_line(message: &Message) -> Option<String> {
@@ -94,6 +116,8 @@ pub struct SessionResumeProjection {
 pub enum SessionManagementError {
     #[error("Session 不存在：{0}")]
     NotFound(String),
+    #[error("Session 不属于当前项目：{0}")]
+    ProjectMismatch(String),
     #[error("Session 数据损坏：{0}")]
     Corrupt(String),
     #[error("Session schema 版本过新：{0}")]

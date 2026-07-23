@@ -103,6 +103,7 @@ impl TrackingMemoryOpener {
         self.open_count.load(Ordering::SeqCst)
     }
 
+    #[allow(dead_code)]
     fn last_key(&self) -> Option<ProjectMemoryKey> {
         self.last_key.lock().unwrap().clone()
     }
@@ -298,14 +299,10 @@ fn session_with_workspace(
 // ─── Tests ────────────────────────────────────────────────────────────
 
 /// Cross-project resume succeeds and the **prepared** identity drives
-/// Config/Memory, not the live identity.
-///
-/// We place a project config file in the target project's `.agents/` dir with
-/// a distinctive model name.  After resuming into that project, the committed
-/// config must reflect that model — proving the config location search root
-/// used the prepared identity's `initial_cwd`, not the live workspace's.
+/// Different-project resume is rejected before Config/Memory preparation,
+/// leaving the current project's resources unchanged.
 #[tokio::test]
-async fn cross_project_resume_drives_config_and_memory_from_prepared_identity() {
+async fn cross_project_resume_does_not_switch_config_or_memory() {
     let _guard = git_lock().await;
 
     // Live workspace (project B).
@@ -320,7 +317,6 @@ async fn cross_project_resume_drives_config_and_memory_from_prepared_identity() 
     // Target project (project A) — different temp dir.
     let tmp_target = TempDir::new("target");
     let target_workspace = wire_production_workspace(tmp_target.path().to_path_buf()).unwrap();
-    let target_identity = target_workspace.read().project_identity();
 
     // Place a project config file in project A so we can detect which
     // search_root was used during prepare_for_project.
@@ -348,14 +344,12 @@ async fn cross_project_resume_drives_config_and_memory_from_prepared_identity() 
     let pre_memory = h.wiring.committed_memory();
     assert_ne!(pre_model, "target-project-model", "precondition");
 
-    // Resume into project A.
-    h.wiring
-        .resume_prepared(session)
-        .await
-        .expect("cross-project resume should succeed");
+    // Cross-project resume must fail before Config/Memory preparation.
+    assert!(matches!(
+        h.wiring.resume_prepared(session).await,
+        Err(context::application::main_session::MainSessionError::ProjectMismatch)
+    ));
 
-    // Config must reflect project A's config file — proving the search root
-    // was the prepared identity's initial_cwd, not the live workspace's.
     let post_model = h
         .config_service
         .committed_snapshot()
@@ -363,27 +357,13 @@ async fn cross_project_resume_drives_config_and_memory_from_prepared_identity() 
         .default
         .clone();
     assert_eq!(
-        post_model, "target-project-model",
-        "config should be loaded from the prepared identity's project dir"
+        post_model, pre_model,
+        "config must remain on the live project"
     );
-
-    // Memory should be opened for the target identity, not the live one.
-    assert_eq!(h.memory_opener.open_count(), 1, "memory opener called once");
-    let expected_key = ProjectMemoryKey::derive(
-        &target_identity.initial_cwd,
-        target_identity.git_common_dir.as_deref(),
-    )
-    .unwrap();
-    assert_eq!(
-        h.memory_opener.last_key().as_ref(),
-        Some(&expected_key),
-        "memory key should be derived from the prepared identity"
-    );
-
-    // Memory Arc changed.
+    assert_eq!(h.memory_opener.open_count(), 0, "memory must not reopen");
     assert!(
-        !Arc::ptr_eq(&h.wiring.committed_memory(), &pre_memory),
-        "committed memory should be a new Arc"
+        Arc::ptr_eq(&h.wiring.committed_memory(), &pre_memory),
+        "committed memory must remain on the live project"
     );
 }
 

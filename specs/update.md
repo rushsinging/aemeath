@@ -3,7 +3,7 @@
 > 路径触发：`agent/features/update/**`
 > 场景触发：改版本检查逻辑 / 更新渠道配置
 
-## 迁移期实现约束
+## 3.13.1. 迁移期实现约束
 
 `update` crate 当前使用下列扁平运行路径，并经 composition 装配为 `Arc<dyn UpdateService>`。在对应迁移 leaf 完成前，Update 改动 **MUST** 保持这些入口与现行 SDK 行为兼容。
 
@@ -17,7 +17,7 @@ agent/features/update/src/
 └── gateway.rs    # 版本检查核心逻辑（UpdateGateway impl UpdateService）
 ```
 
-## SDK 契约
+## 3.13.2. SDK 契约
 
 `sdk::UpdateService` trait 定义在 `packages/sdk/src/update.rs`，CLI 通过 `composition::update::wire_update()` 获取 `Arc<dyn UpdateService>`。
 
@@ -37,7 +37,7 @@ pub trait UpdateService: Send + Sync + 'static {
 > 无缓存可避免过期数据漏报新版本，同时省掉 cache 文件 IO + 路径常量 + spec 章节。
 > `force_check` 保留为公开方法，主要供 `aemeath update --check` 等显式场景调用，语义清晰。
 
-## 版本检查策略
+## 3.13.3. 版本检查策略
 
 | 场景 | 方法 |
 |---|---|
@@ -47,7 +47,7 @@ pub trait UpdateService: Send + Sync + 'static {
 | `aemeath update` | `force_check()` → `perform_update()` |
 | TUI `/update` | `perform_update()` |
 
-## 自动更新流程（`perform_update`）
+## 3.13.4. 自动更新流程（`perform_update`）
 
 ```
 1. force_check() → 确认有新版本
@@ -60,7 +60,7 @@ pub trait UpdateService: Send + Sync + 'static {
 8. 提示用户重启
 ```
 
-### 支持的平台
+### 3.13.4.1. 支持的平台
 
 | OS | ARCH | Target Triple |
 |---|---|---|
@@ -68,13 +68,13 @@ pub trait UpdateService: Send + Sync + 'static {
 | macOS | x86_64 | `x86_64-apple-darwin` |
 | Linux | x86_64 | `x86_64-unknown-linux-gnu` |
 
-### Artifact 命名
+### 3.13.4.2. Artifact 命名
 
 - 文件：`aemeath-{version}-{target}.tar.gz`
 - 下载 URL：`https://github.com/rushsinging/aemeath/releases/download/v{version}/{filename}`
 - checksums.txt 格式：`{sha256}  {filename}`（sha256sum 输出）
 
-### 错误处理
+### 3.13.4.3. 错误处理
 
 | 错误场景 | 处理 |
 |---|---|
@@ -83,14 +83,14 @@ pub trait UpdateService: Send + Sync + 'static {
 | 权限不足 | 提示「原子替换失败」 |
 | 平台不支持 | 提示当前平台无对应 artifact |
 
-## GitHub API
+## 3.13.5. GitHub API
 
 - Endpoint：`https://api.github.com/repos/rushsinging/aemeath/releases/latest`
 - 匿名访问（无 token），限速 60 次/小时
 - 超时：5 秒（`REQUEST_TIMEOUT_SECS`）
 - User-Agent：`aemeath/{version}`
 
-## 配置
+## 3.13.6. 配置
 
 `share::config::UpdateConfig`（`agent/shared/src/config/update.rs`）：
 
@@ -101,19 +101,19 @@ pub struct UpdateConfig {
 }
 ```
 
-## TUI 集成
+## 3.13.7. TUI 集成
 
 - **启动检查**：`run_loop.rs` 创建 `ui_tx` 后，调 `spawn_update_check(ui_tx.clone())`（`executor.rs`），非阻塞 spawn 后台 task
 - **结果回送**：`UiEvent::UpdateAvailable { current, latest, release_url }` 经 `ui_tx` 推回
 - **展示方式**：`update/ui_event.rs` 接收后调 `append_system_notice`，显示 `[aemeath v{latest} is available (you have v{current}); run \`aemeath update\` to upgrade | {release_url}]`
 - **交互式升级 dialog**：PR3 中与 `perform_update` 一起实现
 
-## 日志
+## 3.13.8. 日志
 
 - LOG_TARGET：`aemeath:agent:update`
 - 日志文件路由：`~/.agents/logs/` 下无独立文件，归入兜底 `aemeath.log`（后续可新增 `agent-update.log`）
 
-## 验证
+## 3.13.9. 验证
 
 ```bash
 cargo test -p update

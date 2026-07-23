@@ -355,8 +355,12 @@ fn test_refresh_assembles_again_when_workspace_root_changes() {
     app.refresh_output_document_from_model();
     let after_first = app.assemble_count;
 
-    // conversation 不变（revision 不推进），只改 workspace_root。
-    app.model.conversation.runtime.workspace.workspace_root = Some("/new/root".to_string());
+    app.apply_agent_intent(crate::tui::update::intent::AgentIntent::Workspace(
+        crate::tui::model::workspace_provider::WorkspaceIntent::ApplySnapshot {
+            path_base: Some("/new/root".to_string()),
+            workspace_root: Some("/new/root".to_string()),
+        },
+    ));
     app.refresh_output_document_from_model();
 
     assert_eq!(

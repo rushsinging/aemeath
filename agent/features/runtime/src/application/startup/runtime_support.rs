@@ -3,31 +3,11 @@ use crate::application::agent::runner as agent_runner;
 use crate::application::startup::config_paths;
 use crate::ports::ProviderFactory;
 use hook::HookPort;
-use share::config::hooks::HooksConfig;
 #[cfg(test)]
 use share::config::AgentsConfig;
-use std::collections::HashMap;
-use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
-
-pub fn build_hook_runner(hooks: Option<&HooksConfig>, _cwd: &Path) -> Arc<dyn HookPort> {
-    let runner: Arc<dyn HookPort> = match hooks {
-        Some(h) => {
-            Arc::new(hook::build_dispatcher(h, HashMap::new()).expect("hook config 必须合法"))
-        }
-        None => Arc::new(
-            hook::build_dispatcher(&HooksConfig::default(), HashMap::new())
-                .expect("空 hook config 必须合法"),
-        ),
-    };
-    log::info!(target: crate::LOG_TARGET,
-        "hook runner built: configured_events={}",
-        hooks.map(|h| h.events.len()).unwrap_or(0)
-    );
-    runner
-}
 
 pub fn start_session(resume_session_id: Option<String>) -> String {
     let session_id = resume_session_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
@@ -105,7 +85,8 @@ fn expand_tilde_path(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
+    use hook::HookPort;
+    use share::config::hooks::HooksConfig;
     use share::config::models::ProviderModelsConfig;
     use share::config::{AgentRoleConfig, AgentsConfig, Config, ModelsConfig};
     use std::collections::HashMap;
@@ -131,10 +112,12 @@ mod tests {
         let snapshot = share::config::domain::snapshot::ConfigSnapshot::new(Config::default());
         let config_reader =
             crate::application::agent::runner::test_config_reader::FixedConfigReader::new(snapshot);
+        let hook_runner: Arc<dyn HookPort> =
+            Arc::new(hook::build_dispatcher(&HooksConfig::default(), HashMap::new()).unwrap());
         let runner = build_agent_runner(
             config_reader,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
-            Arc::new(hook::build_dispatcher(&HooksConfig::default(), HashMap::new()).unwrap()),
+            hook_runner.clone(),
             false,
             Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
             policy.clone(),
@@ -149,38 +132,13 @@ mod tests {
         );
 
         assert!(
-            Arc::ptr_eq(&runner.skill_materializer, &skill_materializer),
-            "Sub Run runner 必须复用 Composition 注入的同一 Skill materializer"
+            Arc::ptr_eq(&runner.hook_runner, &hook_runner),
+            "Sub Run runner 必须复用 Composition 注入的同一 HookRunner"
         );
         assert!(
             Arc::ptr_eq(&runner.policy, &policy),
             "Sub Run runner 必须保留 Composition 注入的同一 PolicyPort 实例"
         );
-    }
-
-    #[test]
-    fn test_build_hook_runner_accepts_empty_config() {
-        let hook_runner = build_hook_runner(None, Path::new("."));
-        // hook_runner is an Arc<dyn HookPort> — the dispatcher handles empty configs.
-        let _ = hook_runner;
-    }
-
-    #[test]
-    fn test_build_hook_runner_uses_config_hooks() {
-        let mut events = HashMap::new();
-        events.insert(
-            HookEvent::PreToolUse,
-            vec![HookEntry {
-                matcher: "Bash".to_string(),
-                command: "true".to_string(),
-                timeout: 60,
-            }],
-        );
-        let hooks = HooksConfig { events };
-
-        let hook_runner = build_hook_runner(Some(&hooks), Path::new("project-root"));
-        // hook_runner is an Arc<dyn HookPort> — config is handled by the dispatcher.
-        let _ = hook_runner;
     }
 
     #[test]
