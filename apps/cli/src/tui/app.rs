@@ -6,11 +6,11 @@ mod runtime;
 pub mod state;
 
 use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
-use crate::tui::model::config_provider::ConfigIntent;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::root::TuiModel;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
+use crate::tui::model::runtime_presentation::RuntimePresentationIntent;
 use crate::tui::model::workspace_provider::WorkspaceIntent;
 use crate::tui::render::input::input_area::suggestions::SuggestionViewState;
 use crate::tui::render::input::input_area::InputArea;
@@ -130,10 +130,12 @@ impl App {
         );
         crate::tui::update::root_reducer::reduce_intent(
             &mut model_state,
-            crate::tui::update::intent::AgentIntent::Config(ConfigIntent::SetProviderModel {
-                provider: None,
-                model_id: Some(model.clone()),
-            }),
+            crate::tui::update::intent::AgentIntent::RuntimePresentation(
+                RuntimePresentationIntent::ProviderModel {
+                    provider: None,
+                    model_id: Some(model.clone()),
+                },
+            ),
         );
         crate::tui::update::root_reducer::reduce_intent(
             &mut model_state,

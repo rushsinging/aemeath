@@ -1,7 +1,7 @@
 //! 聊天相关纯数据状态
 
 /// 聊天会话的所有可变数据（不含视图组件 output_area）
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct ChatState {
     pub tool_call_active: bool,
     pub active_tool_call_ids: std::collections::HashSet<sdk::ids::ToolCallId>,
@@ -109,18 +109,5 @@ impl ChatState {
     pub(crate) fn clear_processing_handle(&mut self) {
         self.processing_handle = None;
         self.is_cancelling = false;
-    }
-}
-
-impl Default for ChatState {
-    fn default() -> Self {
-        Self {
-            tool_call_active: false,
-            active_tool_call_ids: std::collections::HashSet::new(),
-            input_event_tx: None,
-            processing_handle: None,
-            is_processing: false,
-            is_cancelling: false,
-        }
     }
 }

@@ -3,9 +3,9 @@ use crate::tui::adapter::hook_notice::hook_spinner_phase;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
-use crate::tui::model::config_provider::ConfigIntent;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::spinner::SpinnerPhase;
+use crate::tui::model::runtime_presentation::RuntimePresentationIntent;
 use crate::tui::update::intent::AgentIntent;
 use tokio::sync::mpsc;
 
@@ -303,24 +303,34 @@ impl App {
             UiEvent::ModelSwitched { result } => {
                 // #497：模型切换走事件流，TUI 在此更新本地状态（与原 slash.rs RPC 路径对齐）。
                 if result.context_window > 0 {
-                    self.apply_agent_intent(AgentIntent::Config(ConfigIntent::SetContextSize(
-                        result.context_window as u64,
-                    )));
+                    self.apply_agent_intent(AgentIntent::RuntimePresentation(
+                        RuntimePresentationIntent::ContextSize(result.context_window as u64),
+                    ));
                 }
                 self.session.current_model_display = result.display_name.clone();
-                self.apply_agent_intent(AgentIntent::Config(ConfigIntent::SetProviderModel {
-                    provider: self.model.config_provider.provider().map(ToOwned::to_owned),
-                    model_id: Some(result.display_name.clone()),
-                }));
+                self.apply_agent_intent(AgentIntent::RuntimePresentation(
+                    RuntimePresentationIntent::ProviderModel {
+                        provider: self
+                            .model
+                            .runtime_presentation
+                            .provider()
+                            .map(ToOwned::to_owned),
+                        model_id: Some(result.display_name.clone()),
+                    },
+                ));
                 if let Some(ra) = result.reasoning_active {
-                    self.apply_agent_intent(AgentIntent::Config(ConfigIntent::SetThinking(ra)));
+                    self.apply_agent_intent(AgentIntent::RuntimePresentation(
+                        RuntimePresentationIntent::Thinking(ra),
+                    ));
                 }
                 self.append_system_notice(format!("[switched to {}]", result.display_name));
             }
             UiEvent::ThinkingChanged { enabled } => {
                 // #497：reasoning 模式切换走事件流。SystemMessage("[thinking mode: ON/OFF]")
                 // 已由 runtime 发回，TUI 只需更新 thinking 状态。
-                self.apply_agent_intent(AgentIntent::Config(ConfigIntent::SetThinking(enabled)));
+                self.apply_agent_intent(AgentIntent::RuntimePresentation(
+                    RuntimePresentationIntent::Thinking(enabled),
+                ));
             }
             UiEvent::ContextEstimated {
                 estimate,

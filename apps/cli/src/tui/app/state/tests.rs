@@ -115,7 +115,7 @@ mod tests {
             app.model.session.current_session_id.as_deref(),
             Some("sess-1")
         );
-        assert_eq!(app.model.config_provider.model_id(), Some("gpt-test"));
+        assert_eq!(app.model.runtime_presentation.model_id(), Some("gpt-test"));
         let expected_cwd = cwd.display().to_string();
         assert_eq!(
             app.model.workspace_provider.cwd(),
