@@ -243,6 +243,16 @@ impl App {
                 crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::AskUserBatch(show) → spinner_stop");
                 self.spinner_stop();
             }
+            UiEvent::InteractionRequested { request } => {
+                // #1246: Map SDK typed interaction request to TUI model intent.
+                let tui_request = sdk_interaction_to_tui(&request);
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::ShowInteraction(ShowInteraction {
+                        request: tui_request,
+                    }),
+                ));
+                self.spinner_stop();
+            }
             UiEvent::CurrentTurnChanged(turn) => {
                 return UpdateResult::one(Effect::SetCurrentTurn { turn });
             }
@@ -418,6 +428,55 @@ fn format_reflection_history(records: &[sdk::ReflectionHistoryView]) -> String {
         ));
     }
     lines.join("\n")
+}
+
+/// #1246: Convert SDK typed InteractionRequest to TUI model's InteractionRequest.
+fn sdk_interaction_to_tui(
+    request: &sdk::InteractionRequest,
+) -> crate::tui::model::conversation::interaction::InteractionRequest {
+    use crate::tui::model::conversation::interaction::*;
+
+    InteractionRequest {
+        request_id: UiInteractionRequestId::from(request.id.as_str()),
+        run_id: UiRunId::from(request.run_id.as_str()),
+        body: match &request.body {
+            sdk::InteractionRequestBody::UserQuestions(questions) => {
+                InteractionBody::UserQuestions(
+                    questions
+                        .iter()
+                        .map(|q| UiUserQuestion {
+                            prompt: q.prompt.clone(),
+                            options: q.options.clone(),
+                            allow_multi: q.allow_multi,
+                        })
+                        .collect(),
+                )
+            }
+            sdk::InteractionRequestBody::ToolApproval(prompt) => {
+                InteractionBody::ToolApproval(UiApprovalPrompt {
+                    title: prompt.tool_name.clone(),
+                    detail: prompt.args_summary.clone(),
+                    risk: match prompt.risk_level {
+                        sdk::RiskLevel::Low => UiRiskLevel::Low,
+                        sdk::RiskLevel::Medium => UiRiskLevel::Medium,
+                        sdk::RiskLevel::High => UiRiskLevel::High,
+                    },
+                })
+            }
+            sdk::InteractionRequestBody::PlanApproval(prompt) => {
+                InteractionBody::PlanApproval(UiPlanApprovalPrompt {
+                    title: prompt.plan_title.clone(),
+                    steps: prompt.steps.clone(),
+                })
+            }
+            sdk::InteractionRequestBody::HardPause(diag) => {
+                InteractionBody::HardPause(UiStuckDiagnostic {
+                    reason: diag.reason.clone(),
+                    recent_actions: diag.recent_actions.clone(),
+                })
+            }
+        },
+    }
 }
 
 #[cfg(test)]
