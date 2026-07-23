@@ -427,7 +427,22 @@ pub(crate) fn project_stream_event(
             workspace: crate::application::client::workspace_context_to_sdk(workspace),
         },
         crate::application::chat::RuntimeStreamEvent::ConfigReloaded { changed_keys } => {
-            ChatEvent::ConfigReloaded { changed_keys }
+            let scopes = changed_keys
+                .iter()
+                .filter_map(|key| match key.as_str() {
+                    "config:scope:session_restart_required" => {
+                        Some(sdk::ConfigApplicationScopeView::SessionRestartRequired)
+                    }
+                    "config:scope:run" => Some(sdk::ConfigApplicationScopeView::Run),
+                    _ => None,
+                })
+                .collect();
+            ChatEvent::ConfigReloaded {
+                event: sdk::ConfigReloadedEvent {
+                    changed_keys,
+                    scopes,
+                },
+            }
         }
         crate::application::chat::RuntimeStreamEvent::GraphPhaseChanged { node, effort, prev } => {
             ChatEvent::GraphPhaseChanged {

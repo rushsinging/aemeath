@@ -1,5 +1,5 @@
+use config::ConfigReader;
 use hook::HookPort;
-use share::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
 use std::sync::Arc;
 
 use crate::ports::ProviderFactory;
@@ -12,6 +12,8 @@ mod loop_run;
 pub(crate) mod progress;
 mod setup;
 #[cfg(test)]
+pub(crate) mod test_config_reader;
+#[cfg(test)]
 mod tests;
 
 pub struct CliAgentRunner {
@@ -19,20 +21,12 @@ pub struct CliAgentRunner {
     pub factory: Arc<dyn ProviderFactory>,
     /// Shared per-Run registry used by Main and every Sub Run.
     pub active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
-    /// Agent config for role resolution.
-    pub agents_config: Arc<AgentsConfig>,
+    /// ConfigReader is queried once at each Subagent Run creation.
+    pub config_reader: Arc<dyn ConfigReader>,
     /// Hook runner for executing sub-agent hooks.
     pub hook_runner: Arc<dyn HookPort>,
     /// Default reasoning setting for sub-agents (from config / CLI).
     pub reasoning: bool,
-    /// Model entries config for reasoning lookup and ProviderBuildSpec construction.
-    pub models_config: Arc<ModelsConfig>,
-    /// Committed configuration snapshot frozen for sub-run prompt materialization.
-    pub config_snapshot: share::config::domain::snapshot::ConfigSnapshot,
-    /// Language frozen with the configuration snapshot.
-    pub language: String,
-    /// Per-request API timeout (seconds) forwarded to ProviderBuildSpec.
-    pub api_timeout_secs: u64,
     pub max_tool_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub tool_result_materializer:
@@ -49,12 +43,7 @@ pub struct CliAgentRunner {
 }
 
 impl CliAgentRunner {
-    /// Resolve the required role to its configuration.
-    fn resolve_role(&self, role: &str) -> Option<&AgentRoleConfig> {
-        self.agents_config.roles.get(role)
-    }
-
-    fn role_max_tokens_override(role: &AgentRoleConfig) -> Option<u32> {
+    fn role_max_tokens_override(role: &share::config::AgentRoleConfig) -> Option<u32> {
         role.max_tokens.filter(|tokens| *tokens > 0)
     }
 }

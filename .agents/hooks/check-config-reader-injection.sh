@@ -65,6 +65,19 @@ for path in sorted((root / "apps" / "cli" / "src").rglob("*.rs")):
                 f"{path.relative_to(root)}:{lineno}: delivery layer must not hold Config-owned contracts"
             )
 
+step_files = [
+    root / "agent" / "features" / "runtime" / "src" / "application" / "chat" / "looping" / "main_run_port.rs",
+    root / "agent" / "features" / "runtime" / "src" / "application" / "agent" / "runner" / "loop_run.rs",
+]
+step_contracts = re.compile(r"\b(ConfigReader|ConfigQuery|ConfigWriter|refresh_if_sources_changed)\b")
+for path in step_files:
+    production = production_prefix(path.read_text())
+    for lineno, line in enumerate(production.splitlines(), 1):
+        if step_contracts.search(line):
+            violations.append(
+                f"{path.relative_to(root)}:{lineno}: Run Step must only consume its frozen RunConfigSnapshot"
+            )
+
 if violations:
     print(
         json.dumps(

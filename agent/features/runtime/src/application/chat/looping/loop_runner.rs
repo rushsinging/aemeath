@@ -475,6 +475,7 @@ where
                 let _refresh = handle_turn_boundary_config(
                     &mut config_snapshot,
                     config_reader.as_ref(),
+                    wiring.as_ref(),
                     turn_count,
                     &sink,
                     &mut messages,
@@ -502,8 +503,16 @@ where
                 }
                 let cancel = CancellationToken::new();
                 let mut run = Run::new(RunSpec::main(), None);
+                let run_config = crate::application::run_config::RunConfigSnapshot::capture(
+                    bound_main_run.config().clone(),
+                );
+                log::debug!(target: crate::LOG_TARGET,
+                    "[config] starting main run with revision={} allow_all={}",
+                    run_config.revision().get(),
+                    run_config.allow_all(),
+                );
                 let run_memory = bound_main_run.memory_arc();
-                let run_memory_config = bound_main_run.config().memory().clone();
+                let run_memory_config = run_config.config().memory().clone();
                 let run_id = run.id().clone();
                 active_run.activate(run_id.clone(), cancel.clone());
                 let cacheable_system_prompt = system_blocks
@@ -531,7 +540,7 @@ where
                     tool_execution: &tool_execution,
                     tool_context_binding: &tool_context_binding,
                     system_prompt_text: &cacheable_system_prompt,
-                    config_snapshot: bound_main_run.config(),
+                    run_config: &run_config,
                     context: &context,
                     context_request: None,
                     context_window: None,

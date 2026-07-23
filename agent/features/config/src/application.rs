@@ -6,6 +6,7 @@ use crate::adapters::{
 use crate::contract::*;
 use async_trait::async_trait;
 use share::config::domain::merge::{ConfigPatch, PriorityChain};
+use share::config::domain::scope::classify_application_scopes;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use std::path::{Path, PathBuf};
@@ -380,7 +381,8 @@ impl ConfigReader for ConfigAppService {
                 }
             }
         };
-        let active_fingerprint = match config_fingerprint(&self.active.read().unwrap().config) {
+        let active = self.active.read().unwrap();
+        let active_fingerprint = match config_fingerprint(&active.config) {
             Ok(fingerprint) => fingerprint,
             Err(error) => {
                 return ConfigRefreshOutcome::Rejected {
@@ -388,6 +390,8 @@ impl ConfigReader for ConfigAppService {
                 }
             }
         };
+        let scopes = classify_application_scopes(&active.config, &config);
+        drop(active);
         *self.source_fingerprints.write().unwrap() = current_sources;
         if candidate_fingerprint == active_fingerprint {
             return ConfigRefreshOutcome::Unchanged;
@@ -397,7 +401,7 @@ impl ConfigReader for ConfigAppService {
         let snapshot = ConfigSnapshot::new_with_revision(revision, config.clone());
         self.active.write().unwrap().config = config;
         self.tx.send_replace(snapshot.clone());
-        ConfigRefreshOutcome::Reloaded { snapshot }
+        ConfigRefreshOutcome::Reloaded { snapshot, scopes }
     }
 }
 
@@ -1199,6 +1203,42 @@ mod tests {
         ));
         assert_eq!(service.committed_snapshot().model_name(), "env-model");
         assert_eq!(service.committed_snapshot().revision(), before.revision());
+    }
+
+    #[tokio::test]
+    async fn refresh_reports_run_scope_for_allow_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.json");
+        std::fs::write(&global, r#"{"permissions":{"mode":"ask"}}"#).unwrap();
+        let service = ConfigAppService::with_global_path(None, global.clone());
+        service.load().await.unwrap();
+
+        std::fs::write(&global, r#"{"permissions":{"mode":"allow_all"}}"#).unwrap();
+        let outcome = service.refresh_if_sources_changed().await;
+
+        assert!(matches!(
+            outcome,
+            ConfigRefreshOutcome::Reloaded { scopes, .. }
+                if scopes == vec![share::config::domain::scope::ConfigApplicationScope::Run]
+        ));
+    }
+
+    #[tokio::test]
+    async fn refresh_reports_session_restart_scope_for_tui_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.json");
+        std::fs::write(&global, r#"{"ui":{"tui":true}}"#).unwrap();
+        let service = ConfigAppService::with_global_path(None, global.clone());
+        service.load().await.unwrap();
+
+        std::fs::write(&global, r#"{"ui":{"tui":false}}"#).unwrap();
+        let outcome = service.refresh_if_sources_changed().await;
+
+        assert!(matches!(
+            outcome,
+            ConfigRefreshOutcome::Reloaded { scopes, .. }
+                if scopes == vec![share::config::domain::scope::ConfigApplicationScope::SessionRestartRequired]
+        ));
     }
 
     #[tokio::test]

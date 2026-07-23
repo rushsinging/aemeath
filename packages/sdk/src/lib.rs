@@ -51,8 +51,8 @@ pub use commands::{
     ParsedArguments, PromptCommand, SlashInput, SnapshotQueryCommand, SnapshotQueryTarget,
 };
 pub use config_view::{
-    ConfigChangeCause, ConfigChangedEvent, ConfigField, ConfigUpdate, ConfigUpdateResult,
-    ConfigView, PermissionModeView,
+    ConfigApplicationScopeView, ConfigChangeCause, ConfigChangedEvent, ConfigField,
+    ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, PermissionModeView,
 };
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;

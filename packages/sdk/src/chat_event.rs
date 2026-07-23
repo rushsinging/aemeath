@@ -334,7 +334,7 @@ pub enum ChatEvent {
         event: crate::ConfigChangedEvent,
     },
     ConfigReloaded {
-        changed_keys: Vec<String>,
+        event: crate::ConfigReloadedEvent,
     },
     /// loop 完成 reset 清理后发出，TUI 据此同步清空镜像。
     /// Reasoning Graph 阶段变化（Phase 2）。
