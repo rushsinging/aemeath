@@ -16,6 +16,11 @@ run_hook() {
     printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$file_path" | "$HOOK" 2>&1
 }
 
+run_aemeath_hook() {
+    local file_path="$1"
+    printf '{"PreToolUse":{"tool_name":"Write","tool_input":{"file_path":"%s"}}}' "$file_path" | "$HOOK" 2>&1
+}
+
 assert_blocks_without_creating_file() {
     local repo="$1"
     local target="$2"
@@ -48,6 +53,15 @@ main() {
 
     target="$repo/existing/new-file.txt"
     assert_blocks_without_creating_file "$repo" "$target"
+
+    target="$repo/existing/aemeath-new-file.txt"
+    set +e
+    output="$(cd "$repo" && run_aemeath_hook "$target")"
+    status=$?
+    set -e
+    [ "$status" -eq 2 ] || fail "Aemeath envelope should block with exit 2, got $status; output=$output"
+    [ ! -e "$target" ] || fail "Aemeath envelope must not create target file before blocking: $target"
+    printf '%s' "$output" | grep -q '\[Hook blocked\]' || fail "Aemeath envelope blocked output should contain hook blocked marker: $output"
 
     target="$repo/missing-parent/new-file.txt"
     assert_blocks_without_creating_file "$repo" "$target"
