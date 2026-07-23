@@ -18,6 +18,7 @@ use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::*;
+use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::output::tool_display::format_subagent_tool_header;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
@@ -251,6 +252,41 @@ impl App {
     }
 
     fn update_runtime_event(&mut self, event: TuiRuntimeEvent) -> UpdateResult {
+        // UserMessagesAdopted 需要在 mapper/reducer 之外执行清占位 + 用户回显，
+        // 因为这些副作用依赖 App 级方法且不产生 Intent。
+        match &event {
+            TuiRuntimeEvent::UserMessagesAdopted { items, .. } => {
+                for item in items {
+                    if let Some(id) = item.input_id.as_ref() {
+                        self.clear_queued_submission_echo_by_id(id);
+                    }
+                    self.append_user_echo(item.text_content());
+                }
+            }
+            TuiRuntimeEvent::TurnStarted { .. } => {
+                self.spinner_phase(SpinnerPhase::Thinking);
+                self.mark_output_dirty();
+            }
+            TuiRuntimeEvent::ApiError { error, .. } => {
+                self.spinner_stop();
+                self.append_system_notice(error);
+                self.mark_output_dirty();
+            }
+            TuiRuntimeEvent::CompactFinished { .. } => {
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
+                ));
+            }
+            TuiRuntimeEvent::CompactRollback { .. } => {
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
+                ));
+            }
+            TuiRuntimeEvent::SessionReset => {
+                return UpdateResult::one(Effect::ResetRuntimeState);
+            }
+            _ => {}
+        }
         let mapping = map_runtime_event(&event);
         let model_result = reduce_agent_event(&mut self.model, mapping);
         crate::tui::update::dirty::merge_dirty(&mut self.view_state.dirty, model_result.dirty);

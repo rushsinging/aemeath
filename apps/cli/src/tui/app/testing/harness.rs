@@ -51,6 +51,13 @@ impl TuiScenarioHarness {
         self.messages.push_back(TuiMsg::AgentEvent(event));
         self.drain(32);
     }
+    pub fn runtime_event(
+        &mut self,
+        event: crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent,
+    ) {
+        self.messages.push_back(TuiMsg::Runtime(event));
+        self.drain(32);
+    }
     pub fn resize(&mut self, width: u16, height: u16) {
         self.terminal
             .resize(ratatui::layout::Rect::new(0, 0, width, height))

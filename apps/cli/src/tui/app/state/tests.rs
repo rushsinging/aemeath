@@ -2,6 +2,7 @@
 #[cfg(test)]
 mod tests {
     use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
+    use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
     use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
     use crate::tui::app::{App, UiEvent};
     use crate::tui::effect::session::processing::SpawnContextRefs;
@@ -190,7 +191,7 @@ mod tests {
         let input_id = "state-input-a".to_string();
         app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
-            TuiMsg::Ui(UiEvent::UserMessagesAdopted {
+            TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
                 items: vec![TuiChatMessage {
                     role: "user".to_string(),
                     content: vec![TuiContentBlock::text("search bug 76")],
@@ -228,7 +229,7 @@ mod tests {
             })
             .count();
         let _ = app.update(
-            TuiMsg::Ui(UiEvent::TurnStarted {
+            TuiMsg::Runtime(TuiRuntimeEvent::TurnStarted {
                 messages: vec![TuiChatMessage::user_text("search bug 76")],
             }),
             &ui_tx,
@@ -276,7 +277,7 @@ mod tests {
         let input_id = "state-input-a".to_string();
         app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
-            TuiMsg::Ui(UiEvent::UserMessagesAdopted {
+            TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
                 items: vec![TuiChatMessage {
                     role: "user".to_string(),
                     content: vec![TuiContentBlock::text("search bug 76")],

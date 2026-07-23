@@ -1,7 +1,9 @@
 use super::*;
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
+use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::update::msg::TuiMsg;
 use std::path::PathBuf;
 
 fn make_spawn_refs() -> SpawnContextRefs {
@@ -30,8 +32,8 @@ fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
 
-    app.update_ui(
-        UiEvent::PostToolExecutionSync { messages },
+    app.update(
+        TuiMsg::Runtime(TuiRuntimeEvent::PostToolExecutionSync { messages }),
         &ui_tx,
         &spawn_refs,
     );
@@ -62,8 +64,8 @@ fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
 
-    app.update_ui(
-        UiEvent::PostToolExecutionSync { messages },
+    app.update(
+        TuiMsg::Runtime(TuiRuntimeEvent::PostToolExecutionSync { messages }),
         &ui_tx,
         &spawn_refs,
     );
@@ -93,10 +95,10 @@ fn test_post_tool_sync_no_display() {
 
     // 构造包含该 user message 的 msgs
     let msgs = vec![TuiChatMessage::user_text("hello")];
-    app.update_ui(
-        UiEvent::PostToolExecutionSync {
+    app.update(
+        TuiMsg::Runtime(TuiRuntimeEvent::PostToolExecutionSync {
             messages: msgs.clone(),
-        },
+        }),
         &ui_tx,
         &spawn_refs,
     );
@@ -168,11 +170,11 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
             stop_hook: None,
         },
     ];
-    app.update_ui(
-        UiEvent::UserMessagesAdopted {
+    app.update(
+        TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
             items,
             queued: vec![],
-        },
+        }),
         &ui_tx,
         &spawn_refs,
     );
@@ -259,11 +261,11 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
         stop_hook: None,
     }];
 
-    app.update_ui(
-        UiEvent::UserMessagesAdopted {
+    app.update(
+        TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
             items,
             queued: vec![],
-        },
+        }),
         &ui_tx,
         &spawn_refs,
     );
@@ -326,8 +328,8 @@ fn test_messages_sync_clears_compact_runtime_state() {
         "precondition: compact_progress 已设置"
     );
 
-    app.update_ui(
-        UiEvent::CompactFinished { messages: vec![] },
+    app.update(
+        TuiMsg::Runtime(TuiRuntimeEvent::CompactFinished { messages: vec![] }),
         &ui_tx,
         &spawn_refs,
     );
@@ -365,11 +367,11 @@ fn test_api_error_appends_notice_and_defers_processing_to_done() {
     assert!(app.chat.is_processing);
 
     let error = "stream error: stream interrupted after partial output".to_string();
-    app.update_ui(
-        UiEvent::ApiError {
+    app.update(
+        TuiMsg::Runtime(TuiRuntimeEvent::ApiError {
             messages: vec![],
             error: error.clone(),
-        },
+        }),
         &ui_tx,
         &spawn_refs,
     );
@@ -471,11 +473,11 @@ fn user_messages_adopted_handler_logs_text_length_not_preview() {
         source: TuiMessageSource::User,
         stop_hook: None,
     }];
-    app.update_ui(
-        UiEvent::UserMessagesAdopted {
+    app.update(
+        TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
             items,
             queued: vec![],
-        },
+        }),
         &ui_tx,
         &spawn_refs,
     );
