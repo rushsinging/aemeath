@@ -13,6 +13,7 @@ fn make_slot(id: &str, question: &str, options: &[&str]) -> AskUserSlot {
     }
     AskUserSlot {
         id: id.to_string(),
+        question_seq: 0,
         question: question.to_string(),
         options: all,
         llm_option_count: llm_count,

@@ -217,12 +217,10 @@ impl App {
     /// 提交整个 batch：收集所有答案并回传。
     fn submit_ask_user_batch(&mut self) {
         let state = self.input.ask_user_state.take().unwrap();
-        let answers: Vec<String> = state
+        let answers: Vec<sdk::AskUserAnswer> = state
             .items
             .iter()
-            .enumerate()
-            .map(|(i, item)| {
-                // 从 timeline 读取答案（timeline 是状态真相源）
+            .filter_map(|item| {
                 self.model
                     .conversation
                     .timeline
@@ -230,13 +228,23 @@ impl App {
                     .iter()
                     .find_map(|tl_item| {
                         if let OutputTimelineItem::AskUserBatch { slots, .. } = tl_item {
-                            slots.get(i).and_then(|slot| slot.answer.clone())
+                            slots
+                                .iter()
+                                .find(|slot| {
+                                    slot.id == item.id && slot.question_seq == item.question_seq
+                                })
+                                .and_then(|slot| {
+                                    slot.answer.clone().or_else(|| item.default.clone())
+                                })
+                                .map(|answer| sdk::AskUserAnswer {
+                                    tool_call_id: item.id.clone(),
+                                    question_seq: item.question_seq,
+                                    answer,
+                                })
                         } else {
                             None
                         }
                     })
-                    .or_else(|| item.default.clone())
-                    .unwrap_or_default()
             })
             .collect();
         self.apply_agent_intent(AgentIntent::Conversation(

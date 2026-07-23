@@ -35,13 +35,13 @@ pub mod interaction;
 pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode};
 pub use change_set::ChangeSet;
 pub use chat::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserQuestionItem,
-    AskUserReply, ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage,
-    ChatRequest, ChatResult, ChatStream, HookEventStatus, HookEventView, HookExecutionResultView,
-    HookMessageKindView, HookMessageView, OptionItem, ReflectionApplyStatusView,
-    ReflectionErrorCategoryView, ReflectionHistoryView, ReflectionStatusView,
-    ReflectionTokenUsageView, ReflectionTriggerView, ToolCallStatusView, ToolResultImage,
-    UserInput, WorkspaceContextView, WorkspaceStackEntryView,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserAnswer,
+    AskUserQuestionItem, AskUserReply, ChatEvent, ChatEventContext, ChatInput, ChatInputEvent,
+    ChatInputImage, ChatRequest, ChatResult, ChatStream, HookEventStatus, HookEventView,
+    HookExecutionResultView, HookMessageKindView, HookMessageView, OptionItem,
+    ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
+    ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ToolCallStatusView,
+    ToolResultImage, UserInput, WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
 pub use commands::{

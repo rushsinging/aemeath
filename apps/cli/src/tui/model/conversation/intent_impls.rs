@@ -117,6 +117,7 @@ impl ConversationUpdate for ResumeConversation {
                                 {
                                     restored_ask_slots.push(super::block::AskUserSlot {
                                         id: id.clone(),
+                                        question_seq: 0,
                                         question,
                                         options: Vec::new(),
                                         llm_option_count: 0,

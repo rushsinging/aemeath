@@ -11,6 +11,7 @@ fn ask_user_selects_option_and_submits_reply() {
     harness.ui(UiEvent::AskUserBatch {
         items: vec![sdk::AskUserQuestionItem {
             id: "ask-1".into(),
+            question_seq: 0,
             question: "Pick A or B".into(),
             options: vec![
                 sdk::OptionItem::title_only("A"),
@@ -31,7 +32,11 @@ fn ask_user_selects_option_and_submits_reply() {
     harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(
         reply_rx.try_recv().expect("ask reply"),
-        sdk::AskUserReply::Answers(vec!["B".to_string()])
+        sdk::AskUserReply::Answers(vec![sdk::AskUserAnswer {
+            tool_call_id: "ask-1".to_string(),
+            question_seq: 0,
+            answer: "B".to_string(),
+        }])
     );
     harness.render();
     insta::assert_snapshot!("ask_user__confirmed__100x30", harness.screen());
@@ -72,6 +77,7 @@ fn ask_user_free_text_stays_in_ask_block() {
     harness.ui(UiEvent::AskUserBatch {
         items: vec![sdk::AskUserQuestionItem {
             id: "ask-free-text".into(),
+            question_seq: 0,
             question: "Tell me more".into(),
             options: Vec::new(),
             multi_select: false,
@@ -98,7 +104,11 @@ fn ask_user_free_text_stays_in_ask_block() {
     harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(
         reply_rx.try_recv().expect("ask reply"),
-        sdk::AskUserReply::Answers(vec!["222".to_string()])
+        sdk::AskUserReply::Answers(vec![sdk::AskUserAnswer {
+            tool_call_id: "ask-free-text".to_string(),
+            question_seq: 0,
+            answer: "222".to_string(),
+        }])
     );
     harness.assert_idle();
 }

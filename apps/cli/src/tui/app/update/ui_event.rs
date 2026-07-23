@@ -227,6 +227,7 @@ impl App {
                         }
                         crate::tui::model::conversation::block::AskUserSlot {
                             id: item.id.clone(),
+                            question_seq: item.question_seq,
                             question: item.question.clone(),
                             options: all_options,
                             llm_option_count: llm_count,
