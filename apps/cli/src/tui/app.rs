@@ -29,7 +29,7 @@ use std::time::Instant;
 
 #[cfg(test)]
 use event::StatusContextUpdate;
-pub use event::{UiEvent, UiTurnContext};
+pub use event::UiEvent;
 
 /// `refresh_output_document_from_model` 的 assemble 产物 memo。
 pub(crate) struct OutputViewCache {

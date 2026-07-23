@@ -576,7 +576,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             ConversationIntent::UpdateTaskLines(UpdateTaskLines(lines.clone())),
         ),
         TuiRuntimeEvent::SessionReset => AgentEventMapping::default(),
-        TuiRuntimeEvent::UserMessagesWithdrawn { texts } => conversation(
+        TuiRuntimeEvent::UserMessagesWithdrawn { texts: _ } => conversation(
             ConversationIntent::ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
         ),
         TuiRuntimeEvent::ModelInvocationRetrying {

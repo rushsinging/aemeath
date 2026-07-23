@@ -1,5 +1,4 @@
 use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiTurnContext};
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
 
 use super::super::testing::TuiScenarioHarness;
 

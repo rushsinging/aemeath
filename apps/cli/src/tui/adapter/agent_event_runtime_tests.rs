@@ -1,4 +1,4 @@
-use super::{map_runtime_event, AgentEventMapping};
+use super::map_runtime_event;
 use crate::tui::adapter::tui_runtime_event::{
     TuiInteractionBody, TuiInteractionRequest, TuiRunEvent, TuiRunStepEvent, TuiRuntimeEvent,
     TuiToolApprovalPrompt, TuiWorkspaceSnapshot,

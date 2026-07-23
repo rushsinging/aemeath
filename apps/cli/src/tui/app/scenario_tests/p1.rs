@@ -1,7 +1,6 @@
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::effect::Effect;
-use crate::tui::update::msg::TuiMsg;
 
 use super::super::testing::{ExpectedEffect, TuiScenarioHarness};
 

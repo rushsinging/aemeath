@@ -1,8 +1,6 @@
 use super::*;
 use crate::tui::adapter::agent_event::sanitize::TOOL_STREAM_PREVIEW_LIMIT;
-use crate::tui::adapter::runtime_view::{
-    TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiStopHookFeedback,
-};
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiMessageSource, TuiStopHookFeedback};
 use crate::tui::adapter::tui_runtime_event::{
     TuiHookEvent, TuiHookMessage, TuiHookMessageKind, TuiHookStatus, TuiRuntimeEvent,
 };
