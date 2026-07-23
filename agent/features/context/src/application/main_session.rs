@@ -345,6 +345,8 @@ pub struct MainSessionWiring {
     // ── Committed state holders ──
     committed_session: Arc<StdRwLock<Arc<CanonicalSession>>>,
     committed_memory: Arc<StdRwLock<Arc<dyn MemoryPort>>>,
+    pending_session_restart_revision:
+        Arc<StdRwLock<Option<share::config::domain::snapshot::ConfigRevision>>>,
     context: Arc<dyn ContextPort>,
     mutation_gate: Arc<tokio::sync::Mutex<()>>,
 }
@@ -382,6 +384,7 @@ impl MainSessionWiring {
         let committed_session = Arc::new(StdRwLock::new(Arc::new(builder.initial_session)));
         let mutation_gate = Arc::new(tokio::sync::Mutex::new(()));
         let committed_memory = Arc::new(StdRwLock::new(builder.initial_memory));
+        let pending_session_restart_revision = Arc::new(StdRwLock::new(None));
         let context = builder.context_factory.build(
             Arc::clone(&committed_session),
             Arc::clone(&builder.task_persist),
@@ -400,6 +403,7 @@ impl MainSessionWiring {
             session_management: builder.session_management,
             committed_session,
             committed_memory,
+            pending_session_restart_revision,
             context,
             mutation_gate,
         }
@@ -445,6 +449,19 @@ impl MainSessionWiring {
     /// an `Arc` clone.
     pub fn committed_config(&self) -> ConfigSnapshot {
         self.config_reader.committed_snapshot()
+    }
+
+    pub fn mark_session_restart_required(
+        &self,
+        revision: share::config::domain::snapshot::ConfigRevision,
+    ) {
+        *self.pending_session_restart_revision.write().unwrap() = Some(revision);
+    }
+
+    pub fn pending_session_restart_revision(
+        &self,
+    ) -> Option<share::config::domain::snapshot::ConfigRevision> {
+        *self.pending_session_restart_revision.read().unwrap()
     }
 
     /// Runs an async closure under a **shared** session-switch permit.
@@ -610,6 +627,7 @@ impl MainSessionWiring {
         self.config_participant
             .commit_project(prepared_config)
             .await;
+        *self.pending_session_restart_revision.write().unwrap() = None;
 
         // _exclusive is dropped here, releasing the exclusive permit.
         Ok(())

@@ -180,9 +180,21 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             "[config changed] fields: {:?}",
             event.changed_fields
         )),
-        sdk::ChatEvent::ConfigReloaded { changed_keys } => {
-            let keys_str = changed_keys.join(", ");
-            UiEvent::SystemMessage(format!("[config reloaded] changed: {}", keys_str))
+        sdk::ChatEvent::ConfigReloaded { event } => {
+            let keys_str = event.changed_keys.join(", ");
+            let scope_message = if event
+                .scopes
+                .contains(&sdk::ConfigApplicationScopeView::SessionRestartRequired)
+            {
+                "; some changes apply after restarting the session"
+            } else if event.scopes.contains(&sdk::ConfigApplicationScopeView::Run) {
+                "; run-scoped changes apply to the next run"
+            } else {
+                ""
+            };
+            UiEvent::SystemMessage(format!(
+                "[config reloaded] changed: {keys_str}{scope_message}"
+            ))
         }
         sdk::ChatEvent::SessionReset => UiEvent::SessionReset,
         sdk::ChatEvent::UserMessagesWithdrawn { texts } => UiEvent::UserMessagesWithdrawn(texts),

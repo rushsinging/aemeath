@@ -8,11 +8,11 @@ use serde_json::{json, Map, Value};
 
 use crate::{
     CancelRunOutcome, CancelRunStepOutcome, ChatEventContext, ChatMessage, ConfigChangedEvent,
-    ConfigUpdate, ConfigUpdateResult, ConfigView, ControlDeadline, HookMessageView,
-    InteractionCancelReason, InteractionCommandOutcome, InteractionReply, InteractionRequest,
-    InteractionRequestBody, ModelSummary, ProjectContext, ReflectionHistoryView,
-    RunTerminationReason, SessionResumeFailureKind, SessionSnapshot, SessionSummary,
-    TerminateRunOutcome, WorkspaceContextView,
+    ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, ControlDeadline,
+    HookMessageView, InteractionCancelReason, InteractionCommandOutcome, InteractionReply,
+    InteractionRequest, InteractionRequestBody, ModelSummary, ProjectContext,
+    ReflectionHistoryView, RunTerminationReason, SessionResumeFailureKind, SessionSnapshot,
+    SessionSummary, TerminateRunOutcome, WorkspaceContextView,
 };
 
 /// 生成供未来 Server adapter 组装 OpenAPI components 的 JSON Schema 文档。
@@ -34,6 +34,7 @@ pub fn components_document() -> Value {
     register::<ConfigUpdate>(&mut definitions);
     register::<ConfigUpdateResult>(&mut definitions);
     register::<ConfigChangedEvent>(&mut definitions);
+    register::<ConfigReloadedEvent>(&mut definitions);
     register::<ProjectContext>(&mut definitions);
     register::<ModelSummary>(&mut definitions);
     register::<ReflectionHistoryView>(&mut definitions);

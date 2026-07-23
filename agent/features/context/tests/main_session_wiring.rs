@@ -25,6 +25,7 @@ use memory::{
 };
 use project::wire_production_workspace;
 use sdk::RunId;
+use share::config::domain::snapshot::ConfigRevision;
 use share::message::Message;
 use share::session_types::PersistedWorkspaceContext;
 use task::{
@@ -870,6 +871,27 @@ async fn memory_open_failure_keeps_all_old_state() {
         1,
         "task must survive"
     );
+}
+
+/// Session restart-required state is cleared after a successful session resume.
+#[tokio::test]
+async fn successful_resume_clears_pending_session_restart_revision() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    h.wiring
+        .mark_session_restart_required(ConfigRevision::new(42));
+    assert_eq!(
+        h.wiring.pending_session_restart_revision(),
+        Some(ConfigRevision::new(42))
+    );
+
+    let workspace = h.workspace_persist.snapshot();
+    h.wiring
+        .resume_prepared(session_with_workspace(&workspace, SnapshotState::Missing))
+        .await
+        .expect("resume should succeed");
+
+    assert_eq!(h.wiring.pending_session_restart_revision(), None);
 }
 
 // ─── Resume publishes only the canonical committed session ───────────

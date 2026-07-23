@@ -5,6 +5,13 @@
 **次触发**：改暂停 / 恢复 / 重试逻辑；改成本追踪；新增 slash 命令。
 **配套**：Tool Published Language、Catalog/Execution 端口与 MCP 主体在 `tools.md`；provider 调用在 `provider.md`。
 
+## 配置应用边界（#1345）
+
+- Runtime **MUST** 在接纳真实用户输入、创建 Main Run 前调用 `ConfigReader::refresh_if_sources_changed()`；同一次 Run 内 **NEVER** 再 refresh。
+- Main Run 与每个新 Subagent Run **MUST** 捕获一个 `RunConfigSnapshot`；provider binding、`allow_all`、hooks、language、timeout 与 context size 随该 Run 固定。
+- Run Step 只从所属 `RunConfigSnapshot` 构造 `ContextRequest.config_snapshot`，**NEVER** 读取 `ConfigReader` / `ConfigQuery` 或配置文件。
+- `SessionRestartRequired` scope 仅标记 pending session revision；当前 TUI/logger/MCP/storage 基础设施保持不变，成功 session resume 后清除 pending 标记。
+
 ## 会话历史唯一真相（#872）
 
 - **MUST** 会话历史唯一可变真相属于 Context Management 的 `CanonicalSession` backing。

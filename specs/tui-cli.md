@@ -5,6 +5,14 @@
 **次触发**：改输入 / 渲染 / 快捷键 / 选区复制，或新增工具显示注册。
 **配套**：所有 Rust 通用规范见 `rust-coding.md`；Agent 循环与 tool 执行编排在 `runtime.md`。
 
+## 配置作用域展示（#1345）
+
+TUI **NEVER** 读取 `ConfigReader`、watch 或配置文件。只消费 SDK `ConfigReloadedEvent`：
+
+- 包含 `run` scope 时显示“下次 Run 生效”；
+- 包含 `session_restart_required` scope 时显示“重启 Session 后生效”；
+- 展示逻辑不得重建 TUI、logger、MCP 或存储基础设施。
+
 ## TEA 副作用纪律
 
 - **NEVER** 在 `update()` 中直接调用 `tokio::spawn`、hook notification、clipboard/image 等副作用——所有副作用通过 `Cmd` 描述并由 runtime 执行。

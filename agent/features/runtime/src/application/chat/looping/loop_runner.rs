@@ -454,6 +454,7 @@ where
                 let _refresh = handle_turn_boundary_config(
                     &mut config_snapshot,
                     config_reader.as_ref(),
+                    wiring.as_ref(),
                     turn_count,
                     &sink,
                     &mut messages,

@@ -18,6 +18,7 @@ use share::message::Message;
 pub(crate) async fn handle_turn_boundary_config<S>(
     config_snapshot: &mut SourceSnapshotRegistry,
     config_reader: &dyn ConfigReader,
+    session_wiring: &context::MainSessionWiring,
     turn_count: usize,
     sink: &S,
     messages: &mut Vec<Message>,
@@ -42,6 +43,8 @@ where
             if scopes.contains(
                 &share::config::domain::scope::ConfigApplicationScope::SessionRestartRequired,
             ) {
+                let revision = config_reader.committed_snapshot().revision();
+                session_wiring.mark_session_restart_required(revision);
                 let message = match language {
                     "zh" => "[config] 部分配置将在重启 Session 后生效。当前 Session 继续使用既有基础设施。",
                     _ => "[config] Some configuration changes take effect after restarting the session. The current session keeps its existing infrastructure.",
