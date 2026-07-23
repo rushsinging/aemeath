@@ -1,19 +1,21 @@
 use crate::application::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::chat::looping::agent_calls::execute_agent_calls;
+#[allow(unused_imports)]
 use crate::application::chat::looping::ask_user::ask_user;
 use crate::application::chat::looping::hook_ui::dispatch_hook;
 use crate::application::chat::looping::non_agent::execute_non_agent;
 use crate::application::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
+use crate::application::interaction::InteractionBridge;
 use crate::application::tool_coordination::{prepare_tool_round, restore_tool_call_order};
 use hook::{HookInvocation, HookPort, PermissionInput, PostToolUseFailureInput, PostToolUseInput};
 
 use sdk::ids::ToolCallId;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tools::ToolOutcome;
 use tools::{ToolCatalogPort, ToolExecutionPort};
+use tools::{ToolOutcome, ToolSuspension};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
@@ -31,6 +33,7 @@ pub(crate) async fn execute_tool_round<S>(
     language: &str,
     workspace_root: &std::path::Path,
     guarded_calls: &[(ToolCall, crate::application::loop_engine::ToolGuardDecision)],
+    interaction_bridge: &Arc<InteractionBridge>,
 ) -> (Vec<ToolExecution>, Vec<ToolCallId>)
 where
     S: ChatEventSink,
@@ -110,13 +113,15 @@ where
             )),
         }
     }
-    let ask_user_results = ask_user(
+    let ask_user_results = resolve_ask_user_via_bridge(
         context,
         sink,
         hook_port,
         &ask_user_suspensions,
         cancel,
         workspace_root,
+        run_id,
+        interaction_bridge,
     )
     .await;
     let non_agent_results = execute_non_agent(
@@ -159,6 +164,142 @@ where
         .chain(denied_results)
         .collect();
     (restore_tool_call_order(tool_calls, results), fuse_bypassed)
+}
+
+/// #1246: Resolve AskUserQuestion suspensions via InteractionBridge.
+///
+/// Each suspension is registered and resolved one at a time (in original
+/// ToolCall order), ensuring Run has at most one PendingInteraction.
+/// Reply maps to ToolSuccess; cancel maps to ToolCancelled.
+async fn resolve_ask_user_via_bridge<S>(
+    context: &RuntimeTurnContext,
+    sink: &S,
+    hook_port: &Arc<dyn HookPort>,
+    suspended_calls: &[(&ToolCall, ToolSuspension, tools::AuthorizationContext)],
+    cancel: &CancellationToken,
+    workspace_root: &std::path::Path,
+    run_id: &sdk::RunId,
+    interaction_bridge: &Arc<InteractionBridge>,
+) -> Vec<ToolExecution>
+where
+    S: ChatEventSink,
+{
+    if suspended_calls.is_empty() {
+        return Vec::new();
+    }
+
+    // Permission request hooks (same as legacy ask_user).
+    for (call, _, authorization) in suspended_calls {
+        if !authorization.enforce_permission_hooks {
+            continue;
+        }
+        let _ = dispatch_hook(
+            hook_port,
+            sink,
+            HookInvocation::PermissionRequest(PermissionInput {
+                tool_name: call.name.clone(),
+                permission_rule: "manual".to_string(),
+            }),
+            workspace_root,
+            cancel,
+        )
+        .await;
+    }
+
+    let mut results = Vec::new();
+    for (call, suspension, _) in suspended_calls {
+        let questions = match suspension {
+            ToolSuspension::UserInteraction(spec) => spec
+                .questions
+                .iter()
+                .map(|q| sdk::UserQuestion {
+                    prompt: q.prompt.clone(),
+                    options: q.options.iter().map(|o| o.title.clone()).collect(),
+                    allow_multi: q.allow_multi,
+                })
+                .collect::<Vec<_>>(),
+        };
+
+        let request = sdk::InteractionRequest {
+            id: sdk::InteractionRequestId::new_v7(),
+            run_id: run_id.clone(),
+            body: sdk::InteractionRequestBody::UserQuestions(questions),
+        };
+
+        let receiver = match interaction_bridge.register(request.clone()) {
+            Ok(rx) => rx,
+            Err(outcome) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "interaction register failed: {outcome:?}"
+                );
+                results.push(ToolExecution::new(
+                    call,
+                    ToolOutcome::error("Interaction already completed"),
+                ));
+                continue;
+            }
+        };
+
+        sink.send_event(RuntimeStreamEvent::InteractionRequested { request })
+            .await;
+
+        let completion = tokio::select! {
+            result = receiver => match result {
+                Ok(completion) => completion,
+                Err(_) => {
+                    results.push(ToolExecution::new(
+                        call,
+                        ToolOutcome::error("Interaction waiter dropped"),
+                    ));
+                    continue;
+                }
+            },
+            () = cancel.cancelled() => {
+                results.push(ToolExecution::new(
+                    call,
+                    ToolOutcome::error("Cancelled by user"),
+                ));
+                continue;
+            }
+        };
+
+        match completion {
+            crate::application::interaction::InteractionCompletion::Replied(reply) => match reply {
+                sdk::InteractionReply::UserQuestions(answers) => {
+                    let answer_text = answers
+                        .into_iter()
+                        .map(|a| a.0)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let outcome = ToolOutcome::new(
+                        answer_text.clone(),
+                        serde_json::json!({"answer": answer_text}),
+                        Vec::new(),
+                    );
+                    let execution = ToolExecution::new(call, outcome);
+                    crate::application::chat::looping::tools::send_tool_result(
+                        sink, context, &execution,
+                    )
+                    .await;
+                    results.push(execution);
+                }
+                _ => {
+                    results.push(ToolExecution::new(
+                        call,
+                        ToolOutcome::error("Unexpected reply type"),
+                    ));
+                }
+            },
+            crate::application::interaction::InteractionCompletion::Cancelled(_) => {
+                results.push(ToolExecution::new(
+                    call,
+                    ToolOutcome::error("Cancelled by user"),
+                ));
+            }
+        }
+    }
+    results
 }
 
 async fn publish_guard_blocked<S>(
@@ -533,6 +674,7 @@ mod tests {
                     reason: "loop".to_string(),
                 },
             )],
+            &std::sync::Arc::new(crate::application::interaction::InteractionBridge::new()),
         )
         .await;
 
@@ -579,6 +721,7 @@ mod tests {
             "en",
             &workspace_root,
             &guarded_calls,
+            &std::sync::Arc::new(crate::application::interaction::InteractionBridge::new()),
         )
         .await;
 
