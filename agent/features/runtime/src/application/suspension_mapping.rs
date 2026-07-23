@@ -11,8 +11,10 @@ pub fn user_interaction_items(
         tools::ToolSuspension::UserInteraction(spec) => spec
             .questions
             .iter()
-            .map(|question| AskUserQuestionItem {
+            .enumerate()
+            .map(|(question_seq, question)| AskUserQuestionItem {
                 id: tool_call_id.to_string(),
+                question_seq,
                 question: question.prompt.clone(),
                 options: question
                     .options

@@ -1,5 +1,6 @@
 ---
 source: apps/cli/src/tui/app/scenario_tests/interaction.rs
+assertion_line: 37
 expression: harness.screen()
 ---
 
@@ -11,8 +12,8 @@ expression: harness.screen()
 
   ━━ 已 回 答  ━━
 
-      Q1. Pick A or B
-        ❯ B
+  Q1. Pick A or B
+    ❯ B
 
  · Brewing...  (Generating...  ⏱ 0s)
 

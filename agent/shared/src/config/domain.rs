@@ -13,6 +13,7 @@ pub mod memory;
 pub mod merge;
 pub mod models;
 pub mod permissions;
+pub mod scope;
 pub mod skills;
 pub mod snapshot;
 pub mod storage;

@@ -47,15 +47,18 @@ pub struct UpdateGateway {
 impl UpdateGateway {
     /// 创建 Gateway。
     pub fn new() -> Self {
-        let ua = format!("aemeath/{}", share::version());
+        Self::with_user_agent(share::config::Config::default().api.user_agent)
+    }
+
+    pub fn with_user_agent(user_agent: String) -> Self {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
-            .user_agent(&ua)
+            .user_agent(&user_agent)
             .build()
             .unwrap_or_default();
         let download = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(DOWNLOAD_TIMEOUT_SECS))
-            .user_agent(ua)
+            .user_agent(user_agent)
             .build()
             .unwrap_or_default();
         Self { http, download }

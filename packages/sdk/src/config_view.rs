@@ -52,6 +52,19 @@ pub struct ConfigUpdateResult {
     pub view: ConfigView,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigApplicationScopeView {
+    SessionRestartRequired,
+    Run,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ConfigReloadedEvent {
+    pub changed_keys: Vec<String>,
+    pub scopes: Vec<ConfigApplicationScopeView>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConfigChangedEvent {
     pub cause: ConfigChangeCause,

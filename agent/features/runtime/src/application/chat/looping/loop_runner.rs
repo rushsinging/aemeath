@@ -195,13 +195,16 @@ where
                         }
                     } else {
                         let port = wiring.session_management();
+                        let project = wiring.project_identity();
                         let args = args.clone();
+                        let deleted_session = args.trim_start().starts_with("delete ");
                         let active_session_id = session_id.clone();
                         let result = wiring
                             .with_shared(async move {
                                 super::idle_commands::execute_session(
                                     &args,
                                     &active_session_id,
+                                    &project,
                                     port.as_ref(),
                                 )
                                 .await
@@ -216,6 +219,23 @@ where
                                 is_error,
                             })
                             .await;
+                        if !is_error && deleted_session {
+                            match list_sessions().await {
+                                Ok(sessions) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::SessionList { sessions })
+                                        .await;
+                                }
+                                Err(error) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("List sessions failed: {error}"),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            }
+                        }
                     }
                     continue;
                 }
@@ -262,7 +282,8 @@ where
                         Err(error) => {
                             use sdk::SessionResumeFailureKind;
                             let kind = match error {
-                                context::SessionManagementError::NotFound(_) => {
+                                context::SessionManagementError::NotFound(_)
+                                | context::SessionManagementError::ProjectMismatch(_) => {
                                     SessionResumeFailureKind::NotFound
                                 }
                                 context::SessionManagementError::Corrupt(_)
@@ -454,6 +475,7 @@ where
                 let _refresh = handle_turn_boundary_config(
                     &mut config_snapshot,
                     config_reader.as_ref(),
+                    wiring.as_ref(),
                     turn_count,
                     &sink,
                     &mut messages,
@@ -481,8 +503,16 @@ where
                 }
                 let cancel = CancellationToken::new();
                 let mut run = Run::new(RunSpec::main(), None);
+                let run_config = crate::application::run_config::RunConfigSnapshot::capture(
+                    bound_main_run.config().clone(),
+                );
+                log::debug!(target: crate::LOG_TARGET,
+                    "[config] starting main run with revision={} allow_all={}",
+                    run_config.revision().get(),
+                    run_config.allow_all(),
+                );
                 let run_memory = bound_main_run.memory_arc();
-                let run_memory_config = bound_main_run.config().memory().clone();
+                let run_memory_config = run_config.config().memory().clone();
                 let run_id = run.id().clone();
                 active_run.activate(run_id.clone(), cancel.clone());
                 let cacheable_system_prompt = system_blocks
@@ -510,7 +540,7 @@ where
                     tool_execution: &tool_execution,
                     tool_context_binding: &tool_context_binding,
                     system_prompt_text: &cacheable_system_prompt,
-                    config_snapshot: bound_main_run.config(),
+                    run_config: &run_config,
                     context: &context,
                     context_request: None,
                     context_window: None,

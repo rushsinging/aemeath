@@ -18,7 +18,10 @@ pub struct HookNoticeContent {
 /// AskUserQuestion 批量交互中的单个问题槽位。
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AskUserSlot {
+    /// 对应的 tool_call_id。
     pub id: String,
+    /// 同一 tool call 内的问题序号，从 0 开始。
+    pub question_seq: usize,
     pub question: String,
     /// 全部选项（LLM 选项 + 内建选项）。
     pub options: Vec<sdk::OptionItem>,

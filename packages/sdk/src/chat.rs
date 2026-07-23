@@ -19,6 +19,8 @@ pub use crate::chat_view::{
 pub struct AskUserQuestionItem {
     /// 对应的 tool_call_id（用于 TUI 关联 ToolCall 状态）。
     pub id: String,
+    /// 同一 tool call 内的问题序号，从 0 开始。
+    pub question_seq: usize,
     /// 问题文本。
     pub question: String,
     /// 预设选项（LLM 选项，不含内建选项）。
@@ -31,10 +33,18 @@ pub struct AskUserQuestionItem {
     pub default: Option<String>,
 }
 
+/// 带身份的 AskUserQuestion 回答。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskUserAnswer {
+    pub tool_call_id: String,
+    pub question_seq: usize,
+    pub answer: String,
+}
+
 /// AskUser 批量交互的显式终结结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AskUserReply {
-    Answers(Vec<String>),
+    Answers(Vec<AskUserAnswer>),
     Cancelled,
 }
 

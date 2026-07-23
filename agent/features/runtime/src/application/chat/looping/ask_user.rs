@@ -91,8 +91,26 @@ where
             }
         }
         sdk::AskUserReply::Answers(answers) => {
-            for (i, (call, _, _)) in suspended_calls.iter().enumerate() {
-                let answer = answers.get(i).cloned().unwrap_or_default();
+            for (call, suspension, _) in suspended_calls {
+                let answer = match suspension {
+                    ToolSuspension::UserInteraction(spec) => spec
+                        .questions
+                        .iter()
+                        .enumerate()
+                        .map(|(question_seq, question)| {
+                            answers
+                                .iter()
+                                .find(|answer| {
+                                    answer.tool_call_id == call.id.as_ref()
+                                        && answer.question_seq == question_seq
+                                })
+                                .map(|answer| answer.answer.clone())
+                                .or_else(|| question.default.clone())
+                                .unwrap_or_default()
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                };
                 let outcome = ToolOutcome::new(
                     answer.clone(),
                     serde_json::json!({"answer": answer}),

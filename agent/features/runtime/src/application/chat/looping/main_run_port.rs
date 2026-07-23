@@ -223,7 +223,7 @@ where
     pub(crate) tool_execution: &'a Arc<dyn tools::ToolExecutionPort>,
     pub(crate) tool_context_binding: &'a Arc<dyn tools::ToolExecutionContextBindingPort>,
     pub(crate) system_prompt_text: &'a str,
-    pub(crate) config_snapshot: &'a share::config::domain::snapshot::ConfigSnapshot,
+    pub(crate) run_config: &'a crate::application::run_config::RunConfigSnapshot,
     pub(crate) context: &'a ContextCoordinator,
     pub(crate) context_request: Option<crate::ports::ContextRequest>,
     pub(crate) context_window: Option<crate::ports::ContextWindow>,
@@ -358,7 +358,7 @@ where
             },
             language: ContextLanguage::new(self.language),
             agent_roles: std::collections::HashMap::new(),
-            config_snapshot: self.config_snapshot.clone(),
+            config_snapshot: self.run_config.config().clone(),
             context_size: self.context_size,
             max_output_tokens: self.binding.max_tokens as usize,
             last_api_input_tokens: *self.last_total_tokens,
@@ -466,6 +466,7 @@ where
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory: &Arc<dyn memory::MemoryPort>,
         language: &str,
+        user_agent: &str,
         workspace: &project::WorkspaceViews,
         cancel: &CancellationToken,
         read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
@@ -504,6 +505,7 @@ where
                         language: language.to_string(),
                     }),
                 )
+                .with_user_agent(user_agent)
                 .with_memory_context(
                     Some(session_id.to_string()),
                     Some(session_reminders.clone()),
@@ -1325,6 +1327,7 @@ where
             self.agent_runner,
             self.memory,
             self.language,
+            self.run_config.config().user_agent(),
             self.workspace,
             &self.cancel,
             self.read_files,

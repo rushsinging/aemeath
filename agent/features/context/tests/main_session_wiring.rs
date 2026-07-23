@@ -25,6 +25,7 @@ use memory::{
 };
 use project::wire_production_workspace;
 use sdk::RunId;
+use share::config::domain::snapshot::ConfigRevision;
 use share::message::Message;
 use share::session_types::PersistedWorkspaceContext;
 use task::{
@@ -504,11 +505,10 @@ async fn finalized_append_persists_and_is_visible_after_resume() {
     assert_eq!(rebound.session().structured_messages().len(), 1);
 }
 
-/// Cross-project resume is allowed: a session whose workspace belongs to a
-/// different project can be resumed. The canonical identity from
-/// `prepare_restore` drives Config/Memory, not the live identity.
+/// Cross-project resume is rejected before Config, Memory, Task or workspace
+/// state can switch. The current project's committed resources remain intact.
 #[tokio::test]
-async fn cross_project_resume_succeeds() {
+async fn cross_project_resume_is_rejected() {
     let _guard = git_lock().await;
     let h = build_harness();
 
@@ -525,49 +525,40 @@ async fn cross_project_resume_succeeds() {
         .snapshot();
     let session = session_with_workspace(&ws2, SnapshotState::Captured(TaskSnapshot::empty()));
 
-    // Resume should succeed — cross-project is allowed.
-    h.wiring
-        .resume_prepared(session)
-        .await
-        .expect("cross-project resume should succeed");
+    // Resume must reject before any participant is prepared or committed.
+    assert!(matches!(
+        h.wiring.resume_prepared(session).await,
+        Err(MainSessionError::ProjectMismatch)
+    ));
 
-    // Committed session changed.
-    assert_ne!(
+    // Committed session remains unchanged.
+    assert_eq!(
         h.wiring.committed_session().id,
         pre_session_id,
-        "committed session should change after cross-project resume"
+        "committed session must remain unchanged after cross-project rejection"
     );
 
-    // Committed memory changed (new Arc opened for the prepared identity), and
-    // the next Run captures that exact Arc under the shared lease.
+    // Committed memory and Config remain unchanged.
     let target_memory = h.wiring.committed_memory();
     assert!(
-        !Arc::ptr_eq(&target_memory, &pre_memory),
-        "committed memory should be a new Arc"
+        Arc::ptr_eq(&target_memory, &pre_memory),
+        "committed memory must remain unchanged after cross-project rejection"
     );
-    let bound = h.wiring.bind_main_run().await.expect("bind target run");
+    let bound = h.wiring.bind_main_run().await.expect("bind current run");
     assert!(
-        std::ptr::eq(bound.memory(), target_memory.as_ref()),
-        "bound run should capture the target project's committed Memory Arc"
+        std::ptr::eq(bound.memory(), pre_memory.as_ref()),
+        "bound run should retain the current project's committed Memory Arc"
     );
-    assert_eq!(bound.session().id, h.wiring.committed_session().id);
+    assert_eq!(bound.session().id, pre_session_id);
     assert_eq!(
-        bound.config().revision(),
-        h.config_service.committed_snapshot().revision()
-    );
-
-    // Config was committed (revision advances).
-    assert_ne!(
         h.config_service.committed_snapshot().revision(),
         pre_config_revision,
-        "config revision should advance"
+        "config revision must remain unchanged after cross-project rejection"
     );
-
-    // Memory opener was called exactly once for the prepared identity.
     assert_eq!(
         h.memory_opener.open_count(),
-        1,
-        "memory opener should be called once"
+        0,
+        "memory opener must not run for a rejected cross-project session"
     );
 }
 
@@ -701,7 +692,65 @@ async fn task_captured_empty_clears_stale_live_tasks() {
     );
 }
 
-/// Resuming with `workspace: Missing` returns a typed error and changes nothing.
+/// 已删除的 worktree 仅降级到当前工作区，不能阻断会话内容恢复。
+#[tokio::test]
+async fn missing_persisted_workspace_falls_back_to_live_workspace_and_rewrites_snapshot() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let live_workspace = h.workspace_persist.snapshot();
+    let mut stale_workspace = live_workspace.clone();
+    let missing_root = h._tmp.path().join("deleted-worktree");
+    stale_workspace.workspace_root = missing_root.display().to_string();
+    stale_workspace.path_base = missing_root.display().to_string();
+
+    let session = session_with_workspace(
+        &stale_workspace,
+        SnapshotState::Captured(TaskSnapshot::empty()),
+    );
+
+    h.wiring
+        .resume_prepared(session)
+        .await
+        .expect("missing persisted workspace should fall back to live workspace");
+
+    assert_eq!(
+        h.workspace_persist.snapshot(),
+        live_workspace,
+        "live workspace must remain unchanged after fallback"
+    );
+    assert_eq!(
+        h.wiring.committed_session().workspace,
+        SnapshotState::Captured(live_workspace),
+        "committed session must replace the stale workspace snapshot"
+    );
+}
+
+#[tokio::test]
+async fn missing_cross_project_workspace_remains_rejected() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let pre_session_id = h.wiring.committed_session().id.clone();
+    let tmp2 = TempDir::new("missing-cross-project");
+    let mut stale_workspace = project::wire_production_workspace(tmp2.path().to_path_buf())
+        .unwrap()
+        .persist()
+        .snapshot();
+    let missing_root = tmp2.path().join("deleted-worktree");
+    stale_workspace.workspace_root = missing_root.display().to_string();
+    stale_workspace.path_base = missing_root.display().to_string();
+    let session = session_with_workspace(
+        &stale_workspace,
+        SnapshotState::Captured(TaskSnapshot::empty()),
+    );
+
+    let result = h.wiring.resume_prepared(session).await;
+    assert!(
+        matches!(result, Err(MainSessionError::ProjectMismatch)),
+        "missing cross-project workspace must remain rejected, got {result:?}"
+    );
+    assert_eq!(h.wiring.committed_session().id, pre_session_id);
+}
+
 #[tokio::test]
 async fn workspace_missing_returns_typed_error() {
     let _guard = git_lock().await;
@@ -870,6 +919,27 @@ async fn memory_open_failure_keeps_all_old_state() {
         1,
         "task must survive"
     );
+}
+
+/// Session restart-required state is cleared after a successful session resume.
+#[tokio::test]
+async fn successful_resume_clears_pending_session_restart_revision() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    h.wiring
+        .mark_session_restart_required(ConfigRevision::new(42));
+    assert_eq!(
+        h.wiring.pending_session_restart_revision(),
+        Some(ConfigRevision::new(42))
+    );
+
+    let workspace = h.workspace_persist.snapshot();
+    h.wiring
+        .resume_prepared(session_with_workspace(&workspace, SnapshotState::Missing))
+        .await
+        .expect("resume should succeed");
+
+    assert_eq!(h.wiring.pending_session_restart_revision(), None);
 }
 
 // ─── Resume publishes only the canonical committed session ───────────

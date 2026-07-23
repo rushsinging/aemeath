@@ -1,6 +1,7 @@
 use super::*;
 use crate::tui::model::conversation::intent::{
-    ConversationIntent, SetCompactProgress, StartChat, ToolCallStart, ToolCallUpdate,
+    ConversationIntent, ResumeConversation, SetCompactProgress, StartChat, ToolCallStart,
+    ToolCallUpdate,
 };
 
 use crate::tui::model::conversation::runtime_state::RuntimeState;
@@ -21,6 +22,27 @@ fn tool_update(
     })
 }
 
+#[test]
+fn session_history_restore_does_not_activate_runtime_spinner() {
+    let mut model = TuiModel::default();
+
+    reduce_intent(
+        &mut model,
+        AgentIntent::Conversation(ConversationIntent::ResumeConversation(ResumeConversation {
+            messages: vec![
+                sdk::ChatMessage::user_text("历史问题"),
+                sdk::ChatMessage::assistant_text("历史回答"),
+            ],
+        })),
+    );
+
+    assert!(
+        !model.conversation.runtime.spinner.chat_active,
+        "SessionResumed 的历史投影不能表示 Runtime 正在执行"
+    );
+    assert_eq!(model.conversation.runtime.spinner.phase, None);
+    assert_eq!(model.conversation.runtime.spinner.running_tool_count, 0);
+}
 #[test]
 fn test_ready_tool_update_does_not_start_runtime_tool_spinner() {
     let mut model = TuiModel::default();

@@ -27,10 +27,26 @@ impl AgentRunner for CliAgentRunner {
         let role_name = request.role;
         let memory = request.memory;
         let progress_sink = request_progress.clone();
-        let role = match self.resolve_role(role_name) {
-            Some(role) => role,
+        let run_config = crate::application::run_config::RunConfigSnapshot::capture(
+            self.config_reader.committed_snapshot(),
+        );
+        let config_snapshot = run_config.config();
+        let role = match config_snapshot.agents().roles.get(role_name) {
+            Some(role) if role.enabled => role,
+            Some(_) => {
+                return tools::AgentRunTerminal::Failed {
+                    error: format!(
+                        "子代理角色 `{role_name}` 已禁用（agents.roles.{role_name}.enabled=false)"
+                    ),
+                };
+            }
             None => {
-                let mut available = self.agents_config.roles.keys().cloned().collect::<Vec<_>>();
+                let mut available = config_snapshot
+                    .agents()
+                    .roles
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>();
                 available.sort();
                 return tools::AgentRunTerminal::Failed {
                     error: format!(
@@ -49,7 +65,7 @@ impl AgentRunner for CliAgentRunner {
 
         // Resolve the model config from ModelsConfig to build a ProviderBuildSpec.
         // Unknown models fail closed — no silent fallback to a default client.
-        let model_lookup = self.models_config.find_model(&resolved_spec);
+        let model_lookup = config_snapshot.models().find_model(&resolved_spec);
 
         let (source_key, source_config, model_entry) = match model_lookup {
             Some(found) => found,
@@ -86,9 +102,7 @@ impl AgentRunner for CliAgentRunner {
             }
         };
 
-        let context_size = self
-            .config_snapshot
-            .resolve_context_size(None, model_entry.context_window);
+        let context_size = config_snapshot.resolve_context_size(None, model_entry.context_window);
 
         // Construct ProviderBuildSpec from the resolved model config and build a binding.
         let max_tokens = max_tokens_override
@@ -112,7 +126,8 @@ impl AgentRunner for CliAgentRunner {
             max_tokens,
             requested_reasoning: level,
             context_window: (model_entry.context_window > 0).then_some(model_entry.context_window),
-            timeout: std::time::Duration::from_secs(self.api_timeout_secs),
+            timeout: std::time::Duration::from_secs(config_snapshot.api_timeout_secs()),
+            user_agent: config_snapshot.user_agent().to_string(),
         };
         let binding: Arc<ProviderBinding> = match self.factory.build(build_spec) {
             Ok(binding) => Arc::new(binding),
@@ -281,6 +296,7 @@ impl AgentRunner for CliAgentRunner {
                 memory.clone(),
                 guidance,
             )
+            .with_user_agent(config_snapshot.user_agent())
             .with_catalog(catalog)
             .with_progress(request_progress),
         );
@@ -331,8 +347,8 @@ impl AgentRunner for CliAgentRunner {
             hook_port,
             workspace_root,
             tool_schemas,
-            config_snapshot: self.config_snapshot.clone(),
-            language: self.language.clone(),
+            config_snapshot: config_snapshot.clone(),
+            language: config_snapshot.language().to_string(),
             messages,
             committed_message_count: 0,
             context: isolated_context,
@@ -383,11 +399,12 @@ impl AgentRunner for CliAgentRunner {
         );
 
         // Resolve the default model for the simple completion path.
+        let config_snapshot = self.config_reader.committed_snapshot();
         let default_spec = {
-            let d = self.models_config.default.as_str();
+            let d = config_snapshot.models().default.as_str();
             (!d.is_empty()).then_some(d)
         };
-        let model_lookup = default_spec.and_then(|spec| self.models_config.find_model(spec));
+        let model_lookup = default_spec.and_then(|spec| config_snapshot.models().find_model(spec));
         let (source_key, source_config, model_entry) = match model_lookup {
             Some(found) => found,
             None => return "LLM error: no default model configured".to_string(),
@@ -414,7 +431,8 @@ impl AgentRunner for CliAgentRunner {
             max_tokens,
             requested_reasoning: provider::ReasoningLevel::Off,
             context_window: (model_entry.context_window > 0).then_some(model_entry.context_window),
-            timeout: std::time::Duration::from_secs(self.api_timeout_secs),
+            timeout: std::time::Duration::from_secs(config_snapshot.api_timeout_secs()),
+            user_agent: config_snapshot.user_agent().to_string(),
         };
         let binding = match self.factory.build(build_spec) {
             Ok(binding) => binding,

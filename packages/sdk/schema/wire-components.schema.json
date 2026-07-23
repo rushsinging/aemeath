@@ -147,6 +147,13 @@
       "type": "string",
       "x-aemeath-uuid-version": 7
     },
+    "ConfigApplicationScopeView": {
+      "enum": [
+        "session_restart_required",
+        "run"
+      ],
+      "type": "string"
+    },
     "ConfigChangeCause": {
       "enum": [
         "client_update",
@@ -185,6 +192,28 @@
         "memory"
       ],
       "type": "string"
+    },
+    "ConfigReloadedEvent": {
+      "properties": {
+        "changed_keys": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scopes": {
+          "items": {
+            "$ref": "#/$defs/ConfigApplicationScopeView"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "changed_keys",
+        "scopes"
+      ],
+      "title": "ConfigReloadedEvent",
+      "type": "object"
     },
     "ConfigUpdate": {
       "oneOf": [

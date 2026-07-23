@@ -84,6 +84,13 @@ pub(crate) async fn from_args_with_gateways(
         ));
 
     let task_wiring = task::wire_task();
+    let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
+        hook::build_dispatcher(
+            config.reader().committed_snapshot().hooks(),
+            std::collections::HashMap::new(),
+        )
+        .map_err(|errors| sdk::SdkError::Init(format!("Hook 配置初始化失败：{errors:?}")))?,
+    );
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
     let skill_materializer = skill_wiring.materializer();
@@ -133,13 +140,16 @@ pub(crate) async fn from_args_with_gateways(
     )?;
 
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
-        workspace,
-        wiring,
-        gateways.provider,
-        reflection_history,
-        gateways.policy,
-        task_wiring.access(),
-        session_management,
+        runtime::RuntimeCoreDependencies::new(
+            workspace,
+            wiring,
+            gateways.provider,
+            reflection_history,
+            gateways.policy,
+            task_wiring.access(),
+            session_management,
+            hook_runner,
+        ),
         runtime::RuntimeToolAssemblyDependencies::new(
             tool_assembly.catalog,
             tool_assembly.execution,

@@ -87,14 +87,25 @@ fn qa_summary_lines(
     active: bool,
     max_width: usize,
 ) -> Vec<RenderedLine> {
-    let marker = if active { "❯" } else { " " };
     let answer = slot.answer.as_deref().unwrap_or("（未回答）");
-    let q_line = format!(
-        "  {marker} Q{}. {}",
-        index + 1,
-        truncate(&slot.question, max_width.saturating_sub(8))
-    );
-    let a_line = format!("      ❯ {}", truncate(answer, max_width.saturating_sub(8)));
+    let q_line = if active {
+        format!(
+            "  ❯ Q{}. {}",
+            index + 1,
+            truncate(&slot.question, max_width.saturating_sub(8))
+        )
+    } else {
+        format!(
+            "Q{}. {}",
+            index + 1,
+            truncate(&slot.question, max_width.saturating_sub(4))
+        )
+    };
+    let a_line = if active {
+        format!("      ❯ {}", truncate(answer, max_width.saturating_sub(8)))
+    } else {
+        format!("  ❯ {}", truncate(answer, max_width.saturating_sub(4)))
+    };
 
     let q_style = if active {
         Style::default()

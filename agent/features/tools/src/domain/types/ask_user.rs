@@ -25,7 +25,10 @@ pub struct AskUserQuestionInput {
     pub options: Option<Vec<Value>>,
     /// If true, the user may select more than one predefined choice
     pub multi_select: Option<bool>,
-    /// If true, user can provide any answer (not limited to options)
+    /// If true, user can provide any answer (not limited to options). Defaults to true. When
+    /// predefined options are present, the system adds a built-in "Type something..." free-text
+    /// entry; do not include that entry yourself in options. Set false only when answers must be
+    /// restricted to options.
     pub allow_free_input: Option<bool>,
     /// Optional default answer if user skips
     pub default: Option<String>,

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 pub use concurrency::resolve_concurrency_limits;
 pub use model_runtime::{resolve_model_runtime_settings, ModelRuntimeSettings};
-pub use runtime_support::{build_agent_runner, build_hook_runner, start_session};
+pub use runtime_support::{build_agent_runner, start_session};
 
 pub type ChatBootstrapArgs = sdk::ChatBootstrapArgs;
 

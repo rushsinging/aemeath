@@ -14,6 +14,7 @@ pub mod model_invocation;
 pub mod prompt;
 pub mod reflection;
 pub mod resources;
+pub(crate) mod run_config;
 pub mod runtime_context;
 pub mod scheduler;
 pub mod service;

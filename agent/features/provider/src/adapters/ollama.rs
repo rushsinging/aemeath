@@ -35,13 +35,34 @@ impl OllamaProvider {
     /// max_tokens / 推理档位由调用方传入的 `InvocationScope` 决定（不可变、
     /// 一次调用一份快照）。这两个构造参数仅为保持调用方签名兼容而保留，
     /// 当前未参与任何 immutable default 的派生，故有意不使用。
+    #[allow(dead_code)]
     pub fn new(
+        api_key: String,
+        base_url: Option<String>,
+        model: Option<String>,
+        max_tokens: u32,
+        reasoning: bool,
+        timeout_secs: u64,
+    ) -> Self {
+        Self::new_with_user_agent(
+            api_key,
+            base_url,
+            model,
+            max_tokens,
+            reasoning,
+            timeout_secs,
+            share::config::Config::default().api.user_agent,
+        )
+    }
+
+    pub fn new_with_user_agent(
         api_key: String,
         base_url: Option<String>,
         model: Option<String>,
         _max_tokens: u32,
         _reasoning: bool,
         timeout_secs: u64,
+        user_agent: String,
     ) -> Self {
         Self {
             base_url: {
@@ -52,7 +73,7 @@ impl OllamaProvider {
             },
             model: model.unwrap_or_else(|| "llama3.2".to_string()),
             api_key,
-            user_agent: format!("aemeath/{}", share::version()),
+            user_agent,
             http: reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
                 .build()
@@ -209,6 +230,24 @@ mod tests {
         (format!("http://{addr}"), counter)
     }
 
+    #[test]
+    fn custom_user_agent_is_sent_in_ollama_headers() {
+        let provider = OllamaProvider::new_with_user_agent(
+            "ollama".to_string(),
+            None,
+            None,
+            8192,
+            false,
+            60,
+            "aemeath-test/1.0".to_string(),
+        );
+
+        assert_eq!(
+            provider.build_headers().unwrap().get(USER_AGENT).unwrap(),
+            "aemeath-test/1.0"
+        );
+    }
+
     #[tokio::test]
     async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
         let body = concat!(
@@ -235,6 +274,7 @@ mod tests {
                 reasoning: false,
                 reasoning_config: None,
                 timeout_secs: 60,
+                user_agent: None,
             })
             .expect("valid ollama config");
         let scope = InvocationScope::new(

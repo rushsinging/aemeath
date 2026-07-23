@@ -15,7 +15,7 @@ impl TypedTool for AskUserQuestionTool {
         "AskUserQuestion"
     }
     fn description(&self) -> &str {
-        "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text."
+        "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text. Free-text input defaults to enabled; when options are present, the system supplies `Type something...` as its entry. Do not add that option yourself."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::ask_user(lang))

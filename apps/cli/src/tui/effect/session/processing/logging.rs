@@ -263,10 +263,11 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             stage,
             event.changed_fields
         ),
-        sdk::ChatEvent::ConfigReloaded { changed_keys } => crate::tui::log_trace!(
-            "{} config_reloaded changed_keys={:?}",
+        sdk::ChatEvent::ConfigReloaded { event } => crate::tui::log_trace!(
+            "{} config_reloaded changed_keys={:?} scopes={:?}",
             stage,
-            changed_keys
+            event.changed_keys,
+            event.scopes
         ),
         sdk::ChatEvent::GraphPhaseChanged {
             node,

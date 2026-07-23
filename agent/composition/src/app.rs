@@ -24,6 +24,7 @@ pub struct AgentClientBootstrap {
     pub skills_map: HashMap<String, SkillView>,
     pub command_catalog: Arc<dyn sdk::CommandCatalogPort>,
     pub command_router: Arc<dyn sdk::CommandRouterPort>,
+    pub user_agent: String,
 }
 
 pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
@@ -224,6 +225,26 @@ async fn build_agent_client_with_gateways(
     Ok(agent_client_from_runtime(runtime_client))
 }
 
+pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> {
+    let cwd = args
+        .cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let config = config::wire_project_config_with_cli(
+        &cwd,
+        wire_config_override_store()?,
+        cli_config_input(&args),
+    )
+    .await
+    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    Ok(config
+        .reader()
+        .committed_snapshot()
+        .user_agent()
+        .to_string())
+}
+
 pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstrap, SdkError> {
     let cwd = args
         .cwd
@@ -244,6 +265,11 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let gateways = FeatureGateways::wire_default(configured_policy(&config));
     init_logging(&config.reader().committed_snapshot(), logging_output)
         .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
+    let user_agent = config
+        .reader()
+        .committed_snapshot()
+        .user_agent()
+        .to_string();
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config).await?;
     let launch = runtime_client.tui_launch_context();
@@ -265,6 +291,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         skills_map: launch.skills_map,
         command_catalog: command_wiring.catalog(),
         command_router: command_wiring.router(),
+        user_agent,
     })
 }
 

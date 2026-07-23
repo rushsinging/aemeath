@@ -44,3 +44,14 @@ fn ask_user_rejects_empty_question_without_runtime_state() {
         .expect("AskUser always uses suspension");
     assert_eq!(result.unwrap_err(), "Question is required");
 }
+
+#[test]
+fn ask_user_schema_describes_default_free_input_and_builtin_option() {
+    let schema = AskUserQuestionTool.input_schema();
+    let description = schema["properties"]["allow_free_input"]["description"]
+        .as_str()
+        .expect("allow_free_input description");
+
+    assert!(description.contains("Defaults to true"));
+    assert!(description.contains("Type something..."));
+}

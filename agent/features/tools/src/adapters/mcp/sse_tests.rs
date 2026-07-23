@@ -2,6 +2,27 @@ use super::*;
 use crate::adapters::mcp::sse_stream::try_parse_incomplete_event;
 
 #[test]
+fn build_http_client_uses_default_user_agent_without_override() {
+    let headers = default_headers("aemeath-test/1.0", &HashMap::new()).unwrap();
+
+    assert_eq!(
+        headers.get(reqwest::header::USER_AGENT).unwrap(),
+        "aemeath-test/1.0"
+    );
+}
+
+#[test]
+fn build_http_client_preserves_explicit_user_agent() {
+    let headers = HashMap::from([("User-Agent".to_string(), "mcp-client/2.0".to_string())]);
+    let headers = default_headers("aemeath-test/1.0", &headers).unwrap();
+
+    assert_eq!(
+        headers.get(reqwest::header::USER_AGENT).unwrap(),
+        "mcp-client/2.0"
+    );
+}
+
+#[test]
 fn test_parse_sse_events_single() {
     let raw = "event: endpoint\ndata: /message?sessionId=abc\n\n";
     let events = parse_sse_events(raw);

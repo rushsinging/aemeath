@@ -62,14 +62,14 @@
 
 | 供应方 | 模式 | 契约与所有权 | 说明 |
 |---|---|---|---|
-| Context Management | C/S | Context-owned `ContextPort` + `SessionManagementPort` OHS | Runtime 请求“构建本轮 Context Window”；Composition 把同一 Session 管理实例注入 MainSessionWiring（resume）与 Runtime（SDK / idle Session 命令）。resume 成功后 Runtime 将唯一活动 Session ID 切换为恢复目标，Context / Tool / Hook / Tool Result 统一消费该 ID；TUI 只消费 SDK 事件 |
+| Context Management | C/S | Context-owned `ContextPort` + `SessionManagementPort` OHS | Runtime 请求“构建本轮 Context Window”；Composition 把同一 Session 管理实例注入 MainSessionWiring（resume）与 Runtime（SDK / idle Session 命令）。Session list、resume、export、import、metadata update 与 delete 仅接受当前 `ProjectIdentity`（Git 以 common-dir、非 Git 以 canonical root 匹配）；resume 成功后 Runtime 将唯一活动 Session ID 切换为恢复目标，Context / Tool / Hook / Tool Result 统一消费该 ID；TUI 只消费 SDK 事件 |
 | Workflow | C/S | Workflow-owned `ReasoningPort` OHS | Runtime 询问当前 reasoning effort（reasoning graph 观察 tool 类型 / 结果调节）；Workflow **NEVER** 阻塞 loop 或强制流程，仅作 effort 调节器。**v0.1.0 scope（#921 收缩）**：五节点固定默认 effort（Config `reasoning_graph` 已退役）；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线；是否接线由 v0.2.0 #1142 决策 |
 | Provider | C/S + **ACL**(在 Provider 内) | Runtime-owned outbound `ProviderPort` | Provider adapter 吸收各家 LLM 差异，实现 Runtime 定义的统一调用语言与有序流。**v0.1.0 scope（#921 收缩）**：option resolver 领域迁移完成但未接生产链路——Runtime 尚未在 `build_window` 前调用 resolver；是否接线由 v0.2.0 #1142 决策 |
 | Tool & Skill & Command | C/S | Tool-owned `ToolCatalogPort` + `ToolExecutionPort` OHS；Skill / Command 各自发布窄 façade | Tool 目录与函数调用分离；Skill 物化 PromptFragment；Command 按 PromptInjection / SnapshotQuery / ApplicationControl 路由；#1294 后 Composition 一次装配并把同一 Tool Catalog/Execution/binding、Skill Catalog/materializer、Tool Result materializer 与 active-run registry 注入 Runtime Main/Sub；MCP Ready 生命周期、动态同步与 revision 由 #1327 承接 |
 | Policy | C/S | Policy-owned `PolicyPort` OHS | v0.1.0 只装配 `AllowAllPolicy`（安全审批、Deny / RequireApproval 为 **Future**，接口预留但不在 v0.1.0 验收范围）；控制流仍归 Runtime |
 | Memory | C/S | Memory-owned `MemoryPort` OHS | 检索注入 + 反思写入（Reflection 产出 Memory Suggestion） |
 | Task Management | C/S | Task-owned `TaskAccess` / `TaskPersist` OHS | Runtime / Tool 只持 Access；Context Management 只持 Persist；同一 backing 守护状态机与依赖图不变量 |
-| Hook | C/S | Hook-owned `HookPort` OHS | 一个类型化 façade；Hook 执行/重试归 Hook，触发时机和 directive 的 Run 状态迁移归调用方 |
+| Hook | C/S | Hook-owned `HookPort` OHS | Composition 从 committed ConfigSnapshot 唯一构造 Hook dispatcher，并将同一 Arc 注入 Runtime Main/Sub；Hook 执行/重试归 Hook，触发时机和 directive 的 Run 状态迁移归调用方 |
 | Application Version Control | C/S | Runtime-owned outbound `ApplicationVersionPort` | 该 seam 隔离 Runtime 的 Application Control policy 与版本模块的 source/cache/installer detail；CLI/TUI 不直接持有更新模块内部端口 |
 | Audit | **Pub/Sub**（Runtime 是 Supplier） | Runtime-owned outbound `UsageSink`（MVP） | Runtime 非阻塞提交 Usage metadata；Audit adapter 独立持久化和查询，不影响 Runtime。**v0.1.0 范围：仅 Usage metadata 持久化与查询**；Cost / Pricing 聚合属 **Future** |
 

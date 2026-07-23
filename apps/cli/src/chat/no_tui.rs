@@ -278,13 +278,17 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::AskUserBatch { items, reply_tx } => {
             let mut answers = Vec::new();
             for item in items {
-                let reply = read_ask_user_reply(
+                let answer = read_ask_user_reply(
                     &item.question,
                     &item.options,
                     item.allow_free_input,
                     item.default.as_deref(),
                 )?;
-                answers.push(reply);
+                answers.push(sdk::AskUserAnswer {
+                    tool_call_id: item.id,
+                    question_seq: item.question_seq,
+                    answer,
+                });
             }
             let _ = reply_tx.send(sdk::AskUserReply::Answers(answers));
         }

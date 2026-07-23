@@ -12,8 +12,8 @@ pub mod domain;
 
 pub use adapters::paths;
 pub use domain::{
-    audit, file_snapshot, hooks, legacy, logging, memory, models, permissions, skills, storage,
-    tools, ui, update,
+    audit, file_snapshot, hooks, legacy, logging, memory, models, permissions, scope, skills,
+    storage, tools, ui, update,
 };
 
 // Re-exports for backward compatibility
