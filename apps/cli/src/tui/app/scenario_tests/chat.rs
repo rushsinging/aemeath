@@ -1,36 +1,38 @@
-use crate::tui::app::event::{UiEvent, UiTurnContext};
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiTurnContext};
 
 use super::super::testing::TuiScenarioHarness;
 
-fn context() -> UiTurnContext {
-    UiTurnContext {
-        chat_id: ChatId::new("chat-p0"),
-        turn_id: ChatTurnId::new("turn-p0"),
+fn ctx() -> TuiTurnContext {
+    TuiTurnContext {
+        chat_id: "chat-p0".to_string(),
+        turn_id: "turn-p0".to_string(),
     }
 }
 
 #[test]
 fn streaming_has_representative_thinking_and_completed_snapshots() {
     let mut harness = TuiScenarioHarness::new(100, 30);
-    harness.ui(UiEvent::TurnStarted { messages: vec![] });
-    harness.ui(UiEvent::Thinking {
-        context: context(),
+    harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
+    harness.runtime_event(TuiRuntimeEvent::Thinking {
+        context: ctx(),
         text: "Inspecting the repository".into(),
     });
     harness.render();
     assert!(harness.screen().contains("Inspecting the repository"));
     insta::assert_snapshot!("chat_streaming__thinking__100x30", harness.screen());
 
-    harness.ui(UiEvent::Text {
-        context: context(),
+    harness.runtime_event(TuiRuntimeEvent::Text {
+        context: ctx(),
         text: "The result is ready.".into(),
     });
-    harness.ui(UiEvent::BlockComplete {
-        context: context(),
+    harness.runtime_event(TuiRuntimeEvent::BlockComplete {
+        context: ctx(),
         text: "The result is ready.".into(),
     });
-    harness.ui(UiEvent::Done { context: context() });
+    harness.runtime_event(TuiRuntimeEvent::Done {
+        context: ctx(),
+        duration_ms: None,
+    });
     harness.render();
     assert!(harness.screen().contains("The result is ready."));
     insta::assert_snapshot!("chat_streaming__completed__100x30", harness.screen());
@@ -40,30 +42,30 @@ fn streaming_has_representative_thinking_and_completed_snapshots() {
 #[test]
 fn tool_lifecycle_binds_result_to_call_and_renders_stable_states() {
     let mut harness = TuiScenarioHarness::new(100, 30);
-    let id = sdk::ids::ToolCallId::new("read-1");
-    harness.ui(UiEvent::ToolCallStart {
-        context: context(),
+    let id = "read-1".to_string();
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+        context: ctx(),
         id: id.clone(),
         provider_id: Some("provider-read-1".into()),
         name: "Read".into(),
         index: 0,
     });
-    harness.ui(UiEvent::ToolCallUpdate {
-        context: context(),
+    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+        context: ctx(),
         id: id.clone(),
         provider_id: Some("provider-read-1".into()),
         name: "Read".into(),
         index: 0,
         arguments_delta: None,
         arguments: Some(serde_json::json!({"file_path":"Cargo.toml"})),
-        status: sdk::ToolCallStatusView::Ready,
+        status: crate::tui::adapter::tui_runtime_event::TuiToolCallStatus::Ready,
     });
     harness.render();
     assert!(harness.screen().contains("Read"));
     insta::assert_snapshot!("tool_read__running__100x30", harness.screen());
 
-    harness.ui(UiEvent::ToolResult {
-        context: context(),
+    harness.runtime_event(TuiRuntimeEvent::ToolResult {
+        context: ctx(),
         id,
         provider_id: "provider-read-1".into(),
         tool_name: "Read".into(),
@@ -94,19 +96,22 @@ fn empty_system_messages_from_runtime_do_not_accumulate_blank_lines() {
                     .cycle()
                     .take(empty_count)
                 {
-                    harness.runtime(UiEvent::SystemMessage((*payload).to_string()));
+                    harness.runtime_event(TuiRuntimeEvent::SystemMessage((*payload).to_string()));
                 }
             }
-            harness.ui(UiEvent::Text {
-                context: context(),
+            harness.runtime_event(TuiRuntimeEvent::Text {
+                context: ctx(),
                 text: anchor.to_string(),
             });
-            harness.ui(UiEvent::BlockComplete {
-                context: context(),
+            harness.runtime_event(TuiRuntimeEvent::BlockComplete {
+                context: ctx(),
                 text: anchor.to_string(),
             });
         }
-        harness.ui(UiEvent::Done { context: context() });
+        harness.runtime_event(TuiRuntimeEvent::Done {
+            context: ctx(),
+            duration_ms: None,
+        });
         harness.render();
 
         let screen = harness.screen();

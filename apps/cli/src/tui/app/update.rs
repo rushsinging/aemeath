@@ -13,10 +13,12 @@ mod ui_event;
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
-use crate::tui::adapter::agent_event::map_agent_event_with_tool_header;
+use crate::tui::adapter::agent_event::{map_agent_event_with_tool_header, map_runtime_event};
+use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::*;
+use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::output::tool_display::format_subagent_tool_header;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
@@ -130,6 +132,7 @@ impl App {
     ) -> UpdateResult {
         match msg {
             TuiMsg::Ui(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
+            TuiMsg::Runtime(ev) => self.update_runtime_event(ev),
             TuiMsg::AgentEvent(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::Key(key) => self.update_key(key, spawn_refs),
             TuiMsg::Mouse(mouse) => {
@@ -245,6 +248,52 @@ impl App {
             TuiMsg::EffectCompleted(_) | TuiMsg::TimerTick { .. } | TuiMsg::RenderTick => {
                 UpdateResult::none()
             }
+        }
+    }
+
+    fn update_runtime_event(&mut self, event: TuiRuntimeEvent) -> UpdateResult {
+        // UserMessagesAdopted 需要在 mapper/reducer 之外执行清占位 + 用户回显，
+        // 因为这些副作用依赖 App 级方法且不产生 Intent。
+        match &event {
+            TuiRuntimeEvent::UserMessagesAdopted { items, .. } => {
+                for item in items {
+                    if let Some(id) = item.input_id.as_ref() {
+                        self.clear_queued_submission_echo_by_id(id);
+                    }
+                    self.append_user_echo(item.text_content());
+                }
+            }
+            TuiRuntimeEvent::TurnStarted { .. } => {
+                self.spinner_phase(SpinnerPhase::Thinking);
+                self.mark_output_dirty();
+            }
+            TuiRuntimeEvent::ApiError { error, .. } => {
+                self.spinner_stop();
+                self.append_system_notice(error);
+                self.mark_output_dirty();
+            }
+            TuiRuntimeEvent::CompactFinished { .. } => {
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
+                ));
+            }
+            TuiRuntimeEvent::CompactRollback { .. } => {
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
+                ));
+            }
+            TuiRuntimeEvent::SessionReset => {
+                return UpdateResult::one(Effect::ResetRuntimeState);
+            }
+            _ => {}
+        }
+        let mapping = map_runtime_event(&event);
+        let model_result = reduce_agent_event(&mut self.model, mapping);
+        crate::tui::update::dirty::merge_dirty(&mut self.view_state.dirty, model_result.dirty);
+        UpdateResult {
+            effects: model_result.effects,
+            spawn_effect: None,
+            pending_slash: None,
         }
     }
 

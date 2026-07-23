@@ -1,3 +1,8 @@
+//! UiEvent carries local Effect 回灌 and legacy Runtime branches.
+//! After #943 阶段 3, Runtime events flow through TuiRuntimeEvent; the
+//! remaining Runtime variants in UiEvent are dead code pending #944 5B.
+#![allow(dead_code)]
+use crate::tui::adapter::runtime_view::TuiChatMessage;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
 use crate::tui::model::conversation::workspace::WorktreeKind;
 use std::path::PathBuf;
@@ -11,8 +16,8 @@ pub struct UiTurnContext {
 impl From<sdk::ChatEventContext> for UiTurnContext {
     fn from(context: sdk::ChatEventContext) -> Self {
         Self {
-            chat_id: context.chat_id,
-            turn_id: context.turn_id,
+            chat_id: ChatId::new(context.chat_id.as_str()),
+            turn_id: ChatTurnId::new(context.turn_id.as_str()),
         }
     }
 }
@@ -96,33 +101,33 @@ pub enum AppEvent {
     },
     /// Turn 启动，TUI 据此启动 spinner(Thinking)。
     TurnStarted {
-        messages: Vec<sdk::ChatMessage>,
+        messages: Vec<TuiChatMessage>,
     },
     /// Microcompact 清理了陈旧 tool result，TUI 只同步消息。
     MicrocompactDone {
-        messages: Vec<sdk::ChatMessage>,
+        messages: Vec<TuiChatMessage>,
         cleared_count: usize,
     },
     /// Stop hook 阻止 turn 结束，TUI 只同步消息。
     StopHookBlocked {
-        messages: Vec<sdk::ChatMessage>,
+        messages: Vec<TuiChatMessage>,
     },
     /// Tool 执行完成后同步，TUI 只同步消息。
     PostToolExecutionSync {
-        messages: Vec<sdk::ChatMessage>,
+        messages: Vec<TuiChatMessage>,
     },
     /// Provider API 调用失败，TUI stop spinner + 显示错误。
     ApiError {
-        messages: Vec<sdk::ChatMessage>,
+        messages: Vec<TuiChatMessage>,
         error: String,
     },
     /// Compact 失败回滚，TUI 只同步消息。
     CompactRollback {
-        messages: Vec<sdk::ChatMessage>,
+        messages: Vec<TuiChatMessage>,
     },
     /// Compact 成功完成，TUI 同步消息 + 清 compact 状态。
     CompactFinished {
-        messages: Vec<sdk::ChatMessage>,
+        messages: Vec<TuiChatMessage>,
     },
     /// 批量用户输入归宿通知（#507 修复）。每条 ChatMessage 由 runtime 端 share::Message
     /// 映射而来，含 typed blocks + image placeholder + input_id；TUI 用 ChatMessage.input_id
@@ -130,13 +135,13 @@ pub enum AppEvent {
     /// 用户输入被 gate 接纳（idle 直发或 batch drain）。
     /// items = 本批接纳的消息；queued = 仍留在 buffer 中的排队消息（一般空）。
     UserMessagesAdopted {
-        items: Vec<sdk::ChatMessage>,
-        queued: Vec<sdk::ChatMessage>,
+        items: Vec<TuiChatMessage>,
+        queued: Vec<TuiChatMessage>,
     },
     /// busy 阶段收到新输入并存入 runtime buffer 后的确认。
     /// queued = 全量 buffer 快照。TUI 据此全量重渲染 queue 区域。
     UserMessagesQueued {
-        queued: Vec<sdk::ChatMessage>,
+        queued: Vec<TuiChatMessage>,
     },
     Done {
         context: UiTurnContext,
@@ -223,7 +228,7 @@ pub enum AppEvent {
     },
     /// 会话恢复完成（#497）。TUI 据此更新 messages。
     SessionResumed {
-        messages: Vec<sdk::ChatMessage>,
+        messages: Vec<TuiChatMessage>,
         session_id: String,
         #[allow(dead_code)]
         created_at: u64,

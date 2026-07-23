@@ -179,8 +179,8 @@ fn test_up_arrow_busy_with_queued_sends_withdraw_all() {
     );
     app.chat.start_processing();
     // 入队两条占位（模拟忙时提交）
-    app.enqueue_submission_echo(sdk::InputId::new_v7(), "first");
-    app.enqueue_submission_echo(sdk::InputId::new_v7(), "second");
+    app.enqueue_submission_echo("key-1", "first");
+    app.enqueue_submission_echo("key-2", "second");
 
     let spawn_refs = SpawnContextRefs { agent_client: None };
     let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);

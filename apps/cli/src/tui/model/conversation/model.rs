@@ -248,7 +248,7 @@ impl ConversationModel {
 
     pub(super) fn queue_submission(
         &mut self,
-        input_id: sdk::InputId,
+        input_id: String,
         text: String,
     ) -> Vec<ConversationChange> {
         let id = self.next_block_id("queued");
@@ -270,10 +270,10 @@ impl ConversationModel {
 
     pub(super) fn clear_queued_submission_by_id(
         &mut self,
-        input_id: &sdk::InputId,
+        input_id: &str,
     ) -> Vec<ConversationChange> {
         let before = self.queued_submissions.len();
-        self.queued_submissions.retain(|q| &q.input_id != input_id);
+        self.queued_submissions.retain(|q| q.input_id != input_id);
         self.timeline.retain(|it| {
             !matches!(it,
                 OutputTimelineItem::QueuedUserMessage { input_id: tid, .. } if tid == input_id)
@@ -300,7 +300,7 @@ impl ConversationModel {
     /// 以 runtime 返回的全量 queued 快照为准重渲染 queue 区域。
     pub(super) fn sync_queued_submissions(
         &mut self,
-        queued: Vec<sdk::ChatMessage>,
+        queued: Vec<crate::tui::adapter::runtime_view::TuiChatMessage>,
     ) -> Vec<ConversationChange> {
         self.queued_submissions.clear();
         self.timeline

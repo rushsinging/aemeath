@@ -1,6 +1,48 @@
-//! Re-export SDK ID types for TUI conversation model.
+//! TUI-owned identities for conversation and tool projections.
+//!
+//! Runtime identities cross the ACL as strings and are reconstructed here as
+//! local values. TUI never exposes or stores SDK ID newtypes.
 
-pub use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
+macro_rules! tui_id {
+    ($name:ident) => {
+        #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+        pub struct $name(String);
+
+        impl $name {
+            pub fn new(value: impl AsRef<str>) -> Self {
+                Self(value.as_ref().to_string())
+            }
+
+            pub fn new_v7() -> Self {
+                Self(uuid::Uuid::new_v4().to_string())
+            }
+
+            pub fn from_legacy_or_new(value: &str) -> Self {
+                Self::new(value)
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                self.as_str()
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str(self.as_str())
+            }
+        }
+    };
+}
+
+tui_id!(ChatId);
+tui_id!(ChatTurnId);
+tui_id!(ToolCallId);
 
 /// Tool stream key for identifying tool call streams.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -26,3 +68,7 @@ impl ToolStreamKey {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "ids_tests.rs"]
+mod tests;

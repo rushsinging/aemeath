@@ -1,3 +1,4 @@
+use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::effect::Effect;
 
@@ -50,7 +51,7 @@ fn busy_paste_classifies_text_empty_and_image_without_real_clipboard() {
 #[test]
 fn error_and_compact_progress_converge_through_frame_driver() {
     let mut harness = TuiScenarioHarness::new(100, 30);
-    harness.ui(UiEvent::CompactProgress {
+    harness.runtime_event(TuiRuntimeEvent::CompactProgress {
         stage: "Summarizing".into(),
         current: Some(2),
         total: Some(4),

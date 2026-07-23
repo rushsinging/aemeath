@@ -1,4 +1,5 @@
 use super::App;
+use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::session::processing;
 use crate::tui::model::conversation::spinner::SpinnerPhase;
@@ -20,6 +21,7 @@ pub(crate) fn tui_msg_name(msg: &TuiMsg) -> &'static str {
         TuiMsg::Resize { .. } => "Resize",
         TuiMsg::SpinnerTick => "SpinnerTick",
         TuiMsg::Ui(_) => "Ui",
+        TuiMsg::Runtime(_) => "Runtime",
         TuiMsg::TerminalKey(_) => "TerminalKey",
         TuiMsg::TerminalMouse(_) => "TerminalMouse",
         TuiMsg::TerminalResize { .. } => "TerminalResize",
@@ -37,14 +39,18 @@ impl App {
     /// `chat.input_event_tx`，port 随 `ChatRequest.input_events` 传给 runtime），
     /// 以当前历史 `messages` 调一次 `chat()` 并 spawn 长生命周期流消费任务。
     /// 已存在通道（`input_event_tx` 为 Some）时为 no-op，调用安全幂等。
-    fn ensure_persistent_processing(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
+    fn ensure_persistent_processing(
+        &mut self,
+        ui_tx: &mpsc::Sender<UiEvent>,
+        runtime_tx: &mpsc::Sender<TuiRuntimeEvent>,
+    ) {
         if self.chat.input_event_tx.is_some() {
             return;
         }
         let spawn_refs = processing::SpawnContextRefs {
             agent_client: self.agent_client.clone(),
         };
-        match self.build_spawn_context(ui_tx, &spawn_refs) {
+        match self.build_spawn_context(ui_tx, runtime_tx, &spawn_refs) {
             Some(spawn_ctx) => {
                 let handle = processing::spawn_processing(spawn_ctx);
                 self.chat.set_processing_handle(handle);
@@ -64,6 +70,7 @@ impl App {
         interrupted: Arc<AtomicBool>,
     ) -> io::Result<()> {
         let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
+        let (runtime_tx, mut runtime_rx) = mpsc::channel::<TuiRuntimeEvent>(256);
         self.chat.stop_processing();
 
         // 启动时后台检查版本更新（非阻塞，失败静默降级）。
@@ -94,7 +101,7 @@ impl App {
         // 直到首条 UserMessage 经 input_events 通道到达；此后每次提交（首条 / 插话）
         // 都复用此通道，不再 per-submit spawn。messages 为当前历史（新会话为空，
         // resume 为已加载历史）。
-        self.ensure_persistent_processing(&ui_tx);
+        self.ensure_persistent_processing(&ui_tx, &runtime_tx);
 
         loop {
             let loop_now = Instant::now();
@@ -123,6 +130,7 @@ impl App {
             // --- TEA event collection: produce a TuiMsg ---
             let msg: Option<TuiMsg> = tokio::select! {
                 biased;
+                ev = runtime_rx.recv() => { ev.map(TuiMsg::Runtime) }
                 ev = ui_rx.recv() => { ev.map(TuiMsg::Ui) }
                 _ = async { match &mut sig_term { Some(s) => s.recv().await, None => std::future::pending().await } } => {
                     log::info!(target: crate::LOG_TARGET, "received SIGTERM, initiating graceful shutdown");
@@ -235,7 +243,7 @@ impl App {
             // 变 None，此处检测并重建，使后续提交仍可经事件通道驱动。正常 /clear 不再
             // drop tx（#391 S2 已统一为 runtime gate 清 messages，loop 存活）。
             if !self.layout.should_exit && self.chat.input_event_tx.is_none() {
-                self.ensure_persistent_processing(&ui_tx);
+                self.ensure_persistent_processing(&ui_tx, &runtime_tx);
             }
         }
 

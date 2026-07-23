@@ -1,10 +1,8 @@
 use super::UpdateResult;
-use crate::tui::adapter::hook_notice::hook_spinner_phase;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::*;
-use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::runtime_presentation::RuntimePresentationIntent;
 use crate::tui::update::intent::AgentIntent;
 use tokio::sync::mpsc;
@@ -19,48 +17,34 @@ impl App {
     ) -> UpdateResult {
         let mut effects = Vec::new();
         match ev {
-            UiEvent::Text { .. } => {
-                if self.chat.tool_call_active {
-                    self.chat.clear_tool_activity();
-                }
+            // ── Runtime 事件已走 TuiMsg::Runtime → update_runtime_event，以下分支不再触达 ──
+            UiEvent::Text { .. }
+            | UiEvent::Thinking { .. }
+            | UiEvent::BlockComplete { .. }
+            | UiEvent::ToolCallStart { .. }
+            | UiEvent::ToolCallUpdate { .. }
+            | UiEvent::ToolResult { .. }
+            | UiEvent::Usage { .. }
+            | UiEvent::LiveTps(_)
+            | UiEvent::AgentProgress { .. }
+            | UiEvent::HookEvent(_)
+            | UiEvent::HookMessage(_)
+            | UiEvent::UserMessagesAdopted { .. }
+            | UiEvent::UserMessagesQueued { .. }
+            | UiEvent::TurnStarted { .. }
+            | UiEvent::MicrocompactDone { .. }
+            | UiEvent::StopHookBlocked { .. }
+            | UiEvent::PostToolExecutionSync { .. }
+            | UiEvent::CompactRollback { .. }
+            | UiEvent::CompactFinished { .. }
+            | UiEvent::GraphPhaseChanged { .. }
+            | UiEvent::CompactProgress { .. }
+            | UiEvent::UserMessagesWithdrawn(_)
+            | UiEvent::SessionReset
+            | UiEvent::ApiError { .. } => {
+                // 阶段 3：Runtime 事件副作用已迁移到 update_runtime_event
             }
-            UiEvent::Thinking { .. } => {
-                if self.chat.tool_call_active {
-                    self.chat.clear_tool_activity();
-                }
-            }
-            UiEvent::BlockComplete { context, text } => {
-                let _ = (context, text);
-            }
-            UiEvent::ToolCallStart { .. } => {
-                self.chat.start_tool_activity();
-            }
-            UiEvent::ToolCallUpdate { id, .. } => {
-                self.chat.register_tool_call(id.clone());
-            }
-            UiEvent::ToolResult { id, .. } => {
-                let _had_active_id = self.chat.has_active_tool_call(&id);
-                let _remaining = self.chat.finish_tool_call(&id);
-            }
-            UiEvent::Usage { .. } => {
-                // token/api/tps 真相归 RuntimeModel，经 StatusViewAssembler + adapter 单向写回 status_bar。
-            }
-            UiEvent::LiveTps(_tps) => {
-                // tps 已由 map_agent_event -> RuntimeIntent::RecordLiveTps 注入 RuntimeModel，
-                // 经 adapter 单向写回 status_bar。
-            }
-            UiEvent::AgentProgress { .. } => {
-                // AgentProgress 已由 map_agent_event -> RecordAgentProgress 注入
-                // ConversationModel，经 document 渲染（消除命令式写 output_area.lines）。
-            }
-            UiEvent::HookEvent(event) => {
-                // Hook notice 已由 map_agent_event -> AppendHookNotice 注入 ConversationModel，
-                // 此处仅更新 spinner 状态（spinner 归 RuntimeModel 管理）。
-                self.spinner_phase(hook_spinner_phase(&event));
-            }
-            UiEvent::HookMessage(_) => {
-                // Hook message 已由 map_agent_event -> AppendHookNotice 注入 ConversationModel。
-            }
+            // ── 本地 Effect 回灌 ──
             UiEvent::Error(msg) => {
                 // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，
                 crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::Error → spinner_stop");
@@ -85,97 +69,6 @@ impl App {
                 // 不清 processing_handle：cancel_to_idle 只把 loop FSM 带回 Idle，
                 // 常驻 loop 任务本身并未退出（等待下一条输入），提前清空会让后续
                 // Esc/Ctrl+C 的 abort() 找不到 handle、静默失效。见 #624。
-            }
-            UiEvent::UserMessagesAdopted { items, queued } => {
-                let before_queued = self.model.conversation.queued_submissions.len();
-                crate::tui::log_debug!(
-                    "UserMessagesAdopted items={} queued={} is_processing={} before_queued={}",
-                    items.len(),
-                    queued.len(),
-                    self.chat.is_processing,
-                    before_queued
-                );
-                for item in items {
-                    let text_len = item.text_content().chars().count();
-                    crate::tui::log_debug!(
-                        "UserMessagesAdopted item input_id={:?} text_len={}",
-                        item.input_id.as_ref().map(|id| id.as_str().to_string()),
-                        text_len
-                    );
-                    if let Some(id) = item.input_id.as_ref() {
-                        self.clear_queued_submission_echo_by_id(id);
-                    }
-                    self.append_user_echo(item.text_content());
-                }
-                self.apply_agent_intent(AgentIntent::Conversation(
-                    ConversationIntent::SyncQueuedSubmissions(SyncQueuedSubmissions { queued }),
-                ));
-                let after_queued = self.model.conversation.queued_submissions.len();
-                crate::tui::log_debug!("UserMessagesAdopted done after_queued={}", after_queued);
-            }
-            UiEvent::UserMessagesQueued { queued } => {
-                crate::tui::log_debug!(
-                    "UserMessagesQueued count={} is_processing={}",
-                    queued.len(),
-                    self.chat.is_processing
-                );
-                self.apply_agent_intent(AgentIntent::Conversation(
-                    ConversationIntent::SyncQueuedSubmissions(SyncQueuedSubmissions { queued }),
-                ));
-            }
-            UiEvent::TurnStarted { messages: _ } => {
-                // Turn 启动：启动 spinner(Thinking)。
-                crate::tui::log_info!(
-                    "[SPINNER_DEBUG] UiEvent::TurnStarted → spinner_phase(Thinking)"
-                );
-                self.spinner_phase(SpinnerPhase::Thinking);
-                self.mark_output_dirty();
-            }
-            UiEvent::MicrocompactDone {
-                messages: _,
-                cleared_count,
-            } => {
-                // Microcompact 清理陈旧 tool result，turn 仍在进行。
-                crate::tui::log_info!(
-                    "[SPINNER_DEBUG] UiEvent::MicrocompactDone cleared={} (spinner 不动)",
-                    cleared_count
-                );
-                self.mark_output_dirty();
-            }
-            UiEvent::StopHookBlocked { messages: _ } => {
-                // Stop hook 阻止 turn 结束，追加 reminder 后继续。
-                crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::StopHookBlocked (spinner 不动)");
-                self.mark_output_dirty();
-            }
-            UiEvent::PostToolExecutionSync { messages: _ } => {
-                // Tool 执行完成后同步消息。
-                self.mark_output_dirty();
-            }
-            UiEvent::ApiError { messages: _, error } => {
-                // #749：ApiError 退化为纯展示——仅追加错误 notice + stop spinner。
-                // processing 状态收口统一交给随后 runtime 发出的 DoneWithDuration
-                // （handle_done → stop_processing），避免各终止路径各自清理导致漏清。
-                // NOT 在此 stop_processing，保持与 Done 单一收口点一致。
-                crate::tui::log_info!(
-                    "[SPINNER_DEBUG] UiEvent::ApiError → spinner_stop（processing 收口交给 Done）error={}",
-                    error
-                );
-                self.spinner_stop();
-                self.append_system_notice(&error);
-                self.mark_output_dirty();
-            }
-            UiEvent::CompactRollback { messages: _ } => {
-                // Compact 失败回滚：不动 spinner（turn 仍在进行）。
-                self.apply_agent_intent(AgentIntent::Conversation(
-                    ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
-                ));
-            }
-            UiEvent::CompactFinished { messages: _ } => {
-                // Compact 成功完成：清 compact 状态。
-                // 不停 spinner——compact 后 turn 仍在进行，LLM 会继续生成。
-                self.apply_agent_intent(AgentIntent::Conversation(
-                    ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
-                ));
             }
             UiEvent::ClipboardImage(img) => {
                 self.handle_input_intent(
@@ -264,44 +157,7 @@ impl App {
                     "[aemeath v{latest} is available (you have v{current}); run `aemeath update` to upgrade | {release_url}]"
                 ));
             }
-            // #391 S1-4：runtime idle gate 已清空 messages 并发 SessionReset。
-            // TUI 收到后经 Effect 异步执行完整 reset_runtime_state（清 UI + sync + tasks）。
-            UiEvent::SessionReset => {
-                return UpdateResult::one(Effect::ResetRuntimeState);
-            }
-            UiEvent::UserMessagesWithdrawn(texts) => {
-                self.clear_all_queued_submission_echos();
-                if !texts.is_empty() {
-                    self.handle_input_intent(
-                        crate::tui::model::input::intent::InputIntent::ReplaceText(
-                            texts.join("\n"),
-                        ),
-                    );
-                }
-            }
-            UiEvent::GraphPhaseChanged { node } => {
-                // Graph 阶段变化 → 更新 graph_phase（model.apply 会同步 status_notice，
-                // 除非当前是临时 notice）
-                let phase = if node == "idle" { None } else { Some(node) };
-                self.apply_agent_intent(AgentIntent::Conversation(
-                    ConversationIntent::SetGraphPhase(SetGraphPhase(phase)),
-                ));
-            }
-            UiEvent::CompactProgress {
-                stage,
-                current,
-                total,
-            } => {
-                self.apply_agent_intent(AgentIntent::Conversation(
-                    ConversationIntent::SetCompactProgress(SetCompactProgress {
-                        stage,
-                        current,
-                        total,
-                    }),
-                ));
-            }
             UiEvent::ModelSwitched { result } => {
-                // #497：模型切换走事件流，TUI 在此更新本地状态（与原 slash.rs RPC 路径对齐）。
                 if result.context_window > 0 {
                     self.apply_agent_intent(AgentIntent::RuntimePresentation(
                         RuntimePresentationIntent::ContextSize(result.context_window as u64),

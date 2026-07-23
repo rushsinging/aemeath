@@ -1,3 +1,4 @@
+use crate::tui::adapter::event_mapping::chat_message;
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 
 pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
@@ -93,25 +94,39 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             last_input,
             elapsed_secs,
         },
-        sdk::ChatEvent::TurnStarted { messages } => UiEvent::TurnStarted { messages },
+        sdk::ChatEvent::TurnStarted { messages } => UiEvent::TurnStarted {
+            messages: messages.into_iter().map(chat_message).collect(),
+        },
         sdk::ChatEvent::MicrocompactDone {
             messages,
             cleared_count,
         } => UiEvent::MicrocompactDone {
-            messages,
+            messages: messages.into_iter().map(chat_message).collect(),
             cleared_count,
         },
-        sdk::ChatEvent::StopHookBlocked { messages } => UiEvent::StopHookBlocked { messages },
-        sdk::ChatEvent::PostToolExecutionSync { messages } => {
-            UiEvent::PostToolExecutionSync { messages }
-        }
-        sdk::ChatEvent::ApiError { messages, error } => UiEvent::ApiError { messages, error },
-        sdk::ChatEvent::CompactRollback { messages } => UiEvent::CompactRollback { messages },
-        sdk::ChatEvent::CompactFinished { messages } => UiEvent::CompactFinished { messages },
-        sdk::ChatEvent::UserMessagesAdopted { items, queued } => {
-            UiEvent::UserMessagesAdopted { items, queued }
-        }
-        sdk::ChatEvent::UserMessagesQueued { queued } => UiEvent::UserMessagesQueued { queued },
+        sdk::ChatEvent::StopHookBlocked { messages } => UiEvent::StopHookBlocked {
+            messages: messages.into_iter().map(chat_message).collect(),
+        },
+        sdk::ChatEvent::PostToolExecutionSync { messages } => UiEvent::PostToolExecutionSync {
+            messages: messages.into_iter().map(chat_message).collect(),
+        },
+        sdk::ChatEvent::ApiError { messages, error } => UiEvent::ApiError {
+            messages: messages.into_iter().map(chat_message).collect(),
+            error,
+        },
+        sdk::ChatEvent::CompactRollback { messages } => UiEvent::CompactRollback {
+            messages: messages.into_iter().map(chat_message).collect(),
+        },
+        sdk::ChatEvent::CompactFinished { messages } => UiEvent::CompactFinished {
+            messages: messages.into_iter().map(chat_message).collect(),
+        },
+        sdk::ChatEvent::UserMessagesAdopted { items, queued } => UiEvent::UserMessagesAdopted {
+            items: items.into_iter().map(chat_message).collect(),
+            queued: queued.into_iter().map(chat_message).collect(),
+        },
+        sdk::ChatEvent::UserMessagesQueued { queued } => UiEvent::UserMessagesQueued {
+            queued: queued.into_iter().map(chat_message).collect(),
+        },
         sdk::ChatEvent::Done { context } => UiEvent::Done {
             context: context.into(),
         },
@@ -223,7 +238,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             session_id,
             created_at,
         } => UiEvent::SessionResumed {
-            messages,
+            messages: messages.into_iter().map(chat_message).collect(),
             session_id,
             created_at,
         },

@@ -1,5 +1,9 @@
 use super::*;
 use crate::tui::adapter::agent_event::sanitize::TOOL_STREAM_PREVIEW_LIMIT;
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiMessageSource, TuiStopHookFeedback};
+use crate::tui::adapter::tui_runtime_event::{
+    TuiHookEvent, TuiHookMessage, TuiHookMessageKind, TuiHookStatus, TuiRuntimeEvent,
+};
 use crate::tui::app::event::UiTurnContext;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
 use serde_json::Value;
@@ -320,9 +324,10 @@ fn test_sanitize_partial_json_truncates() {
 mod started_tests {
     use super::*;
     use crate::tui::app::event::UiTurnContext;
-    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId as TuiToolCallId};
     use sdk::AgentProgressEventView;
     use sdk::AgentProgressKindView;
+    use sdk::ToolCallId as SdkToolCallId;
 
     fn ctx() -> UiTurnContext {
         UiTurnContext {
@@ -334,7 +339,7 @@ mod started_tests {
     fn started_event(role: Option<&str>, model: &str) -> UiEvent {
         UiEvent::AgentProgress {
             context: ctx(),
-            tool_id: ToolCallId::new("tool-1"),
+            tool_id: SdkToolCallId::new("tool-1"),
             event: AgentProgressEventView {
                 sequence: 0,
                 kind: AgentProgressKindView::Started {
@@ -347,10 +352,11 @@ mod started_tests {
 
     #[test]
     fn test_started_event_maps_to_update_agent_meta() {
-        let tool_id = ToolCallId::new("tool-1");
+        let sdk_tool_id = SdkToolCallId::new("tool-1");
+        let expected_tool_id = TuiToolCallId::new(sdk_tool_id.as_str());
         let ev = UiEvent::AgentProgress {
             context: ctx(),
-            tool_id: tool_id.clone(),
+            tool_id: sdk_tool_id,
             event: AgentProgressEventView {
                 sequence: 0,
                 kind: AgentProgressKindView::Started {
@@ -370,7 +376,7 @@ mod started_tests {
             }) => {
                 assert_eq!(role.as_deref(), Some("coder"));
                 assert_eq!(model, "Zhipu/glm-5.2");
-                assert_eq!(got_id, &tool_id);
+                assert_eq!(got_id, &expected_tool_id);
             }
             other => panic!("expected UpdateAgentMeta, got {other:?}"),
         }
@@ -393,7 +399,7 @@ mod started_tests {
     fn test_agent_progress_tool_calls_use_tool_display_headers() {
         let ev = UiEvent::AgentProgress {
             context: ctx(),
-            tool_id: ToolCallId::new("agent-tool"),
+            tool_id: SdkToolCallId::new("agent-tool"),
             event: AgentProgressEventView {
                 sequence: 1,
                 kind: AgentProgressKindView::ToolCalls {
@@ -427,7 +433,7 @@ mod started_tests {
     fn test_agent_progress_tool_calls_keep_each_tool_on_separate_line() {
         let ev = UiEvent::AgentProgress {
             context: ctx(),
-            tool_id: ToolCallId::new("agent-tool"),
+            tool_id: SdkToolCallId::new("agent-tool"),
             event: AgentProgressEventView {
                 sequence: 1,
                 kind: AgentProgressKindView::ToolCalls {
@@ -465,7 +471,7 @@ mod started_tests {
     fn test_agent_progress_unknown_tool_fallback_truncates_json_and_ends_with_newline() {
         let ev = UiEvent::AgentProgress {
             context: ctx(),
-            tool_id: ToolCallId::new("agent-tool"),
+            tool_id: SdkToolCallId::new("agent-tool"),
             event: AgentProgressEventView {
                 sequence: 1,
                 kind: AgentProgressKindView::ToolCalls {
@@ -494,7 +500,7 @@ mod started_tests {
     fn test_non_started_event_maps_to_record_agent_progress() {
         let ev = UiEvent::AgentProgress {
             context: ctx(),
-            tool_id: ToolCallId::new("tool-1"),
+            tool_id: SdkToolCallId::new("tool-1"),
             event: AgentProgressEventView {
                 sequence: 1,
                 kind: AgentProgressKindView::Message {
@@ -515,7 +521,7 @@ mod started_tests {
     fn test_agent_progress_tool_output_is_not_rendered_as_activity() {
         let ev = UiEvent::AgentProgress {
             context: ctx(),
-            tool_id: ToolCallId::new("tool-1"),
+            tool_id: SdkToolCallId::new("tool-1"),
             event: AgentProgressEventView {
                 sequence: 2,
                 kind: AgentProgressKindView::ToolOutput {
@@ -535,24 +541,28 @@ mod started_tests {
 
 #[test]
 fn test_stop_hook_blocked_maps_to_blocked_hook_notice() {
-    let reminder = sdk::ChatMessage::system_generated_user_text(
-        "<system-reminder>Stop hook blocked stopping.</system-reminder>",
-    );
-    let mut messages = vec![sdk::ChatMessage::user_text("user input"), reminder];
-    messages[1].metadata = Some(sdk::ChatMessageMetadata {
-        source: sdk::ChatMessageSource::StopHook,
-        stop_hook: Some(sdk::StopHookFeedbackView {
-            summary: "Stop hook blocked stopping.".to_string(),
-            command: ".agents/hooks/check-agent-stop.sh".to_string(),
-            exit_code: Some(2),
-            reason: "exit code 2: blocked".to_string(),
-            stdout_preview: "short stdout".to_string(),
-            stderr_preview: "short stderr".to_string(),
-            stdout_truncated: false,
-            stderr_truncated: false,
-            output_file: Some("/tmp/stop-hook-output.txt".to_string()),
-        }),
-    });
+    let messages = vec![
+        TuiChatMessage::user_text("user input"),
+        TuiChatMessage {
+            role: "user".to_string(),
+            content: vec![crate::tui::adapter::runtime_view::TuiContentBlock::text(
+                "<system-reminder>Stop hook blocked stopping.</system-reminder>",
+            )],
+            input_id: None,
+            source: TuiMessageSource::StopHook,
+            stop_hook: Some(TuiStopHookFeedback {
+                summary: "Stop hook blocked stopping.".to_string(),
+                command: ".agents/hooks/check-agent-stop.sh".to_string(),
+                exit_code: Some(2),
+                reason: "exit code 2: blocked".to_string(),
+                stdout_preview: "short stdout".to_string(),
+                stderr_preview: "short stderr".to_string(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+                output_file: Some("/tmp/stop-hook-output.txt".to_string()),
+            }),
+        },
+    ];
 
     let mapping = map_agent_event(&UiEvent::StopHookBlocked { messages });
 
@@ -572,12 +582,14 @@ fn test_stop_hook_blocked_maps_to_blocked_hook_notice() {
 
 #[test]
 fn stop_hook_notice_reports_line_preview_truncation_and_output_file() {
-    let reminder =
-        sdk::ChatMessage::system_generated_user_text("<system-reminder>blocked</system-reminder>");
-    let mut messages = vec![reminder];
-    messages[0].metadata = Some(sdk::ChatMessageMetadata {
-        source: sdk::ChatMessageSource::StopHook,
-        stop_hook: Some(sdk::StopHookFeedbackView {
+    let messages = vec![TuiChatMessage {
+        role: "user".to_string(),
+        content: vec![crate::tui::adapter::runtime_view::TuiContentBlock::text(
+            "<system-reminder>blocked</system-reminder>",
+        )],
+        input_id: None,
+        source: TuiMessageSource::StopHook,
+        stop_hook: Some(TuiStopHookFeedback {
             summary: "blocked".to_string(),
             command: "check.sh".to_string(),
             exit_code: Some(2),
@@ -588,7 +600,7 @@ fn stop_hook_notice_reports_line_preview_truncation_and_output_file() {
             stderr_truncated: true,
             output_file: Some("/tmp/full-stop-hook.txt".to_string()),
         }),
-    });
+    }];
 
     let mapping = map_agent_event(&UiEvent::StopHookBlocked { messages });
 
@@ -606,7 +618,7 @@ fn stop_hook_notice_reports_line_preview_truncation_and_output_file() {
 #[test]
 fn test_stop_hook_blocked_without_stop_hook_message_does_not_render_notice() {
     let mapping = map_agent_event(&UiEvent::StopHookBlocked {
-        messages: vec![sdk::ChatMessage::user_text("user input")],
+        messages: vec![TuiChatMessage::user_text("user input")],
     });
 
     assert!(mapping.conversation.is_empty());
@@ -622,9 +634,9 @@ fn test_stop_hook_blocked_without_stop_hook_message_does_not_render_notice() {
 
 #[test]
 fn test_blocked_stop_hook_event_is_suppressed_until_stop_hook_notice() {
-    let mapping = map_agent_event(&UiEvent::HookEvent(sdk::HookEventView {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
         hook_name: "Stop".to_string(),
-        status: sdk::HookEventStatus::Blocked,
+        status: TuiHookStatus::Blocked,
         matcher: None,
         command: None,
         result: None,
@@ -635,12 +647,12 @@ fn test_blocked_stop_hook_event_is_suppressed_until_stop_hook_notice() {
 
 #[test]
 fn test_hook_message_maps_to_info_notice_with_typed_metadata() {
-    let mapping = map_agent_event(&UiEvent::HookMessage(sdk::HookMessageView {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::HookMessage(TuiHookMessage {
         point: "PreToolUse".to_string(),
         source: "matcher:Bash".to_string(),
         execution_ordinal: 2,
         attempt: 3,
-        kind: sdk::HookMessageKindView::AdditionalContext,
+        kind: TuiHookMessageKind::AdditionalContext,
         text: "Use the checked-in formatter.".to_string(),
     }));
 
@@ -656,12 +668,12 @@ fn test_hook_message_maps_to_info_notice_with_typed_metadata() {
 
 #[test]
 fn test_hook_message_with_empty_text_is_not_rendered() {
-    let mapping = map_agent_event(&UiEvent::HookMessage(sdk::HookMessageView {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::HookMessage(TuiHookMessage {
         point: "PreToolUse".to_string(),
         source: "matcher:Bash".to_string(),
         execution_ordinal: 0,
         attempt: 1,
-        kind: sdk::HookMessageKindView::SystemMessage,
+        kind: TuiHookMessageKind::SystemMessage,
         text: " <system-reminder>\n</system-reminder> ".to_string(),
     }));
 

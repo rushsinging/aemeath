@@ -1,12 +1,11 @@
-use super::block::{HookNoticeContent, HookNoticeKind};
-use super::system_reminder::strip_system_reminder_envelope;
+use super::{
+    block::{HookNoticeContent, HookNoticeKind},
+    system_reminder::strip_system_reminder_envelope,
+};
+use crate::tui::adapter::runtime_view::TuiChatMessage;
 
-pub fn stop_hook_notice_content(message: &sdk::ChatMessage) -> HookNoticeContent {
-    if let Some(payload) = message
-        .metadata
-        .as_ref()
-        .and_then(|metadata| metadata.stop_hook.as_ref())
-    {
+pub fn stop_hook_notice_content(message: &TuiChatMessage) -> HookNoticeContent {
+    if let Some(payload) = message.stop_hook.as_ref() {
         let mut details = vec![format!("Command: {}", payload.command)];
         if let Some(exit_code) = payload.exit_code {
             details.push(format!("Exit code: {exit_code}"));

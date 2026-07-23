@@ -1,4 +1,8 @@
 //! 聊天相关纯数据状态
+//!
+//! start_tool_activity/register_tool_call/has_active_tool_call 是 #943 阶段 3
+//! 后的死代码（Runtime 事件不再走 update_ui），#944 5B 物理删除。
+#![allow(dead_code)]
 
 /// 聊天会话的所有可变数据（不含视图组件 output_area）
 #[derive(Debug, Default)]
