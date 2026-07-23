@@ -526,7 +526,7 @@ impl App {
     pub(crate) fn status_view_model(&self) -> crate::tui::view_model::StatusViewModel {
         crate::tui::view_assembler::status::StatusViewAssembler::assemble_status_view(
             &self.model.conversation,
-            &self.model.config_provider,
+            &self.model.runtime_presentation,
             &self.model.workspace_provider,
             Some(&self.model.session),
             &self.model.diagnostic,

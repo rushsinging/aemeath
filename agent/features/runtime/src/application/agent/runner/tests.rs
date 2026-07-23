@@ -611,8 +611,9 @@ async fn run_agent_rejects_disabled_role_from_frozen_run_config() {
     config.api.timeout = 30;
     config.agents.roles.get_mut("coder").unwrap().enabled = false;
     let mut runner = test_runner(ProviderError::cancelled());
-    runner.config_reader =
-        FixedConfigReader::new(share::config::domain::snapshot::ConfigSnapshot::new(config));
+    runner.config_reader = Arc::new(FixedConfigReader::from_snapshot(
+        share::config::domain::snapshot::ConfigSnapshot::new(config),
+    ));
     let ctx = test_ctx();
 
     let result = runner
@@ -1134,7 +1135,7 @@ fn test_config_snapshot() -> share::config::domain::snapshot::ConfigSnapshot {
 }
 
 fn test_config_reader() -> Arc<dyn config::ConfigReader> {
-    FixedConfigReader::new(test_config_snapshot())
+    Arc::new(FixedConfigReader::from_snapshot(test_config_snapshot()))
 }
 
 fn test_runner(error: ProviderError) -> CliAgentRunner {

@@ -104,21 +104,21 @@ fn input_intent_marks_only_input_dirty() {
 }
 
 #[test]
-fn config_intent_updates_config_provider_and_marks_status_dirty() {
+fn runtime_presentation_intent_updates_model_and_marks_status_dirty() {
     let mut model = TuiModel::default();
 
     let result = reduce_intent(
         &mut model,
-        AgentIntent::Config(
-            crate::tui::model::config_provider::ConfigIntent::SetProviderModel {
+        AgentIntent::RuntimePresentation(
+            crate::tui::model::runtime_presentation::RuntimePresentationIntent::ProviderModel {
                 provider: Some("anthropic".to_string()),
                 model_id: Some("claude-opus".to_string()),
             },
         ),
     );
 
-    assert_eq!(model.config_provider.provider(), Some("anthropic"));
-    assert_eq!(model.config_provider.model_id(), Some("claude-opus"));
+    assert_eq!(model.runtime_presentation.provider(), Some("anthropic"));
+    assert_eq!(model.runtime_presentation.model_id(), Some("claude-opus"));
     assert!(result.dirty.status);
 }
 

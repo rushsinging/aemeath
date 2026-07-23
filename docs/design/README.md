@@ -1,6 +1,6 @@
 # docs/design/
 
-> 本目录是 aemeath 的**设计真相源**。自 v0.1.0（#743 DDD 重构）起，采用**三层信息架构**：`01-system` 总体战略 → `02-modules` 模块战术 → `03-engineering` 横切工程。**设计文档只记录目标态（Target），不记录当前代码状态**——旧路径、退役清单与迁移进度集中在 `03-engineering/migration-governance`，避免设计内容与实现现状混淆。
+> 本目录是 aemeath 的**设计真相源**。自 v0.1.0（#743 DDD 重构）起，采用**三层信息架构**：`01-system` 总体战略 → `02-modules` 模块战术 → `03-engineering` 工程守则。**设计文档只记录目标态（Target），不记录当前代码状态**——旧路径、退役清单与迁移进度集中在 `03-engineering/migration-governance`，避免设计内容与实现现状混淆。
 
 ## 三层信息架构
 
@@ -8,18 +8,20 @@
 |---|---|---|
 | **01 · 系统级** | [`01-system/`](01-system/) | 产品与领域、统一语言、上下文地图、系统架构、依赖规则、代码组织 |
 | **02 · 模块级** | [`02-modules/`](02-modules/) | 各 BC 战术设计（聚合 / 不变量 / 领域服务 / 公开 façade / 真实外部 seam） |
-| **03 · 横切** | [`03-engineering/`](03-engineering/) | 架构守卫、agent 工程、reasoning graph、可观测性、迁移治理 |
+| **03 · 工程守则** | [`03-engineering/`](03-engineering/) | 架构守卫、Agent 编排设计、测试架构与覆盖率治理、迁移治理 |
 
 ## 01-system 导航
 
-| 文档 | 角色 |
-|---|---|
-| [01-product-and-domain.md](01-system/01-product-and-domain.md) | 产品目标、核心问题、子域三分类、15 BC 责任章程与判断规则 |
-| [02-ubiquitous-language.md](01-system/02-ubiquitous-language.md) | 统一语言术语表、术语辨析 |
-| [03-context-map.md](01-system/03-context-map.md) | 15 BC 集成关系（C/S · ACL · Pub/Sub · OHS · PL · SK）、交付层、Future 预留 |
-| [04-system-architecture.md](01-system/04-system-architecture.md) | capability-first 模块化单体 + 选择性 Hexagonal seam + 唯一组合根 + crate 映射 + 传输透明 |
-| [05-dependency-rules.md](01-system/05-dependency-rules.md) | Clean 策略 / 细节依赖方向、7 条依赖铁律、跨能力边界、Agent 执行生命周期状态机原则 |
-| [06-code-organization.md](01-system/06-code-organization.md) | 系统级代码组织真相：能力优先、用例共置、按需 port 与渐进 crate 边界 |
+详见 [`01-system/README.md`](01-system/README.md)。
+
+| # | 文档 | 内容 |
+|---|---|---|
+| 01 | [产品与领域](01-system/01-product-and-domain.md) | 产品目标、核心问题、子域三分类、15 BC 责任章程与判断规则 |
+| 02 | [统一语言](01-system/02-ubiquitous-language.md) | 统一语言术语表、术语辨析 |
+| 03 | [上下文地图](01-system/03-context-map.md) | 15 BC 集成关系（C/S · ACL · Pub/Sub · OHS · PL · SK）、交付层、Future 预留 |
+| 04 | [系统架构](01-system/04-system-architecture.md) | capability-first 模块化单体 + 选择性 Hexagonal seam + 唯一组合根 + crate 映射 + 传输透明 |
+| 05 | [依赖规则](01-system/05-dependency-rules.md) | Clean 策略 / 细节依赖方向、7 条依赖铁律、跨能力边界、Agent 执行生命周期状态机原则 |
+| 06 | [代码组织](01-system/06-code-organization.md) | 系统级代码组织真相：能力优先、用例共置、按需 port 与渐进 crate 边界 |
 
 ## 迁移治理入口
 
@@ -58,6 +60,10 @@
 
 ## 相关文档
 
+- 系统级设计索引：[01-system/README.md](01-system/README.md)
+- 产品与领域：[01-system/01-product-and-domain.md](01-system/01-product-and-domain.md)
+- 统一语言：[01-system/02-ubiquitous-language.md](01-system/02-ubiquitous-language.md)
+- 上下文地图：[01-system/03-context-map.md](01-system/03-context-map.md)
 - 系统架构：[01-system/04-system-architecture.md](01-system/04-system-architecture.md)
 - 依赖规则与铁律：[01-system/05-dependency-rules.md](01-system/05-dependency-rules.md)
 - 代码组织规范：[01-system/06-code-organization.md](01-system/06-code-organization.md)
@@ -79,3 +85,4 @@
 | 2026-07-12 | 阅读路径新增 Policy/Hook/Audit 战术设计入口 | #790 |
 | 2026-07-12 | 三层设计导航交叉引用收敛，并统一指向对应 Target 文档 | #743 |
 | 2026-07-14 | 注册系统级代码组织真相源，更新架构与依赖阅读路径，移除 Target 导航中的迁移进度复刻 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 新增 `01-system/README.md` 索引，补全相关文档中缺失的 01-03 链接 | #972 |

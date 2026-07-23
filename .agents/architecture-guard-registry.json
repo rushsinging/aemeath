@@ -9,6 +9,22 @@
   },
   "entries": [
     {
+      "id": "policy.composition.cross-bc-construction-ownership",
+      "guard": "check-composition-construction-ownership.sh",
+      "module": "composition",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/composition/src"
+      },
+      "classification": "target_capability_policy",
+      "owner": "composition",
+      "reason": "Composition is the sole production construction root for the completed Context Session, Config override, Runtime Tool and Hook adapter boundaries",
+      "tracking_issue": 1296,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent aggregate policy that preserves all four leaf ownership boundaries",
+      "status": "active"
+    },
+    {
       "id": "policy.context.session-project-scope",
       "guard": "check-session-project-scope.sh",
       "module": "context",

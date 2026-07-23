@@ -83,14 +83,20 @@ pub(crate) async fn run_chat(args: Args) {
         } else {
             "AskMe"
         });
-        app.apply_agent_intent(crate::tui::update::intent::AgentIntent::Config(
-            crate::tui::model::config_provider::ConfigIntent::SetContextSize(
-                bootstrap.context_size as u64,
+        app.apply_agent_intent(
+            crate::tui::update::intent::AgentIntent::RuntimePresentation(
+                crate::tui::model::runtime_presentation::RuntimePresentationIntent::ContextSize(
+                    bootstrap.context_size as u64,
+                ),
             ),
-        ));
-        app.apply_agent_intent(crate::tui::update::intent::AgentIntent::Config(
-            crate::tui::model::config_provider::ConfigIntent::SetThinking(bootstrap.thinking),
-        ));
+        );
+        app.apply_agent_intent(
+            crate::tui::update::intent::AgentIntent::RuntimePresentation(
+                crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking(
+                    bootstrap.thinking,
+                ),
+            ),
+        );
         app.run(bootstrap.client, initial_resume_id)
             .await
             .unwrap_or_else(|e| {

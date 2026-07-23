@@ -1,5 +1,4 @@
 use share::config::domain::snapshot::ConfigSnapshot;
-use std::sync::Arc;
 use tokio::sync::watch;
 
 pub struct FixedConfigReader {
@@ -7,8 +6,8 @@ pub struct FixedConfigReader {
 }
 
 impl FixedConfigReader {
-    pub fn new(snapshot: ConfigSnapshot) -> Arc<dyn config::ConfigReader> {
-        Arc::new(Self { snapshot })
+    pub fn from_snapshot(snapshot: ConfigSnapshot) -> Self {
+        Self { snapshot }
     }
 }
 

@@ -1,32 +1,32 @@
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ConfigIntent {
-    SetProviderModel {
+pub enum RuntimePresentationIntent {
+    ProviderModel {
         provider: Option<String>,
         model_id: Option<String>,
     },
-    SetContextSize(u64),
-    SetThinking(bool),
+    ContextSize(u64),
+    Thinking(bool),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ConfigChange {
-    ProviderModelChanged {
+pub enum RuntimePresentationChange {
+    ProviderModel {
         provider: Option<String>,
         model_id: Option<String>,
     },
-    ContextSizeChanged(u64),
-    ThinkingChanged(bool),
+    ContextSize(u64),
+    Thinking(bool),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConfigProvider {
+pub struct RuntimePresentation {
     provider: Option<String>,
     model_id: Option<String>,
     context_size: u64,
     thinking: bool,
 }
 
-impl Default for ConfigProvider {
+impl Default for RuntimePresentation {
     fn default() -> Self {
         Self {
             provider: None,
@@ -37,7 +37,7 @@ impl Default for ConfigProvider {
     }
 }
 
-impl ConfigProvider {
+impl RuntimePresentation {
     pub(crate) fn provider(&self) -> Option<&str> {
         self.provider.as_deref()
     }
@@ -54,25 +54,25 @@ impl ConfigProvider {
         self.thinking
     }
 
-    pub(crate) fn apply(&mut self, intent: ConfigIntent) -> ConfigChange {
+    pub(crate) fn apply(&mut self, intent: RuntimePresentationIntent) -> RuntimePresentationChange {
         match intent {
-            ConfigIntent::SetProviderModel { provider, model_id } => {
+            RuntimePresentationIntent::ProviderModel { provider, model_id } => {
                 self.provider = provider.clone();
                 self.model_id = model_id.clone();
-                ConfigChange::ProviderModelChanged { provider, model_id }
+                RuntimePresentationChange::ProviderModel { provider, model_id }
             }
-            ConfigIntent::SetContextSize(context_size) => {
+            RuntimePresentationIntent::ContextSize(context_size) => {
                 self.context_size = context_size;
-                ConfigChange::ContextSizeChanged(context_size)
+                RuntimePresentationChange::ContextSize(context_size)
             }
-            ConfigIntent::SetThinking(thinking) => {
+            RuntimePresentationIntent::Thinking(thinking) => {
                 self.thinking = thinking;
-                ConfigChange::ThinkingChanged(thinking)
+                RuntimePresentationChange::Thinking(thinking)
             }
         }
     }
 }
 
 #[cfg(test)]
-#[path = "config_provider_tests.rs"]
+#[path = "runtime_presentation_tests.rs"]
 mod tests;

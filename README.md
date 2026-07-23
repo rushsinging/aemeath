@@ -4,13 +4,13 @@
 
 ## 设计导航
 
-设计真相按系统级、模块级与横切工程三层组织，完整索引见 [`docs/design/README.md`](docs/design/README.md)。
+设计真相按系统级、模块级与工程守则三层组织，完整索引见 [`docs/design/README.md`](docs/design/README.md)。
 
 | 层级 | 入口 | 角色 |
 |---|---|---|
-| **01 · 系统级** | [系统架构](docs/design/01-system/04-system-architecture.md) · [依赖规则](docs/design/01-system/05-dependency-rules.md) · [代码组织规范](docs/design/01-system/06-code-organization.md) | 整体架构形态、依赖方向与 capability-first 组织判据 |
+| **01 · 系统级** | [系统级设计索引](docs/design/01-system/README.md) | 产品与领域、统一语言、上下文地图、系统架构、依赖规则与代码组织 |
 | **02 · 模块级** | [模块设计索引](docs/design/02-modules/README.md) | 各能力的战术模型、公开 façade 与真实外部 seam |
-| **03 · 横切工程** | [架构守卫注册表](docs/design/03-engineering/01-architecture-guards.md) · [迁移治理](docs/design/03-engineering/03-migration-governance.md) | 可执行守卫的运行时真相与 Current → Target 追踪 |
+| **03 · 工程守则** | [工程守则索引](docs/design/03-engineering/README.md) | 架构守卫、Agent 编排设计、测试架构与覆盖率治理、迁移治理 |
 
 ## 项目结构
 
