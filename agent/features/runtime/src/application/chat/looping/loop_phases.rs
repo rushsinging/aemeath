@@ -39,6 +39,16 @@ where
             );
             sink.send_event(RuntimeStreamEvent::ConfigReloaded { changed_keys })
                 .await;
+            if scopes.contains(
+                &share::config::domain::scope::ConfigApplicationScope::SessionRestartRequired,
+            ) {
+                let message = match language {
+                    "zh" => "[config] 部分配置将在重启 Session 后生效。当前 Session 继续使用既有基础设施。",
+                    _ => "[config] Some configuration changes take effect after restarting the session. The current session keeps its existing infrastructure.",
+                };
+                sink.send_event(RuntimeStreamEvent::SystemMessage(message.to_string()))
+                    .await;
+            }
         }
         ConfigRefreshOutcome::Rejected { error } => {
             sink.send_event(RuntimeStreamEvent::SystemMessage(format!(

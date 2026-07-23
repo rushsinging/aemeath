@@ -264,7 +264,7 @@ fn build_compact_test_port<'a>(
         tool_execution: &harness.tool_execution,
         tool_context_binding: &harness.tool_context_binding,
         system_prompt_text: "system",
-        config_snapshot: &harness.config_snapshot,
+        run_config: &harness.run_config,
         context: &harness.coordinator,
         context_request: Some(request),
         context_window: window,
@@ -350,7 +350,7 @@ struct CompactHarness {
     memory_config: share::config::MemoryConfig,
     tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
-    config_snapshot: ConfigSnapshot,
+    run_config: crate::application::run_config::RunConfigSnapshot,
     hook_runner: Arc<dyn hook::HookPort>,
     workspace: project::WorkspaceViews,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
@@ -382,6 +382,8 @@ impl CompactHarness {
         let memory_config = share::config::MemoryConfig::default();
         let tool_result_materializer = crate::application::testing::test_tool_result_materializer();
         let config_snapshot = ConfigSnapshot::new(Config::default());
+        let run_config =
+            crate::application::run_config::RunConfigSnapshot::capture(config_snapshot.clone());
         let hook_events = HashMap::new();
         let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
             hook::build_dispatcher(
@@ -415,7 +417,7 @@ impl CompactHarness {
             reflection_history,
             memory_config,
             tool_result_materializer,
-            config_snapshot,
+            run_config,
             hook_runner,
             workspace,
             tool_catalog,

@@ -3,6 +3,7 @@ use super::logging::{
     build_json_logger_tool_result_data,
 };
 use super::progress::build_tool_calls_progress_event;
+use super::test_config_reader::FixedConfigReader;
 use super::*;
 use ::logging as scoped_logging;
 use async_trait::async_trait;
@@ -158,16 +159,10 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
                 ContextRecordingProvider { seen: seen.clone() },
             )),
         ),
-        api_timeout_secs: 30,
+        config_reader: test_config_reader(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        agents_config: test_agents_config(),
         hook_runner: noop_hook_port(),
         reasoning: false,
-        models_config: test_models_config(),
-        config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
-            share::config::Config::default(),
-        ),
-        language: "en".to_string(),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
@@ -1090,6 +1085,18 @@ fn test_models_config() -> Arc<share::config::ModelsConfig> {
     })
 }
 
+fn test_config_snapshot() -> share::config::domain::snapshot::ConfigSnapshot {
+    let mut config = share::config::Config::default();
+    config.agents = (*test_agents_config()).clone();
+    config.models = (*test_models_config()).clone();
+    config.api.timeout = 30;
+    share::config::domain::snapshot::ConfigSnapshot::new(config)
+}
+
+fn test_config_reader() -> Arc<dyn config::ConfigReader> {
+    FixedConfigReader::new(test_config_snapshot())
+}
+
 fn test_runner(error: ProviderError) -> CliAgentRunner {
     CliAgentRunner {
         factory: crate::application::testing::constant_factory(
@@ -1097,16 +1104,10 @@ fn test_runner(error: ProviderError) -> CliAgentRunner {
                 error,
             })),
         ),
-        api_timeout_secs: 30,
+        config_reader: test_config_reader(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        agents_config: test_agents_config(),
         hook_runner: noop_hook_port(),
         reasoning: false,
-        models_config: test_models_config(),
-        config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
-            share::config::Config::default(),
-        ),
-        language: "en".to_string(),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
@@ -1131,16 +1132,10 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
                 BlockingThenCancelledProvider { calls },
             )),
         ),
-        api_timeout_secs: 30,
+        config_reader: test_config_reader(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        agents_config: test_agents_config(),
         hook_runner: noop_hook_port(),
         reasoning: false,
-        models_config: test_models_config(),
-        config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
-            share::config::Config::default(),
-        ),
-        language: "en".to_string(),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),

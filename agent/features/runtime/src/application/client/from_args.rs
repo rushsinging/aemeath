@@ -360,9 +360,8 @@ pub async fn from_args_with_workspace(
     let memory: Arc<dyn memory::api::MemoryPort> = wiring.committed_memory();
 
     let agent_runner = build_agent_runner(
-        &snapshot,
+        wiring.config_reader(),
         provider_factory.clone(),
-        snapshot.api_timeout_secs(),
         hook_runner.clone(),
         runtime_settings.reasoning,
         active_run.clone(),

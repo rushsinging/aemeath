@@ -37,9 +37,8 @@ pub fn start_session(resume_session_id: Option<String>) -> String {
 
 #[allow(clippy::too_many_arguments)]
 pub fn build_agent_runner(
-    snapshot: &share::config::domain::snapshot::ConfigSnapshot,
+    config_reader: Arc<dyn config::ConfigReader>,
     factory: Arc<dyn ProviderFactory>,
-    api_timeout_secs: u64,
     hook_runner: Arc<dyn HookPort>,
     reasoning: bool,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
@@ -55,19 +54,12 @@ pub fn build_agent_runner(
     tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
 ) -> Arc<agent_runner::CliAgentRunner> {
-    let models_config = Arc::new(snapshot.models().clone());
-    let agents_config = Arc::new(snapshot.agents().clone());
-
     Arc::new(agent_runner::CliAgentRunner {
         factory,
         active_run,
-        agents_config,
+        config_reader,
         hook_runner,
         reasoning,
-        models_config,
-        config_snapshot: snapshot.clone(),
-        language: snapshot.language().to_string(),
-        api_timeout_secs,
         max_tool_concurrency,
         agent_semaphore,
         tool_result_materializer,
@@ -137,10 +129,11 @@ mod tests {
         let skill_wiring = tools::composition::wire_skills();
         let skill_materializer = skill_wiring.materializer();
         let snapshot = share::config::domain::snapshot::ConfigSnapshot::new(Config::default());
+        let config_reader =
+            crate::application::agent::runner::test_config_reader::FixedConfigReader::new(snapshot);
         let runner = build_agent_runner(
-            &snapshot,
+            config_reader,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
-            30,
             Arc::new(hook::build_dispatcher(&HooksConfig::default(), HashMap::new()).unwrap()),
             false,
             Arc::new(crate::application::active_run::ActiveRunRegistry::default()),

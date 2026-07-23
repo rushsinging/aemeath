@@ -25,11 +25,12 @@ pub(crate) async fn build_provider_binding_for_switch(
     let runtime_model = snapshot
         .resolve_runtime_model((!selection.trim().is_empty()).then_some(selection), None)
         .map_err(|e| e.to_string())?;
-    build_provider_binding_from_runtime_model(runtime_model, factory)
+    build_provider_binding_from_runtime_model(runtime_model, snapshot.api_timeout_secs(), factory)
 }
 
 fn build_provider_binding_from_runtime_model(
     runtime_model: share::config::models::ResolvedRuntimeModel,
+    api_timeout_secs: u64,
     factory: &dyn ProviderFactory,
 ) -> std::result::Result<(crate::ports::ProviderBinding, sdk::ModelSwitchResult), String> {
     let resolved_model = runtime_model.resolved_model().clone();
@@ -74,7 +75,7 @@ fn build_provider_binding_from_runtime_model(
         } else {
             None
         },
-        timeout: std::time::Duration::from_secs(provider::DEFAULT_TIMEOUT_SECS),
+        timeout: std::time::Duration::from_secs(api_timeout_secs),
     };
 
     let binding = factory.build(spec).map_err(|e| e.to_string())?;
