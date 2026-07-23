@@ -816,4 +816,210 @@ mod tests {
         assert!(text.len() < THRESHOLD);
         assert!(text.contains(&session_id));
     }
+
+    // ─── #1246: InteractionBridge resolve tests ───
+
+    use super::resolve_ask_user_via_bridge;
+    use crate::application::interaction::InteractionBridge;
+
+    fn dummy_interaction_suspension_call(
+        id: &str,
+    ) -> (ToolCall, tools::ToolSuspension, tools::AuthorizationContext) {
+        let call = ToolCall {
+            id: ToolCallId::from_legacy_or_new(id),
+            provider_id: format!("provider-{id}"),
+            name: "AskUserQuestion".to_string(),
+            index: 0,
+            input: serde_json::json!({"question": "test"}),
+        };
+        let suspension =
+            tools::ToolSuspension::UserInteraction(tools::UserInteractionSpec::new(vec![
+                tools::UserQuestion {
+                    prompt: "continue?".to_string(),
+                    options: vec![],
+                    allow_multi: false,
+                    allow_free_input: false,
+                    default: None,
+                },
+            ]));
+        (call, suspension, tools::AuthorizationContext::STANDARD)
+    }
+
+    #[tokio::test]
+    async fn bridge_reply_produces_tool_success() {
+        let bridge = Arc::new(InteractionBridge::new());
+        let sink = RecordingSink::default();
+        let hook_port: Arc<dyn HookPort> = Arc::new(NoOpHookPort);
+        let cancel = CancellationToken::new();
+        let run_id = sdk::RunId::new_v7();
+        let (call, suspension, auth) = dummy_interaction_suspension_call("call-reply");
+        let calls = [(&call, suspension, auth)];
+
+        let bridge_for_reply = bridge.clone();
+        let sink_for_reply = sink.clone();
+        let ctx = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let root = std::path::Path::new(".");
+
+        let results = tokio::select! {
+            results = resolve_ask_user_via_bridge(
+                &ctx,
+                &sink,
+                &hook_port,
+                &calls,
+                &cancel,
+                root,
+                &run_id,
+                &bridge,
+            ) => results,
+
+            // Auto-reply when InteractionRequested appears.
+            _ = async {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    let events = sink_for_reply.events.lock().unwrap();
+                    if let Some(RuntimeStreamEvent::InteractionRequested { request }) =
+                        events.iter().find(|e| {
+                            matches!(e, RuntimeStreamEvent::InteractionRequested { .. })
+                        })
+                    {
+                        let request_id = request.id.clone();
+                        drop(events);
+                        bridge_for_reply.reply(
+                          &request_id,
+                          sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("yes".into())]),
+                      );
+                      // Don't return — keep the branch alive so the resolver wins select!.
+                      tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                  }
+              }
+          } => Vec::new(),
+        };
+
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].outcome.is_error);
+        assert!(results[0].outcome.text.contains("yes"));
+    }
+
+    #[tokio::test]
+    async fn bridge_cancel_produces_tool_error() {
+        let bridge = Arc::new(InteractionBridge::new());
+        let sink = RecordingSink::default();
+        let hook_port: Arc<dyn HookPort> = Arc::new(NoOpHookPort);
+        let cancel = CancellationToken::new();
+        let run_id = sdk::RunId::new_v7();
+        let (call, suspension, auth) = dummy_interaction_suspension_call("call-cancel");
+        let calls = [(&call, suspension, auth)];
+
+        let bridge_for_cancel = bridge.clone();
+        let sink_for_cancel = sink.clone();
+        let ctx = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let root = std::path::Path::new(".");
+
+        let results = tokio::select! {
+            results = resolve_ask_user_via_bridge(
+                &ctx,
+                &sink,
+                &hook_port,
+                &calls,
+                &cancel,
+                root,
+                &run_id,
+                &bridge,
+            ) => results,
+
+            _ = async {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    let events = sink_for_cancel.events.lock().unwrap();
+                    if let Some(RuntimeStreamEvent::InteractionRequested { request }) =
+                        events.iter().find(|e| {
+                            matches!(e, RuntimeStreamEvent::InteractionRequested { .. })
+                        })
+                    {
+                        let request_id = request.id.clone();
+                        drop(events);
+                        bridge_for_cancel.cancel(&request_id, sdk::InteractionCancelReason::UserCancelled);
+                      // Don't return — keep the branch alive so the resolver wins select!.
+                      tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                  }
+                }
+            } => Vec::new(),
+        };
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].outcome.is_error);
+        assert!(results[0].outcome.text.contains("Cancelled"));
+    }
+
+    #[tokio::test]
+    async fn bridge_two_suspensions_serial() {
+        let bridge = Arc::new(InteractionBridge::new());
+        let sink = RecordingSink::default();
+        let hook_port: Arc<dyn HookPort> = Arc::new(NoOpHookPort);
+        let cancel = CancellationToken::new();
+        let run_id = sdk::RunId::new_v7();
+        let (call1, suspension1, auth1) = dummy_interaction_suspension_call("call-1");
+        let (call2, suspension2, auth2) = dummy_interaction_suspension_call("call-2");
+        let calls = [(&call1, suspension1, auth1), (&call2, suspension2, auth2)];
+
+        let bridge_for_reply = bridge.clone();
+        let sink_for_reply = sink.clone();
+        let ctx = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let root = std::path::Path::new(".");
+
+        let results = tokio::select! {
+            results = resolve_ask_user_via_bridge(
+                &ctx,
+                &sink,
+                &hook_port,
+                &calls,
+                &cancel,
+                root,
+                &run_id,
+                &bridge,
+            ) => results,
+
+            _ = async {
+                // Reply to each interaction as it appears.
+                for _ in 0..2 {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        let events = sink_for_reply.events.lock().unwrap();
+                        let pending = events.iter().rev().find(|e| {
+                            if let RuntimeStreamEvent::InteractionRequested { request } = e {
+                                bridge_for_reply.contains(&request.id)
+                            } else {
+                                false
+                            }
+                        });
+                        if let Some(RuntimeStreamEvent::InteractionRequested { request }) = pending {
+                            let request_id = request.id.clone();
+                            drop(events);
+                            bridge_for_reply.reply(
+                                &request_id,
+                                sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("ok".into())]),
+                            );
+                            break;
+                        }
+                    }
+                }
+                // Keep the auto-reply task alive until resolver finishes.
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            } => Vec::new(),
+        };
+
+        assert_eq!(results.len(), 2);
+        assert!(!results[0].outcome.is_error);
+        assert!(!results[1].outcome.is_error);
+
+        // Verify two InteractionRequested events were emitted (one per call).
+        let interaction_count = sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, RuntimeStreamEvent::InteractionRequested { .. }))
+            .count();
+        assert_eq!(interaction_count, 2);
+    }
 }
