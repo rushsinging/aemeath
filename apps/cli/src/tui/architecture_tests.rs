@@ -105,7 +105,7 @@ fn test_phase_two_bypass_mutation_paths_are_retired() {
 fn test_phase_three_batch_a_has_no_direct_context_apply() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/app/update");
 
-    for name in ["key.rs", "notice.rs", "ask_user_key.rs", "ui_event.rs"] {
+    for name in ["key.rs", "notice.rs", "ui_event.rs"] {
         let source =
             production_source(&fs::read_to_string(root.join(name)).expect("read update source"));
         let compact: String = source

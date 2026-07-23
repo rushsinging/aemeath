@@ -81,10 +81,6 @@ impl App {
             return handle_dialog_key(self, key).unwrap_or_else(UpdateResult::none);
         }
 
-        if let Some(result) = self.update_ask_user_key(key) {
-            return result;
-        }
-
         // Shift+Enter / Alt+Enter = insert newline
         if (key.code == KeyCode::Enter || key.code == KeyCode::Char('\n'))
             && key
