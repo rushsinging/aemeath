@@ -68,10 +68,38 @@ fn super_click_on_link_opens_url_without_starting_selection() {
 }
 
 #[test]
-fn non_super_modifier_does_not_open_link() {
+fn control_click_on_link_opens_url_without_starting_selection() {
     let mut app = app_with_link();
     let effects =
         app.handle_mouse_event(left_click(KeyModifiers::CONTROL), Rect::new(0, 0, 80, 10));
+
+    assert_eq!(
+        effects,
+        vec![Effect::OpenUrl {
+            url: "https://example.com/docs".into(),
+        }]
+    );
+    assert!(!app.view_state.output.is_selecting());
+}
+
+#[test]
+fn alt_click_on_link_opens_url_without_starting_selection() {
+    let mut app = app_with_link();
+    let effects = app.handle_mouse_event(left_click(KeyModifiers::ALT), Rect::new(0, 0, 80, 10));
+
+    assert_eq!(
+        effects,
+        vec![Effect::OpenUrl {
+            url: "https://example.com/docs".into(),
+        }]
+    );
+    assert!(!app.view_state.output.is_selecting());
+}
+
+#[test]
+fn plain_click_on_link_starts_selection_without_opening_url() {
+    let mut app = app_with_link();
+    let effects = app.handle_mouse_event(left_click(KeyModifiers::NONE), Rect::new(0, 0, 80, 10));
 
     assert!(effects.is_empty());
     assert!(app.view_state.output.is_selecting());

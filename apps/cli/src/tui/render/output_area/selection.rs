@@ -89,15 +89,10 @@ impl super::OutputArea {
         let line = self.document.iter_lines().nth(logic_idx)?;
         let gutter = line.gutter_cols;
         let content_col = rel_col.saturating_sub(gutter);
-        // plain 包含 gutter 前缀，但 link 偏移基于 content 部分（不含 gutter）。
-        // 截取 content 部分的 plain 子串做坐标转换。
-        let content_plain = if gutter > 0 {
-            line.plain.chars().skip(gutter).collect::<String>()
-        } else {
-            line.plain.clone()
-        };
+        // gutter 不进 plain（见 RenderedLine 文档与 apply_gutter_with_frame 实现），
+        // plain 只含 content 部分，link 偏移也基于 content。直接对 plain 做坐标转换。
         let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
-            &content_plain,
+            &line.plain,
             content_col,
         );
         let char_idx = char_col.as_usize();

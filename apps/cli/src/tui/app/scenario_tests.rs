@@ -6,6 +6,7 @@ mod driver;
 mod harness;
 mod input;
 mod interaction;
+mod links;
 mod p1;
 mod snapshot;
 mod startup;

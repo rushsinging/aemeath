@@ -475,10 +475,17 @@ impl App {
             return;
         }
 
-        // 本地相对路径：尝试基于 cwd 解析
+        // 本地相对路径：优先用 workspace_root / path_base 解析，回退到 session cwd
         let resolved = if !is_url && !std::path::Path::new(url).is_absolute() {
-            let cwd = std::env::current_dir().unwrap_or_default();
-            Some(cwd.join(url).to_string_lossy().into_owned())
+            let base = self
+                .model
+                .workspace_provider
+                .workspace_root()
+                .or_else(|| self.model.workspace_provider.path_base())
+                .or_else(|| self.model.workspace_provider.cwd())
+                .map(std::path::PathBuf::from)
+                .or_else(|| std::env::current_dir().ok());
+            base.map(|b| b.join(url).to_string_lossy().into_owned())
         } else {
             None
         };

@@ -300,6 +300,49 @@ mod tests {
     }
 
     #[test]
+    fn markdown_link_survives_render_pipeline() {
+        let lines = markdown(
+            "see [example](https://example.com) here",
+            Style::default(),
+            80,
+        );
+        assert_eq!(lines.len(), 1);
+        let line = &lines[0];
+        assert!(
+            line.links.iter().any(|ls| ls.url == "https://example.com"),
+            "links should survive markdown() render: got {:?}",
+            line.links
+        );
+    }
+
+    #[test]
+    fn markdown_link_survives_gutter() {
+        use crate::tui::render::output::gutter::apply_gutter;
+        use crate::tui::view_model::output::{OutputBlockKind, TextBlockView};
+        use crate::tui::view_model::style::SemanticStyle;
+
+        let lines = markdown(
+            "see [example](https://example.com) here",
+            Style::default(),
+            80,
+        );
+        let view = TextBlockView {
+            key: "t".into(),
+            text: "".into(),
+            style: SemanticStyle::Normal,
+        };
+        let gutted = apply_gutter(&OutputBlockKind::AssistantMessage(view), 0, lines);
+        assert!(
+            gutted[0]
+                .links
+                .iter()
+                .any(|ls| ls.url == "https://example.com"),
+            "links should survive gutter: got {:?}",
+            gutted[0].links
+        );
+    }
+
+    #[test]
     fn test_markdown_multiline_mixed_blocks() {
         // 多行混合：引用 + 列表 + 普通行各成独立渲染行。
         let lines = markdown("> quote\n- item\nplain", Style::default(), 80);
