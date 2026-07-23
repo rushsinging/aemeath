@@ -691,7 +691,65 @@ async fn task_captured_empty_clears_stale_live_tasks() {
     );
 }
 
-/// Resuming with `workspace: Missing` returns a typed error and changes nothing.
+/// 已删除的 worktree 仅降级到当前工作区，不能阻断会话内容恢复。
+#[tokio::test]
+async fn missing_persisted_workspace_falls_back_to_live_workspace_and_rewrites_snapshot() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let live_workspace = h.workspace_persist.snapshot();
+    let mut stale_workspace = live_workspace.clone();
+    let missing_root = h._tmp.path().join("deleted-worktree");
+    stale_workspace.workspace_root = missing_root.display().to_string();
+    stale_workspace.path_base = missing_root.display().to_string();
+
+    let session = session_with_workspace(
+        &stale_workspace,
+        SnapshotState::Captured(TaskSnapshot::empty()),
+    );
+
+    h.wiring
+        .resume_prepared(session)
+        .await
+        .expect("missing persisted workspace should fall back to live workspace");
+
+    assert_eq!(
+        h.workspace_persist.snapshot(),
+        live_workspace,
+        "live workspace must remain unchanged after fallback"
+    );
+    assert_eq!(
+        h.wiring.committed_session().workspace,
+        SnapshotState::Captured(live_workspace),
+        "committed session must replace the stale workspace snapshot"
+    );
+}
+
+#[tokio::test]
+async fn missing_cross_project_workspace_remains_rejected() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let pre_session_id = h.wiring.committed_session().id.clone();
+    let tmp2 = TempDir::new("missing-cross-project");
+    let mut stale_workspace = project::wire_production_workspace(tmp2.path().to_path_buf())
+        .unwrap()
+        .persist()
+        .snapshot();
+    let missing_root = tmp2.path().join("deleted-worktree");
+    stale_workspace.workspace_root = missing_root.display().to_string();
+    stale_workspace.path_base = missing_root.display().to_string();
+    let session = session_with_workspace(
+        &stale_workspace,
+        SnapshotState::Captured(TaskSnapshot::empty()),
+    );
+
+    let result = h.wiring.resume_prepared(session).await;
+    assert!(
+        matches!(result, Err(MainSessionError::ProjectMismatch)),
+        "missing cross-project workspace must remain rejected, got {result:?}"
+    );
+    assert_eq!(h.wiring.committed_session().id, pre_session_id);
+}
+
 #[tokio::test]
 async fn workspace_missing_returns_typed_error() {
     let _guard = git_lock().await;

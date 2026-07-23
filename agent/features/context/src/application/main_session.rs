@@ -536,7 +536,10 @@ impl MainSessionWiring {
     /// **Cross-project resume is forbidden.** The persisted workspace identity
     /// must match the current live workspace identity before any participant
     /// preparation; Git worktrees match by common-dir and non-git by root.
-    pub async fn resume_prepared(&self, session: CanonicalSession) -> Result<(), MainSessionError> {
+    pub async fn resume_prepared(
+        &self,
+        mut session: CanonicalSession,
+    ) -> Result<(), MainSessionError> {
         let _exclusive = self
             .gate
             .acquire_owned_exclusive()
@@ -552,7 +555,23 @@ impl MainSessionWiring {
         // The prepared identity is used by downstream Config/Memory only after
         // it has been proven to belong to the current stable project.
         let prepared_workspace: PreparedWorkspaceRestore = match &session.workspace {
-            SnapshotState::Captured(dto) => self.workspace_persist.prepare_restore(dto)?,
+            SnapshotState::Captured(dto) => match self.workspace_persist.prepare_restore(dto) {
+                Ok(prepared) => prepared,
+                Err(WorkspaceRestoreError::PathNotFound { .. }) => {
+                    let live_identity = self.workspace_read.project_identity();
+                    if !same_project_identity(&live_identity, &dto.project_identity) {
+                        return Err(MainSessionError::ProjectMismatch);
+                    }
+                    let live_workspace = self.workspace_persist.snapshot();
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "会话工作区已不存在，继续使用当前工作区"
+                    );
+                    session.workspace = SnapshotState::Captured(live_workspace.clone());
+                    self.workspace_persist.prepare_restore(&live_workspace)?
+                }
+                Err(error) => return Err(error.into()),
+            },
             SnapshotState::Missing | SnapshotState::CapturedEmpty => {
                 return Err(MainSessionError::WorkspaceMissing);
             }
