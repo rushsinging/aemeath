@@ -20,8 +20,32 @@ pub(crate) fn build_streaming_http_client_builder(_timeout_secs: u64) -> reqwest
 }
 
 impl OpenAICompatibleProvider {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, dead_code)]
     pub fn new(
+        config: OpenAIProviderConfig,
+        api_key: String,
+        base_url: Option<String>,
+        model: Option<String>,
+        max_tokens: u32,
+        reasoning: bool,
+        reasoning_config: Option<ReasoningConfig>,
+        timeout_secs: u64,
+    ) -> Self {
+        Self::new_with_user_agent(
+            config,
+            api_key,
+            base_url,
+            model,
+            max_tokens,
+            reasoning,
+            reasoning_config,
+            timeout_secs,
+            share::config::Config::default().api.user_agent,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_user_agent(
         config: OpenAIProviderConfig,
         api_key: String,
         base_url: Option<String>,
@@ -30,6 +54,7 @@ impl OpenAICompatibleProvider {
         _reasoning: bool,
         reasoning_config: Option<ReasoningConfig>,
         timeout_secs: u64,
+        user_agent: String,
     ) -> Self {
         let driver = driver_for_provider_driver(config.driver);
         let raw_base_url = base_url.unwrap_or_else(|| "https://api.openai.com".to_string());
@@ -51,7 +76,7 @@ impl OpenAICompatibleProvider {
             model: model.unwrap_or_else(|| "gpt-4o".to_string()),
             config,
             api_key,
-            user_agent: format!("aemeath/{}", share::version()),
+            user_agent,
             http: build_streaming_http_client_builder(timeout_secs)
                 .build()
                 .expect("failed to create HTTP client"),

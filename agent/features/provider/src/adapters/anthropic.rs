@@ -29,19 +29,40 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
+    #[allow(dead_code)]
     pub fn new(
+        api_key: String,
+        base_url: Option<String>,
+        model: Option<String>,
+        max_tokens: u32,
+        reasoning_level: crate::ports::ReasoningLevel,
+        timeout_secs: u64,
+    ) -> Self {
+        Self::new_with_user_agent(
+            api_key,
+            base_url,
+            model,
+            max_tokens,
+            reasoning_level,
+            timeout_secs,
+            share::config::Config::default().api.user_agent,
+        )
+    }
+
+    pub fn new_with_user_agent(
         api_key: String,
         base_url: Option<String>,
         model: Option<String>,
         _max_tokens: u32,
         _reasoning_level: crate::ports::ReasoningLevel,
         timeout_secs: u64,
+        user_agent: String,
     ) -> Self {
         Self {
             api_key,
             base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
             model: model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
-            user_agent: format!("aemeath/{}", share::version()),
+            user_agent,
             http: reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
                 .build()
@@ -245,6 +266,28 @@ mod tests {
         (format!("http://{addr}"), counter)
     }
 
+    #[test]
+    fn custom_user_agent_is_sent_in_anthropic_headers() {
+        let provider = AnthropicProvider::new_with_user_agent(
+            "test-key".to_string(),
+            None,
+            None,
+            8192,
+            ReasoningLevel::Off,
+            60,
+            "aemeath-test/1.0".to_string(),
+        );
+
+        assert_eq!(
+            provider
+                .build_headers()
+                .unwrap()
+                .get(reqwest::header::USER_AGENT)
+                .unwrap(),
+            "aemeath-test/1.0"
+        );
+    }
+
     #[tokio::test]
     async fn anthropic_invocation_stream_returns_non_retryable_rate_limited_error_after_one_request(
     ) {
@@ -314,6 +357,7 @@ mod tests {
                 reasoning: false,
                 reasoning_config: None,
                 timeout_secs: 60,
+                user_agent: None,
             })
             .expect("valid anthropic config");
         let scope =

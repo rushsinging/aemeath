@@ -120,6 +120,7 @@ impl AgentRunner for CliAgentRunner {
             requested_reasoning: level,
             context_window: (model_entry.context_window > 0).then_some(model_entry.context_window),
             timeout: std::time::Duration::from_secs(config_snapshot.api_timeout_secs()),
+            user_agent: config_snapshot.user_agent().to_string(),
         };
         let binding: Arc<ProviderBinding> = match self.factory.build(build_spec) {
             Ok(binding) => Arc::new(binding),
@@ -288,6 +289,7 @@ impl AgentRunner for CliAgentRunner {
                 memory.clone(),
                 guidance,
             )
+            .with_user_agent(config_snapshot.user_agent())
             .with_catalog(catalog)
             .with_progress(request_progress),
         );
@@ -423,6 +425,7 @@ impl AgentRunner for CliAgentRunner {
             requested_reasoning: provider::ReasoningLevel::Off,
             context_window: (model_entry.context_window > 0).then_some(model_entry.context_window),
             timeout: std::time::Duration::from_secs(config_snapshot.api_timeout_secs()),
+            user_agent: config_snapshot.user_agent().to_string(),
         };
         let binding = match self.factory.build(build_spec) {
             Ok(binding) => binding,

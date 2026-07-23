@@ -155,6 +155,10 @@ impl ConfigSnapshot {
         self.inner.api.provider.as_deref()
     }
 
+    pub fn user_agent(&self) -> &str {
+        &self.inner.api.user_agent
+    }
+
     pub fn api_timeout_secs(&self) -> u64 {
         self.inner.api.timeout
     }
@@ -379,6 +383,14 @@ mod tests {
     use super::*;
     use crate::config::models::ProviderModelsConfig;
     use crate::config::Config;
+
+    #[test]
+    fn user_agent_accessor_returns_configured_value() {
+        let mut config = Config::default();
+        config.api.user_agent = "aemeath-test/1.0".to_string();
+
+        assert_eq!(ConfigSnapshot::new(config).user_agent(), "aemeath-test/1.0");
+    }
 
     #[test]
     fn logging_accessors_publish_complete_static_settings() {

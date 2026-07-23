@@ -1,4 +1,25 @@
 #[test]
+fn custom_user_agent_is_sent_in_openai_headers() {
+    let config = OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::OpenAI, "openai");
+    let provider = OpenAICompatibleProvider::new_with_user_agent(
+        config,
+        "test-key".to_string(),
+        None,
+        Some("test-model".to_string()),
+        8192,
+        false,
+        None,
+        30,
+        "aemeath-test/1.0".to_string(),
+    );
+
+    assert_eq!(
+        provider.build_headers().unwrap().get(reqwest::header::USER_AGENT).unwrap(),
+        "aemeath-test/1.0"
+    );
+}
+
+#[test]
 fn minimax_provider_uses_max_completion_tokens_field() {
     let config =
         OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::Minimax, "minimax");

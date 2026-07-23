@@ -74,23 +74,39 @@ const SSE_CONNECT_TIMEOUT_SECS: u64 = 10;
 /// response acceptance is more reliable than a single long timeout.
 const SSE_REQUEST_TIMEOUT_SECS: u64 = 15;
 
-/// Build a reqwest client with optional custom headers and sane timeouts.
-pub fn build_http_client(headers: &HashMap<String, String>) -> Result<Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS))
-        .pool_max_idle_per_host(0); // disable connection pooling
-    if !headers.is_empty() {
-        let mut header_map = reqwest::header::HeaderMap::new();
-        for (key, value) in headers {
-            let name = reqwest::header::HeaderName::from_bytes(key.as_bytes())
-                .map_err(|e| format!("invalid header name '{key}': {e}"))?;
-            let val = reqwest::header::HeaderValue::from_str(value)
-                .map_err(|e| format!("invalid header value for '{key}': {e}"))?;
-            header_map.insert(name, val);
-        }
-        builder = builder.default_headers(header_map);
+fn default_headers(
+    default_user_agent: &str,
+    headers: &HashMap<String, String>,
+) -> Result<reqwest::header::HeaderMap, String> {
+    let mut header_map = reqwest::header::HeaderMap::new();
+    let has_explicit_user_agent = headers
+        .keys()
+        .any(|key| key.eq_ignore_ascii_case("user-agent"));
+    if !has_explicit_user_agent {
+        let value = reqwest::header::HeaderValue::from_str(default_user_agent)
+            .map_err(|error| format!("invalid default User-Agent: {error}"))?;
+        header_map.insert(reqwest::header::USER_AGENT, value);
     }
-    builder
+    for (key, value) in headers {
+        let name = reqwest::header::HeaderName::from_bytes(key.as_bytes())
+            .map_err(|e| format!("invalid header name '{key}': {e}"))?;
+        let val = reqwest::header::HeaderValue::from_str(value)
+            .map_err(|e| format!("invalid header value for '{key}': {e}"))?;
+        header_map.insert(name, val);
+    }
+    Ok(header_map)
+}
+
+/// Build a reqwest client with default User-Agent and optional custom headers.
+pub fn build_http_client(
+    default_user_agent: &str,
+    headers: &HashMap<String, String>,
+) -> Result<Client, String> {
+    let header_map = default_headers(default_user_agent, headers)?;
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(SSE_CONNECT_TIMEOUT_SECS))
+        .pool_max_idle_per_host(0)
+        .default_headers(header_map)
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))
 }
@@ -114,8 +130,21 @@ pub struct SseTransport {
 impl SseTransport {
     /// Connect to an SSE MCP server.
     pub async fn connect(sse_url: &str, headers: &HashMap<String, String>) -> Result<Self, String> {
-        let stream_client = build_http_client(headers)?;
-        let post_client = build_http_client(headers)?;
+        Self::connect_with_user_agent(
+            sse_url,
+            headers,
+            &share::config::Config::default().api.user_agent,
+        )
+        .await
+    }
+
+    pub async fn connect_with_user_agent(
+        sse_url: &str,
+        headers: &HashMap<String, String>,
+        user_agent: &str,
+    ) -> Result<Self, String> {
+        let stream_client = build_http_client(user_agent, headers)?;
+        let post_client = build_http_client(user_agent, headers)?;
 
         log::info!(target: crate::LOG_TARGET, "[MCP:SSE] connecting to {sse_url}");
 

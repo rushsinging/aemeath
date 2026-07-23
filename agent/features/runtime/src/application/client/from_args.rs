@@ -324,6 +324,7 @@ pub async fn from_args_with_workspace(
         context_window: (resolved_model.model.context_window > 0)
             .then_some(resolved_model.model.context_window),
         timeout: Duration::from_secs(snapshot.api_timeout_secs()),
+        user_agent: snapshot.user_agent().to_string(),
     };
     let binding = provider_factory
         .build(spec)

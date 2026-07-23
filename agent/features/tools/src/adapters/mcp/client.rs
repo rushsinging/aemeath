@@ -51,15 +51,28 @@ pub enum McpClient {
 }
 
 impl McpClient {
-    /// Connect to an MCP server using the configured transport.
-    pub async fn connect(name: &str, config: &McpServerConfig) -> Result<Self, String> {
+    pub async fn connect_with_user_agent(
+        name: &str,
+        config: &McpServerConfig,
+        user_agent: &str,
+    ) -> Result<Self, String> {
         let kind = config.transport_kind()?;
         match kind {
             McpTransportKind::Stdio => Self::connect_stdio(name, config).await,
             McpTransportKind::Sse | McpTransportKind::StreamableHttp => {
-                Self::connect_sse(name, config).await
+                Self::connect_sse_with_user_agent(name, config, user_agent).await
             }
         }
+    }
+
+    /// Connect to an MCP server using the configured transport.
+    pub async fn connect(name: &str, config: &McpServerConfig) -> Result<Self, String> {
+        Self::connect_with_user_agent(
+            name,
+            config,
+            &share::config::Config::default().api.user_agent,
+        )
+        .await
     }
 
     async fn connect_stdio(name: &str, config: &McpServerConfig) -> Result<Self, String> {
@@ -127,14 +140,19 @@ impl McpClient {
         Ok(client)
     }
 
-    async fn connect_sse(name: &str, config: &McpServerConfig) -> Result<Self, String> {
+    async fn connect_sse_with_user_agent(
+        name: &str,
+        config: &McpServerConfig,
+        user_agent: &str,
+    ) -> Result<Self, String> {
         let url = config
             .url
             .as_deref()
             .ok_or_else(|| "SSE MCP server requires url".to_string())?;
         validate_remote_url(url)?;
 
-        let transport = SseTransport::connect(url, &config.headers).await?;
+        let transport =
+            SseTransport::connect_with_user_agent(url, &config.headers, user_agent).await?;
 
         let client = Self::Sse {
             name: name.to_string(),

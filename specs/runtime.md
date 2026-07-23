@@ -8,7 +8,8 @@
 ## 配置应用边界（#1345）
 
 - Runtime **MUST** 在接纳真实用户输入、创建 Main Run 前调用 `ConfigReader::refresh_if_sources_changed()`；同一次 Run 内 **NEVER** 再 refresh。
-- Main Run 与每个新 Subagent Run **MUST** 捕获一个 `RunConfigSnapshot`；provider binding、`allow_all`、hooks、language、timeout 与 context size 随该 Run 固定。
+- Main Run 与每个新 Subagent Run **MUST** 捕获一个 `RunConfigSnapshot`；provider binding、WebSearch 的 HTTP `User-Agent`、`allow_all`、hooks、language、timeout 与 context size 随该 Run 固定。
+- `api.user_agent` 属于 `Run` scope：Provider 与 WebSearch 在下一 Run 使用冻结快照；当前 Run 不变。
 - Run Step 只从所属 `RunConfigSnapshot` 构造 `ContextRequest.config_snapshot`，**NEVER** 读取 `ConfigReader` / `ConfigQuery` 或配置文件。
 - `SessionRestartRequired` scope 仅标记 pending session revision；当前 TUI/logger/MCP/storage 基础设施保持不变，成功 session resume 后清除 pending 标记。
 

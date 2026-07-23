@@ -397,7 +397,7 @@ impl App {
     /// 使用 `force_check` 忽略缓存，确保每次启动都查最新状态。
     /// 失败时静默降级——版本检查不应影响正常使用。
     pub(crate) fn spawn_update_check(&self, ui_tx: mpsc::Sender<UiEvent>) {
-        let service = composition::update::wire_update();
+        let service = composition::update::wire_update(self.user_agent.clone());
         crate::tui::effect::spawn_guard::spawn_guarded("update_check", async move {
             match service.force_check().await {
                 Ok(check) if check.is_update_available => {
@@ -421,7 +421,7 @@ impl App {
     /// 在后台执行 perform_update，结果通过 UiEvent 回灌。
     async fn run_self_update_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
         self.append_system_notice("[checking for updates...]".to_string());
-        let service = composition::update::wire_update();
+        let service = composition::update::wire_update(self.user_agent.clone());
         let ui_tx = ui_tx.clone();
         crate::tui::effect::spawn_guard::spawn_guarded("self_update", async move {
             match service.perform_update().await {

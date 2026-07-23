@@ -435,6 +435,9 @@ impl ConfigValidator {
         {
             return Err(ConfigAdapterError::Invalid);
         }
+        if reqwest::header::HeaderValue::from_str(&config.api.user_agent).is_err() {
+            return Err(ConfigAdapterError::Invalid);
+        }
         Ok(())
     }
 }
@@ -600,6 +603,17 @@ mod tests {
         assert_eq!(ui.verbose, Some(true));
         assert_eq!(ui.color, Some(false));
         assert_eq!(patch.logging.unwrap().level.as_deref(), Some("debug"));
+    }
+
+    #[test]
+    fn config_validator_rejects_invalid_user_agent() {
+        let mut config = share::config::Config::default();
+        config.api.user_agent = "invalid\nuser-agent".to_string();
+
+        assert_eq!(
+            ConfigValidator::validate(&config),
+            Err(ConfigAdapterError::Invalid)
+        );
     }
 
     #[test]
