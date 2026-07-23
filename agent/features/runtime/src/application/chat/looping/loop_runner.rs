@@ -16,8 +16,7 @@ use crate::application::chat::looping::{
     ChatEventSink, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
     QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
-use crate::application::loop_engine::{run_loop, LoopDirective};
-use crate::domain::agent_run::{Run, RunSpec};
+use crate::domain::agent_run::RunSpec;
 use workflow::api::ReasoningSignal;
 
 use super::loop_context::ChatLoopContext;
@@ -595,13 +594,13 @@ where
                       }
                       port.run_input_buffer.push(event);
                   }
-                // #1280: Main Run creation, ActiveRun registration and shared
-                // run_loop invocation are owned by RunLauncher. First call
-                // creates the Run; AwaitUser re-entry uses reenter_run_loop
-                // with the returned Run.
+                // #1280: Main Run creation, ActiveRun registration, shared
+                // run_loop and cleanup are all owned by RunLauncher.
+                // await_user_input is handled inside MainRunPort (async park
+                // on input_events channel), so run_loop only returns Terminal.
                 let main_active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort> =
                     active_run.clone();
-                let (first_result, mut run) = logging::within(
+                let launch_result = logging::within(
                     logging::LogContextPatch {
                         turn: logging::FieldPatch::Set(turn_count),
                         ..logging::LogContextPatch::default()
@@ -618,123 +617,17 @@ where
                     ),
                 )
                 .await;
-                // Handle first result immediately.
-                let mut last_result = first_result;
-                loop {
-                    match last_result {
-                        crate::application::run_launcher::RunLaunchResult::Terminal => break,
-                        crate::application::run_launcher::RunLaunchResult::Failed(error) => {
-                            log::error!(target: crate::LOG_TARGET, "main shared run loop failed: {error}");
-                            break;
-                        }
-                        crate::application::run_launcher::RunLaunchResult::AwaitUser => {
-                            // #1272: run_loop may have drained control
-                            // events into pending_input during its
-                            // internal await_user_input call.  If
-                            // pending_input is already non-empty, break
-                            // immediately so the session idle gate can
-                            // process those events without blocking.
-                            if !port.pending_input.is_empty() {
-                                break;
-                            }
-
-                            // Wait for input within the same Run, but also
-                            // monitor the cancel token so that a cancel
-                            // request does not leave the session actor stuck
-                            // (#1272).
-                            //
-                            // UserMessage events are fed into the Run-scoped
-                            // buffer and the engine is re-entered.
-                            //
-                            // Non-UserMessage control events are pushed to
-                            // session pending_input and the AwaitUser inner
-                            // loop is exited so the session idle gate can
-                            // process them.
-                            //
-                            // Channel close (None) cleanly exits.
-                            //
-                            // #1272: biased select guarantees deterministic
-                            // input-first ordering.  Without biased, a fair
-                            // select could pick cancel over a ready
-                            // UserMessage, silently dropping it.  With
-                            // biased, a received UserMessage always enters
-                            // run_input_buffer first; cancel is then
-                            // detected on re-entry via handle_interrupt,
-                            // and drain_remaining_events routes the message
-                            // to pending_input for the next Run.
-                            let event = tokio::select! {
-                                biased;
-                                result = input_events.recv_next_input() => result,
-                                _ = cancel.cancelled() => {
-                                    // Cancel triggered: re-enter run_loop so
-                                    // the engine handles cancellation and
-                                    // returns Terminal.
-                                    last_result = logging::within(
-                                        logging::LogContextPatch {
-                                            turn: logging::FieldPatch::Set(turn_count),
-                                            ..logging::LogContextPatch::default()
-                                        },
-                                        crate::application::run_launcher::reenter_run_loop(
-                                            &mut run,
-                                            &cancel,
-                                            main_active_run.clone(),
-                                            &mut port,
-                                        ),
-                                    )
-                                    .await;
-                                    continue;
-                                }
-                            };
-                            match event {
-                                None => {
-                                    // Channel closed — clean exit
-                                    break;
-                                }
-                                Some(event) => {
-                                    match &event {
-                                        sdk::ChatInputEvent::UserMessage { .. } => {
-                                            port.run_input_buffer.push(event);
-                                            // Continue loop → re-enter run_loop
-                                        }
-                                        _ => {
-                                            port.pending_input.push(event);
-                                            // Non-UserMessage control events:
-                                            // exit the AwaitUser inner loop so
-                                            // the session idle gate processes
-                                            // them.  The engine is NOT
-                                            // re-entered directly — control
-                                            // commands take the session-level
-                                            // path through apply_gate.
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                match launch_result {
+                    crate::application::run_launcher::RunLaunchResult::Terminal => {}
+                    crate::application::run_launcher::RunLaunchResult::Failed(error) => {
+                        log::error!(target: crate::LOG_TARGET, "main shared run loop failed: {error}");
                     }
-                    // Re-enter run_loop with the same Run after receiving user input.
-                    last_result = logging::within(
-                        logging::LogContextPatch {
-                            turn: logging::FieldPatch::Set(turn_count),
-                            ..logging::LogContextPatch::default()
-                        },
-                        crate::application::run_launcher::reenter_run_loop(
-                            &mut run,
-                            &cancel,
-                            main_active_run.clone(),
-                            &mut port,
-                        ),
-                    )
-                    .await;
                 }
-                // #1272: Return any remaining Run-scoped events (control commands
-                // buffered during execution) to the session idle gate. User messages
-                // should have been consumed within the Run; any leftovers are
-                // incidental.
+                // Return any remaining Run-scoped events (control commands
+                // buffered during await_user_input) to the session idle gate.
                 port.drain_remaining_events();
                 // Runtime 不保留跨 Run 的语义消息；已提交历史只存在于 Context backing。
                 messages.clear();
-                active_run.clear(&run_id);
             }
             // Session teardown first drains within a bounded grace period. If a
             // Reflection job is still active, shutdown cancels it and waits for

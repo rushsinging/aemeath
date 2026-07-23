@@ -315,6 +315,15 @@ async fn sub_logging_scopes_isolate_concurrent_roles_turns_and_restore_parent() 
 }
 
 #[test]
+fn sub_production_path_is_wired_to_run_launcher() {
+    let run = include_str!("loop_run.rs");
+    assert!(
+        run.contains("run_launcher::launch"),
+        "SubAgentRun::run_loop must call RunLauncher::launch"
+    );
+}
+
+#[test]
 fn sub_logging_path_uses_scopes_and_no_legacy_setters() {
     let setup = include_str!("setup.rs");
     let run = include_str!("loop_run.rs");

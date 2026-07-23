@@ -232,12 +232,11 @@ impl<'a> SubAgentRun<'a> {
         };
         let active_run = self.active_run.clone();
 
-        let (launch_result, _run) =
+        let launch_result =
             crate::application::run_launcher::launch(input, active_run, &mut self).await;
 
         let loop_result = match launch_result {
             crate::application::run_launcher::RunLaunchResult::Terminal => Ok(()),
-            crate::application::run_launcher::RunLaunchResult::AwaitUser => Ok(()),
             crate::application::run_launcher::RunLaunchResult::Failed(error) => Err(error),
         };
 
@@ -519,6 +518,24 @@ impl RunLoopPort for SubAgentRun<'_> {
         let epoch = self.next_epoch;
         self.next_epoch = epoch.next();
         Ok(crate::application::loop_engine::DrainOutcome::EmptyAndSealed { epoch })
+    }
+
+    /// #1280: Sub Agent 的 await_user_input 预留接口。
+    ///
+    /// 当前 Sub 使用 FixedInputBuffer，drain 后立即 seal，永不进入 AwaitingUser，
+    /// 因此此方法不可达。
+    ///
+    /// #1248 将注入 InteractionBridge 后激活：Sub 的 AskUserQuestion suspension
+    /// 会触发 AwaitingUser，此方法 async park 等 InteractionBridge oneshot。
+    async fn await_user_input(
+        &mut self,
+        _expected_epoch: crate::application::loop_engine::DrainEpoch,
+    ) -> Result<crate::application::loop_engine::DrainOutcome, LoopEngineError> {
+        Err(LoopEngineError::Adapter(
+            "Sub Agent 不支持 AwaitingUser（FixedInputBuffer 只 drain 一次即 seal）\
+             ; #1248 注入 InteractionBridge 后激活"
+                .to_string(),
+        ))
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {

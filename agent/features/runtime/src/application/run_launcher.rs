@@ -3,6 +3,10 @@
 //!
 //! Main 和 Sub 各自构造 `RunLaunchInput` + `RunLoopPort` adapter，调
 //! `RunLauncher::launch`，不自行创建 `Run` / cancel / registry。
+//!
+//! #1280: await_user_input 在 adapter 内部 async park（Main 等 channel，
+//! Sub 等 FixedInputBuffer），engine 在 await_interruptible 内消费。
+//! run_loop 只返回 Terminal。launcher 不需要 AwaitUser re-entry。
 
 use crate::application::loop_engine::{run_loop, LoopDirective, LoopEngineError, RunLoopPort};
 use crate::domain::agent_run::{ActiveRunPort, Run, RunId, RunSpec};
@@ -22,13 +26,11 @@ pub struct RunLaunchInput {
 pub enum RunLaunchResult {
     /// Run 正常终止（Completed / Failed / Terminated）。
     Terminal,
-    /// Run 进入 AwaitingUser，Run 归还 caller 做 re-entry。
-    AwaitUser,
     /// shared run_loop 返回引擎错误。
     Failed(LoopEngineError),
 }
 
-/// 唯一启动入口（首次创建 Run）。
+/// 唯一启动入口。
 ///
 /// 创建 `Run`、注册 ActiveRun、调用 shared `run_loop`、返回 typed result。
 /// Main/Sub 的所有 Run 生命周期启动经此函数。
@@ -36,46 +38,17 @@ pub async fn launch<P>(
     input: RunLaunchInput,
     active_run: Arc<dyn ActiveRunPort>,
     port: &mut P,
-) -> (RunLaunchResult, Run)
+) -> RunLaunchResult
 where
     P: RunLoopPort,
 {
     let mut run = Run::with_id(input.run_id, input.spec, input.parent_run_id);
-    let result = run_loop_with_registration(&mut run, &input.cancel, active_run, port).await;
-    (result, run)
-}
-
-/// Re-entry 入口（AwaitUser 后同一 Run 继续执行）。
-///
-/// 接受已有 `Run`，activate/clear + run_loop。
-/// Main session 的 AwaitUser re-entry 经此函数。
-pub async fn reenter_run_loop<P>(
-    run: &mut Run,
-    cancel: &CancellationToken,
-    active_run: Arc<dyn ActiveRunPort>,
-    port: &mut P,
-) -> RunLaunchResult
-where
-    P: RunLoopPort,
-{
-    run_loop_with_registration(run, cancel, active_run, port).await
-}
-
-async fn run_loop_with_registration<P>(
-    run: &mut Run,
-    cancel: &CancellationToken,
-    active_run: Arc<dyn ActiveRunPort>,
-    port: &mut P,
-) -> RunLaunchResult
-where
-    P: RunLoopPort,
-{
+    let cancel = input.cancel;
     let run_id = run.id().clone();
     active_run.activate(run_id.clone(), cancel.clone());
 
-    let result = match run_loop(run, cancel, port).await {
-        Ok(LoopDirective::Terminal) => RunLaunchResult::Terminal,
-        Ok(LoopDirective::AwaitUser) => RunLaunchResult::AwaitUser,
+    let result = match run_loop(&mut run, &cancel, port).await {
+        Ok(LoopDirective::Terminal) | Ok(LoopDirective::AwaitUser) => RunLaunchResult::Terminal,
         Err(error) => {
             log::error!(
                 target: crate::LOG_TARGET,
@@ -85,11 +58,7 @@ where
         }
     };
 
-    // #1280: Only clear registration on Terminal/Failed — AwaitUser keeps
-    // the Run alive for re-entry (reenter_run_loop will re-activate).
-    if !matches!(result, RunLaunchResult::AwaitUser) {
-        active_run.clear(&run_id);
-    }
+    active_run.clear(&run_id);
     result
 }
 
@@ -167,7 +136,7 @@ mod tests {
             cancel: CancellationToken::new(),
         };
 
-        let (result, _run) = launch(input, registry.clone(), &mut port).await;
+        let result = launch(input, registry.clone(), &mut port).await;
         assert!(matches!(result, RunLaunchResult::Terminal));
     }
 
