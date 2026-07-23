@@ -3,12 +3,14 @@ use crate::tui::effect::effect::Effect;
 use crate::tui::model::change::{dirty_from_model_changes, ModelChange};
 use crate::tui::model::conversation::change::ConversationChange;
 use crate::tui::model::root::TuiModel;
+use crate::tui::update::intent::AgentIntent;
 use crate::tui::view_state::ViewModelDirty;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct TuiUpdateResult {
     pub dirty: ViewModelDirty,
     pub effects: Vec<Effect>,
+    pub input_changes: Vec<crate::tui::model::input::change::InputChange>,
 }
 
 impl TuiUpdateResult {
@@ -34,6 +36,66 @@ impl TuiUpdateResult {
     }
 }
 
+pub(crate) fn reduce_intent(model: &mut TuiModel, intent: AgentIntent) -> TuiUpdateResult {
+    let mut result = TuiUpdateResult::default();
+
+    match intent {
+        AgentIntent::Conversation(intent) => {
+            let changes = model.conversation.apply(intent);
+            apply_conversation_changes(&mut result, &changes, &mut model.conversation.runtime);
+        }
+        AgentIntent::Config(intent) => {
+            model.config_provider.apply(intent);
+            result.dirty.mark_status();
+        }
+        AgentIntent::Input(intent) => {
+            result.input_changes = model.input.apply(intent);
+            result.dirty.mark_input();
+        }
+        AgentIntent::Diagnostic(intent) => {
+            model.diagnostic.apply(intent);
+            result.dirty.mark_status();
+            result.dirty.mark_dialog();
+        }
+        AgentIntent::Session(intent) => {
+            model.session.apply(intent);
+            result.dirty.mark_status();
+        }
+        AgentIntent::Workspace(intent) => {
+            let change = model.workspace_provider.apply(intent);
+            apply_workspace_change(&mut result, change);
+        }
+    }
+
+    result.dedupe_render_requests();
+    if result.dirty.output || result.dirty.status || result.dirty.input || result.dirty.dialog {
+        result.push_render_request_once();
+    }
+    result
+}
+
+fn apply_workspace_change(
+    result: &mut TuiUpdateResult,
+    change: crate::tui::model::workspace_provider::WorkspaceChange,
+) {
+    result
+        .effects
+        .extend(crate::tui::update::coordinator::effects_for_workspace_change(&change));
+    match change {
+        crate::tui::model::workspace_provider::WorkspaceChange::CurrentChanged => {
+            result.dirty.mark_status();
+        }
+        crate::tui::model::workspace_provider::WorkspaceChange::SnapshotApplied { .. } => {
+            result.dirty.mark_status();
+            result.dirty.mark_output();
+        }
+        crate::tui::model::workspace_provider::WorkspaceChange::MetadataApplied { .. } => {
+            result.dirty.mark_status();
+        }
+        crate::tui::model::workspace_provider::WorkspaceChange::MetadataDiscarded { .. } => {}
+    }
+}
+
 pub(crate) fn reduce_agent_event(
     model: &mut TuiModel,
     mapping: AgentEventMapping,
@@ -52,7 +114,10 @@ pub(crate) fn reduce_agent_event(
         model.session.apply(intent);
         result.dirty.mark_status();
     }
-    result.effects.extend(mapping.effects);
+    for intent in mapping.workspace {
+        let change = model.workspace_provider.apply(intent);
+        apply_workspace_change(&mut result, change);
+    }
     result.dedupe_render_requests();
     if result.dirty.output || result.dirty.status || result.dirty.dialog {
         result.push_render_request_once();
@@ -66,6 +131,9 @@ fn apply_conversation_changes(
     runtime: &mut crate::tui::model::conversation::runtime_state::RuntimeState,
 ) {
     for change in changes {
+        result
+            .effects
+            .extend(crate::tui::update::coordinator::effects_for_conversation_change(change));
         match change {
             ConversationChange::ChatStarted { .. } => runtime.start_chat(),
             ConversationChange::ChatCompleted { .. }
@@ -114,15 +182,25 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::AskUserShown { .. }
             | ConversationChange::AskUserUpdated { .. }
             | ConversationChange::AskUserDismissed
-            | ConversationChange::CompactProgressChanged
+            | ConversationChange::InteractionShown { .. }
+            | ConversationChange::InteractionUpdated { .. }
+            | ConversationChange::InteractionReplyRequested { .. }
+            | ConversationChange::InteractionCancelRequested { .. }
+            | ConversationChange::InteractionCompleted { .. }
+            | ConversationChange::InteractionCommandRejected { .. }
+            | ConversationChange::InteractionConflict { .. }
+            | ConversationChange::AgentRunChanged { .. }
+            | ConversationChange::AgentRunStepChanged { .. } => {
+                ModelChange::output_and_status_dirty()
+            }
+            ConversationChange::CompactProgressChanged
+            | ConversationChange::QueuedSubmissionsSynced { .. }
+            | ConversationChange::CompactRuntimeCleared
             | ConversationChange::StyleBoundaryResetRequired => ModelChange::output_dirty(),
             ConversationChange::ChatStarted { .. }
             | ConversationChange::ChatTurnStarted { .. }
             | ConversationChange::ChatCompleting { .. }
             | ConversationChange::ChatCompleted { .. }
-            | ConversationChange::ProviderModelChanged { .. }
-            | ConversationChange::WorkspaceChanged { .. }
-            | ConversationChange::WorkspaceSnapshotChanged { .. }
             | ConversationChange::UsageChanged { .. }
             | ConversationChange::LiveTpsChanged { .. }
             | ConversationChange::TaskStatusChanged { .. }
@@ -131,11 +209,14 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::SpinnerStopped
             | ConversationChange::TaskLinesChanged
             | ConversationChange::StatusNoticeChanged
-            | ConversationChange::ThinkingChanged
             | ConversationChange::GraphPhaseChanged => ModelChange::status_dirty(),
         }
     }
 }
+
+#[cfg(test)]
+#[path = "root_reducer_intent_tests.rs"]
+mod intent_tests;
 
 #[cfg(test)]
 #[path = "root_reducer_tests.rs"]

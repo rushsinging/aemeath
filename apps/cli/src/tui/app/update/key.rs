@@ -7,6 +7,7 @@ use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::input::change::submitted_submission_from_changes;
 use crate::tui::model::input::intent::InputIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
+use crate::tui::update::intent::AgentIntent;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 
 /// Ctrl+C 动作。
@@ -57,8 +58,14 @@ fn ctrlc_action(
 
 impl App {
     pub(crate) fn handle_input_intent(&mut self, intent: InputIntent) {
-        // Input changes update the model only; render paths read model-derived view state directly.
-        let _changes = self.model.input.apply(intent);
+        self.apply_agent_intent(AgentIntent::Input(intent));
+    }
+
+    pub(super) fn submit_input_intent(
+        &mut self,
+    ) -> Option<crate::tui::model::input::submission::InputSubmission> {
+        let result = self.apply_agent_intent(AgentIntent::Input(InputIntent::Submit));
+        submitted_submission_from_changes(&result.input_changes)
     }
 
     pub(super) fn update_key(
@@ -158,8 +165,7 @@ impl App {
                     self.chat.input_event_tx.is_some()
                 );
                 if !doc_empty {
-                    let changes = self.model.input.apply(InputIntent::Submit);
-                    let Some(submission) = submitted_submission_from_changes(&changes) else {
+                    let Some(submission) = self.submit_input_intent() else {
                         crate::tui::log_debug!(
                             "mid_turn.enter submission=None (no changes from Submit)"
                         );
@@ -236,14 +242,14 @@ impl App {
                         .collect();
                     let restored_input = texts.join("\n");
                     // 乐观清空 queued 占位
-                    self.model.conversation.apply(
+                    self.apply_agent_intent(AgentIntent::Conversation(
                         crate::tui::model::conversation::intent::ConversationIntent::ClearAllQueuedSubmissions(
                             crate::tui::model::conversation::intent::ClearAllQueuedSubmissions,
                         ),
-                    );
+                    ));
                     // 还原输入框（合并所有 queued 文本到 input buffer）
                     if !restored_input.is_empty() {
-                        self.model.input.apply(
+                        self.handle_input_intent(
                             crate::tui::model::input::intent::InputIntent::ReplaceText(
                                 restored_input,
                             ),

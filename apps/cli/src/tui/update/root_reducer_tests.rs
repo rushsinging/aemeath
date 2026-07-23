@@ -131,7 +131,6 @@ fn test_reduce_agent_event_applies_tool_patch_atomically_with_single_render_requ
                 arguments: Some(r#"{"file_path":"src/lib.rs"}"#.to_string()),
                 status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
             })],
-            effects: vec![Effect::RequestRender],
             ..Default::default()
         },
     );
@@ -160,9 +159,29 @@ fn test_reduce_agent_event_applies_tool_patch_atomically_with_single_render_requ
         )));
 }
 
-/// Bug #540：compact progress 嵌入 spinner 行（output 区），dirty 归类必须为 output_dirty。
 #[test]
-fn test_set_compact_progress_marks_output_dirty_not_status_only() {
+fn error_change_requests_hook_effect_through_coordinator() {
+    let mut model = TuiModel::default();
+
+    let result = reduce_agent_event(
+        &mut model,
+        AgentEventMapping {
+            conversation: vec![ConversationIntent::AppendError(
+                crate::tui::model::conversation::intent::AppendError {
+                    text: "坏了".to_string(),
+                },
+            )],
+            ..Default::default()
+        },
+    );
+
+    assert!(result.effects.iter().any(|effect| matches!(
+        effect,
+        Effect::RunHook { name, message } if name == "error" && message == "坏了"
+    )));
+}
+#[test]
+fn set_compact_progress_marks_output_dirty_not_status_only() {
     let mut model = TuiModel::default();
     let result = reduce_agent_event(
         &mut model,

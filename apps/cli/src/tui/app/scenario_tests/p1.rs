@@ -92,19 +92,15 @@ fn working_directory_change_updates_status_projection() {
     harness.ui(crate::tui::app::status_context_for_paths(&worktree, root));
     harness.render();
 
+    let expected_path_base = worktree.display().to_string();
+    let expected_workspace_root = root.display().to_string();
     assert_eq!(
-        harness.app.model.conversation.runtime.workspace.path_base,
-        Some(worktree.display().to_string())
+        harness.app.model.workspace_provider.path_base(),
+        Some(expected_path_base.as_str())
     );
     assert_eq!(
-        harness
-            .app
-            .model
-            .conversation
-            .runtime
-            .workspace
-            .workspace_root,
-        Some(root.display().to_string())
+        harness.app.model.workspace_provider.workspace_root(),
+        Some(expected_workspace_root.as_str())
     );
     assert!(harness.screen().contains("feature-one"));
     harness.assert_idle();

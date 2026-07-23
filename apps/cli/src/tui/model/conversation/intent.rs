@@ -4,9 +4,12 @@
 
 use super::block::{AskUserSlot, HookNoticeContent};
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
+use super::interaction::{
+    InteractionCommandFailure, InteractionDraftAction, InteractionRequest, UiInteractionRequestId,
+    UiRunId,
+};
 use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
-use super::workspace::WorktreeKind;
 use crate::tui::app::event::ModelStreamWaitingView;
 use std::time::Instant;
 
@@ -221,9 +224,100 @@ pub struct ConfirmAskUserBatch;
 pub struct DismissAskUserBatch;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ShowInteraction {
+    pub request: InteractionRequest,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpdateInteractionDraft {
+    pub request_id: UiInteractionRequestId,
+    pub action: InteractionDraftAction,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfirmInteraction {
+    pub request_id: UiInteractionRequestId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CancelInteraction {
+    pub request_id: UiInteractionRequestId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InteractionReplyAccepted {
+    pub request_id: UiInteractionRequestId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InteractionCancelAccepted {
+    pub request_id: UiInteractionRequestId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InteractionReplyRejected {
+    pub request_id: UiInteractionRequestId,
+    pub failure: InteractionCommandFailure,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InteractionCancelRejected {
+    pub request_id: UiInteractionRequestId,
+    pub failure: InteractionCommandFailure,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompleteChat {
     pub chat_id: ChatId,
     pub turn_id: ChatTurnId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunStarted {
+    pub run_id: UiRunId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunAwaitingUser {
+    pub run_id: UiRunId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunResumed {
+    pub run_id: UiRunId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunCancelling {
+    pub run_id: UiRunId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunCancelled {
+    pub run_id: UiRunId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunCompleted {
+    pub run_id: UiRunId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunFailed {
+    pub run_id: UiRunId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunStepStarted {
+    pub run_id: UiRunId,
+    pub step_id: super::interaction::UiRunStepId,
+    pub tool_reference: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunStepCompleted {
+    pub run_id: UiRunId,
+    pub step_id: super::interaction::UiRunStepId,
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -232,35 +326,12 @@ pub struct CompleteChat {
 // ════════════════════════════════════════════════════════════════════
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct SetProviderModel {
-    pub provider: Option<String>,
-    pub model_id: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct UpdateWorkspace {
-    pub cwd: String,
-    pub worktree: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct WorkspaceSnapshotReceived {
-    pub path_base: Option<String>,
-    pub workspace_root: Option<String>,
-    pub branch: Option<String>,
-    pub kind: WorktreeKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct RecordUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub last_input_tokens: u64,
     pub cost_usd: f64,
 }
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SetContextSize(pub u64);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct UpdateLastInputTokens(pub u64);
@@ -302,9 +373,6 @@ pub struct SetTransientStatusNotice {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct SetThinking(pub bool);
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct SetGraphPhase(pub Option<String>);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -313,6 +381,31 @@ pub struct SetCompactProgress {
     pub current: Option<u32>,
     pub total: Option<u32>,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SetSpinnerPhase {
+    pub phase: super::spinner::SpinnerPhase,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StopSpinner;
+
+#[derive(Clone, Debug)]
+pub struct SyncQueuedSubmissions {
+    pub queued: Vec<sdk::ChatMessage>,
+}
+
+impl PartialEq for SyncQueuedSubmissions {
+    fn eq(&self, other: &Self) -> bool {
+        self.queued.len() == other.queued.len()
+            && self.queued.iter().zip(&other.queued).all(|(left, right)| {
+                left.input_id == right.input_id && left.text_content() == right.text_content()
+            })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClearCompactRuntime;
 
 // ════════════════════════════════════════════════════════════════════
 //  传输容器 enum
@@ -354,13 +447,26 @@ pub enum ConversationIntent {
     SetAskUserConfirmCursor(SetAskUserConfirmCursor),
     ConfirmAskUserBatch(ConfirmAskUserBatch),
     DismissAskUserBatch(DismissAskUserBatch),
+    ShowInteraction(ShowInteraction),
+    UpdateInteractionDraft(UpdateInteractionDraft),
+    ConfirmInteraction(ConfirmInteraction),
+    CancelInteraction(CancelInteraction),
+    InteractionReplyAccepted(InteractionReplyAccepted),
+    InteractionCancelAccepted(InteractionCancelAccepted),
+    InteractionReplyRejected(InteractionReplyRejected),
+    InteractionCancelRejected(InteractionCancelRejected),
+    RunStarted(RunStarted),
+    RunAwaitingUser(RunAwaitingUser),
+    RunResumed(RunResumed),
+    RunCancelling(RunCancelling),
+    RunCancelled(RunCancelled),
+    RunCompleted(RunCompleted),
+    RunFailed(RunFailed),
+    RunStepStarted(RunStepStarted),
+    RunStepCompleted(RunStepCompleted),
     CompleteChat(CompleteChat),
     // ── 原 runtime variants ──
-    SetProviderModel(SetProviderModel),
-    UpdateWorkspace(UpdateWorkspace),
-    WorkspaceSnapshotReceived(WorkspaceSnapshotReceived),
     RecordUsage(RecordUsage),
-    SetContextSize(SetContextSize),
     UpdateLastInputTokens(UpdateLastInputTokens),
     RecordLiveTps(RecordLiveTps),
     UpdateTaskStatus(UpdateTaskStatus),
@@ -369,7 +475,10 @@ pub enum ConversationIntent {
     UpdateTaskLines(UpdateTaskLines),
     SetStatusNotice(SetStatusNotice),
     SetTransientStatusNotice(SetTransientStatusNotice),
-    SetThinking(SetThinking),
     SetGraphPhase(SetGraphPhase),
     SetCompactProgress(SetCompactProgress),
+    SetSpinnerPhase(SetSpinnerPhase),
+    StopSpinner(StopSpinner),
+    SyncQueuedSubmissions(SyncQueuedSubmissions),
+    ClearCompactRuntime(ClearCompactRuntime),
 }
