@@ -1,3 +1,7 @@
+//! UiEvent carries local Effect 回灌 and legacy Runtime branches.
+//! After #943 阶段 3, Runtime events flow through TuiRuntimeEvent; the
+//! remaining Runtime variants in UiEvent are dead code pending #944 5B.
+#![allow(dead_code)]
 use crate::tui::adapter::runtime_view::TuiChatMessage;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
 use crate::tui::model::conversation::workspace::WorktreeKind;

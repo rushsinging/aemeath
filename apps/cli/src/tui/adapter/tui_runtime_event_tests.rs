@@ -55,3 +55,61 @@ fn runtime_event_source_does_not_reference_sdk_or_sender() {
         );
     }
 }
+
+#[test]
+fn event_mapping_is_the_only_sdk_chat_event_match_point() {
+    let source = include_str!("event_mapping.rs");
+    assert!(
+        source.contains("fn sdk_event_to_tui_event"),
+        "event_mapping.rs must contain the sole sdk::ChatEvent exhaustive converter"
+    );
+    // oneshot::Sender is permitted only in the LegacyAskUser resource bridge
+    // (reply_tx), which is exempted until #1246 publishes InteractionRequested.
+    // After that, #944 5B removes it entirely.
+    let oneshot_count = source.matches("oneshot::Sender").count();
+    assert!(
+        oneshot_count <= 2,
+        "event_mapping.rs may have at most 2 oneshot::Sender references (LegacyAskUser reply_tx type + conversion); found {oneshot_count}"
+    );
+}
+
+#[test]
+fn second_layer_mapper_has_no_sdk_dependencies() {
+    let source = include_str!("agent_event.rs");
+    // The second-layer mapper must consume TuiRuntimeEvent / Tui DTO only.
+    // sdk:: is allowed only in the legacy UiEvent branch (map_agent_event),
+    // which is dead code after 阶段 3 and will be removed by #944 5B.
+    // For now, assert the map_runtime_event function block has zero sdk:: references.
+
+    // Extract the map_runtime_event function body as a substring
+    // using only safe iterator-based scanning (no byte-index slicing).
+    let mut in_runtime_fn = false;
+    let mut brace_depth = 0i32;
+    let mut fn_body = String::new();
+
+    for line in source.lines() {
+        if !in_runtime_fn && line.contains("fn map_runtime_event") {
+            in_runtime_fn = true;
+            brace_depth = 0;
+        }
+        if in_runtime_fn {
+            fn_body.push_str(line);
+            fn_body.push('\n');
+            brace_depth += line.matches('{').count() as i32;
+            brace_depth -= line.matches('}').count() as i32;
+            if brace_depth <= 0 && line.contains('}') {
+                break;
+            }
+        }
+    }
+
+    assert!(!fn_body.is_empty(), "map_runtime_event must exist");
+    assert!(
+        !fn_body.contains("sdk::"),
+        "map_runtime_event must not reference sdk:: — it consumes TuiRuntimeEvent only"
+    );
+    assert!(
+        !fn_body.contains("oneshot::Sender"),
+        "map_runtime_event must not hold senders"
+    );
+}

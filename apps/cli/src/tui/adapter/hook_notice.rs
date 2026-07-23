@@ -1,3 +1,7 @@
+//! Hook notice helpers. Spinner-phase functions are dead code after #943 阶段 3
+//! (Runtime hook events no longer flow through update_ui). They and their tests
+//! will be physically removed by #944 5B.
+#![allow(dead_code)]
 #[cfg(test)]
 use crate::tui::adapter::tui_runtime_event::TuiHookResult;
 use crate::tui::adapter::tui_runtime_event::{

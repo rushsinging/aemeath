@@ -2,6 +2,12 @@
 //!
 //! Values here are owned by the TUI adapter. They intentionally mirror only
 //! fields consumed by TUI model, view, and update paths.
+//!
+//! Some constructors and structs are not yet exercised by production after
+//! the #943 ACL migration; they are retained as DTO reserves and will be
+//! consumed by #1246 / #944 5B.
+
+#![allow(dead_code)]
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum TuiContentBlock {

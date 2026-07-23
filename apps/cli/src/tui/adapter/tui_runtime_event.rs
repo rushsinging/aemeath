@@ -2,6 +2,11 @@
 //!
 //! This module deliberately contains no SDK or runtime resource types. The
 //! adapter converter is the only boundary allowed to construct these values.
+//!
+//! Some structs are not yet exercised by production; retained as DTO reserves
+//! for #1246 / #944 5B.
+
+#![allow(dead_code)]
 
 use super::runtime_view::{TuiChatMessage, TuiToolResultImage};
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
