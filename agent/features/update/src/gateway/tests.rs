@@ -8,6 +8,13 @@ use super::platform::{download_url, platform_target};
 use super::version::{build_version_check, current_version, strip_v_prefix};
 
 #[test]
+fn gateway_accepts_custom_user_agent() {
+    let gateway = super::UpdateGateway::with_user_agent("aemeath-test/1.0".to_string());
+    assert!(gateway.http.get("https://example.com").build().is_ok());
+    assert!(gateway.download.get("https://example.com").build().is_ok());
+}
+
+#[test]
 fn test_strip_v_prefix_with_prefix() {
     assert_eq!(strip_v_prefix("v0.9.0"), "0.9.0");
 }

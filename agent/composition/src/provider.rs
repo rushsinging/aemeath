@@ -160,6 +160,7 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
             reasoning: spec.requested_reasoning != ReasoningLevel::Off,
             reasoning_config: None,
             timeout_secs: spec.timeout.as_secs(),
+            user_agent: Some(spec.user_agent),
         };
 
         let client = LlmClient::from_config(config).map_err(|err| {

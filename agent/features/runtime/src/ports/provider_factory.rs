@@ -39,6 +39,8 @@ pub struct ProviderBuildSpec {
     pub context_window: Option<usize>,
     /// Request timeout.
     pub timeout: Duration,
+    /// Run-frozen HTTP User-Agent.
+    pub user_agent: String,
 }
 
 // ─── ProviderBinding ────────────────────────────────────────

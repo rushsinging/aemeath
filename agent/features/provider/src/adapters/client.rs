@@ -104,6 +104,7 @@ pub struct LlmProviderOptions {
     pub reasoning: bool,
     pub reasoning_config: Option<ReasoningConfig>,
     pub timeout_secs: u64,
+    pub user_agent: Option<String>,
 }
 
 pub struct LlmConfigOptions {
@@ -117,6 +118,7 @@ pub struct LlmConfigOptions {
     pub reasoning: bool,
     pub reasoning_config: Option<ReasoningConfig>,
     pub timeout_secs: u64,
+    pub user_agent: Option<String>,
 }
 
 pub struct LlmClient {
@@ -151,6 +153,7 @@ impl LlmClient {
             reasoning: false,
             reasoning_config: None,
             timeout_secs: crate::DEFAULT_TIMEOUT_SECS,
+            user_agent: Some(share::config::Config::default().api.user_agent),
         })
     }
 
@@ -159,22 +162,32 @@ impl LlmClient {
         let requested_reasoning =
             reasoning_level_from_options(options.reasoning, options.reasoning_config.as_ref());
         let provider_impl: Arc<dyn LlmProvider> = match options.driver {
-            ProviderDriverKind::Anthropic => Arc::new(crate::adapters::AnthropicProvider::new(
-                options.api_key,
-                options.base_url,
-                options.model,
-                options.max_tokens,
-                crate::ports::ReasoningLevel::Off,
-                options.timeout_secs,
-            )),
-            ProviderDriverKind::Ollama => Arc::new(crate::adapters::OllamaProvider::new(
-                options.api_key,
-                options.base_url,
-                options.model,
-                options.max_tokens,
-                options.reasoning,
-                options.timeout_secs,
-            )),
+            ProviderDriverKind::Anthropic => {
+                Arc::new(crate::adapters::AnthropicProvider::new_with_user_agent(
+                    options.api_key,
+                    options.base_url,
+                    options.model,
+                    options.max_tokens,
+                    crate::ports::ReasoningLevel::Off,
+                    options.timeout_secs,
+                    options
+                        .user_agent
+                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
+                ))
+            }
+            ProviderDriverKind::Ollama => {
+                Arc::new(crate::adapters::OllamaProvider::new_with_user_agent(
+                    options.api_key,
+                    options.base_url,
+                    options.model,
+                    options.max_tokens,
+                    options.reasoning,
+                    options.timeout_secs,
+                    options
+                        .user_agent
+                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
+                ))
+            }
             ProviderDriverKind::OpenAI
             | ProviderDriverKind::Zhipu
             | ProviderDriverKind::LiteLLM
@@ -185,16 +198,21 @@ impl LlmClient {
             | ProviderDriverKind::Agnes => {
                 let config =
                     OpenAIProviderConfig::from_driver(options.driver, options.driver.as_str());
-                Arc::new(crate::adapters::OpenAICompatibleProvider::new(
-                    config,
-                    options.api_key,
-                    options.base_url,
-                    options.model,
-                    options.max_tokens,
-                    options.reasoning,
-                    options.reasoning_config,
-                    options.timeout_secs,
-                ))
+                Arc::new(
+                    crate::adapters::OpenAICompatibleProvider::new_with_user_agent(
+                        config,
+                        options.api_key,
+                        options.base_url,
+                        options.model,
+                        options.max_tokens,
+                        options.reasoning,
+                        options.reasoning_config,
+                        options.timeout_secs,
+                        options
+                            .user_agent
+                            .unwrap_or_else(|| share::config::Config::default().api.user_agent),
+                    ),
+                )
             }
         };
         let effective_reasoning =
@@ -226,35 +244,50 @@ impl LlmClient {
             reasoning_level_from_options(options.reasoning, options.reasoning_config.as_ref());
         let model = options.model.clone();
         let provider_impl: Arc<dyn LlmProvider> = match spec.family() {
-            ProtocolFamily::AnthropicMessages => Arc::new(crate::adapters::AnthropicProvider::new(
-                options.api_key,
-                options.base_url,
-                Some(options.model),
-                options.max_tokens,
-                crate::ports::ReasoningLevel::Off,
-                options.timeout_secs,
-            )),
-            ProtocolFamily::OllamaNative => Arc::new(crate::adapters::OllamaProvider::new(
-                options.api_key,
-                options.base_url,
-                Some(options.model),
-                options.max_tokens,
-                options.reasoning,
-                options.timeout_secs,
-            )),
-            ProtocolFamily::OpenAi(api_style) => {
-                let config = OpenAIProviderConfig::from_driver(driver, &options.source_key)
-                    .with_responses_api(api_style == ApiStyle::Responses);
-                Arc::new(crate::adapters::OpenAICompatibleProvider::new(
-                    config,
+            ProtocolFamily::AnthropicMessages => {
+                Arc::new(crate::adapters::AnthropicProvider::new_with_user_agent(
+                    options.api_key,
+                    options.base_url,
+                    Some(options.model),
+                    options.max_tokens,
+                    crate::ports::ReasoningLevel::Off,
+                    options.timeout_secs,
+                    options
+                        .user_agent
+                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
+                ))
+            }
+            ProtocolFamily::OllamaNative => {
+                Arc::new(crate::adapters::OllamaProvider::new_with_user_agent(
                     options.api_key,
                     options.base_url,
                     Some(options.model),
                     options.max_tokens,
                     options.reasoning,
-                    options.reasoning_config,
                     options.timeout_secs,
+                    options
+                        .user_agent
+                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
                 ))
+            }
+            ProtocolFamily::OpenAi(api_style) => {
+                let config = OpenAIProviderConfig::from_driver(driver, &options.source_key)
+                    .with_responses_api(api_style == ApiStyle::Responses);
+                Arc::new(
+                    crate::adapters::OpenAICompatibleProvider::new_with_user_agent(
+                        config,
+                        options.api_key,
+                        options.base_url,
+                        Some(options.model),
+                        options.max_tokens,
+                        options.reasoning,
+                        options.reasoning_config,
+                        options.timeout_secs,
+                        options
+                            .user_agent
+                            .unwrap_or_else(|| share::config::Config::default().api.user_agent),
+                    ),
+                )
             }
         };
         let effective_reasoning =

@@ -49,7 +49,14 @@ async fn main() {
             chat::run_chat(run_args.into()).await;
         }
         Some(Commands::Update { check }) => {
-            subcommand::update_command::run_update_command(check).await;
+            let args = Args::from(cli.run_args);
+            let user_agent = composition::app::configured_user_agent(args.into())
+                .await
+                .unwrap_or_else(|error| {
+                    eprintln!("Error: {error}");
+                    std::process::exit(1);
+                });
+            subcommand::update_command::run_update_command(check, user_agent).await;
         }
         Some(Commands::Version) => {
             println!("aemeath {}", composition::version());
