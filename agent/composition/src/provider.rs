@@ -222,6 +222,7 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
 fn reasoning_capability_from_max(max: ReasoningLevel) -> ReasoningCapability {
     let all_levels = [
         ReasoningLevel::Off,
+        ReasoningLevel::Minimal,
         ReasoningLevel::Low,
         ReasoningLevel::Medium,
         ReasoningLevel::High,
