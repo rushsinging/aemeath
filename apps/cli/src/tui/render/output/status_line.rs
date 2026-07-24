@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn test_render_maps_task_status_lines_for_selection() {
         let mut output = OutputArea::new();
-        let live_status = live_status(vec!["━━ Tasks: 0/1 ━━", "□ #1 修复 bug"]);
+        let live_status = live_status(vec!["━━ Tasks: 0/1 ━━", "□ 修复 bug"]);
         let area = Rect::new(0, 0, 40, 5);
         let mut buf = Buffer::empty(area);
 
@@ -220,14 +220,14 @@ mod tests {
 
         assert_eq!(
             output.selected_text_for_view(&view, &live_status),
-            Some("  □ #1 修复 bug".to_string())
+            Some("  □ 修复 bug".to_string())
         );
     }
 
     #[test]
     fn test_render_highlights_selected_task_status_line() {
         let mut output = OutputArea::new();
-        let live_status = live_status(vec!["□ #1 修复 bug"]);
+        let live_status = live_status(vec!["□ 修复 bug"]);
         let area = Rect::new(0, 0, 40, 4);
         let mut buf = Buffer::empty(area);
 

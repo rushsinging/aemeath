@@ -27,7 +27,6 @@ pub mod grep;
 // 保留实现以备后续接线（refs #61 D3）。
 #[allow(dead_code)]
 pub mod list_mcp_resources;
-pub mod lsp;
 // mcp / mcp_manager 内含若干面向完整性的辅助类型/函数（diff、sse、validation 等），
 // 当前仅部分经 tools crate-root façade 暴露消费，其余 re-export 保留备用（refs #61 D3）。
 #[allow(dead_code, unused_imports)]

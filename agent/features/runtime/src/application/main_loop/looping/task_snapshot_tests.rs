@@ -20,16 +20,16 @@ fn access_with_active_batch() -> task::TaskStore {
 }
 
 #[test]
-fn task_snapshot_renders_task_owned_projection_without_owner() {
+fn task_snapshot_hides_task_ids_and_owner() {
     let store = access_with_active_batch();
     let access: &dyn TaskAccess = &store;
-    let created = access.create_task(task_spec("实现适配器"), 2).unwrap();
+    access.create_task(task_spec("实现适配器"), 2).unwrap();
 
     let snapshot = build_task_snapshot(access);
 
     assert_eq!(snapshot.lines[0], "━━ Tasks: 0/1 ━━");
-    assert!(snapshot.lines[1].contains(&format!("#{}", created.value.id())));
-    assert!(snapshot.lines[1].contains("实现适配器"));
+    assert_eq!(snapshot.lines[1], "□ 实现适配器");
+    assert!(!snapshot.lines[1].contains('#'));
     assert!(!snapshot.lines[1].contains('@'));
 }
 
@@ -60,9 +60,21 @@ fn task_status_lines_orders_statuses_and_formats_dependencies() {
     let lines = task_status_lines(&access.list(), 7);
 
     assert_eq!(lines[0], "━━ Tasks: 1/3 ━━");
-    assert!(lines[1].contains("✓ #1 completed"));
-    assert!(lines[2].contains("■ #2 working"));
-    assert!(lines[3].contains("□ #3 blocked (blocked by #1)"));
+    assert_eq!(lines[1], "✓ completed");
+    assert_eq!(lines[2], "■ working");
+    assert_eq!(lines[3], "□ blocked (blocked by #1)");
+}
+
+#[test]
+fn blocked_by_omits_dependencies_outside_current_batch() {
+    let known = TaskId::new(1);
+    let unknown = TaskId::new(u64::MAX);
+    let display_map = [(known, 1)].into_iter().collect();
+
+    let rendered = format_blocked_by(&[known, unknown], &display_map);
+
+    assert_eq!(rendered, " (blocked by #1)");
+    assert!(!rendered.contains(&unknown.to_string()));
 }
 
 #[test]

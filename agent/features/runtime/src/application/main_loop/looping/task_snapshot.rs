@@ -4,6 +4,8 @@
 //! 放在 business 层而非 core/client 层（COLA 分层：business 不可依赖 core，
 //! core 可依赖 business；详见 `docs/design/02-architecture-guards.md`）。
 
+use std::collections::HashMap;
+
 use sdk::TaskStatusView;
 use share::config::TaskListConfig;
 use task::{Task, TaskAccess, TaskId, TaskStatus};
@@ -14,8 +16,8 @@ use task::{Task, TaskAccess, TaskId, TaskStatus};
 /// 通过 `RuntimeStreamEvent::TasksSnapshot` 推送给前端，
 /// 替代已被删除的 `changes()` 轮询路径（见 #567 / #642）。
 ///
-/// #889：改为同步 low-privilege 读取，按 current batch 过滤 Task PL，
-/// typed ID 直接展示（不再需要 display_map，也不含 owner）。
+/// #889：改为同步 low-privilege 读取并按 current batch 过滤 Task PL。
+/// 任务标题隐藏持久化 ID；依赖通过当前 batch 的局部编号显示。
 pub(crate) fn build_task_snapshot(access: &dyn TaskAccess) -> TaskStatusView {
     let Some(current_batch) = access.reminder_snapshot().current_batch else {
         return TaskStatusView::default();
@@ -62,6 +64,11 @@ fn task_status_lines(tasks: &[Task], max_lines: usize) -> Vec<String> {
     in_progress.sort_by_key(|t| t.updated_at());
     pending.sort_by_key(|t| t.id());
 
+    let display_map = tasks
+        .iter()
+        .enumerate()
+        .map(|(index, task)| (task.id(), index + 1))
+        .collect::<HashMap<_, _>>();
     let visible = if total <= max_lines {
         ordered_tasks(completed, in_progress, pending)
     } else {
@@ -70,7 +77,7 @@ fn task_status_lines(tasks: &[Task], max_lines: usize) -> Vec<String> {
     let shown_count = visible.len();
     let hidden_count = total.saturating_sub(shown_count);
     for task in visible {
-        lines.push(format_task_status_line(task));
+        lines.push(format_task_status_line(task, &display_map));
     }
     if hidden_count > 0 {
         lines.push(format!("… +{} more", hidden_count));
@@ -118,28 +125,28 @@ fn select_task_window<'a>(
     visible
 }
 
-fn format_task_status_line(task: &Task) -> String {
+fn format_task_status_line(task: &Task, display_map: &HashMap<TaskId, usize>) -> String {
     let icon = match task.status() {
         TaskStatus::Completed => "✓",
         TaskStatus::InProgress => "■",
         TaskStatus::Pending => "□",
         TaskStatus::Deleted => "?",
     };
-    let blocked_by = format_blocked_by(task.blocked_by());
-    format!("{} #{} {}{}", icon, task.id(), task.subject(), blocked_by)
+    let blocked_by = format_blocked_by(task.blocked_by(), display_map);
+    format!("{} {}{}", icon, task.subject(), blocked_by)
 }
 
-fn format_blocked_by(blocked_by: &[TaskId]) -> String {
-    if blocked_by.is_empty() {
-        return String::new();
-    }
-
+fn format_blocked_by(blocked_by: &[TaskId], display_map: &HashMap<TaskId, usize>) -> String {
     let deps = blocked_by
         .iter()
-        .map(|id| format!("#{}", id))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(" (blocked by {deps})")
+        .filter_map(|id| display_map.get(id))
+        .map(|display_id| format!("#{display_id}"))
+        .collect::<Vec<_>>();
+    if deps.is_empty() {
+        String::new()
+    } else {
+        format!(" (blocked by {})", deps.join(", "))
+    }
 }
 
 #[cfg(test)]

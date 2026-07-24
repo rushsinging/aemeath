@@ -48,7 +48,6 @@ pub fn tool_input_preview(name: &str, input: &serde_json::Value) -> String {
         "WebSearch" => field_str(input, "query"),
         "EnterWorktree" | "ExitWorktree" => field_str(input, "path"),
         "TaskCreate" | "TaskUpdate" => field_str(input, "subject"),
-        "LSP" => composite(input, &["file_path", "operation"]),
         _ => {
             let raw = match input {
                 Value::String(s) => s.clone(),
@@ -120,7 +119,6 @@ mod tests {
         assert_eq!(tool_display_name("Agent"), "Agent");
         assert_eq!(tool_display_name("WebFetch"), "WebFetch");
         assert_eq!(tool_display_name("Skill"), "Skill");
-        assert_eq!(tool_display_name("LSP"), "LSP");
     }
 
     #[test]
