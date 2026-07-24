@@ -248,9 +248,9 @@ where
     );
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-    *ag_ctx = ag_ctx.with_progress(Some(crate::application::tool_execution_adapters::progress(
-        prog_tx,
-    )));
+    let progress_sink: std::sync::Arc<dyn tools::ProgressSink> =
+        crate::application::tool_execution_adapters::progress(prog_tx);
+    *ag_ctx = ag_ctx.with_progress(Some(progress_sink.clone()));
     let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
     let progress_context = context.clone();
@@ -282,7 +282,8 @@ where
                 effective_call.input.clone(),
                 ag_ctx.scope().clone(),
             )
-            .with_authorization(effective_authorization),
+            .with_authorization(effective_authorization)
+            .with_progress(Some(progress_sink.clone())),
             cancellation.as_ref(),
         )
         .await;
