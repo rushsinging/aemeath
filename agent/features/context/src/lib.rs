@@ -12,7 +12,8 @@ pub use adapters::{isolated_context, isolated_context_with_skill};
 #[cfg(any(test, feature = "dev"))]
 pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
 pub use domain::session::{
-    SessionListEntry, SessionManagementError, SessionMetadataUpdate, SessionResumeProjection,
+    SessionListEntry, SessionManagementError, SessionMetadataUpdate, SessionRestoreStep,
+    SessionResumeProjection,
 };
 pub use ports::SessionManagementPort;
 

@@ -1,12 +1,10 @@
-use crate::tui::render::output_area::INDENT;
-use crate::tui::render::theme;
-use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
-
 use super::super::common::{truncate_ellipsis, typed_data};
 use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
+use crate::tui::render::theme;
+use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use sdk::tool_input::BashInput;
@@ -45,16 +43,8 @@ impl ToolDisplay for BashDisplay {
     ) -> String {
         self.format_header(input, workspace_root)
     }
-    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let args = parse_input::<BashInput>(input);
-        if args.command.is_empty() {
-            return vec![];
-        }
-        // 截断显示，避免过长命令占用太多空间
-        vec![truncate_ellipsis(
-            &args.command,
-            200usize.saturating_sub(INDENT.len()),
-        )]
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        Vec::new()
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {

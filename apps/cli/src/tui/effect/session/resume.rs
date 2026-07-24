@@ -1,4 +1,4 @@
-use crate::tui::adapter::runtime_view::TuiChatMessage;
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
 use crate::tui::app::App;
 use crate::tui::model::input::intent::InputIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
@@ -8,9 +8,13 @@ impl App {
     pub(crate) fn resume_session_messages(
         &mut self,
         session_id: &str,
-        messages: Vec<TuiChatMessage>,
+        steps: Vec<TuiResumedSessionStep>,
         created_at: String,
     ) {
+        let messages = steps
+            .iter()
+            .flat_map(|step| step.messages.iter().cloned())
+            .collect::<Vec<_>>();
         let msg_count = messages.len();
         self.session.session_created_at = Some(created_at);
         self.session.rename_session(session_id);
@@ -22,9 +26,7 @@ impl App {
         // 走 ResumeConversation intent，不触发 spinner 副作用
         self.apply_agent_intent(AgentIntent::Conversation(
             crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
-                crate::tui::model::conversation::intent::ResumeConversation {
-                    messages: messages.clone(),
-                },
+                crate::tui::model::conversation::intent::ResumeConversation { steps },
             ),
         ));
         apply_resume_input_history(self, &messages);
@@ -32,6 +34,7 @@ impl App {
             "[resumed session {} ({} messages)]",
             session_id, msg_count
         ));
+        self.mark_output_dirty();
     }
 }
 
@@ -123,10 +126,14 @@ mod tests {
 
         app.resume_session_messages(
             "resumed-session",
-            vec![
-                TuiChatMessage::user_text("历史问题"),
-                TuiChatMessage::assistant_text("历史回答"),
-            ],
+            vec![TuiResumedSessionStep {
+                run_id: "run-1".to_string(),
+                step_id: "step-1".to_string(),
+                messages: vec![
+                    TuiChatMessage::user_text("历史问题"),
+                    TuiChatMessage::assistant_text("历史回答"),
+                ],
+            }],
             "2026-01-01T00:00:00Z".to_string(),
         );
 

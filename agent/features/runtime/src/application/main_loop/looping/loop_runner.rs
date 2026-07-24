@@ -269,7 +269,15 @@ where
                             messages = projection.messages.clone();
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::SessionResumed {
-                                    messages: projection.messages,
+                                    steps: projection
+                                        .steps
+                                        .into_iter()
+                                        .map(|step| super::RuntimeResumedSessionStep {
+                                            run_id: step.run_id,
+                                            step_id: step.step_id,
+                                            messages: step.messages,
+                                        })
+                                        .collect(),
                                     session_id: projection.session_id,
                                     created_at: chrono::DateTime::parse_from_rfc3339(
                                         &projection.created_at,

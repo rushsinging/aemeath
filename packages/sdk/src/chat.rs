@@ -5,7 +5,7 @@ use crate::{ChatInputEventPort, QueueDrainPort};
 pub use crate::chat_event::{
     ChatEvent, ChatEventContext, ReflectionApplyStatusView, ReflectionErrorCategoryView,
     ReflectionHistoryView, ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView,
-    ToolCallStatusView,
+    ResumedSessionStep, ToolCallStatusView,
 };
 pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultImage};
 pub use crate::chat_view::{

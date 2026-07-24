@@ -148,7 +148,11 @@ mod tests {
         app.model.conversation.apply(
             crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
                 crate::tui::model::conversation::intent::ResumeConversation {
-                    messages: vec![TuiChatMessage::user_text("late")],
+                    steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                        run_id: "history-run".into(),
+                        step_id: "history-step".into(),
+                        messages: vec![TuiChatMessage::user_text("late")],
+                    }],
                 },
             ),
         );

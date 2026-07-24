@@ -228,7 +228,7 @@ pub enum AppEvent {
     },
     /// 会话恢复完成（#497）。TUI 据此更新 messages。
     SessionResumed {
-        messages: Vec<TuiChatMessage>,
+        steps: Vec<crate::tui::adapter::runtime_view::TuiResumedSessionStep>,
         session_id: String,
         #[allow(dead_code)]
         created_at: u64,

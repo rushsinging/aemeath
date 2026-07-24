@@ -346,11 +346,18 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             TuiRuntimeEvent::CommandResultText { text, is_error }
         }
         ChatEvent::SessionResumed {
-            messages,
+            steps,
             session_id,
             created_at,
         } => TuiRuntimeEvent::SessionResumed {
-            messages: messages.into_iter().map(chat_message).collect(),
+            steps: steps
+                .into_iter()
+                .map(|step| super::runtime_view::TuiResumedSessionStep {
+                    run_id: step.run_id,
+                    step_id: step.step_id,
+                    messages: step.messages.into_iter().map(chat_message).collect(),
+                })
+                .collect(),
             session_id,
             created_at,
         },

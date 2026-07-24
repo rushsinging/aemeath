@@ -40,8 +40,8 @@ pub use chat::{
     ChatInputImage, ChatRequest, ChatResult, ChatStream, HookEventStatus, HookEventView,
     HookExecutionResultView, HookMessageKindView, HookMessageView, OptionItem,
     ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
-    ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ToolCallStatusView,
-    ToolResultImage, UserInput, WorkspaceContextView, WorkspaceStackEntryView,
+    ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep,
+    ToolCallStatusView, ToolResultImage, UserInput, WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
 pub use commands::{

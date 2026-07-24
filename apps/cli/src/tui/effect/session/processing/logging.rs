@@ -326,11 +326,12 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             text.len(),
             is_error
         ),
-        sdk::ChatEvent::SessionResumed { messages, session_id, .. } => crate::tui::log_trace!(
-            "{} session_resumed id={} msg_count={}",
+        sdk::ChatEvent::SessionResumed { steps, session_id, .. } => crate::tui::log_trace!(
+            "{} session_resumed id={} step_count={} msg_count={}",
             stage,
             session_id,
-            messages.len()
+            steps.len(),
+            steps.iter().map(|step| step.messages.len()).sum::<usize>()
         ),
         sdk::ChatEvent::Result(result) => crate::tui::log_trace!(
             "{} result text_len={} tokens_used={:?}",

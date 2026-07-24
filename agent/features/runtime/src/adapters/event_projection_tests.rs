@@ -1,7 +1,30 @@
 use super::event_projection::project_stream_event;
 use crate::application::main_loop::looping::{
-    RuntimeHookMessage, RuntimeHookMessageKind, RuntimeStreamEvent, RuntimeTurnContext,
+    RuntimeHookMessage, RuntimeHookMessageKind, RuntimeResumedSessionStep, RuntimeStreamEvent,
+    RuntimeTurnContext,
 };
+
+#[test]
+fn session_resume_projection_preserves_context_run_step_boundaries() {
+    let event = RuntimeStreamEvent::SessionResumed {
+        steps: vec![RuntimeResumedSessionStep {
+            run_id: "run-1".into(),
+            step_id: "step-1".into(),
+            messages: vec![share::message::Message::user("hello")],
+        }],
+        session_id: "session-1".into(),
+        created_at: 0,
+    };
+
+    match project_stream_event(event) {
+        sdk::ChatEvent::SessionResumed { steps, .. } => {
+            assert_eq!(steps[0].run_id, "run-1");
+            assert_eq!(steps[0].step_id, "step-1");
+            assert_eq!(steps[0].messages[0].text_content(), "hello");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
 
 #[test]
 fn tool_call_projection_preserves_canonical_name() {

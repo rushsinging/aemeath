@@ -57,6 +57,13 @@ pub(crate) struct TuiStopHookFeedback {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiResumedSessionStep {
+    pub(crate) run_id: String,
+    pub(crate) step_id: String,
+    pub(crate) messages: Vec<TuiChatMessage>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiChatMessage {
     pub(crate) role: String,
     pub(crate) content: Vec<TuiContentBlock>,

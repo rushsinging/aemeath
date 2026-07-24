@@ -181,11 +181,11 @@ impl App {
                 }
             }
             UiEvent::SessionResumed {
-                messages,
+                steps,
                 session_id,
                 created_at,
             } => {
-                self.resume_session_messages(&session_id, messages, created_at.to_string());
+                self.resume_session_messages(&session_id, steps, created_at.to_string());
             }
             UiEvent::SessionResumeFailed { kind, id, message } => {
                 use sdk::SessionResumeFailureKind;

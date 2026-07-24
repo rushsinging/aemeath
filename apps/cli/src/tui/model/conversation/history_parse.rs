@@ -243,6 +243,14 @@ pub(crate) fn collect_following_tool_results(
         .collect()
 }
 
+pub(crate) fn tool_result_display_text(result: HistoryToolResult<'_>) -> String {
+    result
+        .text
+        .filter(|text| !text.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| tool_result_content_to_string(result.content))
+}
+
 pub(crate) fn tool_result_content_to_string(content: &serde_json::Value) -> String {
     match content {
         serde_json::Value::String(s) => s.clone(),
@@ -594,6 +602,45 @@ mod tests {
         assert_eq!(map.len(), 2);
         assert!(map.contains_key("t1"));
         assert!(map.contains_key("t2"));
+    }
+
+    // ── tool_result_display_text ──
+
+    #[test]
+    fn resumed_tool_result_prefers_persisted_text_for_every_tool() {
+        for (tool_name, content) in [
+            (
+                "Bash",
+                serde_json::json!({ "stdout": "raw bash", "exit_code": 0 }),
+            ),
+            ("Read", serde_json::json!({ "content": "raw read" })),
+            ("Grep", serde_json::json!({ "matches": ["raw grep"] })),
+            ("Agent", serde_json::json!({ "output": "raw agent" })),
+            ("McpTool", serde_json::json!({ "value": "raw mcp" })),
+        ] {
+            assert_eq!(
+                tool_result_display_text(HistoryToolResult {
+                    content: &content,
+                    text: Some("human display"),
+                    is_error: false,
+                }),
+                "human display",
+                "{tool_name} resume 必须统一优先使用持久化 text"
+            );
+        }
+    }
+
+    #[test]
+    fn resumed_tool_result_without_text_falls_back_to_legacy_content() {
+        let content = serde_json::json!({ "legacy": true });
+        assert_eq!(
+            tool_result_display_text(HistoryToolResult {
+                content: &content,
+                text: None,
+                is_error: false,
+            }),
+            content.to_string()
+        );
     }
 
     // ── tool_result_content_to_string ──

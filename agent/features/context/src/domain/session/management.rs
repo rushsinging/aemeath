@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use share::message::{Message, Role};
 use share::session_types::ProjectIdentity;
 
-use super::{CanonicalSession, SessionMetadata, SnapshotState};
+use super::{CanonicalSession, SessionMetadata, SessionRestoreStep, SnapshotState};
 
 /// Context-owned session list projection published to Runtime/SDK adapters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +107,7 @@ impl SessionMetadataUpdate {
 pub struct SessionResumeProjection {
     pub session_id: String,
     pub messages: Vec<Message>,
+    pub steps: Vec<SessionRestoreStep>,
     pub created_at: String,
     pub trimmed: usize,
     pub repaired: usize,

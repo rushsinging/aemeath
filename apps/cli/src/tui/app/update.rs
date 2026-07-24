@@ -278,11 +278,11 @@ impl App {
                 return UpdateResult::one(Effect::ResetRuntimeState);
             }
             TuiRuntimeEvent::SessionResumed {
-                messages,
+                steps,
                 session_id,
                 created_at,
             } => {
-                self.resume_session_messages(session_id, messages.clone(), created_at.to_string());
+                self.resume_session_messages(session_id, steps.clone(), created_at.to_string());
                 return UpdateResult {
                     effects: Vec::new(),
                     spawn_effect: None,

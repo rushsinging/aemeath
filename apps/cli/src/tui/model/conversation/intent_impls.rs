@@ -26,122 +26,82 @@ impl ConversationUpdate for ResumeConversation {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         use super::history_parse::{
             collect_following_tool_results, normalize_tool_result_content, restored_ask_answer,
-            tool_result_content_to_string, tool_result_image_count, HistoryAssistantBlock,
+            tool_result_display_text, tool_result_image_count, HistoryAssistantBlock,
             HistoryDisplayMessage,
         };
         use super::ids::{ChatId, ChatTurnId, ToolCallId};
         use super::tool_call::ToolCallStatus;
 
         let mut all_changes = Vec::new();
+        model.reset();
         const HISTORY_RESTORE_ERROR: &str =
             "无法恢复一条历史消息：消息格式不符合当前会话 schema，已跳过。";
 
-        for (index, msg) in self.messages.iter().enumerate() {
-            let subsequent = self.messages.get(index + 1);
-            match HistoryDisplayMessage::parse(msg) {
-                Ok(HistoryDisplayMessage::User { text }) => {
-                    // 直接调 model.start_chat（不走 StartChat intent），避免 spinner 副作用。
-                    all_changes.extend(model.start_chat(text));
-                }
-                Ok(HistoryDisplayMessage::StopHookNotice { .. }) => {
-                    all_changes.extend(model.apply(AppendHookNotice {
-                        content: stop_hook_notice_content(msg),
-                    }));
-                }
-                Ok(HistoryDisplayMessage::ToolResults) => {}
-                Ok(HistoryDisplayMessage::Assistant { blocks }) => {
-                    let chat_id = model
-                        .active_chat_id
-                        .clone()
-                        .unwrap_or_else(|| ChatId::from_legacy_or_new("history-chat"));
-                    let turn_id = ChatTurnId::from_legacy_or_new("turn-1");
-                    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
-                    let tool_results = collect_following_tool_results(subsequent);
-                    let mut restored_ask_slots = Vec::new();
-                    for (block_index, block) in blocks.into_iter().enumerate() {
-                        match block {
-                            HistoryAssistantBlock::Text(text) => {
-                                all_changes.extend(model.apply(AssistantText {
-                                    chat_id: chat_id.clone(),
-                                    turn_id: turn_id.clone(),
-                                    text,
-                                }));
-                                all_changes.extend(model.apply(CompleteBlock {
-                                    chat_id: chat_id.clone(),
-                                    turn_id: turn_id.clone(),
-                                }));
-                            }
-                            HistoryAssistantBlock::Thinking(text) => {
-                                all_changes.extend(model.apply(ThinkingText {
-                                    chat_id: chat_id.clone(),
-                                    turn_id: turn_id.clone(),
-                                    text,
-                                }));
-                                all_changes.extend(model.apply(CompleteBlock {
-                                    chat_id: chat_id.clone(),
-                                    turn_id: turn_id.clone(),
-                                }));
-                            }
-                            HistoryAssistantBlock::ToolUse { id, name, input } => {
-                                let ask_question = (name == "AskUserQuestion")
-                                    .then(|| input.get("question").and_then(|value| value.as_str()))
-                                    .flatten()
-                                    .filter(|question| !question.trim().is_empty())
-                                    .map(ToOwned::to_owned);
-                                let restored_answer = tool_results
-                                    .get(id.as_str())
-                                    .copied()
-                                    .and_then(restored_ask_answer);
-                                let input_json = input.to_string();
-                                let tool_call_id = ToolCallId::from_legacy_or_new(&id);
-                                all_changes.extend(model.apply(ToolCallStart {
-                                    chat_id: chat_id.clone(),
-                                    turn_id: turn_id.clone(),
-                                    id: tool_call_id.clone(),
-                                    provider_id: None,
-                                    name: name.clone(),
-                                    index: block_index,
-                                }));
-                                all_changes.extend(model.apply(ToolCallUpdate {
-                                    chat_id: chat_id.clone(),
-                                    turn_id: turn_id.clone(),
-                                    id: tool_call_id.clone(),
-                                    provider_id: Some(id.clone()),
-                                    name: name.clone(),
-                                    index: block_index,
-                                    arguments: Some(input_json),
-                                    status: ToolCallStatus::Ready,
-                                }));
-                                if let (Some(question), Some(answer)) =
-                                    (ask_question, restored_answer)
-                                {
-                                    restored_ask_slots.push(super::block::AskUserSlot {
-                                        id: id.clone(),
-                                        question_seq: 0,
-                                        question,
-                                        options: Vec::new(),
-                                        llm_option_count: 0,
-                                        multi_select: false,
-                                        default: None,
-                                        answer: Some(answer),
-                                    });
+        for step in &self.steps {
+            let chat_id = ChatId::from_legacy_or_new(&step.run_id);
+            let turn_id = ChatTurnId::from_legacy_or_new(&step.step_id);
+            model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+            for (index, msg) in step.messages.iter().enumerate() {
+                let subsequent = step.messages.get(index + 1);
+                match HistoryDisplayMessage::parse(msg) {
+                    Ok(HistoryDisplayMessage::User { text }) => {
+                        all_changes.extend(model.apply(AppendUserMessage { text }));
+                    }
+                    Ok(HistoryDisplayMessage::StopHookNotice { .. }) => {
+                        all_changes.extend(model.apply(AppendHookNotice {
+                            content: stop_hook_notice_content(msg),
+                        }));
+                    }
+                    Ok(HistoryDisplayMessage::ToolResults) => {}
+                    Ok(HistoryDisplayMessage::Assistant { blocks }) => {
+                        let tool_results = collect_following_tool_results(subsequent);
+                        let mut restored_ask_slots = Vec::new();
+                        for (block_index, block) in blocks.into_iter().enumerate() {
+                            match block {
+                                HistoryAssistantBlock::Text(text) => {
+                                    all_changes.extend(model.apply(AssistantText {
+                                        chat_id: chat_id.clone(),
+                                        turn_id: turn_id.clone(),
+                                        text,
+                                    }));
+                                    all_changes.extend(model.apply(CompleteBlock {
+                                        chat_id: chat_id.clone(),
+                                        turn_id: turn_id.clone(),
+                                    }));
                                 }
-                                if let Some(result) = tool_results.get(id.as_str()) {
-                                    all_changes.extend(model.apply(ToolResult {
+                                HistoryAssistantBlock::Thinking(text) => {
+                                    all_changes.extend(model.apply(ThinkingText {
+                                        chat_id: chat_id.clone(),
+                                        turn_id: turn_id.clone(),
+                                        text,
+                                    }));
+                                    all_changes.extend(model.apply(CompleteBlock {
+                                        chat_id: chat_id.clone(),
+                                        turn_id: turn_id.clone(),
+                                    }));
+                                }
+                                HistoryAssistantBlock::ToolUse { id, name, input } => {
+                                    let ask_question = (name == "AskUserQuestion")
+                                        .then(|| {
+                                            input.get("question").and_then(|value| value.as_str())
+                                        })
+                                        .flatten()
+                                        .filter(|question| !question.trim().is_empty())
+                                        .map(ToOwned::to_owned);
+                                    let restored_answer = tool_results
+                                        .get(id.as_str())
+                                        .copied()
+                                        .and_then(restored_ask_answer);
+                                    let input_json = input.to_string();
+                                    let tool_call_id = ToolCallId::from_legacy_or_new(&id);
+                                    all_changes.extend(model.apply(ToolCallStart {
                                         chat_id: chat_id.clone(),
                                         turn_id: turn_id.clone(),
                                         id: tool_call_id.clone(),
-                                        provider_id: id.clone(),
-                                        tool_name: name,
-                                        output: tool_result_content_to_string(result.content),
-                                        content: normalize_tool_result_content(result.content),
-                                        is_error: result.is_error,
-                                        image_count: tool_result_image_count(result.content),
+                                        provider_id: None,
+                                        name: name.clone(),
+                                        index: block_index,
                                     }));
-                                } else {
-                                    // #1384: ToolUse without a matching ToolResult means
-                                    // the tool was cancelled (e.g. agent call interrupted).
-                                    // Mark as Cancelled so it doesn't stay in Ready/Running.
                                     all_changes.extend(model.apply(ToolCallUpdate {
                                         chat_id: chat_id.clone(),
                                         turn_id: turn_id.clone(),
@@ -149,23 +109,66 @@ impl ConversationUpdate for ResumeConversation {
                                         provider_id: Some(id.clone()),
                                         name: name.clone(),
                                         index: block_index,
-                                        arguments: None,
-                                        status: ToolCallStatus::Cancelled,
+                                        arguments: Some(input_json),
+                                        status: ToolCallStatus::Ready,
                                     }));
+                                    if let (Some(question), Some(answer)) =
+                                        (ask_question, restored_answer)
+                                    {
+                                        restored_ask_slots.push(super::block::AskUserSlot {
+                                            id: id.clone(),
+                                            question_seq: 0,
+                                            question,
+                                            options: Vec::new(),
+                                            llm_option_count: 0,
+                                            multi_select: false,
+                                            default: None,
+                                            answer: Some(answer),
+                                        });
+                                    }
+                                    if let Some(result) = tool_results.get(id.as_str()) {
+                                        all_changes.extend(model.apply(ToolResult {
+                                            chat_id: chat_id.clone(),
+                                            turn_id: turn_id.clone(),
+                                            id: tool_call_id.clone(),
+                                            provider_id: id.clone(),
+                                            tool_name: name,
+                                            output: tool_result_display_text(*result),
+                                            content: normalize_tool_result_content(result.content),
+                                            is_error: result.is_error,
+                                            image_count: tool_result_image_count(result.content),
+                                        }));
+                                    } else {
+                                        // #1384: ToolUse without a matching ToolResult means
+                                        // the tool was cancelled (e.g. agent call interrupted).
+                                        // Mark as Cancelled so it doesn't stay in Ready/Running.
+                                        all_changes.extend(model.apply(ToolCallUpdate {
+                                            chat_id: chat_id.clone(),
+                                            turn_id: turn_id.clone(),
+                                            id: tool_call_id.clone(),
+                                            provider_id: Some(id.clone()),
+                                            name: name.clone(),
+                                            index: block_index,
+                                            arguments: None,
+                                            status: ToolCallStatus::Cancelled,
+                                        }));
+                                    }
                                 }
                             }
                         }
+                        if !restored_ask_slots.is_empty() {
+                            all_changes
+                                .extend(model.restore_answered_ask_user_batch(restored_ask_slots));
+                        }
                     }
-                    if !restored_ask_slots.is_empty() {
-                        all_changes
-                            .extend(model.restore_answered_ask_user_batch(restored_ask_slots));
+                    Err(error) => {
+                        crate::tui::log_warn!(
+                            "skip invalid history message during resume: {error}"
+                        );
+                        all_changes.extend(model.apply(AppendError {
+                            text: HISTORY_RESTORE_ERROR.to_string(),
+                        }));
                     }
-                }
-                Err(error) => {
-                    crate::tui::log_warn!("skip invalid history message during resume: {error}");
-                    all_changes.extend(model.apply(AppendError {
-                        text: HISTORY_RESTORE_ERROR.to_string(),
-                    }));
                 }
             }
         }
@@ -775,6 +778,26 @@ mod tests {
     }
 
     #[test]
+    fn resume_conversation_equality_compares_step_identity_and_messages() {
+        let first = ResumeConversation {
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+                messages: vec![TuiChatMessage::user_text("first")],
+            }],
+        };
+        let different = ResumeConversation {
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "run-2".into(),
+                step_id: "step-1".into(),
+                messages: vec![TuiChatMessage::user_text("second")],
+            }],
+        };
+
+        assert_ne!(first, different);
+    }
+
+    #[test]
     fn resume_restores_answered_ask_batches_in_assistant_message_order() {
         let assistant_one = TuiChatMessage {
             role: "assistant".to_string(),
@@ -793,12 +816,16 @@ mod tests {
         let mut model = ConversationModel::default();
 
         ResumeConversation {
-            messages: vec![
-                assistant_one,
-                ask_result("ask-1", serde_json::json!({ "answer": "答案一" })),
-                assistant_two,
-                ask_result("ask-2", serde_json::json!("答案二")),
-            ],
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "history-run".into(),
+                step_id: "history-step".into(),
+                messages: vec![
+                    assistant_one,
+                    ask_result("ask-1", serde_json::json!({ "answer": "答案一" })),
+                    assistant_two,
+                    ask_result("ask-2", serde_json::json!("答案二")),
+                ],
+            }],
         }
         .update(&mut model);
 
@@ -842,7 +869,11 @@ mod tests {
         };
 
         ResumeConversation {
-            messages: vec![message],
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "history-run".into(),
+                step_id: "history-step".into(),
+                messages: vec![message],
+            }],
         }
         .update(&mut model);
 
@@ -878,7 +909,11 @@ mod tests {
         let mut model = ConversationModel::default();
 
         ResumeConversation {
-            messages: vec![user, stop_hook, assistant],
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "history-run".into(),
+                step_id: "history-step".into(),
+                messages: vec![user, stop_hook, assistant],
+            }],
         }
         .update(&mut model);
 

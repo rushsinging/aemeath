@@ -1,6 +1,8 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
-use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
+use crate::tui::adapter::runtime_view::{
+    TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiResumedSessionStep,
+};
 use crate::tui::adapter::tui_runtime_event::{
     TuiInteractionBody, TuiInteractionRequest, TuiRuntimeEvent, TuiUserQuestion,
 };
@@ -36,6 +38,138 @@ fn cancel_and_quit_effects_are_explicit() {
 }
 
 #[test]
+fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps: vec![
+            TuiResumedSessionStep {
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+                messages: vec![
+                    TuiChatMessage::user_text("QUESTION_ONE"),
+                    TuiChatMessage::assistant_text("ANSWER_ONE"),
+                ],
+            },
+            TuiResumedSessionStep {
+                run_id: "run-1".into(),
+                step_id: "step-2".into(),
+                messages: vec![
+                    TuiChatMessage::user_text("QUESTION_TWO"),
+                    TuiChatMessage::assistant_text("ANSWER_TWO"),
+                ],
+            },
+        ],
+        session_id: "session-resumed".into(),
+        created_at: 0,
+    });
+    harness.render();
+
+    assert_eq!(harness.app.model.conversation.chats.len(), 1);
+    let chat = &harness.app.model.conversation.chats[0];
+    assert_eq!(chat.id.as_str(), "run-1");
+    assert_eq!(chat.turns.len(), 2);
+    assert_eq!(chat.turns[0].id.as_str(), "step-1");
+    assert_eq!(chat.turns[1].id.as_str(), "step-2");
+    let screen = harness.screen();
+    for expected in ["QUESTION_ONE", "ANSWER_ONE", "QUESTION_TWO", "ANSWER_TWO"] {
+        assert!(
+            screen.contains(expected),
+            "resume framebuffer 缺少 {expected}\n{screen}"
+        );
+    }
+    assert!(!harness.app.model.conversation.runtime.spinner.chat_active);
+
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps: vec![TuiResumedSessionStep {
+            run_id: "run-2".into(),
+            step_id: "step-1".into(),
+            messages: vec![TuiChatMessage::user_text("ANOTHER_RUN")],
+        }],
+        session_id: "session-resumed".into(),
+        created_at: 0,
+    });
+    assert_eq!(harness.app.model.conversation.chats.len(), 1);
+    assert_eq!(harness.app.model.conversation.chats[0].id.as_str(), "run-2");
+    assert!(harness
+        .app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .all(|item| !matches!(
+            item,
+            crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. }
+                if text == "QUESTION_ONE" || text == "QUESTION_TWO"
+        )));
+}
+
+#[test]
+fn resume_renders_bash_tool_with_typed_header_and_output() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps: vec![TuiResumedSessionStep {
+            run_id: "run-bash".into(),
+            step_id: "step-bash".into(),
+            messages: vec![
+                TuiChatMessage {
+                    role: "assistant".into(),
+                    content: vec![TuiContentBlock::ToolUse {
+                        id: "bash-1".into(),
+                        name: "Bash".into(),
+                        input: serde_json::json!({ "command": "git status --short --branch" }),
+                    }],
+                    input_id: None,
+                    source: TuiMessageSource::User,
+                    stop_hook: None,
+                },
+                TuiChatMessage {
+                    role: "user".into(),
+                    content: vec![TuiContentBlock::ToolResult {
+                        tool_use_id: "bash-1".into(),
+                        content: serde_json::json!({
+                            "stdout": "## feature/resume...origin/main",
+                            "stderr": "",
+                            "exit_code": 0,
+                            "signal": null,
+                            "path_base": "/repo"
+                        }),
+                        is_error: false,
+                        text: Some("## feature/resume...origin/main\n[cwd: /repo]".into()),
+                    }],
+                    input_id: None,
+                    source: TuiMessageSource::User,
+                    stop_hook: None,
+                },
+            ],
+        }],
+        session_id: "session-bash".into(),
+        created_at: 0,
+    });
+    harness.render();
+
+    let screen = harness.screen();
+    assert!(
+        screen.contains("Run git status --short --branch"),
+        "resume 后 Bash 应走 typed ToolDisplay header\n{screen}"
+    );
+    assert_eq!(
+        screen.matches("git status --short --branch").count(),
+        1,
+        "Bash 命令在 header 已显示，不能再重复为 details\n{screen}"
+    );
+    assert!(
+        screen.contains("## feature/resume...origin/main"),
+        "resume 后 Bash 应显示原始 stdout，而不是结构化 JSON\n{screen}"
+    );
+    assert!(
+        !screen.contains("{\"exit_code\""),
+        "resume 后不得把 BashResult JSON 直接刷到 TUI\n{screen}"
+    );
+}
+
+#[test]
 fn resume_restores_all_answered_ask_batches() {
     fn ask_tool_use(id: &str, question: &str) -> TuiContentBlock {
         TuiContentBlock::ToolUse {
@@ -62,24 +196,28 @@ fn resume_restores_all_answered_ask_batches() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.app.model.conversation.apply(
         crate::tui::model::conversation::intent::ResumeConversation {
-            messages: vec![
-                TuiChatMessage {
-                    role: "assistant".to_string(),
-                    content: vec![ask_tool_use("resume-ask-1", "恢复问题一")],
-                    input_id: None,
-                    source: TuiMessageSource::User,
-                    stop_hook: None,
-                },
-                ask_result("resume-ask-1", "恢复答案一"),
-                TuiChatMessage {
-                    role: "assistant".to_string(),
-                    content: vec![ask_tool_use("resume-ask-2", "恢复问题二")],
-                    input_id: None,
-                    source: TuiMessageSource::User,
-                    stop_hook: None,
-                },
-                ask_result("resume-ask-2", "恢复答案二"),
-            ],
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "history-run".into(),
+                step_id: "history-step".into(),
+                messages: vec![
+                    TuiChatMessage {
+                        role: "assistant".to_string(),
+                        content: vec![ask_tool_use("resume-ask-1", "恢复问题一")],
+                        input_id: None,
+                        source: TuiMessageSource::User,
+                        stop_hook: None,
+                    },
+                    ask_result("resume-ask-1", "恢复答案一"),
+                    TuiChatMessage {
+                        role: "assistant".to_string(),
+                        content: vec![ask_tool_use("resume-ask-2", "恢复问题二")],
+                        input_id: None,
+                        source: TuiMessageSource::User,
+                        stop_hook: None,
+                    },
+                    ask_result("resume-ask-2", "恢复答案二"),
+                ],
+            }],
         },
     );
     let restored_count = harness
