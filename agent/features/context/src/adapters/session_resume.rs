@@ -18,6 +18,7 @@ impl crate::application::MainSessionWiring {
         Ok(SessionResumeProjection {
             session_id: committed.id.clone(),
             messages: restore.active_messages,
+            steps: restore.steps,
             created_at: restore.created_at,
             trimmed: restore.trimmed,
             repaired: restore.repaired,

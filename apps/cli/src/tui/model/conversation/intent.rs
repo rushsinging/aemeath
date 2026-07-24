@@ -10,7 +10,7 @@ use super::interaction::{
 };
 use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
-use crate::tui::adapter::runtime_view::TuiChatMessage;
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
 use crate::tui::app::event::ModelStreamWaitingView;
 use std::time::Instant;
 
@@ -27,15 +27,9 @@ pub struct StartChat {
 ///
 /// 与 `StartChat` 的区别：resume 场景下 chat 已结束，不需要 spinner。
 /// 传入完整消息列表，内部逐条 apply 已有 intent 灌入 ConversationModel。
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ResumeConversation {
-    pub messages: Vec<TuiChatMessage>,
-}
-
-impl PartialEq for ResumeConversation {
-    fn eq(&self, other: &Self) -> bool {
-        self.messages.len() == other.messages.len()
-    }
+    pub steps: Vec<TuiResumedSessionStep>,
 }
 
 /// 仅追加一条用户消息回显块，不创建新的 chat/turn。

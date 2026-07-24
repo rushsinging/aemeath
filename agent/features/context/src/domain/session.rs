@@ -19,7 +19,7 @@ pub use management::{
     same_project_identity, session_matches_project, SessionListEntry, SessionManagementError,
     SessionMetadataUpdate, SessionResumeProjection,
 };
-pub use restore::SessionRestore;
+pub use restore::{SessionRestore, SessionRestoreStep};
 pub use types::{
     extract_project_name, new_session_id, now_iso, validate_session_id, PersistedWorkspaceContext,
     PersistedWorkspaceFrame, SessionMetadata,

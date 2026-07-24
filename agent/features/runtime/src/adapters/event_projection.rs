@@ -492,13 +492,21 @@ pub(crate) fn project_stream_event(
             ChatEvent::CommandResultText { text, is_error }
         }
         crate::application::main_loop::RuntimeStreamEvent::SessionResumed {
-            messages,
+            steps,
             session_id,
             created_at,
         } => ChatEvent::SessionResumed {
-            messages: messages
+            steps: steps
                 .into_iter()
-                .map(crate::application::client::message_to_sdk)
+                .map(|step| sdk::ResumedSessionStep {
+                    run_id: step.run_id,
+                    step_id: step.step_id,
+                    messages: step
+                        .messages
+                        .into_iter()
+                        .map(crate::application::client::message_to_sdk)
+                        .collect(),
+                })
                 .collect(),
             session_id,
             created_at,

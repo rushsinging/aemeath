@@ -9,6 +9,14 @@ use crate::ChatMessage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// 会话恢复时由 Context 发布的结构化 RunStep 展示投影。
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ResumedSessionStep {
+    pub run_id: String,
+    pub step_id: String,
+    pub messages: Vec<ChatMessage>,
+}
+
 /// Runtime stream context used to bind UI events to the authoritative chat/turn.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatEventContext {
@@ -377,7 +385,7 @@ pub enum ChatEvent {
     },
     /// 会话恢复完成通知（#497）。TUI 据此更新 messages 和状态。
     SessionResumed {
-        messages: Vec<ChatMessage>,
+        steps: Vec<ResumedSessionStep>,
         session_id: String,
         created_at: u64,
     },

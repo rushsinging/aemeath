@@ -5,8 +5,16 @@ use crate::domain::session::CanonicalSession;
 use share::message::Message;
 
 #[derive(Debug, Clone)]
+pub struct SessionRestoreStep {
+    pub run_id: String,
+    pub step_id: String,
+    pub messages: Vec<Message>,
+}
+
+#[derive(Debug, Clone)]
 pub struct SessionRestore {
     pub active_messages: Vec<Message>,
+    pub steps: Vec<SessionRestoreStep>,
     pub created_at: String,
     pub trimmed: usize,
     pub repaired: usize,
@@ -15,19 +23,32 @@ pub struct SessionRestore {
 impl SessionRestore {
     pub fn from_canonical(session: &CanonicalSession) -> Self {
         // CanonicalSession applies the active compact marker before integrity repair.
-        let mut messages = session.structured_messages();
-        let trimmed = {
-            let before = messages.len();
-            sanitize_messages(&mut messages);
-            before.saturating_sub(messages.len())
-        };
-        let repaired = if check_message_integrity(&messages).has_issues() {
-            deep_clean_messages(&mut messages)
-        } else {
-            0
-        };
+        let raw_steps = session.flattened_steps_from_marker();
+        let mut steps = Vec::with_capacity(raw_steps.len());
+        let mut trimmed = 0;
+        let mut repaired = 0;
+        for (cursor, mut step_messages) in raw_steps {
+            let before = step_messages.len();
+            sanitize_messages(&mut step_messages);
+            trimmed += before.saturating_sub(step_messages.len());
+            if check_message_integrity(&step_messages).has_issues() {
+                repaired += deep_clean_messages(&mut step_messages);
+            }
+            if !step_messages.is_empty() {
+                steps.push(SessionRestoreStep {
+                    run_id: cursor.run_id,
+                    step_id: cursor.step_id,
+                    messages: step_messages,
+                });
+            }
+        }
+        let messages = steps
+            .iter()
+            .flat_map(|step| step.messages.iter().cloned())
+            .collect();
         Self {
             active_messages: messages,
+            steps,
             created_at: session.created_at.clone(),
             trimmed,
             repaired,

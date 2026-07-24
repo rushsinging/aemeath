@@ -465,7 +465,7 @@ pub(crate) enum TuiRuntimeEvent {
         message_count: usize,
     },
     SessionResumed {
-        messages: Vec<TuiChatMessage>,
+        steps: Vec<super::runtime_view::TuiResumedSessionStep>,
         session_id: String,
         created_at: u64,
     },

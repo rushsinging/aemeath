@@ -80,6 +80,13 @@ pub enum RuntimeToolCallStatus {
 /// Compact 进度阶段（re-export from context crate）。
 pub use context::compact::CompactStage;
 
+#[derive(Debug, Clone)]
+pub struct RuntimeResumedSessionStep {
+    pub run_id: String,
+    pub step_id: String,
+    pub messages: Vec<Message>,
+}
+
 #[derive(Debug)]
 pub enum RuntimeStreamEvent {
     Text {
@@ -261,7 +268,7 @@ pub enum RuntimeStreamEvent {
     },
     /// 会话恢复完成通知（#497）。
     SessionResumed {
-        messages: Vec<share::message::Message>,
+        steps: Vec<RuntimeResumedSessionStep>,
         session_id: String,
         created_at: u64,
     },

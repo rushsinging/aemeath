@@ -237,11 +237,20 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             UiEvent::CommandResultText { text, is_error }
         }
         sdk::ChatEvent::SessionResumed {
-            messages,
+            steps,
             session_id,
             created_at,
         } => UiEvent::SessionResumed {
-            messages: messages.into_iter().map(chat_message).collect(),
+            steps: steps
+                .into_iter()
+                .map(
+                    |step| crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                        run_id: step.run_id,
+                        step_id: step.step_id,
+                        messages: step.messages.into_iter().map(chat_message).collect(),
+                    },
+                )
+                .collect(),
             session_id,
             created_at,
         },

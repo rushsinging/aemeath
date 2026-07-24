@@ -30,10 +30,14 @@ fn session_history_restore_does_not_activate_runtime_spinner() {
     reduce_intent(
         &mut model,
         AgentIntent::Conversation(ConversationIntent::ResumeConversation(ResumeConversation {
-            messages: vec![
-                TuiChatMessage::user_text("历史问题"),
-                TuiChatMessage::assistant_text("历史回答"),
-            ],
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "history-run".into(),
+                step_id: "history-step".into(),
+                messages: vec![
+                    TuiChatMessage::user_text("历史问题"),
+                    TuiChatMessage::assistant_text("历史回答"),
+                ],
+            }],
         })),
     );
 

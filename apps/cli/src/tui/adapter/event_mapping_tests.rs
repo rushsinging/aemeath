@@ -2,6 +2,28 @@ use super::{sdk_event_to_tui_event, SdkEventMapping};
 use crate::tui::adapter::tui_runtime_event::{TuiRunEvent, TuiRuntimeEvent};
 
 #[test]
+fn session_resume_keeps_context_run_step_boundaries() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::SessionResumed {
+        steps: vec![sdk::ResumedSessionStep {
+            run_id: "run-1".into(),
+            step_id: "step-1".into(),
+            messages: vec![sdk::ChatMessage::user_text("hello")],
+        }],
+        session_id: "session-1".into(),
+        created_at: 0,
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::SessionResumed { steps, .. })
+            if steps.len() == 1
+                && steps[0].run_id == "run-1"
+                && steps[0].step_id == "step-1"
+                && steps[0].messages[0].text_content() == "hello"
+    ));
+}
+
+#[test]
 fn run_cancelling_keeps_identity_instead_of_becoming_empty_message() {
     let run_id = sdk::RunId::new("run-1");
 
