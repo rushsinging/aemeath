@@ -159,3 +159,85 @@ fn test_stop_hook_feedback_uses_system_message_when_blocked() {
     assert!(feedback.payload.command.contains("line-check.sh"));
     assert_eq!(feedback.payload.reason, "exit code 2");
 }
+
+// ── run_stop_hook_before_finish integration ──────────────────────
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+/// Mock HookPort that counts dispatch_at calls.
+struct CountingHookPort {
+    dispatch_count: AtomicUsize,
+    last_point: std::sync::Mutex<Option<String>>,
+}
+
+impl CountingHookPort {
+    fn new() -> Self {
+        Self {
+            dispatch_count: AtomicUsize::new(0),
+            last_point: std::sync::Mutex::new(None),
+        }
+    }
+    fn count(&self) -> usize {
+        self.dispatch_count.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl HookPort for CountingHookPort {
+    async fn dispatch(
+        &self,
+        invocation: hook::HookInvocation,
+        _cancellation: &CancellationToken,
+    ) -> hook::HookOutcome {
+        self.dispatch_count.fetch_add(1, Ordering::SeqCst);
+        *self.last_point.lock().unwrap() = Some(format!("{:?}", invocation.point()));
+        hook::HookOutcome::proceed()
+    }
+}
+
+#[derive(Clone)]
+struct NoopSink;
+impl crate::application::main_loop::ChatEventSink for NoopSink {
+    fn send_event<'a>(
+        &'a self,
+        _event: crate::application::main_loop::RuntimeStreamEvent,
+    ) -> crate::application::main_loop::EventFuture<'a> {
+        Box::pin(async {})
+    }
+    fn try_send_event(&self, _event: crate::application::main_loop::RuntimeStreamEvent) {}
+    fn send_domain_event<'a>(
+        &'a self,
+        _event: crate::domain::agent_run::RunDomainEvent,
+    ) -> crate::application::main_loop::EventFuture<'a> {
+        Box::pin(async {})
+    }
+}
+
+#[tokio::test]
+async fn run_stop_hook_invokes_hook_port_with_stop_invocation() {
+    let counting = Arc::new(CountingHookPort::new());
+    let hook_port: Arc<dyn HookPort> = counting.clone();
+    let outcome = crate::application::subagent::runner::AgentRunOutcome {
+        status: crate::application::subagent::runner::AgentRunStatus::Completed,
+        turns: 1,
+        duration: std::time::Duration::from_secs(1),
+        role: None,
+        model: "test-model".to_string(),
+    };
+    let cancel = CancellationToken::new();
+
+    let result = super::run_stop_hook_before_finish(
+        &outcome,
+        &NoopSink,
+        &hook_port,
+        "test-session",
+        "zh",
+        std::path::Path::new("/tmp"),
+        &cancel,
+    )
+    .await;
+
+    assert_eq!(counting.count(), 1, "dispatch must be called once");
+    assert!(result.is_none(), "Continue → None");
+}

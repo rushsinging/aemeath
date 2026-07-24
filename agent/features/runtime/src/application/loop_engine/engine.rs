@@ -785,6 +785,10 @@ where
                 }
                 ToolStep::AwaitUser => {
                     run.complete_step(&step_id)?;
+                    // AwaitUser 前必须先 finalize step outcome（模型回复 +
+                    // 工具结果），否则 Terminate 时 active_step 为 None，
+                    // 上一 step 的 outcome 永久丢失。
+                    port.finalize_step(&step_id).await?;
                     run.transition(RunTransition::AwaitUser)?;
                     emit_events(run, port).await?;
                     // Return to caller; the caller will call run_loop again
