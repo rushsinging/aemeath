@@ -31,6 +31,64 @@ pub fn tool_display_name(name: &str) -> &str {
     TOOL_DISPLAY_NAMES.get(name).copied().unwrap_or(name)
 }
 
+/// 为子代理 tool call 进度行提取简要预览文本。
+///
+/// 从 input JSON 中提取关键字段（如 command、file_path），
+/// 截断到 80 字符。无匹配字段时回退到截断的 JSON 字符串。
+/// 位于 view_model 层，adapter 可直接调用。
+pub fn tool_input_preview(name: &str, input: &serde_json::Value) -> String {
+    use serde_json::Value;
+
+    let preview = match name {
+        "Bash" => field_str(input, "command"),
+        "Read" | "Write" | "Edit" => field_str(input, "file_path"),
+        "Grep" => composite(input, &["pattern", "path"]),
+        "Glob" => field_str(input, "pattern"),
+        "WebFetch" => field_str(input, "url"),
+        "WebSearch" => field_str(input, "query"),
+        "EnterWorktree" | "ExitWorktree" => field_str(input, "path"),
+        "TaskCreate" | "TaskUpdate" => field_str(input, "subject"),
+        "LSP" => composite(input, &["file_path", "operation"]),
+        _ => {
+            let raw = match input {
+                Value::String(s) => s.clone(),
+                value => value.to_string(),
+            };
+            raw.trim().to_string()
+        }
+    };
+
+    truncate_preview(&preview)
+}
+
+fn field_str(input: &serde_json::Value, key: &str) -> String {
+    input
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn composite(input: &serde_json::Value, keys: &[&str]) -> String {
+    let parts: Vec<&str> = keys
+        .iter()
+        .filter_map(|k| input.get(k).and_then(|v| v.as_str()))
+        .collect();
+    parts.join(" ")
+}
+
+fn truncate_preview(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    let chars: String = s.chars().take(80).collect();
+    if chars.len() < s.len() {
+        format!("{chars}...")
+    } else {
+        chars
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
