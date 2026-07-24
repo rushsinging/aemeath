@@ -1,10 +1,10 @@
+use crate::adapters::tool_suspension_acl::user_interaction_items;
 use crate::application::main_loop::looping::hook_ui::dispatch_hook;
 use crate::application::main_loop::looping::tools::send_tool_result;
 use crate::application::main_loop::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext,
 };
 use crate::application::subagent::{ToolCall, ToolExecution};
-use crate::application::suspension_mapping::user_interaction_items;
 use hook::{HookInvocation, HookPort, PermissionInput};
 use std::sync::Arc;
 use tools::{ToolOutcome, ToolSuspension};

@@ -7,6 +7,13 @@ use crate::ports::legacy::ChatRuntimeContext;
 use sdk::ChatEvent;
 use share::config::models::ResolvedModel;
 
+/// #1381: Composition-injected input port pair.
+/// Application receives this without importing adapter modules.
+pub struct InputPortPair {
+    pub queue: crate::adapters::input_buffer::RuntimeQueueDrainPort,
+    pub input_events: crate::adapters::input_buffer::RuntimeInputEventDrainPort,
+}
+
 // ─── 结构体定义 ───
 
 /// AgentClient 的 runtime 实现。
@@ -51,6 +58,17 @@ pub struct RuntimeHandle {
     pub(crate) session_management: Arc<dyn context::SessionManagementPort>,
     pub(crate) event_sink_factory: Arc<
         dyn Fn(tokio::sync::mpsc::UnboundedSender<ChatEvent>) -> ChatEventSinkHandle + Send + Sync,
+    >,
+    /// #1381: Factory for input drain ports, injected by composition.
+    /// Application calls this to get concrete QueueDrainPort/InputEventDrainPort
+    /// without depending on adapter types directly.
+    pub(crate) input_port_factory: Arc<
+        dyn Fn(
+                Option<Arc<dyn sdk::QueueDrainPort>>,
+                Option<Arc<dyn sdk::ChatInputEventPort>>,
+            ) -> InputPortPair
+            + Send
+            + Sync,
     >,
 
     // ─── SDK 业务对象 ───

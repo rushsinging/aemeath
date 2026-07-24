@@ -507,6 +507,10 @@ pub async fn from_args_with_workspace(
                 crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
             )
         }),
+        input_port_factory: Arc::new(|queue, events| super::accessors::InputPortPair {
+            queue: crate::adapters::input_buffer::RuntimeQueueDrainPort::new(queue),
+            input_events: crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(events),
+        }),
         session_reminders: Arc::new(std::sync::RwLock::new(
             share::memory::SessionReminders::new(),
         )),

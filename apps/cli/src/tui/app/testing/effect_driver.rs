@@ -78,10 +78,16 @@ impl ScriptedEffectDriver {
                     ExpectedEffect::ProcessImageFile { path: expected },
                 ) => assert_eq!(path, &expected, "image path mismatch"),
                 (Effect::QuitApplication, ExpectedEffect::QuitApplication) => {}
-                (Effect::ReplyInteraction { .. }, ExpectedEffect::ReplyInteraction { replies: scripted }) => {
+                (
+                    Effect::ReplyInteraction { .. },
+                    ExpectedEffect::ReplyInteraction { replies: scripted },
+                ) => {
                     replies.extend(scripted);
                 }
-                (Effect::CancelInteraction { .. }, ExpectedEffect::CancelInteraction { replies: scripted }) => {
+                (
+                    Effect::CancelInteraction { .. },
+                    ExpectedEffect::CancelInteraction { replies: scripted },
+                ) => {
                     replies.extend(scripted);
                 }
                 (_, _) => panic!("effect did not match script: {effect:?}"),

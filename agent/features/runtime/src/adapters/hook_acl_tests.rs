@@ -18,7 +18,7 @@ use hook::{
 };
 use serde_json::json;
 
-use super::hook_adapter::{
+use super::hook_acl::{
     project_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookDisplayMessageKind,
     RuntimeHookExecution, RuntimeHookExecutionStatus, RuntimeHookReason,
 };

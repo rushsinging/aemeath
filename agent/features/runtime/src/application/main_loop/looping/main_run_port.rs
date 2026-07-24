@@ -497,8 +497,8 @@ where
                 )
                 .build(),
                 tools::ToolExecutionPorts::new(
-                    crate::application::tool_execution_adapters::cancellation(cancel.clone()),
-                    crate::application::tool_execution_adapters::RuntimeWorkspaceAccess::new(
+                    crate::adapters::tool_runtime::cancellation(cancel.clone()),
+                    crate::application::workspace_access::RuntimeWorkspaceAccess::new(
                         workspace.clone(),
                     )
                     .read_access(),
