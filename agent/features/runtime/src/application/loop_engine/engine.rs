@@ -605,6 +605,17 @@ where
 
     // #1272: track the last assistant text for terminal claim
     let assistant_text = model_step_text(&model_step);
+    if assistant_text.trim().is_empty() {
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "{}",
+            serde_json::json!({
+                "event_type": "empty_terminal_text",
+                "model_step": model_step_label(&model_step),
+                "step_id": step_id.to_string(),
+            })
+        );
+    }
     *terminal_text = Some(assistant_text);
 
     match model_step {

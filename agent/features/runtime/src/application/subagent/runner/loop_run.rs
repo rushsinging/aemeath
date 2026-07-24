@@ -801,12 +801,35 @@ impl RunLoopPort for SubAgentRun<'_> {
                 }
 
                 if should_complete_after_model_response(tool_calls.is_empty()) {
-                    return Ok((
-                        ModelStep::Complete {
-                            text: resp.assistant_message.text_content(),
-                        },
-                        usage,
-                    ));
+                    let text = resp.assistant_message.text_content();
+                    if text.trim().is_empty() {
+                        let block_types: Vec<&str> = resp
+                            .assistant_message
+                            .content
+                            .iter()
+                            .map(|b| match b {
+                                share::message::ContentBlock::Text { .. } => "text",
+                                share::message::ContentBlock::Image { .. } => "image",
+                                share::message::ContentBlock::ToolUse { .. } => "tool_use",
+                                share::message::ContentBlock::ToolResult { .. } => "tool_result",
+                                share::message::ContentBlock::Thinking { .. } => "thinking",
+                            })
+                            .collect();
+                        log::warn!(
+                            target: crate::LOG_TARGET,
+                            "{}",
+                            serde_json::json!({
+                                "event_type": "subagent_empty_complete_text",
+                                "block_count": resp.assistant_message.content.len(),
+                                "block_types": block_types,
+                                "has_thinking": resp.assistant_message.content.iter().any(|b| matches!(b, share::message::ContentBlock::Thinking { .. })),
+                                "text_len": text.len(),
+                                "stop_reason": format!("{:?}", resp.stop_reason),
+                                "role": self.role_name_for_log,
+                            })
+                        );
+                    }
+                    return Ok((ModelStep::Complete { text }, usage));
                 }
 
                 Ok((
