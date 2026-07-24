@@ -838,7 +838,16 @@ fn format_agent_progress_calls(
 ) -> String {
     let text = calls
         .iter()
-        .map(|call| format!("→ {}", call.name))
+        .map(|call| {
+            format!(
+                "→ {}",
+                crate::tui::render::output::tool_display::format_subagent_tool_header(
+                    &call.name,
+                    &call.input,
+                    None,
+                )
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     format_agent_progress_text(&text)
