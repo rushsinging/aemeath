@@ -183,13 +183,6 @@ pub struct RuntimeHookDisplayMessage {
     /// 消息文本。
     pub text: String,
 }
-
-// ─── pure projection ──────────────────────────────────────────
-
-/// 把 Hook BC 的 [`hook::HookOutcome`] 投影为 Runtime 拥有的
-/// [`RuntimeHookDispatch`]。
-///
-/// 纯转换：不解析 stdout / JSON，不维护 Run 状态，不修改源。
 pub fn project_hook_outcome(outcome: &hook::HookOutcome) -> RuntimeHookDispatch {
     RuntimeHookDispatch {
         directive: project_directive(&outcome.directive),

@@ -3,11 +3,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-fn test_workspaces() -> &'static Mutex<
-    HashMap<String, crate::application::tool_execution_adapters::RuntimeWorkspaceAccess>,
-> {
+fn test_workspaces(
+) -> &'static Mutex<HashMap<String, crate::application::workspace_access::RuntimeWorkspaceAccess>> {
     static WORKSPACES: OnceLock<
-        Mutex<HashMap<String, crate::application::tool_execution_adapters::RuntimeWorkspaceAccess>>,
+        Mutex<HashMap<String, crate::application::workspace_access::RuntimeWorkspaceAccess>>,
     > = OnceLock::new();
     WORKSPACES.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -20,7 +19,7 @@ pub(crate) fn test_tool_execution_context(
         .expect("workspace initialization")
         .into_views();
     let workspace =
-        crate::application::tool_execution_adapters::RuntimeWorkspaceAccess::new(views.clone());
+        crate::application::workspace_access::RuntimeWorkspaceAccess::new(views.clone());
     test_workspaces().lock().expect("test workspaces").insert(
         views.read().workspace_id().as_str().to_string(),
         workspace.clone(),
@@ -28,7 +27,7 @@ pub(crate) fn test_tool_execution_context(
     tools::ToolExecutionContext::new(
         tools::ExecutionScope::builder("test-run", views.read().workspace_id(), root).build(),
         tools::ToolExecutionPorts::new(
-            crate::application::tool_execution_adapters::cancellation(cancel.clone()),
+            crate::adapters::tool_runtime::cancellation(cancel.clone()),
             workspace.read_access(),
             Arc::new(tools::MutexReadSet(Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
@@ -44,7 +43,7 @@ pub(crate) fn test_tool_execution_context(
 
 pub(crate) fn runtime_workspace(
     ctx: &tools::ToolExecutionContext,
-) -> crate::application::tool_execution_adapters::RuntimeWorkspaceAccess {
+) -> crate::application::workspace_access::RuntimeWorkspaceAccess {
     test_workspaces()
         .lock()
         .expect("test workspaces")
