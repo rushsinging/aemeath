@@ -710,9 +710,8 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
     assert_eq!(harness.stub.compact_calls().len(), 1);
 }
 
-/// Integration: `MainRunPort::compact` does NOT submit when the context port
-/// returns `CompactOutcome::Skipped`, even though `compact()` itself surfaces
-/// the skip as an adapter error.
+/// Integration: `MainRunPort::compact` treats a Context-owned skip as a
+/// non-fatal no-op and does not submit a PreCompact reflection.
 #[tokio::test]
 async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
     let window = window_with(vec![Message::user("only")]);
@@ -731,7 +730,10 @@ async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
 
     let cancel = CancellationToken::new();
     let result = port.compact(&cancel).await;
-    assert!(result.is_err(), "compact must surface Skipped as an error");
+    assert!(
+        result.is_ok(),
+        "automatic compact skip must continue the current Run: {result:?}"
+    );
 
     // Allow any spawned tasks to settle so the absence of a submission is a
     // deterministic observation, not a race.

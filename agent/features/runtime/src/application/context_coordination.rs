@@ -30,6 +30,23 @@ use sdk::RunStepId;
 use sha2::{Digest, Sha256};
 use share::message::Message;
 
+/// Apply the Runtime-owned state transition for an automatic compact outcome.
+///
+/// A committed compact invalidates both the Provider usage baseline and the
+/// materialized ContextWindow. A typed skip is a non-fatal no-op: Context did
+/// not mutate its backing, so Runtime keeps both values and proceeds with the
+/// current model invocation.
+pub(crate) fn apply_automatic_compact_outcome<T>(
+    outcome: &CompactOutcome,
+    last_total_tokens: &mut Option<u64>,
+    context_window: &mut Option<T>,
+) {
+    if matches!(outcome, CompactOutcome::Committed(_)) {
+        *last_total_tokens = None;
+        *context_window = None;
+    }
+}
+
 /// Runtime 对 Context-owned 四方法端口的单一协调 façade。
 #[derive(Clone)]
 pub(crate) struct ContextCoordinator {

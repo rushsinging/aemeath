@@ -16,7 +16,7 @@ use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::{ContentBlock, Message, Role};
 
-use super::ContextCoordinator;
+use super::{apply_automatic_compact_outcome, ContextCoordinator};
 
 #[derive(Default)]
 struct RecordingPort {
@@ -528,4 +528,38 @@ async fn skipped_compaction_is_returned_without_hidden_retry() {
             .unwrap(),
         CompactOutcome::Skipped(CompactSkipReason::ResumeProtection)
     ));
+}
+
+#[test]
+fn automatic_compact_committed_resets_usage_and_window() {
+    let mut usage = Some(42);
+    let mut window = Some("window");
+
+    apply_automatic_compact_outcome(
+        &CompactOutcome::Committed(CompactResult {
+            summary: "summary".to_string(),
+            recent_messages: Vec::new(),
+            source_revision: SessionRevision::new(7),
+        }),
+        &mut usage,
+        &mut window,
+    );
+
+    assert_eq!(usage, None);
+    assert_eq!(window, None);
+}
+
+#[test]
+fn automatic_compact_skipped_preserves_usage_and_window() {
+    let mut usage = Some(42);
+    let mut window = Some("window");
+
+    apply_automatic_compact_outcome(
+        &CompactOutcome::Skipped(CompactSkipReason::ResumeProtection),
+        &mut usage,
+        &mut window,
+    );
+
+    assert_eq!(usage, Some(42));
+    assert_eq!(window, Some("window"));
 }

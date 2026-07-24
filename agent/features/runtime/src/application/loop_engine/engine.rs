@@ -960,7 +960,11 @@ where
     .await
 }
 
-async fn fail_run<P>(run: &mut Run, port: &mut P, error: String) -> Result<(), LoopEngineError>
+pub(crate) async fn fail_run<P>(
+    run: &mut Run,
+    port: &mut P,
+    error: String,
+) -> Result<(), LoopEngineError>
 where
     P: RunLoopPort,
 {
