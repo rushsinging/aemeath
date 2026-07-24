@@ -605,7 +605,10 @@ where
 
     // #1272: track the last assistant text for terminal claim
     let assistant_text = model_step_text(&model_step);
-    if assistant_text.trim().is_empty() {
+    // #1384: Only warn for Complete — Tools steps commonly have empty text
+    // (model returns only tool calls). Empty Complete text is the diagnostic
+    // signal for the "子代理执行完成（无输出）" bug.
+    if assistant_text.trim().is_empty() && matches!(model_step, ModelStep::Complete { .. }) {
         log::warn!(
             target: crate::LOG_TARGET,
             "{}",

@@ -377,6 +377,7 @@ impl AgentRunner for CliAgentRunner {
             tool_context_binding: self.tool_context_binding.clone(),
             prompt_drained: false,
             next_epoch: crate::application::loop_engine::DrainEpoch(0),
+            has_tool_results_pending: false,
         }
         .run_loop()
         .await

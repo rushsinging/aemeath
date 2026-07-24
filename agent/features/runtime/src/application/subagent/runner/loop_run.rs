@@ -163,6 +163,10 @@ pub(super) struct SubAgentRun<'a> {
     /// linearization. First drain (Ready) uses epoch 0, then advances
     /// to 1; subsequent EmptyAndSealed uses epoch 1.
     pub next_epoch: crate::application::loop_engine::DrainEpoch,
+    /// Tracks whether the last step executed tools. When true, drain_input
+    /// returns InternalContinuation::ToolResults so the engine invokes the
+    /// model again with tool results (instead of prematurely sealing).
+    pub has_tool_results_pending: bool,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -517,6 +521,20 @@ impl RunLoopPort for SubAgentRun<'_> {
         }
         let epoch = self.next_epoch;
         self.next_epoch = epoch.next();
+        // #1384: If the last step executed tools, return InternalContinuation
+        // so the engine invokes the model again with tool results appended
+        // to messages. Only seal when the model produced no tool calls
+        // (ModelStep::Complete/Continue) — that's the terminal response.
+        if self.has_tool_results_pending {
+            self.has_tool_results_pending = false;
+            return Ok(
+                crate::application::loop_engine::DrainOutcome::InternalContinuation {
+                    kind: crate::application::loop_engine::InternalContinuationKind::ToolResults,
+                    batch: Vec::new(),
+                    epoch,
+                },
+            );
+        }
         Ok(crate::application::loop_engine::DrainOutcome::EmptyAndSealed { epoch })
     }
 
@@ -961,6 +979,9 @@ impl RunLoopPort for SubAgentRun<'_> {
                     &self.session_id,
                 )
                 .await;
+                // #1384: Mark that tool results are pending so drain_input
+                // returns InternalContinuation instead of EmptyAndSealed.
+                self.has_tool_results_pending = true;
                 Ok(if fuse_bypassed.is_empty() {
                     ToolStep::Continue
                 } else {
