@@ -2,6 +2,7 @@ mod engine;
 mod input;
 mod stuck_guard;
 
+pub(crate) use engine::fail_run;
 pub use engine::{
     run_loop, DrainEpoch, DrainOutcome, InternalContinuationKind, LoopDirective, LoopEngineError,
     LoopInput, ModelStep, RunLoopPort, StepTokenUsage, ToolGuardDecision, ToolStep,

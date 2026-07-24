@@ -8,7 +8,9 @@
 //! Sub 等 FixedInputBuffer），engine 在 await_interruptible 内消费。
 //! run_loop 只返回 Terminal。launcher 不需要 AwaitUser re-entry。
 
-use crate::application::loop_engine::{run_loop, LoopDirective, LoopEngineError, RunLoopPort};
+use crate::application::loop_engine::{
+    fail_run, run_loop, LoopDirective, LoopEngineError, RunLoopPort,
+};
 use crate::domain::agent_run::{ActiveRunPort, Run, RunId, RunSpec};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -54,6 +56,12 @@ where
                 target: crate::LOG_TARGET,
                 "[run_launcher] shared run_loop failed: {error}"
             );
+            if let Err(terminal_error) = fail_run(&mut run, port, error.to_string()).await {
+                log::error!(
+                    target: crate::LOG_TARGET,
+                    "[run_launcher] failed to publish RunFailed: {terminal_error}"
+                );
+            }
             RunLaunchResult::Failed(error)
         }
     };
@@ -63,100 +71,5 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::application::active_run::ActiveRunRegistry;
-    use crate::application::loop_engine::{
-        DrainEpoch, DrainOutcome, ModelStep, RunLoopPort, StepTokenUsage, StuckDecision,
-        ToolGuardDecision, ToolStep,
-    };
-    use crate::domain::agent_run::{ActiveRunPort, RunDomainEvent, RunStepId};
-
-    /// Minimal RunLoopPort stub: drain returns EmptyAndSealed immediately,
-    /// so run_loop completes in one iteration.
-    struct StubPort {
-        events_emitted: Vec<RunDomainEvent>,
-    }
-
-    #[async_trait::async_trait]
-    impl RunLoopPort for StubPort {
-        async fn drain_input(
-            &mut self,
-            _expected_epoch: DrainEpoch,
-        ) -> Result<DrainOutcome, LoopEngineError> {
-            Ok(DrainOutcome::EmptyAndSealed {
-                epoch: DrainEpoch(0),
-            })
-        }
-        async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-            Ok(false)
-        }
-        async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {
-            Ok(())
-        }
-        async fn invoke_model(
-            &mut self,
-            _cancel: &CancellationToken,
-        ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
-            Ok((
-                ModelStep::Complete {
-                    text: String::new(),
-                },
-                StepTokenUsage::default(),
-            ))
-        }
-        async fn execute_tools(
-            &mut self,
-            _run_id: &RunId,
-            _step_id: &RunStepId,
-            _calls: &[(crate::application::subagent::ToolCall, ToolGuardDecision)],
-            _cancel: &CancellationToken,
-        ) -> Result<ToolStep, LoopEngineError> {
-            Ok(ToolStep::Continue)
-        }
-        async fn on_stuck(&mut self, _decision: &StuckDecision) -> Result<(), LoopEngineError> {
-            Ok(())
-        }
-        async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
-            self.events_emitted.extend(events);
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn launch_creates_run_and_returns_terminal() {
-        let registry: Arc<dyn ActiveRunPort> = Arc::new(ActiveRunRegistry::default());
-        let mut port = StubPort {
-            events_emitted: Vec::new(),
-        };
-        let input = RunLaunchInput {
-            run_id: RunId::new_v7(),
-            spec: RunSpec::main(),
-            parent_run_id: None,
-            cancel: CancellationToken::new(),
-        };
-
-        let result = launch(input, registry.clone(), &mut port).await;
-        assert!(matches!(result, RunLaunchResult::Terminal));
-    }
-
-    #[tokio::test]
-    async fn launch_clears_active_run_after_completion() {
-        let registry = Arc::new(ActiveRunRegistry::default());
-        let run_id = RunId::new_v7();
-        let mut port = StubPort {
-            events_emitted: Vec::new(),
-        };
-        let input = RunLaunchInput {
-            run_id: run_id.clone(),
-            spec: RunSpec::main(),
-            parent_run_id: None,
-            cancel: CancellationToken::new(),
-        };
-
-        let _ = launch(input, registry.clone(), &mut port).await;
-
-        // After launch returns, the run should be cleared from the registry.
-        assert!(!registry.claim_terminal(&run_id));
-    }
-}
+#[path = "run_launcher_tests.rs"]
+mod tests;
