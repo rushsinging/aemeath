@@ -1104,7 +1104,7 @@ where
             self.context_request.as_ref(),
             source_revision,
             self.context,
-            &mut self.last_total_tokens,
+            self.last_total_tokens,
             &mut self.context_window,
         )
         .await?;

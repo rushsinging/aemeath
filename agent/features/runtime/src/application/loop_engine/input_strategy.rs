@@ -354,45 +354,37 @@ where
         // Async park: wait for the next input event from the channel.
         // engine's await_interruptible wraps this future — cancel/timeout
         // will drop it automatically.
-        loop {
-            let event = self.input_events.recv_next_input().await;
-            match event {
-                None => {
-                    // Channel closed — seal.
-                    return Ok(DrainOutcome::EmptyAndSealed {
-                        epoch: expected_epoch,
-                    });
+        let event = self.input_events.recv_next_input().await;
+        match event {
+            None => {
+                // Channel closed — seal.
+                Ok(DrainOutcome::EmptyAndSealed {
+                    epoch: expected_epoch,
+                })
+            }
+            Some(event @ ChatInputEvent::UserMessage { .. }) => {
+                self.run_input_buffer.push(event);
+                match self.run_input_buffer.try_drain_unsealed(expected_epoch) {
+                    BufferDrain::Ready { batch, epoch } => Ok(DrainOutcome::Ready { batch, epoch }),
+                    BufferDrain::Empty { epoch } => Ok(DrainOutcome::NoInput { epoch }),
+                    BufferDrain::EmptyAndSealed { epoch }
+                    | BufferDrain::AlreadySealed { epoch } => {
+                        Ok(DrainOutcome::EmptyAndSealed { epoch })
+                    }
+                    BufferDrain::EpochMismatch { expected, actual } => {
+                        Err(LoopEngineError::Adapter(format!(
+                            "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                            expected, actual,
+                        )))
+                    }
                 }
-                Some(ChatInputEvent::UserMessage { .. }) => {
-                    self.run_input_buffer.push(event.unwrap());
-                    return match self.run_input_buffer.try_drain_unsealed(expected_epoch) {
-                        BufferDrain::Ready { batch, epoch } => {
-                            Ok(DrainOutcome::Ready { batch, epoch })
-                        }
-                        BufferDrain::Empty { epoch } => Ok(DrainOutcome::NoInput { epoch }),
-                        BufferDrain::EmptyAndSealed { epoch } => {
-                            Ok(DrainOutcome::EmptyAndSealed { epoch })
-                        }
-                        BufferDrain::AlreadySealed { epoch } => {
-                            Ok(DrainOutcome::EmptyAndSealed { epoch })
-                        }
-                        BufferDrain::EpochMismatch { expected, actual } => {
-                            Err(LoopEngineError::Adapter(format!(
-                                "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                                expected, actual,
-                            )))
-                        }
-                    };
-                }
-                Some(other) => {
-                    // Non-UserMessage command: defer to session idle gate.
-                    // Return EmptyAndSealed so the Run completes and the
-                    // session gate can process the command.
-                    self.pending_input.push(other);
-                    return Ok(DrainOutcome::EmptyAndSealed {
-                        epoch: expected_epoch,
-                    });
-                }
+            }
+            Some(other) => {
+                // Non-UserMessage command: defer to session idle gate.
+                self.pending_input.push(other);
+                Ok(DrainOutcome::EmptyAndSealed {
+                    epoch: expected_epoch,
+                })
             }
         }
     }

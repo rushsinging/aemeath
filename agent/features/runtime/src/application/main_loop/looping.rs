@@ -26,10 +26,6 @@ pub(crate) mod reflection;
 #[cfg(test)]
 mod reflection_trigger_tests;
 pub(crate) mod run_input_buffer;
-#[cfg(test)]
-pub(crate) use run_input_buffer::{BufferDrain, RunInputBuffer};
-#[cfg(test)]
-mod run_input_buffer_tests;
 mod snapshot_registry;
 pub(crate) mod stall;
 mod stream_handler;
