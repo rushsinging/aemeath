@@ -1,4 +1,4 @@
-use super::suspension_mapping::user_interaction_items;
+use super::tool_suspension_acl::user_interaction_items;
 
 #[test]
 fn maps_user_interaction_fields_losslessly_in_stable_order() {

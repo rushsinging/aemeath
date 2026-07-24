@@ -140,8 +140,8 @@ where
         )
         .await
     } else {
-        crate::application::hook_adapter::RuntimeHookDispatch {
-            directive: crate::application::hook_adapter::RuntimeHookDirective::Continue,
+        crate::adapters::hook_acl::RuntimeHookDispatch {
+            directive: crate::adapters::hook_acl::RuntimeHookDirective::Continue,
             executions: Vec::new(),
             messages: Vec::new(),
             block_detail: None,
@@ -248,9 +248,7 @@ where
     );
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-    let progress_sink: std::sync::Arc<dyn tools::ProgressSink> =
-        crate::application::tool_execution_adapters::progress(prog_tx);
-    *ag_ctx = ag_ctx.with_progress(Some(progress_sink.clone()));
+    *ag_ctx = ag_ctx.with_progress(Some(crate::adapters::tool_runtime::progress(prog_tx)));
     let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
     let progress_context = context.clone();

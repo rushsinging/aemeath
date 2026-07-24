@@ -81,8 +81,21 @@ LAYER_MIGRATION_EXCEPTIONS = set()
 RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/runtime/src/application/client/accessors.rs", "adapters"),
     ("agent/features/runtime/src/application/client/from_args.rs", "adapters"),
+    ("agent/features/runtime/src/application/client/trait_chat.rs", "adapters"),
     ("agent/features/runtime/src/ports/input_buffer.rs", "application"),
     ("agent/features/runtime/src/ports/legacy.rs", "application"),
+    # #1381: adapter modules moved from application/ to adapters/;
+    # application still references adapter concrete types until Port traits are introduced.
+    ("agent/features/runtime/src/application/main_loop/looping/agent_calls.rs", "adapters"),
+    ("agent/features/runtime/src/application/main_loop/looping/ask_user.rs", "adapters"),
+    ("agent/features/runtime/src/application/main_loop/looping/finalize.rs", "adapters"),
+    ("agent/features/runtime/src/application/main_loop/looping/hook_ui.rs", "adapters"),
+    ("agent/features/runtime/src/application/main_loop/looping/main_run_port.rs", "adapters"),
+    ("agent/features/runtime/src/application/main_loop/looping/non_agent.rs", "adapters"),
+    ("agent/features/runtime/src/application/startup/runtime_support.rs", "adapters"),
+    ("agent/features/runtime/src/application/subagent/runner.rs", "adapters"),
+    ("agent/features/runtime/src/application/testing.rs", "adapters"),
+    ("agent/features/runtime/src/application/tool_coordination.rs", "adapters"),
 }
 use_crate_segment = re.compile(r"\b(?:use\s+)?crate::([A-Za-z_][A-Za-z0-9_]*)")
 project_domain_adapter_pattern = re.compile(

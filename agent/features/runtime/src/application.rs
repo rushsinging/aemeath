@@ -1,11 +1,11 @@
-/// application/mod.rs — 应用层：用例编排（Agent Execution 核心域 + 支撑域协调）
+/// application/mod.rs — 用例编排层。
+///
+/// COLA 语义：消费 Port/Gateway，拥有用例决策，不依赖具体 Adapter。
+/// 协议转换和运行时桥接已移入 `adapters/`。
 pub(crate) mod active_run;
 pub mod client;
 pub mod context_coordination;
 pub mod cost;
-pub mod hook_adapter;
-#[cfg(test)]
-mod hook_adapter_tests;
 pub mod interaction;
 pub mod loop_engine;
 pub mod main_loop;
@@ -20,12 +20,8 @@ pub mod scheduler;
 pub mod service;
 pub mod startup;
 pub mod subagent;
-pub mod suspension_mapping;
-#[cfg(test)]
-mod suspension_mapping_tests;
 #[cfg(test)]
 pub(crate) mod testing;
 pub(crate) mod token_usage;
 pub mod tool_coordination;
-pub(crate) mod tool_execution_adapters;
 pub mod tool_result_materialization;

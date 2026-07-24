@@ -1,5 +1,5 @@
 use super::*;
-use crate::application::hook_adapter::{
+use crate::adapters::hook_acl::{
     RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookDisplayMessage,
     RuntimeHookDisplayMessageKind, RuntimeHookExecution, RuntimeHookExecutionStatus,
     RuntimeHookReason,
@@ -49,7 +49,7 @@ fn block_dispatch(
             duration: Duration::from_millis(10),
         }],
         messages,
-        block_detail: Some(crate::application::hook_adapter::RuntimeHookBlockDetail {
+        block_detail: Some(crate::adapters::hook_acl::RuntimeHookBlockDetail {
             command: source.to_string(),
             execution_ordinal: 1,
             execution: RuntimeHookExecution {

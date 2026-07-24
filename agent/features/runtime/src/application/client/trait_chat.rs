@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use sdk::{ChatRequest, ChatStream, SdkError};
 
 use super::accessors::AgentClientImpl;
-use crate::ports::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort};
+use crate::adapters::input_buffer::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort};
 
 pub(super) async fn chat_impl(
     me: &AgentClientImpl,

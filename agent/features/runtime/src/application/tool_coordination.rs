@@ -5,7 +5,7 @@
 //! 本模块拥有 Main/Sub 共用的调用准备与稳定回收策略。UI 事件、进度流和
 //! interaction waiter 仍由各自 adapter 处理；typed continuation 由 #878 收口。
 
-use crate::application::hook_adapter::{RuntimeHookDirective, RuntimeHookReason};
+use crate::adapters::hook_acl::{RuntimeHookDirective, RuntimeHookReason};
 use crate::application::loop_engine::ToolGuardDecision;
 use crate::application::subagent::{ToolCall, ToolExecution};
 use policy::{PolicyDecision, PolicyPort, PolicyRequest};
