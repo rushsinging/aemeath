@@ -256,11 +256,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             TuiRunStepEvent::Cancelled { confirmed },
         ),
         ChatEvent::InteractionRequested { request } => {
-            log::info!(
-                target: crate::LOG_TARGET,
-                "[interaction] sdk→tui mapping request_id={} run_id={}",
-                request.id, request.run_id,
-            );
             TuiRuntimeEvent::InteractionRequested(interaction_request(request))
         }
         ChatEvent::Cancelled { context } => TuiRuntimeEvent::Cancelled {

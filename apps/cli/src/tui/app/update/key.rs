@@ -1,4 +1,4 @@
-use super::key_nav::{handle_dialog_key, handle_interaction_key};
+use super::key_nav::handle_dialog_key;
 use super::key_scroll::handle_scroll_key;
 use super::UpdateResult;
 use crate::tui::app::App;
@@ -79,11 +79,6 @@ impl App {
 
         if self.layout.has_active_dialog() {
             return handle_dialog_key(self, key).unwrap_or_else(UpdateResult::none);
-        }
-
-        // Interaction overlay takes priority over normal input
-        if self.model.conversation.active_interaction().is_some() {
-            return handle_interaction_key(self, key);
         }
 
         // Shift+Enter / Alt+Enter = insert newline

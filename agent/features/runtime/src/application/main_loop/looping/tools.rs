@@ -241,11 +241,6 @@ where
             }
         };
 
-        log::info!(
-            target: crate::LOG_TARGET,
-            "[interaction] emitting InteractionRequested request_id={} run_id={}",
-            request.id, request.run_id,
-        );
         sink.send_event(RuntimeStreamEvent::InteractionRequested { request })
             .await;
 

@@ -287,12 +287,7 @@ impl App {
                     pending_slash: None,
                 };
             }
-            TuiRuntimeEvent::InteractionRequested(ref req) => {
-                log::info!(
-                    target: crate::LOG_TARGET,
-                    "[interaction] update_runtime_event received request_id={:?} run_id={:?}",
-                    req.request_id, req.run_id,
-                );
+            TuiRuntimeEvent::InteractionRequested(_) => {
                 // InteractionRequested 走 Runtime 路径，但 spinner_stop / mark_output_dirty
                 // 是 App 级副作用，map_runtime_event 只返回 conversation intent。
                 // 必须在此处理，否则 spinner 不停、交互弹窗不渲染。

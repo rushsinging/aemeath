@@ -268,15 +268,6 @@ impl App {
             } else if let Some(dialog) = self.layout.active_dialog() {
                 dialog.render(size, buf);
             }
-            // Interaction overlay (AskUserQuestion / ToolApproval / etc.)
-            if let Some(interaction) = self.model.conversation.active_interaction() {
-                crate::tui::render::dialog::render_interaction_overlay(
-                    interaction,
-                    self.layout.interaction_selected,
-                    size,
-                    buf,
-                );
-            }
         })?;
         self.layout
             .update_areas(output_rect, input_rect, status_rect);

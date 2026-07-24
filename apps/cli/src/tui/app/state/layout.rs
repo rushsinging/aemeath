@@ -14,8 +14,6 @@ pub(crate) struct UiLayout {
     pub last_terminal_size: Option<TerminalSize>,
     pub active_dialog: Option<Dialog>,
     pub dialog_model_keys: Vec<String>,
-    /// Interaction overlay cursor (for option selection within AskUserQuestion etc.)
-    pub interaction_selected: usize,
     /// Ctrl+C 第一次按下的时间（用于 double-CtrlC 退出）
     pub last_ctrlc: Option<std::time::Instant>,
 }
