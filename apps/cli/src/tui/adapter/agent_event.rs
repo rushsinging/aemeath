@@ -216,14 +216,25 @@ where
                 }))
             }
             sdk::AgentProgressKindView::ToolOutput { .. } => AgentEventMapping::default(),
-            _ => conversation(ConversationIntent::RecordAgentProgress(
-                RecordAgentProgress {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    tool_id: ToolCallId::new(tool_id.as_str()),
-                    message: format_agent_progress(event, &mut format_subagent_tool_header),
-                },
-            )),
+            _ => {
+                let message = format_agent_progress(event, &mut format_subagent_tool_header);
+                let preview: String = message.chars().take(200).collect();
+                crate::tui::log_debug!(
+                    "agent_progress_format kind={} seq={} msg_len={} msg={:?}",
+                    format!("{:?}", event.kind).split('{').next().unwrap_or("?"),
+                    event.sequence,
+                    message.len(),
+                    preview,
+                );
+                conversation(ConversationIntent::RecordAgentProgress(
+                    RecordAgentProgress {
+                        chat_id: context.chat_id.clone(),
+                        turn_id: context.turn_id.clone(),
+                        tool_id: ToolCallId::new(tool_id.as_str()),
+                        message,
+                    },
+                ))
+            }
         },
         UiEvent::Done { context }
         | UiEvent::DoneWithDuration { context, .. }
@@ -791,6 +802,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     })
                 }
             };
+            log::info!(
+                target: crate::LOG_TARGET,
+                "[interaction] map_runtime_event → ShowInteraction request_id={:?} run_id={:?}",
+                request.request_id, request.run_id,
+            );
             conversation(ConversationIntent::ShowInteraction(ShowInteraction {
                 request: InteractionRequest {
                     request_id: request.request_id.clone(),
