@@ -130,18 +130,9 @@ pub(super) struct SubAgentRun<'a> {
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub policy: Arc<dyn policy::PolicyPort>,
     pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
-    /// #1272: Sub's FixedInputBuffer returns the prompt as Ready on the very
-    /// first drain, then EmptyAndSealed forever after. Tracks whether the
-    /// initial prompt has already been consumed.
-    pub prompt_drained: bool,
-    /// #1272: Sub maintains its own epoch counter for per-turn drain
-    /// linearization. First drain (Ready) uses epoch 0, then advances
-    /// to 1; subsequent EmptyAndSealed uses epoch 1.
-    pub next_epoch: crate::application::loop_engine::DrainEpoch,
-    /// Tracks whether the last step executed tools. When true, drain_input
-    /// returns InternalContinuation::ToolResults so the engine invokes the
-    /// model again with tool results (instead of prematurely sealing).
-    pub has_tool_results_pending: bool,
+    /// Input strategy: encapsulates the fixed-prompt drain logic with epoch
+    /// tracking and tool-result continuation support (#1272, #1384).
+    pub input_strategy: crate::application::loop_engine::input_strategy::SubInputStrategy<'a>,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -425,73 +416,22 @@ impl RunLoopPort for SubAgentRun<'_> {
         Ok(())
     }
 
+    /// #1272: Delegates to [`SubInputStrategy::drain_input`].
     async fn drain_input(
         &mut self,
         expected_epoch: crate::application::loop_engine::DrainEpoch,
     ) -> Result<crate::application::loop_engine::DrainOutcome, LoopEngineError> {
-        // #1272: Sub's FixedInputBuffer returns the prompt as Ready exactly
-        // once (consumed by the first step's accepted-input handoff) at
-        // epoch 0, then EmptyAndSealed at epoch 1 forever after.
-        if !self.prompt_drained {
-            if expected_epoch != self.next_epoch {
-                return Err(LoopEngineError::Adapter(format!(
-                    "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                    expected_epoch, self.next_epoch,
-                )));
-            }
-            self.prompt_drained = true;
-            let epoch = self.next_epoch;
-            self.next_epoch = epoch.next();
-            return Ok(crate::application::loop_engine::DrainOutcome::Ready {
-                batch: vec![crate::application::loop_engine::LoopInput {
-                    text: self.prompt.to_string(),
-                    input_id: None,
-                    images: Vec::new(),
-                }],
-                epoch,
-            });
-        }
-        if expected_epoch != self.next_epoch {
-            return Err(LoopEngineError::Adapter(format!(
-                "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                expected_epoch, self.next_epoch,
-            )));
-        }
-        let epoch = self.next_epoch;
-        self.next_epoch = epoch.next();
-        // #1384: If the last step executed tools, return InternalContinuation
-        // so the engine invokes the model again with tool results appended
-        // to messages. Only seal when the model produced no tool calls
-        // (ModelStep::Complete/Continue) — that's the terminal response.
-        if self.has_tool_results_pending {
-            self.has_tool_results_pending = false;
-            return Ok(
-                crate::application::loop_engine::DrainOutcome::InternalContinuation {
-                    kind: crate::application::loop_engine::InternalContinuationKind::ToolResults,
-                    batch: Vec::new(),
-                    epoch,
-                },
-            );
-        }
-        Ok(crate::application::loop_engine::DrainOutcome::EmptyAndSealed { epoch })
+        use crate::application::loop_engine::input_strategy::InputStrategy;
+        self.input_strategy.drain_input(expected_epoch).await
     }
 
-    /// #1280: Sub Agent 的 await_user_input 预留接口。
-    ///
-    /// 当前 Sub 使用 FixedInputBuffer，drain 后立即 seal，永不进入 AwaitingUser，
-    /// 因此此方法不可达。
-    ///
-    /// #1248 将注入 InteractionBridge 后激活：Sub 的 AskUserQuestion suspension
-    /// 会触发 AwaitingUser，此方法 async park 等 InteractionBridge oneshot。
+    /// #1280: Delegates to [`SubInputStrategy::await_user_input`].
     async fn await_user_input(
         &mut self,
         _expected_epoch: crate::application::loop_engine::DrainEpoch,
     ) -> Result<crate::application::loop_engine::DrainOutcome, LoopEngineError> {
-        Err(LoopEngineError::Adapter(
-            "Sub Agent 不支持 AwaitingUser（FixedInputBuffer 只 drain 一次即 seal）\
-             ; #1248 注入 InteractionBridge 后激活"
-                .to_string(),
-        ))
+        use crate::application::loop_engine::input_strategy::InputStrategy;
+        self.input_strategy.await_user_input(_expected_epoch).await
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
@@ -917,7 +857,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                 .await;
                 // #1384: Mark that tool results are pending so drain_input
                 // returns InternalContinuation instead of EmptyAndSealed.
-                self.has_tool_results_pending = true;
+                self.input_strategy.has_tool_results_pending = true;
                 Ok(if fuse_bypassed.is_empty() {
                     ToolStep::Continue
                 } else {
