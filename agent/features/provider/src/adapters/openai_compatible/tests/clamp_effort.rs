@@ -1,4 +1,16 @@
-// === clamp_effort ===
+//! Per-driver `clamp_effort` + `ReasoningConfig::clamped` 契约测试。
+//!
+//! - 锁定 #1393 后 OpenAI 全档位（含 minimal/xhigh/max）的 wire 投影；
+//! - 其他 driver 的 capability / clamp 快照保持不变；
+//! - `ReasoningConfig::ThinkingBudget` 的 `clamped()` 保持原值，不被改写为 Object。
+
+use super::super::driver::{
+    AgnesDriver, ChatApiDriver, DeepSeekDriver, LiteLlmDriver, MimoDriver, MinimaxDriver,
+    OpenAiDriver, VolcengineDriver, ZhipuDriver,
+};
+use super::super::ReasoningConfig;
+
+use serde_json::json;
 
 #[test]
 fn test_clamp_effort_openai_wire_none_for_off() {
@@ -94,6 +106,29 @@ fn test_clamped_thinking_budget_remains_independent_from_effort() {
     let config = ReasoningConfig::ThinkingBudget(40000);
     let clamped = config.clamped(&OpenAiDriver);
     assert_eq!(clamped, config);
+}
+
+#[test]
+fn test_clamped_thinking_budget_remains_for_all_drivers() {
+    // #1393：ThinkingBudget 与 effort 正交，对任何 driver 都必须保留原值。
+    let budget = ReasoningConfig::ThinkingBudget(8192);
+    let drivers: &[&dyn ChatApiDriver] = &[
+        &OpenAiDriver,
+        &ZhipuDriver,
+        &DeepSeekDriver,
+        &LiteLlmDriver,
+        &VolcengineDriver,
+        &MinimaxDriver,
+        &MimoDriver,
+        &AgnesDriver,
+    ];
+    for driver in drivers {
+        assert_eq!(
+            budget.clamped(*driver),
+            budget,
+            "ThinkingBudget must survive clamp on every driver"
+        );
+    }
 }
 
 #[test]

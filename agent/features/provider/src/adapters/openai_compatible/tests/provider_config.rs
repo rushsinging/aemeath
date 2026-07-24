@@ -1,3 +1,16 @@
+//! End-to-end OpenAI-compatible provider 装配测试：
+//! - `OpenAIProviderConfig::from_driver` 字段映射
+//! - 各类 provider 的 URL 后缀、最大 token 字段、headers/UA
+//! - 各种 driver 的 chat URL / max_tokens_field
+
+use super::super::driver::{AgnesDriver, ChatApiDriver, DeepSeekDriver, MimoDriver, ZhipuDriver};
+use super::super::OpenAICompatibleProvider;
+use super::super::ReasoningConfig;
+use super::common::base_body;
+
+use crate::adapters::client::OpenAIProviderConfig;
+use serde_json::json;
+
 #[test]
 fn custom_user_agent_is_sent_in_openai_headers() {
     let config = OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::OpenAI, "openai");
@@ -14,15 +27,18 @@ fn custom_user_agent_is_sent_in_openai_headers() {
     );
 
     assert_eq!(
-        provider.build_headers().unwrap().get(reqwest::header::USER_AGENT).unwrap(),
+        provider
+            .build_headers()
+            .unwrap()
+            .get(reqwest::header::USER_AGENT)
+            .unwrap(),
         "aemeath-test/1.0"
     );
 }
 
 #[test]
 fn minimax_provider_uses_max_completion_tokens_field() {
-    let config =
-        OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::Minimax, "minimax");
+    let config = OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::Minimax, "minimax");
     let provider = OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),
@@ -48,8 +64,7 @@ fn minimax_provider_uses_max_completion_tokens_field() {
 
 #[test]
 fn minimax_provider_keeps_v1_base_url_suffix() {
-    let config =
-        OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::Minimax, "minimax");
+    let config = OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::Minimax, "minimax");
     let provider = OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),
@@ -345,8 +360,7 @@ fn openai_provider_config_from_driver_sets_fields() {
 
 #[test]
 fn openai_provider_uses_scope_max_tokens_in_request_body() {
-    let config =
-        OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::OpenAI, "openai");
+    let config = OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::OpenAI, "openai");
     let provider = OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),
@@ -372,8 +386,7 @@ fn openai_provider_uses_scope_max_tokens_in_request_body() {
 
 #[test]
 fn invocation_scope_requires_non_zero_max_tokens() {
-    let config =
-        OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::OpenAI, "openai");
+    let config = OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::OpenAI, "openai");
     let provider = OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),
@@ -426,7 +439,10 @@ fn volcengine_provider_uses_max_output_tokens_field() {
 
 #[test]
 fn openai_streaming_http_client_uses_connect_timeout() {
-    let debug = format!("{:?}", provider::build_streaming_http_client_builder(30));
+    let debug = format!(
+        "{:?}",
+        super::super::provider::build_streaming_http_client_builder(30)
+    );
 
     assert!(debug.contains("connect_timeout"), "{debug}");
 }

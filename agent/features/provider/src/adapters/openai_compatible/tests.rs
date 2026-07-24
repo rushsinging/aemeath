@@ -1,9 +1,34 @@
+//! OpenAI 兼容 provider 的集成 / 端到端测试。
+//!
+//! 子模块拆分：
+//! - `tests/common.rs`     共享 helpers（`base_body`, `assert_no_reasoning_fields`）
+//! - `tests/reasoning.rs`  `ReasoningConfig` 与各 driver 的 reasoning 字段契约
+//! - `tests/clamp_effort.rs` 各 driver 的 `clamp_effort` 快照
+//! - `tests/provider_config.rs` provider 装配 / URL / max_tokens 字段
+//!
+//! 以下三个异步流测试与三个 usage parser 测试保留在 `tests.rs` 中，
+//! 它们直接依赖 `super::usage::parse_*` 与 `crate::composition::LlmClient`，
+//! 与子模块的 helper 无关——把它们迁出将引入额外样板，因此留在顶层。
+
 use futures_util::StreamExt;
 use share::message::Message;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
+
+#[cfg(test)]
+#[path = "tests/clamp_effort.rs"]
+mod clamp_effort;
+#[cfg(test)]
+#[path = "tests/common.rs"]
+mod common;
+#[cfg(test)]
+#[path = "tests/provider_config.rs"]
+mod provider_config;
+#[cfg(test)]
+#[path = "tests/reasoning.rs"]
+mod reasoning;
 
 async fn spawn_openai_counting_server(raw_response: &'static str) -> (String, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -228,11 +253,6 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
                 && call.arguments == serde_json::json!({"file_path": "examples/hello.rs"})
     ));
 }
-
-include!("tests/common.rs");
-include!("tests/reasoning.rs");
-include!("tests/provider_config.rs");
-include!("tests/clamp_effort.rs");
 
 #[test]
 fn raw_usage_parsers_preserve_missing_zero_and_unknown_fields() {

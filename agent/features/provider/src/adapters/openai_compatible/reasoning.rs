@@ -43,7 +43,10 @@ impl ReasoningConfig {
                 }
                 Self::Object(value)
             }
-            Self::ThinkingBudget(_) => Self::Object(serde_json::json!({"effort": effort})),
+            // ThinkingBudget 与 effort 正交（#1393）：预算只表达启用 / 关闭，
+            // 不参与 driver 的 effort clamp。保持原 `ThinkingBudget(tokens)`，
+            // 由各 driver 在 `apply_reasoning_fields` 中按 toggle / budget 语义决定。
+            Self::ThinkingBudget(_) => self.clone(),
         }
     }
 
@@ -62,8 +65,9 @@ impl ReasoningConfig {
 
     /// 返回经过 driver clamp 后的新配置。
     ///
-    /// 对 Object 中的 effort 字段和 ThinkingBudget 推导出的 effort，
-    /// 调用 `driver.clamp_effort()` 做自适应降级。
+    /// 对 `Object.effort` 字段调用 `driver.clamp_effort()` 做自适应降级；
+    /// `ThinkingBudget` 与 effort 正交（#1393），保留原值不参与 clamp；
+    /// `Bool` 不携带 effort 信息，直接返回自身。
     #[cfg(test)]
     pub(super) fn clamped(&self, driver: &dyn ChatApiDriver) -> ReasoningConfig {
         match self {
@@ -81,14 +85,7 @@ impl ReasoningConfig {
                     self.clone()
                 }
             }
-            Self::ThinkingBudget(_) => {
-                if let Some(effort) = self.as_effort() {
-                    let clamped = driver.clamp_effort(&effort);
-                    Self::Object(serde_json::json!({"effort": clamped}))
-                } else {
-                    self.clone()
-                }
-            }
+            Self::ThinkingBudget(_) => self.clone(),
             _ => self.clone(),
         }
     }
