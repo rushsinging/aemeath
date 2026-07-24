@@ -18,7 +18,6 @@ mod usage;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use driver::effort_from_thinking_tokens;
 pub use provider::OpenAICompatibleProvider;
 pub use reasoning::ReasoningConfig;
 pub(crate) use responses_stream::parse_responses_stream;

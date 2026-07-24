@@ -1,5 +1,4 @@
 use super::driver::ChatApiDriver;
-use super::effort_from_thinking_tokens;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReasoningConfig {
@@ -16,7 +15,7 @@ impl ReasoningConfig {
                 .or_else(|| value.get("reasoning_effort"))
                 .and_then(|v| v.as_str())
                 .map(ToOwned::to_owned),
-            Self::ThinkingBudget(tokens) => Some(effort_from_thinking_tokens(*tokens).to_string()),
+            Self::ThinkingBudget(_tokens) => None,
             Self::Bool(_) => None,
         }
     }

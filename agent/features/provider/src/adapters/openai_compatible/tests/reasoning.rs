@@ -66,32 +66,24 @@ fn litellm_bool_reasoning_sends_no_reasoning_fields() {
 }
 
 #[test]
-fn openai_thinking_budget_maps_to_medium_reasoning_effort() {
+fn openai_thinking_budget_does_not_generate_effort() {
     let config = ReasoningConfig::ThinkingBudget(4096);
     let mut body = base_body();
 
     OpenAiDriver.apply_reasoning_fields(&mut body, Some(&config), true);
 
-    assert_eq!(body.get("reasoning"), Some(&json!({"effort":"medium"})));
+    assert_no_reasoning_fields(&body);
 }
 
 #[test]
-fn litellm_thinking_budget_maps_to_top_level_reasoning_effort() {
+fn litellm_thinking_budget_does_not_generate_effort() {
     let config = ReasoningConfig::ThinkingBudget(40000);
     let mut body = base_body();
 
     LiteLlmDriver.apply_reasoning_fields(&mut body, Some(&config), true);
 
-    assert_eq!(body.get("reasoning_effort"), Some(&json!("xhigh")));
+    assert!(body.get("reasoning_effort").is_none());
     assert!(body.get("reasoning").is_none());
-}
-
-#[test]
-fn thinking_budget_effort_boundaries() {
-    assert_eq!(effort_from_thinking_tokens(1024), "low");
-    assert_eq!(effort_from_thinking_tokens(1025), "medium");
-    assert_eq!(effort_from_thinking_tokens(8193), "high");
-    assert_eq!(effort_from_thinking_tokens(32769), "xhigh");
 }
 
 #[test]
