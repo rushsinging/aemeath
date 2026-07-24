@@ -15,6 +15,24 @@ const SPINNER_BASE: Color = theme::SPINNER_BASE;
 const SPINNER_HIGHLIGHT: Color = theme::SPINNER_HIGHLIGHT;
 const SPINNER_DIM: Color = theme::SPINNER_DIM;
 
+fn format_duration(total_secs: u64) -> String {
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    let mut parts = Vec::with_capacity(3);
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+    }
+    if minutes > 0 {
+        parts.push(format!("{minutes}m"));
+    }
+    if seconds > 0 || parts.is_empty() {
+        parts.push(format!("{seconds}s"));
+    }
+    parts.join(" ")
+}
+
 /// Linear interpolation between two RGB colors
 fn lerp_color(a: Color, b: Color, t: f32) -> Color {
     if let (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) = (a, b) {
@@ -70,7 +88,7 @@ impl super::OutputArea {
         let elapsed = s.elapsed_secs;
         if elapsed >= 1 {
             spans.push(Span::styled(
-                format!("  {}s", elapsed),
+                format!("  {}", format_duration(elapsed)),
                 Style::default().fg(theme::TEXT_DIM),
             ));
         }
@@ -83,7 +101,7 @@ impl super::OutputArea {
             ));
             let phase_elapsed = s.phase_elapsed_secs;
             spans.push(Span::styled(
-                format!("  ⏱ {}s", phase_elapsed),
+                format!("  ⏱ {}", format_duration(phase_elapsed)),
                 Style::default().fg(theme::TEXT_DIM),
             ));
             spans.push(Span::styled(")", Style::default().fg(theme::TEXT_DIM)));
@@ -132,3 +150,7 @@ fn compact_progress_spans(cp: &CompactProgressView) -> Vec<Span<'static>> {
     ));
     spans
 }
+
+#[cfg(test)]
+#[path = "spinner_tests.rs"]
+mod tests;

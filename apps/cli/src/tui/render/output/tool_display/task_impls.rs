@@ -8,8 +8,8 @@ use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use sdk::tool_input::{
-    EnterPlanModeInput, ExitPlanModeInput, LspInput, TaskCreateInput, TaskGetInput,
-    TaskListCreateInput, TaskStopInput, TaskUpdateInput,
+    EnterPlanModeInput, ExitPlanModeInput, TaskCreateInput, TaskGetInput, TaskListCreateInput,
+    TaskStopInput, TaskUpdateInput,
 };
 use sdk::tool_result::TaskUpdateResult;
 use std::path::Path;
@@ -285,43 +285,6 @@ impl ToolDisplay for SkillDisplay {
 inventory::submit!(ToolDisplayEntry {
     name: "Skill",
     display: || Box::new(SkillDisplay)
-});
-
-// ── LSP ──────────────────────────────────────────────────────────
-
-struct LspDisplay;
-impl ToolDisplay for LspDisplay {
-    fn name(&self) -> &str {
-        "LSP"
-    }
-    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let args = parse_input::<LspInput>(input);
-        let name = self.display_name();
-        match (args.operation.is_empty(), args.file_path.is_empty()) {
-            (true, true) => name.to_string(),
-            (true, false) => format!("{name} {}", args.file_path),
-            (false, true) => format!("{name}::{}", args.operation),
-            (false, false) => format!("{name}::{} {}", args.operation, args.file_path),
-        }
-    }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
-    }
-    fn render_policy(&self) -> ToolRenderPolicy {
-        ToolRenderPolicy {
-            header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
-            result: ResultPolicy::Visible {
-                max_lines: Some(5),
-                render_kind: ResultRender::Plain,
-                tail_mode: false,
-            },
-        }
-    }
-}
-inventory::submit!(ToolDisplayEntry {
-    name: "LSP",
-    display: || Box::new(LspDisplay)
 });
 
 // ── TaskGet ──────────────────────────────────────────────────────

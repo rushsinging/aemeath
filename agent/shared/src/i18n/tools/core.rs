@@ -1,4 +1,4 @@
-//! 核心工具文案（agent/memory/skill/plan_mode/ask_user/brief/sleep/tool_search/lsp 的 description）。
+//! 核心工具文案（agent/memory/skill/plan_mode/ask_user/brief/sleep/tool_search 的 description）。
 
 /// Agent description。
 pub fn agent(lang: &str) -> &'static str {
@@ -86,34 +86,6 @@ pub fn tool_search(lang: &str) -> &'static str {
     }
 }
 
-/// Lsp description。
-pub fn lsp(lang: &str) -> &'static str {
-    match lang {
-        "zh" => {
-            r#"使用语言工具获取代码智能信息。
-
-支持的操作：
-- diagnostics：获取文件的编译器错误/警告
-- definition：查找某位置符号的定义
-- references：查找符号的所有引用
-- symbols：列出文件或工作区的符号
-
-本工具使用语言特定的 CLI 工具（cargo、tsc、pylint 等）提供代码智能。"#
-        }
-        _ => {
-            r#"Get code intelligence information using language tools.
-
-Supported operations:
-- diagnostics: Get compiler errors/warnings for a file
-- definition: Find the definition of a symbol at a position
-- references: Find all references to a symbol
-- symbols: List symbols in a file or workspace
-
-This tool uses language-specific CLI tools (cargo, tsc, pylint, etc.) to provide code intelligence."#
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +103,5 @@ mod tests {
         assert!(brief("zh").contains("简要总结"));
         assert!(sleep("zh").contains("暂停执行"));
         assert!(tool_search("zh").contains("搜索可用工具"));
-        assert!(lsp("zh").contains("代码智能"));
     }
 }

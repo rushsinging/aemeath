@@ -91,7 +91,7 @@ pub fn infer_node_from_tool(
 ) -> ReasoningNode {
     match tool_name {
         // 探索类 tool
-        "Read" | "Grep" | "Glob" | "LSP" | "ToolSearch" => ReasoningNode::Explore,
+        "Read" | "Grep" | "Glob" | "ToolSearch" => ReasoningNode::Explore,
         // 执行类 tool
         "Edit" | "Write" => ReasoningNode::Execute,
         // Bash 按 command 内容细分类
