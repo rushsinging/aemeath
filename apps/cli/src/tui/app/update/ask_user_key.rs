@@ -5,6 +5,7 @@ use crate::tui::model::conversation::block::AskUserPhase;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::update::intent::AgentIntent;
 use crossterm::event::{KeyCode, KeyModifiers};
+use log;
 
 impl App {
     pub(super) fn update_ask_user_key(
@@ -200,6 +201,11 @@ impl App {
             .conversation
             .active_interaction()
             .map(|i| (i.request_id().clone(), i.run_id().clone()));
+        log::info!(
+            target: crate::LOG_TARGET,
+            "[ask_user] confirm_ask_user_batch active_interaction={:?}",
+            interaction.as_ref().map(|(id, _)| id.as_str()),
+        );
         let Some((request_id, _run_id)) = interaction else {
             self.apply_agent_intent(AgentIntent::Conversation(
                 ConversationIntent::ConfirmAskUserBatch(ConfirmAskUserBatch),
@@ -207,19 +213,22 @@ impl App {
             return Some(UpdateResult::none());
         };
 
-        // Collect answers from AskUserBatch slots
         let answers = self
             .model
             .conversation
             .ask_user_batch_answers()
             .unwrap_or_default();
+        log::info!(
+            target: crate::LOG_TARGET,
+            "[ask_user] confirm answers={:?} request_id={}",
+            answers,
+            request_id.as_str(),
+        );
 
-        // Mark confirmed in conversation model
         self.apply_agent_intent(AgentIntent::Conversation(
             ConversationIntent::ConfirmAskUserBatch(ConfirmAskUserBatch),
         ));
 
-        // Send reply via InteractionBridge
         let reply = crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(
             answers,
         );
