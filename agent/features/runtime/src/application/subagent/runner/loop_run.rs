@@ -961,23 +961,6 @@ impl RunLoopPort for SubAgentRun<'_> {
                 let cancellation = self.agent.ctx.cancellation();
                 let mut executed = tokio::select! {
                     _ = cancellation.cancelled() => {
-                        // #1384: Don't just return Err(Cancelled) — supplement
-                        // cancelled tool results so messages stay consistent
-                        // for persistence and resume.
-                        let cancelled_results =
-                            crate::application::tool_coordination::complete_cancelled_tool_round(
-                                &all_calls,
-                                results,
-                            );
-                        self.log_result_summaries(turn_number, &cancelled_results, &call_info);
-                        self.log_tool_results(turn_number, &cancelled_results, &call_info);
-                        append_tool_results(
-                            self.tool_result_materializer.as_ref(),
-                            &mut self.messages,
-                            cancelled_results,
-                            &self.session_id,
-                        )
-                        .await;
                         return Err(LoopEngineError::Cancelled);
                     }
                     executed = self.agent.execute_prepared_tools(&executable) => executed,

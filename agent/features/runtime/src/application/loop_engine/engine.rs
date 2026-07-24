@@ -748,6 +748,11 @@ where
             {
                 Interrupt::Completed(Ok(step)) => step,
                 Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
+                    // #1384: Finalize the cancelled step so that tool results
+                    // (including cancelled agent outcomes) are persisted before
+                    // the step is cleaned up. Without this, resume cannot
+                    // recover the tool interaction state.
+                    port.finalize_cancelled_step(&step_id).await?;
                     handle_step_control(run, port).await?;
                     return Ok(());
                 }

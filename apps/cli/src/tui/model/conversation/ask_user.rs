@@ -44,6 +44,42 @@ pub struct AskUserSnapshot {
 }
 
 impl ConversationModel {
+    /// 获取当前 AskUserBatch 块的 slot 数（无块时返回 None）。
+    pub fn ask_user_slot_count(&self) -> Option<usize> {
+        self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::AskUserBatch {
+                slots, confirmed: false, ..
+            } = item
+            {
+                Some(slots.len())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// 收集当前 AskUserBatch 块各 slot 的答案。
+    pub fn ask_user_batch_answers(&self) -> Option<Vec<String>> {
+        self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::AskUserBatch {
+                slots, confirmed: false, ..
+            } = item
+            {
+                let answers: Vec<String> = slots
+                    .iter()
+                    .filter_map(|s| s.answer.clone())
+                    .collect();
+                if answers.len() == slots.len() {
+                    Some(answers)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+    }
+
     /// 读取当前 AskUserBatch 块的交互状态快照（无块时返回 None）。
     pub fn ask_user_snapshot(&self) -> Option<AskUserSnapshot> {
         self.timeline.items().iter().find_map(|item| {

@@ -1,3 +1,4 @@
+mod ask_user_key;
 mod done;
 mod enter;
 mod key;
@@ -13,9 +14,10 @@ pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
 use crate::tui::adapter::agent_event::{map_agent_event_with_tool_header, map_runtime_event};
-use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
+use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRuntimeEvent};
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
+use crate::tui::model::conversation::block::AskUserSlot;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
@@ -287,12 +289,35 @@ impl App {
                     pending_slash: None,
                 };
             }
-            TuiRuntimeEvent::InteractionRequested(_) => {
+            TuiRuntimeEvent::InteractionRequested(ref req) => {
                 // InteractionRequested 走 Runtime 路径，但 spinner_stop / mark_output_dirty
                 // 是 App 级副作用，map_runtime_event 只返回 conversation intent。
-                // 必须在此处理，否则 spinner 不停、交互弹窗不渲染。
+                // 必须在此处理，否则 spinner 不停。
                 self.spinner_stop();
                 self.mark_output_dirty();
+                // 桥接到已有的 ask_user_batch inline block 渲染
+                if let TuiInteractionBody::UserQuestions(questions) = &req.body {
+                    let slots: Vec<AskUserSlot> = questions
+                        .iter()
+                        .enumerate()
+                        .map(|(i, q)| AskUserSlot {
+                            // Derive id from request_id + index for stable identity
+                            id: format!("{}-{}", req.request_id.as_str(), i),
+                            question_seq: i,
+                            question: q.prompt.clone(),
+                            options: q
+                                .options
+                                .iter()
+                                .map(|o| sdk::OptionItem::title_only(o.clone()))
+                                .collect(),
+                            llm_option_count: q.options.len(),
+                            multi_select: q.allow_multi,
+                            default: None,
+                            answer: None,
+                        })
+                        .collect();
+                    self.show_ask_user_batch(slots);
+                }
             }
             TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {
                 // Done/Cancelled 走 Runtime 路径，但 stop_processing 是 App 级副作用。
