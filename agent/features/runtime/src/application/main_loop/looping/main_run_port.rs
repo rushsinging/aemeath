@@ -1292,16 +1292,12 @@ where
             self.memory,
             self.reflection_history,
         );
-        match outcome {
-            crate::ports::CompactOutcome::Committed(_) => {
-                *self.last_total_tokens = None;
-                self.context_window = None;
-                Ok(())
-            }
-            crate::ports::CompactOutcome::Skipped(reason) => Err(LoopEngineError::Adapter(
-                format!("Context compact 被跳过：{reason:?}"),
-            )),
-        }
+        crate::application::context_coordination::apply_automatic_compact_outcome(
+            &outcome,
+            self.last_total_tokens,
+            &mut self.context_window,
+        );
+        Ok(())
     }
 
     async fn invoke_model(

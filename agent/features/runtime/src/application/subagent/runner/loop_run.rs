@@ -6,12 +6,11 @@ use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use crate::application::context_coordination::ContextCoordinator;
 use crate::application::loop_engine::{
-    run_loop as shared_run_loop, LoopEngineError, ModelStep, RunLoopPort, ToolGuardDecision,
-    ToolStep,
+    LoopEngineError, ModelStep, RunLoopPort, ToolGuardDecision, ToolStep,
 };
 use crate::application::main_loop::looping::InvocationResponse;
 use crate::application::subagent::Agent;
-use crate::domain::agent_run::{Run, RunDomainEvent, RunSpec};
+use crate::domain::agent_run::{RunDomainEvent, RunSpec};
 use crate::ports::{
     InvocationOptions, InvocationRequest, ProviderBinding, ReasoningLevel, StopReason,
 };
@@ -69,28 +68,6 @@ impl crate::application::main_loop::looping::ChatEventSink for SubAgentEventSink
     }
 
     fn try_send_event(&self, _event: crate::application::main_loop::looping::RuntimeStreamEvent) {}
-}
-
-struct ActiveRunRegistration {
-    active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
-    run_id: sdk::RunId,
-}
-
-impl ActiveRunRegistration {
-    fn new(
-        active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
-        run_id: sdk::RunId,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> Self {
-        active_run.activate(run_id.clone(), cancel);
-        Self { active_run, run_id }
-    }
-}
-
-impl Drop for ActiveRunRegistration {
-    fn drop(&mut self) {
-        self.active_run.clear(&self.run_id);
-    }
 }
 
 pub(super) fn messages_for_llm(messages: &[Message]) -> Vec<Message> {
@@ -588,21 +565,17 @@ impl RunLoopPort for SubAgentRun<'_> {
             .as_ref()
             .map(|window| window.backing_revision)
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
-        match self
+        let outcome = self
             .context
             .compact(request, source_revision)
             .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?
-        {
-            crate::ports::CompactOutcome::Committed(_) => {
-                self.last_total_tokens = None;
-                self.context_window = None;
-                Ok(())
-            }
-            crate::ports::CompactOutcome::Skipped(reason) => Err(LoopEngineError::Adapter(
-                format!("Context compact 被跳过：{reason:?}"),
-            )),
-        }
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        crate::application::context_coordination::apply_automatic_compact_outcome(
+            &outcome,
+            &mut self.last_total_tokens,
+            &mut self.context_window,
+        );
+        Ok(())
     }
 
     async fn invoke_model(
@@ -1031,47 +1004,9 @@ impl RunLoopPort for SubAgentRun<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{messages_for_llm, terminal_from_domain_event, ActiveRunRegistration};
-    use crate::domain::agent_run::{ActiveRunPort, RunDomainEvent, RunId};
+    use super::{messages_for_llm, terminal_from_domain_event};
+    use crate::domain::agent_run::{RunDomainEvent, RunId};
     use share::message::{ContentBlock, Message, Role};
-
-    #[derive(Default)]
-    struct RecordingActiveRunPort {
-        active: std::sync::Mutex<std::collections::HashSet<RunId>>,
-    }
-
-    impl ActiveRunPort for RecordingActiveRunPort {
-        fn activate(&self, run_id: RunId, _cancel: tokio_util::sync::CancellationToken) {
-            self.active.lock().unwrap().insert(run_id);
-        }
-
-        fn claim_terminal(&self, _run_id: &RunId) -> bool {
-            true
-        }
-
-        fn claim_cancellation(&self, _run_id: &RunId) -> bool {
-            true
-        }
-
-        fn clear(&self, run_id: &RunId) {
-            self.active.lock().unwrap().remove(run_id);
-        }
-    }
-
-    #[test]
-    fn active_run_registration_clears_registry_when_dropped() {
-        let registry = std::sync::Arc::new(RecordingActiveRunPort::default());
-        let run_id = RunId::new_v7();
-        {
-            let _registration = ActiveRunRegistration::new(
-                registry.clone(),
-                run_id.clone(),
-                tokio_util::sync::CancellationToken::new(),
-            );
-            assert!(registry.active.lock().unwrap().contains(&run_id));
-        }
-        assert!(registry.active.lock().unwrap().is_empty());
-    }
 
     #[test]
     fn terminal_domain_events_project_to_all_agent_terminal_variants() {
