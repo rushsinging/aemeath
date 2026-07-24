@@ -839,18 +839,33 @@ fn format_agent_progress_calls(
     let text = calls
         .iter()
         .map(|call| {
-            format!(
-                "→ {}",
-                crate::tui::render::output::tool_display::format_subagent_tool_header(
-                    &call.name,
-                    &call.input,
-                    None,
-                )
-            )
+            let name = crate::tui::view_model::tool_name::tool_display_name(&call.name);
+            let raw = match &call.input {
+                serde_json::Value::String(s) => s.clone(),
+                value => value.to_string(),
+            };
+            let preview = truncate_json(&raw);
+            if preview.is_empty() {
+                format!("→ {name}")
+            } else {
+                format!("→ {name} {preview}")
+            }
         })
         .collect::<Vec<_>>()
         .join("\n");
     format_agent_progress_text(&text)
+}
+
+/// Truncate a JSON string to at most 120 chars for preview. Modeled after
+/// the same logic in `render::output::tool_display::format`  to avoid a
+/// render → adapter dependency.
+fn truncate_json(raw: &str) -> &str {
+    let raw = raw.trim();
+    if raw.len() <= 120 {
+        raw
+    } else {
+        &raw[..120]
+    }
 }
 
 fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
