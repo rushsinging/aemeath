@@ -11,6 +11,18 @@ impl App {
         &mut self,
         key: crossterm::event::KeyEvent,
     ) -> Option<UpdateResult> {
+        // #1384: Ctrl+C must cancel the current run even when an AskUser
+        // dialog is active. Fall through to the normal key handler so it
+        // emits Effect::CancelCurrentRun or ForceQuit.
+        if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('c') {
+            return None;
+        }
+        // #1384: Esc during processing should also cancel, not just
+        // cancel the AskUser dialog.
+        if key.modifiers == KeyModifiers::NONE && key.code == KeyCode::Esc && self.chat.is_processing {
+            return None;
+        }
+
         let snapshot = self.model.conversation.ask_user_snapshot();
 
         // Chat-input 子态：用户在 Type something 中输入自由文本
