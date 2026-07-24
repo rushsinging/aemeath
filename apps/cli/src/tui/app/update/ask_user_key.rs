@@ -100,11 +100,7 @@ impl App {
                         .iter()
                         .enumerate()
                         .filter(|(_, s)| **s)
-                        .filter_map(|(i, _)| {
-                            self.model
-                                .conversation
-                                .ask_user_batch_option_text(i)
-                        })
+                        .filter_map(|(i, _)| self.model.conversation.ask_user_batch_option_text(i))
                         .collect();
                     if chosen.is_empty() {
                         // 未勾选：回退到 cursor 指定的选项
@@ -125,9 +121,7 @@ impl App {
                 };
 
                 self.apply_agent_intent(AgentIntent::Conversation(
-                    ConversationIntent::AnswerCurrentAskUser(AnswerCurrentAskUser {
-                        answer,
-                    }),
+                    ConversationIntent::AnswerCurrentAskUser(AnswerCurrentAskUser { answer }),
                 ));
                 return self.maybe_auto_confirm_ask_user();
             }
@@ -226,14 +220,10 @@ impl App {
             ConversationIntent::ConfirmAskUserBatch(ConfirmAskUserBatch),
         ));
 
-        let reply = crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(
-            answers,
-        );
+        let reply =
+            crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(answers);
         Some(UpdateResult {
-            effects: vec![Effect::ReplyInteraction {
-                request_id,
-                reply,
-            }],
+            effects: vec![Effect::ReplyInteraction { request_id, reply }],
             spawn_effect: None,
             pending_slash: None,
         })

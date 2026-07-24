@@ -249,7 +249,7 @@ where
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
     let prog_adapter = crate::adapters::tool_runtime::progress(prog_tx);
-    *ag_ctx = ag_ctx.with_progress(Some(prog_adapter));
+    *ag_ctx = ag_ctx.with_progress(Some(prog_adapter.clone()));
     let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
     let progress_context = context.clone();
@@ -282,7 +282,7 @@ where
                 ag_ctx.scope().clone(),
             )
             .with_authorization(effective_authorization)
-            .with_progress(Some(progress_sink.clone())),
+            .with_progress(Some(prog_adapter.clone())),
             cancellation.as_ref(),
         )
         .await;
