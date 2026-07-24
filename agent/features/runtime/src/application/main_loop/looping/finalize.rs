@@ -45,6 +45,12 @@ where
         cancel,
     )
     .await;
+    log::info!(
+        target: crate::LOG_TARGET,
+        "[stop_hook] directive={:?} executions={}",
+        dispatch.directive,
+        dispatch.executions.len(),
+    );
     if matches!(dispatch.directive, RuntimeHookDirective::Block { .. }) {
         let feedback = stop_hook_feedback(&dispatch, session_id, language).await;
         return Some(feedback);

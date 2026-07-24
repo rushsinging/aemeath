@@ -1638,6 +1638,14 @@ async fn terminate_while_awaiting_user_finishes_as_terminated() {
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
 
+    // AwaitUser 前的 step outcome 必须已被 finalize（持久化）。
+    // 否则 Terminate 时 active_step 为 None，step 的模型回复会永久丢失。
+    assert_eq!(
+        port.finalized_steps.len(),
+        1,
+        "AwaitUser 前的 step 必须已 finalize，否则 Terminate 时 outcome 丢失"
+    );
+
     // Inject TerminateRun control; root cancel fires so drain is interrupted.
     port.controls
         .lock()
