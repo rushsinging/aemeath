@@ -495,16 +495,13 @@ pub(crate) async fn tool_results_for_api(
 }
 
 pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, output: &str) {
-    let tr_data = serde_json::json!({
-        "tool_use_id": id.to_string(),
-        "tool_name": tool_name,
-        "is_error": is_error,
-        "output": output,
-    });
+    let data = crate::application::loop_engine::llm_log::build_named_tool_result_log(
+        id, tool_name, output, is_error, "main",
+    );
     log::debug!(
         target: crate::LOG_TARGET,
         "tool_result: {}",
-        serde_json::to_string(&tr_data).unwrap_or_default()
+        serde_json::to_string(&data).unwrap_or_default()
     );
 }
 

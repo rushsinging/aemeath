@@ -1,7 +1,9 @@
 use super::progress::build_tool_calls_progress_event;
 use super::test_config_reader::FixedConfigReader;
 use super::*;
-use crate::application::loop_engine::llm_log::{build_tool_call_log, build_tool_result_log};
+use crate::application::loop_engine::llm_log::{
+    build_llm_output_log, build_named_tool_result_log, build_tool_call_log, build_tool_result_log,
+};
 use ::logging as scoped_logging;
 use async_trait::async_trait;
 use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
@@ -451,6 +453,27 @@ fn test_format_grouped_tool_summaries_keeps_existing_display_format() {
 }
 
 #[test]
+fn llm_output_log_preserves_per_invocation_elapsed_time() {
+    let response = crate::application::main_loop::looping::InvocationResponse {
+        assistant_message: Message {
+            role: share::message::Role::Assistant,
+            content: vec![share::message::ContentBlock::Text {
+                text: "done".to_string(),
+            }],
+            metadata: None,
+        },
+        stop_reason: provider::ProviderStopReason::EndTurn,
+        usage: crate::ports::RawUsageSnapshot::default(),
+    };
+
+    let data = build_llm_output_log("test-provider", &response, 1.25, "subagent:test");
+
+    assert_eq!(data["event_type"], "llm_output");
+    assert_eq!(data["role"], "subagent:test");
+    assert_eq!(data["elapsed_secs"], 1.25);
+}
+
+#[test]
 fn test_build_tool_call_log_contains_full_input() {
     let call_id = sdk::ids::ToolCallId::new_v7();
     let call = test_tool_call_with_id(
@@ -466,6 +489,20 @@ fn test_build_tool_call_log_contains_full_input() {
     assert_eq!(data["tool_use_id"], call_id.to_string());
     assert_eq!(data["tool_name"], "Bash");
     assert_eq!(data["input"]["command"], "cargo check");
+}
+
+#[test]
+fn main_tool_result_log_uses_unified_event_schema() {
+    let tool_id = sdk::ids::ToolCallId::new_v7();
+
+    let data = build_named_tool_result_log(&tool_id, "Read", "完整输出", false, "main");
+
+    assert_eq!(data["event_type"], "tool_result");
+    assert_eq!(data["role"], "main");
+    assert_eq!(data["tool_use_id"], tool_id.to_string());
+    assert_eq!(data["tool_name"], "Read");
+    assert_eq!(data["is_error"], false);
+    assert_eq!(data["output"], "完整输出");
 }
 
 #[test]

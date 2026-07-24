@@ -75,21 +75,20 @@ pub(crate) fn log_tool_calls(tool_calls: &[ToolCall], role: &str) {
     }
 }
 
-/// 记录 LLM 输出 + tool_call 日志。
-pub(crate) fn log_llm_output_and_tool_calls(
+/// 构造 LLM 输出日志数据。
+pub(crate) fn build_llm_output_log(
     provider_name: &str,
     resp: &InvocationResponse,
-    tool_calls: &[ToolCall],
     api_elapsed: f64,
     role: &str,
-) {
+) -> serde_json::Value {
     let blocks: Vec<serde_json::Value> = resp
         .assistant_message
         .content
         .iter()
         .filter_map(|block| serde_json::to_value(block).ok())
         .collect();
-    let data = serde_json::json!({
+    serde_json::json!({
         "event_type": "llm_output",
         "role": role,
         "stop_reason": format!("{:?}", resp.stop_reason),
@@ -98,7 +97,18 @@ pub(crate) fn log_llm_output_and_tool_calls(
         "elapsed_secs": api_elapsed,
         "provider": provider_name,
         "content_blocks": blocks,
-    });
+    })
+}
+
+/// 记录 LLM 输出 + tool_call 日志。
+pub(crate) fn log_llm_output_and_tool_calls(
+    provider_name: &str,
+    resp: &InvocationResponse,
+    tool_calls: &[ToolCall],
+    api_elapsed: f64,
+    role: &str,
+) {
+    let data = build_llm_output_log(provider_name, resp, api_elapsed, role);
     log::debug!(
         target: crate::LOG_TARGET,
         "{}",
@@ -107,6 +117,24 @@ pub(crate) fn log_llm_output_and_tool_calls(
 
     log_tool_calls(tool_calls, role);
 }
+/// 构造已知工具名的 tool_result 日志数据。
+pub(crate) fn build_named_tool_result_log(
+    id: &ToolCallId,
+    tool_name: &str,
+    output: &str,
+    is_error: bool,
+    role: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "event_type": "tool_result",
+        "role": role,
+        "tool_use_id": id,
+        "tool_name": tool_name,
+        "is_error": is_error,
+        "output": output,
+    })
+}
+
 /// 构造 tool_result 日志数据。
 pub(crate) fn build_tool_result_log(
     id: &ToolCallId,
@@ -119,14 +147,7 @@ pub(crate) fn build_tool_result_log(
         .get(id)
         .map(|(name, _)| name.as_str())
         .unwrap_or("?");
-    serde_json::json!({
-        "event_type": "tool_result",
-        "role": role,
-        "tool_use_id": id,
-        "tool_name": tool_name,
-        "is_error": is_error,
-        "output": output,
-    })
+    build_named_tool_result_log(id, tool_name, output, is_error, role)
 }
 
 /// 记录 tool_result 日志。

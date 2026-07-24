@@ -20,6 +20,7 @@ use provider::RequestSystemBlock;
 use share::message::Message;
 use share::string_idx::slice_head;
 use std::sync::Arc;
+use std::time::Instant;
 use tools::AgentRunTerminal;
 use tools::{AgentProgressEvent, AgentProgressKind};
 
@@ -297,12 +298,12 @@ impl<'a> SubAgentRun<'a> {
         );
     }
 
-    fn log_output(&self, resp: &InvocationResponse) {
+    fn log_output(&self, resp: &InvocationResponse, api_elapsed: f64) {
         log_llm_output_and_tool_calls(
             &self.binding.model.provider,
             resp,
             &[],
-            self.start_time.elapsed().as_secs_f64(),
+            api_elapsed,
             &self.role_name_for_log,
         );
     }
@@ -397,6 +398,7 @@ impl<'a> SubAgentRun<'a> {
                 self.context_window = window;
                 let mut coordinator =
                     crate::application::model_invocation::ModelInvocationCoordinator::new();
+                let api_start = Instant::now();
                 let resp = loop {
                     let request_context = sub_request_log_context(
                         &logging::capture(),
@@ -489,7 +491,7 @@ impl<'a> SubAgentRun<'a> {
                 );
 
                 self.messages.push(resp.assistant_message.clone());
-                self.log_output(&resp);
+                self.log_output(&resp, api_start.elapsed().as_secs_f64());
                 self.send_text_progress(turn_number, &resp);
 
                 let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
