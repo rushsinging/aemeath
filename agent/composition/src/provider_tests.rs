@@ -203,6 +203,18 @@ fn build_port() -> (Arc<dyn ProviderPort>, ModelId) {
 // ─── Tests ────────────────────────────────────────────────────────────
 
 #[test]
+fn reasoning_capability_from_max_includes_minimal_when_supported() {
+    let minimal = reasoning_capability_from_max(ReasoningLevel::Minimal);
+    assert_eq!(
+        minimal.supported(),
+        &[ReasoningLevel::Off, ReasoningLevel::Minimal]
+    );
+
+    let max = reasoning_capability_from_max(ReasoningLevel::Max);
+    assert!(max.supported().contains(&ReasoningLevel::Minimal));
+}
+
+#[test]
 fn factory_returns_provider_port_that_is_send_sync() {
     fn assert_send_sync<T: Send + Sync + ?Sized>(_: &T) {}
 

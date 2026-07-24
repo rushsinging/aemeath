@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningLevel {
     Off,
+    Minimal,
     Low,
     Medium,
     High,
@@ -18,6 +19,7 @@ impl ReasoningLevel {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Off => "off",
+            Self::Minimal => "minimal",
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
@@ -27,8 +29,10 @@ impl ReasoningLevel {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
+        // "none" 是 Off 的输入 alias；canonical 输出（as_str / Display）仍是 "off"。
         match value.to_ascii_lowercase().as_str() {
-            "off" => Some(Self::Off),
+            "off" | "none" => Some(Self::Off),
+            "minimal" => Some(Self::Minimal),
             "low" => Some(Self::Low),
             "medium" => Some(Self::Medium),
             "high" => Some(Self::High),
@@ -50,34 +54,5 @@ impl std::fmt::Display for ReasoningLevel {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::ReasoningLevel;
-
-    #[test]
-    fn reasoning_level_parses_and_displays_all_levels() {
-        for level in [
-            ReasoningLevel::Off,
-            ReasoningLevel::Low,
-            ReasoningLevel::Medium,
-            ReasoningLevel::High,
-            ReasoningLevel::Xhigh,
-            ReasoningLevel::Max,
-        ] {
-            assert_eq!(ReasoningLevel::parse(level.as_str()), Some(level));
-            assert_eq!(level.to_string(), level.as_str());
-        }
-        assert_eq!(ReasoningLevel::parse("invalid"), None);
-    }
-
-    #[test]
-    fn reasoning_level_clamps_to_maximum() {
-        assert_eq!(
-            ReasoningLevel::Xhigh.clamped_to(ReasoningLevel::Medium),
-            ReasoningLevel::Medium
-        );
-        assert_eq!(
-            ReasoningLevel::Low.clamped_to(ReasoningLevel::High),
-            ReasoningLevel::Low
-        );
-    }
-}
+#[path = "reasoning_tests.rs"]
+mod tests;

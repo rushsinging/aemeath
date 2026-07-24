@@ -81,7 +81,19 @@ pub struct ModelEntryConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<bool>,
 
-    /// 固定推理档位（"off"/"low"/"medium"/"high"/"xhigh"/"max"）。
+    /// 固定推理档位。接受以下字符串之一（大小写不敏感）：
+    ///
+    /// | 值 | 含义 |
+    /// |---|---|
+    /// | `"off"` | 关闭推理/思考（canonical 表示） |
+    /// | `"none"` | 关闭推理/思考——仅作 **Off 输入别名** 与 **OpenAI wire 别名**（OpenAI Responses API 以 `"none"` 表示关闭）；内部 canonical 统一为 `"off"`，**NEVER** 以 `"none"` 作为 canonical 表示 |
+    /// | `"minimal"` | 最低档推理 effort |
+    /// | `"low"` | 低档推理 effort |
+    /// | `"medium"` | 中档推理 effort（旧 `reasoning: true` 的等价默认） |
+    /// | `"high"` | 高档推理 effort |
+    /// | `"xhigh"` | 超高档推理 effort |
+    /// | `"max"` | 最高档推理 effort（等同于模型最大思考预算） |
+    ///
     /// - `None`（默认）— 沿用 `reasoning` bool 映射（true→Medium）
     /// - `Some(level)` — 视为开启思考并取该档位，优先级高于 `reasoning`
     ///

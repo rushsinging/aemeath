@@ -128,7 +128,18 @@ ReasoningPort.current_requested_level
 
 ### 3.1 映射规则
 
-Shared Kernel 的 `ReasoningLevel` 是跨 BC 统一抽象：`Off / Low / Medium / High / Xhigh / Max`；Provider 只消费该类型并拥有 model-capability clamp 与 wire 映射，**NEVER** 再定义副本。driver 必须把 effective level 映射为本协议支持的形式，例如 effort 字符串、thinking 开关、token budget 或 adaptive mode。
+Shared Kernel 的 `ReasoningLevel` 是跨 BC 统一抽象（七档 canonical：`Off / Minimal / Low / Medium / High / Xhigh / Max`；`None` 仅为 Off 输入别名与 OpenAI wire alias，内部 canonical **NEVER** 为 `None`）；Provider 只消费该类型并拥有 model-capability clamp 与 wire 映射，**NEVER** 再定义副本。driver 必须把 effective level 映射为本协议支持的形式，例如 effort 字符串、thinking 开关或 adaptive mode。
+
+**reasoning effort 与 thinking budget（token 预算）正交：**
+- Reasoning effort（`ReasoningLevel`）是**语义档位**——表示"思考多少"，与具体 token 数值无关；
+- Thinking budget（`thinking_budget_tokens` 或各协议等价字段）是**token 上限**——可由独立配置或模型 default 推导，不与 effort level 互译；
+- **禁止从 token 阈值反推 effort level**：Provider **NEVER** 以 `thinking_budget_tokens >= N` 判定 `reasoning_effort` 取值；effort 的唯一来源是 resolver 输出的 `effective_reasoning`；
+- driver 可以按协议要求同时发送 effort 与 budget 两个独立字段，但不能以其中一个推导/覆盖另一个。
+
+**OpenAI Off wire alias 规则：**
+- OpenAI wire 将关闭态命名为 `"none"`——这是 **wire-only alias**，不是 canonical 表示；
+- driver 的 wire mapper 负责 `Off -> "none"`；Chat 与 Responses 请求层在 `effective_reasoning == Off` 时均省略 reasoning 字段，不把禁用态编码成启用对象；
+- `effective_reasoning` 的 canonical 值**始终**为 `Off`（非 `None`），以保持跨 BC 统一语言一致。
 
 - 不支持的档位必须在有序 `supported` 集合中向下选择，禁止向上扩大；
 - `Off` 不得被默认开启逻辑反向提升；
@@ -152,6 +163,21 @@ trait ProviderDriver {
 `WireRequest`、`WireStream`、`DriverEvent` 均为 Provider 内部类型。Anthropic、OpenAI-compatible 与 Ollama 可以复用公共 codec 或工具函数，但不能靠“兜底伪装成另一协议”掩盖不支持路径；不适用的 driver 组合必须在装配或能力解析阶段失败。
 
 OpenAI-compatible 仍允许各部署策略覆盖：max token 字段、reasoning 字段、tool-call 细节、usage 位置和 stop reason；这些差异应通过小型策略对象组合，而不是复制完整 Provider 实现。
+
+**每个 driver 必须显式声明其 `supported` reasoning 档位集合**，不得从 protocol family、模型名称或 provider 前缀隐式推导：
+
+| Driver | `ReasoningMappingKind` | `supported` 集合（canonical） | 备注 |
+|---|---|---|---|
+| OpenAI | `Effort` | 全部七档 canonical（`Off / Minimal / Low / Medium / High / Xhigh / Max`） | Chat 与 Responses 共用 driver wire mapper；启用态按原值发送，`Off` 请求省略 reasoning 字段 |
+| Zhipu | `Effort` | `Off / Low / Medium / High / Xhigh / Max` | 保持既有 capability 与 `thinking.type` / `reasoning_effort` 行为，不包含 `Minimal` |
+| LiteLLM | `Effort` | `Off / Low / Medium / High / Xhigh / Max` | 顶层 `reasoning_effort`，不包含 `Minimal` |
+| Volcengine | `Effort` | `Off / Low / Medium` | `ThinkingBudget` 仅表示启用 toggle，不推导 effort |
+| Minimax | `ThinkingToggle` | `Off / Medium` | adaptive / disabled 开关语义 |
+| Mimo | `ThinkingToggle` | `Off / Medium` | enabled / disabled 开关语义 |
+| DeepSeek | `Effort` | `Off / Low / Medium / High / Xhigh / Max` | 保持既有 `thinking.type` / `reasoning_effort` 行为，不包含 `Minimal` |
+| Agnes | `ThinkingToggle` | `Off / Medium` | `chat_template_kwargs.enable_thinking` 开关语义 |
+
+未来新增 driver 必须在能力解析阶段提供与上表同等精度的 `supported` 集合声明，**NEVER** 以"协议兼容"为由跳过显式声明。
 
 ## 5. 入站 ACL：领域 → wire
 
@@ -343,3 +369,4 @@ struct CapabilityFingerprint(u64); // 仅用于同一进程内的 capability 变
 | 2026-07-14 | 在 Context build 前解析并冻结 model capability；InvocationRequest 直接复用 ContextWindow 的唯一 Tool schema 集 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-19 | #907 完成 Adapter 收口：Runtime 只经 `ProviderFactory` / `ProviderBinding` / `ProviderPort` 与 PL 消费 Provider；具体构造独占 Composition Root（`provider::composition`）；P1/P5/P12 关闭；旧 legacy sink/gateway/pool/setter restore 物理清零；Provider 内部 `InvocationSink`（`pub(crate)`）为私有 decoder seam；#905 已关闭 P6/P7/P9；#1142 resolver `build_window` 接线仍延期 | [#907](https://github.com/rushsinging/aemeath/issues/907) |
 | 2026-07-17 | #921 收缩范围：resolver 领域模型已完成迁移但未接生产链路；Config `max_reasoning` 退役后 §3 clamp 链移除 user-maximum；Runtime 尚未调用 resolver；是否接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |
+| 2026-07-22 | #1393 `ReasoningLevel` 扩展为七档 canonical（`Off / Minimal / Low / Medium / High / Xhigh / Max`）；明确 budget 与 effort 正交、禁止 token 阈值推导 effort；OpenAI `Off` wire 为 `"none"` 但禁止省略字段；每 driver 显式 `supported` 集合声明 | [#1393](https://github.com/rushsinging/aemeath/issues/1393) |

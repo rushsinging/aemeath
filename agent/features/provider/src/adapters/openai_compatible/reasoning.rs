@@ -1,5 +1,4 @@
 use super::driver::ChatApiDriver;
-use super::effort_from_thinking_tokens;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReasoningConfig {
@@ -16,7 +15,7 @@ impl ReasoningConfig {
                 .or_else(|| value.get("reasoning_effort"))
                 .and_then(|v| v.as_str())
                 .map(ToOwned::to_owned),
-            Self::ThinkingBudget(tokens) => Some(effort_from_thinking_tokens(*tokens).to_string()),
+            Self::ThinkingBudget(_tokens) => None,
             Self::Bool(_) => None,
         }
     }
@@ -30,7 +29,7 @@ impl ReasoningConfig {
             return Self::Bool(false);
         }
 
-        let effort = driver.clamp_effort(level.as_str()).to_string();
+        let effort = driver.resolve_effort(level).to_string();
         match self {
             Self::Bool(_) => Self::Bool(true),
             Self::Object(value) => {
@@ -44,7 +43,10 @@ impl ReasoningConfig {
                 }
                 Self::Object(value)
             }
-            Self::ThinkingBudget(_) => Self::Object(serde_json::json!({"effort": effort})),
+            // ThinkingBudget 与 effort 正交（#1393）：预算只表达启用 / 关闭，
+            // 不参与 driver 的 effort clamp。保持原 `ThinkingBudget(tokens)`，
+            // 由各 driver 在 `apply_reasoning_fields` 中按 toggle / budget 语义决定。
+            Self::ThinkingBudget(_) => self.clone(),
         }
     }
 
@@ -56,15 +58,16 @@ impl ReasoningConfig {
             Self::Bool(false)
         } else {
             Self::Object(serde_json::json!({
-                "effort": driver.clamp_effort(level.as_str())
+                "effort": driver.resolve_effort(level)
             }))
         }
     }
 
     /// 返回经过 driver clamp 后的新配置。
     ///
-    /// 对 Object 中的 effort 字段和 ThinkingBudget 推导出的 effort，
-    /// 调用 `driver.clamp_effort()` 做自适应降级。
+    /// 对 `Object.effort` 字段调用 `driver.clamp_effort()` 做自适应降级；
+    /// `ThinkingBudget` 与 effort 正交（#1393），保留原值不参与 clamp；
+    /// `Bool` 不携带 effort 信息，直接返回自身。
     #[cfg(test)]
     pub(super) fn clamped(&self, driver: &dyn ChatApiDriver) -> ReasoningConfig {
         match self {
@@ -82,14 +85,7 @@ impl ReasoningConfig {
                     self.clone()
                 }
             }
-            Self::ThinkingBudget(_) => {
-                if let Some(effort) = self.as_effort() {
-                    let clamped = driver.clamp_effort(&effort);
-                    Self::Object(serde_json::json!({"effort": clamped}))
-                } else {
-                    self.clone()
-                }
-            }
+            Self::ThinkingBudget(_) => self.clone(),
             _ => self.clone(),
         }
     }

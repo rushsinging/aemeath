@@ -43,7 +43,7 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | 术语 | 定义 |
 |---|---|
 | **Reasoning Node** | reasoning graph 的阶段节点：IDLE / EXPLORE / PLAN / EXECUTE / VERIFY，用于调节 effort。 |
-| **Reasoning Level** | 统一的推理强度抽象：Off / Low / Medium / High / Xhigh / Max，经三层 clamp（graph.desired ∩ provider.max ∩ user.max）。静态阈值归 Config。 |
+| **Reasoning Level** | 统一的推理强度抽象：Off / Minimal / Low / Medium / High / Xhigh / Max；`none` 仅是 Off 的 OpenAI wire alias。Provider 按 driver capability 向下 clamp。 |
 
 ## 3. Context Management（支撑域）
 

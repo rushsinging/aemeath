@@ -110,7 +110,7 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 共享内核 | 参与 BC | 风险控制 |
 |---|---|---|
 | `Message`（对话消息类型） | Agent Runtime / Context Management / Provider | 最小化，只放稳定核心类型 |
-| `ReasoningLevel`（`Off / Low / Medium / High / Xhigh / Max`） | Workflow / Agent Runtime / Context Management / Provider | 只共享稳定有序枚举；graph（固定默认 effort）、model capability 与 wire 映射仍归各 BC 所有。Config `reasoning_graph` 含 user max 已退役（#921） |
+| `ReasoningLevel`（七档 canonical：`Off / Minimal / Low / Medium / High / Xhigh / Max`；`None` 为 Off 输入别名与 OpenAI wire alias，内部 canonical **NEVER** 为 `None`） | Workflow / Agent Runtime / Context Management / Provider | 只共享稳定有序枚举；graph（固定默认 effort）、model capability 与 wire 映射仍归各 BC 所有。Config `reasoning_graph` 含 user max 已退役（#921） |
 | `Task` 类型 | 实为 **Task BC 的 Published Language**（非 SK），其他 BC 引用其发布类型 | 不变量由 Task BC 独占 |
 
 领域标识 **NEVER** 使用“全域 ID”共享内核：每个 ID 仍由领域所有者定义语义；当同一 identity 必须跨 BC、进程内 SDK event 与持久化事实稳定关联时，所有者 **MUST** 通过 `packages/sdk` 发布唯一 UUIDv7 newtype，其他 BC 直接复用而不得重定义。`SessionId`（Context-owned）、`RunId` / `RunStepId` / `ModelInvocationId`（Runtime-owned）采用该发布机制；ToolCallId 同理。TaskId / BatchId 使用 Task-owned 单 Session 数字格式，WorkspaceId 使用 Project-owned deterministic opaque 格式。跨 BC **NEVER** 退化为无所有权的通用 `Id`。
@@ -165,3 +165,4 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 2026-07-17 | #927 明确跨 BC identity 发布机制：语义所有权不变，`SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 经 SDK 发布唯一 UUIDv7 newtype，Audit 与 Context/Runtime 复用而不重复定义 | [#927](https://github.com/rushsinging/aemeath/issues/927) |
 | 2026-07-17 | 持久化边对齐 AtomicDataset 现状：独立 OHS/adapter、Prepared commit point、roll-forward 与 typed corruption；Memory 集成 deferred 至 #896 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
 | 2026-07-17 | #921 收缩范围：Provider resolver 领域迁移完成但未接生产链路；Config `reasoning_graph` 退役，Workflow 五节点固定默认 effort；Main ReasoningPort 已接线；Runtime/Context/TUI 尚未端到端消费 Provider resolver；是否接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |
+| 2026-07-22 | #1393 Shared Kernel `ReasoningLevel` 扩展为七档 canonical（`Off / Minimal / Low / Medium / High / Xhigh / Max`）；`None` 明确为 Off 输入别名与 OpenAI wire alias，内部 canonical 保持 `Off` | [#1393](https://github.com/rushsinging/aemeath/issues/1393) |

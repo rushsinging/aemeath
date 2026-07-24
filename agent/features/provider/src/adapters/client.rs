@@ -24,13 +24,13 @@ fn reasoning_level_from_options(
             } else {
                 crate::ReasoningLevel::Off
             }),
-        Some(ReasoningConfig::ThinkingBudget(tokens)) => match *tokens {
-            0 => crate::ReasoningLevel::Off,
-            1..=1024 => crate::ReasoningLevel::Low,
-            1025..=8192 => crate::ReasoningLevel::Medium,
-            8193..=32768 => crate::ReasoningLevel::High,
-            _ => crate::ReasoningLevel::Xhigh,
-        },
+        Some(ReasoningConfig::ThinkingBudget(tokens)) => {
+            if *tokens == 0 {
+                crate::ReasoningLevel::Off
+            } else {
+                crate::ReasoningLevel::High
+            }
+        }
         Some(ReasoningConfig::Bool(enabled)) => {
             if *enabled {
                 crate::ReasoningLevel::High
@@ -42,6 +42,10 @@ fn reasoning_level_from_options(
         None => crate::ReasoningLevel::Off,
     }
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;
 
 /// Truncate a string to at most `max_bytes`, snapping to the nearest char boundary.
 fn truncate_preview(s: &str, max_bytes: usize) -> String {
