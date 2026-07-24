@@ -486,21 +486,12 @@ pub(crate) async fn tool_results_for_api(
         results.len(),
         error_count
     );
-    let provider_results: Vec<_> = results
-        .into_iter()
-        .map(|ex| {
-            (
-                ex.provider_id,
-                ex.outcome.text,
-                ex.outcome.data,
-                ex.outcome.is_error,
-                ex.outcome.images,
-            )
-        })
-        .collect();
-    materializer
-        .materialize_provider_results(session_id, provider_results)
-        .await
+    crate::application::loop_engine::shared::materialize_tool_results(
+        materializer,
+        results,
+        session_id,
+    )
+    .await
 }
 
 pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, output: &str) {

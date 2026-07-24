@@ -4,6 +4,8 @@ use super::progress::build_tool_calls_progress_event;
 use crate::application::context_coordination::ContextCoordinator;
 use crate::application::loop_engine::event_strategy::{EventStrategy, SubEventStrategy};
 use crate::application::loop_engine::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
+use crate::application::loop_engine::shared::compact_core;
+use crate::application::loop_engine::tool_strategy::{self, ToolStrategy};
 use crate::application::loop_engine::{
     LoopEngineError, ModelStep, RunLoopPort, ToolGuardDecision, ToolStep,
 };
@@ -353,6 +355,14 @@ fn should_complete_after_model_response(has_no_tool_calls: bool) -> bool {
     has_no_tool_calls
 }
 
+// ── ToolStrategy impl ─────────────────────────────────────────────────
+
+impl ToolStrategy for SubAgentRun<'_> {
+    fn mark_tool_results_pending(&mut self) {
+        self.input_strategy.has_tool_results_pending = true;
+    }
+}
+
 // ── LlmStrategy impl ─────────────────────────────────────────────────
 
 #[async_trait]
@@ -449,25 +459,19 @@ impl RunLoopPort for SubAgentRun<'_> {
         &mut self,
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(), LoopEngineError> {
-        let request = self
-            .context_request
-            .as_ref()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
         let source_revision = self
             .context_window
             .as_ref()
             .map(|window| window.backing_revision)
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
-        let outcome = self
-            .context
-            .compact(request, source_revision)
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        crate::application::context_coordination::apply_automatic_compact_outcome(
-            &outcome,
+        compact_core(
+            self.context_request.as_ref(),
+            source_revision,
+            &self.context,
             &mut self.last_total_tokens,
             &mut self.context_window,
-        );
+        )
+        .await?;
         Ok(())
     }
 
@@ -812,12 +816,8 @@ impl RunLoopPort for SubAgentRun<'_> {
                 .await;
                 // #1384: Mark that tool results are pending so drain_input
                 // returns InternalContinuation instead of EmptyAndSealed.
-                self.input_strategy.has_tool_results_pending = true;
-                Ok(if fuse_bypassed.is_empty() {
-                    ToolStep::Continue
-                } else {
-                    ToolStep::ContinueWithFuseBypass(fuse_bypassed)
-                })
+                self.mark_tool_results_pending();
+                Ok(tool_strategy::step_from_fuse_bypass(fuse_bypassed))
             },
         )
         .await

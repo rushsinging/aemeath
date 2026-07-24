@@ -11,6 +11,8 @@ use crate::application::context_coordination::ContextCoordinator;
 use crate::application::loop_engine::event_strategy::{EventStrategy, MainEventStrategy};
 use crate::application::loop_engine::input_strategy::{InputStrategy, MainInputStrategy};
 use crate::application::loop_engine::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
+use crate::application::loop_engine::shared::compact_core;
+use crate::application::loop_engine::tool_strategy::{self, ToolStrategy};
 use crate::application::loop_engine::{
     DrainEpoch, DrainOutcome, LoopEngineError, LoopInput, ModelStep, RunLoopPort,
     ToolGuardDecision, ToolStep,
@@ -760,6 +762,19 @@ where
     }
 }
 
+// ── ToolStrategy impl ─────────────────────────────────────────────────
+
+impl<S, Q, I> ToolStrategy for MainRunPort<'_, S, Q, I>
+where
+    S: ChatEventSink,
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    fn mark_tool_results_pending(&mut self) {
+        self.input_strategy.pending_tool_results = true;
+    }
+}
+
 // ── LlmStrategy impl ─────────────────────────────────────────────────
 
 #[async_trait]
@@ -921,15 +936,6 @@ where
     }
 
     async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {
-        let request = self
-            .context_request
-            .as_ref()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
-        let source_revision = self
-            .context_window
-            .as_ref()
-            .map(|window| window.backing_revision)
-            .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
         // Freeze the pre-compact messages snapshot before invoking the context
         // adapter. Only the early window that compact will discard feeds the
         // PreCompact reflection; the recent tail stays in `recent_messages` and
@@ -941,11 +947,19 @@ where
                 context::compact::messages_selected_for_precompact_memory(&window.messages)
             })
             .unwrap_or_default();
-        let outcome = self
-            .context
-            .compact(request, source_revision)
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        let source_revision = self
+            .context_window
+            .as_ref()
+            .map(|window| window.backing_revision)
+            .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
+        let outcome = compact_core(
+            self.context_request.as_ref(),
+            source_revision,
+            self.context,
+            &mut self.last_total_tokens,
+            &mut self.context_window,
+        )
+        .await?;
         // Production PreCompact reflection trigger (#1284): only the success
         // path submits the frozen pre-compact snapshot. Errors and `Skipped`
         // never enqueue a job. The submission is non-blocking and shares the
@@ -961,11 +975,6 @@ where
             self.language,
             self.memory,
             self.reflection_history,
-        );
-        crate::application::context_coordination::apply_automatic_compact_outcome(
-            &outcome,
-            self.last_total_tokens,
-            &mut self.context_window,
         );
         Ok(())
     }
@@ -1138,16 +1147,11 @@ where
             &self.current_cwd(),
         )
         .await;
-        Ok(if fuse_bypassed.is_empty() {
-            // #1272: tool results are an explicit InternalContinuation, not a
-            // fresh batch of user input. Mark the port so the next drain will
-            // emit `InternalContinuation::ToolResults` instead of an empty Ready.
-            self.input_strategy.pending_tool_results = true;
-            ToolStep::Continue
-        } else {
-            self.input_strategy.pending_tool_results = true;
-            ToolStep::ContinueWithFuseBypass(fuse_bypassed)
-        })
+        // #1272: tool results are an explicit InternalContinuation, not a
+        // fresh batch of user input. Mark the port so the next drain will
+        // emit `InternalContinuation::ToolResults` instead of an empty Ready.
+        self.mark_tool_results_pending();
+        Ok(tool_strategy::step_from_fuse_bypass(fuse_bypassed))
     }
 
     async fn on_stuck(

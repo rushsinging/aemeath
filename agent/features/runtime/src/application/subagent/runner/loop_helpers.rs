@@ -70,22 +70,13 @@ pub(super) async fn append_tool_results(
     results: Vec<crate::application::subagent::ToolExecution>,
     session_id: &str,
 ) {
-    let provider_results: Vec<_> = results
-        .into_iter()
-        .map(|ex| {
-            (
-                ex.provider_id,
-                ex.outcome.text,
-                ex.outcome.data,
-                ex.outcome.is_error,
-                ex.outcome.images,
-            )
-        })
-        .collect();
     messages.push(
-        materializer
-            .materialize_provider_results(session_id, provider_results)
-            .await,
+        crate::application::loop_engine::shared::materialize_tool_results(
+            materializer,
+            results,
+            session_id,
+        )
+        .await,
     );
 }
 
