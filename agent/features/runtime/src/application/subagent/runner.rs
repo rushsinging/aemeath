@@ -6,7 +6,6 @@ use crate::ports::ProviderFactory;
 
 mod finalize;
 pub use finalize::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
-mod logging;
 mod loop_helpers;
 mod loop_run;
 pub(crate) mod progress;

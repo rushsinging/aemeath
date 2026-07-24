@@ -8,31 +8,29 @@ use share::message::{Message, MessageSource, Role};
 use tokio_util::sync::CancellationToken;
 
 use crate::application::context_coordination::ContextCoordinator;
+use crate::application::loop_engine::event_strategy::{EventStrategy, MainEventStrategy};
+use crate::application::loop_engine::input_strategy::{InputStrategy, MainInputStrategy};
+use crate::application::loop_engine::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
+use crate::application::loop_engine::shared::compact_core;
+use crate::application::loop_engine::tool_strategy::{self, ToolStrategy};
 use crate::application::loop_engine::{
-    DrainEpoch, DrainOutcome, InternalContinuationKind, LoopEngineError, LoopInput, ModelStep,
-    RunLoopPort, ToolGuardDecision, ToolStep,
+    DrainEpoch, DrainOutcome, LoopEngineError, LoopInput, ModelStep, RunLoopPort,
+    ToolGuardDecision, ToolStep,
 };
-use crate::application::main_loop::looping::finalize::{
-    finish_completed_loop, run_stop_hook_before_finish,
-};
-use crate::application::main_loop::looping::llm_log::{
-    log_llm_input, log_llm_output_and_tool_calls,
-};
+use crate::application::main_loop::looping::finalize::run_stop_hook_before_finish;
 use crate::application::main_loop::looping::post_batch::run_post_tool_batch;
 use crate::application::main_loop::looping::reflection::{
     maybe_submit_pre_compact_reflection, should_run_turn_reflection, submit_interval_reflection,
 };
-use crate::application::main_loop::looping::run_input_buffer::{BufferDrain, RunInputBuffer};
 use crate::application::main_loop::looping::stream_handler::{
     should_emit_model_stream_waiting, InvocationEventReducer,
 };
 use crate::application::main_loop::looping::task_reminder::TaskReminderState;
 use crate::application::main_loop::looping::tools::{execute_tool_round, tool_results_for_api};
 use crate::application::main_loop::looping::{
-    ChatEventSink, InputEventDrainPort, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
-    RuntimeTurnContext,
+    ChatEventSink, InputEventDrainPort, QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
-use crate::application::subagent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
+use crate::application::subagent::runner::{AgentRunOutcome, AgentRunStatus};
 use crate::application::subagent::{Agent, ToolCall};
 use crate::domain::agent_run::RunDomainEvent;
 use crate::ports::{
@@ -252,19 +250,10 @@ where
     pub(crate) reflection_tasks: &'a crate::application::reflection::ReflectionTaskAdapter,
     pub(crate) language: &'a str,
     pub(crate) reasoning: &'a dyn ReasoningPort,
-    pub(crate) pending_input: &'a mut PendingInputBuffer,
-    /// Run-scoped input buffer: user messages received during this Run are
-    /// accumulated here and drained per-step within the same Run (#1272).
-    pub(crate) run_input_buffer: RunInputBuffer,
-    /// Stop hook 阻断后，作为下一 Step 系统前缀投递且恰好消费一次的反馈。
-    pub(crate) stop_hook_feedback: Option<Message>,
-    /// #1272: 桥接 drain_input→freeze_step 的 stop hook feedback relay。
-    /// drain_input 从 [`stop_hook_feedback`] 取走后写入此字段；freeze_step
-    /// 从此字段消费一次（不作为 accepted input）。避免 double-take 丢失。
-    pub(crate) pending_stop_hook_feedback: Option<Message>,
-    /// #1272: 上一 Step 完成 Tools 后置位；下一次 drain 把它作为显式
-    /// `InternalContinuation::ToolResults` 续跑，不与新进入的 user input 混批。
-    pub(crate) pending_tool_results: bool,
+    /// Run-scoped input strategy: owns the buffer, continuation flags,
+    /// pending-input reference, and drain/await logic
+    /// (#1272 per-turn drain-or-seal linearization).
+    pub(crate) input_strategy: MainInputStrategy<'a, S, Q, I>,
     /// #1272: Per-turn adopted (InputId, Message) pairs collected during
     /// freeze_step from LoopInput::input_id. Emitted via UserMessagesAdopted
     /// after accept_step_input durable success. Cleared after emission.
@@ -298,17 +287,17 @@ where
     /// `push_or_reject`). If any are found, they are logged and routed to
     /// `pending_input` explicitly rather than silently forwarded.
     pub(crate) fn drain_remaining_events(&mut self) {
-        let sealed = self.run_input_buffer.is_sealed();
-        for event in self.run_input_buffer.drain_all() {
+        let sealed = self.input_strategy.run_input_buffer.is_sealed();
+        for event in self.input_strategy.run_input_buffer.drain_all() {
             match &event {
                 sdk::ChatInputEvent::UserMessage { .. } if sealed => {
                     log::warn!(
                         target: crate::LOG_TARGET,
                         "MainRunPort: sealed buffer contained unconsumed UserMessage; routing to pending_input"
                     );
-                    self.pending_input.push(event);
+                    self.input_strategy.pending_input.push(event);
                 }
-                _ => self.pending_input.push(event),
+                _ => self.input_strategy.pending_input.push(event),
             }
         }
     }
@@ -404,43 +393,9 @@ where
     }
 
     /// Unify UserMessage admission into the active Run's input buffer.
-    /// Uses `push_or_reject`: when the buffer is sealed, the message is
-    /// routed to `pending_input` for the next Run; when accepted,
-    /// `UserMessagesQueued` is emitted.
+    /// Delegates to [`MainInputStrategy::admit_user_message`].
     async fn admit_user_message(&mut self, event: sdk::ChatInputEvent) {
-        debug_assert!(matches!(event, sdk::ChatInputEvent::UserMessage { .. }));
-        match self.run_input_buffer.push_or_reject(event) {
-            Some(rejected) => {
-                let rejected_id = match &rejected {
-                    sdk::ChatInputEvent::UserMessage { id, .. } => Some(id.as_str().to_string()),
-                    _ => None,
-                };
-                log::debug!(
-                    target: crate::LOG_TARGET,
-                    "[loop_debug] admit_user_message run_id={} REJECTED sealed=true rejected_id={:?}",
-                    self.run_id,
-                    rejected_id,
-                );
-                self.pending_input.push(rejected);
-            }
-            None => {
-                let queued = self.run_input_buffer.user_message_snapshot();
-                let queued_ids: Vec<_> = queued
-                    .iter()
-                    .map(|(id, _)| id.as_str().to_string())
-                    .collect();
-                log::debug!(
-                    target: crate::LOG_TARGET,
-                    "[loop_debug] admit_user_message run_id={} ACCEPTED queue_count={} queued_ids={:?}",
-                    self.run_id,
-                    queued.len(),
-                    queued_ids,
-                );
-                self.sink
-                    .send_event(RuntimeStreamEvent::UserMessagesQueued { queued })
-                    .await;
-            }
-        }
+        self.input_strategy.admit_user_message(event).await;
     }
 
     /// Route events received during a Run. User messages accumulate in the
@@ -453,13 +408,16 @@ where
                 self.admit_user_message(event).await;
             }
             sdk::ChatInputEvent::WithdrawAll => {
-                let texts = self.run_input_buffer.withdraw_all_user_texts();
+                let texts = self
+                    .input_strategy
+                    .run_input_buffer
+                    .withdraw_all_user_texts();
                 self.sink
                     .send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts })
                     .await;
             }
             // Commands are retained for the session idle gate. They never enter model context.
-            other => self.pending_input.push(other),
+            other => self.input_strategy.pending_input.push(other),
         }
     }
 
@@ -533,19 +491,6 @@ where
         }
     }
 
-    async fn project_done(&self, status: AgentRunStatus) {
-        let outcome = self.outcome(status);
-        log_agent_outcome(&outcome, self.session_id);
-        finish_completed_loop(&outcome, self.sink, &self.turn_context, &**self.task_access).await;
-    }
-
-    async fn rollback_cancelled(&mut self) {
-        self.sink
-            .send_event(RuntimeStreamEvent::Cancelled {
-                context: self.turn_context.clone(),
-            })
-            .await;
-    }
     async fn invoke_model_impl(
         &mut self,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
@@ -565,41 +510,19 @@ where
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
         self.task_reminder_state
             .update_from_messages(self.turn_count as u64, &window.messages);
-        let messages_for_api = window
-            .messages
-            .iter()
-            .map(Message::to_llm_view)
-            .collect::<Vec<_>>();
-        let tool_schemas = window
-            .tool_schemas
-            .iter()
-            .map(|schema| {
-                serde_json::json!({
-                    "name": schema.name,
-                    "description": schema.description,
-                    "input_schema": schema.input_schema,
-                })
-            })
-            .collect::<Vec<_>>();
-        let effective_system_blocks = window
-            .system_blocks
-            .iter()
-            .map(|block| {
-                if block.cache_break {
-                    debug_assert!(block.cacheable, "cache breakpoint 必须位于可缓存前缀");
-                    provider::RequestSystemBlock::Cacheable(block.content.clone())
-                } else {
-                    provider::RequestSystemBlock::Text(block.content.clone())
-                }
-            })
-            .collect::<Vec<_>>();
+        let ctx =
+            crate::application::loop_engine::llm_strategy::extract_invocation_context(&window);
         log_llm_input(
-            &messages_for_api,
+            &ctx.messages_for_api,
             window.messages.len(),
-            &effective_system_blocks,
-            &tool_schemas,
+            &ctx.system_blocks,
+            &ctx.tool_schemas,
+            "main",
         );
-        let requested_reasoning = self.reasoning.current_requested_level();
+        let requested_reasoning = {
+            use crate::application::loop_engine::llm_strategy::LlmStrategy;
+            self.reasoning_level()
+        };
 
         let api_start = Instant::now();
         let mut coordinator =
@@ -623,13 +546,19 @@ where
                 let model = self.binding.model.clone();
                 let max_tokens = self.binding.max_tokens;
                 let request_tool_schemas = window.tool_schemas.clone();
+                let messages_for_api = ctx.messages_for_api.clone();
+                let system_blocks = ctx.system_blocks.clone();
+                let committed_delta = {
+                    use crate::application::loop_engine::llm_strategy::LlmStrategy;
+                    self.committed_delta()
+                };
                 let invocation_fut = async {
                     let mut request = crate::ports::InvocationRequest::new(
                         model,
-                        messages_for_api.clone(),
+                        messages_for_api,
                         crate::ports::InvocationOptions::new(max_tokens, requested_reasoning),
                     );
-                    request.system = effective_system_blocks.clone();
+                    request.system = system_blocks;
                     request.tools = request_tool_schemas;
                     request.cancellation = stream_cancel.clone();
                     let stream = provider
@@ -637,7 +566,9 @@ where
                         .await
                         .map_err(|error| (error, false))?;
                     coordinator
-                        .pull_stream(stream, &stream_cancel, true, |event| reducer.apply(event))
+                        .pull_stream(stream, &stream_cancel, committed_delta, |event| {
+                            reducer.apply(event)
+                        })
                         .await
                 };
                 let waiting_sink = self.sink.clone();
@@ -683,28 +614,17 @@ where
                 Err((error, _)) if error.is_cancelled() || self.cancel.is_cancelled() => {
                     return Err(LoopEngineError::Cancelled);
                 }
-                Err((error, visible_delta)) => match coordinator
-                    .handle_failure(&error, visible_delta, &self.cancel)
-                    .await
-                {
-                    crate::application::model_invocation::RetryStep::Retry { attempt, delay } => {
-                        self.sink
-                            .try_send_event(RuntimeStreamEvent::ModelInvocationRetrying {
-                                context: self.turn_context.clone(),
-                                attempt,
-                                delay,
-                            });
-                    }
-                    crate::application::model_invocation::RetryStep::Cancelled => {
-                        return Err(LoopEngineError::Cancelled);
-                    }
-                    crate::application::model_invocation::RetryStep::Compact => {
-                        return Err(LoopEngineError::NeedsCompaction(error.to_string()));
-                    }
-                    crate::application::model_invocation::RetryStep::Fail => {
-                        return Err(LoopEngineError::Adapter(error.to_string()));
-                    }
-                },
+                Err((error, visible_delta)) => {
+                    let step = coordinator
+                        .handle_failure(&error, visible_delta, &self.cancel)
+                        .await;
+                    crate::application::loop_engine::llm_strategy::map_retry_outcome(
+                        step,
+                        &error.to_string(),
+                        self,
+                    )
+                    .await?;
+                }
             }
         };
         let api_elapsed = api_start.elapsed().as_secs_f64();
@@ -722,19 +642,13 @@ where
             &resp.usage,
         ));
 
-        let token_usage = crate::application::loop_engine::StepTokenUsage {
-            input_tokens: resp.usage.input_tokens.unwrap_or(0) as u64,
-            output_tokens: resp.usage.output_tokens.unwrap_or(0) as u64,
-            cached_tokens: resp.usage.cache_read_tokens.map(u64::from).unwrap_or(0),
-            cache_creation_tokens: resp.usage.cache_write_tokens.map(u64::from).unwrap_or(0),
-            reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
-            total_tokens: crate::application::token_usage::normalized_total_tokens(&resp.usage),
-            context_window: request_context_size(self.context_request.as_ref()) as u64,
-            est_system_tokens: window.token_estimation.system_tokens,
-            est_tool_tokens: window.token_estimation.tool_schema_tokens,
-            est_message_tokens: window.token_estimation.message_tokens,
-            stop_reason: format!("{:?}", resp.stop_reason).to_lowercase(),
-        };
+        let token_usage = crate::application::loop_engine::llm_strategy::build_step_token_usage(
+            &resp,
+            request_context_size(self.context_request.as_ref()) as u64,
+            window.token_estimation.system_tokens,
+            window.token_estimation.tool_schema_tokens,
+            window.token_estimation.message_tokens,
+        );
 
         self.sink
             .send_event(RuntimeStreamEvent::Usage {
@@ -760,6 +674,7 @@ where
             &resp,
             &calls,
             api_elapsed,
+            "main",
         );
         if !calls.is_empty() {
             return Ok((
@@ -823,7 +738,7 @@ where
                 ),
                 feedback.payload,
             );
-            self.stop_hook_feedback = Some(feedback.clone());
+            self.input_strategy.stop_hook_feedback = Some(feedback.clone());
             self.step_messages.record(feedback.clone());
             self.messages.push(feedback);
             self.sink
@@ -846,489 +761,8 @@ where
         ))
     }
 
-    /// #1272: Shared drain logic: collect events, check stop-hook feedback
-    /// and tool results. Returns `Some(outcome)` if the drain is complete
-    /// (stop hook or tool results consumed), or `None` if control falls
-    /// through to the normal drain path (`drain_or_seal` / `try_drain_unsealed`).
-    async fn drain_collect_and_check_continuations(
-        &mut self,
-        expected_epoch: DrainEpoch,
-    ) -> Result<Option<DrainOutcome>, LoopEngineError> {
-        let mut events = self.input_events.drain_input_events().await;
-        if let Some(queued) = self.queue.drain_queued_input().await {
-            events.extend(
-                queued
-                    .into_iter()
-                    .map(|text| sdk::ChatInputEvent::classify_text(text, Vec::new())),
-            );
-        }
-        for event in events {
-            match event {
-                sdk::ChatInputEvent::UserMessage { .. } => self.admit_user_message(event).await,
-                sdk::ChatInputEvent::WithdrawAll => {
-                    let texts = self.run_input_buffer.withdraw_all_user_texts();
-                    if !texts.is_empty() {
-                        self.sink
-                            .send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts })
-                            .await;
-                    }
-                }
-                other => self.pending_input.push(other),
-            }
-        }
-
-        // #1272 Per-turn drain-or-seal contract:
-        //   StopHookFeedback > ToolResults > user input (Ready) > EmptyAndSealed.
-        if let Some(feedback) = self.stop_hook_feedback.take() {
-            let text = feedback.text_content();
-            self.pending_stop_hook_feedback = Some(feedback);
-            let (batch, epoch) = match self
-                .run_input_buffer
-                .take_internal_continuation(expected_epoch)
-            {
-                BufferDrain::Ready { batch, epoch } => (batch, epoch),
-                BufferDrain::EmptyAndSealed { .. } | BufferDrain::Empty { .. } => {
-                    // Shouldn't happen: take_internal_continuation never seals
-                    // and never returns Empty.
-                    return Err(LoopEngineError::Adapter(
-                        "internal continuation 意外返回 EmptyAndSealed/Empty".to_string(),
-                    ));
-                }
-                BufferDrain::AlreadySealed { epoch } => {
-                    log::warn!(
-                        target: crate::LOG_TARGET,
-                        "MainRunPort: take_internal_continuation returned AlreadySealed at epoch {:?}",
-                        epoch,
-                    );
-                    return Ok(Some(DrainOutcome::EmptyAndSealed { epoch }));
-                }
-                BufferDrain::EpochMismatch { expected, actual } => {
-                    return Err(LoopEngineError::Adapter(format!(
-                        "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                        expected, actual,
-                    )));
-                }
-            };
-            let input_ids: Vec<_> = batch
-                .iter()
-                .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
-                .collect();
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "[loop_debug] drain_input run_id={} status=InternalContinuation epoch={:?} kind=StopHookFeedback input_ids={:?} count={}",
-                self.run_id,
-                epoch,
-                input_ids,
-                batch.len(),
-            );
-            return Ok(Some(DrainOutcome::InternalContinuation {
-                kind: InternalContinuationKind::StopHookFeedback { feedback: text },
-                batch,
-                epoch,
-            }));
-        }
-        if self.pending_tool_results {
-            self.pending_tool_results = false;
-            let (batch, epoch) = match self
-                .run_input_buffer
-                .take_internal_continuation(expected_epoch)
-            {
-                BufferDrain::Ready { batch, epoch } => (batch, epoch),
-                BufferDrain::EmptyAndSealed { .. } | BufferDrain::Empty { .. } => {
-                    return Err(LoopEngineError::Adapter(
-                        "internal continuation 意外返回 EmptyAndSealed/Empty".to_string(),
-                    ));
-                }
-                BufferDrain::AlreadySealed { epoch } => {
-                    log::warn!(
-                        target: crate::LOG_TARGET,
-                        "MainRunPort: take_internal_continuation returned AlreadySealed at epoch {:?}",
-                        epoch,
-                    );
-                    return Ok(Some(DrainOutcome::EmptyAndSealed { epoch }));
-                }
-                BufferDrain::EpochMismatch { expected, actual } => {
-                    return Err(LoopEngineError::Adapter(format!(
-                        "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                        expected, actual,
-                    )));
-                }
-            };
-            let input_ids: Vec<_> = batch
-                .iter()
-                .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
-                .collect();
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "[loop_debug] drain_input run_id={} status=InternalContinuation epoch={:?} kind=ToolResults input_ids={:?} count={}",
-                self.run_id,
-                epoch,
-                input_ids,
-                batch.len(),
-            );
-            return Ok(Some(DrainOutcome::InternalContinuation {
-                kind: InternalContinuationKind::ToolResults,
-                batch,
-                epoch,
-            }));
-        }
-
-        // Fall through to normal drain path
-        Ok(None)
-    }
-}
-
-#[async_trait]
-impl<S, Q, I> RunLoopPort for MainRunPort<'_, S, Q, I>
-where
-    S: ChatEventSink,
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
-{
-    fn freeze_step(&mut self, step_id: &RunStepId, inputs: &[LoopInput]) {
-        // #1272: consume from pending_stop_hook_feedback — drain_input took
-        // from stop_hook_feedback and relayed here so freeze_step can
-        // inject the feedback as a system-prefix message.
-        let feedback = self.pending_stop_hook_feedback.take();
-        let has_stop_hook_feedback = feedback.is_some();
-        let _pending_messages = self.step_messages.freeze(feedback, inputs);
-        if has_stop_hook_feedback {
-            self.messages
-                .extend(inputs.iter().map(|input| Message::user(input.text.clone())));
-        }
-        // #1272 per-turn drain identity: collect (InputId, Message) pairs
-        // for UserMessagesAdopted emission after durable accept succeeds.
-        self.per_turn_adopted = inputs
-            .iter()
-            .filter_map(|input| {
-                input.input_id.as_ref().map(|id| {
-                    let message = if input.images.is_empty() {
-                        Message::user(input.text.clone())
-                    } else {
-                        super::super::input_gate::user_message_with_images(
-                            input.text.clone(),
-                            input.images.clone(),
-                        )
-                    };
-                    (id.clone(), message)
-                })
-            })
-            .collect();
-        if !self.per_turn_adopted.is_empty() {
-            let input_ids: Vec<_> = self
-                .per_turn_adopted
-                .iter()
-                .map(|(id, _)| id.as_str().to_string())
-                .collect();
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "[loop_debug] freeze_step run_id={} step_id={} input_ids={:?} count={}",
-                self.run_id,
-                step_id,
-                input_ids,
-                self.per_turn_adopted.len()
-            );
-        }
-        self.context_request = Some(self.freeze_request(step_id, self.step_messages.outcome()));
-        self.context_window = None;
-    }
-
-    async fn accept_step_input(&mut self, step_id: &RunStepId) -> Result<(), LoopEngineError> {
-        let accepted = self.step_messages.accepted_user_messages();
-        if accepted.is_empty() {
-            return Ok(());
-        }
-        let request = self
-            .context_request
-            .as_ref()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
-        debug_assert_eq!(&request.step_id, step_id);
-        self.context
-            .append_accepted_input(request, accepted)
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-
-        // #1272 per-turn drain identity: emit UserMessagesAdopted strictly
-        // after durable accept succeeds. The TUI uses this to clear queued
-        // placeholders by input_id and append formal user messages.
-        let adopted = std::mem::take(&mut self.per_turn_adopted);
-        if !adopted.is_empty() {
-            let queued = self.run_input_buffer.user_message_snapshot();
-            let input_ids: Vec<_> = adopted
-                .iter()
-                .map(|(id, _)| id.as_str().to_string())
-                .collect();
-            let queued_ids: Vec<_> = queued
-                .iter()
-                .map(|(id, _)| id.as_str().to_string())
-                .collect();
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "[loop_debug] accept_step_input emitting UserMessagesAdopted run_id={} step_id={} adopt_ids={:?} adopt_count={} queued_ids={:?} queued_count={}",
-                self.run_id,
-                step_id,
-                input_ids,
-                adopted.len(),
-                queued_ids,
-                queued.len(),
-            );
-            self.sink
-                .send_event(RuntimeStreamEvent::UserMessagesAdopted {
-                    items: adopted,
-                    queued,
-                })
-                .await;
-        }
-        Ok(())
-    }
-
-    async fn drain_input(
-        &mut self,
-        expected_epoch: DrainEpoch,
-    ) -> Result<DrainOutcome, LoopEngineError> {
-        if let Some(outcome) = self
-            .drain_collect_and_check_continuations(expected_epoch)
-            .await?
-        {
-            return Ok(outcome);
-        }
-
-        // #1272: atomic drain-or-seal — a single synchronous decision point
-        // instead of drain-then-check. Once sealed, late UserMessages are
-        // rejected by push_or_reject (not silently buffered for next Run).
-        match self.run_input_buffer.drain_or_seal(expected_epoch) {
-            BufferDrain::Ready { batch, epoch } => {
-                let input_ids: Vec<_> = batch
-                    .iter()
-                    .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
-                    .collect();
-                log::debug!(
-                    target: crate::LOG_TARGET,
-                    "[loop_debug] drain_input run_id={} status=Ready epoch={:?} kind=per_turn input_ids={:?} count={}",
-                    self.run_id,
-                    epoch,
-                    input_ids,
-                    batch.len(),
-                );
-                Ok(DrainOutcome::Ready { batch, epoch })
-            }
-            BufferDrain::EmptyAndSealed { epoch } => {
-                log::debug!(
-                    target: crate::LOG_TARGET,
-                    "[loop_debug] drain_input run_id={} status=EmptyAndSealed epoch={:?}",
-                    self.run_id,
-                    epoch,
-                );
-                // Buffer was empty; seal applied atomically.
-                Ok(DrainOutcome::EmptyAndSealed { epoch })
-            }
-            BufferDrain::Empty { .. } => {
-                // Shouldn't happen: drain_or_seal never returns Empty.
-                Err(LoopEngineError::Adapter(
-                    "drain_or_seal 意外返回 Empty".to_string(),
-                ))
-            }
-            BufferDrain::AlreadySealed { epoch } => {
-                // Defensive: buffer already sealed (should not reach here).
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "MainRunPort: drain_or_seal returned AlreadySealed — buffer was already sealed"
-                );
-                Ok(DrainOutcome::EmptyAndSealed { epoch })
-            }
-            BufferDrain::EpochMismatch { expected, actual } => {
-                log::error!(
-                    target: crate::LOG_TARGET,
-                    "MainRunPort: drain_or_seal epoch mismatch — expected {:?}, actual {:?}",
-                    expected,
-                    actual,
-                );
-                Err(LoopEngineError::Adapter(format!(
-                    "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                    expected, actual,
-                )))
-            }
-        }
-    }
-
-    /// #1280: AwaitUser 时直接 async 等 input_events channel。
-    /// 收到 UserMessage → push RunInputBuffer → drain 返回 Ready。
-    /// 收到非 UserMessage → push pending_input → 继续等。
-    /// channel 关闭 → EmptyAndSealed。
-    /// cancel/timeout 由 engine 的 await_interruptible 自动处理（future drop）。
-    async fn await_user_input(
-        &mut self,
-        expected_epoch: DrainEpoch,
-    ) -> Result<DrainOutcome, LoopEngineError> {
-        // First check if continuations or already-buffered input is ready.
-        if let Some(outcome) = self
-            .drain_collect_and_check_continuations(expected_epoch)
-            .await?
-        {
-            return Ok(outcome);
-        }
-
-        // Check RunInputBuffer (might have been seeded during drain phase).
-        if let Some(outcome) = match self.run_input_buffer.try_drain_unsealed(expected_epoch) {
-            BufferDrain::Ready { batch, epoch } => Some(DrainOutcome::Ready { batch, epoch }),
-            BufferDrain::Empty { .. } | BufferDrain::EmptyAndSealed { .. } => None,
-            BufferDrain::AlreadySealed { epoch } => {
-                return Ok(DrainOutcome::EmptyAndSealed { epoch });
-            }
-            BufferDrain::EpochMismatch { expected, actual } => {
-                return Err(LoopEngineError::Adapter(format!(
-                    "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                    expected, actual,
-                )));
-            }
-        } {
-            return Ok(outcome);
-        }
-
-        // Async park: wait for the next input event from the channel.
-        // engine's await_interruptible wraps this future — cancel/timeout
-        // will drop it automatically.
-        loop {
-            let event = self.input_events.recv_next_input().await;
-            match event {
-                None => {
-                    // Channel closed — seal.
-                    return Ok(DrainOutcome::EmptyAndSealed {
-                        epoch: expected_epoch,
-                    });
-                }
-                Some(sdk::ChatInputEvent::UserMessage { .. }) => {
-                    self.run_input_buffer.push(event.unwrap());
-                    return match self.run_input_buffer.try_drain_unsealed(expected_epoch) {
-                        BufferDrain::Ready { batch, epoch } => {
-                            Ok(DrainOutcome::Ready { batch, epoch })
-                        }
-                        BufferDrain::Empty { epoch } => Ok(DrainOutcome::NoInput { epoch }),
-                        BufferDrain::EmptyAndSealed { epoch } => {
-                            Ok(DrainOutcome::EmptyAndSealed { epoch })
-                        }
-                        BufferDrain::AlreadySealed { epoch } => {
-                            Ok(DrainOutcome::EmptyAndSealed { epoch })
-                        }
-                        BufferDrain::EpochMismatch { expected, actual } => {
-                            Err(LoopEngineError::Adapter(format!(
-                                "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                                expected, actual,
-                            )))
-                        }
-                    };
-                }
-                Some(other) => {
-                    // Non-UserMessage command: defer to session idle gate.
-                    // Return EmptyAndSealed so the Run completes and the
-                    // session gate can process the command.
-                    self.pending_input.push(other);
-                    return Ok(DrainOutcome::EmptyAndSealed {
-                        epoch: expected_epoch,
-                    });
-                }
-            }
-        }
-    }
-
-    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-        let request = self
-            .context_request
-            .as_ref()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
-        let window = self
-            .context
-            .build_window(request)
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        let needed = self
-            .context
-            .needs_compaction(request)
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        self.context_window = Some(window);
-        Ok(needed)
-    }
-
-    async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {
-        let request = self
-            .context_request
-            .as_ref()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
-        let source_revision = self
-            .context_window
-            .as_ref()
-            .map(|window| window.backing_revision)
-            .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
-        // Freeze the pre-compact messages snapshot before invoking the context
-        // adapter. Only the early window that compact will discard feeds the
-        // PreCompact reflection; the recent tail stays in `recent_messages` and
-        // is observable by the next LLM turn without going through Memory.
-        let pre_compact_snapshot: Vec<share::message::Message> = self
-            .context_window
-            .as_ref()
-            .map(|window| {
-                context::compact::messages_selected_for_precompact_memory(&window.messages)
-            })
-            .unwrap_or_default();
-        let outcome = self
-            .context
-            .compact(request, source_revision)
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        // Production PreCompact reflection trigger (#1284): only the success
-        // path submits the frozen pre-compact snapshot. Errors and `Skipped`
-        // never enqueue a job. The submission is non-blocking and shares the
-        // session-scoped slot with Interval and Manual triggers; the helper
-        // returns `BusySkipped`/`DisabledSkipped` without blocking the caller.
-        let _ = maybe_submit_pre_compact_reflection(
-            &outcome,
-            &pre_compact_snapshot,
-            self.reflection_tasks,
-            self.memory_config,
-            self.binding,
-            self.system_prompt_text,
-            self.language,
-            self.memory,
-            self.reflection_history,
-        );
-        crate::application::context_coordination::apply_automatic_compact_outcome(
-            &outcome,
-            self.last_total_tokens,
-            &mut self.context_window,
-        );
-        Ok(())
-    }
-
-    async fn invoke_model(
-        &mut self,
-        _cancel: &CancellationToken,
-    ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
-        self.invoke_model_impl().await
-    }
-
-    async fn finalize_step(&mut self, step_id: &RunStepId) -> Result<(), LoopEngineError> {
-        let Some(request) = &self.context_request else {
-            return Ok(());
-        };
-        debug_assert_eq!(&request.step_id, step_id);
-        self.persist_step(crate::ports::FinalizeCause::Completed)
-            .await
-    }
-
-    async fn finalize_cancelled_step(
-        &mut self,
-        step_id: &RunStepId,
-    ) -> Result<(), LoopEngineError> {
-        let Some(request) = &self.context_request else {
-            return Ok(());
-        };
-        debug_assert_eq!(&request.step_id, step_id);
-        self.persist_step(crate::ports::FinalizeCause::UserCancelledStep)
-            .await
-    }
-
-    async fn execute_tools(
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_tools_impl(
         &mut self,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
@@ -1468,16 +902,268 @@ where
             &self.current_cwd(),
         )
         .await;
-        Ok(if fuse_bypassed.is_empty() {
-            // #1272: tool results are an explicit InternalContinuation, not a
-            // fresh batch of user input. Mark the port so the next drain will
-            // emit `InternalContinuation::ToolResults` instead of an empty Ready.
-            self.pending_tool_results = true;
-            ToolStep::Continue
-        } else {
-            self.pending_tool_results = true;
-            ToolStep::ContinueWithFuseBypass(fuse_bypassed)
-        })
+        // #1272: tool results are an explicit InternalContinuation, not a
+        // fresh batch of user input. Mark the port so the next drain will
+        // emit `InternalContinuation::ToolResults` instead of an empty Ready.
+        self.mark_tool_results_pending();
+        Ok(tool_strategy::step_from_fuse_bypass(fuse_bypassed))
+    }
+}
+
+// ── ToolStrategy impl ─────────────────────────────────────────────────
+
+impl<S, Q, I> ToolStrategy for MainRunPort<'_, S, Q, I>
+where
+    S: ChatEventSink,
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    fn mark_tool_results_pending(&mut self) {
+        self.input_strategy.pending_tool_results = true;
+    }
+}
+
+// ── LlmStrategy impl ─────────────────────────────────────────────────
+
+#[async_trait]
+impl<S, Q, I> crate::application::loop_engine::llm_strategy::LlmStrategy
+    for MainRunPort<'_, S, Q, I>
+where
+    S: ChatEventSink,
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    fn reasoning_level(&self) -> crate::ports::ReasoningLevel {
+        self.reasoning.current_requested_level()
+    }
+
+    fn committed_delta(&self) -> bool {
+        true
+    }
+
+    async fn on_retry(&mut self, attempt: u32, delay: std::time::Duration) {
+        self.sink
+            .try_send_event(RuntimeStreamEvent::ModelInvocationRetrying {
+                context: self.turn_context.clone(),
+                attempt,
+                delay,
+            });
+    }
+}
+
+#[async_trait]
+impl<S, Q, I> RunLoopPort for MainRunPort<'_, S, Q, I>
+where
+    S: ChatEventSink,
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    fn freeze_step(&mut self, step_id: &RunStepId, inputs: &[LoopInput]) {
+        // #1272: consume from pending_stop_hook_feedback — drain_input took
+        // from stop_hook_feedback and relayed here so freeze_step can
+        // inject the feedback as a system-prefix message.
+        let feedback = self.input_strategy.pending_stop_hook_feedback.take();
+        let has_stop_hook_feedback = feedback.is_some();
+        let _pending_messages = self.step_messages.freeze(feedback, inputs);
+        if has_stop_hook_feedback {
+            self.messages
+                .extend(inputs.iter().map(|input| Message::user(input.text.clone())));
+        }
+        // #1272 per-turn drain identity: collect (InputId, Message) pairs
+        // for UserMessagesAdopted emission after durable accept succeeds.
+        self.per_turn_adopted = inputs
+            .iter()
+            .filter_map(|input| {
+                input.input_id.as_ref().map(|id| {
+                    let message = if input.images.is_empty() {
+                        Message::user(input.text.clone())
+                    } else {
+                        super::super::input_gate::user_message_with_images(
+                            input.text.clone(),
+                            input.images.clone(),
+                        )
+                    };
+                    (id.clone(), message)
+                })
+            })
+            .collect();
+        if !self.per_turn_adopted.is_empty() {
+            let input_ids: Vec<_> = self
+                .per_turn_adopted
+                .iter()
+                .map(|(id, _)| id.as_str().to_string())
+                .collect();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[loop_debug] freeze_step run_id={} step_id={} input_ids={:?} count={}",
+                self.run_id,
+                step_id,
+                input_ids,
+                self.per_turn_adopted.len()
+            );
+        }
+        self.context_request = Some(self.freeze_request(step_id, self.step_messages.outcome()));
+        self.context_window = None;
+    }
+
+    async fn accept_step_input(&mut self, step_id: &RunStepId) -> Result<(), LoopEngineError> {
+        let accepted = self.step_messages.accepted_user_messages();
+        if accepted.is_empty() {
+            return Ok(());
+        }
+        let request = self
+            .context_request
+            .as_ref()
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+        debug_assert_eq!(&request.step_id, step_id);
+        self.context
+            .append_accepted_input(request, accepted)
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+
+        // #1272 per-turn drain identity: emit UserMessagesAdopted strictly
+        // after durable accept succeeds. The TUI uses this to clear queued
+        // placeholders by input_id and append formal user messages.
+        let adopted = std::mem::take(&mut self.per_turn_adopted);
+        if !adopted.is_empty() {
+            let queued = self.input_strategy.run_input_buffer.user_message_snapshot();
+            let input_ids: Vec<_> = adopted
+                .iter()
+                .map(|(id, _)| id.as_str().to_string())
+                .collect();
+            let queued_ids: Vec<_> = queued
+                .iter()
+                .map(|(id, _)| id.as_str().to_string())
+                .collect();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[loop_debug] accept_step_input emitting UserMessagesAdopted run_id={} step_id={} adopt_ids={:?} adopt_count={} queued_ids={:?} queued_count={}",
+                self.run_id,
+                step_id,
+                input_ids,
+                adopted.len(),
+                queued_ids,
+                queued.len(),
+            );
+            self.sink
+                .send_event(RuntimeStreamEvent::UserMessagesAdopted {
+                    items: adopted,
+                    queued,
+                })
+                .await;
+        }
+        Ok(())
+    }
+
+    /// #1272: Delegates to [`MainInputStrategy::drain_input`].
+    async fn drain_input(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        self.input_strategy.drain_input(expected_epoch).await
+    }
+
+    /// #1280: Delegates to [`MainInputStrategy::await_user_input`].
+    /// Cancellation / timeout is handled by the engine's `await_interruptible`.
+    async fn await_user_input(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        self.input_strategy.await_user_input(expected_epoch).await
+    }
+
+    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
+        let (needed, window) =
+            crate::application::loop_engine::shared::needs_compaction_with_window(
+                self.context_request.as_ref(),
+                self.context,
+            )
+            .await?;
+        self.context_window = Some(window);
+        Ok(needed)
+    }
+
+    async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {
+        // Freeze the pre-compact messages snapshot before invoking the context
+        // adapter. Only the early window that compact will discard feeds the
+        // PreCompact reflection; the recent tail stays in `recent_messages` and
+        // is observable by the next LLM turn without going through Memory.
+        let pre_compact_snapshot: Vec<share::message::Message> = self
+            .context_window
+            .as_ref()
+            .map(|window| {
+                context::compact::messages_selected_for_precompact_memory(&window.messages)
+            })
+            .unwrap_or_default();
+        let source_revision = self
+            .context_window
+            .as_ref()
+            .map(|window| window.backing_revision)
+            .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
+        let outcome = compact_core(
+            self.context_request.as_ref(),
+            source_revision,
+            self.context,
+            self.last_total_tokens,
+            &mut self.context_window,
+        )
+        .await?;
+        // Production PreCompact reflection trigger (#1284): only the success
+        // path submits the frozen pre-compact snapshot. Errors and `Skipped`
+        // never enqueue a job. The submission is non-blocking and shares the
+        // session-scoped slot with Interval and Manual triggers; the helper
+        // returns `BusySkipped`/`DisabledSkipped` without blocking the caller.
+        let _ = maybe_submit_pre_compact_reflection(
+            &outcome,
+            &pre_compact_snapshot,
+            self.reflection_tasks,
+            self.memory_config,
+            self.binding,
+            self.system_prompt_text,
+            self.language,
+            self.memory,
+            self.reflection_history,
+        );
+        Ok(())
+    }
+
+    async fn invoke_model(
+        &mut self,
+        _cancel: &CancellationToken,
+    ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
+        self.invoke_model_impl().await
+    }
+
+    async fn finalize_step(&mut self, step_id: &RunStepId) -> Result<(), LoopEngineError> {
+        let Some(request) = &self.context_request else {
+            return Ok(());
+        };
+        debug_assert_eq!(&request.step_id, step_id);
+        self.persist_step(crate::ports::FinalizeCause::Completed)
+            .await
+    }
+
+    async fn finalize_cancelled_step(
+        &mut self,
+        step_id: &RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        let Some(request) = &self.context_request else {
+            return Ok(());
+        };
+        debug_assert_eq!(&request.step_id, step_id);
+        self.persist_step(crate::ports::FinalizeCause::UserCancelledStep)
+            .await
+    }
+
+    async fn execute_tools(
+        &mut self,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+        calls: &[(ToolCall, ToolGuardDecision)],
+        cancel: &CancellationToken,
+    ) -> Result<ToolStep, LoopEngineError> {
+        self.execute_tools_impl(run_id, step_id, calls, cancel)
+            .await
     }
 
     async fn on_stuck(
@@ -1505,79 +1191,24 @@ where
     }
 
     fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
-        debug_assert_eq!(run_id, &self.run_id);
         self.active_run.claim_terminal(run_id)
     }
 
     fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
-        debug_assert_eq!(run_id, &self.run_id);
         self.active_run.claim_cancellation(run_id)
     }
 
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
-        for event in events {
-            match event {
-                RunDomainEvent::Completed { .. } => {
-                    self.project_done(AgentRunStatus::Completed).await;
-                }
-                RunDomainEvent::Failed { error, .. } => {
-                    self.sink
-                        .send_event(RuntimeStreamEvent::ApiError {
-                            messages: self.messages.clone(),
-                            error: error.clone(),
-                        })
-                        .await;
-                    self.project_done(AgentRunStatus::ApiError(error)).await;
-                }
-                RunDomainEvent::Cancelled { run_id, .. } => {
-                    self.rollback_cancelled().await;
-                    self.sink
-                        .send_event(RuntimeStreamEvent::RunCancelled { run_id })
-                        .await;
-                }
-                RunDomainEvent::Terminated { run_id, .. } => {
-                    self.rollback_cancelled().await;
-                    self.sink
-                        .send_event(RuntimeStreamEvent::RunCancelled { run_id })
-                        .await;
-                }
-                RunDomainEvent::CancellationRequested { run_id, .. } => {
-                    self.sink
-                        .send_event(RuntimeStreamEvent::RunCancelling { run_id })
-                        .await;
-                }
-                RunDomainEvent::Started {
-                    run_id,
-                    parent_run_id,
-                } => {
-                    self.sink
-                        .send_event(RuntimeStreamEvent::RunStarted {
-                            run_id,
-                            parent_run_id,
-                        })
-                        .await;
-                }
-                RunDomainEvent::StuckDetected { reason, .. } => {
-                    self.sink
-                        .send_event(RuntimeStreamEvent::SystemMessage(format!(
-                            "[StuckGuard: {reason}]"
-                        )))
-                        .await;
-                }
-                RunDomainEvent::Transitioned { .. }
-                | RunDomainEvent::AwaitingUser { .. }
-                | RunDomainEvent::Resumed { .. }
-                | RunDomainEvent::StepStarted { .. }
-                | RunDomainEvent::StepCompleted { .. }
-                | RunDomainEvent::StepCancellationRequested { .. }
-                | RunDomainEvent::StepFinalizationStarted { .. }
-                | RunDomainEvent::StepCancelled { .. }
-                | RunDomainEvent::DrainingInput { .. }
-                | RunDomainEvent::TerminationRequested { .. } => {
-                    self.sink.send_domain_event(event).await;
-                }
-            }
-        }
-        Ok(())
+        let mut strategy = MainEventStrategy {
+            sink: self.sink,
+            session_id: self.session_id,
+            turn_context: &self.turn_context,
+            task_access: self.task_access,
+            model: &self.binding.model.model,
+            started_at: self.started_at,
+            turn_count: self.turn_count,
+            messages_snapshot: self.messages.clone(),
+        };
+        strategy.emit(events).await
     }
 }

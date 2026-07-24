@@ -90,7 +90,20 @@ Run 终止旁路：任意非终态 ── TerminateRun ──▶ Terminating
 
 ## 2. Loop Engine 骨架（Main/Sub 共用，零分支）
 
-### 2.0 Step/Run 控制与持久化原则
+### 2.0 Adapter 内部策略注入（#1382）
+
+`run_loop` 只依赖 `RunLoopPort`，**NEVER** 按 Main/Sub 分支。两个 adapter 内部进一步用四个静态分发策略面隔离真实差异：
+
+| 策略 | Main | Sub |
+|---|---|---|
+| `InputStrategy` | `MainInputStrategy`：RunInputBuffer、输入 channel、StopHook/ToolResults continuation | `SubInputStrategy`：固定 prompt、epoch、ToolResults continuation |
+| `EventStrategy` | `MainEventStrategy`：投影 RuntimeStreamEvent、完成收口 | `SubEventStrategy`：提取 typed `AgentRunTerminal`、报告 progress |
+| `LlmStrategy` | 动态 reasoning、visible delta、retry event | 固定 reasoning、non-visible delta、retry log/cancellation propagation |
+| `ToolStrategy` | Main tool result continuation | Sub tool result continuation |
+
+策略使用具体类型和泛型静态分发，**NEVER** 用 trait object 组成超集 struct。共享纯流程位于 `loop_engine::{shared,llm_log,llm_strategy,tool_strategy}`；Main 独有的输入交错、reflection、Stop Hook、InteractionBridge、任务快照和 Sub 独有的 max-output-tokens 恢复仍留在各自 adapter。`RunLoopPort` impl 仅保留 engine contract 与薄委托，业务差异不进入 engine。
+
+### 2.1 Step/Run 控制与持久化原则
 
 Loop 在**每个** `.await` 返回后 **MUST** 检查当前 Step scope 与 Run root scope：
 

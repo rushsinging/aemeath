@@ -560,11 +560,17 @@ where
                     reflection_tasks: &reflection_tasks,
                     language: &language,
                     reasoning: reasoning.as_ref(),
-                    pending_input: &mut pending_input,
-                    run_input_buffer: RunInputBuffer::new(),
-                    stop_hook_feedback: None,
-                    pending_stop_hook_feedback: None,
-                    pending_tool_results: false,
+                    input_strategy: crate::application::loop_engine::input_strategy::MainInputStrategy {
+                        input_events: &input_events,
+                        sink: &sink,
+                        queue: &queue,
+                        pending_input: &mut pending_input,
+                        run_input_buffer: RunInputBuffer::new(),
+                        stop_hook_feedback: None,
+                        pending_stop_hook_feedback: None,
+                        pending_tool_results: false,
+                        run_id: run_id.clone(),
+                    },
                     per_turn_adopted: Vec::new(),
                     cancel: cancel.clone(),
                     run_id: run_id.clone(),
@@ -592,7 +598,7 @@ where
                               id, text.len(), images.len()
                           );
                       }
-                      port.run_input_buffer.push(event);
+                      port.input_strategy.run_input_buffer.push(event);
                   }
                 // #1280: Main Run creation, ActiveRun registration, shared
                 // run_loop and cleanup are all owned by RunLauncher.

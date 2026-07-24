@@ -2,7 +2,7 @@ mod agent_calls;
 mod ask_user;
 pub(crate) mod config_reload;
 mod events;
-mod finalize;
+pub(crate) mod finalize;
 mod hook_ui;
 mod idle_commands;
 mod idle_lifecycle;
@@ -12,7 +12,6 @@ mod input_gate_reset_withdraw_tests;
 #[cfg(test)]
 mod input_gate_tests;
 mod input_log;
-mod llm_log;
 mod loop_context;
 mod loop_phases;
 mod loop_runner;
@@ -26,7 +25,7 @@ mod queue;
 pub(crate) mod reflection;
 #[cfg(test)]
 mod reflection_trigger_tests;
-mod run_input_buffer;
+pub(crate) mod run_input_buffer;
 mod snapshot_registry;
 pub(crate) mod stall;
 mod stream_handler;

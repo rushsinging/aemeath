@@ -1,10 +1,11 @@
 use super::finalize::{finalize_sub_agent, AgentRunOutcome, AgentRunStatus};
-use super::logging::{
-    build_json_logger_input_data, build_json_logger_output_data, build_json_logger_tool_call_data,
-};
 use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use crate::application::context_coordination::ContextCoordinator;
+use crate::application::loop_engine::event_strategy::{EventStrategy, SubEventStrategy};
+use crate::application::loop_engine::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
+use crate::application::loop_engine::shared::compact_core;
+use crate::application::loop_engine::tool_strategy::{self, ToolStrategy};
 use crate::application::loop_engine::{
     LoopEngineError, ModelStep, RunLoopPort, ToolGuardDecision, ToolStep,
 };
@@ -19,6 +20,7 @@ use provider::RequestSystemBlock;
 use share::message::Message;
 use share::string_idx::slice_head;
 use std::sync::Arc;
+use std::time::Instant;
 use tools::AgentRunTerminal;
 use tools::{AgentProgressEvent, AgentProgressKind};
 
@@ -132,18 +134,9 @@ pub(super) struct SubAgentRun<'a> {
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub policy: Arc<dyn policy::PolicyPort>,
     pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
-    /// #1272: Sub's FixedInputBuffer returns the prompt as Ready on the very
-    /// first drain, then EmptyAndSealed forever after. Tracks whether the
-    /// initial prompt has already been consumed.
-    pub prompt_drained: bool,
-    /// #1272: Sub maintains its own epoch counter for per-turn drain
-    /// linearization. First drain (Ready) uses epoch 0, then advances
-    /// to 1; subsequent EmptyAndSealed uses epoch 1.
-    pub next_epoch: crate::application::loop_engine::DrainEpoch,
-    /// Tracks whether the last step executed tools. When true, drain_input
-    /// returns InternalContinuation::ToolResults so the engine invokes the
-    /// model again with tool results (instead of prematurely sealing).
-    pub has_tool_results_pending: bool,
+    /// Input strategy: encapsulates the fixed-prompt drain logic with epoch
+    /// tracking and tool-result continuation support (#1272, #1384).
+    pub input_strategy: crate::application::loop_engine::input_strategy::SubInputStrategy<'a>,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -283,38 +276,14 @@ impl<'a> SubAgentRun<'a> {
         );
     }
 
-    fn log_input(&self) {
-        let system_blocks_count = self
-            .context_window
-            .as_ref()
-            .map_or(0, |window| window.system_blocks.len());
-        let tool_schemas = self
-            .context_window
-            .as_ref()
-            .map_or(&[][..], |window| window.tool_schemas.as_slice());
-        let raw_tool_schemas = tool_schemas
-            .iter()
-            .map(|schema| {
-                serde_json::json!({
-                    "name": schema.name,
-                    "description": schema.description,
-                    "input_schema": schema.input_schema,
-                })
-            })
-            .collect::<Vec<_>>();
-        let mut data =
-            build_json_logger_input_data(&self.messages, system_blocks_count, &raw_tool_schemas);
-        if let serde_json::Value::Object(ref mut map) = data {
-            map.insert(
-                "event_type".to_string(),
-                serde_json::Value::String("llm_input".to_string()),
-            );
-            map.insert(
-                "role".to_string(),
-                serde_json::Value::String(self.role_name_for_log.clone()),
-            );
-        }
-        log::debug!(target: crate::LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
+    fn log_input(&self, system_blocks: &[RequestSystemBlock], tool_schemas: &[serde_json::Value]) {
+        log_llm_input(
+            &self.messages,
+            self.committed_message_count,
+            system_blocks,
+            tool_schemas,
+            &self.role_name_for_log,
+        );
     }
 
     fn progress_api_ok(&self, turn_number: usize, resp: &InvocationResponse) {
@@ -329,23 +298,14 @@ impl<'a> SubAgentRun<'a> {
         );
     }
 
-    fn log_output(&self, resp: &InvocationResponse) {
-        let mut data = build_json_logger_output_data(
-            resp,
-            self.start_time.elapsed().as_secs_f64(),
+    fn log_output(&self, resp: &InvocationResponse, api_elapsed: f64) {
+        log_llm_output_and_tool_calls(
             &self.binding.model.provider,
+            resp,
+            &[],
+            api_elapsed,
+            &self.role_name_for_log,
         );
-        if let serde_json::Value::Object(ref mut map) = data {
-            map.insert(
-                "event_type".to_string(),
-                serde_json::Value::String("llm_output".to_string()),
-            );
-            map.insert(
-                "role".to_string(),
-                serde_json::Value::String(self.role_name_for_log.clone()),
-            );
-        }
-        log::debug!(target: crate::LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
     }
 
     fn send_text_progress(&self, turn: usize, resp: &InvocationResponse) {
@@ -367,14 +327,10 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn log_tool_calls(&self, tool_calls: &[crate::application::subagent::ToolCall]) {
-        for tool_call in tool_calls {
-            let data = build_json_logger_tool_call_data(tool_call);
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "tool_call: {}",
-                serde_json::to_string(&data).unwrap_or_default()
-            );
-        }
+        crate::application::loop_engine::llm_log::log_tool_calls(
+            tool_calls,
+            &self.role_name_for_log,
+        );
     }
 
     fn build_call_info(
@@ -394,195 +350,10 @@ impl<'a> SubAgentRun<'a> {
             })
             .collect()
     }
-}
 
-fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal> {
-    match event {
-        RunDomainEvent::Completed { result, .. } => Some(AgentRunTerminal::Completed {
-            result: result.clone(),
-        }),
-        RunDomainEvent::Failed { error, .. } => Some(AgentRunTerminal::Failed {
-            error: error.clone(),
-        }),
-        RunDomainEvent::Cancelled { .. } | RunDomainEvent::Terminated { .. } => {
-            Some(AgentRunTerminal::Cancelled)
-        }
-        RunDomainEvent::Transitioned { .. }
-        | RunDomainEvent::Started { .. }
-        | RunDomainEvent::StepStarted { .. }
-        | RunDomainEvent::StepCompleted { .. }
-        | RunDomainEvent::StepCancellationRequested { .. }
-        | RunDomainEvent::StepFinalizationStarted { .. }
-        | RunDomainEvent::StepCancelled { .. }
-        | RunDomainEvent::DrainingInput { .. }
-        | RunDomainEvent::TerminationRequested { .. }
-        | RunDomainEvent::CancellationRequested { .. }
-        | RunDomainEvent::AwaitingUser { .. }
-        | RunDomainEvent::Resumed { .. }
-        | RunDomainEvent::StuckDetected { .. } => None,
-    }
-}
-
-fn should_complete_after_model_response(has_no_tool_calls: bool) -> bool {
-    has_no_tool_calls
-}
-
-#[async_trait]
-impl RunLoopPort for SubAgentRun<'_> {
-    fn freeze_step(
+    async fn invoke_model_impl(
         &mut self,
-        step_id: &sdk::RunStepId,
-        _inputs: &[crate::application::loop_engine::LoopInput],
-    ) {
-        self.accepted_input = if self.committed_message_count == 0 {
-            self.messages
-                .first()
-                .filter(|message| message.role == share::message::Role::User)
-                .cloned()
-                .into_iter()
-                .collect()
-        } else {
-            Vec::new()
-        };
-        self.context_request = Some(self.freeze_request(step_id));
-        self.context_window = None;
-    }
-
-    async fn accept_step_input(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
-        let request = self
-            .context_request
-            .as_ref()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
-        debug_assert_eq!(&request.step_id, step_id);
-        if self.accepted_input.is_empty() {
-            return Ok(());
-        }
-        self.context
-            .append_accepted_input(request, self.accepted_input.clone())
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        Ok(())
-    }
-
-    async fn drain_input(
-        &mut self,
-        expected_epoch: crate::application::loop_engine::DrainEpoch,
-    ) -> Result<crate::application::loop_engine::DrainOutcome, LoopEngineError> {
-        // #1272: Sub's FixedInputBuffer returns the prompt as Ready exactly
-        // once (consumed by the first step's accepted-input handoff) at
-        // epoch 0, then EmptyAndSealed at epoch 1 forever after.
-        if !self.prompt_drained {
-            if expected_epoch != self.next_epoch {
-                return Err(LoopEngineError::Adapter(format!(
-                    "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                    expected_epoch, self.next_epoch,
-                )));
-            }
-            self.prompt_drained = true;
-            let epoch = self.next_epoch;
-            self.next_epoch = epoch.next();
-            return Ok(crate::application::loop_engine::DrainOutcome::Ready {
-                batch: vec![crate::application::loop_engine::LoopInput {
-                    text: self.prompt.to_string(),
-                    input_id: None,
-                    images: Vec::new(),
-                }],
-                epoch,
-            });
-        }
-        if expected_epoch != self.next_epoch {
-            return Err(LoopEngineError::Adapter(format!(
-                "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                expected_epoch, self.next_epoch,
-            )));
-        }
-        let epoch = self.next_epoch;
-        self.next_epoch = epoch.next();
-        // #1384: If the last step executed tools, return InternalContinuation
-        // so the engine invokes the model again with tool results appended
-        // to messages. Only seal when the model produced no tool calls
-        // (ModelStep::Complete/Continue) — that's the terminal response.
-        if self.has_tool_results_pending {
-            self.has_tool_results_pending = false;
-            return Ok(
-                crate::application::loop_engine::DrainOutcome::InternalContinuation {
-                    kind: crate::application::loop_engine::InternalContinuationKind::ToolResults,
-                    batch: Vec::new(),
-                    epoch,
-                },
-            );
-        }
-        Ok(crate::application::loop_engine::DrainOutcome::EmptyAndSealed { epoch })
-    }
-
-    /// #1280: Sub Agent 的 await_user_input 预留接口。
-    ///
-    /// 当前 Sub 使用 FixedInputBuffer，drain 后立即 seal，永不进入 AwaitingUser，
-    /// 因此此方法不可达。
-    ///
-    /// #1248 将注入 InteractionBridge 后激活：Sub 的 AskUserQuestion suspension
-    /// 会触发 AwaitingUser，此方法 async park 等 InteractionBridge oneshot。
-    async fn await_user_input(
-        &mut self,
-        _expected_epoch: crate::application::loop_engine::DrainEpoch,
-    ) -> Result<crate::application::loop_engine::DrainOutcome, LoopEngineError> {
-        Err(LoopEngineError::Adapter(
-            "Sub Agent 不支持 AwaitingUser（FixedInputBuffer 只 drain 一次即 seal）\
-             ; #1248 注入 InteractionBridge 后激活"
-                .to_string(),
-        ))
-    }
-
-    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-        let request = self
-            .context_request
-            .as_ref()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
-        let window = self
-            .context
-            .build_window(request)
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        let needed = self
-            .context
-            .needs_compaction(request)
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        self.context_window = Some(window);
-        Ok(needed)
-    }
-
-    async fn compact(
-        &mut self,
-        _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<(), LoopEngineError> {
-        let request = self
-            .context_request
-            .as_ref()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
-        let source_revision = self
-            .context_window
-            .as_ref()
-            .map(|window| window.backing_revision)
-            .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
-        let outcome = self
-            .context
-            .compact(request, source_revision)
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        crate::application::context_coordination::apply_automatic_compact_outcome(
-            &outcome,
-            &mut self.last_total_tokens,
-            &mut self.context_window,
-        );
-        Ok(())
-    }
-
-    async fn invoke_model(
-        &mut self,
-        _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
-        use crate::application::loop_engine::StepTokenUsage;
         self.turn_count += 1;
         let turn_number = self.turn_count;
         logging::within(
@@ -594,7 +365,6 @@ impl RunLoopPort for SubAgentRun<'_> {
             async move {
                 self.progress_turn_start(turn_number);
                 (self.log_request_messages)(turn_number, &self.messages);
-                self.log_input();
 
                 let window = if let Some(window) = self.context_window.clone() {
                     Some(window)
@@ -612,35 +382,24 @@ impl RunLoopPort for SubAgentRun<'_> {
                     .as_ref()
                     .map(|window| messages_for_llm(&window.messages))
                     .unwrap_or_else(|| messages_for_llm(&self.messages));
-                let effective_blocks = window
-                    .as_ref()
-                    .map(|window| {
-                        window
-                            .system_blocks
-                            .iter()
-                            .map(|block| {
-                                if block.cache_break {
-                                    debug_assert!(
-                                        block.cacheable,
-                                        "cache breakpoint 必须位于可缓存前缀"
-                                    );
-                                    RequestSystemBlock::Cacheable(block.content.clone())
-                                } else {
-                                    RequestSystemBlock::Text(block.content.clone())
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
+                let (effective_blocks, raw_tool_schemas) = match &window {
+                    Some(w) => {
+                        let ctx = crate::application::loop_engine::llm_strategy::extract_invocation_context(w);
+                        let tools = ctx.tool_schemas;
+                        (ctx.system_blocks, tools)
+                    }
+                    None => (Vec::new(), Vec::new()),
+                };
                 let effective_tools = window
                     .as_ref()
                     .map(|window| window.tool_schemas.clone())
                     .unwrap_or_default();
+                self.log_input(&effective_blocks, &raw_tool_schemas);
                 self.context_window = window;
                 let mut coordinator =
                     crate::application::model_invocation::ModelInvocationCoordinator::new();
+                let api_start = Instant::now();
                 let resp = loop {
-                    // A retry is a fresh provider request and therefore gets a fresh request id.
                     let request_context = sub_request_log_context(
                         &logging::capture(),
                         &self.model_name_for_log,
@@ -648,31 +407,38 @@ impl RunLoopPort for SubAgentRun<'_> {
                         &self.role_name_for_log,
                     );
                     let response = logging::instrument(request_context, async {
-                        let mut reducer =
-                            crate::application::main_loop::looping::InvocationEventReducer::new(
-                                SubAgentEventSink,
-                            );
-                        let provider = self.binding.provider.clone();
-                        let model = self.binding.model.clone();
-                        let max_tokens = self.max_tokens;
-                        let level = self.level;
-                        let system = effective_blocks.clone();
-                        let messages = messages_for_api.clone();
-                        let tools = effective_tools.clone();
-                        let cancellation = self.runtime_cancellation.clone();
-                        let invocation_fut = async {
-                            let mut request = InvocationRequest::new(
-                                model,
-                                messages,
-                                InvocationOptions::new(max_tokens, level),
-                            );
-                            request.system = system;
-                            request.tools = tools;
-                            request.cancellation = cancellation.clone();
-                            match provider.invoke(request, &cancellation).await {
-                                Ok(stream) => {
-                                    coordinator
-                                        .pull_stream(stream, &cancellation, false, |event| {
+                            let mut reducer =
+                                crate::application::main_loop::looping::InvocationEventReducer::new(
+                                    SubAgentEventSink,
+                                );
+                            let provider = self.binding.provider.clone();
+                            let model = self.binding.model.clone();
+                            let max_tokens = self.max_tokens;
+                            let level = {
+                                use crate::application::loop_engine::llm_strategy::LlmStrategy;
+                                self.reasoning_level()
+                            };
+                            let committed_delta = {
+                                use crate::application::loop_engine::llm_strategy::LlmStrategy;
+                                self.committed_delta()
+                            };
+                            let system = effective_blocks.clone();
+                            let messages = messages_for_api.clone();
+                            let tools = effective_tools.clone();
+                            let cancellation = self.runtime_cancellation.clone();
+                            let invocation_fut = async {
+                                let mut request = InvocationRequest::new(
+                                    model,
+                                    messages,
+                                    InvocationOptions::new(max_tokens, level),
+                                );
+                                request.system = system;
+                                request.tools = tools;
+                                request.cancellation = cancellation.clone();
+                                match provider.invoke(request, &cancellation).await {
+                                    Ok(stream) => {
+                                        coordinator
+                                            .pull_stream(stream, &cancellation, committed_delta, |event| {
                                             reducer.apply(event)
                                         })
                                         .await
@@ -693,32 +459,17 @@ impl RunLoopPort for SubAgentRun<'_> {
                             self.runtime_cancellation.cancel();
                             return Err(LoopEngineError::Cancelled);
                         }
-                        Err((error, visible_delta)) => match coordinator
-                            .handle_failure(&error, visible_delta, &self.runtime_cancellation)
-                            .await
-                        {
-                            crate::application::model_invocation::RetryStep::Retry {
-                                attempt,
-                                delay,
-                            } => {
-                                log::info!(
-                                    target: crate::LOG_TARGET,
-                                    "sub-agent model invocation retrying: attempt={} delay_ms={}",
-                                    attempt,
-                                    delay.as_millis(),
-                                );
+                        Err((error, visible_delta)) => {
+                                let step = coordinator
+                                    .handle_failure(&error, visible_delta, &self.runtime_cancellation)
+                                    .await;
+                                crate::application::loop_engine::llm_strategy::map_retry_outcome(
+                                    step,
+                                    &error.to_string(),
+                                    self,
+                                )
+                                .await?;
                             }
-                            crate::application::model_invocation::RetryStep::Cancelled => {
-                                self.runtime_cancellation.cancel();
-                                return Err(LoopEngineError::Cancelled);
-                            }
-                            crate::application::model_invocation::RetryStep::Compact => {
-                                return Err(LoopEngineError::NeedsCompaction(error.to_string()));
-                            }
-                            crate::application::model_invocation::RetryStep::Fail => {
-                                return Err(LoopEngineError::Adapter(error.to_string()));
-                            }
-                        },
                     }
                 };
 
@@ -727,37 +478,20 @@ impl RunLoopPort for SubAgentRun<'_> {
                 );
                 self.progress_api_ok(turn_number, &resp);
 
-                let usage = StepTokenUsage {
-                    input_tokens: resp.usage.input_tokens.unwrap_or(0) as u64,
-                    output_tokens: resp.usage.output_tokens.unwrap_or(0) as u64,
-                    cached_tokens: resp.usage.cache_read_tokens.map(u64::from).unwrap_or(0),
-                    cache_creation_tokens: resp
-                        .usage
-                        .cache_write_tokens
-                        .map(u64::from)
-                        .unwrap_or(0),
-                    reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
-                    total_tokens: crate::application::token_usage::normalized_total_tokens(
-                        &resp.usage,
-                    ),
-                    context_window: self.ctx_context_size as u64,
-                    est_system_tokens: self
-                        .context_window
-                        .as_ref()
-                        .map_or(0, |window| window.token_estimation.system_tokens),
-                    est_tool_tokens: self
-                        .context_window
-                        .as_ref()
-                        .map_or(0, |window| window.token_estimation.tool_schema_tokens),
-                    est_message_tokens: self
-                        .context_window
-                        .as_ref()
-                        .map_or(0, |window| window.token_estimation.message_tokens),
-                    stop_reason: format!("{:?}", resp.stop_reason).to_lowercase(),
-                };
+                let est = self
+                    .context_window
+                    .as_ref()
+                    .map(|window| &window.token_estimation);
+                let usage = crate::application::loop_engine::llm_strategy::build_step_token_usage(
+                    &resp,
+                    self.ctx_context_size as u64,
+                    est.map_or(0, |e| e.system_tokens),
+                    est.map_or(0, |e| e.tool_schema_tokens),
+                    est.map_or(0, |e| e.message_tokens),
+                );
 
                 self.messages.push(resp.assistant_message.clone());
-                self.log_output(&resp);
+                self.log_output(&resp, api_start.elapsed().as_secs_f64());
                 self.send_text_progress(turn_number, &resp);
 
                 let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
@@ -769,18 +503,14 @@ impl RunLoopPort for SubAgentRun<'_> {
                     );
                     self.messages.push(Message::user(
                         "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
-                 请基于已有内容继续，或用更紧凑的方式重新组织响应：\
-                 大文件改用 Edit 分块写入（每次 < 12k 字符），\
-                 长命令用 Bash heredoc 分段执行。\
-                 不要重复已输出的内容，直接从截断点继续。"
+                   请基于已有内容继续，或用更紧凑的方式重新组织响应：\
+                   大文件改用 Edit 分块写入（每次 < 12k 字符），\
+                   长命令用 Bash heredoc 分段执行。\
+                   不要重复已输出的内容，直接从截断点继续。"
                             .to_string(),
                     ));
                     if tool_calls.is_empty() {
-                        // Preserve the old retry path: a text-only truncation did not
-                        // trigger compaction before asking the model to continue.
                         self.last_total_tokens = None;
-                        // An empty tool phase advances the shared state machine while
-                        // retaining the old behavior of retrying a truncated response.
                         return Ok((
                             ModelStep::Tools {
                                 text: resp.assistant_message.text_content(),
@@ -835,56 +565,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         .await
     }
 
-    async fn finalize_step(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
-        let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
-            return Ok(());
-        };
-        debug_assert_eq!(&request.step_id, step_id);
-        let messages =
-            self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
-        self.context
-            .append_finalized(
-                request,
-                step_id.clone(),
-                window.backing_revision,
-                crate::ports::FinalizeCause::Completed,
-                messages,
-                vec![],
-                self.last_total_tokens,
-            )
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        self.committed_message_count = self.messages.len();
-        Ok(())
-    }
-
-    async fn finalize_cancelled_step(
-        &mut self,
-        step_id: &sdk::RunStepId,
-    ) -> Result<(), LoopEngineError> {
-        let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
-            return Ok(());
-        };
-        debug_assert_eq!(&request.step_id, step_id);
-        let messages =
-            self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
-        self.context
-            .append_finalized(
-                request,
-                step_id.clone(),
-                window.backing_revision,
-                crate::ports::FinalizeCause::UserCancelledStep,
-                messages,
-                vec![],
-                self.last_total_tokens,
-            )
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        self.committed_message_count = self.messages.len();
-        Ok(())
-    }
-
-    async fn execute_tools(
+    async fn execute_tools_impl(
         &mut self,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
@@ -954,15 +635,203 @@ impl RunLoopPort for SubAgentRun<'_> {
                 .await;
                 // #1384: Mark that tool results are pending so drain_input
                 // returns InternalContinuation instead of EmptyAndSealed.
-                self.has_tool_results_pending = true;
-                Ok(if fuse_bypassed.is_empty() {
-                    ToolStep::Continue
-                } else {
-                    ToolStep::ContinueWithFuseBypass(fuse_bypassed)
-                })
+                self.mark_tool_results_pending();
+                Ok(tool_strategy::step_from_fuse_bypass(fuse_bypassed))
             },
         )
         .await
+    }
+}
+
+fn should_complete_after_model_response(has_no_tool_calls: bool) -> bool {
+    has_no_tool_calls
+}
+
+// ── ToolStrategy impl ─────────────────────────────────────────────────
+
+impl ToolStrategy for SubAgentRun<'_> {
+    fn mark_tool_results_pending(&mut self) {
+        self.input_strategy.has_tool_results_pending = true;
+    }
+}
+
+// ── LlmStrategy impl ─────────────────────────────────────────────────
+
+#[async_trait]
+impl crate::application::loop_engine::llm_strategy::LlmStrategy for SubAgentRun<'_> {
+    fn reasoning_level(&self) -> crate::ports::ReasoningLevel {
+        self.level
+    }
+
+    fn committed_delta(&self) -> bool {
+        false
+    }
+
+    async fn on_retry(&mut self, attempt: u32, delay: std::time::Duration) {
+        log::info!(
+            target: crate::LOG_TARGET,
+            "sub-agent model invocation retrying: attempt={} delay_ms={}",
+            attempt,
+            delay.as_millis(),
+        );
+    }
+
+    async fn on_retry_cancelled(&mut self) {
+        self.runtime_cancellation.cancel();
+    }
+}
+
+#[async_trait]
+impl RunLoopPort for SubAgentRun<'_> {
+    fn freeze_step(
+        &mut self,
+        step_id: &sdk::RunStepId,
+        _inputs: &[crate::application::loop_engine::LoopInput],
+    ) {
+        self.accepted_input = if self.committed_message_count == 0 {
+            self.messages
+                .first()
+                .filter(|message| message.role == share::message::Role::User)
+                .cloned()
+                .into_iter()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.context_request = Some(self.freeze_request(step_id));
+        self.context_window = None;
+    }
+
+    async fn accept_step_input(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
+        let request = self
+            .context_request
+            .as_ref()
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+        debug_assert_eq!(&request.step_id, step_id);
+        if self.accepted_input.is_empty() {
+            return Ok(());
+        }
+        self.context
+            .append_accepted_input(request, self.accepted_input.clone())
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        Ok(())
+    }
+
+    /// #1272: Delegates to [`SubInputStrategy::drain_input`].
+    async fn drain_input(
+        &mut self,
+        expected_epoch: crate::application::loop_engine::DrainEpoch,
+    ) -> Result<crate::application::loop_engine::DrainOutcome, LoopEngineError> {
+        use crate::application::loop_engine::input_strategy::InputStrategy;
+        self.input_strategy.drain_input(expected_epoch).await
+    }
+
+    /// #1280: Delegates to [`SubInputStrategy::await_user_input`].
+    async fn await_user_input(
+        &mut self,
+        _expected_epoch: crate::application::loop_engine::DrainEpoch,
+    ) -> Result<crate::application::loop_engine::DrainOutcome, LoopEngineError> {
+        use crate::application::loop_engine::input_strategy::InputStrategy;
+        self.input_strategy.await_user_input(_expected_epoch).await
+    }
+
+    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
+        let (needed, window) =
+            crate::application::loop_engine::shared::needs_compaction_with_window(
+                self.context_request.as_ref(),
+                &self.context,
+            )
+            .await?;
+        self.context_window = Some(window);
+        Ok(needed)
+    }
+
+    async fn compact(
+        &mut self,
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<(), LoopEngineError> {
+        let source_revision = self
+            .context_window
+            .as_ref()
+            .map(|window| window.backing_revision)
+            .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
+        compact_core(
+            self.context_request.as_ref(),
+            source_revision,
+            &self.context,
+            &mut self.last_total_tokens,
+            &mut self.context_window,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn invoke_model(
+        &mut self,
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
+        self.invoke_model_impl().await
+    }
+
+    async fn finalize_step(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
+        let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
+            return Ok(());
+        };
+        debug_assert_eq!(&request.step_id, step_id);
+        let messages =
+            self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
+        self.context
+            .append_finalized(
+                request,
+                step_id.clone(),
+                window.backing_revision,
+                crate::ports::FinalizeCause::Completed,
+                messages,
+                vec![],
+                self.last_total_tokens,
+            )
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        self.committed_message_count = self.messages.len();
+        Ok(())
+    }
+
+    async fn finalize_cancelled_step(
+        &mut self,
+        step_id: &sdk::RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
+            return Ok(());
+        };
+        debug_assert_eq!(&request.step_id, step_id);
+        let messages =
+            self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
+        self.context
+            .append_finalized(
+                request,
+                step_id.clone(),
+                window.backing_revision,
+                crate::ports::FinalizeCause::UserCancelledStep,
+                messages,
+                vec![],
+                self.last_total_tokens,
+            )
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        self.committed_message_count = self.messages.len();
+        Ok(())
+    }
+
+    async fn execute_tools(
+        &mut self,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+        calls: &[(crate::application::subagent::ToolCall, ToolGuardDecision)],
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<ToolStep, LoopEngineError> {
+        self.execute_tools_impl(run_id, step_id, calls, _cancel)
+            .await
     }
 
     async fn on_stuck(
@@ -982,29 +851,19 @@ impl RunLoopPort for SubAgentRun<'_> {
     }
 
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
-        for event in events {
-            if let Some(terminal) = terminal_from_domain_event(&event) {
-                match &terminal {
-                    AgentRunTerminal::Completed { .. } => {
-                        (self.progress)(Some(self.turn_count), "Agent completed");
-                    }
-                    AgentRunTerminal::Failed { error } => {
-                        (self.progress)(Some(self.turn_count), &format!("Agent error: {error}"));
-                    }
-                    AgentRunTerminal::Cancelled => {
-                        (self.progress)(Some(self.turn_count), "Agent cancelled by user");
-                    }
-                }
-                self.terminal = Some(terminal);
-            }
-        }
-        Ok(())
+        let mut strategy = SubEventStrategy {
+            progress: &*self.progress,
+            terminal: &mut self.terminal,
+            turn_count: self.turn_count,
+        };
+        strategy.emit(events).await
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{messages_for_llm, terminal_from_domain_event};
+    use super::messages_for_llm;
+    use crate::application::loop_engine::event_strategy::terminal_from_domain_event;
     use crate::domain::agent_run::{RunDomainEvent, RunId};
     use share::message::{ContentBlock, Message, Role};
 

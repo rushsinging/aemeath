@@ -2,6 +2,7 @@ pub mod event_projection;
 #[cfg(test)]
 #[path = "adapters/event_projection_tests.rs"]
 mod event_projection_tests;
+#[cfg(test)]
 pub(crate) mod hook_acl;
 #[cfg(test)]
 #[path = "adapters/hook_acl_tests.rs"]

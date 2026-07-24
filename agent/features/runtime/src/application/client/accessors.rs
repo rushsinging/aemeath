@@ -7,6 +7,13 @@ use crate::ports::legacy::ChatRuntimeContext;
 use sdk::ChatEvent;
 use share::config::models::ResolvedModel;
 
+pub(crate) type InputPortFactory = dyn Fn(
+        Option<Arc<dyn sdk::QueueDrainPort>>,
+        Option<Arc<dyn sdk::ChatInputEventPort>>,
+    ) -> InputPortPair
+    + Send
+    + Sync;
+
 /// #1381: Composition-injected input port pair.
 /// Application receives this without importing adapter modules.
 pub struct InputPortPair {
@@ -62,14 +69,7 @@ pub struct RuntimeHandle {
     /// #1381: Factory for input drain ports, injected by composition.
     /// Application calls this to get concrete QueueDrainPort/InputEventDrainPort
     /// without depending on adapter types directly.
-    pub(crate) input_port_factory: Arc<
-        dyn Fn(
-                Option<Arc<dyn sdk::QueueDrainPort>>,
-                Option<Arc<dyn sdk::ChatInputEventPort>>,
-            ) -> InputPortPair
-            + Send
-            + Sync,
-    >,
+    pub(crate) input_port_factory: Arc<InputPortFactory>,
 
     // ─── SDK 业务对象 ───
     /// Session reminders（供 SDK 增删改查）

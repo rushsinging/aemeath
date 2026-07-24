@@ -96,6 +96,17 @@ enum InteractionCommandOutcome {
 
 ## 2. Runtime 消费的能力契约
 
+### Main/Sub RunLoop adapter 策略边界（#1382）
+
+`RunLoopPort` 是 Loop Engine 消费的 application contract；`MainRunPort` 与 `SubAgentRun` 是该 contract 的两个 adapter。adapter 内部通过 `InputStrategy`、`EventStrategy`、`LlmStrategy`、`ToolStrategy` 四个窄策略面注入差异，策略实现归 `application/loop_engine/` 所有，不是跨 Feature Port，也不进入 Runtime crate façade。
+
+- Input：Main channel + RunInputBuffer；Sub fixed prompt。
+- Event：Main RuntimeStreamEvent projection；Sub typed terminal extraction。
+- LLM：共享 window 映射、usage 构造和日志 schema；保留各自 retry/reasoning/stream 语义。
+- Tool：只共享结果物化和 continuation 标记；Main 的 Interaction/Hook/Agent 派发与 Sub 的隔离执行 **NEVER** 强行合并。
+
+这些策略使用具体类型静态分发，**NEVER** 形成 50+ 字段的 Main/Sub 超集或 `is_sub` 条件分支。生产对象选择仍由现有 Main/Sub 构造点和 Composition Root 完成。
+
 供应能力发布的 OHS **MUST** 只在各自战术文档定义完整签名；本文只登记 Runtime 的使用面，**NEVER** 复制第二份 trait 真相。Runtime 只消费这些 façade，**NEVER** 再定义同义 wrapper：
 
 | 供应能力 | Runtime 消费的窄契约 | 用途 / 唯一真相 |
