@@ -257,6 +257,13 @@ where
     let progress_log_context = logging::capture();
     let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
         while let Some(event) = prog_rx.recv().await {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[agent_progress_forward] tool_id={} kind={} seq={}",
+                call_id.as_str(),
+                format!("{:?}", event.kind).split('{').next().unwrap_or("?"),
+                event.sequence,
+            );
             let _ = ui_sink
                 .send_event(RuntimeStreamEvent::AgentProgress {
                     context: progress_context.clone(),
