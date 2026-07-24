@@ -755,6 +755,7 @@ mod tests {
 
         for (requested, expected) in [
             (ReasoningLevel::Off, ReasoningLevel::Off),
+            (ReasoningLevel::Minimal, ReasoningLevel::Off),
             (ReasoningLevel::Low, ReasoningLevel::Off),
             (ReasoningLevel::Medium, ReasoningLevel::Medium),
             (ReasoningLevel::High, ReasoningLevel::Medium),
@@ -770,6 +771,49 @@ mod tests {
             assert_eq!(resolved.context_size(), 128_000);
             assert_eq!(resolved.max_output_tokens(), 8_192);
         }
+    }
+
+    #[test]
+    fn resolver_preserves_minimal_and_max_when_capability_declares_minimal() {
+        // OpenAI driver 的 capability 显式声明七档；resolver 必须把 Minimal 与
+        // Max 原样下传，证明共享枚举新增档位不会自动丢失。
+        let openai = ReasoningCapability::new(
+            [
+                ReasoningLevel::Off,
+                ReasoningLevel::Minimal,
+                ReasoningLevel::Low,
+                ReasoningLevel::Medium,
+                ReasoningLevel::High,
+                ReasoningLevel::Xhigh,
+                ReasoningLevel::Max,
+            ],
+            ReasoningMappingKind::Effort,
+        )
+        .expect("OpenAI capability includes off and seven levels");
+
+        assert_eq!(
+            openai.resolve(ReasoningLevel::Minimal),
+            ReasoningLevel::Minimal
+        );
+        assert_eq!(openai.resolve(ReasoningLevel::Max), ReasoningLevel::Max);
+    }
+
+    #[test]
+    fn resolver_downgrades_minimal_to_off_when_capability_omits_minimal() {
+        // Legacy driver（如 Zhipu/LiteLLM）的 capability 不包含 Minimal：
+        // resolver 必须把 Minimal 向下退到 Off，禁止把 Off 静默升级到 Minimal，
+        // 也禁止因为 Minimal 不在集合里而 panic 或返回任何非 Off 档位。
+        let legacy = ReasoningCapability::new(
+            [
+                ReasoningLevel::Off,
+                ReasoningLevel::Low,
+                ReasoningLevel::Medium,
+            ],
+            ReasoningMappingKind::Effort,
+        )
+        .expect("legacy capability includes off");
+
+        assert_eq!(legacy.resolve(ReasoningLevel::Minimal), ReasoningLevel::Off);
     }
 
     #[test]
