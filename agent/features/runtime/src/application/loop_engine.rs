@@ -3,6 +3,7 @@ pub(crate) mod event_strategy;
 mod input;
 pub(crate) mod input_strategy;
 pub(crate) mod llm_log;
+pub(crate) mod llm_strategy;
 pub(crate) mod shared;
 mod stuck_guard;
 

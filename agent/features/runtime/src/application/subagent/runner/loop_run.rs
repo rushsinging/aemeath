@@ -353,6 +353,32 @@ fn should_complete_after_model_response(has_no_tool_calls: bool) -> bool {
     has_no_tool_calls
 }
 
+// ── LlmStrategy impl ─────────────────────────────────────────────────
+
+#[async_trait]
+impl crate::application::loop_engine::llm_strategy::LlmStrategy for SubAgentRun<'_> {
+    fn reasoning_level(&self) -> crate::ports::ReasoningLevel {
+        self.level
+    }
+
+    fn committed_delta(&self) -> bool {
+        false
+    }
+
+    async fn on_retry(&mut self, attempt: u32, delay: std::time::Duration) {
+        log::info!(
+            target: crate::LOG_TARGET,
+            "sub-agent model invocation retrying: attempt={} delay_ms={}",
+            attempt,
+            delay.as_millis(),
+        );
+    }
+
+    async fn on_retry_cancelled(&mut self) {
+        self.runtime_cancellation.cancel();
+    }
+}
+
 #[async_trait]
 impl RunLoopPort for SubAgentRun<'_> {
     fn freeze_step(
@@ -449,7 +475,6 @@ impl RunLoopPort for SubAgentRun<'_> {
         &mut self,
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
-        use crate::application::loop_engine::StepTokenUsage;
         self.turn_count += 1;
         let turn_number = self.turn_count;
         logging::within(
@@ -478,40 +503,21 @@ impl RunLoopPort for SubAgentRun<'_> {
                     .as_ref()
                     .map(|window| messages_for_llm(&window.messages))
                     .unwrap_or_else(|| messages_for_llm(&self.messages));
-                let effective_blocks = window
-                    .as_ref()
-                    .map(|window| {
-                        window
-                            .system_blocks
-                            .iter()
-                            .map(|block| {
-                                if block.cache_break {
-                                    debug_assert!(
-                                        block.cacheable,
-                                        "cache breakpoint 必须位于可缓存前缀"
-                                    );
-                                    RequestSystemBlock::Cacheable(block.content.clone())
-                                } else {
-                                    RequestSystemBlock::Text(block.content.clone())
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
+                let (effective_blocks, raw_tool_schemas) = match &window {
+                    Some(w) => {
+                        let ctx = crate::application::loop_engine::llm_strategy::extract_invocation_context(w);
+                        let tools = ctx.tool_schemas;
+                        // Use `window.tool_schemas` (ModelToolSchema) for the
+                        // InvocationRequest, not the JSON form. The JSON form is
+                        // only for logging.
+                        (ctx.system_blocks, tools)
+                    }
+                    None => (Vec::new(), Vec::new()),
+                };
                 let effective_tools = window
                     .as_ref()
                     .map(|window| window.tool_schemas.clone())
                     .unwrap_or_default();
-                let raw_tool_schemas = effective_tools
-                    .iter()
-                    .map(|schema| {
-                        serde_json::json!({
-                            "name": schema.name,
-                            "description": schema.description,
-                            "input_schema": schema.input_schema,
-                        })
-                    })
-                    .collect::<Vec<_>>();
                 self.log_input(&effective_blocks, &raw_tool_schemas);
                 self.context_window = window;
                 let mut coordinator =
@@ -525,31 +531,38 @@ impl RunLoopPort for SubAgentRun<'_> {
                         &self.role_name_for_log,
                     );
                     let response = logging::instrument(request_context, async {
-                        let mut reducer =
-                            crate::application::main_loop::looping::InvocationEventReducer::new(
-                                SubAgentEventSink,
-                            );
-                        let provider = self.binding.provider.clone();
-                        let model = self.binding.model.clone();
-                        let max_tokens = self.max_tokens;
-                        let level = self.level;
-                        let system = effective_blocks.clone();
-                        let messages = messages_for_api.clone();
-                        let tools = effective_tools.clone();
-                        let cancellation = self.runtime_cancellation.clone();
-                        let invocation_fut = async {
-                            let mut request = InvocationRequest::new(
-                                model,
-                                messages,
-                                InvocationOptions::new(max_tokens, level),
-                            );
-                            request.system = system;
-                            request.tools = tools;
-                            request.cancellation = cancellation.clone();
-                            match provider.invoke(request, &cancellation).await {
-                                Ok(stream) => {
-                                    coordinator
-                                        .pull_stream(stream, &cancellation, false, |event| {
+                            let mut reducer =
+                                crate::application::main_loop::looping::InvocationEventReducer::new(
+                                    SubAgentEventSink,
+                                );
+                            let provider = self.binding.provider.clone();
+                            let model = self.binding.model.clone();
+                            let max_tokens = self.max_tokens;
+                            let level = {
+                                use crate::application::loop_engine::llm_strategy::LlmStrategy;
+                                self.reasoning_level()
+                            };
+                            let committed_delta = {
+                                use crate::application::loop_engine::llm_strategy::LlmStrategy;
+                                self.committed_delta()
+                            };
+                            let system = effective_blocks.clone();
+                            let messages = messages_for_api.clone();
+                            let tools = effective_tools.clone();
+                            let cancellation = self.runtime_cancellation.clone();
+                            let invocation_fut = async {
+                                let mut request = InvocationRequest::new(
+                                    model,
+                                    messages,
+                                    InvocationOptions::new(max_tokens, level),
+                                );
+                                request.system = system;
+                                request.tools = tools;
+                                request.cancellation = cancellation.clone();
+                                match provider.invoke(request, &cancellation).await {
+                                    Ok(stream) => {
+                                        coordinator
+                                            .pull_stream(stream, &cancellation, committed_delta, |event| {
                                             reducer.apply(event)
                                         })
                                         .await
@@ -570,32 +583,17 @@ impl RunLoopPort for SubAgentRun<'_> {
                             self.runtime_cancellation.cancel();
                             return Err(LoopEngineError::Cancelled);
                         }
-                        Err((error, visible_delta)) => match coordinator
-                            .handle_failure(&error, visible_delta, &self.runtime_cancellation)
-                            .await
-                        {
-                            crate::application::model_invocation::RetryStep::Retry {
-                                attempt,
-                                delay,
-                            } => {
-                                log::info!(
-                                    target: crate::LOG_TARGET,
-                                    "sub-agent model invocation retrying: attempt={} delay_ms={}",
-                                    attempt,
-                                    delay.as_millis(),
-                                );
+                        Err((error, visible_delta)) => {
+                                let step = coordinator
+                                    .handle_failure(&error, visible_delta, &self.runtime_cancellation)
+                                    .await;
+                                crate::application::loop_engine::llm_strategy::map_retry_outcome(
+                                    step,
+                                    &error.to_string(),
+                                    self,
+                                )
+                                .await?;
                             }
-                            crate::application::model_invocation::RetryStep::Cancelled => {
-                                self.runtime_cancellation.cancel();
-                                return Err(LoopEngineError::Cancelled);
-                            }
-                            crate::application::model_invocation::RetryStep::Compact => {
-                                return Err(LoopEngineError::NeedsCompaction(error.to_string()));
-                            }
-                            crate::application::model_invocation::RetryStep::Fail => {
-                                return Err(LoopEngineError::Adapter(error.to_string()));
-                            }
-                        },
                     }
                 };
 
@@ -604,34 +602,17 @@ impl RunLoopPort for SubAgentRun<'_> {
                 );
                 self.progress_api_ok(turn_number, &resp);
 
-                let usage = StepTokenUsage {
-                    input_tokens: resp.usage.input_tokens.unwrap_or(0) as u64,
-                    output_tokens: resp.usage.output_tokens.unwrap_or(0) as u64,
-                    cached_tokens: resp.usage.cache_read_tokens.map(u64::from).unwrap_or(0),
-                    cache_creation_tokens: resp
-                        .usage
-                        .cache_write_tokens
-                        .map(u64::from)
-                        .unwrap_or(0),
-                    reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
-                    total_tokens: crate::application::token_usage::normalized_total_tokens(
-                        &resp.usage,
-                    ),
-                    context_window: self.ctx_context_size as u64,
-                    est_system_tokens: self
-                        .context_window
-                        .as_ref()
-                        .map_or(0, |window| window.token_estimation.system_tokens),
-                    est_tool_tokens: self
-                        .context_window
-                        .as_ref()
-                        .map_or(0, |window| window.token_estimation.tool_schema_tokens),
-                    est_message_tokens: self
-                        .context_window
-                        .as_ref()
-                        .map_or(0, |window| window.token_estimation.message_tokens),
-                    stop_reason: format!("{:?}", resp.stop_reason).to_lowercase(),
-                };
+                let est = self
+                    .context_window
+                    .as_ref()
+                    .map(|window| &window.token_estimation);
+                let usage = crate::application::loop_engine::llm_strategy::build_step_token_usage(
+                    &resp,
+                    self.ctx_context_size as u64,
+                    est.map_or(0, |e| e.system_tokens),
+                    est.map_or(0, |e| e.tool_schema_tokens),
+                    est.map_or(0, |e| e.message_tokens),
+                );
 
                 self.messages.push(resp.assistant_message.clone());
                 self.log_output(&resp);

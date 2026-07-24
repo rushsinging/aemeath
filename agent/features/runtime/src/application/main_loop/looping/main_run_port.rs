@@ -508,42 +508,19 @@ where
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
         self.task_reminder_state
             .update_from_messages(self.turn_count as u64, &window.messages);
-        let messages_for_api = window
-            .messages
-            .iter()
-            .map(Message::to_llm_view)
-            .collect::<Vec<_>>();
-        let tool_schemas = window
-            .tool_schemas
-            .iter()
-            .map(|schema| {
-                serde_json::json!({
-                    "name": schema.name,
-                    "description": schema.description,
-                    "input_schema": schema.input_schema,
-                })
-            })
-            .collect::<Vec<_>>();
-        let effective_system_blocks = window
-            .system_blocks
-            .iter()
-            .map(|block| {
-                if block.cache_break {
-                    debug_assert!(block.cacheable, "cache breakpoint 必须位于可缓存前缀");
-                    provider::RequestSystemBlock::Cacheable(block.content.clone())
-                } else {
-                    provider::RequestSystemBlock::Text(block.content.clone())
-                }
-            })
-            .collect::<Vec<_>>();
+        let ctx =
+            crate::application::loop_engine::llm_strategy::extract_invocation_context(&window);
         log_llm_input(
-            &messages_for_api,
+            &ctx.messages_for_api,
             window.messages.len(),
-            &effective_system_blocks,
-            &tool_schemas,
+            &ctx.system_blocks,
+            &ctx.tool_schemas,
             "main",
         );
-        let requested_reasoning = self.reasoning.current_requested_level();
+        let requested_reasoning = {
+            use crate::application::loop_engine::llm_strategy::LlmStrategy;
+            self.reasoning_level()
+        };
 
         let api_start = Instant::now();
         let mut coordinator =
@@ -567,13 +544,19 @@ where
                 let model = self.binding.model.clone();
                 let max_tokens = self.binding.max_tokens;
                 let request_tool_schemas = window.tool_schemas.clone();
+                let messages_for_api = ctx.messages_for_api.clone();
+                let system_blocks = ctx.system_blocks.clone();
+                let committed_delta = {
+                    use crate::application::loop_engine::llm_strategy::LlmStrategy;
+                    self.committed_delta()
+                };
                 let invocation_fut = async {
                     let mut request = crate::ports::InvocationRequest::new(
                         model,
-                        messages_for_api.clone(),
+                        messages_for_api,
                         crate::ports::InvocationOptions::new(max_tokens, requested_reasoning),
                     );
-                    request.system = effective_system_blocks.clone();
+                    request.system = system_blocks;
                     request.tools = request_tool_schemas;
                     request.cancellation = stream_cancel.clone();
                     let stream = provider
@@ -581,7 +564,9 @@ where
                         .await
                         .map_err(|error| (error, false))?;
                     coordinator
-                        .pull_stream(stream, &stream_cancel, true, |event| reducer.apply(event))
+                        .pull_stream(stream, &stream_cancel, committed_delta, |event| {
+                            reducer.apply(event)
+                        })
                         .await
                 };
                 let waiting_sink = self.sink.clone();
@@ -627,28 +612,17 @@ where
                 Err((error, _)) if error.is_cancelled() || self.cancel.is_cancelled() => {
                     return Err(LoopEngineError::Cancelled);
                 }
-                Err((error, visible_delta)) => match coordinator
-                    .handle_failure(&error, visible_delta, &self.cancel)
-                    .await
-                {
-                    crate::application::model_invocation::RetryStep::Retry { attempt, delay } => {
-                        self.sink
-                            .try_send_event(RuntimeStreamEvent::ModelInvocationRetrying {
-                                context: self.turn_context.clone(),
-                                attempt,
-                                delay,
-                            });
-                    }
-                    crate::application::model_invocation::RetryStep::Cancelled => {
-                        return Err(LoopEngineError::Cancelled);
-                    }
-                    crate::application::model_invocation::RetryStep::Compact => {
-                        return Err(LoopEngineError::NeedsCompaction(error.to_string()));
-                    }
-                    crate::application::model_invocation::RetryStep::Fail => {
-                        return Err(LoopEngineError::Adapter(error.to_string()));
-                    }
-                },
+                Err((error, visible_delta)) => {
+                    let step = coordinator
+                        .handle_failure(&error, visible_delta, &self.cancel)
+                        .await;
+                    crate::application::loop_engine::llm_strategy::map_retry_outcome(
+                        step,
+                        &error.to_string(),
+                        self,
+                    )
+                    .await?;
+                }
             }
         };
         let api_elapsed = api_start.elapsed().as_secs_f64();
@@ -666,19 +640,13 @@ where
             &resp.usage,
         ));
 
-        let token_usage = crate::application::loop_engine::StepTokenUsage {
-            input_tokens: resp.usage.input_tokens.unwrap_or(0) as u64,
-            output_tokens: resp.usage.output_tokens.unwrap_or(0) as u64,
-            cached_tokens: resp.usage.cache_read_tokens.map(u64::from).unwrap_or(0),
-            cache_creation_tokens: resp.usage.cache_write_tokens.map(u64::from).unwrap_or(0),
-            reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
-            total_tokens: crate::application::token_usage::normalized_total_tokens(&resp.usage),
-            context_window: request_context_size(self.context_request.as_ref()) as u64,
-            est_system_tokens: window.token_estimation.system_tokens,
-            est_tool_tokens: window.token_estimation.tool_schema_tokens,
-            est_message_tokens: window.token_estimation.message_tokens,
-            stop_reason: format!("{:?}", resp.stop_reason).to_lowercase(),
-        };
+        let token_usage = crate::application::loop_engine::llm_strategy::build_step_token_usage(
+            &resp,
+            request_context_size(self.context_request.as_ref()) as u64,
+            window.token_estimation.system_tokens,
+            window.token_estimation.tool_schema_tokens,
+            window.token_estimation.message_tokens,
+        );
 
         self.sink
             .send_event(RuntimeStreamEvent::Usage {
@@ -789,6 +757,34 @@ where
             },
             token_usage,
         ))
+    }
+}
+
+// ── LlmStrategy impl ─────────────────────────────────────────────────
+
+#[async_trait]
+impl<S, Q, I> crate::application::loop_engine::llm_strategy::LlmStrategy
+    for MainRunPort<'_, S, Q, I>
+where
+    S: ChatEventSink,
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    fn reasoning_level(&self) -> crate::ports::ReasoningLevel {
+        self.reasoning.current_requested_level()
+    }
+
+    fn committed_delta(&self) -> bool {
+        true
+    }
+
+    async fn on_retry(&mut self, attempt: u32, delay: std::time::Duration) {
+        self.sink
+            .try_send_event(RuntimeStreamEvent::ModelInvocationRetrying {
+                context: self.turn_context.clone(),
+                attempt,
+                delay,
+            });
     }
 }
 
