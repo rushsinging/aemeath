@@ -287,6 +287,13 @@ impl App {
                     pending_slash: None,
                 };
             }
+            TuiRuntimeEvent::InteractionRequested(_) => {
+                // InteractionRequested 走 Runtime 路径，但 spinner_stop / mark_output_dirty
+                // 是 App 级副作用，map_runtime_event 只返回 conversation intent。
+                // 必须在此处理，否则 spinner 不停、交互弹窗不渲染。
+                self.spinner_stop();
+                self.mark_output_dirty();
+            }
             _ => {}
         }
         let mapping = map_runtime_event(&event);
