@@ -498,8 +498,10 @@ where
                 .build(),
                 tools::ToolExecutionPorts::new(
                     crate::adapters::tool_runtime::cancellation(cancel.clone()),
-                    crate::adapters::tool_runtime::RuntimeWorkspaceAccess::new(workspace.clone())
-                        .read_access(),
+                    crate::application::workspace_access::RuntimeWorkspaceAccess::new(
+                        workspace.clone(),
+                    )
+                    .read_access(),
                     Arc::new(tools::MutexReadSet(read_files.clone())),
                     Arc::new(tools::FixedPlanMode(None)),
                     memory.clone(),

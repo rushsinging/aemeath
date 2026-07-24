@@ -1,4 +1,6 @@
-use crate::adapters::hook_acl::{RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookReason};
+use crate::application::hook_types::{
+    RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookReason,
+};
 use crate::application::main_loop::looping::hook_ui::dispatch_hook;
 use crate::application::main_loop::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext,

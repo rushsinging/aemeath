@@ -1,6 +1,6 @@
 //! Hook dispatch helper — typed Runtime projection.
 
-use crate::adapters::hook_acl::{
+use crate::application::hook_types::{
     project_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookDisplayMessageKind,
 };
 use crate::application::main_loop::looping::{
@@ -41,7 +41,7 @@ pub(crate) async fn dispatch_hook<S: ChatEventSink>(
     } else if dispatch.executions.iter().any(|execution| {
         matches!(
             execution.status,
-            crate::adapters::hook_acl::RuntimeHookExecutionStatus::ExecutionFailed { .. }
+            crate::application::hook_types::RuntimeHookExecutionStatus::ExecutionFailed { .. }
         )
     }) {
         RuntimeHookEventStatus::Failed

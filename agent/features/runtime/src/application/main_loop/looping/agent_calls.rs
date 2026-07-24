@@ -140,8 +140,8 @@ where
         )
         .await
     } else {
-        crate::adapters::hook_acl::RuntimeHookDispatch {
-            directive: crate::adapters::hook_acl::RuntimeHookDirective::Continue,
+        crate::application::hook_types::RuntimeHookDispatch {
+            directive: crate::application::hook_types::RuntimeHookDirective::Continue,
             executions: Vec::new(),
             messages: Vec::new(),
             block_detail: None,
@@ -248,7 +248,8 @@ where
     );
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-    *ag_ctx = ag_ctx.with_progress(Some(crate::adapters::tool_runtime::progress(prog_tx)));
+    let prog_adapter = crate::adapters::tool_runtime::progress(prog_tx);
+    *ag_ctx = ag_ctx.with_progress(Some(prog_adapter));
     let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
     let progress_context = context.clone();

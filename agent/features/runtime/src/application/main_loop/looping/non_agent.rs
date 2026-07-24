@@ -257,8 +257,8 @@ where
         )
         .await
     } else {
-        crate::adapters::hook_acl::RuntimeHookDispatch {
-            directive: crate::adapters::hook_acl::RuntimeHookDirective::Continue,
+        crate::application::hook_types::RuntimeHookDispatch {
+            directive: crate::application::hook_types::RuntimeHookDirective::Continue,
             executions: Vec::new(),
             messages: Vec::new(),
             block_detail: None,

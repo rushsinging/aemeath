@@ -43,7 +43,7 @@ pub fn build_agent_runner(
         max_tool_concurrency,
         agent_semaphore,
         tool_result_materializer,
-        workspace: crate::adapters::tool_runtime::RuntimeWorkspaceAccess::new(workspace),
+        workspace: crate::application::workspace_access::RuntimeWorkspaceAccess::new(workspace),
         tool_catalog,
         tool_execution,
         tool_context_binding,

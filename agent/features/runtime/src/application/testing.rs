@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 fn test_workspaces(
-) -> &'static Mutex<HashMap<String, crate::adapters::tool_runtime::RuntimeWorkspaceAccess>> {
+) -> &'static Mutex<HashMap<String, crate::application::workspace_access::RuntimeWorkspaceAccess>> {
     static WORKSPACES: OnceLock<
-        Mutex<HashMap<String, crate::adapters::tool_runtime::RuntimeWorkspaceAccess>>,
+        Mutex<HashMap<String, crate::application::workspace_access::RuntimeWorkspaceAccess>>,
     > = OnceLock::new();
     WORKSPACES.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -18,7 +18,8 @@ pub(crate) fn test_tool_execution_context(
     let views = project::wire_production_workspace(root.clone())
         .expect("workspace initialization")
         .into_views();
-    let workspace = crate::adapters::tool_runtime::RuntimeWorkspaceAccess::new(views.clone());
+    let workspace =
+        crate::application::workspace_access::RuntimeWorkspaceAccess::new(views.clone());
     test_workspaces().lock().expect("test workspaces").insert(
         views.read().workspace_id().as_str().to_string(),
         workspace.clone(),
@@ -42,7 +43,7 @@ pub(crate) fn test_tool_execution_context(
 
 pub(crate) fn runtime_workspace(
     ctx: &tools::ToolExecutionContext,
-) -> crate::adapters::tool_runtime::RuntimeWorkspaceAccess {
+) -> crate::application::workspace_access::RuntimeWorkspaceAccess {
     test_workspaces()
         .lock()
         .expect("test workspaces")

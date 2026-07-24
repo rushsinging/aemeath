@@ -1,5 +1,5 @@
 use super::*;
-use crate::adapters::hook_acl::{RuntimeHookDirective, RuntimeHookReason};
+use crate::application::hook_types::{RuntimeHookDirective, RuntimeHookReason};
 use crate::application::loop_engine::ToolGuardDecision;
 use crate::application::subagent::ToolCall;
 use policy::{ApprovalSubject, PolicyDecision, PolicyPort, PolicyReason, PolicyRequest};
