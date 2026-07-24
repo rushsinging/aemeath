@@ -601,17 +601,26 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         )),
         TuiRuntimeEvent::TurnChanged(_) => AgentEventMapping::default(),
         TuiRuntimeEvent::HookEvent(event) => {
-            if event.hook_name == "PostCompact"
-                || (event.hook_name == "Stop" && event.status == TuiHookStatus::Blocked)
-            {
+            if event.hook_name == "PostCompact" {
                 AgentEventMapping::default()
-            } else if let Some(notice) = crate::tui::adapter::hook_notice::hook_event_notice(event)
-            {
-                conversation(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                    content: notice,
-                }))
             } else {
-                AgentEventMapping::default()
+                let mut mapping =
+                    conversation(ConversationIntent::SetSpinnerPhase(SetSpinnerPhase {
+                        phase: crate::tui::adapter::hook_notice::hook_spinner_phase(event),
+                    }));
+                let suppress_notice =
+                    event.hook_name == "Stop" && event.status == TuiHookStatus::Blocked;
+                if !suppress_notice {
+                    if let Some(notice) = crate::tui::adapter::hook_notice::hook_event_notice(event)
+                    {
+                        mapping
+                            .conversation
+                            .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
+                                content: notice,
+                            }));
+                    }
+                }
+                mapping
             }
         }
         TuiRuntimeEvent::HookMessage(message) => {

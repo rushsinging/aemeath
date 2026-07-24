@@ -1,9 +1,13 @@
-use crate::tui::adapter::agent_event::map_agent_event;
+use crate::tui::adapter::agent_event::{map_agent_event, map_runtime_event};
 use crate::tui::adapter::runtime_view::{
     TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiStopHookFeedback,
 };
+use crate::tui::adapter::tui_runtime_event::{TuiHookEvent, TuiHookStatus, TuiRuntimeEvent};
 use crate::tui::app::event::UiEvent;
 use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::spinner::{HookOutcome, SpinnerPhase};
+use crate::tui::model::root::TuiModel;
+use crate::tui::update::root_reducer::reduce_agent_event;
 
 #[test]
 fn stop_hook_feedback_scenario_projects_one_structured_notice() {
@@ -41,4 +45,30 @@ fn stop_hook_feedback_scenario_projects_one_structured_notice() {
                         && details.contains("Exit code: 2")
                 )
     ));
+}
+
+#[test]
+fn stop_hook_running_event_replaces_thinking_spinner_end_to_end() {
+    let mut model = TuiModel::default();
+    model.conversation.runtime.spinner.chat_active = true;
+    model.conversation.runtime.spinner.phase = Some(SpinnerPhase::Thinking);
+
+    let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
+        hook_name: "Stop".to_string(),
+        status: TuiHookStatus::Running,
+        matcher: None,
+        command: None,
+        result: None,
+    }));
+    let result = reduce_agent_event(&mut model, mapping);
+
+    assert_eq!(
+        model.conversation.runtime.spinner.phase,
+        Some(SpinnerPhase::Hook {
+            event: "Stop".to_string(),
+            detail: String::new(),
+            outcome: HookOutcome::Running,
+        })
+    );
+    assert!(result.dirty.status);
 }
