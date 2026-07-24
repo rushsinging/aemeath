@@ -12,16 +12,9 @@ impl App {
         &mut self,
         key: crossterm::event::KeyEvent,
     ) -> Option<UpdateResult> {
-        // #1384: Ctrl+C must cancel the current run even when an AskUser
-        // dialog is active. Fall through to the normal key handler so it
-        // emits Effect::CancelCurrentRun or ForceQuit.
+        // Ctrl+C during AskUser: cancel the interaction (not the run).
         if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('c') {
-            return None;
-        }
-        // #1384: Esc during processing should also cancel, not just
-        // cancel the AskUser dialog.
-        if key.modifiers == KeyModifiers::NONE && key.code == KeyCode::Esc && self.chat.is_processing {
-            return None;
+            return self.cancel_ask_user_batch();
         }
 
         let snapshot = self.model.conversation.ask_user_snapshot();
@@ -32,7 +25,17 @@ impl App {
             .map(|s| s.chat_input_active)
             .unwrap_or(false);
         if chat_input_active {
+            // Esc in chat-input exits chat-input mode (not cancel)
+            if key.modifiers == KeyModifiers::NONE && key.code == KeyCode::Esc {
+                self.set_ask_user_chat_input(false);
+                return Some(UpdateResult::none());
+            }
             return self.update_ask_user_chat_input_key(key);
+        }
+
+        // Esc in answering/confirming: cancel the interaction
+        if key.modifiers == KeyModifiers::NONE && key.code == KeyCode::Esc {
+            return self.cancel_ask_user_batch();
         }
 
         let phase = snapshot
@@ -128,9 +131,6 @@ impl App {
                 ));
                 return self.maybe_auto_confirm_ask_user();
             }
-            KeyCode::Esc => {
-                return self.cancel_ask_user_batch();
-            }
             _ => {}
         }
         Some(UpdateResult::none())
@@ -177,9 +177,6 @@ impl App {
                 } else {
                     return self.cancel_ask_user_batch();
                 }
-            }
-            KeyCode::Esc => {
-                return self.cancel_ask_user_batch();
             }
             _ => {}
         }
@@ -288,9 +285,6 @@ impl App {
                     ));
                     self.maybe_auto_confirm_ask_user();
                 }
-            }
-            KeyCode::Esc => {
-                self.set_ask_user_chat_input(false);
             }
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.apply_agent_intent(AgentIntent::Conversation(
