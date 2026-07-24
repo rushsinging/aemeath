@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 use sdk::{ChatRequest, ChatStream, SdkError};
 
 use super::accessors::AgentClientImpl;
-use crate::adapters::input_buffer::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort};
 
 pub(super) async fn chat_impl(
     me: &AgentClientImpl,
@@ -58,14 +57,15 @@ pub(super) async fn chat_impl(
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let sink = (me.inner.event_sink_factory)(tx);
+    let input_ports = (me.inner.input_port_factory)(queue_drain, input_events);
     let inner = me.inner.clone();
     let session_context = logging::capture();
     logging::spawn_instrumented(session_context, async move {
         crate::application::main_loop::process_chat_loop(
             crate::application::main_loop::ChatLoopContext {
                 sink,
-                queue: RuntimeQueueDrainPort::new(queue_drain),
-                input_events: RuntimeInputEventDrainPort::new(input_events),
+                queue: input_ports.queue,
+                input_events: input_ports.input_events,
                 binding: inner.context.resources.binding.clone(),
                 tool_catalog: inner.context.resources.tool_catalog.clone(),
                 tool_execution: inner.context.resources.tool_execution.clone(),

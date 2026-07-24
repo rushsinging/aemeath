@@ -81,7 +81,6 @@ LAYER_MIGRATION_EXCEPTIONS = set()
 RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/runtime/src/application/client/accessors.rs", "adapters"),
     ("agent/features/runtime/src/application/client/from_args.rs", "adapters"),
-    ("agent/features/runtime/src/application/client/trait_chat.rs", "adapters"),
     ("agent/features/runtime/src/ports/input_buffer.rs", "application"),
     ("agent/features/runtime/src/ports/legacy.rs", "application"),
     # #1381: Runtime-owned types (hook_types, workspace_access) moved back to application.
