@@ -48,7 +48,16 @@ pub trait ChatApiDriver: Send + Sync {
         level.as_str()
     }
 
-    /// 将 legacy effort 字符串投影到唯一 capability 声明允许的档位。
+    /// 对 ReasoningLevel 做 capability resolve + wire_effort 映射，一步到位。
+    ///
+    /// 等价于 `self.wire_effort(self.reasoning_capability().resolve(level))`，
+    /// 但避免 `clamp_effort` 所需的 `as_str() → parse()` 字符串往返。
+    fn resolve_effort(&self, level: ReasoningLevel) -> &'static str {
+        self.wire_effort(self.reasoning_capability().resolve(level))
+    }
+
+    /// 将测试中的 legacy effort 字符串投影到 capability 允许的 wire 档位。
+    #[cfg(test)]
     fn clamp_effort<'a>(&self, effort: &'a str) -> &'a str {
         ReasoningLevel::parse(effort)
             .map(|requested| self.wire_effort(self.reasoning_capability().resolve(requested)))

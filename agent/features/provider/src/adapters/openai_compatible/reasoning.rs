@@ -29,7 +29,7 @@ impl ReasoningConfig {
             return Self::Bool(false);
         }
 
-        let effort = driver.clamp_effort(level.as_str()).to_string();
+        let effort = driver.resolve_effort(level).to_string();
         match self {
             Self::Bool(_) => Self::Bool(true),
             Self::Object(value) => {
@@ -58,7 +58,7 @@ impl ReasoningConfig {
             Self::Bool(false)
         } else {
             Self::Object(serde_json::json!({
-                "effort": driver.clamp_effort(level.as_str())
+                "effort": driver.resolve_effort(level)
             }))
         }
     }

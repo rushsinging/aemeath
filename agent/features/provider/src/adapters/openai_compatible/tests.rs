@@ -29,6 +29,9 @@ mod provider_config;
 #[cfg(test)]
 #[path = "tests/reasoning.rs"]
 mod reasoning;
+#[cfg(test)]
+#[path = "tests/responses_reasoning.rs"]
+mod responses_reasoning;
 
 async fn spawn_openai_counting_server(raw_response: &'static str) -> (String, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
