@@ -300,20 +300,28 @@ impl App {
                     let slots: Vec<AskUserSlot> = questions
                         .iter()
                         .enumerate()
-                        .map(|(i, q)| AskUserSlot {
-                            // Derive id from request_id + index for stable identity
-                            id: format!("{}-{}", req.request_id.as_str(), i),
-                            question_seq: i,
-                            question: q.prompt.clone(),
-                            options: q
+                        .map(|(i, q)| {
+                            let llm_count = q.options.len();
+                            let mut options: Vec<sdk::OptionItem> = q
                                 .options
                                 .iter()
                                 .map(|o| sdk::OptionItem::title_only(o.clone()))
-                                .collect(),
-                            llm_option_count: q.options.len(),
-                            multi_select: q.allow_multi,
-                            default: None,
-                            answer: None,
+                                .collect();
+                            // 追加 "Type something..." 内建选项 —— cursor 超出
+                            // llm_option_count 时切换到自由输入子态
+                            options.push(sdk::OptionItem::title_only(
+                                "Type something… (自由输入)".to_string(),
+                            ));
+                            AskUserSlot {
+                                id: format!("{}-{}", req.request_id.as_str(), i),
+                                question_seq: i,
+                                question: q.prompt.clone(),
+                                options,
+                                llm_option_count: llm_count,
+                                multi_select: q.allow_multi,
+                                default: None,
+                                answer: None,
+                            }
                         })
                         .collect();
                     self.show_ask_user_batch(slots);

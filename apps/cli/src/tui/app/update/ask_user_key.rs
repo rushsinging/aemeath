@@ -89,46 +89,46 @@ impl App {
                     return Some(UpdateResult::none());
                 }
 
-                // 从当前 timeline AskUserBatch 的 slots 中获取选项
-                let answer = self
-                    .model
-                    .conversation
-                    .ask_user_snapshot()
-                    .and_then(|snap| {
-                        if multi_select {
-                            let chosen: Vec<String> = snap
-                                .selected
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, s)| **s)
-                                .filter_map(|(i, _)| {
-                                    // options come from AskUserSlot, we reconstruct from idx
-                                    // For now, collect selected as comma-separated indices
-                                    Some(format!("{i}"))
-                                })
-                                .collect();
-                            if chosen.is_empty() {
-                                Some(format!("{cursor}"))
-                            } else {
-                                Some(chosen.join(", "))
-                            }
-                        } else if options_count > 0 {
-                            Some(format!("{cursor}"))
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default();
+                // 从 timeline AskUserBatch 的 slots 获取选项全名后回填 answer
+                let answer = if multi_select {
+                    let chosen: Vec<String> = snap
+                        .selected
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, s)| **s)
+                        .filter_map(|(i, _)| {
+                            self.model
+                                .conversation
+                                .ask_user_batch_option_text(i)
+                        })
+                        .collect();
+                    if chosen.is_empty() {
+                        // 未勾选：回退到 cursor 指定的选项
+                        self.model
+                            .conversation
+                            .ask_user_batch_option_text(cursor)
+                            .unwrap_or_default()
+                    } else {
+                        chosen.join(", ")
+                    }
+                } else if options_count > 0 {
+                    self.model
+                        .conversation
+                        .ask_user_batch_option_text(cursor)
+                        .unwrap_or_default()
+                } else {
+                    return Some(UpdateResult::none());
+                };
 
                 self.apply_agent_intent(AgentIntent::Conversation(
                     ConversationIntent::AnswerCurrentAskUser(AnswerCurrentAskUser {
                         answer,
                     }),
                 ));
-                self.maybe_auto_confirm_ask_user();
+                return self.maybe_auto_confirm_ask_user();
             }
             KeyCode::Esc => {
-                self.cancel_ask_user_batch();
+                return self.cancel_ask_user_batch();
             }
             _ => {}
         }
@@ -172,23 +172,25 @@ impl App {
                         }),
                     ));
                 } else if confirm_cursor == n {
-                    self.confirm_ask_user_batch();
+                    return self.confirm_ask_user_batch();
                 } else {
-                    self.cancel_ask_user_batch();
+                    return self.cancel_ask_user_batch();
                 }
             }
             KeyCode::Esc => {
-                self.cancel_ask_user_batch();
+                return self.cancel_ask_user_batch();
             }
             _ => {}
         }
         Some(UpdateResult::none())
     }
 
-    fn maybe_auto_confirm_ask_user(&mut self) {
+    fn maybe_auto_confirm_ask_user(&mut self) -> Option<UpdateResult> {
         let has_active_batch = self.model.conversation.ask_user_snapshot().is_some();
         if !has_active_batch {
-            self.confirm_ask_user_batch();
+            self.confirm_ask_user_batch()
+        } else {
+            Some(UpdateResult::none())
         }
     }
 

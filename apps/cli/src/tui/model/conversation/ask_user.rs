@@ -58,12 +58,10 @@ impl ConversationModel {
         })
     }
 
-    /// 收集当前 AskUserBatch 块各 slot 的答案。
+    /// 收集当前 AskUserBatch 块各 slot 的答案（含已完成块）。
     pub fn ask_user_batch_answers(&self) -> Option<Vec<String>> {
         self.timeline.items().iter().find_map(|item| {
-            if let OutputTimelineItem::AskUserBatch {
-                slots, confirmed: false, ..
-            } = item
+            if let OutputTimelineItem::AskUserBatch { slots, .. } = item
             {
                 let answers: Vec<String> = slots
                     .iter()
@@ -74,6 +72,44 @@ impl ConversationModel {
                 } else {
                     None
                 }
+            } else {
+                None
+            }
+        })
+    }
+
+    /// 获取当前激活 slot 中指定索引的选项文本。
+    pub fn ask_user_batch_option_text(&self, index: usize) -> Option<String> {
+        self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::AskUserBatch {
+                slots,
+                active_index,
+                confirmed: false,
+                ..
+            } = item
+            {
+                slots
+                    .get(*active_index)
+                    .and_then(|slot| slot.options.get(index).map(|o| o.title.clone()))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// 获取当前激活 slot 的全部选项文本。
+    pub fn ask_user_batch_active_options(&self) -> Option<Vec<String>> {
+        self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::AskUserBatch {
+                slots,
+                active_index,
+                confirmed: false,
+                ..
+            } = item
+            {
+                slots.get(*active_index).map(|slot| {
+                    slot.options.iter().map(|o| o.title.clone()).collect()
+                })
             } else {
                 None
             }
