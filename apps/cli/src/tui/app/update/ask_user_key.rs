@@ -248,6 +248,11 @@ impl App {
             .conversation
             .active_interaction()
             .map(|i| i.request_id().clone());
+        log::info!(
+            target: crate::LOG_TARGET,
+            "[ask_user] cancel_ask_user_batch active_interaction={:?}",
+            interaction.as_ref().map(|id| id.as_str()),
+        );
         self.dismiss_ask_user_block();
         if let Some(request_id) = interaction {
             Some(UpdateResult {
