@@ -19,7 +19,6 @@ pub use tools::types::enter_worktree::EnterWorktreeInput;
 pub use tools::types::exit_worktree::ExitWorktreeInput;
 pub use tools::types::glob::GlobInput;
 pub use tools::types::grep::GrepInput;
-pub use tools::types::lsp::LspInput;
 pub use tools::types::plan_mode::{EnterPlanModeInput, ExitPlanModeInput};
 pub use tools::types::read::ReadInput;
 pub use tools::types::task_create::TaskCreateInput;

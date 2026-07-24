@@ -52,7 +52,6 @@ pub use write::{WriteInput, WriteResult};
 // Non-core tool result structs (Phase 0a 任务 0.4).
 pub mod brief;
 pub mod list_mcp_resources;
-pub mod lsp;
 pub mod mcp_manager;
 pub mod mcp_tool;
 pub mod memory;
@@ -71,7 +70,6 @@ pub mod web_search;
 // Re-exports for non-core tool result structs.
 pub use brief::{BriefInput, BriefResult};
 pub use list_mcp_resources::ListMcpResourcesResult;
-pub use lsp::{LspInput, LspResult};
 pub use mcp_manager::McpManagerResult;
 pub use mcp_tool::McpToolResult;
 pub use memory::{MemoryInput, MemoryResult};

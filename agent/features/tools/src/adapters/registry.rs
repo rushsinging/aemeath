@@ -1,7 +1,7 @@
 //! Built-in tool registration and named registry-scope assembly.
 
 use crate::adapters::{
-    agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep, lsp,
+    agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep,
     memory_tool, plan_mode, task_create, task_get, task_list, task_list_complete, task_list_create,
     task_stop, task_update, tool_search, web_fetch, web_search, worktree,
 };
@@ -116,12 +116,6 @@ pub(crate) fn register_named_scope(
         glob_tool::GlobTool
     );
     builtin!("Grep", Caps::ReadWorkspace, [true, true], grep::GrepTool);
-    builtin!(
-        "LSP",
-        Caps::ReadWorkspace | Caps::ExecuteProcess,
-        [true, true],
-        lsp::LspTool
-    );
     builtin!(
         "WebFetch",
         Caps::NetworkAccess,
@@ -306,7 +300,6 @@ mod tests {
         "Edit",
         "Glob",
         "Grep",
-        "LSP",
         "WebFetch",
         "WebSearch",
         "Agent",
@@ -333,7 +326,6 @@ mod tests {
         "Edit",
         "Glob",
         "Grep",
-        "LSP",
         "WebFetch",
         "WebSearch",
         "Memory",
@@ -356,15 +348,6 @@ mod tests {
     #[test]
     fn side_effect_capability_characterization_matches_builtin_behavior() {
         let main_scope = assembled_scope(BuiltinRegistryScope::Main);
-        let lsp = main_scope
-            .get(&crate::domain::published_language::ToolName::new("LSP"))
-            .unwrap();
-        assert_eq!(
-            lsp.required_capabilities(),
-            Caps::ReadWorkspace | Caps::ExecuteProcess,
-            "LSP invokes cargo/npx/python/go/grep and may write compiler caches"
-        );
-
         for name in ["TaskGet", "TaskList"] {
             let spec = main_scope
                 .get(&crate::domain::published_language::ToolName::new(name))
@@ -382,6 +365,16 @@ mod tests {
                 .get(&crate::domain::published_language::ToolName::new(name))
                 .unwrap();
             assert_eq!(spec.required_capabilities(), Caps::TaskMutation);
+        }
+    }
+
+    #[test]
+    fn retired_lsp_is_absent_from_all_builtin_scopes() {
+        for scope in [BuiltinRegistryScope::Main, BuiltinRegistryScope::SubAgent] {
+            assert!(
+                !names_for(scope).contains("lsp"),
+                "retired LSP tool leaked into {scope:?} scope"
+            );
         }
     }
 

@@ -117,28 +117,6 @@ async fn grep_outside_workspace_follows_authorization_context() {
 }
 
 #[tokio::test]
-async fn lsp_outside_workspace_follows_authorization_context() {
-    let workspace = tempfile::tempdir().unwrap();
-    let outside = tempfile::tempdir().unwrap();
-    let path = outside.path().join("valid.py");
-    tokio::fs::write(&path, "value = 1\n").await.unwrap();
-    let (standard, allow_all) = outside_contexts(&workspace);
-    let input = serde_json::json!({
-        "file_path": path,
-        "language": "python",
-        "operation": "diagnostics"
-    });
-
-    let denied = crate::adapters::lsp::LspTool
-        .call(input.clone(), &standard)
-        .await;
-    let allowed = crate::adapters::lsp::LspTool.call(input, &allow_all).await;
-
-    assert!(denied.is_error && denied.text.contains("工作区根"));
-    assert!(!allowed.is_error, "allow-all LSP failed: {}", allowed.text);
-}
-
-#[tokio::test]
 async fn file_read_outside_workspace_is_allowed_when_allow_all() {
     let workspace = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();

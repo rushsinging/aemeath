@@ -30,16 +30,6 @@ pub struct AskOption {
     pub preview: Option<String>,
 }
 
-/// A single LSP diagnostic entry returned by the `lsp` tool.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct Diagnostic {
-    pub file_path: PathBuf,
-    pub line: u64,
-    pub column: u64,
-    pub severity: String,
-    pub message: String,
-}
-
 /// A single web search hit returned by the `web_search` tool.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct SearchResult {

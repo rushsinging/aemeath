@@ -439,43 +439,6 @@ fn test_format_tool_call_task_list_create_empty_subject_no_question_mark() {
 }
 
 #[test]
-fn test_format_tool_call_lsp_both_empty_no_question_mark() {
-    let (header, _details) = format_tool_call("LSP", "{}", None, None);
-    let text = line_to_string(&header);
-    assert_eq!(text, "LSP");
-    assert!(!text.contains('?'));
-}
-
-#[test]
-fn test_format_tool_call_lsp_only_operation_no_path() {
-    let (header, _details) = format_tool_call("LSP", r#"{"operation":"hover"}"#, None, None);
-    let text = line_to_string(&header);
-    assert_eq!(text, "LSP::hover");
-    assert!(!text.contains('?'));
-}
-
-#[test]
-fn test_format_tool_call_lsp_only_path_no_operation() {
-    let (header, _details) = format_tool_call("LSP", r#"{"filePath":"/tmp/x.rs"}"#, None, None);
-    let text = line_to_string(&header);
-    assert_eq!(text, "LSP /tmp/x.rs");
-    assert!(!text.contains('?'));
-}
-
-#[test]
-fn test_format_tool_call_lsp_full_no_question_mark() {
-    let (header, _details) = format_tool_call(
-        "LSP",
-        r#"{"operation":"hover","filePath":"/tmp/x.rs"}"#,
-        None,
-        None,
-    );
-    let text = line_to_string(&header);
-    assert_eq!(text, "LSP::hover /tmp/x.rs");
-    assert!(!text.contains('?'));
-}
-
-#[test]
 fn test_format_tool_call_web_fetch_empty_url_no_question_mark() {
     let (header, _details) = format_tool_call("WebFetch", "{}", None, None);
     let text = line_to_string(&header);
@@ -911,21 +874,5 @@ fn test_task_get_snake_case_task_id_shows_id() {
     assert!(
         text.contains("7"),
         "TaskGet header 应包含 task_id '7'，实际: {text}"
-    );
-}
-
-#[test]
-fn test_lsp_snake_case_file_path_shows_path() {
-    // LSP Input 有 #[serde(alias = "filePath")]，snake_case file_path 也应生效。
-    let raw = serde_json::json!({
-        "operation": "diagnostics",
-        "file_path": "/repo/src/lib.rs"
-    })
-    .to_string();
-    let (header, _) = format_tool_call("LSP", &raw, None, None);
-    let text = line_to_string(&header);
-    assert!(
-        text.contains("lib.rs"),
-        "LSP header 应包含 file_path，实际: {text}"
     );
 }
