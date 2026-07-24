@@ -2,7 +2,7 @@ mod agent_calls;
 mod ask_user;
 pub(crate) mod config_reload;
 mod events;
-mod finalize;
+pub(crate) mod finalize;
 mod hook_ui;
 mod idle_commands;
 mod idle_lifecycle;

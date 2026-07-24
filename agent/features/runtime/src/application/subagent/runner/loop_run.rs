@@ -2,6 +2,7 @@ use super::finalize::{finalize_sub_agent, AgentRunOutcome, AgentRunStatus};
 use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use crate::application::context_coordination::ContextCoordinator;
+use crate::application::loop_engine::event_strategy::{EventStrategy, SubEventStrategy};
 use crate::application::loop_engine::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::application::loop_engine::{
     LoopEngineError, ModelStep, RunLoopPort, ToolGuardDecision, ToolStep,
@@ -345,33 +346,6 @@ impl<'a> SubAgentRun<'a> {
                 (call.id.clone(), (call.name.clone(), input_short))
             })
             .collect()
-    }
-}
-
-fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal> {
-    match event {
-        RunDomainEvent::Completed { result, .. } => Some(AgentRunTerminal::Completed {
-            result: result.clone(),
-        }),
-        RunDomainEvent::Failed { error, .. } => Some(AgentRunTerminal::Failed {
-            error: error.clone(),
-        }),
-        RunDomainEvent::Cancelled { .. } | RunDomainEvent::Terminated { .. } => {
-            Some(AgentRunTerminal::Cancelled)
-        }
-        RunDomainEvent::Transitioned { .. }
-        | RunDomainEvent::Started { .. }
-        | RunDomainEvent::StepStarted { .. }
-        | RunDomainEvent::StepCompleted { .. }
-        | RunDomainEvent::StepCancellationRequested { .. }
-        | RunDomainEvent::StepFinalizationStarted { .. }
-        | RunDomainEvent::StepCancelled { .. }
-        | RunDomainEvent::DrainingInput { .. }
-        | RunDomainEvent::TerminationRequested { .. }
-        | RunDomainEvent::CancellationRequested { .. }
-        | RunDomainEvent::AwaitingUser { .. }
-        | RunDomainEvent::Resumed { .. }
-        | RunDomainEvent::StuckDetected { .. } => None,
     }
 }
 
@@ -876,38 +850,20 @@ impl RunLoopPort for SubAgentRun<'_> {
         Ok(())
     }
 
-    fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
-        self.active_run.claim_terminal(run_id)
-    }
-
-    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
-        self.active_run.claim_cancellation(run_id)
-    }
-
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
-        for event in events {
-            if let Some(terminal) = terminal_from_domain_event(&event) {
-                match &terminal {
-                    AgentRunTerminal::Completed { .. } => {
-                        (self.progress)(Some(self.turn_count), "Agent completed");
-                    }
-                    AgentRunTerminal::Failed { error } => {
-                        (self.progress)(Some(self.turn_count), &format!("Agent error: {error}"));
-                    }
-                    AgentRunTerminal::Cancelled => {
-                        (self.progress)(Some(self.turn_count), "Agent cancelled by user");
-                    }
-                }
-                self.terminal = Some(terminal);
-            }
-        }
-        Ok(())
+        let mut strategy = SubEventStrategy {
+            progress: &*self.progress,
+            terminal: &mut self.terminal,
+            turn_count: self.turn_count,
+        };
+        strategy.emit(events).await
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{messages_for_llm, terminal_from_domain_event};
+    use super::messages_for_llm;
+    use crate::application::loop_engine::event_strategy::terminal_from_domain_event;
     use crate::domain::agent_run::{RunDomainEvent, RunId};
     use share::message::{ContentBlock, Message, Role};
 

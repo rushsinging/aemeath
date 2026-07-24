@@ -8,15 +8,14 @@ use share::message::{Message, MessageSource, Role};
 use tokio_util::sync::CancellationToken;
 
 use crate::application::context_coordination::ContextCoordinator;
+use crate::application::loop_engine::event_strategy::{EventStrategy, MainEventStrategy};
 use crate::application::loop_engine::input_strategy::{InputStrategy, MainInputStrategy};
 use crate::application::loop_engine::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::application::loop_engine::{
     DrainEpoch, DrainOutcome, LoopEngineError, LoopInput, ModelStep, RunLoopPort,
     ToolGuardDecision, ToolStep,
 };
-use crate::application::main_loop::looping::finalize::{
-    finish_completed_loop, run_stop_hook_before_finish,
-};
+use crate::application::main_loop::looping::finalize::run_stop_hook_before_finish;
 use crate::application::main_loop::looping::post_batch::run_post_tool_batch;
 use crate::application::main_loop::looping::reflection::{
     maybe_submit_pre_compact_reflection, should_run_turn_reflection, submit_interval_reflection,
@@ -29,7 +28,7 @@ use crate::application::main_loop::looping::tools::{execute_tool_round, tool_res
 use crate::application::main_loop::looping::{
     ChatEventSink, InputEventDrainPort, QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
-use crate::application::subagent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
+use crate::application::subagent::runner::{AgentRunOutcome, AgentRunStatus};
 use crate::application::subagent::{Agent, ToolCall};
 use crate::domain::agent_run::RunDomainEvent;
 use crate::ports::{
@@ -490,19 +489,6 @@ where
         }
     }
 
-    async fn project_done(&self, status: AgentRunStatus) {
-        let outcome = self.outcome(status);
-        log_agent_outcome(&outcome, self.session_id);
-        finish_completed_loop(&outcome, self.sink, &self.turn_context, &**self.task_access).await;
-    }
-
-    async fn rollback_cancelled(&mut self) {
-        self.sink
-            .send_event(RuntimeStreamEvent::Cancelled {
-                context: self.turn_context.clone(),
-            })
-            .await;
-    }
     async fn invoke_model_impl(
         &mut self,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
@@ -1192,80 +1178,17 @@ where
         self.active_run.take_control(run_id)
     }
 
-    fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
-        debug_assert_eq!(run_id, &self.run_id);
-        self.active_run.claim_terminal(run_id)
-    }
-
-    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
-        debug_assert_eq!(run_id, &self.run_id);
-        self.active_run.claim_cancellation(run_id)
-    }
-
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
-        for event in events {
-            match event {
-                RunDomainEvent::Completed { .. } => {
-                    self.project_done(AgentRunStatus::Completed).await;
-                }
-                RunDomainEvent::Failed { error, .. } => {
-                    self.sink
-                        .send_event(RuntimeStreamEvent::ApiError {
-                            messages: self.messages.clone(),
-                            error: error.clone(),
-                        })
-                        .await;
-                    self.project_done(AgentRunStatus::ApiError(error)).await;
-                }
-                RunDomainEvent::Cancelled { run_id, .. } => {
-                    self.rollback_cancelled().await;
-                    self.sink
-                        .send_event(RuntimeStreamEvent::RunCancelled { run_id })
-                        .await;
-                }
-                RunDomainEvent::Terminated { run_id, .. } => {
-                    self.rollback_cancelled().await;
-                    self.sink
-                        .send_event(RuntimeStreamEvent::RunCancelled { run_id })
-                        .await;
-                }
-                RunDomainEvent::CancellationRequested { run_id, .. } => {
-                    self.sink
-                        .send_event(RuntimeStreamEvent::RunCancelling { run_id })
-                        .await;
-                }
-                RunDomainEvent::Started {
-                    run_id,
-                    parent_run_id,
-                } => {
-                    self.sink
-                        .send_event(RuntimeStreamEvent::RunStarted {
-                            run_id,
-                            parent_run_id,
-                        })
-                        .await;
-                }
-                RunDomainEvent::StuckDetected { reason, .. } => {
-                    self.sink
-                        .send_event(RuntimeStreamEvent::SystemMessage(format!(
-                            "[StuckGuard: {reason}]"
-                        )))
-                        .await;
-                }
-                RunDomainEvent::Transitioned { .. }
-                | RunDomainEvent::AwaitingUser { .. }
-                | RunDomainEvent::Resumed { .. }
-                | RunDomainEvent::StepStarted { .. }
-                | RunDomainEvent::StepCompleted { .. }
-                | RunDomainEvent::StepCancellationRequested { .. }
-                | RunDomainEvent::StepFinalizationStarted { .. }
-                | RunDomainEvent::StepCancelled { .. }
-                | RunDomainEvent::DrainingInput { .. }
-                | RunDomainEvent::TerminationRequested { .. } => {
-                    self.sink.send_domain_event(event).await;
-                }
-            }
-        }
-        Ok(())
+        let mut strategy = MainEventStrategy {
+            sink: self.sink,
+            session_id: self.session_id,
+            turn_context: &self.turn_context,
+            task_access: self.task_access,
+            model: &self.binding.model.model,
+            started_at: self.started_at,
+            turn_count: self.turn_count,
+            messages_snapshot: self.messages.clone(),
+        };
+        strategy.emit(events).await
     }
 }

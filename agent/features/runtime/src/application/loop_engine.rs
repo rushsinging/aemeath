@@ -1,4 +1,5 @@
 mod engine;
+pub(crate) mod event_strategy;
 mod input;
 pub(crate) mod input_strategy;
 pub(crate) mod llm_log;
