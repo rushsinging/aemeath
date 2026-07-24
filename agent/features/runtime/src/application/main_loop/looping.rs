@@ -12,7 +12,6 @@ mod input_gate_reset_withdraw_tests;
 #[cfg(test)]
 mod input_gate_tests;
 mod input_log;
-mod llm_log;
 mod loop_context;
 mod loop_phases;
 mod loop_runner;

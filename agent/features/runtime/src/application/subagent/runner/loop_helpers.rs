@@ -2,8 +2,8 @@ use share::string_idx::slice_head;
 
 use share::message::Message;
 
-use super::logging::build_json_logger_tool_result_data;
 use super::loop_run::SubAgentRun;
+use crate::application::loop_engine::llm_log::log_tool_result;
 
 impl<'a> SubAgentRun<'a> {
     pub(super) fn progress_tools_done(&self, turn_number: usize, result_count: usize) {
@@ -53,16 +53,12 @@ impl<'a> SubAgentRun<'a> {
         call_info: &std::collections::HashMap<sdk::ids::ToolCallId, (String, String)>,
     ) {
         for ex in results.iter() {
-            let data = build_json_logger_tool_result_data(
+            log_tool_result(
                 &ex.call_id,
                 &ex.outcome.text,
                 ex.outcome.is_error,
                 call_info,
-            );
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "tool_result: {}",
-                serde_json::to_string(&data).unwrap_or_default()
+                &self.role_name_for_log,
             );
         }
     }

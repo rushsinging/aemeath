@@ -1,10 +1,7 @@
-use super::logging::{
-    build_json_logger_input_data, build_json_logger_tool_call_data,
-    build_json_logger_tool_result_data,
-};
 use super::progress::build_tool_calls_progress_event;
 use super::test_config_reader::FixedConfigReader;
 use super::*;
+use crate::application::loop_engine::llm_log::{build_tool_call_log, build_tool_result_log};
 use ::logging as scoped_logging;
 use async_trait::async_trait;
 use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
@@ -454,22 +451,7 @@ fn test_format_grouped_tool_summaries_keeps_existing_display_format() {
 }
 
 #[test]
-fn test_build_json_logger_input_data_includes_latest_message_and_schema_names() {
-    let messages = vec![Message::user("first"), Message::user("latest")];
-    let schemas = vec![serde_json::json!({"name": "Read"})];
-
-    let data = build_json_logger_input_data(&messages, 2, &schemas);
-
-    assert_eq!(data["system_blocks_count"], 2);
-    assert_eq!(data["tool_schemas_count"], 1);
-    assert_eq!(data["tool_schemas_names"], serde_json::json!(["Read"]));
-    assert_eq!(data["messages"].as_array().unwrap().len(), 1);
-    assert_eq!(data["messages"][0]["role"], "user");
-    assert_eq!(data["messages"][0]["block_count"], 1);
-}
-
-#[test]
-fn test_build_json_logger_tool_call_data_contains_full_input() {
+fn test_build_tool_call_log_contains_full_input() {
     let call_id = sdk::ids::ToolCallId::new_v7();
     let call = test_tool_call_with_id(
         call_id.clone(),
@@ -477,21 +459,25 @@ fn test_build_json_logger_tool_call_data_contains_full_input() {
         serde_json::json!({"command": "cargo check"}),
     );
 
-    let data = build_json_logger_tool_call_data(&call);
+    let data = build_tool_call_log(&call, "subagent:test");
 
+    assert_eq!(data["event_type"], "tool_call");
+    assert_eq!(data["role"], "subagent:test");
     assert_eq!(data["tool_use_id"], call_id.to_string());
     assert_eq!(data["tool_name"], "Bash");
     assert_eq!(data["input"]["command"], "cargo check");
 }
 
 #[test]
-fn test_build_json_logger_tool_result_data_contains_full_output() {
+fn test_build_tool_result_log_contains_full_output() {
     let tool_id = sdk::ids::ToolCallId::new_v7();
     let mut call_info = std::collections::HashMap::new();
     call_info.insert(tool_id.clone(), ("Read".to_string(), "file.rs".to_string()));
 
-    let data = build_json_logger_tool_result_data(&tool_id, "完整输出", false, &call_info);
+    let data = build_tool_result_log(&tool_id, "完整输出", false, &call_info, "subagent:test");
 
+    assert_eq!(data["event_type"], "tool_result");
+    assert_eq!(data["role"], "subagent:test");
     assert_eq!(data["tool_use_id"], tool_id.to_string());
     assert_eq!(data["tool_name"], "Read");
     assert_eq!(data["is_error"], false);

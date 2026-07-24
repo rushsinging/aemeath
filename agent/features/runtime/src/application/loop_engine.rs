@@ -1,5 +1,6 @@
 mod engine;
 mod input;
+pub(crate) mod llm_log;
 pub(crate) mod shared;
 mod stuck_guard;
 

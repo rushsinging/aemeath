@@ -8,15 +8,13 @@ use share::message::{Message, MessageSource, Role};
 use tokio_util::sync::CancellationToken;
 
 use crate::application::context_coordination::ContextCoordinator;
+use crate::application::loop_engine::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::application::loop_engine::{
     DrainEpoch, DrainOutcome, InternalContinuationKind, LoopEngineError, LoopInput, ModelStep,
     RunLoopPort, ToolGuardDecision, ToolStep,
 };
 use crate::application::main_loop::looping::finalize::{
     finish_completed_loop, run_stop_hook_before_finish,
-};
-use crate::application::main_loop::looping::llm_log::{
-    log_llm_input, log_llm_output_and_tool_calls,
 };
 use crate::application::main_loop::looping::post_batch::run_post_tool_batch;
 use crate::application::main_loop::looping::reflection::{
@@ -598,6 +596,7 @@ where
             window.messages.len(),
             &effective_system_blocks,
             &tool_schemas,
+            "main",
         );
         let requested_reasoning = self.reasoning.current_requested_level();
 
@@ -760,6 +759,7 @@ where
             &resp,
             &calls,
             api_elapsed,
+            "main",
         );
         if !calls.is_empty() {
             return Ok((

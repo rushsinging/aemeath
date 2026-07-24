@@ -1,10 +1,8 @@
 use super::finalize::{finalize_sub_agent, AgentRunOutcome, AgentRunStatus};
-use super::logging::{
-    build_json_logger_input_data, build_json_logger_output_data, build_json_logger_tool_call_data,
-};
 use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use crate::application::context_coordination::ContextCoordinator;
+use crate::application::loop_engine::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::application::loop_engine::{
     LoopEngineError, ModelStep, RunLoopPort, ToolGuardDecision, ToolStep,
 };
@@ -283,38 +281,14 @@ impl<'a> SubAgentRun<'a> {
         );
     }
 
-    fn log_input(&self) {
-        let system_blocks_count = self
-            .context_window
-            .as_ref()
-            .map_or(0, |window| window.system_blocks.len());
-        let tool_schemas = self
-            .context_window
-            .as_ref()
-            .map_or(&[][..], |window| window.tool_schemas.as_slice());
-        let raw_tool_schemas = tool_schemas
-            .iter()
-            .map(|schema| {
-                serde_json::json!({
-                    "name": schema.name,
-                    "description": schema.description,
-                    "input_schema": schema.input_schema,
-                })
-            })
-            .collect::<Vec<_>>();
-        let mut data =
-            build_json_logger_input_data(&self.messages, system_blocks_count, &raw_tool_schemas);
-        if let serde_json::Value::Object(ref mut map) = data {
-            map.insert(
-                "event_type".to_string(),
-                serde_json::Value::String("llm_input".to_string()),
-            );
-            map.insert(
-                "role".to_string(),
-                serde_json::Value::String(self.role_name_for_log.clone()),
-            );
-        }
-        log::debug!(target: crate::LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
+    fn log_input(&self, system_blocks: &[RequestSystemBlock], tool_schemas: &[serde_json::Value]) {
+        log_llm_input(
+            &self.messages,
+            self.committed_message_count,
+            system_blocks,
+            tool_schemas,
+            &self.role_name_for_log,
+        );
     }
 
     fn progress_api_ok(&self, turn_number: usize, resp: &InvocationResponse) {
@@ -330,22 +304,13 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn log_output(&self, resp: &InvocationResponse) {
-        let mut data = build_json_logger_output_data(
-            resp,
-            self.start_time.elapsed().as_secs_f64(),
+        log_llm_output_and_tool_calls(
             &self.binding.model.provider,
+            resp,
+            &[],
+            self.start_time.elapsed().as_secs_f64(),
+            &self.role_name_for_log,
         );
-        if let serde_json::Value::Object(ref mut map) = data {
-            map.insert(
-                "event_type".to_string(),
-                serde_json::Value::String("llm_output".to_string()),
-            );
-            map.insert(
-                "role".to_string(),
-                serde_json::Value::String(self.role_name_for_log.clone()),
-            );
-        }
-        log::debug!(target: crate::LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
     }
 
     fn send_text_progress(&self, turn: usize, resp: &InvocationResponse) {
@@ -367,14 +332,10 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn log_tool_calls(&self, tool_calls: &[crate::application::subagent::ToolCall]) {
-        for tool_call in tool_calls {
-            let data = build_json_logger_tool_call_data(tool_call);
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "tool_call: {}",
-                serde_json::to_string(&data).unwrap_or_default()
-            );
-        }
+        crate::application::loop_engine::llm_log::log_tool_calls(
+            tool_calls,
+            &self.role_name_for_log,
+        );
     }
 
     fn build_call_info(
@@ -586,7 +547,6 @@ impl RunLoopPort for SubAgentRun<'_> {
             async move {
                 self.progress_turn_start(turn_number);
                 (self.log_request_messages)(turn_number, &self.messages);
-                self.log_input();
 
                 let window = if let Some(window) = self.context_window.clone() {
                     Some(window)
@@ -628,6 +588,17 @@ impl RunLoopPort for SubAgentRun<'_> {
                     .as_ref()
                     .map(|window| window.tool_schemas.clone())
                     .unwrap_or_default();
+                let raw_tool_schemas = effective_tools
+                    .iter()
+                    .map(|schema| {
+                        serde_json::json!({
+                            "name": schema.name,
+                            "description": schema.description,
+                            "input_schema": schema.input_schema,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                self.log_input(&effective_blocks, &raw_tool_schemas);
                 self.context_window = window;
                 let mut coordinator =
                     crate::application::model_invocation::ModelInvocationCoordinator::new();
