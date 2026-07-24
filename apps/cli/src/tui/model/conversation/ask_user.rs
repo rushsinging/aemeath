@@ -44,6 +44,78 @@ pub struct AskUserSnapshot {
 }
 
 impl ConversationModel {
+    /// 获取当前 AskUserBatch 块的 slot 数（无块时返回 None）。
+    pub fn ask_user_slot_count(&self) -> Option<usize> {
+        self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::AskUserBatch {
+                slots, confirmed: false, ..
+            } = item
+            {
+                Some(slots.len())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// 收集当前 AskUserBatch 块各 slot 的答案（含已完成块）。
+    pub fn ask_user_batch_answers(&self) -> Option<Vec<String>> {
+        self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::AskUserBatch { slots, .. } = item
+            {
+                let answers: Vec<String> = slots
+                    .iter()
+                    .filter_map(|s| s.answer.clone())
+                    .collect();
+                if answers.len() == slots.len() {
+                    Some(answers)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+    }
+
+    /// 获取当前激活 slot 中指定索引的选项文本。
+    pub fn ask_user_batch_option_text(&self, index: usize) -> Option<String> {
+        self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::AskUserBatch {
+                slots,
+                active_index,
+                confirmed: false,
+                ..
+            } = item
+            {
+                slots
+                    .get(*active_index)
+                    .and_then(|slot| slot.options.get(index).map(|o| o.title.clone()))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// 获取当前激活 slot 的全部选项文本。
+    pub fn ask_user_batch_active_options(&self) -> Option<Vec<String>> {
+        self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::AskUserBatch {
+                slots,
+                active_index,
+                confirmed: false,
+                ..
+            } = item
+            {
+                slots.get(*active_index).map(|slot| {
+                    slot.options.iter().map(|o| o.title.clone()).collect()
+                })
+            } else {
+                None
+            }
+        })
+    }
+
     /// 读取当前 AskUserBatch 块的交互状态快照（无块时返回 None）。
     pub fn ask_user_snapshot(&self) -> Option<AskUserSnapshot> {
         self.timeline.items().iter().find_map(|item| {

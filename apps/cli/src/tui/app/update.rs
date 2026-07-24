@@ -1,3 +1,4 @@
+mod ask_user_key;
 mod done;
 mod enter;
 mod key;
@@ -13,9 +14,10 @@ pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
 use crate::tui::adapter::agent_event::{map_agent_event_with_tool_header, map_runtime_event};
-use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
+use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRuntimeEvent};
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
+use crate::tui::model::conversation::block::AskUserSlot;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
@@ -274,6 +276,64 @@ impl App {
             }
             TuiRuntimeEvent::SessionReset => {
                 return UpdateResult::one(Effect::ResetRuntimeState);
+            }
+            TuiRuntimeEvent::SessionResumed {
+                messages,
+                session_id,
+                created_at,
+            } => {
+                self.resume_session_messages(session_id, messages.clone(), created_at.to_string());
+                return UpdateResult {
+                    effects: Vec::new(),
+                    spawn_effect: None,
+                    pending_slash: None,
+                };
+            }
+            TuiRuntimeEvent::InteractionRequested(ref req) => {
+                // InteractionRequested 走 Runtime 路径，但 spinner_stop / mark_output_dirty
+                // 是 App 级副作用，map_runtime_event 只返回 conversation intent。
+                // 必须在此处理，否则 spinner 不停。
+                self.spinner_stop();
+                self.mark_output_dirty();
+                // 桥接到已有的 ask_user_batch inline block 渲染
+                if let TuiInteractionBody::UserQuestions(questions) = &req.body {
+                    let slots: Vec<AskUserSlot> = questions
+                        .iter()
+                        .enumerate()
+                        .map(|(i, q)| {
+                            let llm_count = q.options.len();
+                            let mut options: Vec<sdk::OptionItem> = q
+                                .options
+                                .iter()
+                                .map(|o| sdk::OptionItem::title_only(o.clone()))
+                                .collect();
+                            // 追加 "Type something..." 内建选项 —— cursor 超出
+                            // llm_option_count 时切换到自由输入子态
+                            options.push(sdk::OptionItem::title_only(
+                                "Type something… (自由输入)".to_string(),
+                            ));
+                            AskUserSlot {
+                                id: format!("{}-{}", req.request_id.as_str(), i),
+                                question_seq: i,
+                                question: q.prompt.clone(),
+                                options,
+                                llm_option_count: llm_count,
+                                multi_select: q.allow_multi,
+                                default: None,
+                                answer: None,
+                            }
+                        })
+                        .collect();
+                    self.show_ask_user_batch(slots);
+                }
+            }
+            TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {
+                // Done/Cancelled 走 Runtime 路径，但 stop_processing 是 App 级副作用。
+                // 不调则 is_processing 永远为 true，而 run_cancel_state 已被
+                // processing.rs 设为 Idle，导致 Ctrl+C 返回 NotFound（"没反应"）。
+                self.spinner_stop();
+                self.chat.stop_processing();
+                self.mark_output_dirty();
             }
             _ => {}
         }

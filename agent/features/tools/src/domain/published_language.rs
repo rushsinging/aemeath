@@ -298,12 +298,27 @@ impl ToolDescriptor {
 /// 工具调用请求。
 ///
 /// 不携带 RuntimeContext、Registry、Session、Store 或 MCP 类型。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ToolInvocation {
     pub tool_name: ToolName,
     pub input: serde_json::Value,
     pub execution_scope: ExecutionScope,
     pub authorization: crate::domain::AuthorizationContext,
+    /// Optional progress sink override. When set, ExecutionAdapter injects
+    /// it into the resolved ToolExecutionContext so the tool (e.g. Agent)
+    /// can emit progress events to the caller's channel.
+    pub progress: Option<std::sync::Arc<dyn crate::domain::ProgressSink>>,
+}
+
+impl std::fmt::Debug for ToolInvocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolInvocation")
+            .field("tool_name", &self.tool_name)
+            .field("execution_scope", &self.execution_scope)
+            .field("authorization", &self.authorization)
+            .field("progress", &self.progress.as_ref().map(|_| "<set>"))
+            .finish()
+    }
 }
 
 impl ToolInvocation {
@@ -317,6 +332,7 @@ impl ToolInvocation {
             input,
             execution_scope,
             authorization: crate::domain::AuthorizationContext::STANDARD,
+            progress: None,
         }
     }
 
@@ -325,6 +341,17 @@ impl ToolInvocation {
         authorization: crate::domain::AuthorizationContext,
     ) -> Self {
         self.authorization = authorization;
+        self
+    }
+
+    /// Override the progress sink for this invocation. When set, the
+    /// execution adapter injects it into the resolved context, allowing
+    /// tools like Agent to emit progress events to the caller's channel.
+    pub fn with_progress(
+        mut self,
+        progress: Option<std::sync::Arc<dyn crate::domain::ProgressSink>>,
+    ) -> Self {
+        self.progress = progress;
         self
     }
 }

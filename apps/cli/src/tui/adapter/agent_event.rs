@@ -216,14 +216,25 @@ where
                 }))
             }
             sdk::AgentProgressKindView::ToolOutput { .. } => AgentEventMapping::default(),
-            _ => conversation(ConversationIntent::RecordAgentProgress(
-                RecordAgentProgress {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    tool_id: ToolCallId::new(tool_id.as_str()),
-                    message: format_agent_progress(event, &mut format_subagent_tool_header),
-                },
-            )),
+            _ => {
+                let message = format_agent_progress(event, &mut format_subagent_tool_header);
+                let preview: String = message.chars().take(200).collect();
+                crate::tui::log_debug!(
+                    "agent_progress_format kind={} seq={} msg_len={} msg={:?}",
+                    format!("{:?}", event.kind).split('{').next().unwrap_or("?"),
+                    event.sequence,
+                    message.len(),
+                    preview,
+                );
+                conversation(ConversationIntent::RecordAgentProgress(
+                    RecordAgentProgress {
+                        chat_id: context.chat_id.clone(),
+                        turn_id: context.turn_id.clone(),
+                        tool_id: ToolCallId::new(tool_id.as_str()),
+                        message,
+                    },
+                ))
+            }
         },
         UiEvent::Done { context }
         | UiEvent::DoneWithDuration { context, .. }
@@ -791,6 +802,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     })
                 }
             };
+            log::info!(
+                target: crate::LOG_TARGET,
+                "[interaction] map_runtime_event → ShowInteraction request_id={:?} run_id={:?}",
+                request.request_id, request.run_id,
+            );
             conversation(ConversationIntent::ShowInteraction(ShowInteraction {
                 request: InteractionRequest {
                     request_id: request.request_id.clone(),
@@ -822,10 +838,35 @@ fn format_agent_progress_calls(
 ) -> String {
     let text = calls
         .iter()
-        .map(|call| format!("→ {}", call.name))
+        .map(|call| {
+            let name = crate::tui::view_model::tool_name::tool_display_name(&call.name);
+            let raw = match &call.input {
+                serde_json::Value::String(s) => s.clone(),
+                value => value.to_string(),
+            };
+            let preview = truncate_json(&raw);
+            if preview.is_empty() {
+                format!("→ {name}")
+            } else {
+                format!("→ {name} {preview}")
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n");
     format_agent_progress_text(&text)
+}
+
+/// Truncate a JSON string to at most 120 chars for preview. Modeled after
+/// the same logic in `render::output::tool_display::format`  to avoid a
+/// render → adapter dependency.
+fn truncate_json(raw: &str) -> &str {
+    let raw = raw.trim();
+    let mut indices = raw.char_indices().take(121);
+    if let Some((idx, _)) = indices.last() {
+        raw.get(..idx).unwrap_or(raw)
+    } else {
+        raw
+    }
 }
 
 fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {

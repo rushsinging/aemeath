@@ -132,7 +132,16 @@ impl ExecutionAdapter {
             None => return unavailable(&invocation),
         };
         let context = match self.contexts.resolve(&invocation.execution_scope) {
-            Some(context) => context.with_authorization(invocation.authorization),
+            Some(context) => {
+                let context = context.with_authorization(invocation.authorization);
+                // #1384: inject caller-provided progress sink so tools
+                // like Agent can emit progress events to the caller.
+                if let Some(ref progress) = invocation.progress {
+                    context.with_progress(Some(progress.clone()))
+                } else {
+                    context
+                }
+            }
             None => {
                 return ToolExecutionOutcome::failure(
                     ToolErrorKind::ResourceUnavailable,

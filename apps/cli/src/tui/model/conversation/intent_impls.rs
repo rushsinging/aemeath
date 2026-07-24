@@ -138,6 +138,20 @@ impl ConversationUpdate for ResumeConversation {
                                         is_error: result.is_error,
                                         image_count: tool_result_image_count(result.content),
                                     }));
+                                } else {
+                                    // #1384: ToolUse without a matching ToolResult means
+                                    // the tool was cancelled (e.g. agent call interrupted).
+                                    // Mark as Cancelled so it doesn't stay in Ready/Running.
+                                    all_changes.extend(model.apply(ToolCallUpdate {
+                                        chat_id: chat_id.clone(),
+                                        turn_id: turn_id.clone(),
+                                        id: tool_call_id.clone(),
+                                        provider_id: Some(id.clone()),
+                                        name: name.clone(),
+                                        index: block_index,
+                                        arguments: None,
+                                        status: ToolCallStatus::Cancelled,
+                                    }));
                                 }
                             }
                         }

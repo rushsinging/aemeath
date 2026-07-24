@@ -248,15 +248,22 @@ where
     );
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-    *ag_ctx = ag_ctx.with_progress(Some(crate::application::tool_execution_adapters::progress(
-        prog_tx,
-    )));
+    let progress_sink: std::sync::Arc<dyn tools::ProgressSink> =
+        crate::application::tool_execution_adapters::progress(prog_tx);
+    *ag_ctx = ag_ctx.with_progress(Some(progress_sink.clone()));
     let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
     let progress_context = context.clone();
     let progress_log_context = logging::capture();
     let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
         while let Some(event) = prog_rx.recv().await {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[agent_progress_forward] tool_id={} kind={} seq={}",
+                call_id.as_str(),
+                format!("{:?}", event.kind).split('{').next().unwrap_or("?"),
+                event.sequence,
+            );
             let _ = ui_sink
                 .send_event(RuntimeStreamEvent::AgentProgress {
                     context: progress_context.clone(),
@@ -275,7 +282,8 @@ where
                 effective_call.input.clone(),
                 ag_ctx.scope().clone(),
             )
-            .with_authorization(effective_authorization),
+            .with_authorization(effective_authorization)
+            .with_progress(Some(progress_sink.clone())),
             cancellation.as_ref(),
         )
         .await;
