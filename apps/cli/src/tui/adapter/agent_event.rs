@@ -861,10 +861,11 @@ fn format_agent_progress_calls(
 /// render → adapter dependency.
 fn truncate_json(raw: &str) -> &str {
     let raw = raw.trim();
-    if raw.len() <= 120 {
-        raw
+    let mut indices = raw.char_indices().take(121);
+    if let Some((idx, _)) = indices.last() {
+        raw.get(..idx).unwrap_or(raw)
     } else {
-        &raw[..120]
+        raw
     }
 }
 
