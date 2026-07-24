@@ -760,6 +760,154 @@ where
             token_usage,
         ))
     }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_tools_impl(
+        &mut self,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+        calls: &[(ToolCall, ToolGuardDecision)],
+        cancel: &CancellationToken,
+    ) -> Result<ToolStep, LoopEngineError> {
+        if calls.is_empty() {
+            return Ok(ToolStep::Continue);
+        }
+        // #1272 test hook: when TEST_AWAIT_USER_MODE is set and any call is
+        // AskUserQuestion, return AwaitUser so the session actor exercises
+        // its same-Run recovery loop.  The normal inline ask_user path is
+        // bypassed — the test driver injects user input through the
+        // channel instead.
+        #[cfg(test)]
+        if TEST_AWAIT_USER_MODE.load(std::sync::atomic::Ordering::Relaxed)
+            && calls.iter().any(|(call, _)| call.name == "AskUserQuestion")
+        {
+            return Ok(ToolStep::AwaitUser);
+        }
+        let raw_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+        let agent = Self::make_agent(
+            self.tool_catalog,
+            self.tool_execution,
+            self.agent_runner,
+            self.memory,
+            self.language,
+            self.run_config.config().user_agent(),
+            self.workspace,
+            &self.cancel,
+            self.read_files,
+            self.session_reminders,
+            self.max_tool_concurrency,
+            self.agent_semaphore,
+            self.session_id,
+            &self.run_id,
+        );
+        let _binding = tools::ToolExecutionContextBindingGuard::bind(
+            (*self.tool_context_binding).clone(),
+            agent.ctx.clone(),
+        )
+        .map_err(LoopEngineError::Adapter)?;
+        let (all_results, fuse_bypassed) = execute_tool_round(
+            &self.turn_context,
+            &raw_calls,
+            self.tool_catalog,
+            self.tool_execution,
+            self.policy,
+            run_id,
+            step_id,
+            &agent,
+            self.sink,
+            self.hook_runner,
+            cancel,
+            self.language,
+            &self.current_cwd(),
+            calls,
+            self.interaction_bridge,
+        )
+        .await;
+        let cancelled = cancel.is_cancelled();
+
+        let all_results = if cancelled {
+            crate::application::tool_coordination::complete_cancelled_tool_round(
+                &raw_calls,
+                all_results,
+            )
+        } else {
+            all_results
+        };
+
+        let metadata: HashMap<&str, (Option<&str>, Option<&str>)> = raw_calls
+            .iter()
+            .map(|call| {
+                let command = (call.name == "Bash")
+                    .then(|| call.input.get("command").and_then(|value| value.as_str()))
+                    .flatten();
+                let phase = call.input.get("phase").and_then(|value| value.as_str());
+                (call.provider_id.as_str(), (command, phase))
+            })
+            .collect();
+        for result in &all_results {
+            let (command, phase) = metadata
+                .get(result.provider_id.as_str())
+                .copied()
+                .unwrap_or((None, None));
+            let observation = self.reasoning.observe(ReasoningSignal::ToolCompleted {
+                tool_name: result.tool_name.clone(),
+                bash_command: command.map(str::to_string),
+                is_error: result.outcome.is_error,
+                declared_phase: phase.map(str::to_string),
+            });
+            if observation.changed() {
+                self.sink
+                    .send_event(RuntimeStreamEvent::GraphPhaseChanged {
+                        node: observation.current,
+                        effort: observation.requested,
+                        prev: observation.previous,
+                    })
+                    .await;
+            }
+        }
+        let has_task_mutation = all_results.iter().any(|result| {
+            crate::application::main_loop::looping::events::is_task_store_mutation(
+                &result.tool_name,
+            )
+        });
+        let tool_results =
+            tool_results_for_api(self.tool_result_materializer, all_results, self.session_id).await;
+        self.messages.push(tool_results.clone());
+        self.step_messages.record(tool_results);
+        self.sink
+            .send_event(RuntimeStreamEvent::PostToolExecutionSync {
+                messages: self.messages.clone(),
+            })
+            .await;
+        if has_task_mutation {
+            let snapshot =
+                crate::application::main_loop::looping::task_snapshot::build_task_snapshot(
+                    &**self.task_access,
+                );
+            self.sink
+                .send_event(RuntimeStreamEvent::TasksSnapshot {
+                    tasks: Box::new(snapshot),
+                })
+                .await;
+        }
+        if cancelled {
+            return Err(LoopEngineError::Cancelled);
+        }
+        run_post_tool_batch(
+            self.sink,
+            self.hook_runner,
+            &agent.runtime_cancellation,
+            raw_calls.len(),
+            self.turn_count,
+            &self.current_cwd(),
+        )
+        .await;
+        // #1272: tool results are an explicit InternalContinuation, not a
+        // fresh batch of user input. Mark the port so the next drain will
+        // emit `InternalContinuation::ToolResults` instead of an empty Ready.
+        self.mark_tool_results_pending();
+        Ok(tool_strategy::step_from_fuse_bypass(fuse_bypassed))
+    }
 }
 
 // ── ToolStrategy impl ─────────────────────────────────────────────────
@@ -1014,144 +1162,8 @@ where
         calls: &[(ToolCall, ToolGuardDecision)],
         cancel: &CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
-        if calls.is_empty() {
-            return Ok(ToolStep::Continue);
-        }
-        // #1272 test hook: when TEST_AWAIT_USER_MODE is set and any call is
-        // AskUserQuestion, return AwaitUser so the session actor exercises
-        // its same-Run recovery loop.  The normal inline ask_user path is
-        // bypassed — the test driver injects user input through the
-        // channel instead.
-        #[cfg(test)]
-        if TEST_AWAIT_USER_MODE.load(std::sync::atomic::Ordering::Relaxed)
-            && calls.iter().any(|(call, _)| call.name == "AskUserQuestion")
-        {
-            return Ok(ToolStep::AwaitUser);
-        }
-        let raw_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
-        let agent = Self::make_agent(
-            self.tool_catalog,
-            self.tool_execution,
-            self.agent_runner,
-            self.memory,
-            self.language,
-            self.run_config.config().user_agent(),
-            self.workspace,
-            &self.cancel,
-            self.read_files,
-            self.session_reminders,
-            self.max_tool_concurrency,
-            self.agent_semaphore,
-            self.session_id,
-            &self.run_id,
-        );
-        let _binding = tools::ToolExecutionContextBindingGuard::bind(
-            (*self.tool_context_binding).clone(),
-            agent.ctx.clone(),
-        )
-        .map_err(LoopEngineError::Adapter)?;
-        let (all_results, fuse_bypassed) = execute_tool_round(
-            &self.turn_context,
-            &raw_calls,
-            self.tool_catalog,
-            self.tool_execution,
-            self.policy,
-            run_id,
-            step_id,
-            &agent,
-            self.sink,
-            self.hook_runner,
-            cancel,
-            self.language,
-            &self.current_cwd(),
-            calls,
-            self.interaction_bridge,
-        )
-        .await;
-        let cancelled = cancel.is_cancelled();
-
-        let all_results = if cancelled {
-            crate::application::tool_coordination::complete_cancelled_tool_round(
-                &raw_calls,
-                all_results,
-            )
-        } else {
-            all_results
-        };
-
-        let metadata: HashMap<&str, (Option<&str>, Option<&str>)> = raw_calls
-            .iter()
-            .map(|call| {
-                let command = (call.name == "Bash")
-                    .then(|| call.input.get("command").and_then(|value| value.as_str()))
-                    .flatten();
-                let phase = call.input.get("phase").and_then(|value| value.as_str());
-                (call.provider_id.as_str(), (command, phase))
-            })
-            .collect();
-        for result in &all_results {
-            let (command, phase) = metadata
-                .get(result.provider_id.as_str())
-                .copied()
-                .unwrap_or((None, None));
-            let observation = self.reasoning.observe(ReasoningSignal::ToolCompleted {
-                tool_name: result.tool_name.clone(),
-                bash_command: command.map(str::to_string),
-                is_error: result.outcome.is_error,
-                declared_phase: phase.map(str::to_string),
-            });
-            if observation.changed() {
-                self.sink
-                    .send_event(RuntimeStreamEvent::GraphPhaseChanged {
-                        node: observation.current,
-                        effort: observation.requested,
-                        prev: observation.previous,
-                    })
-                    .await;
-            }
-        }
-        let has_task_mutation = all_results.iter().any(|result| {
-            crate::application::main_loop::looping::events::is_task_store_mutation(
-                &result.tool_name,
-            )
-        });
-        let tool_results =
-            tool_results_for_api(self.tool_result_materializer, all_results, self.session_id).await;
-        self.messages.push(tool_results.clone());
-        self.step_messages.record(tool_results);
-        self.sink
-            .send_event(RuntimeStreamEvent::PostToolExecutionSync {
-                messages: self.messages.clone(),
-            })
-            .await;
-        if has_task_mutation {
-            let snapshot =
-                crate::application::main_loop::looping::task_snapshot::build_task_snapshot(
-                    &**self.task_access,
-                );
-            self.sink
-                .send_event(RuntimeStreamEvent::TasksSnapshot {
-                    tasks: Box::new(snapshot),
-                })
-                .await;
-        }
-        if cancelled {
-            return Err(LoopEngineError::Cancelled);
-        }
-        run_post_tool_batch(
-            self.sink,
-            self.hook_runner,
-            &agent.runtime_cancellation,
-            raw_calls.len(),
-            self.turn_count,
-            &self.current_cwd(),
-        )
-        .await;
-        // #1272: tool results are an explicit InternalContinuation, not a
-        // fresh batch of user input. Mark the port so the next drain will
-        // emit `InternalContinuation::ToolResults` instead of an empty Ready.
-        self.mark_tool_results_pending();
-        Ok(tool_strategy::step_from_fuse_bypass(fuse_bypassed))
+        self.execute_tools_impl(run_id, step_id, calls, cancel)
+            .await
     }
 
     async fn on_stuck(

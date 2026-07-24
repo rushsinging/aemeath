@@ -349,6 +349,296 @@ impl<'a> SubAgentRun<'a> {
             })
             .collect()
     }
+
+    async fn invoke_model_impl(
+        &mut self,
+    ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
+        self.turn_count += 1;
+        let turn_number = self.turn_count;
+        logging::within(
+            logging::LogContextPatch {
+                turn: logging::FieldPatch::Set(turn_number),
+                request_id: logging::FieldPatch::Clear,
+                ..logging::LogContextPatch::default()
+            },
+            async move {
+                self.progress_turn_start(turn_number);
+                (self.log_request_messages)(turn_number, &self.messages);
+
+                let window = if let Some(window) = self.context_window.clone() {
+                    Some(window)
+                } else if let Some(request) = &self.context_request {
+                    Some(
+                        self.context
+                            .build_window(request)
+                            .await
+                            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?,
+                    )
+                } else {
+                    None
+                };
+                let messages_for_api = window
+                    .as_ref()
+                    .map(|window| messages_for_llm(&window.messages))
+                    .unwrap_or_else(|| messages_for_llm(&self.messages));
+                let (effective_blocks, raw_tool_schemas) = match &window {
+                    Some(w) => {
+                        let ctx = crate::application::loop_engine::llm_strategy::extract_invocation_context(w);
+                        let tools = ctx.tool_schemas;
+                        (ctx.system_blocks, tools)
+                    }
+                    None => (Vec::new(), Vec::new()),
+                };
+                let effective_tools = window
+                    .as_ref()
+                    .map(|window| window.tool_schemas.clone())
+                    .unwrap_or_default();
+                self.log_input(&effective_blocks, &raw_tool_schemas);
+                self.context_window = window;
+                let mut coordinator =
+                    crate::application::model_invocation::ModelInvocationCoordinator::new();
+                let resp = loop {
+                    let request_context = sub_request_log_context(
+                        &logging::capture(),
+                        &self.model_name_for_log,
+                        &self.binding.model.provider,
+                        &self.role_name_for_log,
+                    );
+                    let response = logging::instrument(request_context, async {
+                            let mut reducer =
+                                crate::application::main_loop::looping::InvocationEventReducer::new(
+                                    SubAgentEventSink,
+                                );
+                            let provider = self.binding.provider.clone();
+                            let model = self.binding.model.clone();
+                            let max_tokens = self.max_tokens;
+                            let level = {
+                                use crate::application::loop_engine::llm_strategy::LlmStrategy;
+                                self.reasoning_level()
+                            };
+                            let committed_delta = {
+                                use crate::application::loop_engine::llm_strategy::LlmStrategy;
+                                self.committed_delta()
+                            };
+                            let system = effective_blocks.clone();
+                            let messages = messages_for_api.clone();
+                            let tools = effective_tools.clone();
+                            let cancellation = self.runtime_cancellation.clone();
+                            let invocation_fut = async {
+                                let mut request = InvocationRequest::new(
+                                    model,
+                                    messages,
+                                    InvocationOptions::new(max_tokens, level),
+                                );
+                                request.system = system;
+                                request.tools = tools;
+                                request.cancellation = cancellation.clone();
+                                match provider.invoke(request, &cancellation).await {
+                                    Ok(stream) => {
+                                        coordinator
+                                            .pull_stream(stream, &cancellation, committed_delta, |event| {
+                                            reducer.apply(event)
+                                        })
+                                        .await
+                                }
+                                Err(error) => Err((error, false)),
+                            }
+                        };
+                        invocation_fut.await
+                    })
+                    .await;
+
+                    match response {
+                        Ok((resp, _)) => break resp,
+                        Err((error, _))
+                            if error.is_cancelled()
+                                || self.agent.ctx.cancellation().is_cancelled() =>
+                        {
+                            self.runtime_cancellation.cancel();
+                            return Err(LoopEngineError::Cancelled);
+                        }
+                        Err((error, visible_delta)) => {
+                                let step = coordinator
+                                    .handle_failure(&error, visible_delta, &self.runtime_cancellation)
+                                    .await;
+                                crate::application::loop_engine::llm_strategy::map_retry_outcome(
+                                    step,
+                                    &error.to_string(),
+                                    self,
+                                )
+                                .await?;
+                            }
+                    }
+                };
+
+                self.last_total_tokens = Some(
+                    crate::application::token_usage::normalized_total_tokens(&resp.usage),
+                );
+                self.progress_api_ok(turn_number, &resp);
+
+                let est = self
+                    .context_window
+                    .as_ref()
+                    .map(|window| &window.token_estimation);
+                let usage = crate::application::loop_engine::llm_strategy::build_step_token_usage(
+                    &resp,
+                    self.ctx_context_size as u64,
+                    est.map_or(0, |e| e.system_tokens),
+                    est.map_or(0, |e| e.tool_schema_tokens),
+                    est.map_or(0, |e| e.message_tokens),
+                );
+
+                self.messages.push(resp.assistant_message.clone());
+                self.log_output(&resp);
+                self.send_text_progress(turn_number, &resp);
+
+                let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
+                if resp.stop_reason == StopReason::MaxOutputTokens {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "turn {}: 模型响应触发 max_tokens 限制，注入分块提示",
+                        turn_number,
+                    );
+                    self.messages.push(Message::user(
+                        "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
+                   请基于已有内容继续，或用更紧凑的方式重新组织响应：\
+                   大文件改用 Edit 分块写入（每次 < 12k 字符），\
+                   长命令用 Bash heredoc 分段执行。\
+                   不要重复已输出的内容，直接从截断点继续。"
+                            .to_string(),
+                    ));
+                    if tool_calls.is_empty() {
+                        self.last_total_tokens = None;
+                        return Ok((
+                            ModelStep::Tools {
+                                text: resp.assistant_message.text_content(),
+                                calls: Vec::new(),
+                            },
+                            usage,
+                        ));
+                    }
+                }
+
+                if should_complete_after_model_response(tool_calls.is_empty()) {
+                    let text = resp.assistant_message.text_content();
+                    if text.trim().is_empty() {
+                        let block_types: Vec<&str> = resp
+                            .assistant_message
+                            .content
+                            .iter()
+                            .map(|b| match b {
+                                share::message::ContentBlock::Text { .. } => "text",
+                                share::message::ContentBlock::Image { .. } => "image",
+                                share::message::ContentBlock::ToolUse { .. } => "tool_use",
+                                share::message::ContentBlock::ToolResult { .. } => "tool_result",
+                                share::message::ContentBlock::Thinking { .. } => "thinking",
+                            })
+                            .collect();
+                        log::warn!(
+                            target: crate::LOG_TARGET,
+                            "{}",
+                            serde_json::json!({
+                                "event_type": "subagent_empty_complete_text",
+                                "block_count": resp.assistant_message.content.len(),
+                                "block_types": block_types,
+                                "has_thinking": resp.assistant_message.content.iter().any(|b| matches!(b, share::message::ContentBlock::Thinking { .. })),
+                                "text_len": text.len(),
+                                "stop_reason": format!("{:?}", resp.stop_reason),
+                                "role": self.role_name_for_log,
+                            })
+                        );
+                    }
+                    return Ok((ModelStep::Complete { text }, usage));
+                }
+
+                Ok((
+                    ModelStep::Tools {
+                        text: resp.assistant_message.text_content(),
+                        calls: tool_calls,
+                    },
+                    usage,
+                ))
+            },
+        )
+        .await
+    }
+
+    async fn execute_tools_impl(
+        &mut self,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+        calls: &[(crate::application::subagent::ToolCall, ToolGuardDecision)],
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<ToolStep, LoopEngineError> {
+        let turn_number = self.turn_count;
+        logging::within(
+            logging::LogContextPatch {
+                turn: logging::FieldPatch::Set(turn_number),
+                request_id: logging::FieldPatch::Clear,
+                ..logging::LogContextPatch::default()
+            },
+            async move {
+                if calls.is_empty() {
+                    return Ok(ToolStep::Continue);
+                }
+                let prepared = crate::application::tool_coordination::prepare_tool_round(
+                    calls,
+                    &self.agent.catalog,
+                    self.policy.as_ref(),
+                    run_id,
+                    step_id,
+                    &self.agent.ctx.workspace_read().current_workspace_root(),
+                );
+                let allowed_calls = prepared
+                    .executable
+                    .iter()
+                    .map(|prepared| prepared.call.clone())
+                    .collect::<Vec<_>>();
+                let fuse_bypassed = prepared.fuse_bypassed;
+                let executable = prepared.executable;
+                let mut results = prepared.guard_blocked;
+                results.extend(
+                    prepared
+                        .denied
+                        .into_iter()
+                        .map(crate::application::tool_coordination::denied_tool_execution),
+                );
+                let all_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+                self.log_tool_calls(&all_calls);
+                let call_info = self.build_call_info(&all_calls);
+                if let Some(ref sink) = self.progress_sink {
+                    sink.emit(build_tool_calls_progress_event(turn_number, &allowed_calls));
+                }
+
+                let cancellation = self.agent.ctx.cancellation();
+                let mut executed = tokio::select! {
+                    _ = cancellation.cancelled() => {
+                        return Err(LoopEngineError::Cancelled);
+                    }
+                    executed = self.agent.execute_prepared_tools(&executable) => executed,
+                };
+                results.append(&mut executed);
+                let results = crate::application::tool_coordination::restore_tool_call_order(
+                    &all_calls, results,
+                );
+                self.progress_tools_done(turn_number, results.len());
+                self.log_result_summaries(turn_number, &results, &call_info);
+                self.log_tool_results(turn_number, &results, &call_info);
+                append_tool_results(
+                    self.tool_result_materializer.as_ref(),
+                    &mut self.messages,
+                    results,
+                    &self.session_id,
+                )
+                .await;
+                // #1384: Mark that tool results are pending so drain_input
+                // returns InternalContinuation instead of EmptyAndSealed.
+                self.mark_tool_results_pending();
+                Ok(tool_strategy::step_from_fuse_bypass(fuse_bypassed))
+            },
+        )
+        .await
+    }
 }
 
 fn should_complete_after_model_response(has_no_tool_calls: bool) -> bool {
@@ -479,222 +769,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         &mut self,
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
-        self.turn_count += 1;
-        let turn_number = self.turn_count;
-        logging::within(
-            logging::LogContextPatch {
-                turn: logging::FieldPatch::Set(turn_number),
-                request_id: logging::FieldPatch::Clear,
-                ..logging::LogContextPatch::default()
-            },
-            async move {
-                self.progress_turn_start(turn_number);
-                (self.log_request_messages)(turn_number, &self.messages);
-
-                let window = if let Some(window) = self.context_window.clone() {
-                    Some(window)
-                } else if let Some(request) = &self.context_request {
-                    Some(
-                        self.context
-                            .build_window(request)
-                            .await
-                            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?,
-                    )
-                } else {
-                    None
-                };
-                let messages_for_api = window
-                    .as_ref()
-                    .map(|window| messages_for_llm(&window.messages))
-                    .unwrap_or_else(|| messages_for_llm(&self.messages));
-                let (effective_blocks, raw_tool_schemas) = match &window {
-                    Some(w) => {
-                        let ctx = crate::application::loop_engine::llm_strategy::extract_invocation_context(w);
-                        let tools = ctx.tool_schemas;
-                        // Use `window.tool_schemas` (ModelToolSchema) for the
-                        // InvocationRequest, not the JSON form. The JSON form is
-                        // only for logging.
-                        (ctx.system_blocks, tools)
-                    }
-                    None => (Vec::new(), Vec::new()),
-                };
-                let effective_tools = window
-                    .as_ref()
-                    .map(|window| window.tool_schemas.clone())
-                    .unwrap_or_default();
-                self.log_input(&effective_blocks, &raw_tool_schemas);
-                self.context_window = window;
-                let mut coordinator =
-                    crate::application::model_invocation::ModelInvocationCoordinator::new();
-                let resp = loop {
-                    // A retry is a fresh provider request and therefore gets a fresh request id.
-                    let request_context = sub_request_log_context(
-                        &logging::capture(),
-                        &self.model_name_for_log,
-                        &self.binding.model.provider,
-                        &self.role_name_for_log,
-                    );
-                    let response = logging::instrument(request_context, async {
-                            let mut reducer =
-                                crate::application::main_loop::looping::InvocationEventReducer::new(
-                                    SubAgentEventSink,
-                                );
-                            let provider = self.binding.provider.clone();
-                            let model = self.binding.model.clone();
-                            let max_tokens = self.max_tokens;
-                            let level = {
-                                use crate::application::loop_engine::llm_strategy::LlmStrategy;
-                                self.reasoning_level()
-                            };
-                            let committed_delta = {
-                                use crate::application::loop_engine::llm_strategy::LlmStrategy;
-                                self.committed_delta()
-                            };
-                            let system = effective_blocks.clone();
-                            let messages = messages_for_api.clone();
-                            let tools = effective_tools.clone();
-                            let cancellation = self.runtime_cancellation.clone();
-                            let invocation_fut = async {
-                                let mut request = InvocationRequest::new(
-                                    model,
-                                    messages,
-                                    InvocationOptions::new(max_tokens, level),
-                                );
-                                request.system = system;
-                                request.tools = tools;
-                                request.cancellation = cancellation.clone();
-                                match provider.invoke(request, &cancellation).await {
-                                    Ok(stream) => {
-                                        coordinator
-                                            .pull_stream(stream, &cancellation, committed_delta, |event| {
-                                            reducer.apply(event)
-                                        })
-                                        .await
-                                }
-                                Err(error) => Err((error, false)),
-                            }
-                        };
-                        invocation_fut.await
-                    })
-                    .await;
-
-                    match response {
-                        Ok((resp, _)) => break resp,
-                        Err((error, _))
-                            if error.is_cancelled()
-                                || self.agent.ctx.cancellation().is_cancelled() =>
-                        {
-                            self.runtime_cancellation.cancel();
-                            return Err(LoopEngineError::Cancelled);
-                        }
-                        Err((error, visible_delta)) => {
-                                let step = coordinator
-                                    .handle_failure(&error, visible_delta, &self.runtime_cancellation)
-                                    .await;
-                                crate::application::loop_engine::llm_strategy::map_retry_outcome(
-                                    step,
-                                    &error.to_string(),
-                                    self,
-                                )
-                                .await?;
-                            }
-                    }
-                };
-
-                self.last_total_tokens = Some(
-                    crate::application::token_usage::normalized_total_tokens(&resp.usage),
-                );
-                self.progress_api_ok(turn_number, &resp);
-
-                let est = self
-                    .context_window
-                    .as_ref()
-                    .map(|window| &window.token_estimation);
-                let usage = crate::application::loop_engine::llm_strategy::build_step_token_usage(
-                    &resp,
-                    self.ctx_context_size as u64,
-                    est.map_or(0, |e| e.system_tokens),
-                    est.map_or(0, |e| e.tool_schema_tokens),
-                    est.map_or(0, |e| e.message_tokens),
-                );
-
-                self.messages.push(resp.assistant_message.clone());
-                self.log_output(&resp);
-                self.send_text_progress(turn_number, &resp);
-
-                let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
-                if resp.stop_reason == StopReason::MaxOutputTokens {
-                    log::warn!(
-                        target: crate::LOG_TARGET,
-                        "turn {}: 模型响应触发 max_tokens 限制，注入分块提示",
-                        turn_number,
-                    );
-                    self.messages.push(Message::user(
-                        "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
-                 请基于已有内容继续，或用更紧凑的方式重新组织响应：\
-                 大文件改用 Edit 分块写入（每次 < 12k 字符），\
-                 长命令用 Bash heredoc 分段执行。\
-                 不要重复已输出的内容，直接从截断点继续。"
-                            .to_string(),
-                    ));
-                    if tool_calls.is_empty() {
-                        // Preserve the old retry path: a text-only truncation did not
-                        // trigger compaction before asking the model to continue.
-                        self.last_total_tokens = None;
-                        // An empty tool phase advances the shared state machine while
-                        // retaining the old behavior of retrying a truncated response.
-                        return Ok((
-                            ModelStep::Tools {
-                                text: resp.assistant_message.text_content(),
-                                calls: Vec::new(),
-                            },
-                            usage,
-                        ));
-                    }
-                }
-
-                if should_complete_after_model_response(tool_calls.is_empty()) {
-                    let text = resp.assistant_message.text_content();
-                    if text.trim().is_empty() {
-                        let block_types: Vec<&str> = resp
-                            .assistant_message
-                            .content
-                            .iter()
-                            .map(|b| match b {
-                                share::message::ContentBlock::Text { .. } => "text",
-                                share::message::ContentBlock::Image { .. } => "image",
-                                share::message::ContentBlock::ToolUse { .. } => "tool_use",
-                                share::message::ContentBlock::ToolResult { .. } => "tool_result",
-                                share::message::ContentBlock::Thinking { .. } => "thinking",
-                            })
-                            .collect();
-                        log::warn!(
-                            target: crate::LOG_TARGET,
-                            "{}",
-                            serde_json::json!({
-                                "event_type": "subagent_empty_complete_text",
-                                "block_count": resp.assistant_message.content.len(),
-                                "block_types": block_types,
-                                "has_thinking": resp.assistant_message.content.iter().any(|b| matches!(b, share::message::ContentBlock::Thinking { .. })),
-                                "text_len": text.len(),
-                                "stop_reason": format!("{:?}", resp.stop_reason),
-                                "role": self.role_name_for_log,
-                            })
-                        );
-                    }
-                    return Ok((ModelStep::Complete { text }, usage));
-                }
-
-                Ok((
-                    ModelStep::Tools {
-                        text: resp.assistant_message.text_content(),
-                        calls: tool_calls,
-                    },
-                    usage,
-                ))
-            },
-        )
-        .await
+        self.invoke_model_impl().await
     }
 
     async fn finalize_step(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
@@ -753,74 +828,8 @@ impl RunLoopPort for SubAgentRun<'_> {
         calls: &[(crate::application::subagent::ToolCall, ToolGuardDecision)],
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
-        let turn_number = self.turn_count;
-        logging::within(
-            logging::LogContextPatch {
-                turn: logging::FieldPatch::Set(turn_number),
-                request_id: logging::FieldPatch::Clear,
-                ..logging::LogContextPatch::default()
-            },
-            async move {
-                if calls.is_empty() {
-                    return Ok(ToolStep::Continue);
-                }
-                let prepared = crate::application::tool_coordination::prepare_tool_round(
-                    calls,
-                    &self.agent.catalog,
-                    self.policy.as_ref(),
-                    run_id,
-                    step_id,
-                    &self.agent.ctx.workspace_read().current_workspace_root(),
-                );
-                let allowed_calls = prepared
-                    .executable
-                    .iter()
-                    .map(|prepared| prepared.call.clone())
-                    .collect::<Vec<_>>();
-                let fuse_bypassed = prepared.fuse_bypassed;
-                let executable = prepared.executable;
-                let mut results = prepared.guard_blocked;
-                results.extend(
-                    prepared
-                        .denied
-                        .into_iter()
-                        .map(crate::application::tool_coordination::denied_tool_execution),
-                );
-                let all_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
-                self.log_tool_calls(&all_calls);
-                let call_info = self.build_call_info(&all_calls);
-                if let Some(ref sink) = self.progress_sink {
-                    sink.emit(build_tool_calls_progress_event(turn_number, &allowed_calls));
-                }
-
-                let cancellation = self.agent.ctx.cancellation();
-                let mut executed = tokio::select! {
-                    _ = cancellation.cancelled() => {
-                        return Err(LoopEngineError::Cancelled);
-                    }
-                    executed = self.agent.execute_prepared_tools(&executable) => executed,
-                };
-                results.append(&mut executed);
-                let results = crate::application::tool_coordination::restore_tool_call_order(
-                    &all_calls, results,
-                );
-                self.progress_tools_done(turn_number, results.len());
-                self.log_result_summaries(turn_number, &results, &call_info);
-                self.log_tool_results(turn_number, &results, &call_info);
-                append_tool_results(
-                    self.tool_result_materializer.as_ref(),
-                    &mut self.messages,
-                    results,
-                    &self.session_id,
-                )
-                .await;
-                // #1384: Mark that tool results are pending so drain_input
-                // returns InternalContinuation instead of EmptyAndSealed.
-                self.mark_tool_results_pending();
-                Ok(tool_strategy::step_from_fuse_bypass(fuse_bypassed))
-            },
-        )
-        .await
+        self.execute_tools_impl(run_id, step_id, calls, _cancel)
+            .await
     }
 
     async fn on_stuck(
