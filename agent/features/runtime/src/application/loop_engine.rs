@@ -1,5 +1,6 @@
 mod engine;
 mod input;
+pub(crate) mod shared;
 mod stuck_guard;
 
 pub(crate) use engine::fail_run;

@@ -534,20 +534,12 @@ impl RunLoopPort for SubAgentRun<'_> {
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-        let request = self
-            .context_request
-            .as_ref()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
-        let window = self
-            .context
-            .build_window(request)
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        let needed = self
-            .context
-            .needs_compaction(request)
-            .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        let (needed, window) =
+            crate::application::loop_engine::shared::needs_compaction_with_window(
+                self.context_request.as_ref(),
+                &self.context,
+            )
+            .await?;
         self.context_window = Some(window);
         Ok(needed)
     }
