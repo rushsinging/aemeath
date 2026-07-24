@@ -840,6 +840,14 @@ impl RunLoopPort for SubAgentRun<'_> {
         Ok(())
     }
 
+    fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
+        self.active_run.claim_terminal(run_id)
+    }
+
+    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
+        self.active_run.claim_cancellation(run_id)
+    }
+
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
         let mut strategy = SubEventStrategy {
             progress: &*self.progress,
