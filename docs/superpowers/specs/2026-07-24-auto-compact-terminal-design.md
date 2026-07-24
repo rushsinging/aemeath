@@ -1,6 +1,6 @@
 # Auto-compact Skipped 与 Run Terminal 收口设计
 
-> 对应 Issue：[#1387](https://github.com/rushsinging/aemeath/issues/1387)  
+> 对应 Issue：[#1387](https://github.com/rushsinging/aemeath/issues/1387)
 > Milestone：`v0.1.0 — Context Engineering + 架构重构`
 
 ## 1. 问题
@@ -75,4 +75,3 @@ MainRunPort 与 SubAgentRunner 的 `compact` 实现遵循 Context Published Lang
 - 不修改 compact 阈值与 Session schema。
 - 不新增 TUI timeout/watchdog。
 - 不处理与 #1387 无关的 Runtime 重构。
-
