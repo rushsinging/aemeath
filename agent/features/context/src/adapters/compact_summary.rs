@@ -33,9 +33,6 @@ fn placeholder_tool_results(messages: &mut [Message]) {
     }
 }
 
-// 向后兼容的 re-export
-pub use crate::domain::compact::needs_compaction;
-
 /// Compact 进度回调 trait。
 ///
 /// `compact_messages_with_llm` 在各阶段（Preparing/Summarizing/Finalizing）
@@ -163,17 +160,10 @@ const COMPACT_CHUNK_TARGET_TOKENS: usize = 30_000;
 
 /// 使用本地文本提取压缩消息（LLM 不可用时的回退方案）。
 ///
-/// 返回 `Some(CompactResult)` 表示发生了压缩（summary + recent tail）；
-/// `None` 表示无需压缩。summary 不再注入 messages，走 system 通道。
-pub fn compact_messages(
-    messages: &[Message],
-    system_prompt: &str,
-    context_size: usize,
-) -> Option<CompactResult> {
-    if !needs_compaction(messages, system_prompt, context_size) {
-        return None;
-    }
-
+/// 调用方已经根据归一化的 Provider usage 或无 usage 时的完整估算完成决策；
+/// 本函数只执行压缩。返回 `None` 仅表示消息太少，无法形成有效压缩窗口。
+/// summary 不再注入 messages，走 system 通道。
+pub fn compact_messages(messages: &[Message]) -> Option<CompactResult> {
     let total = messages.len();
     let window = compact_window(total)?;
     if total <= 4 {

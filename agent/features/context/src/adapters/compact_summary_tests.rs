@@ -1,6 +1,20 @@
 use super::*;
 
 #[test]
+fn compact_execution_does_not_repeat_threshold_decision() {
+    let messages = (0..10)
+        .map(|index| Message::user(format!("message-{index}")))
+        .collect::<Vec<_>>();
+
+    let result = compact_messages(&messages);
+
+    assert!(
+        result.is_some(),
+        "上层以归一化 API token 决定 compact 后，执行管线不得再用纯估算否决"
+    );
+}
+
+#[test]
 fn test_compact_window_boundaries() {
     assert_eq!(compact_window(4), None);
     assert_eq!(compact_window(5), None);

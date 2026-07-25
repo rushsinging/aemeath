@@ -9,7 +9,8 @@ use context::domain::session::{
 use context::domain::{
     AcceptedInputAppend, AcceptedInputError, CompactRequest, CompactTrigger, ContentFingerprint,
     ContextAppend, ContextAppendError, ContextRequest, ContextRequestId, FinalizeCause, Language,
-    RunStepId, SessionId, SessionRevision, SystemPromptSpec, TaskReminderSnapshot,
+    ManualCompactRequest, RunStepId, SessionId, SessionRevision, SystemPromptSpec,
+    TaskReminderSnapshot,
 };
 use context::ports::SessionRepository;
 use project::{PreparedWorkspaceRestore, WorkspacePersist, WorkspaceRestoreError};
@@ -409,6 +410,54 @@ async fn failed_durable_write_does_not_publish_candidate() {
         Err(ContextAppendError::Storage(message)) if message == "disk full"
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
+}
+
+#[tokio::test]
+async fn automatic_compaction_executes_after_actual_token_decision() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("actual-token-session");
+    let (repository, _) = repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
+    let mut request = compact_request(session_id);
+    request.context_size = 1_000_000;
+    request.max_output_tokens = 8_192;
+    request.last_api_input_tokens = Some(900_000);
+
+    let outcome = repository
+        .commit_compaction(&CompactRequest {
+            run_id: request.run_id.clone(),
+            source_revision: SessionRevision::new(0),
+            source: request,
+            trigger: CompactTrigger::Automatic,
+        })
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        outcome,
+        context::domain::CompactOutcome::Committed(_)
+    ));
+}
+
+#[tokio::test]
+async fn manual_compaction_bypasses_automatic_threshold() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("manual-compact-session");
+    let (repository, _) = repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
+
+    let outcome = repository
+        .commit_manual_compaction(&ManualCompactRequest {
+            session_id,
+            run_id: RunId::new("manual-run"),
+            system_prompt: SystemPromptSpec::new("system"),
+            context_size: 1_000_000,
+        })
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        outcome,
+        context::domain::CompactOutcome::Committed(_)
+    ));
 }
 
 #[tokio::test]

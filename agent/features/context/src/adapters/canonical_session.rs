@@ -332,11 +332,7 @@ impl SessionRepository for CanonicalSessionRepository {
             .iter()
             .flat_map(|(_, messages)| messages.iter().cloned())
             .collect();
-        let Some(compacted) = crate::adapters::compact_summary::compact_messages(
-            &messages,
-            request.source.system_prompt.as_str(),
-            request.source.context_size,
-        ) else {
+        let Some(compacted) = crate::adapters::compact_summary::compact_messages(&messages) else {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         };
         let mut candidate = (*current).clone();
@@ -403,12 +399,7 @@ impl SessionRepository for CanonicalSessionRepository {
         if messages.len() <= 4 {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         }
-        let context_size = request.context_size.max(1);
-        let Some(compacted) = crate::adapters::compact_summary::compact_messages(
-            &messages,
-            request.system_prompt.as_str(),
-            context_size,
-        ) else {
+        let Some(compacted) = crate::adapters::compact_summary::compact_messages(&messages) else {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         };
         let mut candidate = (*current).clone();
