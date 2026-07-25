@@ -204,9 +204,18 @@ pub(crate) async fn advance_until_retry_condition(
         if condition() {
             return;
         }
-        tokio::time::advance(tick).await;
+        // Let the task under test register its retry timer before advancing
+        // virtual time.  Advancing first can move the clock past the
+        // invocation that creates the timer, making the timer's deadline
+        // relative to a later instant and causing a false timeout under
+        // heavily instrumented test runs.
         tokio::task::yield_now().await;
+        if condition() {
+            return;
+        }
+        tokio::time::advance(tick).await;
     }
+    tokio::task::yield_now().await;
     assert!(condition(), "timed out waiting for {description}");
 }
 
