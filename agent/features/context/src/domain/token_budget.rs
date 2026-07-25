@@ -236,31 +236,27 @@ pub fn estimate_message_tokens(message: &Message) -> usize {
 }
 
 // ---- Autocompact threshold constants ----
-// Following Claude Code TS's formula:
-// effective_window = context_window - reserved_output
-// threshold = effective_window - buffer
+// effective = context_size - reserved_context(2%) - max_output
+// threshold = effective * 0.8
 
-/// Reserved tokens for compaction summary output (p99.99 ≈ 17.4K, use 20K).
-/// Summary 输出预算：context window 的 2%。
+/// Reserved context for guidance and compaction summary.
+/// 预留上下文预算：context window 的 2%。
 pub fn summary_budget(context_size: usize) -> usize {
     context_size / 50
 }
 
-/// Safety buffer below the effective window before triggering compaction.
-const AUTOCOMPACT_BUFFER_TOKENS: usize = 13_000;
-
-/// Calculate the effective context window size (after reserving output tokens).
+/// Calculate the effective context window size (after reserving output tokens
+/// and summary budget).
 pub fn effective_context_window(context_size: usize, max_output_tokens: usize) -> usize {
-    let reserved = max_output_tokens.min(summary_budget(context_size));
+    let reserved = summary_budget(context_size) + max_output_tokens;
     context_size.saturating_sub(reserved)
 }
 
 /// Calculate the autocompact trigger threshold.
-/// Formula: (context_size - summary_budget - 13K) * 0.8
+/// Formula: effective_context_window * 0.8
 pub fn autocompact_threshold(context_size: usize, max_output_tokens: usize) -> usize {
-    let raw = effective_context_window(context_size, max_output_tokens)
-        .saturating_sub(AUTOCOMPACT_BUFFER_TOKENS);
-    ((raw as f64) * 0.8) as usize
+    let effective = effective_context_window(context_size, max_output_tokens);
+    ((effective as f64) * 0.8) as usize
 }
 
 /// Estimate the token overhead of tool schemas.
@@ -274,7 +270,8 @@ pub fn estimate_tool_schemas_tokens(tool_schemas: &[serde_json::Value]) -> usize
 }
 
 /// Check if messages need compaction given a context size limit (in tokens).
-/// Uses the TS-style threshold formula that reserves output + buffer tokens.
+/// Uses the unified threshold formula that independently reserves guidance/
+/// summary context and provider output tokens.
 /// Includes a fixed overhead estimate for tool schemas (~15K tokens for 25 tools).
 pub fn needs_compaction(messages: &[Message], system_prompt: &str, context_size: usize) -> bool {
     needs_compaction_full(messages, system_prompt, context_size, 0)

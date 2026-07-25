@@ -2,6 +2,9 @@
 
 pub mod compact;
 pub(crate) mod context_decision;
+#[cfg(test)]
+#[path = "domain/context_decision_tests.rs"]
+mod context_decision_tests;
 pub mod session;
 pub(crate) mod token_budget;
 
@@ -86,11 +89,11 @@ pub struct ContextRequest {
     pub config_snapshot: ConfigSnapshot,
     pub context_size: usize,
     pub max_output_tokens: usize,
-    pub last_api_input_tokens: Option<u64>,
+    /// The most recent API-reported total tokens: normalized input plus output.
+    /// `None` while no turn has completed yet (first turn or after baseline reset).
+    pub last_api_total_tokens: Option<u64>,
     pub tool_schemas: Vec<ModelToolSchema>,
     pub tool_schema_tokens: usize,
-    pub prev_system_tokens: Option<usize>,
-    pub prev_tool_schema_tokens: Option<usize>,
 }
 
 /// Context-owned system block；不是任何 Provider wire DTO。
@@ -134,8 +137,10 @@ pub enum Urgency {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecisionReason {
-    ActualApiWithDelta,
-    Heuristic,
+    /// Provider-reported normalized total tokens used directly (no heuristic projection).
+    ActualProviderUsage,
+    /// No provider usage available; full candidate heuristic estimate used.
+    HeuristicFallback,
     Manual,
 }
 
@@ -143,7 +148,10 @@ pub enum DecisionReason {
 pub struct CompactionDecision {
     pub needed: bool,
     pub urgency: Urgency,
-    pub estimated_tokens: usize,
+    /// Token count used for the decision — either provider-reported actual usage
+    /// or the heuristic candidate estimate.  Named `decision_token_count` to
+    /// distinguish it from SDK UI estimates.
+    pub decision_token_count: usize,
     pub threshold: usize,
     pub reason: DecisionReason,
 }

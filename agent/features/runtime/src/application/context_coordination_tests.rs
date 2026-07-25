@@ -52,9 +52,9 @@ impl ContextPort for RecordingPort {
             compaction_decision: CompactionDecision {
                 needed: false,
                 urgency: Urgency::None,
-                estimated_tokens: 0,
+                decision_token_count: 0,
                 threshold: 1,
-                reason: DecisionReason::Heuristic,
+                reason: DecisionReason::HeuristicFallback,
             },
         })
     }
@@ -67,9 +67,9 @@ impl ContextPort for RecordingPort {
         Ok(CompactionDecision {
             needed: true,
             urgency: Urgency::Must,
-            estimated_tokens: 100,
+            decision_token_count: 100,
             threshold: 90,
-            reason: DecisionReason::ActualApiWithDelta,
+            reason: DecisionReason::ActualProviderUsage,
         })
     }
 
@@ -146,11 +146,9 @@ fn request() -> ContextRequest {
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,
         max_output_tokens: 8_192,
-        last_api_input_tokens: None,
+        last_api_total_tokens: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
-        prev_system_tokens: None,
-        prev_tool_schema_tokens: None,
     }
 }
 
@@ -193,7 +191,10 @@ async fn coordinator_returns_complete_window_and_decision_fields() {
         serde_json::to_value(&frozen.pending_messages).unwrap()
     );
     assert_eq!(window.token_estimation.total_tokens, 10);
-    assert_eq!(window.compaction_decision.reason, DecisionReason::Heuristic);
+    assert_eq!(
+        window.compaction_decision.reason,
+        DecisionReason::HeuristicFallback
+    );
     assert!(coordinator.needs_compaction(&frozen).await.unwrap());
 }
 #[tokio::test]

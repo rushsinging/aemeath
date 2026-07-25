@@ -22,41 +22,50 @@ pub(crate) fn token_budget(
     }
 }
 
+/// Compute the compaction decision.
+///
+/// Two paths, in priority order:
+/// 1. **ActualProviderUsage** — when `last_api_total_tokens` is `Some`, the
+///    provider-reported total is used directly.  No heuristic projection or
+///    delta is applied; the API-reported number already reflects the last
+///    turn's real context consumption.
+/// 2. **HeuristicFallback** — when no provider usage is available (first turn,
+///    or baseline was reset after a compaction / model switch / resume), a
+///    full candidate heuristic estimate is built from the current system
+///    blocks, messages, and tool schemas.
+///
+/// Both paths use the same `effective` / `threshold` formula:
+/// `effective = context_size - reserved_context(2%) - max_output`
+/// `threshold = effective * 0.8`
 pub(crate) fn calculate(
     request: &ContextRequest,
     messages: &[ContextMessage],
     system_blocks: &[SystemBlock],
 ) -> CompactionDecision {
     let budget = token_budget(request, messages, system_blocks);
-    let system_delta = budget
-        .system_tokens
-        .saturating_sub(request.prev_system_tokens.unwrap_or_default());
-    let tool_delta = budget
-        .tool_schema_tokens
-        .saturating_sub(request.prev_tool_schema_tokens.unwrap_or_default());
-    let pending_delta = crate::domain::estimate_messages_tokens(&request.pending_messages);
-    let (estimated_tokens, reason) = match request.last_api_input_tokens {
-        Some(previous) => (
-            previous as usize + pending_delta + system_delta + tool_delta,
-            DecisionReason::ActualApiWithDelta,
-        ),
-        None => (budget.total_tokens, DecisionReason::Heuristic),
+
+    let (decision_token_count, reason) = match request.last_api_total_tokens {
+        Some(api_total) => (api_total as usize, DecisionReason::ActualProviderUsage),
+        None => (budget.total_tokens, DecisionReason::HeuristicFallback),
     };
+
     let effective =
         crate::domain::effective_context_window(request.context_size, request.max_output_tokens);
     let threshold =
         crate::domain::autocompact_threshold(request.context_size, request.max_output_tokens);
-    let percentage = estimated_tokens.saturating_mul(100) / effective.max(1);
+
+    let percentage = decision_token_count.saturating_mul(100) / effective.max(1);
     let urgency = match percentage {
         0..=69 => Urgency::None,
         70..=79 => Urgency::Monitor,
         80..=89 => Urgency::Should,
         _ => Urgency::Must,
     };
+
     CompactionDecision {
-        needed: estimated_tokens > threshold,
+        needed: decision_token_count > threshold,
         urgency,
-        estimated_tokens,
+        decision_token_count,
         threshold,
         reason,
     }
