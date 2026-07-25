@@ -158,7 +158,7 @@ impl RetryPolicy {
     pub(crate) fn decide(
         &self,
         attempt: u32,
-        visible_delta: bool,
+        _visible_delta: bool,
         error: &ProviderError,
         jitter_millis: u64,
     ) -> RetryDecision {
@@ -166,7 +166,6 @@ impl RetryPolicy {
             return RetryDecision::Compact;
         }
         if error.kind == ProviderErrorKind::RateLimited
-            || visible_delta
             || !error.retryable
             || attempt >= self.max_attempts
         {
@@ -211,8 +210,9 @@ impl ModelInvocationCoordinator {
     ///
     /// `delta_is_committed` is deliberately supplied by the caller: main-chat
     /// deltas are projected to a user-visible sink and cannot be rolled back, while
-    /// sub-agent deltas go to a no-op sink and remain safe to retry. A stream ending
-    /// without a reducer-produced terminal value is a protocol failure.
+    /// sub-agent deltas go to a no-op sink. The resulting flag is diagnostic (and may
+    /// inform future presentation policy), but does not determine retry eligibility.
+    /// A stream ending without a reducer-produced terminal value is a protocol failure.
     pub(crate) async fn pull_stream<T, S, Apply>(
         &self,
         mut stream: S,
@@ -528,16 +528,21 @@ mod tests {
     }
 
     #[test]
-    fn visible_delta_and_fatal_error_disable_retry() {
+    fn visible_delta_does_not_disable_structurally_retryable_error() {
         let policy = RetryPolicy::default();
         assert_eq!(
-            policy.decide(1, true, &retryable(ProviderErrorKind::Network), 0),
-            RetryDecision::Fail
+            policy.decide(1, true, &retryable(ProviderErrorKind::StreamTruncated), 0,),
+            RetryDecision::RetryAfter(Duration::from_secs(10))
         );
+    }
+
+    #[test]
+    fn fatal_error_still_fails_after_visible_delta() {
+        let policy = RetryPolicy::default();
         assert_eq!(
             policy.decide(
                 1,
-                false,
+                true,
                 &ProviderError::fatal(ProviderErrorKind::Authentication, "safe"),
                 0,
             ),
@@ -599,7 +604,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn main_committed_delta_disables_retry() {
+    async fn main_committed_delta_remains_diagnostic_but_can_retry() {
         let coordinator = ModelInvocationCoordinator::new();
         let cancel = CancellationToken::new();
         let events = futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Text(
@@ -618,13 +623,8 @@ mod tests {
         assert_eq!(error.kind, ProviderErrorKind::StreamTruncated);
         assert!(committed_delta);
         assert_eq!(
-            coordinator.policy.decide(
-                1,
-                committed_delta,
-                &retryable(ProviderErrorKind::Network),
-                0
-            ),
-            RetryDecision::Fail
+            coordinator.policy.decide(1, committed_delta, &error, 0),
+            RetryDecision::RetryAfter(Duration::from_secs(10))
         );
     }
 
