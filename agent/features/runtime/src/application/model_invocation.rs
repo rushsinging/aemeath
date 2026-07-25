@@ -209,9 +209,9 @@ impl ModelInvocationCoordinator {
     /// Pull and reduce one provider attempt.
     ///
     /// `delta_is_committed` is deliberately supplied by the caller: main-chat
-    /// deltas are projected to a user-visible sink and cannot be rolled back, while
-    /// sub-agent deltas go to a no-op sink. The resulting flag is diagnostic (and may
-    /// inform future presentation policy), but does not determine retry eligibility.
+    /// deltas are already projected to a user-visible sink, while sub-agent deltas
+    /// go to a no-op sink. The resulting flag is diagnostic (and may inform future
+    /// presentation policy), but does not determine retry eligibility.
     /// A stream ending without a reducer-produced terminal value is a protocol failure.
     pub(crate) async fn pull_stream<T, S, Apply>(
         &self,
@@ -629,7 +629,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sub_agent_rollbackable_delta_can_retry() {
+    async fn sub_agent_uncommitted_delta_can_retry() {
         let coordinator = ModelInvocationCoordinator::new();
         let cancel = CancellationToken::new();
         let events = futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Text(
