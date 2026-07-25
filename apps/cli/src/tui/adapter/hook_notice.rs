@@ -1,9 +1,4 @@
-//! Hook notice helpers. Spinner-phase functions are dead code after #943 阶段 3
-//! (Runtime hook events no longer flow through update_ui). They and their tests
-//! will be physically removed by #944 5B.
-#![allow(dead_code)]
-#[cfg(test)]
-use crate::tui::adapter::tui_runtime_event::TuiHookResult;
+//! Hook notice and spinner projection helpers.
 use crate::tui::adapter::tui_runtime_event::{
     TuiHookEvent, TuiHookMessage, TuiHookMessageKind, TuiHookStatus,
 };
@@ -54,11 +49,6 @@ pub fn hook_spinner_phase(
     if event.hook_name == "PreCompact" {
         return SpinnerPhase::Compacting;
     }
-
-    // PostCompact 事件停止 spinner（通过返回 None 的方式，但这里需要特殊处理）
-    // 由于函数签名要求返回 SpinnerPhase，我们使用一个特殊的方式
-    // 实际上，PostCompact 事件会在 hook_spinner_phase 中被调用，
-    // 但我们需要在调用方处理停止 spinner 的逻辑
 
     let outcome = match event.status {
         TuiHookStatus::Running => HookOutcome::Running,
@@ -138,6 +128,7 @@ fn truncate_for_spinner(text: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::adapter::tui_runtime_event::TuiHookResult;
 
     fn event(status: TuiHookStatus, result: TuiHookResult) -> TuiHookEvent {
         TuiHookEvent {
