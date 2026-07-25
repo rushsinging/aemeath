@@ -907,22 +907,380 @@ fn sub_run_spec_is_isolated_noninteractive_and_parent_routed() {
 }
 
 #[test]
-fn derived_sub_spec_can_only_restrict_parent_capabilities() {
+fn derive_sub_from_main_can_relax_memory_only() {
     let parent = RunSpec::main();
     let sub = parent.derive_sub("coder", Duration::from_secs(30)).unwrap();
 
+    // Defaults: most restrictive Sub profile
     assert_eq!(sub.tools, ToolScope::Restricted);
     assert_eq!(sub.interaction, InteractionMode::NonInteractive);
     assert_eq!(sub.workspace, ResourceMode::Isolated);
     assert_eq!(sub.memory, MemoryMode::Disabled);
+
+    // Memory CAN relax to parent ceiling (main has Enabled).
+    let sub = sub.with_memory_mode(MemoryMode::Enabled).unwrap();
+    assert_eq!(sub.memory, MemoryMode::Enabled);
+
+    // Fixed-profile fields CANNOT relax — even when parent allows.
     assert_eq!(
-        sub.clone().with_memory_mode(MemoryMode::Enabled),
+        sub.clone().with_tool_scope(ToolScope::Full),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        sub.clone().with_input(InputMode::SessionQueue),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        sub.clone().with_interaction(InteractionMode::Interactive),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        sub.clone().with_events(EventRoute::Client),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        sub.clone().with_context(ResourceMode::Shared),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        sub.with_workspace(ResourceMode::Shared),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+}
+
+#[test]
+fn standalone_sub_rejects_fixed_profile_relaxation() {
+    // Standalone sub (ceiling=None) must also respect the fixed sub profile.
+    let sub = RunSpec::sub("r", Duration::from_secs(30));
+    assert_eq!(
+        sub.clone().with_input(InputMode::SessionQueue),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        sub.clone().with_interaction(InteractionMode::Interactive),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        sub.clone().with_events(EventRoute::Client),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        sub.clone().with_context(ResourceMode::Shared),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        sub.clone().with_workspace(ResourceMode::Shared),
         Err(RunSpecError::CapabilityEscalation)
     );
     assert_eq!(
         sub.with_tool_scope(ToolScope::Full),
         Err(RunSpecError::CapabilityEscalation)
     );
+}
+
+#[test]
+fn standalone_sub_rejects_memory_enabled() {
+    // Standalone sub has no ceiling → memory must stay Disabled.
+    assert_eq!(
+        RunSpec::sub("r", Duration::from_secs(30)).with_memory_mode(MemoryMode::Enabled),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+}
+
+#[test]
+fn standalone_sub_allows_memory_disabled() {
+    // Staying at the default (Disabled) is always allowed.
+    assert!(RunSpec::sub("r", Duration::from_secs(30))
+        .with_memory_mode(MemoryMode::Disabled)
+        .is_ok());
+}
+
+#[test]
+fn derived_sub_can_relax_memory_when_parent_allows() {
+    let parent = RunSpec::main(); // memory = Enabled
+    let sub = parent.derive_sub("child", Duration::from_secs(10)).unwrap();
+    // Memory can relax up to parent ceiling.
+    let sub = sub.with_memory_mode(MemoryMode::Enabled).unwrap();
+    assert_eq!(sub.memory, MemoryMode::Enabled);
+}
+
+// ── Task 3: table-driven capability contraction ───────────────────
+
+#[test]
+fn capability_input_monotonic_contraction() {
+    let cases = [
+        (InputMode::SessionQueue, InputMode::Fixed, true),
+        // SessionQueue → SessionQueue REJECTED: sub fixed profile is Fixed
+        (InputMode::SessionQueue, InputMode::SessionQueue, false),
+        (InputMode::Fixed, InputMode::Fixed, true),
+        (InputMode::Fixed, InputMode::SessionQueue, false),
+    ];
+    for (parent_val, child_val, expect_ok) in cases {
+        let parent = RunSpec::main().with_input(parent_val).unwrap();
+        let sub = parent.derive_sub("test", Duration::from_secs(10)).unwrap();
+        let result = sub.with_input(child_val);
+        assert_eq!(
+            result.is_ok(),
+            expect_ok,
+            "input parent={parent_val:?} child={child_val:?} expect_ok={expect_ok}"
+        );
+    }
+}
+
+#[test]
+fn capability_interaction_monotonic_contraction() {
+    let cases = [
+        (
+            InteractionMode::Interactive,
+            InteractionMode::NonInteractive,
+            true,
+        ),
+        // Interactive → Interactive REJECTED: sub fixed profile is NonInteractive
+        (
+            InteractionMode::Interactive,
+            InteractionMode::Interactive,
+            false,
+        ),
+        (
+            InteractionMode::NonInteractive,
+            InteractionMode::NonInteractive,
+            true,
+        ),
+        (
+            InteractionMode::NonInteractive,
+            InteractionMode::Interactive,
+            false,
+        ),
+    ];
+    for (parent_val, child_val, expect_ok) in cases {
+        let parent = RunSpec::main().with_interaction(parent_val).unwrap();
+        let sub = parent.derive_sub("test", Duration::from_secs(10)).unwrap();
+        let result = sub.with_interaction(child_val);
+        assert_eq!(
+            result.is_ok(),
+            expect_ok,
+            "interaction parent={parent_val:?} child={child_val:?} expect_ok={expect_ok}"
+        );
+    }
+}
+
+#[test]
+fn capability_events_monotonic_contraction() {
+    let cases = [
+        (EventRoute::Client, EventRoute::ParentRun, true),
+        // Client → Client REJECTED: sub fixed profile is ParentRun
+        (EventRoute::Client, EventRoute::Client, false),
+        (EventRoute::ParentRun, EventRoute::ParentRun, true),
+        (EventRoute::ParentRun, EventRoute::Client, false),
+    ];
+    for (parent_val, child_val, expect_ok) in cases {
+        let parent = RunSpec::main().with_events(parent_val).unwrap();
+        let sub = parent.derive_sub("test", Duration::from_secs(10)).unwrap();
+        let result = sub.with_events(child_val);
+        assert_eq!(
+            result.is_ok(),
+            expect_ok,
+            "events parent={parent_val:?} child={child_val:?} expect_ok={expect_ok}"
+        );
+    }
+}
+
+#[test]
+fn capability_context_monotonic_contraction() {
+    let cases = [
+        (ResourceMode::Shared, ResourceMode::Isolated, true),
+        // Shared → Shared REJECTED: sub fixed profile is Isolated
+        (ResourceMode::Shared, ResourceMode::Shared, false),
+        (ResourceMode::Isolated, ResourceMode::Isolated, true),
+        (ResourceMode::Isolated, ResourceMode::Shared, false),
+    ];
+    for (parent_val, child_val, expect_ok) in cases {
+        let parent = RunSpec::main().with_context(parent_val).unwrap();
+        let sub = parent.derive_sub("test", Duration::from_secs(10)).unwrap();
+        let result = sub.with_context(child_val);
+        assert_eq!(
+            result.is_ok(),
+            expect_ok,
+            "context parent={parent_val:?} child={child_val:?} expect_ok={expect_ok}"
+        );
+    }
+}
+
+#[test]
+fn capability_workspace_monotonic_contraction() {
+    let cases = [
+        (ResourceMode::Shared, ResourceMode::Isolated, true),
+        // Shared → Shared REJECTED: sub fixed profile is Isolated
+        (ResourceMode::Shared, ResourceMode::Shared, false),
+        (ResourceMode::Isolated, ResourceMode::Isolated, true),
+        (ResourceMode::Isolated, ResourceMode::Shared, false),
+    ];
+    for (parent_val, child_val, expect_ok) in cases {
+        let parent = RunSpec::main().with_workspace(parent_val).unwrap();
+        let sub = parent.derive_sub("test", Duration::from_secs(10)).unwrap();
+        let result = sub.with_workspace(child_val);
+        assert_eq!(
+            result.is_ok(),
+            expect_ok,
+            "workspace parent={parent_val:?} child={child_val:?} expect_ok={expect_ok}"
+        );
+    }
+}
+
+#[test]
+fn capability_memory_monotonic_contraction() {
+    let cases = [
+        (MemoryMode::Enabled, MemoryMode::Disabled, true),
+        (MemoryMode::Enabled, MemoryMode::Enabled, true),
+        (MemoryMode::Disabled, MemoryMode::Disabled, true),
+        (MemoryMode::Disabled, MemoryMode::Enabled, false),
+    ];
+    for (parent_val, child_val, expect_ok) in cases {
+        let parent = RunSpec::main().with_memory_mode(parent_val).unwrap();
+        let sub = parent.derive_sub("test", Duration::from_secs(10)).unwrap();
+        let result = sub.with_memory_mode(child_val);
+        assert_eq!(
+            result.is_ok(),
+            expect_ok,
+            "memory parent={parent_val:?} child={child_val:?} expect_ok={expect_ok}"
+        );
+    }
+}
+
+#[test]
+fn capability_tools_monotonic_contraction() {
+    let cases = [
+        (ToolScope::Full, ToolScope::Restricted, true),
+        // Full → Full REJECTED: sub fixed profile is Restricted
+        (ToolScope::Full, ToolScope::Full, false),
+        (ToolScope::Restricted, ToolScope::Restricted, true),
+        (ToolScope::Restricted, ToolScope::Full, false),
+    ];
+    for (parent_val, child_val, expect_ok) in cases {
+        let parent = RunSpec::main().with_tool_scope(parent_val).unwrap();
+        let sub = parent.derive_sub("test", Duration::from_secs(10)).unwrap();
+        let result = sub.with_tool_scope(child_val);
+        assert_eq!(
+            result.is_ok(),
+            expect_ok,
+            "tools parent={parent_val:?} child={child_val:?} expect_ok={expect_ok}"
+        );
+    }
+}
+
+#[test]
+fn nested_sub_cannot_restore_capabilities() {
+    // main → sub1 (disable memory, restrict tools) → sub2
+    let parent = RunSpec::main();
+    let sub1 = parent
+        .derive_sub("sub1", Duration::from_secs(60))
+        .unwrap()
+        .with_memory_mode(MemoryMode::Disabled)
+        .unwrap()
+        .with_tool_scope(ToolScope::Restricted)
+        .unwrap();
+
+    let sub2 = sub1.derive_sub("sub2", Duration::from_secs(30)).unwrap();
+
+    // sub2 inherits sub1's effective caps, cannot re-enable memory or tools
+    assert_eq!(
+        sub2.clone().with_memory_mode(MemoryMode::Enabled),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        sub2.with_tool_scope(ToolScope::Full),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+}
+
+#[test]
+fn nested_sub_can_further_restrict() {
+    let parent = RunSpec::main();
+    let sub1 = parent
+        .derive_sub("sub1", Duration::from_secs(60))
+        .unwrap()
+        .with_memory_mode(MemoryMode::Disabled)
+        .unwrap();
+
+    // sub2 can stay at Disabled or go even more restrictive (already at floor)
+    let sub2 = sub1.derive_sub("sub2", Duration::from_secs(30)).unwrap();
+    assert_eq!(sub2.memory, MemoryMode::Disabled);
+
+    let sub2 = sub2.with_memory_mode(MemoryMode::Disabled).unwrap();
+    assert_eq!(sub2.memory, MemoryMode::Disabled);
+}
+
+#[test]
+fn timeout_parent_zero_is_infinite() {
+    let parent = RunSpec::main(); // timeout = 0
+                                  // child can have any timeout
+    assert!(parent.derive_sub("a", Duration::ZERO).is_ok());
+    assert!(parent.derive_sub("b", Duration::from_secs(1)).is_ok());
+    assert!(parent.derive_sub("c", Duration::from_secs(3600)).is_ok());
+}
+
+#[test]
+fn timeout_child_must_not_exceed_finite_parent() {
+    let parent = RunSpec::main()
+        .with_timeout(Duration::from_secs(120))
+        .unwrap();
+
+    // child <= 120 → ok
+    assert!(parent.derive_sub("ok1", Duration::from_secs(120)).is_ok());
+    assert!(parent.derive_sub("ok2", Duration::from_secs(60)).is_ok());
+
+    // child > 120 → error
+    assert_eq!(
+        parent.derive_sub("bad", Duration::from_secs(121)),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+
+    // child == 0 (infinite) while parent is finite → error
+    assert_eq!(
+        parent.derive_sub("infinite", Duration::ZERO),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+}
+
+#[test]
+fn with_timeout_respects_parent_ceiling() {
+    let parent = RunSpec::main()
+        .with_timeout(Duration::from_secs(60))
+        .unwrap();
+
+    let sub = parent.derive_sub("sub", Duration::from_secs(30)).unwrap();
+
+    // OK: child timeout ≤ parent
+    assert!(sub.clone().with_timeout(Duration::from_secs(60)).is_ok());
+    assert!(sub.clone().with_timeout(Duration::from_secs(30)).is_ok());
+
+    // Error: child > parent
+    assert_eq!(
+        sub.clone().with_timeout(Duration::from_secs(61)),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+
+    // Error: child infinite while parent is finite
+    assert_eq!(
+        sub.with_timeout(Duration::ZERO),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+}
+
+#[test]
+fn derive_sub_defaults_keep_sub_profile() {
+    let parent = RunSpec::main();
+    let sub = parent.derive_sub("child", Duration::from_secs(10)).unwrap();
+
+    assert_eq!(sub.kind, RunKind::Sub);
+    assert_eq!(sub.input, InputMode::Fixed);
+    assert_eq!(sub.interaction, InteractionMode::NonInteractive);
+    assert_eq!(sub.events, EventRoute::ParentRun);
+    assert_eq!(sub.context, ResourceMode::Isolated);
+    assert_eq!(sub.workspace, ResourceMode::Isolated);
+    assert_eq!(sub.memory, MemoryMode::Disabled);
+    assert_eq!(sub.tools, ToolScope::Restricted);
+    assert_eq!(sub.timeout, Duration::from_secs(10));
 }
 
 // ---------------------------------------------------------------------------

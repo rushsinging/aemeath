@@ -30,6 +30,7 @@ use crate::application::main_loop::looping::tools::{execute_tool_round, tool_res
 use crate::application::main_loop::looping::{
     ChatEventSink, InputEventDrainPort, QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
+use crate::application::runtime_context::RuntimeContext;
 use crate::application::subagent::runner::{AgentRunOutcome, AgentRunStatus};
 use crate::application::subagent::{Agent, ToolCall};
 use crate::domain::agent_run::RunDomainEvent;
@@ -204,27 +205,25 @@ pub(crate) fn fixture_two_step_accepted(
     (first_accepted, second_accepted)
 }
 
-/// Main-chat adapter for the shared run loop.
-///
-/// It owns no lifecycle state machine. `Run` is the only per-run state machine; this adapter
-/// projects its domain events and bridges the existing provider/tool/compact/hook helpers.
+/// #1385 Task 12: `S` generic eliminated — all event-sink access goes through
+/// `RuntimeContext::event_sink()`.  MainInputStrategy now takes a
+/// `ChatEventSinkHandle` directly.
 #[allow(clippy::too_many_arguments)]
-pub(crate) struct MainRunPort<'a, S, Q, I>
+pub(crate) struct MainRunPort<'a, Q, I>
 where
-    S: ChatEventSink,
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
-    pub(crate) sink: &'a S,
+    // ── #1385: per-Run RuntimeContext — single source for all service contracts ──
+    // Non-Option. Accessors below delegate to this for binding, tools, policy,
+    // hooks, memory, reflection, reasoning, config, context, and interaction.
+    // Event sink (`event_sink()`), usage tracker (`usage()`), and input buffer
+    // (`input()`) also come from RuntimeContext — no duplicate fields.
+    pub(crate) runtime_context: &'a RuntimeContext,
+
     pub(crate) queue: &'a Q,
     pub(crate) input_events: &'a I,
-    pub(crate) binding: &'a Arc<crate::ports::ProviderBinding>,
-    pub(crate) tool_catalog: &'a Arc<dyn tools::ToolCatalogPort>,
-    pub(crate) tool_execution: &'a Arc<dyn tools::ToolExecutionPort>,
-    pub(crate) tool_context_binding: &'a Arc<dyn tools::ToolExecutionContextBindingPort>,
     pub(crate) system_prompt_text: &'a str,
-    pub(crate) run_config: &'a crate::application::run_config::RunConfigSnapshot,
-    pub(crate) context: &'a ContextCoordinator,
     pub(crate) context_request: Option<crate::ports::ContextRequest>,
     pub(crate) context_window: Option<crate::ports::ContextWindow>,
     /// 当前 RunStep 的显式消息所有权；历史长度不参与归属判断。
@@ -238,46 +237,101 @@ where
     pub(crate) agent_runner: &'a Option<Arc<dyn tools::AgentRunner>>,
     pub(crate) tool_result_materializer:
         &'a crate::application::tool_result_materialization::ToolResultMaterializer,
-    pub(crate) policy: &'a dyn policy::PolicyPort,
-    /// Runtime/Tool 日常状态唯一来源（#889 low-privilege 端口）。
-    pub(crate) task_access: &'a Arc<dyn task::TaskAccess>,
     pub(crate) max_tool_concurrency: usize,
     pub(crate) agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
-    pub(crate) hook_runner: &'a std::sync::Arc<dyn hook::HookPort>,
-    pub(crate) memory_config: &'a share::config::MemoryConfig,
-    pub(crate) memory: &'a Arc<dyn memory::MemoryPort>,
-    pub(crate) reflection_history: &'a Arc<dyn memory::api::ReflectionHistoryStore>,
     pub(crate) reflection_tasks: &'a crate::application::reflection::ReflectionTaskAdapter,
     pub(crate) language: &'a str,
-    pub(crate) reasoning: &'a dyn ReasoningPort,
     /// Run-scoped input strategy: owns the buffer, continuation flags,
     /// pending-input reference, and drain/await logic
     /// (#1272 per-turn drain-or-seal linearization).
-    pub(crate) input_strategy: MainInputStrategy<'a, S, Q, I>,
+    pub(crate) input_strategy: MainInputStrategy<'a, Q, I>,
     /// #1272: Per-turn adopted (InputId, Message) pairs collected during
     /// freeze_step from LoopInput::input_id. Emitted via UserMessagesAdopted
     /// after accept_step_input durable success. Cleared after emission.
     pub(crate) per_turn_adopted: Vec<(sdk::InputId, Message)>,
-    pub(crate) cancel: CancellationToken,
     pub(crate) run_id: sdk::RunId,
     pub(crate) active_run: &'a dyn crate::domain::agent_run::ActiveRunPort,
-    /// #1246: Typed interaction bridge for AskUserQuestion suspension.
-    pub(crate) interaction_bridge: &'a Arc<crate::application::interaction::InteractionBridge>,
     pub(crate) turn_count: usize,
     pub(crate) turn_context: RuntimeTurnContext,
-    pub(crate) last_total_tokens: &'a mut Option<u64>,
+    // #1385 Task 12: last_total_tokens eliminated — usage tracker is the
+    // single source via runtime_context.usage().
     pub(crate) task_reminder_state: &'a mut TaskReminderState,
     pub(crate) tool_identity:
         &'a crate::application::tool_coordination::identity::ToolIdentityRegistry,
     pub(crate) started_at: Instant,
 }
 
-impl<S, Q, I> MainRunPort<'_, S, Q, I>
+impl<Q, I> MainRunPort<'_, Q, I>
 where
-    S: ChatEventSink,
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
+    // ── #1385: Accessor methods that delegate to RuntimeContext ──
+    // These replace the old bare fields (binding, tool_catalog, etc.) so
+    // that all reads go through the single source of truth.
+
+    #[inline]
+    fn binding(&self) -> &Arc<crate::ports::ProviderBinding> {
+        self.runtime_context.provider_ref()
+    }
+    #[inline]
+    fn tool_catalog(&self) -> &Arc<dyn tools::ToolCatalogPort> {
+        self.runtime_context.tool_catalog_ref()
+    }
+    #[inline]
+    fn tool_execution(&self) -> &Arc<dyn tools::ToolExecutionPort> {
+        self.runtime_context.tool_execution_ref()
+    }
+    #[inline]
+    fn tool_context_binding(&self) -> &Arc<dyn tools::ToolExecutionContextBindingPort> {
+        self.runtime_context.tool_context_binding_ref()
+    }
+    #[inline]
+    fn policy(&self) -> &dyn policy::PolicyPort {
+        self.runtime_context.policy_ref().as_ref()
+    }
+    #[inline]
+    fn task_access(&self) -> &Arc<dyn task::TaskAccess> {
+        self.runtime_context.task_ref()
+    }
+    #[inline]
+    fn hook_runner(&self) -> &Arc<dyn hook::HookPort> {
+        self.runtime_context.hooks_ref()
+    }
+    #[inline]
+    fn memory(&self) -> &Arc<dyn memory::MemoryPort> {
+        self.runtime_context.memory_ref()
+    }
+    #[inline]
+    fn reflection_history(&self) -> &Arc<dyn memory::api::ReflectionHistoryStore> {
+        self.runtime_context.reflection_history_ref()
+    }
+    #[inline]
+    fn reasoning(&self) -> &dyn ReasoningPort {
+        self.runtime_context.reasoning_ref().as_ref()
+    }
+    #[inline]
+    fn interaction_bridge(&self) -> &Arc<crate::application::interaction::InteractionBridge> {
+        self.runtime_context.interaction_ref()
+    }
+    #[inline]
+    fn run_config(&self) -> &crate::application::run_config::RunConfigSnapshot {
+        self.runtime_context.config_ref()
+    }
+    #[inline]
+    fn memory_config(&self) -> &share::config::MemoryConfig {
+        self.runtime_context.config_ref().config().memory()
+    }
+    #[inline]
+    fn cancel_token(&self) -> CancellationToken {
+        self.runtime_context.cancel_ref().token().clone()
+    }
+    /// Context coordinator, constructed lazily from RuntimeContext's ContextPort.
+    #[inline]
+    fn context_coordinator(&self) -> ContextCoordinator {
+        ContextCoordinator::new(self.runtime_context.context())
+    }
+
     /// Drain any remaining events from the Run-scoped buffer back to the
     /// session's `pending_input`. Called after `run_loop` returns so that
     /// unconsumed control events are not lost (#1272).
@@ -288,7 +342,11 @@ where
     /// `pending_input` explicitly rather than silently forwarded.
     pub(crate) fn drain_remaining_events(&mut self) {
         let sealed = self.input_strategy.run_input_buffer.is_sealed();
-        for event in self.input_strategy.run_input_buffer.drain_all() {
+        let drained = self
+            .input_strategy
+            .run_input_buffer
+            .with_lock(|b| b.drain_all());
+        for event in drained {
             match &event {
                 sdk::ChatInputEvent::UserMessage { .. } if sealed => {
                     log::warn!(
@@ -308,7 +366,7 @@ where
         pending_messages: Vec<Message>,
     ) -> ContextRequest {
         let task_reminder = self
-            .task_access
+            .task_access()
             .reminder_snapshot()
             .items
             .iter()
@@ -320,7 +378,7 @@ where
             })
             .then(|| "当前 task batch 仍有未完成任务；仅在与最新用户请求相关时继续。".to_string());
         let raw_tool_schemas = self
-            .tool_catalog
+            .tool_catalog()
             .snapshot(
                 &tools::RegistryScopeName::new("main"),
                 &tools::ToolProfileName::new("main-full"),
@@ -344,17 +402,17 @@ where
             step_id: step_id.clone(),
             pending_messages,
             system_prompt: SystemPromptSpec::new(self.system_prompt_text),
-            model_id: self.binding.model.model.clone(),
-            effective_reasoning: self.reasoning.current_requested_level(),
+            model_id: self.binding().model.model.clone(),
+            effective_reasoning: self.reasoning().current_requested_level(),
             task_reminder: TaskReminderSnapshot {
                 text: task_reminder,
             },
             language: ContextLanguage::new(self.language),
             agent_roles: std::collections::HashMap::new(),
-            config_snapshot: self.run_config.config().clone(),
+            config_snapshot: self.run_config().config().clone(),
             context_size: self.context_size,
-            max_output_tokens: self.binding.max_tokens as usize,
-            last_api_total_tokens: *self.last_total_tokens,
+            max_output_tokens: self.binding().max_tokens as usize,
+            last_api_total_tokens: self.runtime_context.usage().get(),
             tool_schemas,
             tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(&raw_tool_schemas),
         }
@@ -374,7 +432,7 @@ where
             return Ok(());
         };
         let messages = self.step_messages.outcome();
-        self.context
+        self.context_coordinator()
             .append_finalized(
                 request,
                 request.step_id.clone(),
@@ -382,7 +440,7 @@ where
                 cause,
                 messages,
                 vec![],
-                *self.last_total_tokens,
+                self.runtime_context.usage().get(),
             )
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
@@ -409,8 +467,9 @@ where
                 let texts = self
                     .input_strategy
                     .run_input_buffer
-                    .withdraw_all_user_texts();
-                self.sink
+                    .with_lock(|b| b.withdraw_all_user_texts());
+                self.runtime_context
+                    .event_sink()
                     .send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts })
                     .await;
             }
@@ -485,7 +544,7 @@ where
             turns: self.turn_count,
             duration: self.started_at.elapsed(),
             role: None,
-            model: self.binding.model.model.clone(),
+            model: self.binding().model.model.clone(),
         }
     }
 
@@ -495,7 +554,7 @@ where
         if self.context_window.is_none() {
             if let Some(request) = &self.context_request {
                 let window = self
-                    .context
+                    .context_coordinator()
                     .build_window(request)
                     .await
                     .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
@@ -528,21 +587,21 @@ where
         let resp = loop {
             let request_context = request_log_context(
                 &logging::capture(),
-                self.binding.model.model.as_str(),
-                self.binding.model.provider.as_str(),
+                self.binding().model.model.as_str(),
+                self.binding().model.provider.as_str(),
                 "default",
             );
             let mut reducer = InvocationEventReducer::with_tool_identity(
-                self.sink.clone(),
+                self.runtime_context.event_sink(),
                 self.tool_identity.clone(),
                 self.turn_context.clone(),
             );
             let response = logging::instrument(request_context.clone(), async {
                 let progress_handle = reducer.progress_handle();
-                let stream_cancel = self.cancel.clone();
-                let provider = self.binding.provider.clone();
-                let model = self.binding.model.clone();
-                let max_tokens = self.binding.max_tokens;
+                let stream_cancel = self.cancel_token().clone();
+                let provider = self.binding().provider.clone();
+                let model = self.binding().model.clone();
+                let max_tokens = self.binding().max_tokens;
                 let request_tool_schemas = window.tool_schemas.clone();
                 let messages_for_api = ctx.messages_for_api.clone();
                 let system_blocks = ctx.system_blocks.clone();
@@ -569,7 +628,7 @@ where
                         })
                         .await
                 };
-                let waiting_sink = self.sink.clone();
+                let waiting_sink = self.runtime_context.event_sink();
                 let waiting_context = self.turn_context.clone();
                 let request_started_at = tokio::time::Instant::now();
                 let waiting_task =
@@ -578,7 +637,10 @@ where
                         let mut last_version = None;
                         loop {
                             tokio::time::sleep_until(next).await;
-                            let snapshot = progress_handle.lock().unwrap().snapshot();
+                            let snapshot = progress_handle
+                                .lock()
+                                .unwrap_or_else(|poison| poison.into_inner())
+                                .snapshot();
                             if should_emit_model_stream_waiting(last_version, &snapshot) {
                                 waiting_sink.try_send_event(
                                     RuntimeStreamEvent::ModelStreamWaiting {
@@ -609,12 +671,12 @@ where
             .await;
             match response {
                 Ok((response, _)) => break response,
-                Err((error, _)) if error.is_cancelled() || self.cancel.is_cancelled() => {
+                Err((error, _)) if error.is_cancelled() || self.cancel_token().is_cancelled() => {
                     return Err(LoopEngineError::Cancelled);
                 }
                 Err((error, visible_delta)) => {
                     let step = coordinator
-                        .handle_failure(&error, visible_delta, &self.cancel)
+                        .handle_failure(&error, visible_delta, &self.cancel_token())
                         .await;
                     crate::application::loop_engine::llm_strategy::map_retry_outcome(
                         step,
@@ -636,9 +698,9 @@ where
             }
         }
 
-        *self.last_total_tokens = Some(crate::application::token_usage::normalized_total_tokens(
-            &resp.usage,
-        ));
+        let total_tokens = crate::application::token_usage::normalized_total_tokens(&resp.usage);
+        // #1385 Task 12: Write to RuntimeContext's usage tracker — the single source.
+        self.runtime_context.usage().update(total_tokens);
 
         let token_usage = crate::application::loop_engine::llm_strategy::build_step_token_usage(
             &resp,
@@ -648,7 +710,8 @@ where
             window.token_estimation.message_tokens,
         );
 
-        self.sink
+        self.runtime_context
+            .event_sink()
             .send_event(RuntimeStreamEvent::Usage {
                 input: resp.usage.input_tokens.unwrap_or(0),
                 output: resp.usage.output_tokens.unwrap_or(0),
@@ -658,7 +721,8 @@ where
             .await;
         self.messages.push(resp.assistant_message.clone());
         self.step_messages.record(resp.assistant_message.clone());
-        self.sink
+        self.runtime_context
+            .event_sink()
             .send_event(RuntimeStreamEvent::TurnStarted {
                 messages: self.messages.clone(),
             })
@@ -668,7 +732,7 @@ where
             self.tool_identity.runtime_id_for_provider(provider_id)
         });
         log_llm_output_and_tool_calls(
-            self.binding.model.provider.as_str(),
+            self.binding().model.provider.as_str(),
             &resp,
             &calls,
             api_elapsed,
@@ -684,9 +748,10 @@ where
             ));
         }
 
-        let observation = self.reasoning.observe(ReasoningSignal::TextOnly);
+        let observation = self.reasoning().observe(ReasoningSignal::TextOnly);
         if observation.changed() {
-            self.sink
+            self.runtime_context
+                .event_sink()
                 .send_event(RuntimeStreamEvent::GraphPhaseChanged {
                     node: observation.current,
                     effort: observation.requested,
@@ -695,7 +760,7 @@ where
                 .await;
         }
         if should_run_turn_reflection(
-            self.memory_config,
+            self.memory_config(),
             self.turn_count,
             !calls.is_empty(),
             &resp.stop_reason,
@@ -703,30 +768,31 @@ where
         ) {
             let _ = submit_interval_reflection(
                 self.reflection_tasks,
-                self.memory_config,
+                self.memory_config(),
                 self.turn_count,
                 &self.messages,
-                self.binding,
+                self.binding(),
                 self.system_prompt_text,
                 self.language,
-                self.memory,
-                self.reflection_history,
+                self.memory(),
+                self.reflection_history(),
             );
         }
 
         let outcome = self.outcome(AgentRunStatus::Completed);
+        let sink = self.runtime_context.event_sink();
         if let Some(feedback) = run_stop_hook_before_finish(
             &outcome,
-            self.sink,
-            self.hook_runner,
+            &sink,
+            self.hook_runner(),
             self.session_id,
             self.language,
             &self.current_cwd(),
-            &self.cancel,
+            &self.cancel_token(),
         )
         .await
         {
-            if self.cancel.is_cancelled() {
+            if self.cancel_token().is_cancelled() {
                 return Err(LoopEngineError::Cancelled);
             }
             let feedback = Message::stop_hook_feedback(
@@ -739,7 +805,8 @@ where
             self.input_strategy.stop_hook_feedback = Some(feedback.clone());
             self.step_messages.record(feedback.clone());
             self.messages.push(feedback);
-            self.sink
+            self.runtime_context
+                .event_sink()
                 .send_event(RuntimeStreamEvent::StopHookBlocked {
                     messages: self.messages.clone(),
                 })
@@ -783,14 +850,14 @@ where
         }
         let raw_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
         let agent = Self::make_agent(
-            self.tool_catalog,
-            self.tool_execution,
+            self.tool_catalog(),
+            self.tool_execution(),
             self.agent_runner,
-            self.memory,
+            self.memory(),
             self.language,
-            self.run_config.config().user_agent(),
+            self.run_config().config().user_agent(),
             self.workspace,
-            &self.cancel,
+            &self.cancel_token(),
             self.read_files,
             self.session_reminders,
             self.max_tool_concurrency,
@@ -799,26 +866,27 @@ where
             &self.run_id,
         );
         let _binding = tools::ToolExecutionContextBindingGuard::bind(
-            (*self.tool_context_binding).clone(),
+            (*self.tool_context_binding()).clone(),
             agent.ctx.clone(),
         )
         .map_err(LoopEngineError::Adapter)?;
+        let sink = self.runtime_context.event_sink();
         let (all_results, fuse_bypassed) = execute_tool_round(
             &self.turn_context,
             &raw_calls,
-            self.tool_catalog,
-            self.tool_execution,
-            self.policy,
+            self.tool_catalog(),
+            self.tool_execution(),
+            self.policy(),
             run_id,
             step_id,
             &agent,
-            self.sink,
-            self.hook_runner,
+            &sink,
+            self.hook_runner(),
             cancel,
             self.language,
             &self.current_cwd(),
             calls,
-            self.interaction_bridge,
+            self.interaction_bridge(),
         )
         .await;
         let cancelled = cancel.is_cancelled();
@@ -847,14 +915,15 @@ where
                 .get(result.provider_id.as_str())
                 .copied()
                 .unwrap_or((None, None));
-            let observation = self.reasoning.observe(ReasoningSignal::ToolCompleted {
+            let observation = self.reasoning().observe(ReasoningSignal::ToolCompleted {
                 tool_name: result.tool_name.clone(),
                 bash_command: command.map(str::to_string),
                 is_error: result.outcome.is_error,
                 declared_phase: phase.map(str::to_string),
             });
             if observation.changed() {
-                self.sink
+                self.runtime_context
+                    .event_sink()
                     .send_event(RuntimeStreamEvent::GraphPhaseChanged {
                         node: observation.current,
                         effort: observation.requested,
@@ -872,7 +941,8 @@ where
             tool_results_for_api(self.tool_result_materializer, all_results, self.session_id).await;
         self.messages.push(tool_results.clone());
         self.step_messages.record(tool_results);
-        self.sink
+        self.runtime_context
+            .event_sink()
             .send_event(RuntimeStreamEvent::PostToolExecutionSync {
                 messages: self.messages.clone(),
             })
@@ -880,9 +950,10 @@ where
         if has_task_mutation {
             let snapshot =
                 crate::application::main_loop::looping::task_snapshot::build_task_snapshot(
-                    &**self.task_access,
+                    &**self.task_access(),
                 );
-            self.sink
+            self.runtime_context
+                .event_sink()
                 .send_event(RuntimeStreamEvent::TasksSnapshot {
                     tasks: Box::new(snapshot),
                 })
@@ -892,8 +963,8 @@ where
             return Err(LoopEngineError::Cancelled);
         }
         run_post_tool_batch(
-            self.sink,
-            self.hook_runner,
+            &sink,
+            self.hook_runner(),
             &agent.runtime_cancellation,
             raw_calls.len(),
             self.turn_count,
@@ -910,9 +981,8 @@ where
 
 // ── ToolStrategy impl ─────────────────────────────────────────────────
 
-impl<S, Q, I> ToolStrategy for MainRunPort<'_, S, Q, I>
+impl<Q, I> ToolStrategy for MainRunPort<'_, Q, I>
 where
-    S: ChatEventSink,
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
@@ -924,15 +994,13 @@ where
 // ── LlmStrategy impl ─────────────────────────────────────────────────
 
 #[async_trait]
-impl<S, Q, I> crate::application::loop_engine::llm_strategy::LlmStrategy
-    for MainRunPort<'_, S, Q, I>
+impl<Q, I> crate::application::loop_engine::llm_strategy::LlmStrategy for MainRunPort<'_, Q, I>
 where
-    S: ChatEventSink,
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
     fn reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        self.reasoning.current_requested_level()
+        self.reasoning().current_requested_level()
     }
 
     fn committed_delta(&self) -> bool {
@@ -940,19 +1008,19 @@ where
     }
 
     async fn on_retry(&mut self, attempt: u32, delay: std::time::Duration) {
-        self.sink
-            .try_send_event(RuntimeStreamEvent::ModelInvocationRetrying {
+        self.runtime_context.event_sink().try_send_event(
+            RuntimeStreamEvent::ModelInvocationRetrying {
                 context: self.turn_context.clone(),
                 attempt,
                 delay,
-            });
+            },
+        );
     }
 }
 
 #[async_trait]
-impl<S, Q, I> RunLoopPort for MainRunPort<'_, S, Q, I>
+impl<Q, I> RunLoopPort for MainRunPort<'_, Q, I>
 where
-    S: ChatEventSink,
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
@@ -1014,7 +1082,7 @@ where
             .as_ref()
             .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
         debug_assert_eq!(&request.step_id, step_id);
-        self.context
+        self.context_coordinator()
             .append_accepted_input(request, accepted)
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
@@ -1024,7 +1092,10 @@ where
         // placeholders by input_id and append formal user messages.
         let adopted = std::mem::take(&mut self.per_turn_adopted);
         if !adopted.is_empty() {
-            let queued = self.input_strategy.run_input_buffer.user_message_snapshot();
+            let queued = self
+                .input_strategy
+                .run_input_buffer
+                .with_lock(|b| b.user_message_snapshot());
             let input_ids: Vec<_> = adopted
                 .iter()
                 .map(|(id, _)| id.as_str().to_string())
@@ -1043,7 +1114,8 @@ where
                 queued_ids,
                 queued.len(),
             );
-            self.sink
+            self.runtime_context
+                .event_sink()
                 .send_event(RuntimeStreamEvent::UserMessagesAdopted {
                     items: adopted,
                     queued,
@@ -1074,7 +1146,7 @@ where
         let (needed, window) =
             crate::application::loop_engine::shared::needs_compaction_with_window(
                 self.context_request.as_ref(),
-                self.context,
+                &self.context_coordinator(),
             )
             .await?;
         self.context_window = Some(window);
@@ -1101,8 +1173,8 @@ where
         let outcome = compact_core(
             self.context_request.as_ref(),
             source_revision,
-            self.context,
-            self.last_total_tokens,
+            &self.context_coordinator(),
+            &self.runtime_context.usage(),
             &mut self.context_window,
         )
         .await?;
@@ -1115,12 +1187,12 @@ where
             &outcome,
             &pre_compact_snapshot,
             self.reflection_tasks,
-            self.memory_config,
-            self.binding,
+            self.memory_config(),
+            self.binding(),
             self.system_prompt_text,
             self.language,
-            self.memory,
-            self.reflection_history,
+            self.memory(),
+            self.reflection_history(),
         );
         Ok(())
     }
@@ -1197,12 +1269,13 @@ where
     }
 
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+        // #1385 Task 12: Route through RuntimeContext's event_sink, not self.sink.
         let mut strategy = MainEventStrategy {
-            sink: self.sink,
+            sink: self.runtime_context.event_sink(),
             session_id: self.session_id,
             turn_context: &self.turn_context,
-            task_access: self.task_access,
-            model: &self.binding.model.model,
+            task_access: self.task_access(),
+            model: &self.binding().model.model,
             started_at: self.started_at,
             turn_count: self.turn_count,
             messages_snapshot: self.messages.clone(),

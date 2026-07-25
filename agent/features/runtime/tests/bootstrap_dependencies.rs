@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 struct TestProviderFactory;
@@ -182,6 +183,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         .unwrap(),
     );
 
+    let wiring_clone = wiring.clone();
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         runtime::RuntimeCoreDependencies::new(
             workspace,
@@ -204,14 +206,20 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         ),
     );
 
+    // ── Arc identity: Core dependencies ──
     assert!(Arc::ptr_eq(
         &dependencies.session_management(),
         &session_management
     ));
-
     assert!(Arc::ptr_eq(&dependencies.reflection_history(), &history));
     assert!(Arc::ptr_eq(&dependencies.task_access(), &access));
     assert!(Arc::ptr_eq(&dependencies.hook_runner(), &hook_runner));
+    assert!(
+        Arc::ptr_eq(&dependencies.wiring(), &wiring_clone),
+        "wiring Arc identity preserved"
+    );
+
+    // ── Arc identity: Tool assembly dependencies ──
     assert!(Arc::ptr_eq(
         &dependencies.skill_materializer(),
         &skill_materializer
@@ -221,16 +229,26 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         &tool_result_materializer
     ));
     assert!(Arc::ptr_eq(&dependencies.active_run(), &active_run));
-    assert_eq!(
-        dependencies
-            .tool_catalog()
-            .snapshot(
-                &tools::RegistryScopeName::new("main"),
-                &tools::ToolProfileName::new("main-full"),
-            )
-            .unwrap()
-            .tools
-            .len(),
-        0
-    );
+
+    // ── Tool catalog: Arc identity AND functional check ──
+    let catalog = dependencies.tool_catalog();
+    // Functional: snapshot succeeds and returns an empty catalog.
+    let snapshot = catalog
+        .snapshot(
+            &tools::RegistryScopeName::new("main"),
+            &tools::ToolProfileName::new("main-full"),
+        )
+        .unwrap();
+    assert_eq!(snapshot.tools.len(), 0, "empty test catalog");
+
+    // ── Skill catalog: functional check (call succeeds without panicking) ──
+    let skills = dependencies.skill_catalog();
+    let _skill_list = skills.list(tools::SkillQuery::new(
+        temp.path().to_path_buf(),
+        vec![],
+        BTreeSet::new(),
+    ));
+    // The filesystem skill adapter may pick up skills from global
+    // directories; the list may or may not be empty. The contract is
+    // that calling list() does not panic and returns a valid Vec.
 }

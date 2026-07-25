@@ -12,24 +12,19 @@
 //! - PolicyPort -> policy BC (#917)
 //! - MemoryPort -> memory BC (#897) ✅ Port 由 memory crate 提供，runtime 通过 `memory::api::MemoryPort` 消费
 //! - TaskPort -> task BC (#885)
-//! - WorkspacePort -> project BC (#892)
 //! - HookPort -> hook BC (#922)
 //! - ReasoningPort -> workflow BC (#919)
-//! - UsageSink -> audit BC (#927)
-//! - EventSink / InputBuffer -> runtime 内部
+//! - RuntimeStreamEvent::Usage 路径 -> audit BC (#927)
 
 pub mod context_port;
-pub mod event_sink;
-pub mod input_buffer;
 pub mod legacy;
 pub mod policy_port;
 pub mod provider_factory;
 pub mod provider_port;
+pub mod session_query;
 pub mod task_port;
 pub mod tool_port;
 pub mod tool_result_blob;
-pub mod usage_sink;
-pub mod workspace_port;
 
 pub use context_port::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
@@ -40,9 +35,7 @@ pub use context_port::{
     StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, ToolOutcomeKind,
     Urgency,
 };
-pub use event_sink::EventSink;
 pub use hook::{HookInvocation, HookOutcome, HookPoint, HookPort};
-pub use input_buffer::InputBuffer;
 pub use policy_port::{
     ApprovalSubject, PolicyDecision, PolicyMode, PolicyPort, PolicyReason, PolicyRequest,
     PolicyRequestError,
@@ -55,11 +48,10 @@ pub use provider_port::{
     RawUsageSnapshot, ReasoningCapability, ReasoningLevel, ReasoningMappingKind,
     RequestSystemBlock, StopReason,
 };
+pub use session_query::SessionQueryPort;
 pub use task_port::TaskPort;
 pub use tool_port::{
     RegistryScopeName, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionPort, ToolInvocation,
     ToolOutcome, ToolProfileName,
 };
 pub use tool_result_blob::{ToolResultBlobError, ToolResultBlobPort, ToolResultBlobRef};
-pub use usage_sink::{UsageDropReason, UsageEmitOutcome, UsageRecord, UsageSink};
-pub use workspace_port::{WorkspaceFrame, WorkspacePort};

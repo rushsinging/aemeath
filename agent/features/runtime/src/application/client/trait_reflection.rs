@@ -19,8 +19,7 @@ pub(super) async fn list_reflection_history_impl(
 ) -> Result<Vec<ReflectionHistoryView>> {
     let records = me
         .inner
-        .context
-        .resources
+        .shell
         .reflection_history
         .list(limit)
         .await

@@ -8,10 +8,11 @@ use super::mapping;
 pub(super) async fn list_sessions_impl(
     me: &AgentClientImpl,
 ) -> Result<Vec<SessionSummary>, SdkError> {
-    let session_management = me.inner.session_management.clone();
-    let project = me.inner.wiring.project_identity();
+    let session_management = me.inner.shell.session_management.clone();
+    let project = me.inner.shell.wiring.project_identity();
     let sessions = me
         .inner
+        .shell
         .wiring
         .with_shared(async move { session_management.list_for_project(&project).await })
         .await

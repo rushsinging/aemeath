@@ -2,10 +2,11 @@ mod accessors;
 mod from_args;
 mod mapping;
 pub mod resume_helper;
+pub(super) mod session_query;
 mod trait_chat;
 mod trait_impl;
 mod trait_memory;
-mod trait_model;
+pub(crate) mod trait_model;
 mod trait_reflection;
 mod trait_session;
 

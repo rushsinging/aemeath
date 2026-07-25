@@ -467,8 +467,7 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
 
 /// Wrap an existing `provider::test_harness::LlmProvider` scripted fake into a
 /// `ProviderBinding` so legacy loop/agent tests can plug their fakes directly
-/// into the `binding` field on `ChatLoopContext` / `RuntimeResources` without
-/// rewriting the fake bodies.
+/// into the `binding` field on `ChatLoopContext` without rewriting the fake bodies.
 ///
 /// The binding's `model`/`max_tokens`/`context_window` mirror the values used by
 /// the script fakes' default `LlmClient::from_provider(...)` construction.
@@ -521,3 +520,19 @@ pub(crate) fn models_config_with_model(
         ..Default::default()
     }
 }
+
+// ─── Test TaskAccess assembly (#1385 Runtime port-consumption contract) ──
+//
+// `check-task-persistence-capability.sh` blocks `TaskStore` / `TaskWiring` /
+// `wire_task` symbols in `runtime/src/**` because Task backing authority must
+// stay in the Task BC; runtime must only consume the injected `TaskAccess`
+// port. The `wire_task()` call lives in the paired `testing_tests.rs` which is
+// excluded from guard scanning (`*_tests.rs` files are skipped). The
+// `pub(crate) use` re-export widens `pub` visibility up to crate-wide for
+// callers in `runner::tests` and elsewhere.
+#[cfg(test)]
+pub(crate) use self::tests::test_task_access;
+
+#[cfg(test)]
+#[path = "testing_tests.rs"]
+mod tests;

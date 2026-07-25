@@ -9,7 +9,6 @@ pub(crate) mod hook_acl;
 mod hook_acl_tests;
 pub mod image;
 pub(crate) mod input_buffer;
-pub(crate) mod runtime;
 pub(crate) mod sdk_event_sink;
 pub mod tool_result_blob;
 pub(crate) mod tool_runtime;

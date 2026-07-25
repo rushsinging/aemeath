@@ -30,8 +30,7 @@ use crate::application::main_loop::looping::reflection::{
     maybe_submit_pre_compact_reflection, submit_pre_compact_reflection,
 };
 use crate::application::main_loop::looping::{
-    ChatEventSink, EmptyInputEventDrainPort, EmptyQueueDrainPort, EventFuture, PendingInputBuffer,
-    RuntimeStreamEvent, RuntimeTurnContext,
+    EmptyInputEventDrainPort, EmptyQueueDrainPort, PendingInputBuffer, RuntimeTurnContext,
 };
 use crate::application::reflection::{
     ReflectionTaskAdapter, ReflectionTaskRequest, ReflectionTaskSubmitOutcome,
@@ -171,18 +170,6 @@ impl ContextPort for StubContextPort {
     }
 }
 
-/// Recording sink — required because `MainRunPort` is generic over the sink.
-#[derive(Clone, Default)]
-struct NullSink;
-
-impl ChatEventSink for NullSink {
-    fn send_event<'a>(&'a self, _event: RuntimeStreamEvent) -> EventFuture<'a> {
-        Box::pin(async {})
-    }
-
-    fn try_send_event(&self, _event: RuntimeStreamEvent) {}
-}
-
 fn noop_reflection_history() -> Arc<dyn memory::api::ReflectionHistoryStore> {
     struct NoopHistory;
     #[async_trait]
@@ -252,18 +239,13 @@ fn build_compact_test_port<'a>(
     request: ContextRequest,
     window: Option<ContextWindow>,
     pre_compact_messages: Vec<Message>,
-) -> MainRunPort<'a, NullSink, EmptyQueueDrainPort, EmptyInputEventDrainPort> {
+) -> MainRunPort<'a, EmptyQueueDrainPort, EmptyInputEventDrainPort> {
+    let event_sink = harness.runtime_context.event_sink();
     MainRunPort {
-        sink: &harness.sink,
+        runtime_context: &harness.runtime_context,
         queue: &harness.queue,
         input_events: &harness.input_events,
-        binding: &harness.binding,
-        tool_catalog: &harness.tool_catalog,
-        tool_execution: &harness.tool_execution,
-        tool_context_binding: &harness.tool_context_binding,
         system_prompt_text: "system",
-        run_config: &harness.run_config,
-        context: &harness.coordinator,
         context_request: Some(request),
         context_window: window,
         step_messages: StepMessageOwnership::new(pre_compact_messages.clone()),
@@ -275,36 +257,28 @@ fn build_compact_test_port<'a>(
         session_reminders: &harness.session_reminders,
         agent_runner: &None,
         tool_result_materializer: harness.tool_result_materializer.as_ref(),
-        policy: &policy::AllowAllPolicy,
-        task_access: &harness.task_access,
         max_tool_concurrency: 1,
         agent_semaphore: &harness.agent_semaphore,
-        hook_runner: &harness.hook_runner,
-        memory_config: &harness.memory_config,
-        memory: &harness.memory,
-        reflection_history: &harness.reflection_history,
         reflection_tasks: &harness.adapter,
         language: "en",
-        reasoning: harness.reasoning.as_ref(),
         input_strategy: crate::application::loop_engine::input_strategy::MainInputStrategy {
             input_events: &harness.input_events,
-            sink: &harness.sink,
+            // #1385 Task 12: sink from runtime context, not separate reference.
+            sink: event_sink,
             queue: &harness.queue,
             pending_input: &mut harness.pending_input,
-            run_input_buffer: super::run_input_buffer::RunInputBuffer::new(),
+            run_input_buffer: crate::application::runtime_context::RunInputBufferHandle::new(),
             stop_hook_feedback: None,
             pending_stop_hook_feedback: None,
             pending_tool_results: false,
             run_id: RunId::new("run"),
         },
         per_turn_adopted: Vec::new(),
-        cancel: CancellationToken::new(),
         run_id: RunId::new("run"),
         active_run: harness.active_run.as_ref(),
-        interaction_bridge: &harness.interaction_bridge,
         turn_count: 1,
         turn_context: RuntimeTurnContext::new(ChatId::new_v7(), ChatTurnId::new_v7()),
-        last_total_tokens: &mut harness.last_total_tokens,
+        // #1385 Task 12: last_total_tokens eliminated.
         task_reminder_state: &mut harness.task_reminder_state,
         tool_identity: &harness.tool_identity,
         started_at: Instant::now(),
@@ -345,6 +319,7 @@ impl ReasoningPort for StubReasoningPort {
 
 /// Per-test harness. Holds all owned state that the borrowed `MainRunPort`
 /// references. Must outlive the port that `build_compact_test_port` returns.
+#[allow(dead_code)]
 struct CompactHarness {
     adapter: ReflectionTaskAdapter,
     coordinator: ContextCoordinator,
@@ -367,14 +342,14 @@ struct CompactHarness {
     interaction_bridge: Arc<crate::application::interaction::InteractionBridge>,
     task_access: Arc<dyn task::TaskAccess>,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
-    sink: NullSink,
     queue: EmptyQueueDrainPort,
     input_events: EmptyInputEventDrainPort,
     pending_input: PendingInputBuffer,
-    last_total_tokens: Option<u64>,
+    // #1385 Task 12: sink and last_total_tokens eliminated — both from runtime_context.
     task_reminder_state: TaskReminderState,
     tool_identity: crate::application::tool_coordination::identity::ToolIdentityRegistry,
     reasoning: Arc<dyn workflow::api::ReasoningPort>,
+    runtime_context: crate::application::runtime_context::RuntimeContext,
 }
 
 impl CompactHarness {
@@ -414,6 +389,45 @@ impl CompactHarness {
         let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
         let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(1));
         let reasoning: Arc<dyn workflow::api::ReasoningPort> = Arc::new(StubReasoningPort);
+        let runtime_context = crate::application::runtime_context::RuntimeContext::new(
+            crate::application::runtime_context::RuntimeContextParts {
+                context: stub.clone(),
+                provider: binding.clone(),
+                tool_catalog: tool_catalog.clone(),
+                tool_execution: tool_execution.clone(),
+                tool_context_binding: tool_context_binding.clone(),
+                policy: Arc::new(policy::AllowAllPolicy),
+                interaction: Arc::new(crate::application::interaction::InteractionBridge::new()),
+                memory: memory.clone(),
+                reflection_history: reflection_history.clone(),
+                task: task_access.clone(),
+                hooks: hook_runner.clone(),
+                reasoning: reasoning.clone(),
+                config: run_config.clone(),
+                cancel: crate::application::runtime_context::RunCancellationScope::new(),
+                event_sink: {
+                    #[derive(Clone)]
+                    struct NoOpSink;
+                    impl crate::application::main_loop::ChatEventSink for NoOpSink {
+                        fn send_event<'a>(
+                            &'a self,
+                            _event: crate::application::main_loop::RuntimeStreamEvent,
+                        ) -> crate::application::main_loop::EventFuture<'a>
+                        {
+                            Box::pin(std::future::ready(()))
+                        }
+                        fn try_send_event(
+                            &self,
+                            _event: crate::application::main_loop::RuntimeStreamEvent,
+                        ) {
+                        }
+                    }
+                    crate::application::main_loop::ChatEventSinkHandle::new(NoOpSink)
+                },
+                usage: crate::application::runtime_context::RunUsageTracker::new(),
+                input: crate::application::runtime_context::RunInputBufferHandle::new(),
+            },
+        );
         Self {
             adapter,
             coordinator,
@@ -435,15 +449,15 @@ impl CompactHarness {
             interaction_bridge: Arc::new(crate::application::interaction::InteractionBridge::new()),
             task_access,
             agent_semaphore,
-            sink: NullSink,
             queue: EmptyQueueDrainPort,
             input_events: EmptyInputEventDrainPort,
             pending_input: PendingInputBuffer::default(),
-            last_total_tokens: Some(0),
+            // #1385 Task 12: sink and last_total_tokens eliminated.
             task_reminder_state: TaskReminderState::new(),
             tool_identity:
                 crate::application::tool_coordination::identity::ToolIdentityRegistry::new(),
             reasoning,
+            runtime_context,
         }
     }
 }

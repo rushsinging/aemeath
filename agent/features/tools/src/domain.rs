@@ -52,8 +52,8 @@ pub use ports::{
 };
 pub use published_language::{
     CancellationDeclaration, ConcurrencyDeclaration, InputSafetyDeclaration, RegistryScopeName,
-    ToolCapabilities, ToolCapability, ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind,
-    ToolInvocation, ToolName, ToolOutcome as ToolExecutionOutcome, ToolProfileName,
+    ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogSnapshot, ToolDescriptor,
+    ToolErrorKind, ToolInvocation, ToolName, ToolOutcome as ToolExecutionOutcome, ToolProfileName,
 };
 pub use resources::CatalogQuery;
 pub use scope_profile::{ProfileExpansionError, ToolProfile};

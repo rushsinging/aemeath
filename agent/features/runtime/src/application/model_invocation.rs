@@ -6,13 +6,13 @@
 //! - 调 `ProviderPort` 发起 LLM 调用
 //! - 组装流式响应
 //! - 提取 tool_calls
-//! - 记录 `RawUsageSnapshot` -> 构造 `UsageRecord` 经 `UsageSink.try_record`
+//! - 记录 `RawUsageSnapshot` -> 构造 `UsageRecord` 经 `RuntimeStreamEvent::Usage` 路径发出
 //! - 退避重试：仅对 Retryable(超时/5xx/429/流中断) 指数退避重试
 //! - Fatal(4xx) 直接失败；context 超限 -> compact
 //! - 重试期 emit `ModelInvocationRetrying{attempt}`
 //!
 //! 状态：无（产出 `ModelInvocation` VO 交回 Run Step）
-//! 消费：`ProviderPort`、`ReasoningPort`、`UsageSink`
+//! 消费：`ProviderPort`、`ReasoningPort`
 //!
 //! 实现由 #875 负责。
 
@@ -35,7 +35,7 @@ const MAX_BACKOFF: Duration = Duration::from_secs(120);
 /// 一次 Provider attempt 的 usage 归属信息。
 ///
 /// 每次调用 [`Self::new`] 都生成新的 `ModelInvocationId`；该类型只负责纯映射，
-/// 不向 `UsageSink` 写入，避免在尚无 `RunStepId` 的 legacy 调用链上伪接生产链。
+/// 不向 usage 路径写入，避免在尚无 `RunStepId` 的 legacy 调用链上伪接生产链。
 #[derive(Debug, Clone)]
 pub(crate) struct ModelInvocationUsageContext {
     session_id: SessionId,
