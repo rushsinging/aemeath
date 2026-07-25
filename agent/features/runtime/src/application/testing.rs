@@ -62,7 +62,7 @@ use async_trait::async_trait;
 use futures::stream;
 use provider::{
     InvocationDelta, InvocationEvent, InvocationStream, ProviderCompletion, ProviderContentBlock,
-    ProviderStopReason, RawUsageSnapshot, ReasoningLevel,
+    ProviderError, ProviderStopReason, RawUsageSnapshot, ReasoningLevel,
 };
 
 pub(crate) fn test_tool_result_materializer(
@@ -112,6 +112,102 @@ pub(crate) fn text_completion_stream(
             effective_reasoning: ReasoningLevel::Off,
         }),
     ]))
+}
+
+#[derive(Clone)]
+pub(crate) struct ScriptedInvocationProvider {
+    attempts: Arc<Mutex<VecDeque<Vec<InvocationEvent>>>>,
+    calls: Arc<Mutex<usize>>,
+}
+
+impl ScriptedInvocationProvider {
+    pub(crate) fn new(attempts: Vec<Vec<InvocationEvent>>) -> Self {
+        Self {
+            attempts: Arc::new(Mutex::new(VecDeque::from(attempts))),
+            calls: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    pub(crate) fn calls(&self) -> usize {
+        *self.calls.lock().unwrap()
+    }
+}
+
+#[async_trait]
+impl provider::test_harness::LlmProvider for ScriptedInvocationProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &provider::test_harness::InvocationScope,
+        _system: &[provider::test_harness::SystemBlock],
+        _messages: &[share::message::Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        *self.calls.lock().unwrap() += 1;
+        let events = self
+            .attempts
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("scripted invocation provider attempt");
+        Ok(Box::pin(futures::stream::iter(events)))
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+pub(crate) fn empty_completion() -> InvocationEvent {
+    InvocationEvent::Completed(ProviderCompletion {
+        output: Vec::new(),
+        stop_reason: ProviderStopReason::EndTurn,
+        usage: Some(RawUsageSnapshot::default()),
+        effective_reasoning: ReasoningLevel::Off,
+    })
+}
+
+pub(crate) fn successful_completion(text: &str) -> InvocationEvent {
+    InvocationEvent::Completed(ProviderCompletion {
+        output: vec![ProviderContentBlock::Text(text.to_string())],
+        stop_reason: ProviderStopReason::EndTurn,
+        usage: Some(RawUsageSnapshot::default()),
+        effective_reasoning: ReasoningLevel::Off,
+    })
+}
+
+pub(crate) const RETRY_ADVANCE_LIMITS: [std::time::Duration; 10] = [
+    std::time::Duration::from_secs(11),
+    std::time::Duration::from_secs(21),
+    std::time::Duration::from_secs(41),
+    std::time::Duration::from_secs(81),
+    std::time::Duration::from_secs(121),
+    std::time::Duration::from_secs(121),
+    std::time::Duration::from_secs(121),
+    std::time::Duration::from_secs(121),
+    std::time::Duration::from_secs(121),
+    std::time::Duration::from_secs(121),
+];
+
+pub(crate) async fn advance_until_retry_condition(
+    description: &str,
+    virtual_time_limit: std::time::Duration,
+    condition: impl Fn() -> bool,
+) {
+    let tick = std::time::Duration::from_millis(100);
+    let max_ticks = virtual_time_limit.as_millis().div_ceil(tick.as_millis());
+    for _ in 0..max_ticks {
+        if condition() {
+            return;
+        }
+        tokio::time::advance(tick).await;
+        tokio::task::yield_now().await;
+    }
+    assert!(condition(), "timed out waiting for {description}");
 }
 
 // ─── Test ProviderPort helpers (#907) ────────────────────────────
