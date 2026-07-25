@@ -240,7 +240,13 @@ impl ModelInvocationCoordinator {
             };
 
             let Some(event) = event else {
-                return Err((missing_terminal_error(), committed_delta));
+                let error = missing_terminal_error();
+                // A raw EOF has no provider terminal event, so synthesize the
+                // retryable failure through the reducer before returning to the
+                // coordinator. This lets stream consumers close any active
+                // text/thinking block before the next attempt starts.
+                let _ = apply(InvocationEvent::Failed(error.clone()));
+                return Err((error, committed_delta));
             };
             let terminal_event = matches!(
                 event,
@@ -626,6 +632,46 @@ mod tests {
             coordinator.policy.decide(1, committed_delta, &error, 0),
             RetryDecision::RetryAfter(Duration::from_secs(10))
         );
+    }
+
+    #[tokio::test]
+    async fn raw_eof_dispatches_retryable_failure_through_reducer_for_stream_cleanup() {
+        let coordinator = ModelInvocationCoordinator::new();
+        let cancel = CancellationToken::new();
+        let events = futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Text(
+            "partial".to_string(),
+        ))]);
+        let reducer_events = std::cell::RefCell::new(Vec::new());
+
+        let outcome = coordinator
+            .pull_stream(events, &cancel, true, |event| {
+                reducer_events.borrow_mut().push(event);
+                Ok::<Option<()>, ProviderError>(None)
+            })
+            .await;
+
+        assert!(matches!(
+            outcome,
+            Err((
+                ProviderError {
+                    kind: ProviderErrorKind::StreamTruncated,
+                    retryable: true,
+                    ..
+                },
+                true
+            ))
+        ));
+        assert!(matches!(
+            reducer_events.borrow().as_slice(),
+            [
+                InvocationEvent::Delta(InvocationDelta::Text(_)),
+                InvocationEvent::Failed(ProviderError {
+                    kind: ProviderErrorKind::StreamTruncated,
+                    retryable: true,
+                    ..
+                })
+            ]
+        ));
     }
 
     #[tokio::test]

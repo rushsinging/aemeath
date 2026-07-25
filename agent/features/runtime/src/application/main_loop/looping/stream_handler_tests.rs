@@ -187,6 +187,31 @@ fn reducer_projects_block_transitions_without_callback_contract() {
 }
 
 #[test]
+fn reducer_closes_active_block_for_synthetic_raw_eof_failure() {
+    let sink = RecordingSink::default();
+    let mut reducer = InvocationEventReducer::new(sink.clone());
+    reducer
+        .apply(InvocationEvent::Delta(InvocationDelta::Text(
+            "partial".into(),
+        )))
+        .unwrap();
+
+    let error = provider::ProviderError::retryable(
+        ProviderErrorKind::StreamTruncated,
+        "provider stream ended without terminal event",
+    );
+    let returned = reducer
+        .apply(InvocationEvent::Failed(error.clone()))
+        .expect_err("failure event should terminate the invocation");
+    assert_eq!(returned.kind, ProviderErrorKind::StreamTruncated);
+
+    let events = sink.0.lock().unwrap();
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, RuntimeStreamEvent::BlockComplete { .. })));
+}
+
+#[test]
 fn waiting_detection_requires_no_progress_since_previous_snapshot() {
     let sink = RecordingSink::default();
     let mut reducer = InvocationEventReducer::new(sink);
