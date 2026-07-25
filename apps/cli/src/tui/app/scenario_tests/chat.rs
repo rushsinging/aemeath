@@ -139,3 +139,50 @@ fn empty_system_messages_from_runtime_do_not_accumulate_blank_lines() {
         );
     }
 }
+
+#[test]
+fn chat_retry_after_partial_preserves_output_append_only() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
+    harness.runtime_event(TuiRuntimeEvent::Text {
+        context: ctx(),
+        text: "partial before interruption".into(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::BlockComplete {
+        context: ctx(),
+        text: "partial before interruption".into(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::ModelInvocationRetrying {
+        context: ctx(),
+        attempt: 2,
+        delay_ms: 10_000,
+    });
+    harness.runtime_event(TuiRuntimeEvent::Text {
+        context: ctx(),
+        text: "replacement after retry".into(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::BlockComplete {
+        context: ctx(),
+        text: "replacement after retry".into(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::Done {
+        context: ctx(),
+        duration_ms: None,
+    });
+    harness.render();
+
+    let screen = harness.screen();
+    let partial = screen
+        .find("partial before interruption")
+        .expect("partial output should remain visible");
+    let retry = screen
+        .find("Retrying model invocation (attempt 2) in 10.0s.")
+        .expect("retry notice should be visible");
+    let replacement = screen
+        .find("replacement after retry")
+        .expect("replacement output should be visible");
+    assert!(partial < retry && retry < replacement);
+    assert!(!screen.contains("rollback"));
+    insta::assert_snapshot!("chat_retry_after_partial__100x30", screen);
+    harness.assert_idle();
+}
