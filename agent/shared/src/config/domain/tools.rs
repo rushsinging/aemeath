@@ -69,6 +69,9 @@ pub struct ToolsConfig {
 
 /// Agent role configuration — binds a named agent role to a specific LLM.
 ///
+/// Model protocol and capability settings are owned by the referenced model entry.
+/// Unknown legacy role fields such as `reasoning` are ignored by serde.
+///
 /// Example in config.json:
 /// ```json
 /// { "agents": { "roles": { "coder": { "model": "deepseek/deepseek-chat", "description": "Writes and edits code" } } } }
@@ -93,13 +96,6 @@ pub struct AgentRoleConfig {
     #[serde(default, alias = "systemSuffix")]
     pub system_suffix: Option<String>,
 
-    /// Reasoning / thinking mode for sub-agents using this role.
-    /// - `None` (default) — inherit from the main model's reasoning setting
-    /// - `Some(true)` — force enable thinking for this role
-    /// - `Some(false)` — force disable thinking for this role
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<bool>,
-
     /// Maximum output token budget for sub-agents using this role.
     /// `None` and `Some(0)` both inherit/default; `Some(n > 0)` overrides.
     #[serde(
@@ -118,7 +114,6 @@ impl Default for AgentRoleConfig {
             model: String::new(),
             description: String::new(),
             system_suffix: None,
-            reasoning: None,
             max_tokens: None,
         }
     }
@@ -180,6 +175,14 @@ mod tests {
         let config: AgentRoleConfig = serde_json::from_str(r#"{}"#).unwrap();
         assert!(config.enabled);
         assert!(AgentRoleConfig::default().enabled);
+    }
+
+    #[test]
+    fn agent_role_config_ignores_legacy_reasoning_field() {
+        let config: AgentRoleConfig = serde_json::from_str(r#"{ "reasoning": false }"#).unwrap();
+        let serialized = serde_json::to_value(config).unwrap();
+
+        assert!(serialized.get("reasoning").is_none());
     }
 
     #[test]
