@@ -3,8 +3,8 @@
 /// Agent description。
 pub fn agent(lang: &str) -> &'static str {
     match lang {
-        "zh" => "启动一个新代理，自主处理聚焦、限定范围的任务。必须通过 `role` 选择 `config.agents.roles` 中已配置的角色；子代理的模型、上下文窗口和输出预算来自该角色对应的 `config.models` 配置。同一响应中的多个 Agent 调用并发执行。",
-        _ => "Launch a new agent to handle a focused, scoped task autonomously. `role` is required and must name a configured entry in `config.agents.roles`; the sub-agent model, context window, and output budget come from that role's `config.models` entry. Multiple Agent calls in the SAME response run concurrently.",
+        "zh" => "启动一个新代理，自主处理聚焦、限定范围的任务。每次调用都是全新的独立会话，不继承主会话、其他子代理或历史调用的上下文，因此 prompt 必须自包含并列全完成任务所需的信息。必须通过 `role` 选择 `config.agents.roles` 中已配置的角色；子代理的模型、上下文窗口和输出预算来自该角色对应的 `config.models` 配置。同一响应中的多个 Agent 调用并发执行。",
+        _ => "Launch a new agent to handle a focused, scoped task autonomously. Every call starts a fresh, independent session and inherits no context from the parent conversation, other sub-agents, or previous calls, so the prompt must be self-contained with all information needed to complete the task. `role` is required and must name a configured entry in `config.agents.roles`; the sub-agent model, context window, and output budget come from that role's `config.models` entry. Multiple Agent calls in the SAME response run concurrently.",
     }
 }
 
@@ -89,6 +89,19 @@ pub fn tool_search(lang: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_description_requires_self_contained_prompt_for_isolated_session() {
+        let zh = agent("zh");
+        assert!(zh.contains("全新的独立会话"));
+        assert!(zh.contains("不继承"));
+        assert!(zh.contains("prompt 必须自包含"));
+
+        let en = agent("en");
+        assert!(en.contains("fresh, independent session"));
+        assert!(en.contains("inherits no context"));
+        assert!(en.contains("prompt must be self-contained"));
+    }
 
     #[test]
     fn core_bilingual_and_fallback() {
