@@ -22,20 +22,25 @@ aemeath 保留两类 token 数据，但职责不同：
 
 | 数据 | 来源 | 用途 |
 |---|---|---|---|
-| **Actual Provider usage** | `last_total_tokens`（上一次 Provider 响应） | 自动 compact 的唯一触发依据 |
-| **Heuristic** | `estimate_messages_tokens()` 等 | UI/日志诊断、recent-tail 30% 预算、summary/map-reduce 分块；**NEVER** 单独触发自动 compact |
+| **Actual Provider usage** | `last_api_total_tokens`（上一次 Provider 响应） | 若 baseline 与当前 session/model/compact generation 可比，则为自动 compact 的首选依据 |
+| **Heuristic** | `estimate_messages_tokens()` 等 | 缺少可比 API baseline 时作为自动 compact 回退；同时用于 UI/日志诊断、recent-tail 30% 预算、summary/map-reduce 分块 |
 
-`last_total_tokens` 是最近一次调用的 context usage，不是 Session 累计成本。只有
-Provider 成功返回新 usage 才更新；compact 成功后清为 `None`，防止旧值重复触发。
+`last_api_total_tokens` 是最近一次调用的标准化 context usage，不是 Session 累计成本。只有
+Provider 成功返回新 usage 才更新；compact（自动或手动）成功、session resume、模型切换后清为 `None`，防止跨 context generation 或模型复用不可比数值。缺少 baseline 时，Context decision 使用完整 candidate 启发式估算，而不是禁用自动 compact。
 
 > **Current / Target 边界**：Provider usage 标准化与自动触发已落地；
 > recent-tail 30% 是 RunStep backing 完成后的 Target。Current 仍按 message
 > 数保留约 10%（至少 4 条），不按 Run / Step token 预算裁剪。
 
 ```rust
-fn should_auto_compact(req: &ContextRequest, threshold: usize) -> bool {
-    req.last_total_tokens
-        .is_some_and(|total| total > threshold as u64)
+fn decision_token_count(req: &ContextRequest, candidate: &WindowCandidate) -> (usize, DecisionReason) {
+    match req.last_api_total_tokens {
+        Some(total) => (total as usize, DecisionReason::ActualProviderUsage),
+        None => (
+            estimate_candidate(req, candidate),
+            DecisionReason::HeuristicFallback,
+        ),
+    }
 }
 
 fn estimate_candidate(req: &ContextRequest, candidate: &WindowCandidate) -> usize {
@@ -100,7 +105,7 @@ fn estimate_message_tokens(msg: &Message) -> usize {
 ### 2.4 设计决策
 
 - **偏保守**：估算值 > 实际值是安全方向——compact 触发偏早比偏晚好
-- **自动触发只认 Actual**：没有新 Provider usage 时不进入 `Compacting`；heuristic 只做预算和诊断
+- **自动触发单一决策点**：Context decision 统一比较 `decision_token_count` 与 threshold；API baseline 可比时直接采用，缺失时回退完整 candidate heuristic
 - **reasoning_tokens 不额外相加**：若 Provider 的 `total_tokens` 已包含 output/reasoning，重复相加会双计
 - **Anthropic cache tokens 必须相加**：其 `input_tokens` 不代表完整 context input；cache read / creation 均占 context window
 - **OpenAI cached tokens 不重复相加**：其 prompt/input tokens 已包含 cached 部分
@@ -119,10 +124,7 @@ fn estimate_message_tokens(msg: &Message) -> usize {
 
 ```rust
 struct TokenBudgetConfig {
-    // summary_budget 不再在此 struct——改为 token_budget::summary_budget(context_size) 动态计算（context_size * 2%）
-
-    /// auto-compact 触发缓冲区
-    autocompact_buffer_tokens: usize,       // 13_000
+    // reserved_context 不再在此 struct——改为 token_budget::reserved_context(context_size) 动态计算（context_size * 2%）
 
     /// 估算安全系数
     estimation_safety_factor: f64,          // 1.33
@@ -150,8 +152,7 @@ struct TokenBudgetConfig {
 
 | 常量 | 值 | 依据 |
 |---|---|---|
-| `summary_budget` | `context_size * 2%`（动态） | 按比例缩放，100K→2000 / 272K→5440；summary 作为后续每轮固定前缀，按比例比写死常量更合理 |
-| `autocompact_buffer_tokens` | 13,000 | 安全缓冲：compact LLM 调用本身的输入+输出+下一轮用户输入的预留 |
+| `reserved_context` | `context_size * 2%`（动态） | 为 guidance 与 compact summary 预留；按比例缩放，100K→2000 / 272K→5440 |
 | `estimation_safety_factor` | 1.33 | 4/3 保守系数，覆盖 JSON 结构和估算不确定性 |
 | `map_reduce_chunk_threshold` | 30,000 | 超过此值时分块 map-reduce，每块 ≤ 此值 |
 | `compact_family_protect_recent_runs` | 3 | Main / Sub 统一保护最近 3 个完整 Run；RunStep 不推进窗口 |
@@ -161,18 +162,18 @@ struct TokenBudgetConfig {
 ### 4.1 公式
 
 ```
-resolved       = ProviderPort.resolve_invocation_options(model, requested)
-max_output     = resolved.max_output_tokens
-summary_budget = context_size * 2%
-effective      = context_size - min(max_output, summary_budget)
-threshold      = (effective - autocompact_buffer_tokens) * 0.8
+resolved         = ProviderPort.resolve_invocation_options(model, requested)
+max_output       = resolved.max_output_tokens
+reserved_context = context_size * 2%
+effective        = context_size - reserved_context - max_output
+threshold        = effective * 0.8
 ```
 
 **示例**（context_size=200,000, max_output=16,000）：
 ```
-summary_budget = 200,000 * 2% = 4,000
-effective      = 200,000 - min(16,000, 4,000) = 200,000 - 4,000 = 196,000
-threshold      = (196,000 - 13,000) * 0.8 = 146,400
+reserved_context = 200,000 * 2% = 4,000
+effective        = 200,000 - 4,000 - 16,000 = 180,000
+threshold        = 180,000 * 0.8 = 144,000
 ```
 
 ### 4.2 max_output_tokens 注入
@@ -185,10 +186,8 @@ threshold      = (196,000 - 13,000) * 0.8 = 146,400
 ```rust
 fn compaction_urgency(req: &ContextRequest, candidate: &WindowCandidate) -> Urgency {
     let effective = effective_context_window(req.context_size, req.max_output_tokens);
-    let total = req.last_total_tokens
-        .map(|value| value as usize)
-        .unwrap_or_else(|| estimate_candidate(req, candidate));
-    let pct = total * 100 / effective;
+    let (total, _) = decision_token_count(req, candidate);
+    let pct = total * 100 / effective.max(1);
 
     match pct {
         0..=69 => Urgency::None,
@@ -205,22 +204,12 @@ fn compaction_urgency(req: &ContextRequest, candidate: &WindowCandidate) -> Urge
 
 ```rust
 fn needs_compaction(req: &ContextRequest, candidate: &WindowCandidate) -> CompactionDecision {
-    let effective = effective_context_window(req.context_size, req.max_output_tokens);
-    let threshold = autocompact_threshold(effective);
-    let estimated = estimate_candidate(req, candidate);
-    let (needed, reason, observed) = if let Some(total) = req.last_total_tokens {
-        (
-            total > threshold as u64,
-            DecisionReason::ActualProviderUsage,
-            total as usize,
-        )
-    } else {
-        (false, DecisionReason::NoActualUsage, estimated)
-    };
+    let threshold = autocompact_threshold(req.context_size, req.max_output_tokens);
+    let (decision_token_count, reason) = decision_token_count(req, candidate);
     CompactionDecision {
-        needed,
+        needed: decision_token_count > threshold,
         urgency: compaction_urgency(req, candidate),
-        estimated_tokens: observed,
+        decision_token_count,
         threshold,
         reason,
     }
@@ -248,8 +237,7 @@ fn needs_compaction(req: &ContextRequest, candidate: &WindowCandidate) -> Compac
 struct CompactionFingerprint {
     backing_revision: SessionRevision,     // Context backing 的稳定 revision（ChatChain 版本）
     pending_messages_hash: u64,            // req.pending_messages 内容 hash
-    last_total_tokens: Option<u64>,
-    context_size: usize,
+    last_api_total_tokens: Option<u64>,    context_size: usize,
     max_output_tokens: usize,
     tool_schema_hash: u64,                 // tool 定义内容 hash（schema 变化时 fingerprint 变化）
 }
@@ -355,8 +343,7 @@ aemeath **不主动分配** system / history / tool / response 的 token 预算�
 - Snip / Microcompact（Target）：每次 `PreparingContext` 常驻执行，按完整 Run
   保护最近 3 个 Run；Current 仍在 compact 管线内调用既有 Microcompact，
   本次未迁移为常驻投影；
-- Auto-compact：仅当最近 Provider 标准化 `last_total_tokens > threshold` 时进入
-  `Compacting`。RunStep-aware recent tail Target 单独使用 heuristic 估算，并
+- Auto-compact：`compaction_decision` 是唯一阈值决策点；优先比较最近 Provider 标准化 `last_api_total_tokens`，baseline 缺失时回退完整 candidate heuristic。RunStep-aware recent tail Target 单独使用 heuristic 估算，并
   限制在 `context_size * 30%`，不包含 summary/system/tool schemas；Current
   recent tail 仍保持 message 10%。
 

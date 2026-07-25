@@ -124,6 +124,7 @@ where
                     match coordinator.manual_compact(&request).await {
                         Ok(crate::ports::CompactOutcome::Committed(result)) => {
                             messages = result.recent_messages.clone();
+                            last_total_tokens = None;
                             sink.send_event(RuntimeStreamEvent::CompactFinished {
                                 messages: result.recent_messages,
                             }).await;
@@ -148,6 +149,7 @@ where
                             reasoning.reset_default_level(new_binding.requested_reasoning);
                             binding = Arc::new(new_binding);
                             context_size = result.context_window;
+                            last_total_tokens = None;
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::ModelSwitched { result })
                                 .await;
@@ -267,6 +269,7 @@ where
                         Ok(projection) => {
                             session_id = projection.session_id.clone();
                             messages = projection.messages.clone();
+                            last_total_tokens = None;
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::SessionResumed {
                                     steps: projection

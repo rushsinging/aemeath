@@ -59,7 +59,7 @@ struct ContextRequest {
     config_snapshot: ConfigSnapshot,    // 本 Run shared lease 下的只读快照
     context_size: usize,                // 模型 context window
     max_output_tokens: usize,           // 与 InvocationRequest 相同的 resolved output limit
-    last_total_tokens: Option<u64>,     // 上一次 Provider 响应的标准化 total；None 时不自动 compact
+    last_api_total_tokens: Option<u64>, // 上一次 Provider 响应的标准化 total；None 时回退本轮启发式估算
     tool_schemas: Vec<ModelToolSchema>, // 本轮唯一 ToolCatalogSnapshot 的稳定投影
     tool_schema_tokens: usize,          // tool 定义占用
 }
@@ -97,13 +97,13 @@ struct CompactRequest {
 struct CompactionDecision {
     needed: bool,
     urgency: Urgency,                   // None / Monitor / Should / Must
-    estimated_tokens: usize,
+    decision_token_count: usize,        // 本次 decision 实际采用的 token 数值
     threshold: usize,
-    reason: DecisionReason,             // ActualProviderUsage / NoActualUsage / Manual
+    reason: DecisionReason,             // ActualProviderUsage / HeuristicFallback / Manual
 }
 enum DecisionReason {
-    ActualProviderUsage,                // 基于上一次 Provider 标准化 total_tokens
-    NoActualUsage,                      // 首轮 / compact 后尚无新 Provider usage
+    ActualProviderUsage,                // 直接采用上一次 Provider 标准化 total_tokens
+    HeuristicFallback,                  // 首轮、resume、切换模型或 compact 后缺少可比 API baseline
     Manual,                             // 仅 manual compact 路径独立构造 Decision 时使用；
                                         // compaction_decision 计算永远不会产出此值
 }
@@ -346,26 +346,25 @@ fn generate_collapse_summary(messages: &[Message]) -> CollapseSummary {
 **目标**：token 超阈值时，用 LLM 生成摘要替换历史。
 ### 8.1 触发条件
 按优先级检查，任一失败即跳过：
-1. **Provider usage 存在**：`last_total_tokens` 为 `Some`；首轮、resume 首轮和 compact 后尚未产生新 Provider 响应时均跳过自动 compact
-2. **Token 阈值**：`last_total_tokens > threshold`
+1. **计算 decision token count**：若存在与当前 session/model/compact generation 可比的 `last_api_total_tokens`，直接采用该标准化 total；否则使用本轮完整 candidate 的启发式估算
+2. **Token 阈值**：`decision_token_count > threshold`
 3. **PreCompact hook**：`result.blocked || decision == "block"` → 跳过
 4. **可压缩历史存在**：至少一个 finalized RunStep 可进入 summary 或 recent tail
-`last_total_tokens` 是上一次 Provider 响应经 Provider ACL 标准化后的单次
+`last_api_total_tokens` 是上一次 Provider 响应经 Provider ACL 标准化后的单次
 context usage，不是 Session 累计成本。Anthropic 必须包含 cache read / cache
 creation input；完整规则见 [03-token-budget.md](03-token-budget.md)。
-**compact 后 usage 重置**：compact 成功后把 `last_total_tokens` 清为 `None`。
-只有下一次 Provider 调用成功返回新的 usage 后，自动 compact 才可再次触发。
-因此一个长 Run 可以在不同 RunStep 后多次 compact，但 **NEVER** 在没有新
-Provider usage 的情况下围绕同一个旧值重复进入 `Compacting`。目标态不再使用
-“每 Run 最多 compact 一次”的粗粒度冷却。
+**baseline 失效**：compact 成功、manual compact 成功、session resume 或模型切换后，
+Runtime 必须把 `last_api_total_tokens` 清为 `None`；下一次 decision 回退本轮完整
+candidate 启发式估算，直到当前模型成功返回新的标准化 usage。由此既不复用不可比的
+旧 API 数值，也不会因缺少 usage 而禁用自动 compact。
 ### 8.2 阈值计算
 见 [03-token-budget.md](03-token-budget.md)。核心公式：
 ```
-summary_budget = context_size * 2%
-effective = context_size - min(max_output_tokens, summary_budget)
-threshold = (effective - autocompact_buffer_tokens) * 0.8
+reserved_context = context_size * 2%
+effective = context_size - reserved_context - max_output_tokens
+threshold = effective * 0.8
 ```
-`summary_budget` 按 context window 比例动态缩放（如 100K context → 2000 token budget；272K → 5440 token），**NEVER** 写死常量。`max_output_tokens` **MUST** 使用本 Run 的 Config / Provider capability 已解析真实值，**NEVER** 使用固定 `8192`。
+`reserved_context` 为 guidance 与 compact summary 预留，按 context window 比例动态缩放（如 100K context → 2000；272K → 5440），**NEVER** 写死常量。它与 `max_output_tokens` 是两个独立预算，必须同时从 context window 扣除，**NEVER** 取 `min`。0.8 safety ratio 已承担提前触发缓冲，因此不再叠加固定 `13_000`。`max_output_tokens` **MUST** 使用本 Run 的 Config / Provider capability 已解析真实值，**NEVER** 使用固定 `8192`。
 ### 8.3 Summary 生成
 L5 的 Target 摘要生成已经演进为**持久化增量摘要树**：平时在
 `append_and_persist` 后按 finalized RunStep 增量构建 Leaf / Branch，compact
@@ -507,8 +506,7 @@ chain.compact(result.summary, result.recent_runs, source.revision);
 `messages_flat()`；因此现状**无法正确按 RunStep 裁 recent tail**。在
 `CommittedRunStep` backing 落地前，Current 与 Target 必须明确区分：
 **Current（本次已实现）**：
-1. Provider ACL 先产出标准化 `last_total_tokens`，Runtime 仅以
-   `last_total_tokens > threshold` 进入 `Compacting`，成功后清空该值；
+1. Context decision 优先采用 Provider ACL 标准化的 `last_api_total_tokens`；baseline 缺失时回退完整 candidate heuristic，并统一以 `decision_token_count > threshold` 进入 `Compacting`；
 2. 删除 auto compact 各层重复阈值判断，`Compacting` 内只执行一次管线；
 3. 连续 compact 把上一轮 active summary 显式并入下一轮 summary 输入；
 4. recent tail **保持现有实现不变**：按 message 数保留约 10%（至少 4 条），
@@ -541,8 +539,7 @@ chain.compact(result.summary, result.recent_runs, source.revision);
 | 常量 | 默认值 / 来源 | 唯一所有者 |
 |---|---|---|
 | `max_output_tokens` | 本 Run 的 model capability / ConfigSnapshot | Invocation / ContextRequest |
-| `summary_budget` | `context_size * 2%`（动态计算） | `token_budget::summary_budget(context_size)` |
-| `autocompact_buffer_tokens` | 13,000 | `TokenBudgetConfig.autocompact_buffer_tokens` |
+| `reserved_context` | `context_size * 2%`（动态计算） | `token_budget::summary_budget(context_size)` |
 | `estimation_safety_factor` | 1.33 | `TokenBudgetConfig.estimation_safety_factor` |
 ## 11. 与 #547 的映射
 | #547 子 issue | 策略 | 目标契约位置 |

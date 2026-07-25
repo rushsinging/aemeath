@@ -176,11 +176,9 @@ impl<'a> SubAgentRun<'a> {
             config_snapshot: self.config_snapshot.clone(),
             context_size: self.ctx_context_size,
             max_output_tokens: self.max_tokens as usize,
-            last_api_input_tokens: self.last_total_tokens,
+            last_api_total_tokens: self.last_total_tokens,
             tool_schemas,
             tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(&raw_tool_schemas),
-            prev_system_tokens: None,
-            prev_tool_schema_tokens: None,
         }
     }
 

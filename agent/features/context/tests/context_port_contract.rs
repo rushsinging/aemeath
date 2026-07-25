@@ -21,9 +21,9 @@ fn decision() -> CompactionDecision {
     CompactionDecision {
         needed: false,
         urgency: Urgency::None,
-        estimated_tokens: 12,
+        decision_token_count: 12,
         threshold: 100,
-        reason: DecisionReason::Heuristic,
+        reason: DecisionReason::HeuristicFallback,
     }
 }
 
@@ -43,11 +43,9 @@ fn request() -> ContextRequest {
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,
         max_output_tokens: 8_192,
-        last_api_input_tokens: None,
+        last_api_total_tokens: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
-        prev_system_tokens: None,
-        prev_tool_schema_tokens: None,
     }
 }
 

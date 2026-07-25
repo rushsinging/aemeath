@@ -130,11 +130,9 @@ fn compact_request(session_id: SessionId) -> ContextRequest {
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 1,
         max_output_tokens: 1,
-        last_api_input_tokens: Some(100),
+        last_api_total_tokens: Some(100),
         tool_schemas: vec![],
         tool_schema_tokens: 0,
-        prev_system_tokens: None,
-        prev_tool_schema_tokens: None,
     }
 }
 
@@ -420,7 +418,7 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
     let mut request = compact_request(session_id);
     request.context_size = 1_000_000;
     request.max_output_tokens = 8_192;
-    request.last_api_input_tokens = Some(900_000);
+    request.last_api_total_tokens = Some(900_000);
 
     let outcome = repository
         .commit_compaction(&CompactRequest {
