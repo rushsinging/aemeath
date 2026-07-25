@@ -837,16 +837,31 @@ fn retry_main_context(
     sink: RecordingSink,
     input_events: ChannelInputEvents,
 ) -> ChatLoopContext<RecordingSink, SequenceQueueDrainPort, ChannelInputEvents> {
+    retry_main_context_with_wiring(provider, sink, input_events).0
+}
+
+fn retry_main_context_with_wiring(
+    provider: Arc<RetryThenSuccessProvider>,
+    sink: RecordingSink,
+    input_events: ChannelInputEvents,
+) -> (
+    ChatLoopContext<RecordingSink, SequenceQueueDrainPort, ChannelInputEvents>,
+    Arc<context::MainSessionWiring>,
+) {
     let mut shell = test_shell();
+    let wiring = shell.wiring.clone();
     shell.current_binding = Arc::new(std::sync::RwLock::new(
         crate::application::testing::binding_from_llm_provider(provider),
     ));
     shell.session_id = "test-main-terminal-retry".to_string();
-    test_chat_loop_ctx(
-        sink,
-        SequenceQueueDrainPort::new(Vec::new()),
-        input_events,
-        shell,
+    (
+        test_chat_loop_ctx(
+            sink,
+            SequenceQueueDrainPort::new(Vec::new()),
+            input_events,
+            shell,
+        ),
+        wiring,
     )
 }
 
@@ -928,7 +943,8 @@ async fn main_empty_completion_retries_and_succeeds() {
         .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
         .unwrap();
 
-    let ctx = retry_main_context(provider.clone(), sink.clone(), input_events);
+    let (ctx, wiring) =
+        retry_main_context_with_wiring(provider.clone(), sink.clone(), input_events);
     let run = tokio::spawn(process_chat_loop(ctx));
     wait_for_retry_test_condition("first empty completion", || provider.calls() == 1).await;
     tokio::time::advance(std::time::Duration::from_secs(10)).await;
@@ -956,6 +972,22 @@ async fn main_empty_completion_retries_and_succeeds() {
     assert!(sink.synced_messages().iter().flatten().all(|message| {
         message.role != Role::Assistant || !message.text_content().trim().is_empty()
     }));
+    let committed = wiring.committed_session();
+    let committed_messages = committed
+        .run_slices
+        .iter()
+        .flat_map(|slice| slice.steps.iter())
+        .filter_map(|step| step.outcome.as_ref())
+        .flat_map(|outcome| outcome.messages.iter());
+    let committed_assistant_texts = committed_messages
+        .filter(|message| message.role == Role::Assistant)
+        .map(Message::text_content)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        committed_assistant_texts,
+        vec!["complete"],
+        "only the valid terminal assistant response may be finalized"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -1011,10 +1043,14 @@ async fn main_empty_completion_exhaustion_fails_instead_of_completing() {
         10,
         "events: {events:?}"
     );
-    assert!(events.iter().any(|event| {
-        event.starts_with("ApiError:")
-            && event.contains("provider completed without assistant text or tool call")
-    }));
+    assert_eq!(
+        events
+            .iter()
+            .find(|event| event.starts_with("ApiError:"))
+            .map(String::as_str),
+        Some("ApiError:loop adapter error: protocol error: provider completed without assistant text or tool call"),
+        "the final ApiError must preserve the last empty-terminal failure: {events:?}"
+    );
 }
 
 fn test_hook_port() -> Arc<dyn HookPort> {
