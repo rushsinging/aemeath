@@ -196,6 +196,7 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
 use crate::application::testing::text_completion_stream;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use hook::HookPort;
 use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
 use provider::ReasoningLevel;
@@ -763,6 +764,7 @@ impl LlmProvider for SequenceProvider {
 struct RetryThenSuccessProvider {
     attempts: Arc<Mutex<VecDeque<Vec<InvocationEvent>>>>,
     calls: Arc<Mutex<usize>>,
+    terminal_events: Arc<Mutex<usize>>,
 }
 
 impl RetryThenSuccessProvider {
@@ -770,11 +772,16 @@ impl RetryThenSuccessProvider {
         Self {
             attempts: Arc::new(Mutex::new(VecDeque::from(attempts))),
             calls: Arc::new(Mutex::new(0)),
+            terminal_events: Arc::new(Mutex::new(0)),
         }
     }
 
     fn calls(&self) -> usize {
         *self.calls.lock().unwrap()
+    }
+
+    fn terminal_events(&self) -> usize {
+        *self.terminal_events.lock().unwrap()
     }
 }
 
@@ -795,7 +802,17 @@ impl LlmProvider for RetryThenSuccessProvider {
             .unwrap()
             .pop_front()
             .expect("scripted provider attempt");
-        Ok(Box::pin(futures::stream::iter(events)))
+        let terminal_events = self.terminal_events.clone();
+        Ok(Box::pin(futures::stream::iter(events).inspect(
+            move |event| {
+                if matches!(
+                    event,
+                    InvocationEvent::Completed(_) | InvocationEvent::Failed(_)
+                ) {
+                    *terminal_events.lock().unwrap() += 1;
+                }
+            },
+        )))
     }
 
     fn model_name(&self) -> &str {
@@ -875,6 +892,12 @@ async fn wait_for_retry_test_condition(description: &str, condition: impl Fn() -
     panic!("timed out waiting for {description}");
 }
 
+async fn yield_after_terminal_event() {
+    for _ in 0..32 {
+        tokio::task::yield_now().await;
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn main_partial_stream_failure_retries_without_rollback() {
     let provider = Arc::new(RetryThenSuccessProvider::new(vec![
@@ -895,7 +918,11 @@ async fn main_partial_stream_failure_retries_without_rollback() {
 
     let ctx = retry_main_context(provider.clone(), sink.clone(), input_events);
     let run = tokio::spawn(process_chat_loop(ctx));
-    wait_for_retry_test_condition("first provider attempt", || provider.calls() == 1).await;
+    wait_for_retry_test_condition("first provider terminal event", || {
+        provider.terminal_events() == 1
+    })
+    .await;
+    yield_after_terminal_event().await;
     tokio::time::advance(std::time::Duration::from_secs(10)).await;
     wait_for_retry_test_condition("successful retry", || provider.calls() == 2).await;
     wait_for_retry_test_condition("completed Main turn", || {
@@ -946,7 +973,11 @@ async fn main_empty_completion_retries_and_succeeds() {
     let (ctx, wiring) =
         retry_main_context_with_wiring(provider.clone(), sink.clone(), input_events);
     let run = tokio::spawn(process_chat_loop(ctx));
-    wait_for_retry_test_condition("first empty completion", || provider.calls() == 1).await;
+    wait_for_retry_test_condition("first empty completion terminal event", || {
+        provider.terminal_events() == 1
+    })
+    .await;
+    yield_after_terminal_event().await;
     tokio::time::advance(std::time::Duration::from_secs(10)).await;
     wait_for_retry_test_condition("successful retry", || provider.calls() == 2).await;
     wait_for_retry_test_condition("completed Main turn", || {
@@ -1003,7 +1034,11 @@ async fn main_empty_completion_exhaustion_fails_instead_of_completing() {
 
     let ctx = retry_main_context(provider.clone(), sink.clone(), input_events);
     let run = tokio::spawn(process_chat_loop(ctx));
-    wait_for_retry_test_condition("initial empty completion", || provider.calls() == 1).await;
+    wait_for_retry_test_condition("initial empty completion terminal event", || {
+        provider.terminal_events() == 1
+    })
+    .await;
+    yield_after_terminal_event().await;
     let advances = [
         std::time::Duration::from_secs(10),
         std::time::Duration::from_millis(20_146),
@@ -1023,6 +1058,21 @@ async fn main_empty_completion_exhaustion_fails_instead_of_completing() {
             provider.calls() == expected_calls
         })
         .await;
+        wait_for_retry_test_condition("next empty completion terminal event", || {
+            provider.terminal_events() == expected_calls
+        })
+        .await;
+        yield_after_terminal_event().await;
+        if expected_calls < 11 {
+            wait_for_retry_test_condition("next retry event", || {
+                sink.events()
+                    .iter()
+                    .filter(|event| event.starts_with("ModelInvocationRetrying:"))
+                    .count()
+                    == expected_calls - 1
+            })
+            .await;
+        }
     }
     wait_for_retry_test_condition("exhaustion ApiError", || {
         sink.events()
@@ -1042,6 +1092,27 @@ async fn main_empty_completion_exhaustion_fails_instead_of_completing() {
             .count(),
         10,
         "events: {events:?}"
+    );
+    let retry_events = events
+        .iter()
+        .filter(|event| event.starts_with("ModelInvocationRetrying:"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        retry_events,
+        vec![
+            "ModelInvocationRetrying:2:10000",
+            "ModelInvocationRetrying:3:20146",
+            "ModelInvocationRetrying:4:40219",
+            "ModelInvocationRetrying:5:80041",
+            "ModelInvocationRetrying:6:120000",
+            "ModelInvocationRetrying:7:120000",
+            "ModelInvocationRetrying:8:120000",
+            "ModelInvocationRetrying:9:120000",
+            "ModelInvocationRetrying:10:120000",
+            "ModelInvocationRetrying:11:120000",
+        ],
+        "retry attempts and capped delays must remain observable: {events:?}"
     );
     assert_eq!(
         events
