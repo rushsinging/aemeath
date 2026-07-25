@@ -7,9 +7,13 @@ use crate::application::loop_engine::llm_log::{
 use ::logging as scoped_logging;
 use async_trait::async_trait;
 use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
-use provider::{InvocationStream, ProviderError, ProviderErrorKind};
+use provider::{
+    InvocationEvent, InvocationStream, ProviderCompletion, ProviderContentBlock, ProviderError,
+    ProviderErrorKind, ProviderStopReason, RawUsageSnapshot, ReasoningLevel,
+};
 use share::config::AgentRoleConfig;
 use share::message::Message;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tools::AgentProgressKind;
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
@@ -1250,6 +1254,111 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn sub_empty_completion_retries_and_succeeds() {
+    let provider = Arc::new(ScriptedCompletionProvider::new(vec![
+        vec![empty_completion()],
+        vec![successful_completion("sub recovered")],
+    ]));
+    let (runner, _parent_guard) = test_runner_with_provider(provider.clone());
+    let ctx = test_ctx();
+
+    let run = tokio::spawn(async move {
+        runner
+            .run_agent(AgentRunRequest {
+                prompt: "prompt",
+                system: "system",
+                identity: ctx.scope(),
+                cancellation: ctx.cancellation(),
+                progress: ctx.progress_sink(),
+                memory: ctx.memory(),
+                catalog: ctx.catalog_query(),
+                read_set: ctx.read_set(),
+                plan_mode: ctx.plan_mode_state(),
+                guidance: ctx.guidance(),
+                timeout: std::time::Duration::from_secs(3_600),
+                role: "coder",
+            })
+            .await
+    });
+
+    advance_until_sub_retry_condition(
+        "second provider attempt",
+        std::time::Duration::from_secs(11),
+        || provider.calls() == 2,
+    )
+    .await;
+    let result = run.await.unwrap();
+
+    assert_eq!(provider.calls(), 2);
+    assert_eq!(
+        result,
+        tools::AgentRunTerminal::Completed {
+            result: "sub recovered".to_string(),
+        }
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn sub_empty_completion_exhaustion_is_typed_failure() {
+    let provider = Arc::new(ScriptedCompletionProvider::new(
+        (0..11).map(|_| vec![empty_completion()]).collect(),
+    ));
+    let (runner, _parent_guard) = test_runner_with_provider(provider.clone());
+    let ctx = test_ctx();
+
+    let run = tokio::spawn(async move {
+        runner
+            .run_agent(AgentRunRequest {
+                prompt: "prompt",
+                system: "system",
+                identity: ctx.scope(),
+                cancellation: ctx.cancellation(),
+                progress: ctx.progress_sink(),
+                memory: ctx.memory(),
+                catalog: ctx.catalog_query(),
+                read_set: ctx.read_set(),
+                plan_mode: ctx.plan_mode_state(),
+                guidance: ctx.guidance(),
+                timeout: std::time::Duration::from_secs(3_600),
+                role: "coder",
+            })
+            .await
+    });
+
+    let retry_limits = [
+        std::time::Duration::from_secs(11),
+        std::time::Duration::from_secs(21),
+        std::time::Duration::from_secs(41),
+        std::time::Duration::from_secs(81),
+        std::time::Duration::from_secs(121),
+        std::time::Duration::from_secs(121),
+        std::time::Duration::from_secs(121),
+        std::time::Duration::from_secs(121),
+        std::time::Duration::from_secs(121),
+        std::time::Duration::from_secs(121),
+    ];
+    for (retry_index, virtual_time_limit) in retry_limits.into_iter().enumerate() {
+        let expected_calls = retry_index + 2;
+        advance_until_sub_retry_condition(
+            "next empty completion retry",
+            virtual_time_limit,
+            || provider.calls() == expected_calls,
+        )
+        .await;
+    }
+    let result = run.await.unwrap();
+
+    assert_eq!(provider.calls(), 11);
+    assert_eq!(
+        result,
+        tools::AgentRunTerminal::Failed {
+            error: "loop adapter error: protocol error: provider completed without assistant text or tool call"
+                .to_string(),
+        }
+    );
+}
+
 #[tokio::test]
 async fn test_run_agent_timeout_comes_from_request_and_returns_typed_failure() {
     let (runner, _guard) = test_runner(ProviderError::retryable(
@@ -1393,8 +1502,8 @@ fn test_config_reader() -> Arc<dyn config::ConfigReader> {
     Arc::new(FixedConfigReader::from_snapshot(test_config_snapshot()))
 }
 
-fn test_runner(
-    error: ProviderError,
+fn test_runner_with_provider(
+    provider: Arc<dyn LlmProvider>,
 ) -> (
     CliAgentRunner,
     crate::application::runtime_context::ParentRunFrameGuard,
@@ -1403,9 +1512,7 @@ fn test_runner(
     (
         CliAgentRunner {
             factory: crate::application::testing::constant_factory(
-                crate::application::testing::binding_from_llm_provider(Arc::new(ErrorProvider {
-                    error,
-                })),
+                crate::application::testing::binding_from_llm_provider(provider),
             ),
             config_reader: test_config_reader(),
             active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
@@ -1423,6 +1530,15 @@ fn test_runner(
         },
         guard,
     )
+}
+
+fn test_runner(
+    error: ProviderError,
+) -> (
+    CliAgentRunner,
+    crate::application::runtime_context::ParentRunFrameGuard,
+) {
+    test_runner_with_provider(Arc::new(ErrorProvider { error }))
 }
 
 /// #1385 Task 7: Create a `ParentRunContextSource` pre-loaded with a valid
@@ -1451,30 +1567,90 @@ fn test_runner_with_blocking_provider(
     CliAgentRunner,
     crate::application::runtime_context::ParentRunFrameGuard,
 ) {
-    let (src, guard) = test_parent_source();
-    (
-        CliAgentRunner {
-            factory: crate::application::testing::constant_factory(
-                crate::application::testing::binding_from_llm_provider(Arc::new(
-                    BlockingThenCancelledProvider { calls },
-                )),
-            ),
-            config_reader: test_config_reader(),
-            active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-            max_tool_concurrency: 10,
-            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-            tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-            workspace: crate::application::testing::runtime_workspace(
-                &crate::application::testing::test_tool_execution_context(
-                    std::env::temp_dir(),
-                    tokio_util::sync::CancellationToken::new(),
-                ),
-            ),
-            skill_materializer: empty_skill_materializer(),
-            parent_context: src,
-        },
-        guard,
-    )
+    test_runner_with_provider(Arc::new(BlockingThenCancelledProvider { calls }))
+}
+
+#[derive(Clone)]
+struct ScriptedCompletionProvider {
+    attempts: Arc<std::sync::Mutex<VecDeque<Vec<InvocationEvent>>>>,
+    calls: Arc<std::sync::Mutex<usize>>,
+}
+
+impl ScriptedCompletionProvider {
+    fn new(attempts: Vec<Vec<InvocationEvent>>) -> Self {
+        Self {
+            attempts: Arc::new(std::sync::Mutex::new(VecDeque::from(attempts))),
+            calls: Arc::new(std::sync::Mutex::new(0)),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        *self.calls.lock().unwrap()
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ScriptedCompletionProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        *self.calls.lock().unwrap() += 1;
+        let events = self
+            .attempts
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("scripted completion provider attempt");
+        Ok(Box::pin(futures::stream::iter(events)))
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+fn empty_completion() -> InvocationEvent {
+    InvocationEvent::Completed(ProviderCompletion {
+        output: Vec::new(),
+        stop_reason: ProviderStopReason::EndTurn,
+        usage: Some(RawUsageSnapshot::default()),
+        effective_reasoning: ReasoningLevel::Off,
+    })
+}
+
+fn successful_completion(text: &str) -> InvocationEvent {
+    InvocationEvent::Completed(ProviderCompletion {
+        output: vec![ProviderContentBlock::Text(text.to_string())],
+        stop_reason: ProviderStopReason::EndTurn,
+        usage: Some(RawUsageSnapshot::default()),
+        effective_reasoning: ReasoningLevel::Off,
+    })
+}
+
+async fn advance_until_sub_retry_condition(
+    description: &str,
+    virtual_time_limit: std::time::Duration,
+    condition: impl Fn() -> bool,
+) {
+    let tick = std::time::Duration::from_millis(100);
+    let max_ticks = virtual_time_limit.as_millis().div_ceil(tick.as_millis());
+    for _ in 0..max_ticks {
+        if condition() {
+            return;
+        }
+        tokio::time::advance(tick).await;
+        tokio::task::yield_now().await;
+    }
+    assert!(condition(), "timed out waiting for {description}");
 }
 
 /// 模拟真实进行中的 LLM 流：`invocation_stream` 阻塞在 `cancel.cancelled()` 上，
