@@ -1,12 +1,10 @@
-#[cfg(test)]
-use crate::application::startup::config_paths;
+use crate::application::runtime_context::ParentRunContextSource;
 use crate::application::subagent::runner as agent_runner;
 use crate::ports::ProviderFactory;
-use hook::HookPort;
 #[cfg(test)]
 use share::config::AgentsConfig;
 #[cfg(test)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub fn start_session(resume_session_id: Option<String>) -> String {
@@ -19,36 +17,26 @@ pub fn start_session(resume_session_id: Option<String>) -> String {
 pub fn build_agent_runner(
     config_reader: Arc<dyn config::ConfigReader>,
     factory: Arc<dyn ProviderFactory>,
-    hook_runner: Arc<dyn HookPort>,
-    reasoning: bool,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
-    policy: Arc<dyn policy::PolicyPort>,
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     tool_result_materializer: Arc<
         crate::application::tool_result_materialization::ToolResultMaterializer,
     >,
     workspace: project::WorkspaceViews,
-    tool_catalog: Arc<dyn tools::ToolCatalogPort>,
-    tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    parent_context_source: ParentRunContextSource,
 ) -> Arc<agent_runner::CliAgentRunner> {
     Arc::new(agent_runner::CliAgentRunner {
         factory,
         active_run,
         config_reader,
-        hook_runner,
-        reasoning,
         max_tool_concurrency,
         agent_semaphore,
         tool_result_materializer,
         workspace: crate::application::workspace_access::RuntimeWorkspaceAccess::new(workspace),
-        tool_catalog,
-        tool_execution,
-        tool_context_binding,
         skill_materializer,
-        policy,
+        parent_context: parent_context_source,
     })
 }
 
@@ -60,14 +48,20 @@ fn has_multi_provider_or_agent_roles(
     models_config.providers.len() > 1 || agents.map(|a| !a.roles.is_empty()).unwrap_or(false)
 }
 
+/// Resolve the effective logs directory from config or an explicit fallback.
+///
+/// #1385: accepts explicit `agents_dir` so the caller (production composition)
+/// threads one resolved `agents_dir` through every path; tests exercise the
+/// same contract without calling `global_logs_dir()`.
 #[cfg(test)]
 fn resolve_role_logs_dir(
     config_file: Option<&share::config::domain::snapshot::ConfigSnapshot>,
+    agents_dir: &Path,
 ) -> PathBuf {
     config_file
         .and_then(|config| config.logs_dir())
         .map(expand_tilde_path)
-        .unwrap_or_else(|| config_paths::global_logs_dir().join("logs"))
+        .unwrap_or_else(|| agents_dir.join("logs"))
 }
 
 #[cfg(test)]
@@ -83,8 +77,6 @@ fn expand_tilde_path(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hook::HookPort;
-    use share::config::hooks::HooksConfig;
     use share::config::models::ProviderModelsConfig;
     use share::config::{AgentRoleConfig, AgentsConfig, Config, ModelsConfig};
     use std::collections::HashMap;
@@ -98,13 +90,11 @@ mod tests {
     }
 
     #[test]
-    fn build_agent_runner_preserves_injected_policy_identity_for_sub_runs() {
-        let policy: Arc<dyn policy::PolicyPort> = Arc::new(policy::AllowAllPolicy);
+    fn build_agent_runner_constructs_without_panic() {
         let workspace = project::wire_production_workspace(std::env::temp_dir())
             .expect("wire test workspace")
             .into_views();
 
-        let tools = tools::composition::TestCatalogExecutionFactory::empty();
         let skill_wiring = tools::composition::wire_skills();
         let skill_materializer = skill_wiring.materializer();
         let snapshot = share::config::domain::snapshot::ConfigSnapshot::new(Config::default());
@@ -113,33 +103,22 @@ mod tests {
                 snapshot,
             ),
         );
-        let hook_runner: Arc<dyn HookPort> =
-            Arc::new(hook::build_dispatcher(&HooksConfig::default(), HashMap::new()).unwrap());
         let runner = build_agent_runner(
             config_reader,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
-            hook_runner.clone(),
-            false,
             Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-            policy.clone(),
             10,
             Arc::new(tokio::sync::Semaphore::new(4)),
             crate::application::testing::test_tool_result_materializer(),
             workspace,
-            tools.catalog_port(),
-            tools.execution(),
-            tools.binding(),
             skill_materializer.clone(),
+            ParentRunContextSource::new(),
         );
 
-        assert!(
-            Arc::ptr_eq(&runner.hook_runner, &hook_runner),
-            "Sub Run runner 必须复用 Composition 注入的同一 HookRunner"
-        );
-        assert!(
-            Arc::ptr_eq(&runner.policy, &policy),
-            "Sub Run runner 必须保留 Composition 注入的同一 PolicyPort 实例"
-        );
+        // #1385: runner now only carries fields used by run_agent / complete;
+        // policy / hook_runner / tool_catalog / tool_execution / tool_context_binding
+        // are all accessed through derived.context at runtime.
+        assert_eq!(runner.max_tool_concurrency, 10);
     }
 
     #[test]
@@ -160,7 +139,7 @@ mod tests {
     fn test_resolve_role_logs_dir_uses_config_path() {
         let snapshot = snapshot_with_logs_dir(Some("custom-logs"));
 
-        let result = resolve_role_logs_dir(Some(&snapshot));
+        let result = resolve_role_logs_dir(Some(&snapshot), Path::new("/tmp/agents"));
 
         assert_eq!(result, PathBuf::from("custom-logs"));
     }
@@ -169,7 +148,7 @@ mod tests {
     fn test_resolve_role_logs_dir_expands_tilde_path() {
         let snapshot = snapshot_with_logs_dir(Some("~/custom-logs"));
 
-        let result = resolve_role_logs_dir(Some(&snapshot));
+        let result = resolve_role_logs_dir(Some(&snapshot), Path::new("/tmp/agents"));
 
         assert!(!result.to_string_lossy().starts_with('~'));
         assert!(result.ends_with("custom-logs"));
@@ -177,9 +156,12 @@ mod tests {
 
     #[test]
     fn test_resolve_role_logs_dir_uses_default_logs_dir_without_config() {
-        let result = resolve_role_logs_dir(None);
+        // #1385: explicit agents_dir threaded through — fallback is
+        // agents_dir.join("logs"), not global_logs_dir().join("logs") (which
+        // would produce agents_dir/logs/logs).
+        let result = resolve_role_logs_dir(None, Path::new("/tmp/agents"));
 
-        assert_eq!(result, config_paths::global_logs_dir().join("logs"));
+        assert_eq!(result, PathBuf::from("/tmp/agents/logs"));
     }
 
     fn models_config_with_provider_count(count: usize) -> ModelsConfig {

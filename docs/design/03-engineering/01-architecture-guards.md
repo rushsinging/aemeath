@@ -88,7 +88,7 @@
 - **功能**：调用 `cargo run -p xtask -- guard-registry check`，以 `.agents/architecture-guard-registry.json` 为单一机器可读治理注册表。
 - **分类**：`target_capability_policy`、`target_hexagonal_policy`、`scope_exclusion`、`false_positive_suppression`、`migration_exception`；只有最后一类计入迁移债务。
 - **schema**：每项使用全局唯一 stable id，并记录 guard、module、scope、owner、reason、tracking issue、introduced baseline、exit condition 与 status。迁移例外缺失归责或退出信息时 fail-closed。
-- **预算**：Current 冻结迁移债务为 repository `6`，其中 Runtime `5`、TUI `1`；Storage 的 #883 transitional business modules 债务已删除，模块和仓库预算均只允许下降。
+- **预算**：Current 冻结迁移债务为 repository `5`，其中 Runtime `4`、TUI `1`；Storage 的 #883 transitional business modules 债务已删除，模块和仓库预算均只允许下降。
 - **stale / 隐式排除**：精确 path/path-prefix 不存在即 stale；每个注册项必须被其声明的 Guard 以精确 `guard-registry:<stable-id>` 引用；Shell 中 `grep -v`、`--exclude`、`--exclude-dir`、`EXEMPT_FILES`、migration exception 集合和自由格式 inline allow 必须在同一行或前一行引用同 Guard 下已登记 stable id。
 - **expiry**：每次执行通过 GitHub CLI 核验所有 migration exception 的 tracking Issue 仍为 OPEN；查询失败或 Issue 已关闭均 fail-closed。
 - **报告**：`cargo run -p xtask -- guard-registry report . <output>` 按 stable id 确定性输出 classification、module、guard、scope kind 与 lifecycle 维度，用于模块开发前/完成后预算复核。
@@ -232,7 +232,7 @@
 |---|---|---|
 | `agent/features/tools/src/business/mcp_manager/connection.rs` | `core` | MCP 连接触达 registry |
 
-- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：4 个精确 `path + target layer` 例外，均为 #995 只迁目录而不改变接线语义后仍存在的 Current 倒置：`application/client/accessors.rs → adapters`、`application/client/from_args.rs → adapters`、`ports/input_buffer.rs → application`、`ports/legacy.rs → application`。脚本对其做 stale 自检；由 #874–#879 删除，禁止扩张。
+- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：3 个精确 `path + target layer` 例外，均为 #995 只迁目录而不改变接线语义后仍存在的 Current 倒置：`application/client/accessors.rs → adapters`、`application/client/from_args.rs → adapters`、`ports/legacy.rs → application`。脚本对其做 stale 自检；由 #874–#879 删除，禁止扩张。#1385 已删除旧 `InputBufferPort`（`ports/input_buffer.rs → application`）与 `migration.runtime.shared-adapter-bridge`（`adapters/runtime.rs`），迁移债务预算同步降至 repository `4`、Runtime `3`。
 
 - **#916 安全所有权规则（`check-context-architecture.sh` R8）**：Policy/Runtime 生产代码禁止恢复 `PathAccess` / `PathKind` / `path_accesses` / `requires_read_before_write` / Policy path helper；Bash safety 禁止与 `allow_all` 条件耦合。路径解析经 Project `WorkspaceRead`，read-before-write 与 Bash safety 留在 Tool adapter。规则无路径例外。
 
@@ -252,7 +252,7 @@
   - `ROOT_ACCESS_ALLOW.storage`：#883/#884 后仅登记 AtomicBlob/AtomicDataset、安全路径与 filesystem adapter 等通用持久化机制，不再包含 Task/Memory 业务 façade。
   - `ROOT_ACCESS_ALLOW.project`：Project 发布 `ProjectIdentity` / `WorkspaceId` / `WorktreeKind`、三类 workspace port、opaque restore token、结构化 init/control/restore/git 错误与 composition-only wiring；`WorkspaceService`、Git adapter/port 和内部 state **NEVER** 跨 crate 暴露。
   - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
-  - `ROOT_ACCESS_ALLOW.workflow = ∅`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` composition wiring 由函数调用规则允许，graph/node/config 不再作为 crate-root façade。
+  - `ROOT_ACCESS_ALLOW.workflow = {adaptive_reasoning}`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` 是 crate-root 发布的 composition façade（返回 `Arc<dyn api::ReasoningPort>`），graph/node/config 不再作为 crate-root façade。
   - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, RuntimeBootstrapDependencies, UsageSink, from_args_with_workspace, resume_session_to_backing, ResumeError}`：Composition 注入唯一 `MainSessionWiring` 与 Provider/Tool/Task views；`UsageSink` 供 #931 bridge，实现细节仍私有。
   - `ROOT_ACCESS_ALLOW.context`：除既有 `compact/context_port/guidance/session/skill` 外，#871 登记 `MainSessionWiring`、gate/permit、projection participant、production factory/dependencies 与结构化错误；内部 application/adapters 路径仍禁止穿透。
   - `ROOT_ACCESS_ALLOW.memory`：#900 后生产消费只需 Memory-owned OHS/PL、project key、`DatasetMemoryOpener`、legacy source factory、Reflection history adapter 与稳定错误；concrete active dataset store、project opener 和 `MemoryService` 已收回 crate 内。脚本中的 stale 名称由 #982/#1022 统一收口，本 Issue 不修改 `.agents/hooks/**`。
@@ -350,14 +350,8 @@
 
 - **功能**：检查源码 import 边界，禁止非 composition 代码引用生产 adapter。
 - **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R1 / R6——shared adapter 只能由 Composition 装配；feature 与 CLI 不得直接 import 易变 detail。
-- **白名单（`RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS`）**——临时精确豁免：
-
-| 路径 | 说明 |
-|---|---|
-| `agent/features/runtime/src/adapters/runtime.rs` | Runtime-owned ACL 暂时把 shared adapter newtype 适配到 runtime-local port。保留到对应消费方-owned outbound port 由供应 adapter 直接实现、Composition 完成接线且 #982 故意违规证明生效；具体迁移责任与退出证据见 Migration Governance O2/O8 |
-
+- **白名单（`RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS`）**：已退役。原 `agent/features/runtime/src/adapters/runtime.rs` 例外（Runtime-owned ACL 临时把 shared adapter newtype 适配到 runtime-local port）经 #1385 删除文件、移除 mod 声明并清退例外集合后退役；白名单预算降至 0。
 - **检查方式**：扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `*_test.rs` / `*_tests.rs` / `tests/` / `agent/composition/src/`），匹配 `\bshare::adapter\b | \bshared::adapter\b | agent/shared/src/adapter`。
-- **自检**：脚本会校验 exception 表中所有路径仍被命中；未命中即报"stale"并要求清理。
 
 ## 9. check-tui-tea-purity.sh
 
@@ -713,3 +707,4 @@
 | 2026-07-16 | 新增 `check-provider-http-attempt.sh`（§6c）：锁定 #1033 单 attempt 机械收敛（send/cancel/status 只能经 crate-private `HttpAttemptExecutor`、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs`）；串行守卫总数由 25 增至 26（此前 §6a `check-provider-invocation-scope.sh` 已计入，故基数为 25 而非 24） | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-16 | 文档审查修正：补登记此前文档从未登记、但脚本编排一直包含的 `check-run-control-boundary.sh`（新增 §23，原 §23/§24 顺延为 §24/§25）；同时收紧 `check-provider-http-attempt.sh` 扫描范围至整个 `agent/features/provider/src`（非仅 `adapters/`）、修复 `strip_test_tail` 首个 `#[cfg(test)]` 盲截尾问题、新增 `.text()/.json()/.bytes()/.chunk()` 跨行 body 读取绕过检测；串行守卫总数由 26 更正为 27，与 `check-architecture-guards.sh` 实际调用数一致 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-14 | 将固定层级检查重分类为迁移期守卫，精确记录按测试路径跳过文件及普通文件内 `#[cfg(test)]` block 仍受扫描的运行时语义，并将覆盖门槛、实施状态、责任与退出证据收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-17 | #1385 退役 `migration.runtime.shared-adapter-bridge`：删除 `agent/features/runtime/src/adapters/runtime.rs`（仅剩 4 行注释、零 `share::adapter` 引用）、移除 `adapters.rs` mod 声明、清退 `check-forbidden-imports.sh` 例外集合/stale 自检/`is_runtime_adapter_migration_path` 函数与 `guard-registry` stable-id 引用、从 registry 删除对应 entry；迁移债务预算 repository 5→4、Runtime 4→3；§8 白名单表移除，白名单预算归零 | [#1385](https://github.com/rushsinging/aemeath/issues/1385) |

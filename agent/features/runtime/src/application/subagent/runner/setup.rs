@@ -1,95 +1,201 @@
 use super::loop_run::SubAgentRun;
 use super::CliAgentRunner;
+use crate::application::interaction::InteractionBridge;
+use crate::application::runtime_context::{
+    RunInputBufferHandle, RunUsageTracker, RuntimeContext, RuntimeContextParts,
+};
 use crate::application::subagent::Agent;
-use crate::ports::{ModelId, ProviderBinding, ProviderBuildSpec};
+use crate::application::workspace_access::RuntimeWorkspaceAccess;
+use crate::domain::agent_run::RunSpec;
+use crate::ports::ModelId;
 use async_trait::async_trait;
 use hook::HookDispatchContext;
 use provider::RequestSystemBlock;
 use share::message::Message;
 use std::sync::Arc;
-use tools::{AgentProgressEvent, AgentProgressKind};
+use std::time::Duration;
+use tools::{
+    AgentProgressEvent, AgentProgressKind, RegistryScopeName, ToolCatalogError, ToolCatalogPort,
+    ToolCatalogSnapshot, ToolProfileName,
+};
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
-#[async_trait]
-impl AgentRunner for CliAgentRunner {
-    async fn run_agent(&self, request: AgentRunRequest<'_>) -> tools::AgentRunTerminal {
-        let prompt = request.prompt;
-        let system = request.system;
-        let identity = request.identity;
-        let cancellation = request.cancellation.child_signal();
-        let runtime_cancellation = tokio_util::sync::CancellationToken::new().child_token();
-        let request_progress = request.progress;
-        let catalog = request.catalog;
-        let plan_mode = request.plan_mode;
-        let guidance = request.guidance;
-        let timeout = request.timeout;
-        let parent_run_id = Some(sdk::RunId::from_legacy_or_new(identity.run_id()));
-        let role_name = request.role;
-        let memory = request.memory;
-        let progress_sink = request_progress.clone();
-        let run_config = crate::application::run_config::RunConfigSnapshot::capture(
-            self.config_reader.committed_snapshot(),
-        );
-        let config_snapshot = run_config.config();
-        let role = match config_snapshot.agents().roles.get(role_name) {
-            Some(role) if role.enabled => role,
-            Some(_) => {
-                return tools::AgentRunTerminal::Failed {
-                    error: format!(
-                        "子代理角色 `{role_name}` 已禁用（agents.roles.{role_name}.enabled=false)"
-                    ),
-                };
-            }
-            None => {
-                let mut available = config_snapshot
-                    .agents()
-                    .roles
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>();
-                available.sort();
-                return tools::AgentRunTerminal::Failed {
-                    error: format!(
-                        "unknown sub-agent role `{role_name}`; configured roles: {}",
-                        available.join(", ")
-                    ),
-                };
-            }
-        };
-        if role.model.trim().is_empty() {
-            return tools::AgentRunTerminal::Failed {
-                error: format!("sub-agent role `{role_name}` has no configured model"),
-            };
+// ── Sub-run derivation types ──
+
+/// Minimal request for sub-run derivation — only the fields needed to
+/// determine the derived [`RunSpec`] and [`RuntimeContext`].
+#[derive(Debug, Clone)]
+pub struct SubRunRequest {
+    pub role: String,
+    pub timeout: Duration,
+}
+
+/// Result of [`derive_sub_run`]: a single-source-of-truth bundle for the
+/// sub-agent launcher.  Every downstream consumer reads from this bundle —
+/// no second `derive_isolated()` call, no separate config snapshot, no
+/// parallel catalog query.
+///
+/// #1385: holds full [`RuntimeWorkspaceAccess`] (not just [`project::WorkspaceViews`]);
+/// all scope/read_access/persist/skill query/hook workspace root come from this
+/// single derived workspace.
+#[derive(Clone)]
+pub struct DerivedSubRun {
+    pub spec: RunSpec,
+    pub context: RuntimeContext,
+    /// Full workspace access — used for execution scope, read_access, persist,
+    /// skill query factory, and hook workspace root.  Never call
+    /// `derive_isolated()` a second time.
+    pub workspace: RuntimeWorkspaceAccess,
+    /// Resolved role config — avoids re-parsing config snapshot in run_agent.
+    pub role_config: share::config::AgentRoleConfig,
+    /// Resolved model display string (e.g. "test-provider/test-model").
+    pub model_display: String,
+    /// Resolved model name (e.g. "test-model").
+    pub model_name: String,
+    /// Max tokens for this sub-run.
+    pub max_tokens: u32,
+    /// Requested reasoning level.
+    pub reasoning_level: provider::ReasoningLevel,
+    /// Session ID for the isolated context (used as SubAgentRun.session_id).
+    pub session_id: String,
+}
+
+// ── Restricted tool catalog wrapper ──
+
+/// A [`ToolCatalogPort`] backed by a fixed snapshot that ONLY serves the
+/// `sub-agent / sub-agent-restricted` scope+profile pair.  Any other
+/// query is rejected to prevent semantic masquerading (e.g. a tool
+/// requesting a full catalog through a restricted handle).
+struct RestrictedToolCatalog {
+    snapshot: ToolCatalogSnapshot,
+}
+
+impl ToolCatalogPort for RestrictedToolCatalog {
+    fn snapshot(
+        &self,
+        scope: &RegistryScopeName,
+        profile: &ToolProfileName,
+    ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
+        if scope.as_str() != "sub-agent" || profile.as_str() != "sub-agent-restricted" {
+            return Err(ToolCatalogError::UnknownScope {
+                scope: format!("{scope}/{profile} — RestrictedToolCatalog only serves sub-agent/sub-agent-restricted"),
+            });
         }
-        let resolved_spec = role.model.clone();
+        Ok(self.snapshot.clone())
+    }
+}
 
-        // Resolve the model config from ModelsConfig to build a ProviderBuildSpec.
-        // Unknown models fail closed — no silent fallback to a default client.
-        let model_lookup = config_snapshot.models().find_model(&resolved_spec);
+/// #1385: Combined cancellation signal — wraps an external signal (from the
+/// tools-layer [`AgentRunRequest`]) and an internal [`tokio_util::sync::CancellationToken`].
+/// Either source cancelling makes the combined signal fire, so a parent
+/// cancellation propagates into tool execution AND the runtime LLM token.
+struct CombinedCancellationSignal {
+    external: Arc<dyn tools::CancellationSignal>,
+    token: tokio_util::sync::CancellationToken,
+}
 
-        let (source_key, source_config, model_entry) = match model_lookup {
-            Some(found) => found,
-            None => {
-                return tools::AgentRunTerminal::Failed {
-                    error: format!(
-                        "unknown model `{resolved_spec}` configured for sub-agent role `{role_name}`"
-                    ),
-                };
-            }
-        };
+#[async_trait]
+impl tools::CancellationSignal for CombinedCancellationSignal {
+    fn is_cancelled(&self) -> bool {
+        self.external.is_cancelled() || self.token.is_cancelled()
+    }
 
-        let max_tokens_override = Self::role_max_tokens_override(role);
+    async fn cancelled(&self) {
+        // Race: whichever fires first wakes us.
+        tokio::select! {
+            _ = self.external.cancelled() => {},
+            _ = self.token.cancelled() => {},
+        }
+    }
 
-        // Model configuration is the sole owner of provider protocol and capability
-        // settings; roles only supply identity, prompt suffix, and token budget.
+    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
+        // Child tools get the same combined signal.
+        Arc::new(Self {
+            external: self.external.clone(),
+            token: self.token.clone(),
+        })
+    }
+}
+
+/// Derive a sub-run [`RunSpec`], [`RuntimeContext`], isolated
+/// [`RuntimeWorkspaceAccess`], and resolved model/role metadata from the
+/// parent's capabilities.
+///
+/// # Rules (per #1385)
+///
+/// - **cancel**: `parent.child_scope()` — parent cancels child, child does NOT cancel parent.
+/// - **tool catalog**: restricted `sub-agent/sub-agent-restricted` snapshot from parent.
+/// - **memory**: `NoOpMemory` by default; not the parent's `Arc`.
+/// - **context**: skills-wired [`ContextPort`] using the derived workspace query factory.
+/// - **policy**: same `Arc` as parent (or stricter in future).
+/// - **interaction**: disabled bridge (sub-agents are non-interactive).
+///   Returns `InteractionCommandOutcome::NotFound` on any register/reply/cancel attempt.
+/// - **provider**: built fresh from role config via factory; does NOT reuse parent transport.
+/// - **task/hook/reflection/reasoning/config**: shared from parent.
+/// - **workspace**: isolated via `parent_workspace.derive_isolated()` — used exactly once here;
+///   all downstream access comes from the returned `DerivedSubRun.workspace`.
+///   **Never call `derive_isolated` a second time.**
+pub fn derive_sub_run(
+    parent_spec: &RunSpec,
+    parent_context: &RuntimeContext,
+    parent_workspace: &RuntimeWorkspaceAccess,
+    request: &SubRunRequest,
+    factory: &dyn crate::ports::ProviderFactory,
+    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+) -> Result<DerivedSubRun, crate::application::client::RuntimeContextAssemblyError> {
+    use crate::application::client::RuntimeContextAssemblyError;
+
+    // 1. Derive the RunSpec from parent.
+    let spec = parent_spec
+        .derive_sub(&request.role, request.timeout)
+        .map_err(|e| RuntimeContextAssemblyError::SubDerivationFailed {
+            reason: e.to_string(),
+        })?;
+
+    // 2. Derive isolated workspace — exactly once, used for all downstream needs.
+    let sub_workspace = parent_workspace.derive_isolated();
+
+    // 3. Look up role config from parent's config snapshot.
+    let config_snapshot = parent_context.config().clone();
+    let config = config_snapshot.config();
+    let role = config.agents().roles.get(&request.role).ok_or_else(|| {
+        RuntimeContextAssemblyError::SubRoleNotFound {
+            role: request.role.clone(),
+        }
+    })?;
+    if !role.enabled {
+        return Err(RuntimeContextAssemblyError::SubRoleDisabled {
+            role: request.role.clone(),
+        });
+    }
+    if role.model.trim().is_empty() {
+        return Err(RuntimeContextAssemblyError::SubRoleNoModel {
+            role: request.role.clone(),
+        });
+    }
+    let resolved_spec = role.model.clone();
+
+    // 4. Build provider binding via factory.
+    let sub_binding = {
+        let model_lookup = config.models().find_model(&resolved_spec);
+        let (_source_key, source_config, model_entry) =
+            model_lookup.ok_or_else(|| RuntimeContextAssemblyError::SubUnknownModel {
+                model: resolved_spec.clone(),
+                role: request.role.clone(),
+            })?;
+
+        let max_tokens = CliAgentRunner::role_max_tokens_override(role)
+            .filter(|t| *t > 0)
+            .or_else(|| (model_entry.max_tokens > 0).then_some(model_entry.max_tokens))
+            .unwrap_or(8192);
+
+        // Determine reasoning level.
         let model_reasoning = model_entry.reasoning;
         let model_effort = model_entry
             .reasoning_effort
             .as_deref()
             .and_then(provider::ReasoningLevel::parse);
-        let reasoning = model_reasoning.unwrap_or(self.reasoning);
-        // The provider adapter clamps the requested level to the model capability
-        // during invoke, so we pass the unclamped level here.
+        let reasoning = model_reasoning.unwrap_or(false);
         let level = match model_effort {
             Some(effort) => effort,
             None => {
@@ -101,16 +207,9 @@ impl AgentRunner for CliAgentRunner {
             }
         };
 
-        let context_size = config_snapshot.resolve_context_size(None, model_entry.context_window);
-
-        // Construct ProviderBuildSpec from the resolved model config and build a binding.
-        let max_tokens = max_tokens_override
-            .filter(|tokens| *tokens > 0)
-            .or_else(|| (model_entry.max_tokens > 0).then_some(model_entry.max_tokens))
-            .unwrap_or(8192);
-        let build_spec = ProviderBuildSpec {
+        let build_spec = crate::ports::ProviderBuildSpec {
             driver: source_config.driver.clone(),
-            source_key: source_key.clone(),
+            source_key: _source_key.clone(),
             api_style: model_entry.api_style.clone(),
             api_key: source_config.api_key.clone(),
             base_url: if source_config.base_url.is_empty() {
@@ -119,29 +218,187 @@ impl AgentRunner for CliAgentRunner {
                 Some(source_config.base_url.clone())
             },
             model: ModelId {
-                provider: source_key.clone(),
+                provider: _source_key.clone(),
                 model: model_entry.id.clone(),
             },
             max_tokens,
             requested_reasoning: level,
             context_window: (model_entry.context_window > 0).then_some(model_entry.context_window),
-            timeout: std::time::Duration::from_secs(config_snapshot.api_timeout_secs()),
-            user_agent: config_snapshot.user_agent().to_string(),
+            timeout: std::time::Duration::from_secs(config_snapshot.config().api_timeout_secs()),
+            user_agent: config_snapshot.config().user_agent().to_string(),
         };
-        let binding: Arc<ProviderBinding> = match self.factory.build(build_spec) {
-            Ok(binding) => Arc::new(binding),
+        factory
+            .build(build_spec)
+            .map_err(|e| RuntimeContextAssemblyError::SubDerivationFailed {
+                reason: e.to_string(),
+            })?
+    };
+
+    let max_tokens = sub_binding.max_tokens;
+    let reasoning_level = sub_binding.requested_reasoning;
+    // model_name is the full "provider/model" spec (matches logging expectations).
+    let model_name = resolved_spec.clone();
+    let model_display = resolved_spec.clone();
+
+    // 5. Build restricted tool catalog from parent's catalog (NOT from
+    // a separate runner field; derived.context.tool_catalog() is the
+    // single source for catalog access).
+    let restricted_catalog: Arc<dyn ToolCatalogPort> = {
+        let snapshot = parent_context
+            .tool_catalog()
+            .snapshot(
+                &RegistryScopeName::new("sub-agent"),
+                &ToolProfileName::new("sub-agent-restricted"),
+            )
+            .map_err(|e| RuntimeContextAssemblyError::SubDerivationFailed {
+                reason: e.to_string(),
+            })?;
+        Arc::new(RestrictedToolCatalog { snapshot })
+    };
+
+    // 6. Build skills-wired ContextPort using the derived workspace's
+    // query factory.  This is the final port stored in RuntimeContext;
+    // run_agent uses `derived.context.context()` directly.
+    let isolated_session_id = sdk::SessionId::new_v7().to_string();
+    let skills_context_port: Arc<dyn crate::ports::ContextPort> =
+        context::isolated_context_with_skill(
+            &isolated_session_id,
+            skill_materializer,
+            Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
+                sub_workspace.views().read(),
+            )),
+        );
+
+    // 7. Assemble RuntimeContext.  All ports stream from parent context
+    // (execution, binding, policy, hooks, etc.) — the caller never uses
+    // self-owned bypass fields.
+    let cancel = parent_context.cancel().child_scope();
+    let parts = RuntimeContextParts {
+        context: skills_context_port,
+        provider: Arc::new(sub_binding.clone()),
+        tool_catalog: restricted_catalog,
+        tool_execution: parent_context.tool_execution(),
+        tool_context_binding: parent_context.tool_context_binding(),
+        policy: parent_context.policy(),
+        // Sub-agents are non-interactive: use an explicitly disabled bridge.
+        // Any register/reply/cancel returns InteractionCommandOutcome::NotFound
+        // (the most appropriate existing error for "no interaction capability").
+        // The SDK enum should not be extended across crates.
+        interaction: Arc::new(InteractionBridge::disabled()),
+        memory: Arc::new(memory::NoOpMemory),
+        reflection_history: parent_context.reflection_history(),
+        task: parent_context.task(),
+        hooks: parent_context.hooks(),
+        reasoning: parent_context.reasoning(),
+        config: config_snapshot.clone(),
+        cancel,
+        // #1385 Task 12: Sub-agent gets derived I/O seams.
+        // event_sink uses the canonical SubAgentEventSink (from loop_run),
+        // not an inline noop.  Usage and input are fresh per sub-run.
+        event_sink: {
+            crate::application::main_loop::ChatEventSinkHandle::new(
+                super::loop_run::SubAgentEventSink,
+            )
+        },
+        usage: RunUsageTracker::new(),
+        input: RunInputBufferHandle::new(),
+    };
+
+    let context = RuntimeContext::new(parts);
+
+    Ok(DerivedSubRun {
+        spec,
+        context,
+        workspace: sub_workspace,
+        role_config: role.clone(),
+        model_display,
+        model_name,
+        max_tokens,
+        reasoning_level,
+        session_id: isolated_session_id,
+    })
+}
+
+#[async_trait]
+impl AgentRunner for CliAgentRunner {
+    async fn run_agent(&self, request: AgentRunRequest<'_>) -> tools::AgentRunTerminal {
+        let prompt = request.prompt;
+        let system = request.system;
+        let identity = request.identity;
+        // ── #1385: external cancellation signal from tools layer ──
+        let external_cancel = request.cancellation.child_signal();
+        let request_progress = request.progress;
+        // #1385: request catalog/memory are NOT used for child;
+        // all catalog/memory access comes from derived.context.
+        let plan_mode = request.plan_mode;
+        let guidance = request.guidance;
+        let timeout = request.timeout;
+        let parent_run_id = Some(sdk::RunId::from_legacy_or_new(identity.run_id()));
+        let role_name = request.role;
+        let progress_sink = request_progress.clone();
+
+        // ── #1385: Read the parent frame from the shared RAII source ──
+        let parent_frame = match self.parent_context.get() {
+            Some(frame) => frame,
+            None => {
+                return tools::AgentRunTerminal::Failed {
+                    error: "no parent run context — sub-agent invoked outside Main Run".to_string(),
+                };
+            }
+        };
+
+        let sub_request = SubRunRequest {
+            role: role_name.to_string(),
+            timeout,
+        };
+        let derived = match derive_sub_run(
+            &parent_frame.spec,
+            &parent_frame.context,
+            &self.workspace,
+            &sub_request,
+            self.factory.as_ref(),
+            self.skill_materializer.clone(),
+        ) {
+            Ok(d) => d,
             Err(error) => {
                 return tools::AgentRunTerminal::Failed {
                     error: error.to_string(),
                 };
             }
         };
-        let max_tokens = binding.max_tokens;
+
+        // ── #1385: Every value below comes from `derived` or `derived.context` ──
+        // No `config_reader` snapshot, no `self.tool_catalog`, no second
+        // `derive_isolated()`, no separate `self.policy`/`self.tool_context_binding`.
+
+        let run_spec = derived.spec.clone();
+
+        // Runtime cancellation: derived from parent's scope, parent-cancels-child.
+        let runtime_token = derived.context.cancel().token().clone();
+
+        // Combined cancellation for ToolExecutionPorts: external (tools-layer)
+        // OR runtime token cancelling stops executing tools.
+        let combined_cancel: Arc<dyn tools::CancellationSignal> =
+            Arc::new(CombinedCancellationSignal {
+                external: external_cancel,
+                token: runtime_token.clone(),
+            });
+
+        // Resolved metadata from derived (no config re-parse needed).
+        let role_config = &derived.role_config;
+        let role_name_for_log = role_name.to_string();
+        let model_display = derived.model_display.clone();
+        let model_name = derived.model_name.clone();
+        let max_tokens = derived.max_tokens;
+        let level = derived.reasoning_level;
+        let binding = derived.context.provider();
+
         let session_id = identity
             .parent_run_id()
             .map(ToString::to_string)
             .or_else(|| {
-                self.workspace
+                derived
+                    .workspace
                     .views()
                     .read()
                     .current_workspace_root()
@@ -150,8 +407,7 @@ impl AgentRunner for CliAgentRunner {
                     .map(ToString::to_string)
             })
             .unwrap_or_else(|| "subagent".to_string());
-        let role_name = role_name.to_string();
-        let model_name = resolved_spec.clone();
+
         let sub_run_id = sdk::RunId::new_v7();
         let sub_run_context = super::loop_run::sub_run_log_context(
             &logging::capture(),
@@ -159,226 +415,223 @@ impl AgentRunner for CliAgentRunner {
             sub_run_id.as_ref(),
             &model_name,
             &binding.model.provider,
-            &role_name,
+            &role_name_for_log,
         );
 
         logging::instrument(sub_run_context, async move {
-        log::info!(target: crate::LOG_TARGET,
-            "[SubAgent] reasoning={} level={} max_tokens={:?} (model={:?}, effort={:?}, default={})",
-            reasoning,
-            level,
-            max_tokens_override,
-            model_reasoning,
-            model_effort,
-            self.reasoning
-        );
-
-        // Extract hook port to avoid borrow conflicts with closure
-        let hook_port = self.hook_runner.clone();
-
-        // Append role-specific system suffix if configured
-        let system = match role.system_suffix.as_ref() {
-            Some(suffix) => format!("{}\n\n{}", system, suffix),
-            None => system.to_string(),
-        };
-
-        // Call SubagentStart hook
-        let workspace_root = self.workspace.views().read().current_workspace_root();
-        let hook_outcome = hook_port
-            .dispatch_at(
-                hook::HookInvocation::SubRunStart(hook::SubRunInput {
-                    prompt: prompt.to_string(),
-                    system: system.clone(),
-                    model_spec: Some(resolved_spec.clone()),
-                }),
-                HookDispatchContext::new(&workspace_root),
-                &tokio_util::sync::CancellationToken::new(),
-            )
-            .await;
-        // Send any system messages from hook results to progress_tx
-        for msg in &hook_outcome.messages {
-            if let hook::HookDisplayMessageKind::SystemMessage = msg.kind {
-                if let Some(ref sink) = progress_sink {
-                    sink.emit(AgentProgressEvent {
-                        sequence: 0,
-                        kind: AgentProgressKind::Message {
-                            text: format!("[hook] {}", msg.text),
-                        },
-                    });
-                }
-            }
-        }
-
-        // Helper to emit progress — writes to aemeath.log via log::info! for diagnostics.
-        let session_id_for_log = session_id.clone();
-        let role_name_for_log = role_name.clone();
-        let model_name_for_log = model_name.clone();
-        let progress = move |turn: Option<usize>, msg: &str| {
-            let turn_str = turn
-                .map(|t| t.to_string())
-                .unwrap_or_else(|| "-".to_string());
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "[role:{} model:{} turn:{}] {}",
-                role_name,
-                model_name,
-                turn_str,
-                msg
-            );
-        };
-        // Build a fresh sub-agent registry with all tools except Agent (prevent recursion)
-        let sub_workspace = self.workspace.derive_isolated();
-        let sub_catalog = match self.tool_catalog.snapshot(
-            &tools::RegistryScopeName::new("sub-agent"),
-            &tools::ToolProfileName::new("sub-agent-restricted"),
-        ) {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                return tools::AgentRunTerminal::Failed {
-                    error: error.to_string(),
-                }
-            }
-        };
-        let tool_schemas = sub_catalog.model_schemas();
-        let messages = vec![Message::user(prompt)];
-        let provider_name_for_log = binding.model.provider.clone();
-        let model_name_for_log_closure = model_name_for_log.clone();
-        let role_name_for_request_log = role_name_for_log.clone();
-        let schema_count = tool_schemas.len();
-        let log_request_messages = move |turn: usize, messages: &[Message]| {
-            // 只记录摘要，不 dump 完整消息内容
-            let latest: Vec<serde_json::Value> = messages
-                .iter()
-                .rev()
-                .take(3)
-                .map(|m| {
-                    serde_json::json!({
-                        "role": m.role,
-                        "len": m.content.len(),
-                    })
-                })
-                .collect();
+            // ── Logging ──
             log::info!(target: crate::LOG_TARGET,
-                "[subagent_llm_request] session={}, turn={}, provider={}, model={}, role={}, messages={}, tools={}, latest_roles={}",
-                session_id_for_log,
-                turn,
-                provider_name_for_log,
-                model_name_for_log_closure,
-                role_name_for_request_log,
-                messages.len(),
-                schema_count,
-                serde_json::to_string(&latest).unwrap_or_default(),
+                "[SubAgent] derived run_spec={} role={} model={} max_tokens={}",
+                run_spec.name, role_name_for_log, model_display, max_tokens
             );
-        };
-        let sub_run_id = sdk::RunId::new_v7();
-        let sub_views = sub_workspace.views();
-        let sub_scope = tools::ExecutionScope::builder(
-            sub_run_id.to_string(),
-            sub_views.read().workspace_id(),
-            sub_views.read().current_workspace_root(),
-        )
-        .parent_run_id(identity.run_id())
-        .invocation_source(tools::InvocationSource::SubAgent)
-        .registry_scope(tools::RegistryScopeName::new("sub-agent"))
-        .profile(tools::ToolProfileName::new("sub-agent-restricted"))
-        .build();
-        let sub_ctx = ToolExecutionContext::new(
-            sub_scope,
-            tools::ToolExecutionPorts::new(
-                cancellation.clone(),
-                sub_workspace.read_access(),
-                std::sync::Arc::new(tools::MutexReadSet(std::sync::Arc::new(
-                    std::sync::Mutex::new(std::collections::HashSet::new()),
-                ))),
-                plan_mode,
-                memory.clone(),
-                guidance,
+
+            let hook_port = derived.context.hooks();
+
+            // Append role-specific system suffix if configured
+            let system = match role_config.system_suffix.as_ref() {
+                Some(suffix) => format!("{}\n\n{}", system, suffix),
+                None => system.to_string(),
+            };
+
+            // Call SubagentStart hook — workspace root from derived workspace.
+            let workspace_root = derived.workspace.views().read().current_workspace_root();
+            let hook_outcome = hook_port
+                .dispatch_at(
+                    hook::HookInvocation::SubRunStart(hook::SubRunInput {
+                        prompt: prompt.to_string(),
+                        system: system.clone(),
+                        model_spec: Some(model_display.clone()),
+                    }),
+                    HookDispatchContext::new(&workspace_root),
+                    &tokio_util::sync::CancellationToken::new(),
+                )
+                .await;
+            for msg in &hook_outcome.messages {
+                if let hook::HookDisplayMessageKind::SystemMessage = msg.kind {
+                    if let Some(ref sink) = progress_sink {
+                        sink.emit(AgentProgressEvent {
+                            sequence: 0,
+                            kind: AgentProgressKind::Message {
+                                text: format!("[hook] {}", msg.text),
+                            },
+                        });
+                    }
+                }
+            }
+
+            // Helper to emit progress
+            let session_id_for_log = session_id.clone();
+            let progress_role = role_name_for_log.clone();
+            let progress_model = model_display.clone();
+            let progress = move |turn: Option<usize>, msg: &str| {
+                let turn_str = turn
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "[role:{} model:{} turn:{}] {}",
+                    progress_role,
+                    progress_model,
+                    turn_str,
+                    msg
+                );
+            };
+
+            // ── #1385: Catalog from derived.context (NOT from self.tool_catalog) ──
+            let sub_catalog = match derived
+                .context
+                .tool_catalog()
+                .snapshot(
+                    &tools::RegistryScopeName::new("sub-agent"),
+                    &tools::ToolProfileName::new("sub-agent-restricted"),
+                ) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return tools::AgentRunTerminal::Failed {
+                        error: error.to_string(),
+                    }
+                }
+            };
+            let tool_schemas = sub_catalog.model_schemas();
+            let schema_count = tool_schemas.len();
+
+            // ── Log request messages callback ──
+            let log_session_id = session_id_for_log.clone();
+            let log_provider = binding.model.provider.clone();
+            let log_model = model_name.clone();
+            let log_role = role_name_for_log.clone();
+            let log_request_messages = move |turn: usize, messages: &[Message]| {
+                let latest: Vec<serde_json::Value> = messages
+                    .iter()
+                    .rev()
+                    .take(3)
+                    .map(|m| {
+                        serde_json::json!({
+                            "role": m.role,
+                            "len": m.content.len(),
+                        })
+                    })
+                    .collect();
+                log::info!(target: crate::LOG_TARGET,
+                    "[subagent_llm_request] session={}, turn={}, provider={}, model={}, role={}, messages={}, tools={}, latest_roles={}",
+                    log_session_id,
+                    turn,
+                    log_provider,
+                    log_model,
+                    log_role,
+                    messages.len(),
+                    schema_count,
+                    serde_json::to_string(&latest).unwrap_or_default(),
+                );
+            };
+
+            // ── #1385: Execution scope from derived workspace (the single source) ──
+            let sub_views = derived.workspace.views();
+            let sub_scope = tools::ExecutionScope::builder(
+                sub_run_id.to_string(),
+                sub_views.read().workspace_id(),
+                sub_views.read().current_workspace_root(),
             )
-            .with_user_agent(config_snapshot.user_agent())
-            .with_catalog(catalog)
-            .with_progress(request_progress),
-        );
-        let agent = Agent {
-            catalog: sub_catalog,
-            execution: self.tool_execution.clone(),
-            ctx: sub_ctx,
-            max_tool_concurrency: self.max_tool_concurrency,
-            agent_semaphore: self.agent_semaphore.clone(),
-            workspace_persist: sub_workspace.persist(),
-            runtime_cancellation: runtime_cancellation.clone(),
-        };
+            .parent_run_id(identity.run_id())
+            .invocation_source(tools::InvocationSource::SubAgent)
+            .registry_scope(tools::RegistryScopeName::new("sub-agent"))
+            .profile(tools::ToolProfileName::new("sub-agent-restricted"))
+            .build();
 
-        let model_display = resolved_spec.as_str();
-        // issue #499：发送 Started 事件，让 TUI 在 Agent 工具 header 显示实际 role/model。
-        // 这是 sub-agent 的第一个 progress 事件，早于 ToolCalls/Message。
-        if let Some(ref sink) = progress_sink {
-            sink.emit(AgentProgressEvent {
-                sequence: 0,
-                kind: AgentProgressKind::Started {
-                    role: Some(role_name_for_log.clone()),
-                    model: model_display.to_string(),
-                },
-            });
-        }
-        progress(
-            None,
-            &format!("Sub-agent started with model: {}", model_display),
-        );
+            // #1385: Read access and persist from the SAME derived workspace.
+            // Never call derive_isolated() a second time.
+            let sub_ctx = ToolExecutionContext::new(
+                sub_scope,
+                tools::ToolExecutionPorts::new(
+                    combined_cancel.clone(),
+                    derived.workspace.read_access(),
+                    Arc::new(tools::MutexReadSet(Arc::new(
+                        std::sync::Mutex::new(std::collections::HashSet::new()),
+                    ))),
+                    plan_mode,
+                    derived.context.memory(),
+                    guidance,
+                )
+                .with_user_agent(derived.context.config_ref().config().user_agent())
+                .with_progress(progress_sink.clone()),
+            );
+            let agent = Agent {
+                catalog: sub_catalog,
+                execution: derived.context.tool_execution(),
+                ctx: sub_ctx,
+                max_tool_concurrency: self.max_tool_concurrency,
+                agent_semaphore: self.agent_semaphore.clone(),
+                // #1385: workspace_persist from the same derived workspace.
+                workspace_persist: derived.workspace.persist(),
+                runtime_cancellation: runtime_token.clone(),
+            };
 
-        let isolated_session_id = sdk::SessionId::new_v7().to_string();
-        let isolated_context = crate::application::context_coordination::ContextCoordinator::new(
-            context::isolated_context_with_skill(
-                &isolated_session_id,
-                self.skill_materializer.clone(),
-                std::sync::Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
-                    sub_workspace.views().read(),
-                )),
-            ),
-        );
-        SubAgentRun {
-            prompt,
-            system,
-            progress_sink,
-            binding,
-            max_tokens,
-            level,
-            hook_port,
-            workspace_root,
-            tool_schemas,
-            config_snapshot: config_snapshot.clone(),
-            language: config_snapshot.language().to_string(),
-            messages,
-            committed_message_count: 0,
-            context: isolated_context,
-            context_request: None,
-            accepted_input: Vec::new(),
-            context_window: None,
-            log_request_messages: Box::new(log_request_messages),
-            agent,
-            runtime_cancellation,
-            timeout,
-            turn_count: 0,
-            last_total_tokens: None,
-            active_run: self.active_run.clone(),
-            terminal: None,
-            start_time: std::time::Instant::now(),
-            session_id: isolated_session_id,
-            run_id: sub_run_id,
-            parent_run_id,
-            role_name_for_log,
-            model_name_for_log,
-            resolved_spec: Some(resolved_spec),
-            progress: Box::new(progress),
-            ctx_context_size: context_size,
-            tool_result_materializer: self.tool_result_materializer.clone(),
-            policy: self.policy.clone(),
-            tool_context_binding: self.tool_context_binding.clone(),
-            input_strategy: crate::application::loop_engine::input_strategy::SubInputStrategy::new(
-                prompt,
-            ),
-        }
-        .run_loop()
-        .await
+            if let Some(ref sink) = progress_sink {
+                sink.emit(AgentProgressEvent {
+                    sequence: 0,
+                    kind: AgentProgressKind::Started {
+                        role: Some(role_name_for_log.clone()),
+                        model: model_display.clone(),
+                    },
+                });
+            }
+            progress(
+                None,
+                &format!("Sub-agent started with model: {}", model_display),
+            );
+
+            // ── #1385: Context port from derived.context (skills-wired) ──
+            // ContextCoordinator is constructed on-demand inside SubAgentRun,
+            // not stored as a field.
+
+            let messages = vec![Message::user(prompt)];
+            let context_size = derived.context.config_ref().config().resolve_context_size(None, 0);
+
+            let config_snapshot = derived.context.config_ref().config().clone();
+
+            SubAgentRun {
+                  prompt,
+                  system,
+                  progress_sink,
+                  // #1385 Task 12: runtime_context is owned (not Arc) — derived context
+                  // is already owned by the caller.
+                  runtime_context: derived.context,
+                  max_tokens,
+                  level,
+                workspace_root,
+                tool_schemas,
+                config_snapshot: config_snapshot.clone(),
+                language: config_snapshot.language().to_string(),
+                messages,
+                committed_message_count: 0,
+                context_request: None,
+                accepted_input: Vec::new(),
+                context_window: None,
+                log_request_messages: Box::new(log_request_messages),
+                agent,
+                runtime_cancellation: runtime_token,
+                turn_count: 0,
+                // #1385 Task 12: last_total_tokens eliminated — usage tracker is single source.
+                active_run: self.active_run.clone(),
+                terminal: None,
+                start_time: std::time::Instant::now(),
+                session_id: derived.session_id,
+                run_id: sub_run_id,
+                parent_run_id,
+                role_name_for_log: role_name_for_log.clone(),
+                model_name_for_log: model_name,
+                resolved_spec: Some(model_display),
+                progress: Box::new(progress),
+                ctx_context_size: context_size,
+                  tool_result_materializer: self.tool_result_materializer.clone(),
+                  run_spec,
+                input_strategy:
+                    crate::application::loop_engine::input_strategy::SubInputStrategy::new(
+                        prompt,
+                    ),
+            }
+            .run_loop()
+            .await
         })
         .await
     }
@@ -397,7 +650,6 @@ impl AgentRunner for CliAgentRunner {
             runtime_cancellation.clone(),
         );
 
-        // Resolve the default model for the simple completion path.
         let config_snapshot = self.config_reader.committed_snapshot();
         let default_spec = {
             let d = config_snapshot.models().default.as_str();
@@ -413,7 +665,7 @@ impl AgentRunner for CliAgentRunner {
         } else {
             8192
         };
-        let build_spec = ProviderBuildSpec {
+        let build_spec = crate::ports::ProviderBuildSpec {
             driver: source_config.driver.clone(),
             source_key: source_key.clone(),
             api_style: model_entry.api_style.clone(),

@@ -531,9 +531,11 @@ async fn skipped_compaction_is_returned_without_hidden_retry() {
     ));
 }
 
+/// #1385 Task 12: Tests updated for RunUsageTracker.
 #[test]
 fn automatic_compact_committed_resets_usage_and_window() {
-    let mut usage = Some(42);
+    let usage = crate::application::runtime_context::RunUsageTracker::new();
+    usage.update(42);
     let mut window = Some("window");
 
     apply_automatic_compact_outcome(
@@ -542,25 +544,26 @@ fn automatic_compact_committed_resets_usage_and_window() {
             recent_messages: Vec::new(),
             source_revision: SessionRevision::new(7),
         }),
-        &mut usage,
+        &usage,
         &mut window,
     );
 
-    assert_eq!(usage, None);
+    assert_eq!(usage.get(), None);
     assert_eq!(window, None);
 }
 
 #[test]
 fn automatic_compact_skipped_preserves_usage_and_window() {
-    let mut usage = Some(42);
+    let usage = crate::application::runtime_context::RunUsageTracker::new();
+    usage.update(42);
     let mut window = Some("window");
 
     apply_automatic_compact_outcome(
         &CompactOutcome::Skipped(CompactSkipReason::ResumeProtection),
-        &mut usage,
+        &usage,
         &mut window,
     );
 
-    assert_eq!(usage, Some(42));
+    assert_eq!(usage.get(), Some(42));
     assert_eq!(window, Some("window"));
 }

@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use sdk::{ChatRequest, ChatStream, SdkError};
 
 use super::accessors::AgentClientImpl;
+use super::session_query::AgentSessionQuery;
 
 pub(super) async fn chat_impl(
     me: &AgentClientImpl,
@@ -18,14 +19,15 @@ pub(super) async fn chat_impl(
         if !user_input.images.is_empty() {
             let supports_image = me
                 .inner
+                .shell
                 .resolved_model
                 .model
                 .input
                 .iter()
                 .any(|t| t == "image");
             if !supports_image {
-                let model_id = &me.inner.resolved_model.model.id;
-                let provider = &me.inner.resolved_model.source_key;
+                let model_id = &me.inner.shell.resolved_model.model.id;
+                let provider = &me.inner.shell.resolved_model.source_key;
                 return Err(SdkError::Internal(format!(
                     "当前模型 {provider}/{model_id} 不支持图片输入。\
                      请切换到支持图片的模型（如 MiniMax/MiniMax-M3）或使用 /clear-images 清除待发送图片后重试。"
@@ -56,8 +58,9 @@ pub(super) async fn chat_impl(
         };
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let sink = (me.inner.event_sink_factory)(tx);
-    let input_ports = (me.inner.input_port_factory)(queue_drain, input_events);
+    let sink = (me.inner.shell.event_sink_factory)(tx);
+    let input_ports = (me.inner.shell.input_port_factory)(queue_drain, input_events);
+    let shell = me.inner.shell.clone();
     let inner = me.inner.clone();
     let session_context = logging::capture();
     logging::spawn_instrumented(session_context, async move {
@@ -66,94 +69,15 @@ pub(super) async fn chat_impl(
                 sink,
                 queue: input_ports.queue,
                 input_events: input_ports.input_events,
-                binding: inner.context.resources.binding.clone(),
-                tool_catalog: inner.context.resources.tool_catalog.clone(),
-                tool_execution: inner.context.resources.tool_execution.clone(),
-                tool_context_binding: inner.context.resources.tool_context_binding.clone(),
-                system_blocks: inner.context.resources.system_blocks.clone(),
-                system_prompt_text: inner.context.resources.system_prompt_text.clone(),
-                initial_git_context: inner.context.resources.initial_git_context.clone(),
-                user_context: inner.context.resources.user_context.clone(),
+                shell: shell.clone(),
                 initial_messages,
-                context_size: inner.context.resources.context_size,
-                workspace: inner.workspace.clone(),
-                wiring: inner.wiring.clone(),
-                session_id: inner.session_id.clone(),
                 read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
+                // Task 7 debt: ChatLoopContext uses tools::SessionReminders type;
+                // shell holds share::memory::SessionReminders (different type).
                 session_reminders: Arc::new(Mutex::new(Default::default())),
-                agent_runner: Some(inner.context.resources.agent_runner.clone()),
-                tool_result_materializer: inner.context.resources.tool_result_materializer.clone(),
-                policy: inner.context.resources.policy.clone(),
-                active_run: inner.active_run.clone(),
-                interaction_bridge: inner.interaction_bridge.clone(),
-                task_access: inner.context.resources.task_access.clone(),
-                max_tool_concurrency: inner.max_tool_concurrency,
-                agent_semaphore: inner.context.resources.agent_semaphore.clone(),
-                hook_runner: inner.context.resources.hook_runner.clone(),
-                memory_config: inner.context.resources.memory_config.clone(),
-                memory: inner.wiring.committed_memory(),
-                reflection_history: inner.context.resources.reflection_history.clone(),
-                language: inner.context.resources.language.clone(),
-                reasoning: workflow::adaptive_reasoning(
-                    inner.context.resources.binding.requested_reasoning,
-                ),
-                build_switched_client: {
-                    let config_query = inner.config_query.clone();
-                    let provider_factory = inner.context.resources.provider_factory.clone();
-                    std::sync::Arc::new(move |selection: &str| {
-                        let selection = selection.to_string();
-                        let config_query = config_query.clone();
-                        let provider_factory = provider_factory.clone();
-                        Box::pin(async move {
-                            super::trait_model::build_provider_binding_for_switch(
-                                &selection,
-                                config_query.as_ref(),
-                                provider_factory.as_ref(),
-                            )
-                            .await
-                        })
-                    })
-                },
-                list_reflection_history: {
-                    let inner = inner.clone();
-                    std::sync::Arc::new(move |limit| {
-                        let inner = inner.clone();
-                        Box::pin(async move {
-                            let me = super::accessors::AgentClientImpl { inner };
-                            super::trait_reflection::list_reflection_history_impl(&me, limit).await
-                        })
-                    })
-                },
-                list_models: {
-                    let inner = inner.clone();
-                    std::sync::Arc::new(move || {
-                        let inner = inner.clone();
-                        Box::pin(async move {
-                            let me = super::accessors::AgentClientImpl { inner };
-                            super::trait_model::list_models_impl(&me).await
-                        })
-                    })
-                },
-                list_reminders: {
-                    let inner = inner.clone();
-                    std::sync::Arc::new(move || {
-                        let inner = inner.clone();
-                        Box::pin(async move {
-                            let me = super::accessors::AgentClientImpl { inner };
-                            super::trait_memory::list_reminders_impl(&me).await
-                        })
-                    })
-                },
-                list_sessions: {
-                    let inner = inner.clone();
-                    std::sync::Arc::new(move || {
-                        let inner = inner.clone();
-                        Box::pin(async move {
-                            let me = super::accessors::AgentClientImpl { inner };
-                            super::trait_session::list_sessions_impl(&me).await
-                        })
-                    })
-                },
+                session_queries: Arc::new(AgentSessionQuery::new(Arc::new(AgentClientImpl {
+                    inner: inner.clone(),
+                }))),
             },
         )
         .await;

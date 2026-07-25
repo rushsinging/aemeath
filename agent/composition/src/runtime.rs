@@ -31,6 +31,7 @@ fn wire_runtime_tool_assembly(
     memory_source: Arc<dyn tools::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
+    agents_dir: &std::path::Path,
 ) -> Result<RuntimeToolAssembly, sdk::SdkError> {
     let tools = tools::composition::wire_builtin_catalog_execution(
         task_access,
@@ -39,12 +40,13 @@ fn wire_runtime_tool_assembly(
     )
     .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let policy = snapshot.tool_result_policy();
+    let agents_dir_buf = agents_dir.to_path_buf();
     let blobs = Arc::new(runtime::AtomicBlobToolResultStore::new(
         Arc::new(
-            storage::FileSystemBlobAdapter::new(share::config::paths::global_agents_dir())
+            storage::FileSystemBlobAdapter::new(agents_dir_buf.clone())
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
         ),
-        share::config::paths::global_agents_dir(),
+        agents_dir_buf,
     ));
     Ok(RuntimeToolAssembly {
         catalog: tools.catalog(),
@@ -67,6 +69,7 @@ pub(crate) async fn from_args_with_gateways(
     gateways: FeatureGateways,
     workspace: project::WorkspaceViews,
     config: config::ConfigWiring,
+    agents_dir: &std::path::Path,
 ) -> Result<AgentClientImpl, sdk::SdkError> {
     let identity = workspace.read().project_identity();
     let project_key = memory_api::ProjectMemoryKey::derive(
@@ -74,10 +77,14 @@ pub(crate) async fn from_args_with_gateways(
         identity.git_common_dir.as_deref(),
     )
     .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+    // StorageNamespace::Memory adds "memory" segment → adapter root is
+    // agents_dir so the dataset lives at agents_dir/memory/{project}/...
+    // (not agents_dir/memory/memory/...). Legacy memory still uses the
+    // explicit agents_dir.join("memory") path via FileLegacyMemorySourceFactory.
     let reflection_history: Arc<dyn memory_api::ReflectionHistoryStore> =
         Arc::new(memory_api::AtomicDatasetReflectionHistoryStore::new(
             Arc::new(
-                storage::FileSystemDatasetAdapter::new(share::config::paths::global_memory_dir())
+                storage::FileSystemDatasetAdapter::new(agents_dir)
                     .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             ),
             project_key,
@@ -94,11 +101,12 @@ pub(crate) async fn from_args_with_gateways(
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
     let skill_materializer = skill_wiring.materializer();
-    let session_blob = storage::api::file_system_blob(share::config::paths::global_agents_dir())
+    let session_blob = storage::api::file_system_blob(agents_dir)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
         context::adapters::AtomicBlobSessionManagement::new(session_blob.clone()),
     );
+    let agents_dir_buf = agents_dir.to_path_buf();
     let deps = context::MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
@@ -106,11 +114,11 @@ pub(crate) async fn from_args_with_gateways(
         config_participant: config.participant(),
         memory_opener: Box::new(memory::DatasetMemoryOpener::new(
             Arc::new(
-                storage::FileSystemDatasetAdapter::new(share::config::paths::global_agents_dir())
+                storage::FileSystemDatasetAdapter::new(agents_dir_buf)
                     .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             ),
             Arc::new(memory::FileLegacyMemorySourceFactory::new(
-                share::config::paths::global_memory_dir(),
+                agents_dir.join("memory"),
             )),
         )),
         session_management: session_management.clone(),
@@ -137,6 +145,7 @@ pub(crate) async fn from_args_with_gateways(
         }),
         workspace.control(),
         &config.reader().committed_snapshot(),
+        agents_dir,
     )?;
 
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
@@ -162,3 +171,7 @@ pub(crate) async fn from_args_with_gateways(
     );
     runtime::from_args_with_workspace(args, dependencies).await
 }
+
+#[cfg(test)]
+#[path = "runtime_tests.rs"]
+mod tests;

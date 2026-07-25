@@ -24,43 +24,17 @@ use context::MainSessionDependencies;
 use context::SessionManagementPort;
 use sdk::{ChatBootstrapArgs, RunId};
 use share::message::Message;
+use std::path::Path;
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-/// Process-global mutex so tests that set `AEMEATH_AGENTS_DIR` don't race.
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-struct EnvGuard {
-    key: &'static str,
-    previous: Option<std::ffi::OsString>,
-    _lock: std::sync::MutexGuard<'static, ()>,
-}
-
-impl EnvGuard {
-    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let previous = std::env::var_os(key);
-        unsafe { std::env::set_var(key, value) };
-        Self {
-            key,
-            previous,
-            _lock: lock,
-        }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        unsafe {
-            match &self.previous {
-                Some(v) => std::env::set_var(self.key, v),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
-}
-
-fn setup_agents_dir(temp: &tempfile::TempDir) -> EnvGuard {
+/// Create the temp `agents/` directory tree that tests need on disk
+/// (config + mcp files), returning the resolved `agents_dir` PathBuf.
+///
+/// Tests pass this directly to every wiring call that previously read
+/// `share::config::paths::global_agents_dir()` — no environment
+/// variables, no process-global mutex, no races with parallel tests.
+fn make_agents_dir(temp: &tempfile::TempDir) -> std::path::PathBuf {
     let agents_dir = temp.path().join("agents");
     std::fs::create_dir_all(&agents_dir).expect("create agents dir");
     std::fs::write(
@@ -88,7 +62,7 @@ fn setup_agents_dir(temp: &tempfile::TempDir) -> EnvGuard {
     )
     .expect("write config");
     std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#).expect("write MCP config");
-    EnvGuard::set("AEMEATH_AGENTS_DIR", &agents_dir)
+    agents_dir
 }
 
 fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInput {
@@ -106,19 +80,34 @@ fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInput {
     }
 }
 
-fn config_native_store() -> config::NativeConfigStore {
+/// Wire a project config that reads the global config from the test's
+/// `agents_dir/aemeath.json` instead of `share::config::paths::global_agents_dir()`
+/// (which reads `AEMEATH_AGENTS_DIR`). Used by every test in this file so
+/// they can swap agents dirs without env-var races — see #1385.
+async fn wire_config_with_agents_dir(
+    project_dir: &Path,
+    agents_dir: &Path,
+    cli: config::CliConfigInput,
+) -> Result<config::ConfigWiring, config::ConfigError> {
+    config::wire_project_config_with_agents_dir(
+        project_dir,
+        agents_dir,
+        config_native_store(agents_dir),
+        cli,
+    )
+    .await
+}
+
+fn config_native_store(agents_dir: &Path) -> config::NativeConfigStore {
     config::NativeConfigStore::new(
-        storage::api::file_system_blob(
-            share::config::paths::global_agents_dir().join("config-overrides"),
-        )
-        .expect("create config override blob"),
+        storage::api::file_system_blob(agents_dir.join("config-overrides"))
+            .expect("create config override blob"),
     )
 }
 
-fn session_management() -> Arc<dyn SessionManagementPort> {
+fn session_management(agents_dir: &Path) -> Arc<dyn SessionManagementPort> {
     Arc::new(context::adapters::AtomicBlobSessionManagement::new(
-        storage::api::file_system_blob(share::config::paths::global_agents_dir())
-            .expect("create session blob"),
+        storage::api::file_system_blob(agents_dir).expect("create session blob"),
     ))
 }
 
@@ -143,6 +132,30 @@ fn production_runtime_has_no_direct_active_memory_construction() {
         1,
         "production runtime must provide exactly one active Memory opener to MainSession wiring"
     );
+
+    // #1385: reflection history adapter root is agents_dir, not
+    // agents_dir.join("memory"). StorageNamespace::Memory already adds the
+    // "memory" segment; an explicit join produces memory/memory/...
+    let reflection_adapter_new = source
+        .match_indices("FileSystemDatasetAdapter::new(")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reflection_adapter_new.len(),
+        2,
+        "production runtime must construct exactly 2 dataset adapters: \
+         one for reflection (agents_dir), one for MemoryOpener (agents_dir)"
+    );
+    // Verify neither uses `join("memory")` for FileSystemDatasetAdapter.
+    // Legacy memory uses `agents_dir.join("memory")` via
+    // FileLegacyMemorySourceFactory, not via FileSystemDatasetAdapter.
+    for (idx, _) in &reflection_adapter_new {
+        let line = source[*idx..].lines().next().unwrap_or("");
+        assert!(
+            !line.contains(r#"join("memory")"#),
+            "FileSystemDatasetAdapter::new must not use join(\"memory\") — \
+             namespace adds the segment; found: {line}"
+        );
+    }
 }
 
 /// The production wiring constructs a real `DatasetMemoryOpener` backed by
@@ -152,15 +165,15 @@ fn production_runtime_has_no_direct_active_memory_construction() {
 async fn production_wiring_uses_real_filesystem_backed_memory() {
     let temp = tempfile::tempdir().expect("create temp root");
     let root = temp.path().join("root");
+    let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
-    let _env = setup_agents_dir(&temp);
 
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config_with_cli(
+    let config = wire_config_with_agents_dir(
         &root,
-        config_native_store(),
+        &agents_dir,
         cli_config_input(&ChatBootstrapArgs {
             api_key: Some("test-api-key".to_string()),
             base_url: Some("http://127.0.0.1:1/v1".to_string()),
@@ -175,18 +188,17 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
 
     // Construct the same production opener that Composition uses.
     let dataset_adapter = Arc::new(
-        storage::FileSystemDatasetAdapter::new(share::config::paths::global_agents_dir())
-            .expect("create dataset adapter"),
+        storage::FileSystemDatasetAdapter::new(agents_dir.clone()).expect("create dataset adapter"),
     );
     let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
-        share::config::paths::global_memory_dir(),
+        agents_dir.join("memory"),
     ));
     let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
         dataset_adapter,
         legacy_factory,
     ));
 
-    let session_management = session_management();
+    let session_management = session_management(&agents_dir);
     let deps = MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
@@ -235,28 +247,26 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
 async fn production_context_append_reopens_from_atomic_blob() {
     let temp = tempfile::tempdir().expect("create temp root");
     let root = temp.path().join("root");
+    let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
-    let _env = setup_agents_dir(&temp);
 
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config(&root, config_native_store())
+    let config = wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInput::default())
         .await
         .expect("wire config");
     let task_wiring = task::wire_task();
     let dataset_adapter = Arc::new(
-        storage::FileSystemDatasetAdapter::new(share::config::paths::global_agents_dir())
-            .expect("create dataset adapter"),
+        storage::FileSystemDatasetAdapter::new(agents_dir.clone()).expect("create dataset adapter"),
     );
     let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
         dataset_adapter,
         Arc::new(memory::FileLegacyMemorySourceFactory::new(
-            share::config::paths::global_memory_dir(),
+            agents_dir.join("memory"),
         )),
     ));
-    let session_blob = storage::api::file_system_blob(share::config::paths::global_agents_dir())
-        .expect("create session blob");
+    let session_blob = storage::api::file_system_blob(&agents_dir).expect("create session blob");
     let session_management: Arc<dyn SessionManagementPort> = Arc::new(
         context::adapters::AtomicBlobSessionManagement::new(session_blob.clone()),
     );
@@ -331,15 +341,15 @@ async fn production_context_append_reopens_from_atomic_blob() {
 async fn runtime_session_id_matches_wiring_committed_session() {
     let temp = tempfile::tempdir().expect("create temp root");
     let root = temp.path().join("root");
+    let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
-    let _env = setup_agents_dir(&temp);
 
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config_with_cli(
+    let config = wire_config_with_agents_dir(
         &root,
-        config_native_store(),
+        &agents_dir,
         cli_config_input(&ChatBootstrapArgs {
             api_key: Some("test-api-key".to_string()),
             base_url: Some("http://127.0.0.1:1/v1".to_string()),
@@ -356,11 +366,10 @@ async fn runtime_session_id_matches_wiring_committed_session() {
 
     // Construct the same production opener that Composition uses.
     let dataset_adapter = Arc::new(
-        storage::FileSystemDatasetAdapter::new(share::config::paths::global_agents_dir())
-            .expect("create dataset adapter"),
+        storage::FileSystemDatasetAdapter::new(agents_dir.clone()).expect("create dataset adapter"),
     );
     let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
-        share::config::paths::global_memory_dir(),
+        agents_dir.join("memory"),
     ));
     let project_key =
         memory::api::ProjectMemoryKey::derive(root.to_str().expect("project root is UTF-8"), None)
@@ -373,7 +382,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         legacy_factory,
     ));
 
-    let session_management = session_management();
+    let session_management = session_management(&agents_dir);
     let deps = MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
@@ -463,31 +472,30 @@ async fn runtime_session_id_matches_wiring_committed_session() {
 async fn config_query_and_writer_are_gate_aware_from_wiring() {
     let temp = tempfile::tempdir().expect("create temp root");
     let root = temp.path().join("root");
+    let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
-    let _env = setup_agents_dir(&temp);
 
     let workspace = project::wire_production_workspace(root.clone())
         .expect("wire workspace")
         .into_views();
-    let config = config::wire_project_config(&root, config_native_store())
+    let config = wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInput::default())
         .await
         .expect("wire config");
 
     let task_wiring = task::wire_task();
 
     let dataset_adapter = Arc::new(
-        storage::FileSystemDatasetAdapter::new(share::config::paths::global_agents_dir())
-            .expect("create dataset adapter"),
+        storage::FileSystemDatasetAdapter::new(agents_dir.clone()).expect("create dataset adapter"),
     );
     let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
-        share::config::paths::global_memory_dir(),
+        agents_dir.join("memory"),
     ));
     let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
         dataset_adapter,
         legacy_factory,
     ));
 
-    let session_management = session_management();
+    let session_management = session_management(&agents_dir);
     let deps = MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),

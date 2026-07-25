@@ -34,7 +34,7 @@ pub use domain::{
     SkillCatalogPort, SkillDescriptor, SkillError, SkillMaterializationPort,
     SkillMaterializationQuery, SkillMaterializationRevision, SkillMaterializationSnapshot,
     SkillQuery, SkillSource, SkillSourceKind, SlashInput, SnapshotQueryCommand,
-    SnapshotQueryTarget, Tool, ToolCapabilities, ToolCapability, ToolCatalogPort,
+    SnapshotQueryTarget, Tool, ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogPort,
     ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind, ToolExecutionContext,
     ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort, ToolExecutionOutcome,
     ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider, ToolName, ToolOutcome,

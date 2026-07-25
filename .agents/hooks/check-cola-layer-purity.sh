@@ -4,7 +4,6 @@ set -euo pipefail
 # guard-registry:policy.task.target-layout
 # guard-registry:migration.runtime.application-accessors-to-adapters
 # guard-registry:migration.runtime.application-from-args-to-adapters
-# guard-registry:migration.runtime.input-buffer-port-to-application
 # guard-registry:migration.runtime.legacy-port-to-application
 
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
@@ -76,12 +75,10 @@ RUNTIME_PROVIDER_TOOLS_OLD_PATHS = [
 LAYER_MIGRATION_EXCEPTIONS = set()
 # guard-registry:migration.runtime.application-accessors-to-adapters
 # guard-registry:migration.runtime.application-from-args-to-adapters
-# guard-registry:migration.runtime.input-buffer-port-to-application
 # guard-registry:migration.runtime.legacy-port-to-application
 RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/runtime/src/application/client/accessors.rs", "adapters"),
     ("agent/features/runtime/src/application/client/from_args.rs", "adapters"),
-    ("agent/features/runtime/src/ports/input_buffer.rs", "application"),
     ("agent/features/runtime/src/ports/legacy.rs", "application"),
     # #1381: Runtime-owned types (hook_types, workspace_access) moved back to application.
     # Remaining adapter refs: tool_runtime (progress/cancellation), input_buffer,

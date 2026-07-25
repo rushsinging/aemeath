@@ -8,7 +8,6 @@ use crate::application::startup::ChatBootstrapArgs;
 use crate::application::startup::{
     build_agent_runner, resolve_concurrency_limits, resolve_model_runtime_settings,
 };
-use crate::ports::legacy::ChatRuntimeContext;
 use crate::ports::{ProviderBuildSpec, ProviderFactory, RequestSystemBlock};
 
 use super::{AgentClientImpl, RuntimeHandle};
@@ -374,7 +373,7 @@ pub async fn from_args_with_workspace(
                 },
             ))
         })
-        .collect();
+        .collect::<std::collections::HashMap<String, sdk::SkillView>>();
     // #1327 承接 MCP Ready lifecycle / Catalog 同步；#1294 不保留 MCP manager 或
     // Tools 私有 CatalogExecutionWiring 接线。
 
@@ -397,24 +396,25 @@ pub async fn from_args_with_workspace(
 
     // 16. PolicyPort 已由 Composition 注入；同一 Arc 分发给 Main 与 Sub。
 
-    // 17. Memory port — gate-aware, from wiring.
-    let memory: Arc<dyn memory::api::MemoryPort> = wiring.committed_memory();
+    // 17. #1385 Task 7: Memory port is obtained per-run via BoundMainRun
+    // (assemble_main_runtime_context), not at bootstrap time.
+
+    // #1385 Task 6: shared parent context source — created once and injected
+    // into both CliAgentRunner and MainSessionShell so that the Main Run loop
+    // can install the current RuntimeContext before tool execution and sub-agent
+    // derivation reads it.
+    let parent_context_source = crate::application::runtime_context::ParentRunContextSource::new();
 
     let agent_runner = build_agent_runner(
         wiring.config_reader(),
         provider_factory.clone(),
-        hook_runner.clone(),
-        runtime_settings.reasoning,
         active_run.clone(),
-        policy.clone(),
         max_tool_concurrency,
         agent_semaphore.clone(),
         tool_result_materializer.clone(),
         workspace.clone(),
-        tool_catalog.clone(),
-        tool_execution.clone(),
-        tool_context_binding.clone(),
         skill_materializer.clone(),
+        parent_context_source.clone(),
     );
 
     // 18. Prompt bundle
@@ -451,57 +451,43 @@ pub async fn from_args_with_workspace(
         max_agent_concurrency
     );
 
-    // 20. context_size / verbose 合并
+    // 20. context_size
     let context_size =
         snapshot.resolve_context_size(Some(args.context_size), resolved_model.model.context_window);
 
-    // 20. 组装 context
     let memory_config = snapshot.memory().clone();
-    let context = ChatRuntimeContext {
-        resources: crate::application::resources::RuntimeResources {
-            binding: Arc::new(binding.clone()),
-            provider_factory: provider_factory.clone(),
-            tool_catalog,
-            tool_execution,
-            tool_context_binding,
-            system_blocks,
-            system_prompt_text,
-            initial_git_context: prompt_parts.initial_git_context,
-            user_context: prompt_parts.claude_md,
-            agent_runner,
-            tool_result_materializer,
-            task_access,
-            skills_map,
-            hook_runner,
-            memory_config,
-            agent_semaphore,
-            memory,
-            reflection_history,
-            policy,
-            allow_all: args.allow_all,
-            context_size,
-            language: snapshot.language().to_string(),
-        },
-        verbose: args.verbose,
-        resume: args.resume,
-    };
 
-    // 21. 构建 handle
-    let handle = RuntimeHandle {
-        context,
-        cwd,
-        resolved_model,
-        session_id,
+    // 20b. #1385: 构建 MainSessionShell（session 级状态，§2.2）
+    let shell = crate::application::client::accessors::MainSessionShell {
+        session_id: session_id.clone(),
+        cwd: cwd.clone(),
+        workspace: workspace.clone(),
+        wiring: wiring.clone(),
+        config_query: config_query.clone(),
+        config_writer: config_writer.clone(),
+        session_management: session_management.clone(),
+        provider_factory: provider_factory.clone(),
+        resolved_model: resolved_model.clone(),
+        current_binding: Arc::new(std::sync::RwLock::new(Arc::new(binding.clone()))),
         max_tool_concurrency,
         max_agent_concurrency,
-        current_binding: std::sync::RwLock::new(Arc::new(binding)),
-        active_run,
+        agent_semaphore: agent_semaphore.clone(),
+        system_blocks,
+        system_prompt_text,
+        initial_git_context: prompt_parts.initial_git_context,
+        user_context: prompt_parts.claude_md,
+        skills_map,
+        memory_config,
+        context_size,
+        language: snapshot.language().to_string(),
+        allow_all: args.allow_all,
+        verbose: args.verbose,
+        resume: args.resume,
+        agent_runner,
+        parent_context_source,
+        tool_result_materializer,
+        active_run: active_run.clone(),
         interaction_bridge: Arc::new(crate::application::interaction::InteractionBridge::new()),
-        workspace,
-        wiring: wiring.clone(),
-        config_query,
-        config_writer,
-        session_management,
         event_sink_factory: Arc::new(|tx| {
             crate::application::main_loop::ChatEventSinkHandle::new(
                 crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
@@ -514,7 +500,17 @@ pub async fn from_args_with_workspace(
         session_reminders: Arc::new(std::sync::RwLock::new(
             share::memory::SessionReminders::new(),
         )),
+        hook_runner,
+        policy,
+        task_access,
+        reflection_history,
+        tool_catalog,
+        tool_execution,
+        tool_context_binding,
     };
+
+    // 21. 构建 handle — #1385 Task 7: shell is the single source.
+    let handle = RuntimeHandle { shell };
 
     Ok(AgentClientImpl {
         inner: Arc::new(handle),
@@ -529,9 +525,34 @@ fn non_empty_string(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use crate::application::client::accessors::MainSessionShell;
+    use crate::application::run_config::RunConfigSnapshot;
+    use crate::domain::agent_run::RunSpec;
+    use crate::ports::{ContextPort, PolicyPort};
+    use hook::{HookInvocation, HookOutcome, HookPort};
+    use memory::api::{MemoryPort, ReflectionHistoryStore};
+    use workflow::api::ReasoningPort;
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// #1385 Task 12: noop event sink handle for tests.
+    fn test_sink() -> crate::application::main_loop::ChatEventSinkHandle {
+        #[derive(Clone)]
+        struct NoOpSink;
+        impl crate::application::main_loop::ChatEventSink for NoOpSink {
+            fn send_event<'a>(
+                &'a self,
+                _event: crate::application::main_loop::RuntimeStreamEvent,
+            ) -> crate::application::main_loop::EventFuture<'a> {
+                Box::pin(std::future::ready(()))
+            }
+            fn try_send_event(&self, _event: crate::application::main_loop::RuntimeStreamEvent) {}
+        }
+        crate::application::main_loop::ChatEventSinkHandle::new(NoOpSink)
+    }
 
     struct EnvGuard {
         key: &'static str,
@@ -561,6 +582,397 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ── Fake implementations for RuntimeContext assembly tests ──
+
+    struct FakeContextPort;
+    #[async_trait::async_trait]
+    impl ContextPort for FakeContextPort {
+        async fn build_window(
+            &self,
+            _request: &crate::ports::ContextRequest,
+        ) -> Result<crate::ports::ContextWindow, crate::ports::ContextPortError> {
+            Err(crate::ports::ContextPortError::Compact("fake".into()))
+        }
+        async fn needs_compaction(
+            &self,
+            _request: &crate::ports::ContextRequest,
+        ) -> Result<crate::ports::CompactionDecision, crate::ports::ContextPortError> {
+            Err(crate::ports::ContextPortError::Compact("fake".into()))
+        }
+        async fn compact(
+            &self,
+            _request: &crate::ports::CompactRequest,
+        ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
+            Err(crate::ports::ContextPortError::Compact("fake".into()))
+        }
+        async fn manual_compact(
+            &self,
+            _request: &crate::ports::ManualCompactRequest,
+        ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
+            Err(crate::ports::ContextPortError::Compact("fake".into()))
+        }
+        async fn clear_session(
+            &self,
+            _session_id: &crate::ports::SessionId,
+        ) -> Result<(), crate::ports::ContextPortError> {
+            Ok(())
+        }
+        async fn append_and_persist(
+            &self,
+            _append: &crate::ports::ContextAppend,
+        ) -> Result<crate::ports::AppendReceipt, crate::ports::ContextAppendError> {
+            Err(crate::ports::ContextAppendError::Storage("fake".into()))
+        }
+    }
+
+    struct FakeReflectionHistory;
+    #[async_trait::async_trait]
+    impl memory::api::ReflectionHistoryQuery for FakeReflectionHistory {
+        async fn list(
+            &self,
+            _limit: usize,
+        ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::MemoryError> {
+            Ok(vec![])
+        }
+    }
+    #[async_trait::async_trait]
+    impl memory::api::ReflectionHistoryStore for FakeReflectionHistory {
+        async fn append(
+            &self,
+            _record: &memory::api::ReflectionRecord,
+        ) -> Result<(), memory::MemoryError> {
+            Ok(())
+        }
+        async fn upsert(
+            &self,
+            _record: &memory::api::ReflectionRecord,
+        ) -> Result<(), memory::MemoryError> {
+            Ok(())
+        }
+    }
+
+    struct FakeHook;
+    #[async_trait::async_trait]
+    impl HookPort for FakeHook {
+        async fn dispatch(
+            &self,
+            _invocation: HookInvocation,
+            _cancellation: &tokio_util::sync::CancellationToken,
+        ) -> HookOutcome {
+            HookOutcome::proceed()
+        }
+    }
+
+    struct FakeReasoning;
+    impl ReasoningPort for FakeReasoning {
+        fn observe(
+            &self,
+            _signal: workflow::api::ReasoningSignal,
+        ) -> workflow::api::ReasoningObservation {
+            workflow::api::ReasoningObservation {
+                previous: workflow::api::ReasoningNode::Idle,
+                current: workflow::api::ReasoningNode::Idle,
+                requested: provider::ReasoningLevel::Medium,
+            }
+        }
+        fn current_requested_level(&self) -> provider::ReasoningLevel {
+            provider::ReasoningLevel::Medium
+        }
+        fn set_level(&self, level: provider::ReasoningLevel) -> provider::ReasoningLevel {
+            level
+        }
+        fn reset_default_level(&self, level: provider::ReasoningLevel) -> provider::ReasoningLevel {
+            level
+        }
+    }
+
+    /// Build a minimal `MainSessionShell` with fake ports for assembler tests.
+    /// Accepts a shared `ParentRunContextSource` so tests that wire up both
+    /// a shell and a runner pass the same source — no orphan source.
+    async fn make_test_shell(
+        parent_context_source: crate::application::runtime_context::ParentRunContextSource,
+    ) -> MainSessionShell {
+        let temp = tempfile::tempdir().expect("create temp root");
+        let root = temp.path().join("root");
+        std::fs::create_dir_all(&root).expect("create root");
+        let workspace = project::wire_production_workspace(root.clone())
+            .expect("wire workspace")
+            .into_views();
+        let task_wiring = task::wire_task();
+        let config = config::wire_project_config(
+            &root,
+            config::NativeConfigStore::new(Arc::new(
+                storage::FileSystemBlobAdapter::new(temp.path()).expect("create config blob"),
+            )),
+        )
+        .await
+        .expect("wire config");
+        let wiring = context::test_support::wire_in_memory(
+            &workspace,
+            task_wiring.persist(),
+            config.reader(),
+            config.participant(),
+            Arc::new(context::test_support::UnavailableSessionManagement),
+            Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            ))),
+        )
+        .await;
+        let snapshot = wiring.committed_config();
+        let binding = crate::application::testing::test_binding(Vec::new());
+        let policy: Arc<dyn PolicyPort> = Arc::new(policy::AllowAllPolicy);
+        let _memory: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
+        let tools_factory = tools::composition::TestCatalogExecutionFactory::empty();
+        let tool_catalog: Arc<dyn tools::ToolCatalogPort> = tools_factory.catalog_port();
+        let tool_execution: Arc<dyn tools::ToolExecutionPort> = tools_factory.execution();
+        let tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort> =
+            tools_factory.binding();
+        let reflection_history: Arc<dyn ReflectionHistoryStore> = Arc::new(FakeReflectionHistory);
+        let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
+        let hook_runner: Arc<dyn HookPort> = Arc::new(FakeHook);
+
+        struct NoopRunner;
+        #[async_trait::async_trait]
+        impl tools::AgentRunner for NoopRunner {
+            async fn run_agent(
+                &self,
+                _request: tools::AgentRunRequest<'_>,
+            ) -> tools::AgentRunTerminal {
+                tools::AgentRunTerminal::Completed {
+                    result: String::new(),
+                }
+            }
+            async fn complete(
+                &self,
+                _prompt: &str,
+                _system: &str,
+                _cancellation: Arc<dyn tools::CancellationSignal>,
+            ) -> String {
+                String::new()
+            }
+        }
+        let agent_runner: Arc<dyn tools::AgentRunner> = Arc::new(NoopRunner);
+        let tool_result_materializer = crate::application::testing::test_tool_result_materializer();
+        let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
+        let config_query = wiring.config_query();
+        let config_writer = wiring.config_writer();
+        let session_management = wiring.session_management();
+        let cwd = root.clone();
+
+        MainSessionShell {
+            session_id: "test-session".to_string(),
+            cwd,
+            workspace,
+            wiring: wiring.clone(),
+            config_query,
+            config_writer,
+            session_management,
+            provider_factory: Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
+            resolved_model: snapshot
+                .resolve_runtime_model(None, None)
+                .map(|rm| rm.resolved_model().clone())
+                .unwrap_or_else(|_| share::config::models::ResolvedModel {
+                    source_key: "test".to_string(),
+                    source_config: Default::default(),
+                    driver: "openai".to_string(),
+                    model: share::config::models::ModelEntryConfig {
+                        id: "test-model".to_string(),
+                        name: "test".to_string(),
+                        context_window: 128_000,
+                        max_tokens: 8192,
+                        ..Default::default()
+                    },
+                }),
+            current_binding: Arc::new(std::sync::RwLock::new(binding.clone())),
+            max_tool_concurrency: 10,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+            system_blocks: Vec::new(),
+            system_prompt_text: String::new(),
+            initial_git_context: String::new(),
+            user_context: String::new(),
+            skills_map: std::collections::HashMap::new(),
+            memory_config: share::config::MemoryConfig::default(),
+            context_size: 200_000,
+            language: "en".to_string(),
+            allow_all: true,
+            verbose: false,
+            resume: None,
+            agent_runner,
+            parent_context_source,
+            tool_result_materializer,
+            active_run,
+            interaction_bridge: Arc::new(crate::application::interaction::InteractionBridge::new()),
+            event_sink_factory: Arc::new(|tx| {
+                crate::application::main_loop::ChatEventSinkHandle::new(
+                    crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
+                )
+            }),
+            input_port_factory: Arc::new(|queue, events| {
+                crate::application::client::accessors::InputPortPair {
+                    queue: crate::adapters::input_buffer::RuntimeQueueDrainPort::new(queue),
+                    input_events: crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(
+                        events,
+                    ),
+                }
+            }),
+            session_reminders: Arc::new(std::sync::RwLock::new(
+                share::memory::SessionReminders::new(),
+            )),
+            hook_runner,
+            policy,
+            task_access,
+            reflection_history,
+            tool_catalog,
+            tool_execution,
+            tool_context_binding,
+        }
+    }
+
+    // ── Task 4 L1: Shell classification tests ──
+
+    /// After bootstrap, MainSessionShell holds session-level state: wiring, workspace,
+    /// session identity, prompt bootstrap, model switch. It does NOT hold a per-Run
+    /// RuntimeContext instance.
+    #[tokio::test(flavor = "current_thread")]
+    async fn main_session_shell_holds_wiring_and_workspace_not_runtime_context() {
+        let shell =
+            make_test_shell(crate::application::runtime_context::ParentRunContextSource::new())
+                .await;
+
+        // Shell has wiring + workspace (session-level).
+        let _wiring = &shell.wiring;
+        let _workspace = &shell.workspace;
+        let _session_id = &shell.session_id;
+
+        // Shell has prompt bootstrap fields.
+        let _system_blocks = &shell.system_blocks;
+        let _skills_map = &shell.skills_map;
+        let _initial_git = &shell.initial_git_context;
+
+        // Shell has model switch fields.
+        let _resolved_model = &shell.resolved_model;
+        let _binding = shell.current_binding.read().unwrap().clone();
+
+        // Shell does NOT have a RuntimeContext — it must be assembled per run.
+        // (Compile-time check: MainSessionShell has no `runtime_context: RuntimeContext` field.)
+    }
+
+    /// Two assembler calls from the same shell produce different cancellation scopes
+    /// but share Arc'd parent resources.
+    #[tokio::test(flavor = "current_thread")]
+    async fn two_assembler_calls_produce_different_cancel_shared_arcs() {
+        let shell =
+            make_test_shell(crate::application::runtime_context::ParentRunContextSource::new())
+                .await;
+        let config = RunConfigSnapshot::capture(shell.wiring.committed_config());
+
+        let spec = RunSpec::main();
+        let reasoning: Arc<dyn ReasoningPort> = Arc::new(FakeReasoning);
+        let memory: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
+        let context: Arc<dyn ContextPort> = Arc::new(FakeContextPort);
+
+        let ctx1 = shell
+            .assemble_main_runtime_context(
+                &spec,
+                config.clone(),
+                context.clone(),
+                memory.clone(),
+                reasoning.clone(),
+                test_sink(),
+            )
+            .expect("first assembly");
+
+        let ctx2 = shell
+            .assemble_main_runtime_context(
+                &spec,
+                config.clone(),
+                context.clone(),
+                memory.clone(),
+                reasoning.clone(),
+                test_sink(),
+            )
+            .expect("second assembly");
+
+        // Different cancellation scopes.
+        ctx1.cancel().token().cancel();
+        assert!(ctx1.cancel().token().is_cancelled());
+        assert!(!ctx2.cancel().token().is_cancelled());
+
+        // Shared Arc'd resources: both RuntimeContexts point to the same underlying
+        // parent capability ports (policy, hook, task, reflection).
+        assert!(Arc::ptr_eq(&ctx1.policy(), &ctx2.policy()));
+        assert!(Arc::ptr_eq(&ctx1.hooks(), &ctx2.hooks()));
+        assert!(Arc::ptr_eq(&ctx1.task(), &ctx2.task()));
+        assert!(Arc::ptr_eq(
+            &ctx1.reflection_history(),
+            &ctx2.reflection_history()
+        ));
+    }
+
+    /// Model switch (updating `current_binding`) only affects the NEXT assembler call.
+    /// An already-assembled RuntimeContext keeps its frozen binding.
+    #[tokio::test(flavor = "current_thread")]
+    async fn model_switch_affects_only_next_assembler() {
+        let shell =
+            make_test_shell(crate::application::runtime_context::ParentRunContextSource::new())
+                .await;
+        let config = RunConfigSnapshot::capture(shell.wiring.committed_config());
+
+        let spec = RunSpec::main();
+        let reasoning: Arc<dyn ReasoningPort> = Arc::new(FakeReasoning);
+        let memory: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
+        let context: Arc<dyn ContextPort> = Arc::new(FakeContextPort);
+
+        // First assembly captures the current binding.
+        let ctx_before = shell
+            .assemble_main_runtime_context(
+                &spec,
+                config.clone(),
+                context.clone(),
+                memory.clone(),
+                reasoning.clone(),
+                test_sink(),
+            )
+            .expect("first assembly");
+
+        let binding_before = ctx_before.provider();
+
+        // Simulate model switch: create a new binding.
+        let new_binding = crate::application::testing::test_binding(vec!["new model response"]);
+        *shell.current_binding.write().unwrap() = new_binding.clone();
+
+        // Second assembly picks up the new binding.
+        let ctx_after = shell
+            .assemble_main_runtime_context(
+                &spec,
+                config.clone(),
+                context.clone(),
+                memory.clone(),
+                reasoning.clone(),
+                test_sink(),
+            )
+            .expect("second assembly");
+
+        let binding_after = ctx_after.provider();
+
+        // The first context still uses the old binding.
+        assert!(
+            Arc::ptr_eq(&binding_before, &ctx_before.provider()),
+            "already-assembled context retains its frozen binding"
+        );
+        // The second context uses the new binding.
+        assert!(
+            Arc::ptr_eq(&binding_after, &new_binding),
+            "next assembler uses the switched binding"
+        );
+        // They are different.
+        assert!(
+            !Arc::ptr_eq(&binding_before, &binding_after),
+            "model switch produces different bindings across assembler calls"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -702,11 +1114,11 @@ mod tests {
             .expect("build client with workspace");
 
         assert!(
-            Arc::ptr_eq(&client.inner.context.resources.hook_runner, &hook_runner),
+            Arc::ptr_eq(&client.inner.shell.hook_runner, &hook_runner),
             "Main Run 必须保留 Composition 注入的同一 HookRunner 实例"
         );
         assert_eq!(
-            client.inner.workspace.read().current_path_base(),
+            client.inner.shell.workspace.read().current_path_base(),
             sub.canonicalize().expect("canonicalize subdirectory")
         );
 
@@ -715,8 +1127,101 @@ mod tests {
             .change_directory(root.clone())
             .expect("change original clone back to root");
         assert_eq!(
-            client.inner.workspace.read().current_path_base(),
+            client.inner.shell.workspace.read().current_path_base(),
             root.canonicalize().expect("canonicalize root")
+        );
+    } // ── Task 4 GREEN: single-source verification tests ──
+
+    /// #1385 Task 7: `tui_launch_context()` reads binding from
+    /// `shell.current_binding` — the single model binding lock.
+    #[tokio::test(flavor = "current_thread")]
+    async fn tui_launch_context_binding_comes_from_shell_lock() {
+        let shell =
+            make_test_shell(crate::application::runtime_context::ParentRunContextSource::new())
+                .await;
+
+        // Write a distinct binding into shell.current_binding.
+        let switched = crate::application::testing::test_binding(vec!["tui sees this"]);
+        *shell.current_binding.write().unwrap() = switched.clone();
+
+        let handle = RuntimeHandle {
+            shell: shell.clone(),
+        };
+        let client = AgentClientImpl {
+            inner: Arc::new(handle),
+        };
+
+        let launch = client.tui_launch_context();
+        assert!(
+            Arc::ptr_eq(&launch.binding, &switched),
+            "tui_launch_context must read binding from shell.current_binding"
+        );
+    }
+
+    /// #1385 Task 7: accessors return values from `shell`, the single source.
+    #[tokio::test(flavor = "current_thread")]
+    async fn accessors_read_from_shell_single_source() {
+        let shell =
+            make_test_shell(crate::application::runtime_context::ParentRunContextSource::new())
+                .await;
+
+        let handle = RuntimeHandle {
+            shell: shell.clone(),
+        };
+        let client = AgentClientImpl {
+            inner: Arc::new(handle),
+        };
+
+        // All accessors must return shell values.
+        assert_eq!(
+            client.session_id(),
+            shell.session_id,
+            "session_id() must return shell.session_id"
+        );
+        assert_eq!(client.cwd(), &*shell.cwd, "cwd() must return shell.cwd");
+        assert_eq!(
+            client.resolved_model().model.id,
+            shell.resolved_model.model.id,
+            "resolved_model() must return shell.resolved_model"
+        );
+        assert_eq!(
+            client.max_tool_concurrency(),
+            shell.max_tool_concurrency,
+            "max_tool_concurrency() must return shell value"
+        );
+        assert_eq!(
+            client.max_agent_concurrency(),
+            shell.max_agent_concurrency,
+            "max_agent_concurrency() must return shell value"
+        );
+        assert_eq!(
+            client.shell().session_id,
+            shell.session_id,
+            "shell() accessor must return the actual MainSessionShell"
+        );
+        // #1385 Task 7: verbose migrated from ChatRuntimeContext to shell.
+        assert_eq!(client.shell().verbose, shell.verbose);
+    }
+
+    /// #1385 Task 7: `shell.interaction_bridge` is the single source.
+    /// `reply_interaction` and `cancel_interaction` both use it.
+    #[tokio::test(flavor = "current_thread")]
+    async fn interaction_bridge_is_single_source_on_shell() {
+        let shell =
+            make_test_shell(crate::application::runtime_context::ParentRunContextSource::new())
+                .await;
+        let bridge_ptr = Arc::as_ptr(&shell.interaction_bridge);
+
+        let handle = RuntimeHandle { shell };
+        let client = AgentClientImpl {
+            inner: Arc::new(handle),
+        };
+
+        // shell().interaction_bridge is the one used by SDK methods.
+        let shell_bridge_after = Arc::as_ptr(&client.shell().interaction_bridge);
+        assert_eq!(
+            bridge_ptr, shell_bridge_after,
+            "interaction_bridge must be a single Arc on shell — no second copy"
         );
     }
 

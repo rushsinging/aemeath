@@ -77,7 +77,7 @@ TOOLS_DOMAIN_FACADE = {
     "ParsedArguments", "PromptCommand", "SlashInput", "SnapshotQueryCommand",
     "SnapshotQueryTarget",
     "RegistryScopeName", "SessionReminder", "SessionReminders", "Tool", "ToolCapabilities",
-    "ToolCapability", "ToolCatalogPort", "ToolCatalogSnapshot", "ToolDescriptor",
+    "ToolCapability", "ToolCatalogError", "ToolCatalogPort", "ToolCatalogSnapshot", "ToolDescriptor",
     "ToolErrorKind", "ToolExecutionContext", "ToolExecutionContextBindingGuard",
     "ToolExecutionContextBindingPort", "ToolExecutionOutcome", "ToolExecutionPort",
     "ToolExecutionPorts", "ToolInvocation", "ToolListProvider", "ToolName", "ToolOutcome",
@@ -186,7 +186,7 @@ ROOT_ACCESS_ALLOW = {
           "PolicyDecision", "PolicyMode", "PolicyModeSource", "PolicyPort", "PolicyReason",
           "PolicyRequest", "PolicyRequestError", "StandardPolicy",
       },
-    "workflow": set(),
+    "workflow": {"adaptive_reasoning"},
     # guard-registry:policy.hook.crate-root-facade
     "hook": {
         "Dispatcher", "MAX_ATTEMPTS", "classify_directive", "ClassifyError", "HookClass",

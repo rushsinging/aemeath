@@ -35,6 +35,7 @@
 | [04-stuck-prevention.md](04-stuck-prevention.md) | StuckGuard 四层防线、分级响应、状态机集成 |
 | [05-recovery-semantics.md](05-recovery-semantics.md) | 从头开始恢复、持久化边界、无 durable |
 | [06-ports-and-adapters.md](06-ports-and-adapters.md) | 入站 OHS、Runtime 消费的能力契约、RuntimeContext 装配、Composition Root |
+| [07-runtime-ownership-and-assembly.md](07-runtime-ownership-and-assembly.md) | 去除 Main/Sub 生产类型、静动态所有权、统一 RuntimeContextFactory 与 Composition 边界 |
 
 ## 相关文档
 

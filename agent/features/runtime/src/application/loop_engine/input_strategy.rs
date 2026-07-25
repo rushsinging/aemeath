@@ -12,9 +12,10 @@ use share::message::Message;
 use crate::application::loop_engine::{
     DrainEpoch, DrainOutcome, InternalContinuationKind, LoopEngineError,
 };
-use crate::application::main_loop::looping::run_input_buffer::{BufferDrain, RunInputBuffer};
+use crate::application::main_loop::looping::run_input_buffer::BufferDrain;
 use crate::application::main_loop::looping::{
-    ChatEventSink, InputEventDrainPort, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
+    ChatEventSink, ChatEventSinkHandle, InputEventDrainPort, PendingInputBuffer, QueueDrainPort,
+    RuntimeStreamEvent,
 };
 
 /// Common interface for input-source strategies.
@@ -45,25 +46,27 @@ pub(crate) trait InputStrategy {
 
 /// Input strategy for the **Main** adapter.
 ///
-/// Owns the run-scoped [`RunInputBuffer`] and the continuation flags shared
-/// between drain and freeze/execute-tool phases.  Holds references to the
-/// channel-based input sources (`input_events`, `queue`), event sink, and
-/// pending-input buffer.
-pub(crate) struct MainInputStrategy<'a, S, Q, I>
+/// #1385 Task 12: `sink` is now a [`ChatEventSinkHandle`] (shared with
+/// [`RuntimeContext`]) instead of a generic `&S`.  This eliminates the `S`
+/// generic parameter.
+pub(crate) struct MainInputStrategy<'a, Q, I>
 where
-    S: ChatEventSink,
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
     pub input_events: &'a I,
-    pub sink: &'a S,
+    /// #1385 Task 12: Canonical event sink from RuntimeContext, not a separate
+    /// sink reference.  This is Clone and implements ChatEventSink directly.
+    pub sink: ChatEventSinkHandle,
     pub queue: &'a Q,
     /// Non-user-message events (controls) are forwarded here for the
     /// session idle gate to process after the Run ends.
     pub pending_input: &'a mut PendingInputBuffer,
-    /// Run-scoped input buffer: user messages received during this Run are
-    /// accumulated here and drained per-step within the same Run (#1272).
-    pub run_input_buffer: RunInputBuffer,
+    /// #1385 Task 12: Run-scoped input buffer handle shared with RuntimeContext.
+    /// User messages received during this Run are accumulated here and drained
+    /// per-step within the same Run (#1272).  All access goes through
+    /// [`RunInputBufferHandle::with_lock`].
+    pub run_input_buffer: crate::application::runtime_context::RunInputBufferHandle,
     /// Stop-hook feedback set by `invoke_model`, consumed by drain to
     /// produce `InternalContinuation::StopHookFeedback`.
     pub stop_hook_feedback: Option<Message>,
@@ -76,9 +79,8 @@ where
     pub run_id: sdk::RunId,
 }
 
-impl<'a, S, Q, I> MainInputStrategy<'a, S, Q, I>
+impl<'a, Q, I> MainInputStrategy<'a, Q, I>
 where
-    S: ChatEventSink,
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
@@ -88,7 +90,12 @@ where
     /// `UserMessagesQueued` is emitted.
     pub async fn admit_user_message(&mut self, event: ChatInputEvent) {
         debug_assert!(matches!(event, ChatInputEvent::UserMessage { .. }));
-        match self.run_input_buffer.push_or_reject(event) {
+        let (rejected, queued) = self.run_input_buffer.with_lock(|buf| {
+            let rejected = buf.push_or_reject(event);
+            let queued = buf.user_message_snapshot();
+            (rejected, queued)
+        });
+        match rejected {
             Some(rejected) => {
                 let rejected_id = match &rejected {
                     ChatInputEvent::UserMessage { id, .. } => Some(id.as_str().to_string()),
@@ -103,7 +110,6 @@ where
                 self.pending_input.push(rejected);
             }
             None => {
-                let queued = self.run_input_buffer.user_message_snapshot();
                 let queued_ids: Vec<_> = queued
                     .iter()
                     .map(|(id, _)| id.as_str().to_string())
@@ -142,7 +148,9 @@ where
             match event {
                 ChatInputEvent::UserMessage { .. } => self.admit_user_message(event).await,
                 ChatInputEvent::WithdrawAll => {
-                    let texts = self.run_input_buffer.withdraw_all_user_texts();
+                    let texts = self
+                        .run_input_buffer
+                        .with_lock(|b| b.withdraw_all_user_texts());
                     if !texts.is_empty() {
                         self.sink
                             .send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts })
@@ -160,7 +168,7 @@ where
             self.pending_stop_hook_feedback = Some(feedback);
             let (batch, epoch) = match self
                 .run_input_buffer
-                .take_internal_continuation(expected_epoch)
+                .with_lock(|b| b.take_internal_continuation(expected_epoch))
             {
                 BufferDrain::Ready { batch, epoch } => (batch, epoch),
                 BufferDrain::EmptyAndSealed { .. } | BufferDrain::Empty { .. } => {
@@ -205,7 +213,7 @@ where
             self.pending_tool_results = false;
             let (batch, epoch) = match self
                 .run_input_buffer
-                .take_internal_continuation(expected_epoch)
+                .with_lock(|b| b.take_internal_continuation(expected_epoch))
             {
                 BufferDrain::Ready { batch, epoch } => (batch, epoch),
                 BufferDrain::EmptyAndSealed { .. } | BufferDrain::Empty { .. } => {
@@ -253,9 +261,8 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S, Q, I> InputStrategy for MainInputStrategy<'_, S, Q, I>
+impl<Q, I> InputStrategy for MainInputStrategy<'_, Q, I>
 where
-    S: ChatEventSink + Send,
     Q: QueueDrainPort + Send,
     I: InputEventDrainPort + Send,
 {
@@ -270,7 +277,10 @@ where
         // #1272: atomic drain-or-seal — a single synchronous decision point
         // instead of drain-then-check. Once sealed, late UserMessages are
         // rejected by push_or_reject (not silently buffered for next Run).
-        match self.run_input_buffer.drain_or_seal(expected_epoch) {
+        match self
+            .run_input_buffer
+            .with_lock(|b| b.drain_or_seal(expected_epoch))
+        {
             BufferDrain::Ready { batch, epoch } => {
                 let input_ids: Vec<_> = batch
                     .iter()
@@ -335,7 +345,10 @@ where
         }
 
         // Check RunInputBuffer (might have been seeded during drain phase).
-        if let Some(outcome) = match self.run_input_buffer.try_drain_unsealed(expected_epoch) {
+        if let Some(outcome) = match self
+            .run_input_buffer
+            .with_lock(|b| b.try_drain_unsealed(expected_epoch))
+        {
             BufferDrain::Ready { batch, epoch } => Some(DrainOutcome::Ready { batch, epoch }),
             BufferDrain::Empty { .. } | BufferDrain::EmptyAndSealed { .. } => None,
             BufferDrain::AlreadySealed { epoch } => {
@@ -363,8 +376,11 @@ where
                 })
             }
             Some(event @ ChatInputEvent::UserMessage { .. }) => {
-                self.run_input_buffer.push(event);
-                match self.run_input_buffer.try_drain_unsealed(expected_epoch) {
+                let outcome = self.run_input_buffer.with_lock(|b| {
+                    b.push(event);
+                    b.try_drain_unsealed(expected_epoch)
+                });
+                match outcome {
                     BufferDrain::Ready { batch, epoch } => Ok(DrainOutcome::Ready { batch, epoch }),
                     BufferDrain::Empty { epoch } => Ok(DrainOutcome::NoInput { epoch }),
                     BufferDrain::EmptyAndSealed { epoch }

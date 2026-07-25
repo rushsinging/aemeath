@@ -10,6 +10,7 @@ impl AgentClient for AgentClientImpl {
     async fn config_view(&self) -> Result<sdk::ConfigView, SdkError> {
         let snapshot = self
             .inner
+            .shell
             .config_query
             .snapshot()
             .await
@@ -39,6 +40,7 @@ impl AgentClient for AgentClientImpl {
         };
         let change = self
             .inner
+            .shell
             .config_writer
             .update(command)
             .await
@@ -47,7 +49,7 @@ impl AgentClient for AgentClientImpl {
     }
 
     fn cancel_run(&self, run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
-        self.inner.active_run.cancel(run_id)
+        self.inner.shell.active_run.cancel(run_id)
     }
 
     fn cancel_run_step(
@@ -56,7 +58,10 @@ impl AgentClient for AgentClientImpl {
         step_id: Option<&sdk::RunStepId>,
         deadline: sdk::ControlDeadline,
     ) -> sdk::CancelRunStepOutcome {
-        self.inner.active_run.cancel_step(run_id, step_id, deadline)
+        self.inner
+            .shell
+            .active_run
+            .cancel_step(run_id, step_id, deadline)
     }
 
     fn terminate_run(
@@ -65,7 +70,10 @@ impl AgentClient for AgentClientImpl {
         reason: sdk::RunTerminationReason,
         deadline: sdk::ControlDeadline,
     ) -> sdk::TerminateRunOutcome {
-        self.inner.active_run.terminate(run_id, reason, deadline)
+        self.inner
+            .shell
+            .active_run
+            .terminate(run_id, reason, deadline)
     }
 
     fn reply_interaction(
@@ -73,7 +81,7 @@ impl AgentClient for AgentClientImpl {
         request_id: &sdk::InteractionRequestId,
         reply: sdk::InteractionReply,
     ) -> sdk::InteractionCommandOutcome {
-        self.inner.interaction_bridge.reply(request_id, reply)
+        self.inner.shell.interaction_bridge.reply(request_id, reply)
     }
 
     fn cancel_interaction(
@@ -81,7 +89,10 @@ impl AgentClient for AgentClientImpl {
         request_id: &sdk::InteractionRequestId,
         reason: sdk::InteractionCancelReason,
     ) -> sdk::InteractionCommandOutcome {
-        self.inner.interaction_bridge.cancel(request_id, reason)
+        self.inner
+            .shell
+            .interaction_bridge
+            .cancel(request_id, reason)
     }
 
     async fn chat(&self, input: ChatRequest) -> Result<ChatStream, SdkError> {

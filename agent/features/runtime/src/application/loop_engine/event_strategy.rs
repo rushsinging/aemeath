@@ -10,17 +10,14 @@
 //! interface consistency, not for dynamic dispatch.
 
 use async_trait::async_trait;
-use std::sync::Arc;
-use std::time::Instant;
 
 use crate::application::loop_engine::LoopEngineError;
 use crate::application::main_loop::looping::finalize::finish_completed_loop;
 use crate::application::main_loop::looping::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext,
+    ChatEventSink as _, RuntimeStreamEvent, RuntimeTurnContext,
 };
 use crate::application::subagent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::domain::agent_run::RunDomainEvent;
-use share::message::Message;
 use tools::AgentRunTerminal;
 
 /// Extract terminal state from a domain event. Shared between Main and Sub.
@@ -74,25 +71,23 @@ pub(crate) trait EventStrategy {
 /// Projects domain events to [`RuntimeStreamEvent`] via the event sink,
 /// handles completion finalization (log, DoneWithDuration, task archival),
 /// and sends cancellation/error events with message snapshots.
-pub(crate) struct MainEventStrategy<'a, S>
-where
-    S: ChatEventSink,
-{
-    pub sink: &'a S,
+///
+/// #1385 Task 12: Uses [`ChatEventSinkHandle`] (from RuntimeContext) instead of
+/// generic `S: ChatEventSink`, so `MainRunPort::emit()` routes through the
+/// RuntimeContext I/O seam.
+pub(crate) struct MainEventStrategy<'a> {
+    pub sink: crate::application::main_loop::ChatEventSinkHandle,
     pub session_id: &'a str,
     pub turn_context: &'a RuntimeTurnContext,
-    pub task_access: &'a Arc<dyn task::TaskAccess>,
+    pub task_access: &'a std::sync::Arc<dyn task::TaskAccess>,
     pub model: &'a str,
-    pub started_at: Instant,
+    pub started_at: std::time::Instant,
     pub turn_count: usize,
     /// Snapshot of messages at emit time (cloned by the caller).
-    pub messages_snapshot: Vec<Message>,
+    pub messages_snapshot: Vec<share::message::Message>,
 }
 
-impl<'a, S> MainEventStrategy<'a, S>
-where
-    S: ChatEventSink,
-{
+impl<'a> MainEventStrategy<'a> {
     fn outcome(&self, status: AgentRunStatus) -> AgentRunOutcome {
         AgentRunOutcome {
             status,
@@ -106,7 +101,7 @@ where
     async fn project_done(&self, status: AgentRunStatus) {
         let outcome = self.outcome(status);
         log_agent_outcome(&outcome, self.session_id);
-        finish_completed_loop(&outcome, self.sink, self.turn_context, &**self.task_access).await;
+        finish_completed_loop(&outcome, &self.sink, self.turn_context, &**self.task_access).await;
     }
 
     async fn send_cancelled(&self) {
@@ -119,10 +114,7 @@ where
 }
 
 #[async_trait]
-impl<S> EventStrategy for MainEventStrategy<'_, S>
-where
-    S: ChatEventSink + Send + Sync,
-{
+impl EventStrategy for MainEventStrategy<'_> {
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
         for event in events {
             match event {

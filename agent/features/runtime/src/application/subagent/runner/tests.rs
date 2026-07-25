@@ -32,27 +32,6 @@ fn empty_skill_materializer() -> Arc<dyn tools::SkillMaterializationPort> {
     Arc::new(EmptySkillMaterializer)
 }
 
-/// 测试用 NoOp `HookPort`：对每次 dispatch 返回 `HookOutcome::proceed()`。
-///
-/// 满足 #926 要求（test-only scripted Dispatcher 或 runtime-local port fake），
-/// 测试用空 HookPort。
-struct NoOpHookPort;
-
-#[async_trait]
-impl hook::HookPort for NoOpHookPort {
-    async fn dispatch(
-        &self,
-        _invocation: hook::HookInvocation,
-        _cancellation: &tokio_util::sync::CancellationToken,
-    ) -> hook::HookOutcome {
-        hook::HookOutcome::proceed()
-    }
-}
-
-fn noop_hook_port() -> Arc<dyn hook::HookPort> {
-    Arc::new(NoOpHookPort)
-}
-
 struct FixedSkillMaterializer;
 
 #[async_trait]
@@ -176,6 +155,7 @@ fn format_grouped_tool_summaries(tool_calls: &[crate::application::subagent::Too
 #[tokio::test]
 async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_parent() {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (parent_source, _parent_guard) = test_parent_source();
     let runner = CliAgentRunner {
         factory: crate::application::testing::constant_factory(
             crate::application::testing::binding_from_llm_provider(Arc::new(
@@ -184,8 +164,6 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
         ),
         config_reader: test_config_reader(),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        hook_runner: noop_hook_port(),
-        reasoning: false,
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
@@ -195,11 +173,8 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
-        tool_catalog: tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: tools::composition::TestCatalogExecutionFactory::empty().binding(),
         skill_materializer: empty_skill_materializer(),
-        policy: Arc::new(policy::AllowAllPolicy),
+        parent_context: parent_source,
     };
     let ctx_a = test_ctx();
     let ctx_b = test_ctx();
@@ -615,7 +590,7 @@ fn test_sub_run_cancellation_scope_is_one_way() {
 async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
     let calls = Arc::new(std::sync::Mutex::new(0usize));
     let registry = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
-    let mut runner = test_runner_with_blocking_provider(calls.clone());
+    let (mut runner, _guard) = test_runner_with_blocking_provider(calls.clone());
     runner.active_run = registry.clone();
     let ctx = test_ctx();
 
@@ -666,9 +641,18 @@ async fn run_agent_rejects_disabled_role_from_frozen_run_config() {
     };
     config.api.timeout = 30;
     config.agents.roles.get_mut("coder").unwrap().enabled = false;
-    let mut runner = test_runner(ProviderError::cancelled());
-    runner.config_reader = Arc::new(FixedConfigReader::from_snapshot(
-        share::config::domain::snapshot::ConfigSnapshot::new(config),
+    let (runner, _guard) = test_runner(ProviderError::cancelled());
+    // #1385: config now comes from parent_context (not config_reader), so
+    // install a parent frame with the disabled config.
+    let disabled_config_snapshot =
+        share::config::domain::snapshot::ConfigSnapshot::new(config.clone());
+    let disabled_parent_ctx =
+        sub_context_derivation_tests::make_parent_context_with_config(disabled_config_snapshot);
+    let _disabled_guard = runner.parent_context.install(Arc::new(
+        crate::application::runtime_context::ParentRunFrame {
+            spec: crate::domain::agent_run::RunSpec::main(),
+            context: Arc::new(disabled_parent_ctx),
+        },
     ));
     let ctx = test_ctx();
 
@@ -692,13 +676,13 @@ async fn run_agent_rejects_disabled_role_from_frozen_run_config() {
     assert!(matches!(
         result,
         tools::AgentRunTerminal::Failed { ref error }
-            if error.contains("agents.roles.coder.enabled=false")
+            if error.contains("disabled")
     ));
 }
 
 #[tokio::test]
 async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
-    let runner = test_runner(ProviderError::cancelled());
+    let (runner, _guard) = test_runner(ProviderError::cancelled());
     let ctx = test_ctx();
 
     let result = runner
@@ -723,7 +707,7 @@ async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
 
 #[tokio::test]
 async fn test_run_agent_context_cancelled_after_provider_error_returns_user_cancelled() {
-    let runner = test_runner(ProviderError::retryable(
+    let (runner, _guard) = test_runner(ProviderError::retryable(
         ProviderErrorKind::Network,
         "interrupted",
     ));
@@ -758,7 +742,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
     // 之前的两个测试都只覆盖了「调用前」的两种情形，没有覆盖「调用中」，
     // 而用户实际点击停止时，sub-agent 几乎总是正阻塞在某次 stream_message 里。
     let calls = Arc::new(std::sync::Mutex::new(0usize));
-    let runner = test_runner_with_blocking_provider(calls.clone());
+    let (runner, _guard) = test_runner_with_blocking_provider(calls.clone());
     let cwd = std::env::current_dir().unwrap();
     let cancel = tokio_util::sync::CancellationToken::new();
     let ctx = crate::application::testing::test_tool_execution_context(cwd, cancel.clone());
@@ -823,7 +807,7 @@ impl tools::TypedTool for ReadFixtureTool {
 
 #[tokio::test]
 async fn unknown_sub_agent_role_fails_before_provider_invocation() {
-    let runner = test_runner(ProviderError::fatal(
+    let (runner, _guard) = test_runner(ProviderError::fatal(
         ProviderErrorKind::Network,
         "provider must not be invoked",
     ));
@@ -849,15 +833,15 @@ async fn unknown_sub_agent_role_fails_before_provider_invocation() {
     assert_eq!(
         result,
         tools::AgentRunTerminal::Failed {
-            error: "unknown sub-agent role `missing-role`; configured roles: coder, role-a, role-b"
-                .to_string(),
+            error: "sub-agent role `missing-role` not found in config".to_string(),
         }
     );
 }
 
 #[tokio::test]
 async fn sub_agent_provider_spec_inherits_model_owned_settings() {
-    let mut runner = test_runner(ProviderError::fatal(ProviderErrorKind::Network, "stop"));
+    let (mut runner, _parent_guard) =
+        test_runner(ProviderError::fatal(ProviderErrorKind::Network, "stop"));
     let mut config = share::config::Config {
         agents: (*test_agents_config()).clone(),
         models: (*test_models_config()).clone(),
@@ -877,7 +861,16 @@ async fn sub_agent_provider_spec_inherits_model_owned_settings() {
     model.context_window = 64_000;
     model.max_tokens = 16_384;
     runner.config_reader = Arc::new(FixedConfigReader::from_snapshot(
+        share::config::domain::snapshot::ConfigSnapshot::new(config.clone()),
+    ));
+    let parent_ctx = sub_context_derivation_tests::make_parent_context_with_config(
         share::config::domain::snapshot::ConfigSnapshot::new(config),
+    );
+    let _config_guard = runner.parent_context.install(Arc::new(
+        crate::application::runtime_context::ParentRunFrame {
+            spec: crate::domain::agent_run::RunSpec::main(),
+            context: Arc::new(parent_ctx),
+        },
     ));
 
     let captured_spec = Arc::new(std::sync::Mutex::new(None));
@@ -941,9 +934,19 @@ async fn sub_agent_provider_spec_ignores_legacy_role_reasoning_override() {
         .expect("test model")
         .reasoning = Some(true);
 
-    let mut runner = test_runner(ProviderError::fatal(ProviderErrorKind::Network, "stop"));
+    let (mut runner, _parent_guard) =
+        test_runner(ProviderError::fatal(ProviderErrorKind::Network, "stop"));
     runner.config_reader = Arc::new(FixedConfigReader::from_snapshot(
+        share::config::domain::snapshot::ConfigSnapshot::new(config.clone()),
+    ));
+    let parent_ctx = sub_context_derivation_tests::make_parent_context_with_config(
         share::config::domain::snapshot::ConfigSnapshot::new(config),
+    );
+    let _config_guard = runner.parent_context.install(Arc::new(
+        crate::application::runtime_context::ParentRunFrame {
+            spec: crate::domain::agent_run::RunSpec::main(),
+            context: Arc::new(parent_ctx),
+        },
     ));
     let captured_spec = Arc::new(std::sync::Mutex::new(None));
     let binding = crate::application::testing::binding_from_llm_provider(Arc::new(ErrorProvider {
@@ -980,7 +983,8 @@ async fn sub_agent_provider_spec_ignores_legacy_role_reasoning_override() {
 
 #[tokio::test]
 async fn sub_agent_provider_spec_maps_model_reasoning_to_medium_without_effort() {
-    let mut runner = test_runner(ProviderError::fatal(ProviderErrorKind::Network, "stop"));
+    let (mut runner, _parent_guard) =
+        test_runner(ProviderError::fatal(ProviderErrorKind::Network, "stop"));
     let mut config = share::config::Config {
         agents: (*test_agents_config()).clone(),
         models: (*test_models_config()).clone(),
@@ -996,7 +1000,16 @@ async fn sub_agent_provider_spec_maps_model_reasoning_to_medium_without_effort()
         .expect("test model")
         .reasoning = Some(true);
     runner.config_reader = Arc::new(FixedConfigReader::from_snapshot(
+        share::config::domain::snapshot::ConfigSnapshot::new(config.clone()),
+    ));
+    let parent_ctx = sub_context_derivation_tests::make_parent_context_with_config(
         share::config::domain::snapshot::ConfigSnapshot::new(config),
+    );
+    let _config_guard = runner.parent_context.install(Arc::new(
+        crate::application::runtime_context::ParentRunFrame {
+            spec: crate::domain::agent_run::RunSpec::main(),
+            context: Arc::new(parent_ctx),
+        },
     ));
 
     let captured_spec = Arc::new(std::sync::Mutex::new(None));
@@ -1037,17 +1050,30 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
     let captured = Arc::new(std::sync::Mutex::new(CapturedInvocation::default()));
     let factory = tools::composition::TestCatalogExecutionFactory::new();
     factory.register(ReadFixtureTool);
-    let mut runner = test_runner(ProviderError::fatal(ProviderErrorKind::Network, "unused"));
+    let (mut runner, _guard) =
+        test_runner(ProviderError::fatal(ProviderErrorKind::Network, "unused"));
     runner.factory = crate::application::testing::constant_factory(
         crate::application::testing::binding_from_llm_provider(Arc::new(CapturingProvider {
             captured: captured.clone(),
         })),
     );
     let ports = factory.build(test_ctx());
-    runner.tool_catalog = ports.catalog_port();
-    runner.tool_execution = ports.execution();
-    runner.tool_context_binding = ports.binding();
     runner.skill_materializer = Arc::new(FixedSkillMaterializer);
+    // #1385: tool catalog and execution now come from derived.context (parent
+    // context port), not from runner.tool_catalog/runner.tool_execution.
+    // Install a parent frame with the factory-built catalog so the
+    // derived context sees the registered tools.
+    let parent_ctx = sub_context_derivation_tests::make_parent_context_with_catalog(
+        ports.catalog_port(),
+        ports.execution(),
+        ports.binding(),
+    );
+    let _catalog_guard = runner.parent_context.install(Arc::new(
+        crate::application::runtime_context::ParentRunFrame {
+            spec: crate::domain::agent_run::RunSpec::main(),
+            context: Arc::new(parent_ctx),
+        },
+    ));
     let ctx = test_ctx();
 
     let result = runner
@@ -1082,7 +1108,7 @@ async fn test_started_event_emitted_with_role_and_model() {
     use tokio::sync::mpsc;
     use tools::{AgentProgressEvent, AgentProgressKind};
 
-    let runner = test_runner(ProviderError::fatal(
+    let (runner, _guard) = test_runner(ProviderError::fatal(
         ProviderErrorKind::Network,
         "setup-only",
     ));
@@ -1123,7 +1149,7 @@ async fn started_event_always_reports_required_role_and_configured_model() {
     use tokio::sync::mpsc;
     use tools::{AgentProgressEvent, AgentProgressKind};
 
-    let runner = test_runner(ProviderError::fatal(
+    let (runner, _guard) = test_runner(ProviderError::fatal(
         ProviderErrorKind::Network,
         "setup-only",
     ));
@@ -1162,7 +1188,7 @@ async fn started_event_always_reports_required_role_and_configured_model() {
 #[tokio::test]
 async fn test_started_event_not_emitted_without_progress_tx() {
     // progress_tx = None → 不会 emit（也不会 panic）
-    let runner = test_runner(ProviderError::fatal(
+    let (runner, _guard) = test_runner(ProviderError::fatal(
         ProviderErrorKind::Network,
         "setup-only",
     ));
@@ -1196,7 +1222,7 @@ async fn test_started_event_not_emitted_without_progress_tx() {
 
 #[tokio::test]
 async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
-    let runner = test_runner(ProviderError::fatal(ProviderErrorKind::Network, "boom"));
+    let (runner, _guard) = test_runner(ProviderError::fatal(ProviderErrorKind::Network, "boom"));
     let ctx = test_ctx();
 
     let result = runner
@@ -1226,7 +1252,7 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
 
 #[tokio::test]
 async fn test_run_agent_timeout_comes_from_request_and_returns_typed_failure() {
-    let runner = test_runner(ProviderError::retryable(
+    let (runner, _guard) = test_runner(ProviderError::retryable(
         ProviderErrorKind::Network,
         "should not be invoked",
     ));
@@ -1367,60 +1393,88 @@ fn test_config_reader() -> Arc<dyn config::ConfigReader> {
     Arc::new(FixedConfigReader::from_snapshot(test_config_snapshot()))
 }
 
-fn test_runner(error: ProviderError) -> CliAgentRunner {
-    CliAgentRunner {
-        factory: crate::application::testing::constant_factory(
-            crate::application::testing::binding_from_llm_provider(Arc::new(ErrorProvider {
-                error,
-            })),
-        ),
-        config_reader: test_config_reader(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        hook_runner: noop_hook_port(),
-        reasoning: false,
-        max_tool_concurrency: 10,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        tool_catalog: tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        workspace: crate::application::testing::runtime_workspace(
-            &crate::application::testing::test_tool_execution_context(
-                std::env::temp_dir(),
-                tokio_util::sync::CancellationToken::new(),
+fn test_runner(
+    error: ProviderError,
+) -> (
+    CliAgentRunner,
+    crate::application::runtime_context::ParentRunFrameGuard,
+) {
+    let (src, guard) = test_parent_source();
+    (
+        CliAgentRunner {
+            factory: crate::application::testing::constant_factory(
+                crate::application::testing::binding_from_llm_provider(Arc::new(ErrorProvider {
+                    error,
+                })),
             ),
-        ),
-        skill_materializer: empty_skill_materializer(),
-        policy: Arc::new(policy::AllowAllPolicy),
-    }
+            config_reader: test_config_reader(),
+            active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+            max_tool_concurrency: 10,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+            tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+            workspace: crate::application::testing::runtime_workspace(
+                &crate::application::testing::test_tool_execution_context(
+                    std::env::temp_dir(),
+                    tokio_util::sync::CancellationToken::new(),
+                ),
+            ),
+            skill_materializer: empty_skill_materializer(),
+            parent_context: src,
+        },
+        guard,
+    )
 }
 
-fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> CliAgentRunner {
-    CliAgentRunner {
-        factory: crate::application::testing::constant_factory(
-            crate::application::testing::binding_from_llm_provider(Arc::new(
-                BlockingThenCancelledProvider { calls },
-            )),
-        ),
-        config_reader: test_config_reader(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        hook_runner: noop_hook_port(),
-        reasoning: false,
-        max_tool_concurrency: 10,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        tool_catalog: tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        workspace: crate::application::testing::runtime_workspace(
-            &crate::application::testing::test_tool_execution_context(
-                std::env::temp_dir(),
-                tokio_util::sync::CancellationToken::new(),
+/// #1385 Task 7: Create a `ParentRunContextSource` pre-loaded with a valid
+/// parent frame so `run_agent` tests exercise the real production derivation
+/// path instead of the old `.ok()` fallback.
+/// The returned guard MUST be held for the duration of the test to keep
+/// the parent frame installed.
+fn test_parent_source() -> (
+    crate::application::runtime_context::ParentRunContextSource,
+    crate::application::runtime_context::ParentRunFrameGuard,
+) {
+    let source = crate::application::runtime_context::ParentRunContextSource::new();
+    let parent_ctx = sub_context_derivation_tests::make_parent_context();
+    let guard = source.install(Arc::new(
+        crate::application::runtime_context::ParentRunFrame {
+            spec: crate::domain::agent_run::RunSpec::main(),
+            context: Arc::new(parent_ctx),
+        },
+    ));
+    (source, guard)
+}
+
+fn test_runner_with_blocking_provider(
+    calls: Arc<std::sync::Mutex<usize>>,
+) -> (
+    CliAgentRunner,
+    crate::application::runtime_context::ParentRunFrameGuard,
+) {
+    let (src, guard) = test_parent_source();
+    (
+        CliAgentRunner {
+            factory: crate::application::testing::constant_factory(
+                crate::application::testing::binding_from_llm_provider(Arc::new(
+                    BlockingThenCancelledProvider { calls },
+                )),
             ),
-        ),
-        skill_materializer: empty_skill_materializer(),
-        policy: Arc::new(policy::AllowAllPolicy),
-    }
+            config_reader: test_config_reader(),
+            active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+            max_tool_concurrency: 10,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+            tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+            workspace: crate::application::testing::runtime_workspace(
+                &crate::application::testing::test_tool_execution_context(
+                    std::env::temp_dir(),
+                    tokio_util::sync::CancellationToken::new(),
+                ),
+            ),
+            skill_materializer: empty_skill_materializer(),
+            parent_context: src,
+        },
+        guard,
+    )
 }
 
 /// 模拟真实进行中的 LLM 流：`invocation_stream` 阻塞在 `cancel.cancelled()` 上，
@@ -1515,3 +1569,16 @@ impl LlmProvider for ErrorProvider {
         "test-provider"
     }
 }
+
+// ── #1385 Task 6: Sub Context Derivation RED Tests ──
+
+#[path = "tests/runtime_context_derivation.rs"]
+mod sub_context_derivation_tests;
+
+// ── #1385 L2 / production-chain tests ──
+//
+// These prove the derived context wiring in run_agent works correctly.
+// Each test verifies one invariant from Issues 1-7.
+
+#[path = "tests/runtime_context_wiring.rs"]
+mod derived_wiring_tests;

@@ -864,23 +864,32 @@ mod tests {
             _ = async {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                    let events = sink_for_reply.events.lock().unwrap();
-                    if let Some(RuntimeStreamEvent::InteractionRequested { request }) =
-                        events.iter().find(|e| {
-                            matches!(e, RuntimeStreamEvent::InteractionRequested { .. })
-                        })
-                    {
-                        let request_id = request.id.clone();
-                        drop(events);
+                    let found = {
+                        let events = sink_for_reply.events.lock().unwrap();
+                        events
+                            .iter()
+                            .find(|e| {
+                                matches!(e, RuntimeStreamEvent::InteractionRequested { .. })
+                            })
+                            .map(|e| match e {
+                                RuntimeStreamEvent::InteractionRequested { request } => {
+                                    request.id.clone()
+                                }
+                                _ => unreachable!(),
+                            })
+                    };
+                    if let Some(request_id) = found {
                         bridge_for_reply.reply(
-                          &request_id,
-                          sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("yes".into())]),
-                      );
-                      // Don't return — keep the branch alive so the resolver wins select!.
-                      tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                  }
-              }
-          } => Vec::new(),
+                            &request_id,
+                            sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer(
+                                "yes".into(),
+                            )]),
+                        );
+                        // Don't return — keep the branch alive so the resolver wins select!.
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    }
+                }
+            } => Vec::new(),
         };
 
         assert_eq!(results.len(), 1);
@@ -918,18 +927,28 @@ mod tests {
             _ = async {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                    let events = sink_for_cancel.events.lock().unwrap();
-                    if let Some(RuntimeStreamEvent::InteractionRequested { request }) =
-                        events.iter().find(|e| {
-                            matches!(e, RuntimeStreamEvent::InteractionRequested { .. })
-                        })
-                    {
-                        let request_id = request.id.clone();
-                        drop(events);
-                        bridge_for_cancel.cancel(&request_id, sdk::InteractionCancelReason::UserCancelled);
-                      // Don't return — keep the branch alive so the resolver wins select!.
-                      tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                  }
+                    let found = {
+                        let events = sink_for_cancel.events.lock().unwrap();
+                        events
+                            .iter()
+                            .find(|e| {
+                                matches!(e, RuntimeStreamEvent::InteractionRequested { .. })
+                            })
+                            .map(|e| match e {
+                                RuntimeStreamEvent::InteractionRequested { request } => {
+                                    request.id.clone()
+                                }
+                                _ => unreachable!(),
+                            })
+                    };
+                    if let Some(request_id) = found {
+                        bridge_for_cancel.cancel(
+                            &request_id,
+                            sdk::InteractionCancelReason::UserCancelled,
+                        );
+                        // Don't return — keep the branch alive so the resolver wins select!.
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    }
                 }
             } => Vec::new(),
         };

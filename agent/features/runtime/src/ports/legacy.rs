@@ -3,11 +3,11 @@ use async_trait::async_trait;
 
 /// `ChatRuntimePort` 方法的入参——runtime 启动时的一次性配置包。
 ///
-/// 持有 [`RuntimeResources`](crate::application::resources::RuntimeResources)（不变共享件）
-/// + 启动期专有参数（`verbose` / `resume`）。构造完 `ChatLoopContext` 后不再存活。
+/// #1385 Task 7: 退化为真正启动参数（`verbose`/`resume`）。
+/// 原先的 `RuntimeResources` bag 已被删除；所有服务由
+/// `MainSessionShell` → `RuntimeContextParts` → `RuntimeContext` 装配。
 #[derive(Clone)]
 pub struct ChatRuntimeContext {
-    pub resources: crate::application::resources::RuntimeResources,
     pub verbose: bool,
     pub resume: Option<String>,
 }

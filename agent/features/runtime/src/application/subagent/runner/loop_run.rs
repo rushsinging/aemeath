@@ -10,11 +10,10 @@ use crate::application::loop_engine::{
     LoopEngineError, ModelStep, RunLoopPort, ToolGuardDecision, ToolStep,
 };
 use crate::application::main_loop::looping::InvocationResponse;
+use crate::application::runtime_context::RuntimeContext;
 use crate::application::subagent::Agent;
 use crate::domain::agent_run::{RunDomainEvent, RunSpec};
-use crate::ports::{
-    InvocationOptions, InvocationRequest, ProviderBinding, ReasoningLevel, StopReason,
-};
+use crate::ports::{InvocationOptions, InvocationRequest, ReasoningLevel, StopReason};
 use async_trait::async_trait;
 use provider::RequestSystemBlock;
 use share::message::Message;
@@ -58,8 +57,13 @@ pub(super) fn sub_request_log_context(
     })
 }
 
+/// #1385 Task 12: Canonical sub-agent event sink (noop by design —
+/// sub-agents push events through parent).  Used by both [`SubAgentRun`]
+/// (for `InvocationEventReducer`) and [`derive_sub_run`] (for the
+/// derived [`RuntimeContext`]'s event_sink) so there is one definition,
+/// not duplicated inline noops.
 #[derive(Clone)]
-struct SubAgentEventSink;
+pub(super) struct SubAgentEventSink;
 
 impl crate::application::main_loop::looping::ChatEventSink for SubAgentEventSink {
     fn send_event<'a>(
@@ -99,26 +103,29 @@ pub(super) struct SubAgentRun<'a> {
     pub prompt: &'a str,
     pub system: String,
     pub progress_sink: Option<Arc<dyn tools::ProgressSink>>,
-    pub binding: Arc<ProviderBinding>,
+    /// #1385 Task 12: Provider binding, hook, policy, tool_context_binding, config,
+    /// context (via context()), usage (via usage()), and event_sink all come from
+    /// `runtime_context` via accessors — no separate fields needed.
+    /// Owned (not Arc) — derived context is already owned by the caller.
+    pub runtime_context: RuntimeContext,
     pub max_tokens: u32,
     pub level: ReasoningLevel,
-    pub hook_port: Arc<dyn hook::HookPort>,
     pub workspace_root: std::path::PathBuf,
     pub tool_schemas: Vec<serde_json::Value>,
     pub config_snapshot: share::config::domain::snapshot::ConfigSnapshot,
     pub language: String,
     pub messages: Vec<Message>,
     pub committed_message_count: usize,
-    pub context: ContextCoordinator,
+    /// #1385 Task 12: ContextCoordinator constructed on-demand from
+    /// runtime_context.context() — no stored copy.
     pub context_request: Option<crate::ports::ContextRequest>,
     pub accepted_input: Vec<Message>,
     pub context_window: Option<crate::ports::ContextWindow>,
     pub log_request_messages: Box<dyn Fn(usize, &[Message]) + Send + Sync + 'a>,
     pub agent: Agent,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
-    pub timeout: std::time::Duration,
     pub turn_count: usize,
-    pub last_total_tokens: Option<u64>,
+    /// #1385 Task 12: last_total_tokens eliminated — usage tracker is the single source.
     pub active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     pub terminal: Option<AgentRunTerminal>,
     pub start_time: std::time::Instant,
@@ -132,14 +139,23 @@ pub(super) struct SubAgentRun<'a> {
     pub ctx_context_size: usize,
     pub tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
-    pub policy: Arc<dyn policy::PolicyPort>,
-    pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
+    /// #1385 Task 6: Derived RunSpec for the sub-run, created by
+    /// [`derive_sub_run`] and consumed by the launcher.
+    /// Must be the same spec returned by `DerivedSubRun.spec`.
+    pub run_spec: RunSpec,
     /// Input strategy: encapsulates the fixed-prompt drain logic with epoch
     /// tracking and tool-result continuation support (#1272, #1384).
     pub input_strategy: crate::application::loop_engine::input_strategy::SubInputStrategy<'a>,
 }
 
 impl<'a> SubAgentRun<'a> {
+    /// #1385 Task 12: Construct a fresh ContextCoordinator from the runtime
+    /// context's ContextPort.  No stored copy — each use builds its own.
+    #[inline]
+    fn ctx_coordinator(&self) -> ContextCoordinator {
+        ContextCoordinator::new(self.runtime_context.context())
+    }
+
     fn freeze_request(&self, step_id: &sdk::RunStepId) -> crate::ports::ContextRequest {
         let raw_tool_schemas = self.tool_schemas.clone();
         let tool_schemas = raw_tool_schemas
@@ -176,7 +192,7 @@ impl<'a> SubAgentRun<'a> {
             config_snapshot: self.config_snapshot.clone(),
             context_size: self.ctx_context_size,
             max_output_tokens: self.max_tokens as usize,
-            last_api_total_tokens: self.last_total_tokens,
+            last_api_total_tokens: self.runtime_context.usage().get(),
             tool_schemas,
             tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(&raw_tool_schemas),
         }
@@ -189,7 +205,7 @@ impl<'a> SubAgentRun<'a> {
             self.runtime_cancellation.clone(),
         );
         let _binding = match tools::ToolExecutionContextBindingGuard::bind(
-            self.tool_context_binding.clone(),
+            self.runtime_context.tool_context_binding(),
             self.agent.ctx.clone(),
         ) {
             Ok(binding) => binding,
@@ -198,7 +214,7 @@ impl<'a> SubAgentRun<'a> {
 
         let input = crate::application::run_launcher::RunLaunchInput {
             run_id: self.run_id.clone(),
-            spec: RunSpec::sub(self.role_name_for_log.clone(), self.timeout),
+            spec: self.run_spec.clone(),
             parent_run_id: self.parent_run_id.clone(),
             cancel: self.runtime_cancellation.clone(),
         };
@@ -247,7 +263,7 @@ impl<'a> SubAgentRun<'a> {
         let output = terminal.output();
         finalize_sub_agent(
             &outcome,
-            &self.hook_port,
+            &self.runtime_context.hooks(),
             &self.workspace_root,
             &self.session_id,
             self.prompt,
@@ -298,7 +314,7 @@ impl<'a> SubAgentRun<'a> {
 
     fn log_output(&self, resp: &InvocationResponse, api_elapsed: f64) {
         log_llm_output_and_tool_calls(
-            &self.binding.model.provider,
+            &self.runtime_context.provider().model.provider,
             resp,
             &[],
             api_elapsed,
@@ -367,8 +383,9 @@ impl<'a> SubAgentRun<'a> {
                 let window = if let Some(window) = self.context_window.clone() {
                     Some(window)
                 } else if let Some(request) = &self.context_request {
+                    let coordinator = self.ctx_coordinator();
                     Some(
-                        self.context
+                        coordinator
                             .build_window(request)
                             .await
                             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?,
@@ -401,7 +418,7 @@ impl<'a> SubAgentRun<'a> {
                     let request_context = sub_request_log_context(
                         &logging::capture(),
                         &self.model_name_for_log,
-                        &self.binding.model.provider,
+                        &self.runtime_context.provider().model.provider,
                         &self.role_name_for_log,
                     );
                     let response = logging::instrument(request_context, async {
@@ -409,8 +426,8 @@ impl<'a> SubAgentRun<'a> {
                                 crate::application::main_loop::looping::InvocationEventReducer::new(
                                     SubAgentEventSink,
                                 );
-                            let provider = self.binding.provider.clone();
-                            let model = self.binding.model.clone();
+                            let provider = self.runtime_context.provider().provider.clone();
+                            let model = self.runtime_context.provider().model.clone();
                             let max_tokens = self.max_tokens;
                             let level = {
                                 use crate::application::loop_engine::llm_strategy::LlmStrategy;
@@ -471,9 +488,10 @@ impl<'a> SubAgentRun<'a> {
                     }
                 };
 
-                self.last_total_tokens = Some(
-                    crate::application::token_usage::normalized_total_tokens(&resp.usage),
-                );
+                // #1385 Task 12: Write token usage to RuntimeContext's tracker — single source.
+                let total_tokens =
+                    crate::application::token_usage::normalized_total_tokens(&resp.usage);
+                self.runtime_context.usage().update(total_tokens);
                 self.progress_api_ok(turn_number, &resp);
 
                 let est = self
@@ -508,7 +526,7 @@ impl<'a> SubAgentRun<'a> {
                             .to_string(),
                     ));
                     if tool_calls.is_empty() {
-                        self.last_total_tokens = None;
+                        self.runtime_context.usage().reset();
                         return Ok((
                             ModelStep::Tools {
                                 text: resp.assistant_message.text_content(),
@@ -584,7 +602,7 @@ impl<'a> SubAgentRun<'a> {
                 let prepared = crate::application::tool_coordination::prepare_tool_round(
                     calls,
                     &self.agent.catalog,
-                    self.policy.as_ref(),
+                    self.runtime_context.policy().as_ref(),
                     run_id,
                     step_id,
                     &self.agent.ctx.workspace_read().current_workspace_root(),
@@ -709,7 +727,8 @@ impl RunLoopPort for SubAgentRun<'_> {
         if self.accepted_input.is_empty() {
             return Ok(());
         }
-        self.context
+        let coordinator = self.ctx_coordinator();
+        coordinator
             .append_accepted_input(request, self.accepted_input.clone())
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
@@ -735,10 +754,11 @@ impl RunLoopPort for SubAgentRun<'_> {
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
+        let coordinator = self.ctx_coordinator();
         let (needed, window) =
             crate::application::loop_engine::shared::needs_compaction_with_window(
                 self.context_request.as_ref(),
-                &self.context,
+                &coordinator,
             )
             .await?;
         self.context_window = Some(window);
@@ -754,11 +774,12 @@ impl RunLoopPort for SubAgentRun<'_> {
             .as_ref()
             .map(|window| window.backing_revision)
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
+        let coordinator = self.ctx_coordinator();
         compact_core(
             self.context_request.as_ref(),
             source_revision,
-            &self.context,
-            &mut self.last_total_tokens,
+            &coordinator,
+            &self.runtime_context.usage(),
             &mut self.context_window,
         )
         .await?;
@@ -779,7 +800,8 @@ impl RunLoopPort for SubAgentRun<'_> {
         debug_assert_eq!(&request.step_id, step_id);
         let messages =
             self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
-        self.context
+        let coordinator = self.ctx_coordinator();
+        coordinator
             .append_finalized(
                 request,
                 step_id.clone(),
@@ -787,7 +809,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                 crate::ports::FinalizeCause::Completed,
                 messages,
                 vec![],
-                self.last_total_tokens,
+                self.runtime_context.usage().get(),
             )
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
@@ -805,7 +827,8 @@ impl RunLoopPort for SubAgentRun<'_> {
         debug_assert_eq!(&request.step_id, step_id);
         let messages =
             self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
-        self.context
+        let coordinator = self.ctx_coordinator();
+        coordinator
             .append_finalized(
                 request,
                 step_id.clone(),
@@ -813,7 +836,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                 crate::ports::FinalizeCause::UserCancelledStep,
                 messages,
                 vec![],
-                self.last_total_tokens,
+                self.runtime_context.usage().get(),
             )
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;

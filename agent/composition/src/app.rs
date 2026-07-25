@@ -77,11 +77,9 @@ fn cli_config_input(args: &AgentArgs) -> config::CliConfigInput {
     }
 }
 
-fn wire_config_override_store() -> Result<config::NativeConfigStore, SdkError> {
-    let blob = storage::api::file_system_blob(
-        share::config::paths::global_agents_dir().join("config-overrides"),
-    )
-    .map_err(|error| SdkError::Init(format!("配置 override 存储初始化失败：{error}")))?;
+fn wire_config_override_store(agents_dir: &Path) -> Result<config::NativeConfigStore, SdkError> {
+    let blob = storage::api::file_system_blob(agents_dir.join("config-overrides"))
+        .map_err(|error| SdkError::Init(format!("配置 override 存储初始化失败：{error}")))?;
     Ok(config::NativeConfigStore::new(blob))
 }
 
@@ -139,6 +137,7 @@ fn logging_init_decision(
 fn init_logging(
     snapshot: &ConfigSnapshot,
     output_mode: sdk::LoggingOutputMode,
+    default_logs_dir: &Path,
 ) -> Result<(), String> {
     let _guard = LOGGING_INIT_LOCK
         .get_or_init(|| Mutex::new(()))
@@ -153,11 +152,7 @@ fn init_logging(
         LoggingInitDecision::AlreadyInitialized => return Ok(()),
         LoggingInitDecision::Initialize => {}
     }
-    let settings = logging_settings_from_bootstrap(
-        snapshot,
-        &share::config::paths::global_logs_dir(),
-        output_mode,
-    );
+    let settings = logging_settings_from_bootstrap(snapshot, default_logs_dir, output_mode);
     UnifiedLogger::init(settings.clone()).map_err(|error| error.to_string())?;
     logging::set_boot_ts(logging::timestamp_local_rfc3339());
     logging::set_app_version(share::version().to_string());
@@ -182,18 +177,24 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
     let logging_output = args.logging_output;
+    let agents_dir = share::config::paths::global_agents_dir();
     let config = config::wire_project_config_with_cli(
         &cwd,
-        wire_config_override_store()?,
+        wire_config_override_store(&agents_dir)?,
         cli_config_input(&args),
     )
     .await
     .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
     let gateways = FeatureGateways::wire_default(configured_policy(&config));
-    init_logging(&config.reader().committed_snapshot(), logging_output)
-        .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
+    init_logging(
+        &config.reader().committed_snapshot(),
+        logging_output,
+        &agents_dir.join("logs"),
+    )
+    .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =
-        crate::runtime::from_args_with_gateways(args, gateways, workspace, config).await?;
+        crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
+            .await?;
     Ok(agent_client_from_runtime(runtime_client))
 }
 
@@ -201,6 +202,7 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
 async fn build_agent_client_with_gateways(
     args: AgentArgs,
     gateways: FeatureGateways,
+    agents_dir: &Path,
 ) -> Result<AgentClientHandle, SdkError> {
     let cwd = args
         .cwd
@@ -211,17 +213,29 @@ async fn build_agent_client_with_gateways(
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
     let logging_output = args.logging_output;
-    let config = config::wire_project_config_with_cli(
-        &cwd,
-        wire_config_override_store()?,
+    // Tests construct the config wiring directly via `ConfigAppService` so the
+    // global config path is bounded by the test's `agents_dir` rather than
+    // `share::config::paths::global_agents_dir()` (which reads process env vars
+    // and would race with parallel tests). See #1385 — the production call site
+    // remains env-driven.
+    let native_store = wire_config_override_store(agents_dir)?;
+    let config = config::wire_project_config_with_agents_dir(
+        cwd.as_path(),
+        agents_dir,
+        native_store,
         cli_config_input(&args),
     )
     .await
     .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
-    init_logging(&config.reader().committed_snapshot(), logging_output)
-        .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
+    init_logging(
+        &config.reader().committed_snapshot(),
+        logging_output,
+        &agents_dir.join("logs"),
+    )
+    .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let runtime_client =
-        crate::runtime::from_args_with_gateways(args, gateways, workspace, config).await?;
+        crate::runtime::from_args_with_gateways(args, gateways, workspace, config, agents_dir)
+            .await?;
     Ok(agent_client_from_runtime(runtime_client))
 }
 
@@ -231,9 +245,10 @@ pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> 
         .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
+    let agents_dir = share::config::paths::global_agents_dir();
     let config = config::wire_project_config_with_cli(
         &cwd,
-        wire_config_override_store()?,
+        wire_config_override_store(&agents_dir)?,
         cli_config_input(&args),
     )
     .await
@@ -255,23 +270,29 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
     let logging_output = args.logging_output;
+    let agents_dir = share::config::paths::global_agents_dir();
     let config = config::wire_project_config_with_cli(
         &cwd,
-        wire_config_override_store()?,
+        wire_config_override_store(&agents_dir)?,
         cli_config_input(&args),
     )
     .await
     .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
     let gateways = FeatureGateways::wire_default(configured_policy(&config));
-    init_logging(&config.reader().committed_snapshot(), logging_output)
-        .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
+    init_logging(
+        &config.reader().committed_snapshot(),
+        logging_output,
+        &agents_dir.join("logs"),
+    )
+    .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
     let user_agent = config
         .reader()
         .committed_snapshot()
         .user_agent()
         .to_string();
     let runtime_client =
-        crate::runtime::from_args_with_gateways(args, gateways, workspace, config).await?;
+        crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
+            .await?;
     let launch = runtime_client.tui_launch_context();
     let command_wiring = crate::tools::wire_commands_with_skills(&launch.skills_map)
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
@@ -302,46 +323,6 @@ mod tests {
     use runtime::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
     use share::config::Config;
     use std::sync::atomic::{AtomicUsize, Ordering};
-
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    struct EnvGuard {
-        _lock: std::sync::MutexGuard<'static, ()>,
-        previous_agents_dir: Option<std::ffi::OsString>,
-        previous_home: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(agents_dir: &std::path::Path, home: &std::path::Path) -> Self {
-            let lock = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-            let previous_agents_dir = std::env::var_os("AEMEATH_AGENTS_DIR");
-            let previous_home = std::env::var_os("HOME");
-            unsafe {
-                std::env::set_var("AEMEATH_AGENTS_DIR", agents_dir);
-                std::env::set_var("HOME", home);
-            }
-            Self {
-                _lock: lock,
-                previous_agents_dir,
-                previous_home,
-            }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match self.previous_agents_dir.take() {
-                    Some(value) => std::env::set_var("AEMEATH_AGENTS_DIR", value),
-                    None => std::env::remove_var("AEMEATH_AGENTS_DIR"),
-                }
-                match self.previous_home.take() {
-                    Some(value) => std::env::set_var("HOME", value),
-                    None => std::env::remove_var("HOME"),
-                }
-            }
-        }
-    }
 
     #[test]
     fn logging_init_decision_initializes_when_no_logger_exists() {
@@ -415,8 +396,6 @@ mod tests {
         std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#)
             .expect("write MCP config");
 
-        let _env = EnvGuard::set(&agents_dir, temp.path());
-
         let provider = Arc::new(CountingProviderFactory::default());
         let gateways = FeatureGateways::new(provider.clone(), Arc::new(policy::AllowAllPolicy));
         let args = AgentArgs {
@@ -428,7 +407,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = build_agent_client_with_gateways(args, gateways).await;
+        let result = build_agent_client_with_gateways(args, gateways, &agents_dir).await;
 
         result.expect("build client with injected gateways");
         assert_eq!(provider.build_calls.load(Ordering::SeqCst), 1);

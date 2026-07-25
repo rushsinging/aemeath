@@ -58,14 +58,12 @@ where
     None
 }
 
-pub(crate) async fn finish_completed_loop<S>(
+pub(crate) async fn finish_completed_loop(
     outcome: &AgentRunOutcome,
-    sink: &S,
+    sink: &crate::application::main_loop::ChatEventSinkHandle,
     context: &RuntimeTurnContext,
     access: &dyn TaskAccess,
-) where
-    S: ChatEventSink,
-{
+) {
     let _ = sink
         .send_event(RuntimeStreamEvent::DoneWithDuration {
             context: context.clone(),

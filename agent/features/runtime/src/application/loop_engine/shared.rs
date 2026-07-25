@@ -67,11 +67,13 @@ pub(crate) async fn materialize_tool_results(
 /// Returns the [`CompactOutcome`] so that callers (Main) can run additional
 /// hooks (e.g. pre-compact snapshot + reflection) around the core. Sub
 /// callers may ignore the return value.
+/// #1385 Task 12: `last_total_tokens` parameter replaced with `RunUsageTracker`
+/// for RuntimeContext I/O seam consumption.
 pub(crate) async fn compact_core(
     context_request: Option<&ContextRequest>,
     source_revision: SessionRevision,
     context: &ContextCoordinator,
-    last_total_tokens: &mut Option<u64>,
+    usage: &crate::application::runtime_context::RunUsageTracker,
     context_window_out: &mut Option<ContextWindow>,
 ) -> Result<CompactOutcome, LoopEngineError> {
     let request = context_request
@@ -82,7 +84,7 @@ pub(crate) async fn compact_core(
         .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
     crate::application::context_coordination::apply_automatic_compact_outcome(
         &outcome,
-        last_total_tokens,
+        usage,
         context_window_out,
     );
     Ok(outcome)

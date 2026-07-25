@@ -38,20 +38,58 @@ struct BridgeState {
     completed: HashSet<InteractionRequestId>,
 }
 
-#[derive(Default)]
+/// Interaction capability gate.  Sub-agent runs are non-interactive and
+/// MUST use [`InteractionBridge::disabled`] so that any accidental attempt
+/// to pause for user input fails explicitly rather than silently parking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InteractionCapability {
+    #[default]
+    /// Full interaction is available (Main Run only).
+    Enabled,
+    /// Interaction is disabled — any register/reply/cancel is rejected.
+    Disabled,
+}
+
 pub struct InteractionBridge {
     state: Mutex<BridgeState>,
+    capability: InteractionCapability,
+}
+
+impl Default for InteractionBridge {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl InteractionBridge {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            state: Mutex::new(BridgeState::default()),
+            capability: InteractionCapability::Enabled,
+        }
+    }
+
+    /// Create a bridge that rejects all interaction.  Sub-agents are
+    /// non-interactive by design — this is their only valid bridge.
+    pub fn disabled() -> Self {
+        Self {
+            state: Mutex::new(BridgeState::default()),
+            capability: InteractionCapability::Disabled,
+        }
+    }
+
+    /// Whether this bridge allows interactions.
+    pub fn is_enabled(&self) -> bool {
+        self.capability == InteractionCapability::Enabled
     }
 
     pub fn register(
         &self,
         request: InteractionRequest,
     ) -> Result<oneshot::Receiver<InteractionCompletion>, InteractionCommandOutcome> {
+        if self.capability == InteractionCapability::Disabled {
+            return Err(InteractionCommandOutcome::NotFound);
+        }
         let mut state = self.state.lock().expect("interaction bridge poisoned");
         if state.pending.contains_key(&request.id) || state.completed.contains(&request.id) {
             return Err(InteractionCommandOutcome::AlreadyCompleted);
@@ -68,6 +106,9 @@ impl InteractionBridge {
     }
 
     pub fn contains(&self, request_id: &InteractionRequestId) -> bool {
+        if self.capability == InteractionCapability::Disabled {
+            return false;
+        }
         self.state
             .lock()
             .expect("interaction bridge poisoned")
@@ -80,6 +121,9 @@ impl InteractionBridge {
         request_id: &InteractionRequestId,
         reply: InteractionReply,
     ) -> InteractionCommandOutcome {
+        if self.capability == InteractionCapability::Disabled {
+            return InteractionCommandOutcome::NotFound;
+        }
         let mut state = self.state.lock().expect("interaction bridge poisoned");
         let Some(waiter) = state.pending.get(request_id) else {
             return completed_or_not_found(&state, request_id);
@@ -104,6 +148,9 @@ impl InteractionBridge {
         request_id: &InteractionRequestId,
         reason: InteractionCancelReason,
     ) -> InteractionCommandOutcome {
+        if self.capability == InteractionCapability::Disabled {
+            return InteractionCommandOutcome::NotFound;
+        }
         let mut state = self.state.lock().expect("interaction bridge poisoned");
         let Some(waiter) = state.pending.remove(request_id) else {
             return completed_or_not_found(&state, request_id);
@@ -120,6 +167,9 @@ impl InteractionBridge {
     }
 
     pub fn drain_run(&self, run_id: &RunId, reason: InteractionCancelReason) -> usize {
+        if self.capability == InteractionCapability::Disabled {
+            return 0;
+        }
         let mut state = self.state.lock().expect("interaction bridge poisoned");
         let ids = state
             .pending

@@ -193,60 +193,6 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
     ))
 }
 
-/// 测试用 reflection history 查询闭包（#899）。
-fn test_reflection_history() -> Arc<
-    dyn Fn(
-            usize,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<Vec<sdk::ReflectionHistoryView>, sdk::SdkError>,
-                    > + Send,
-            >,
-        > + Send
-        + Sync,
-> {
-    Arc::new(|_limit| Box::pin(async { Ok(Vec::new()) }))
-}
-
-/// 测试用 list-models 闭包（#567）。
-fn test_list_models() -> Arc<
-    dyn Fn() -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Vec<sdk::ModelSummary>, sdk::SdkError>>
-                    + Send,
-            >,
-        > + Send
-        + Sync,
-> {
-    Arc::new(|| Box::pin(async { Ok(Vec::new()) }))
-}
-
-/// 测试用 list-reminders 闭包（#567）。
-fn test_list_reminders() -> Arc<
-    dyn Fn() -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Vec<sdk::ReminderView>, sdk::SdkError>>
-                    + Send,
-            >,
-        > + Send
-        + Sync,
-> {
-    Arc::new(|| Box::pin(async { Ok(Vec::new()) }))
-}
-
-fn test_list_sessions() -> Arc<
-    dyn Fn() -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Vec<sdk::SessionSummary>, sdk::SdkError>>
-                    + Send,
-            >,
-        > + Send
-        + Sync,
-> {
-    Arc::new(|| Box::pin(async { Ok(Vec::new()) }))
-}
-
 use crate::application::testing::text_completion_stream;
 
 use async_trait::async_trait;
@@ -259,6 +205,7 @@ use provider::{
     RawUsageSnapshot,
 };
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
+use share::config::models::ResolvedModel;
 use share::message::{Message, MessageSource, Role};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -299,32 +246,156 @@ fn test_reflection_history_store() -> Arc<dyn memory::api::ReflectionHistoryStor
     Arc::new(TestReflectionHistory)
 }
 
-/// 测试用模型切换构建器（#567）。返回 dummy LlmClient + result，
-/// 测试中模型切换不会被真正触发，此处仅满足 ChatLoopContext 字段约束。
-fn test_build_switched_client(
-    selection: &str,
-) -> std::pin::Pin<
-    Box<
-        dyn std::future::Future<
-                Output = std::result::Result<
-                    (crate::ports::ProviderBinding, sdk::ModelSwitchResult),
-                    String,
-                >,
-            > + Send,
-    >,
-> {
-    let selection = selection.to_string();
-    Box::pin(async move {
-        let binding = crate::application::testing::test_binding(vec!["dummy"])
-            .as_ref()
-            .clone();
-        let result = sdk::ModelSwitchResult {
-            display_name: selection,
-            context_window: 0,
-            reasoning_active: None,
-        };
-        Ok((binding, result))
-    })
+/// #1385: No-op AgentRunner for tests that don't exercise agent tool dispatch.
+struct NoopAgentRunner;
+#[async_trait]
+impl ::tools::AgentRunner for NoopAgentRunner {
+    async fn run_agent(&self, _request: ::tools::AgentRunRequest<'_>) -> ::tools::AgentRunTerminal {
+        ::tools::AgentRunTerminal::Completed {
+            result: String::new(),
+        }
+    }
+    async fn complete(
+        &self,
+        _prompt: &str,
+        _system: &str,
+        _cancellation: std::sync::Arc<dyn ::tools::CancellationSignal>,
+    ) -> String {
+        String::new()
+    }
+}
+
+/// #1385: Hook port that delegates to a real dispatcher with empty config.
+fn noop_hook_port() -> Arc<dyn hook::HookPort> {
+    Arc::new(
+        hook::build_dispatcher(
+            &HooksConfig {
+                events: HashMap::new(),
+            },
+            HashMap::new(),
+        )
+        .expect("empty hook dispatcher"),
+    )
+}
+
+/// #1385: Construct a [`MainSessionShell`] for tests.
+fn test_shell() -> crate::application::client::MainSessionShell {
+    let wiring = test_wiring();
+    let binding = crate::application::testing::test_binding(vec!["dummy"]);
+    let workspace = project::wire_production_workspace(std::env::current_dir().unwrap())
+        .expect("workspace 初始化成功")
+        .into_views();
+    let factory = ::tools::composition::TestCatalogExecutionFactory::empty();
+
+    crate::application::client::MainSessionShell {
+        session_id: uuid::Uuid::now_v7().to_string(),
+        cwd: std::env::current_dir().unwrap(),
+        workspace,
+        wiring,
+        config_query: Arc::new(config::ConfigAppService::new(None)),
+        config_writer: Arc::new(config::ConfigAppService::new(None)),
+        session_management: Arc::new(context::test_support::UnavailableSessionManagement),
+        provider_factory: crate::application::testing::constant_factory(binding.clone()),
+        resolved_model: ResolvedModel {
+            source_key: "test".to_string(),
+            source_config: Default::default(),
+            driver: "openai".to_string(),
+            model: Default::default(),
+        },
+        current_binding: Arc::new(std::sync::RwLock::new(binding)),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        skills_map: std::collections::HashMap::new(),
+        memory_config: share::config::MemoryConfig::default(),
+        context_size: 200_000,
+        language: "en".to_string(),
+        allow_all: true,
+        verbose: false,
+        resume: None,
+        agent_runner: Arc::new(NoopAgentRunner),
+        parent_context_source: crate::application::runtime_context::ParentRunContextSource::new(),
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        interaction_bridge: Arc::new(crate::application::interaction::InteractionBridge::new()),
+        event_sink_factory: Arc::new(|tx| {
+            crate::application::main_loop::ChatEventSinkHandle::new(
+                crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
+            )
+        }),
+        input_port_factory: Arc::new(|queue, input_events| {
+            crate::application::client::InputPortPair {
+                queue: crate::adapters::input_buffer::RuntimeQueueDrainPort::new(queue),
+                input_events: crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(
+                    input_events,
+                ),
+            }
+        }),
+        session_reminders: Arc::new(std::sync::RwLock::new(
+            share::memory::SessionReminders::default(),
+        )),
+        tool_catalog: factory.catalog_port(),
+        tool_execution: factory.execution(),
+        tool_context_binding: factory.binding(),
+        hook_runner: noop_hook_port(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        task_access: Arc::new(task::TaskStore::new()),
+        reflection_history: test_reflection_history_store(),
+    }
+}
+
+/// #1385: Test fake implementing `SessionQueryPort`, replacing four `Arc<Fn>` fixtures.
+struct FakeSessionQuery;
+
+#[async_trait::async_trait]
+impl crate::ports::SessionQueryPort for FakeSessionQuery {
+    async fn list_models(&self) -> Result<Vec<sdk::ModelSummary>, sdk::SdkError> {
+        Ok(Vec::new())
+    }
+    async fn list_sessions(&self) -> Result<Vec<sdk::SessionSummary>, sdk::SdkError> {
+        Ok(Vec::new())
+    }
+    async fn list_reminders(&self) -> Result<Vec<sdk::ReminderView>, sdk::SdkError> {
+        Ok(Vec::new())
+    }
+    async fn list_reflection_history(
+        &self,
+        _limit: usize,
+    ) -> Result<Vec<sdk::ReflectionHistoryView>, sdk::SdkError> {
+        Ok(Vec::new())
+    }
+}
+
+fn test_session_query_port() -> Arc<dyn crate::ports::SessionQueryPort> {
+    Arc::new(FakeSessionQuery)
+}
+
+/// #1385: Shorthand for constructing a [`ChatLoopContext`] from a test shell.
+fn test_chat_loop_ctx<S, Q, I>(
+    sink: S,
+    queue: Q,
+    input_events: I,
+    shell: crate::application::client::MainSessionShell,
+) -> ChatLoopContext<S, Q, I>
+where
+    S: ChatEventSink,
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    ChatLoopContext {
+        sink,
+        queue,
+        input_events,
+        shell,
+        initial_messages: vec![],
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        session_queries: test_session_query_port(),
+    }
 }
 
 #[test]
@@ -332,7 +403,8 @@ fn runtime_resume_replaces_the_only_active_session_id() {
     let runner_source = include_str!("loop_runner.rs");
     let port_source = include_str!("main_run_port.rs");
 
-    assert!(runner_source.contains("mut session_id,"));
+    // #1385: session_id now comes from shell.session_id.clone(), not from destructuring
+    assert!(runner_source.contains("let mut session_id = shell.session_id.clone();"));
     assert!(runner_source.contains("session_id = projection.session_id.clone();"));
     assert!(runner_source.contains("if session_id != bound_session_id"));
     assert!(runner_source.contains("session_id = bound_session_id;"));
@@ -779,49 +851,18 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         drop(input_tx);
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(provider.clone()),
+    ));
+    shell.hook_runner = blocking_then_success_hook_port(&flag_path);
+    shell.session_id = "test-stop-hook-blocked".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-stop-hook-blocked".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: blocking_then_success_hook_port(&flag_path),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -935,49 +976,18 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
         drop(input_tx);
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(provider.clone()),
+    ));
+    shell.hook_runner = delayed_blocking_then_success_hook_port(&flag_path);
+    shell.session_id = "test-stop-hook-follow-up".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-stop-hook-follow-up".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: delayed_blocking_then_success_hook_port(&flag_path),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1068,51 +1078,20 @@ async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
         drop(input_tx);
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(SequenceProvider::new(
+            vec!["first attempted final", "after hook feedback"],
+        ))),
+    ));
+    shell.hook_runner = blocking_then_success_hook_port(&flag_path);
+    shell.session_id = "test-stop-hook-metadata".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
-            SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
-        )),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-stop-hook-metadata".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: blocking_then_success_hook_port(&flag_path),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1262,51 +1241,22 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         drop(input_tx);
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.workspace = workspace;
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(SequenceProvider::new(
+            vec!["final response"],
+        ))),
+    ));
+    shell.hook_runner =
+        Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap());
+    shell.session_id = "test-worktree-stop-hook-env".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
-            SequenceProvider::new(vec!["final response"]),
-        )),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace,
-        session_id: "test-worktree-stop-hook-env".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: Arc::new(
-            hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap(),
-        ),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1362,49 +1312,13 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         drop(input_tx);
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue,
-        input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(TwoTurnProvider)),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-session".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(TwoTurnProvider)),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-session".to_string();
+    let ctx = test_chat_loop_ctx(sink.clone(), queue, input_events, shell);
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1541,51 +1455,20 @@ async fn test_continue_false_json_treated_as_block() {
         drop(input_tx);
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(SequenceProvider::new(
+            vec!["first response", "second response"],
+        ))),
+    ));
+    shell.hook_runner = continue_false_then_allow_hook_port(&flag_path);
+    shell.session_id = "test-continue-false".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
-            SequenceProvider::new(vec!["first response", "second response"]),
-        )),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-continue-false".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: continue_false_then_allow_hook_port(&flag_path),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1663,56 +1546,20 @@ async fn test_stall_triggers_stop_hook_check() {
 
     // LLM 前 3 次返回相同输出（触发 stall），第 4 次返回不同输出
     // Stop hook 前 3 次阻断，第 4 次放行
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(SequenceProvider::new(
+            vec!["same output", "same output", "same output", "final ok"],
+        ))),
+    ));
+    shell.hook_runner = block_n_times_hook_port(&counter_path, 3);
+    shell.session_id = "test-stall-hook".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
-            SequenceProvider::new(vec![
-                "same output",
-                "same output",
-                "same output",
-                "final ok",
-            ]),
-        )),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-stall-hook".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: block_n_times_hook_port(&counter_path, 3),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1838,51 +1685,20 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(SequenceProvider::new(
+            vec!["turn one final", "turn two final"],
+        ))),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-persistent-loop".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
-            SequenceProvider::new(vec!["turn one final", "turn two final"]),
-        )),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: Vec::new(),
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-persistent-loop".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     // timeout 包裹：若 loop 在 shutdown 后未返回（hang），测试失败而非永久阻塞。
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -2006,51 +1822,20 @@ async fn test_stall_detector_resets_across_user_turns() {
         drop(input_tx); // 无条件关闭通道 → recv_next_input 返回 None → shutdown
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(
             IdenticalReplyProvider::new("Done.", per_turn_delay),
         )),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: Vec::new(),
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-stall-reset-across-turns".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-stall-reset-across-turns".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -2208,49 +1993,18 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-idle-control-command".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: Vec::new(),
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-idle-control-command".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -2333,49 +2087,18 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         drop(input_tx); // 关闭通道 → shutdown
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-idle-pending-save".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: Vec::new(),
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-idle-pending-save".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -2438,49 +2161,18 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         drop(input_tx);
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-idle-pending-list-reminders".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: Vec::new(),
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-idle-pending-list-reminders".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -2520,51 +2212,20 @@ async fn test_stop_hook_block_limit_stops_loop() {
     });
 
     // 每次返回不同输出避免 stall；Stop hook 每次阻断
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(SequenceProvider::new(
+            vec!["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"],
+        ))),
+    ));
+    shell.hook_runner = always_blocking_hook_port();
+    shell.session_id = "test-block-limit".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
-            SequenceProvider::new(vec!["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"]),
-        )),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-block-limit".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: always_blocking_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -2710,49 +2371,19 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.active_run = active_run.clone();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-cancel-then-idle".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: Vec::new(),
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-cancel-then-idle".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: active_run.clone(),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -2927,49 +2558,19 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         drop(input_tx); // 关闭通道 → shutdown
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.active_run = active_run.clone();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-cancel-preserves-prior-turns".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: Vec::new(),
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-cancel-preserves-prior-turns".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: active_run.clone(),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     // timeout 包裹：未 shutdown（hang）则测试失败而非永久阻塞。
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -3115,49 +2716,18 @@ async fn test_chat_impl_idle_until_first_input_event() {
         drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-idle-until-first-input".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: Vec::new(),
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-idle-until-first-input".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -3242,49 +2812,18 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         drop(input_tx); // 关闭通道 → shutdown
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-no-turn-signal-before-first-input".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: Vec::new(),
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-no-turn-signal-before-first-input".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -3318,7 +2857,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
     let (input_tx, input_events) = ChannelInputEvents::new();
 
     // messages 模拟 resume 加载的历史：末条是 User（等待 assistant 回复）
-    let messages = vec![Message::user("unfinished question")];
+    let _messages = [Message::user("unfinished question")];
 
     // driver：先确认 loop 在 idle（无 LLM 调用），再投递新消息触发回合
     let driver_sink = sink.clone();
@@ -3342,49 +2881,18 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
     });
 
     let provider = SequenceProvider::new(vec!["response to new input"]);
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-resume-skip-pending".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: messages, // 末条为 User，模拟 resume
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-resume-skip-pending".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -3411,7 +2919,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
 
-    let messages = vec![Message::user("hello")];
+    let _messages = [Message::user("hello")];
 
     // driver：等待 200ms 后关闭通道（不应有 LLM 响应产生）
     let _driver_sink = sink.clone();
@@ -3422,49 +2930,18 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
     });
 
     let provider = SequenceProvider::new(vec!["hi there"]);
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![None]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-user-tail-idle".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![None]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: messages,
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-user-tail-idle".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -3572,49 +3049,18 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
     });
 
     let provider = ApiErrorThenNormalProvider::new();
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-api-error-finalize".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(provider)),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-api-error-finalize".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -3824,51 +3270,20 @@ async fn test_await_user_same_run_recovery() {
         drop(input_tx);
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(
             AskUserThenTextProvider::new(notify),
         )),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-await-user-recovery".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-await-user-recovery".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
         .await
@@ -3976,51 +3391,21 @@ async fn test_control_event_during_await_user_exits_to_session() {
         drop(input_tx);
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+    let mut shell = test_shell();
+    shell.active_run = active_run.clone();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(
             AskUserThenTextProvider::new(notify),
         )),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-ctl-await-user".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: active_run.clone(),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-ctl-await-user".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
         .await
@@ -4130,51 +3515,21 @@ async fn test_cancel_during_await_user_terminates_run() {
         drop(input_tx);
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+    let mut shell = test_shell();
+    shell.active_run = active_run.clone();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(
             AskUserThenTextProvider::new(notify),
         )),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-cancel-await-user".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: active_run.clone(),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-cancel-await-user".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
         .await
@@ -4292,51 +3647,21 @@ async fn test_biased_select_preserves_queued_input_when_cancel_and_message_both_
         drop(input_tx);
     });
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        binding: crate::application::testing::binding_from_llm_provider(Arc::new(
+    let mut shell = test_shell();
+    shell.active_run = active_run.clone();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(
             AskUserThenTextProvider::new(notify),
         )),
-        tool_catalog: ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port(),
-        tool_execution: ::tools::composition::TestCatalogExecutionFactory::empty().execution(),
-        tool_context_binding: ::tools::composition::TestCatalogExecutionFactory::empty().binding(),
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-biased-select-preserves-input".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: active_run.clone(),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-biased-select-preserves-input".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        shell,
+    );
 
     tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
         .await
@@ -4839,9 +4164,9 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
         Default::default(),
     );
     let wired = factory.build(tool_ctx);
-    let catalog_port = wired.catalog_port();
-    let execution = wired.execution();
-    let binding_port = wired.binding();
+    let _catalog_port = wired.catalog_port();
+    let _execution = wired.execution();
+    let _binding_port = wired.binding();
 
     let user_input_id = sdk::InputId::new_v7();
     let user_text = "first-message-marker-1272";
@@ -4854,49 +4179,18 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
         })
         .expect("input channel is open");
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(provider.clone()),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-per-turn-drain-seal".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
-        tool_catalog: catalog_port,
-        tool_execution: execution,
-        tool_context_binding: binding_port,
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-per-turn-drain-seal".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     let driver_sink = sink.clone();
     let driver_after_first = after_first.clone();
@@ -5001,9 +4295,9 @@ async fn per_turn_drain_seal_input_id_preserved_when_run_returns_tool_results_wi
         Default::default(),
     );
     let wired = factory.build(tool_ctx);
-    let catalog_port = wired.catalog_port();
-    let execution = wired.execution();
-    let binding_port = wired.binding();
+    let _catalog_port = wired.catalog_port();
+    let _execution = wired.execution();
+    let _binding_port = wired.binding();
 
     let user_input_id = sdk::InputId::new_v7();
     let user_text = "second-scenario-marker-1272";
@@ -5016,49 +4310,18 @@ async fn per_turn_drain_seal_input_id_preserved_when_run_returns_tool_results_wi
         })
         .unwrap();
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(provider.clone()),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-per-turn-drain-seal-2".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
-        tool_catalog: catalog_port,
-        tool_execution: execution,
-        tool_context_binding: binding_port,
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-per-turn-drain-seal-2".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     let driver_sink = sink.clone();
     let driver_after_first = after_first.clone();
@@ -5129,9 +4392,9 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
 
     // Empty catalog — no tools needed for text-only path.
     let factory = ::tools::composition::TestCatalogExecutionFactory::empty();
-    let catalog_port = factory.catalog_port();
-    let execution = factory.execution();
-    let binding_port = factory.binding();
+    let _catalog_port = factory.catalog_port();
+    let _execution = factory.execution();
+    let _binding_port = factory.binding();
 
     let user_input_id = sdk::InputId::new_v7();
     let user_text = "single-invocation-marker-1272";
@@ -5144,49 +4407,18 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
         })
         .expect("input channel is open");
 
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(provider.clone()),
+    ));
+    shell.hook_runner = test_hook_port();
+    shell.session_id = "test-per-turn-drain-seal-single".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
         input_events,
-        binding: crate::application::testing::binding_from_llm_provider(provider.clone()),
-        tool_catalog: catalog_port,
-        tool_execution: execution,
-        tool_context_binding: binding_port,
-        policy: Arc::new(policy::AllowAllPolicy),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        initial_git_context: String::new(),
-        user_context: String::new(),
-        initial_messages: vec![],
-        context_size: 200_000,
-        wiring: test_wiring(),
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views(),
-        session_id: "test-per-turn-drain-seal-single".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        interaction_bridge: std::sync::Arc::new(
-            crate::application::interaction::InteractionBridge::new(),
-        ),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_port(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory: std::sync::Arc::new(memory::NoOpMemory),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        reflection_history: test_reflection_history_store(),
-        language: "en".to_string(),
-        list_reflection_history: test_reflection_history(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
+        shell,
+    );
 
     let driver_sink = sink.clone();
     let driver_after = after_response.clone();

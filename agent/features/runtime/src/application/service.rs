@@ -45,67 +45,14 @@ mod tests {
     use super::*;
     use crate::application::main_loop::request::ChatLaunchOptions;
     use async_trait::async_trait;
-    use hook::HookPort;
-    use share::config::MemoryConfig;
-    use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    use tools::{AgentRunRequest, AgentRunner};
 
     #[derive(Default)]
     struct RecordingRuntimePort {
         no_tui_calls: Arc<AtomicUsize>,
         tui_calls: Arc<AtomicUsize>,
-    }
-
-    struct NoopAgentRunner;
-
-    struct NoopReflectionHistory;
-
-    #[async_trait]
-    impl memory::api::ReflectionHistoryQuery for NoopReflectionHistory {
-        async fn list(
-            &self,
-            _limit: usize,
-        ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError> {
-            Ok(Vec::new())
-        }
-    }
-
-    #[async_trait]
-    impl memory::api::ReflectionHistoryStore for NoopReflectionHistory {
-        async fn append(
-            &self,
-            _record: &memory::api::ReflectionRecord,
-        ) -> Result<(), memory::api::MemoryError> {
-            Ok(())
-        }
-
-        async fn upsert(
-            &self,
-            _record: &memory::api::ReflectionRecord,
-        ) -> Result<(), memory::api::MemoryError> {
-            Ok(())
-        }
-    }
-
-    #[async_trait]
-    impl AgentRunner for NoopAgentRunner {
-        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> tools::AgentRunTerminal {
-            tools::AgentRunTerminal::Completed {
-                result: String::new(),
-            }
-        }
-
-        async fn complete(
-            &self,
-            _prompt: &str,
-            _system: &str,
-            _cancellation: std::sync::Arc<dyn tools::CancellationSignal>,
-        ) -> String {
-            String::new()
-        }
     }
 
     #[async_trait(?Send)]
@@ -167,47 +114,9 @@ mod tests {
         launch
     }
 
+    /// #1385 Task 7: `ChatRuntimeContext` degraded to startup params only.
     fn runtime_context() -> ChatRuntimeContext {
         ChatRuntimeContext {
-            resources: crate::application::resources::RuntimeResources {
-                binding: crate::application::testing::test_binding(Vec::new()),
-                provider_factory: crate::application::testing::constant_factory(
-                    crate::application::testing::test_binding(Vec::new()),
-                ),
-                tool_catalog: tools::composition::TestCatalogExecutionFactory::empty()
-                    .catalog_port(),
-                tool_execution: tools::composition::TestCatalogExecutionFactory::empty()
-                    .execution(),
-                tool_context_binding: tools::composition::TestCatalogExecutionFactory::empty()
-                    .binding(),
-                system_blocks: Vec::new(),
-                system_prompt_text: String::new(),
-                initial_git_context: String::new(),
-                user_context: String::new(),
-                agent_runner: Arc::new(NoopAgentRunner),
-                policy: Arc::new(policy::AllowAllPolicy),
-                tool_result_materializer:
-                    crate::application::testing::test_tool_result_materializer(),
-                task_access: task::wire_task().access(),
-                skills_map: HashMap::new(),
-                hook_runner: {
-                    let port: Arc<dyn HookPort> = Arc::new(
-                        hook::build_dispatcher(
-                            &share::config::hooks::HooksConfig::default(),
-                            HashMap::new(),
-                        )
-                        .unwrap(),
-                    );
-                    port
-                },
-                memory_config: MemoryConfig::default(),
-                memory: std::sync::Arc::new(memory::NoOpMemory),
-                reflection_history: Arc::new(NoopReflectionHistory),
-                agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-                allow_all: true,
-                context_size: 200_000,
-                language: "en".to_string(),
-            },
             verbose: false,
             resume: None,
         }

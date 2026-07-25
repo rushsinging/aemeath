@@ -5,7 +5,7 @@ use super::accessors::AgentClientImpl;
 type Result<T> = std::result::Result<T, SdkError>;
 
 pub(super) async fn list_reminders_impl(me: &AgentClientImpl) -> Result<Vec<sdk::ReminderView>> {
-    let reminders = me.inner.session_reminders.read().unwrap();
+    let reminders = me.inner.shell.session_reminders.read().unwrap();
     Ok(reminders
         .list()
         .iter()

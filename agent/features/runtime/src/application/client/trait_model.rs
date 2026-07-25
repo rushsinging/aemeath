@@ -106,6 +106,7 @@ fn build_provider_binding_from_runtime_model(
 pub(super) async fn list_models_impl(me: &AgentClientImpl) -> Result<Vec<ModelSummary>> {
     let snapshot = me
         .inner
+        .shell
         .config_query
         .snapshot()
         .await
