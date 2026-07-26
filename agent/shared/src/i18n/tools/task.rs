@@ -132,6 +132,13 @@ After completing a task, check the unblocked list or call TaskList to find the n
     }
 }
 
+pub fn task_lists(lang: &str) -> &'static str {
+    match lang {
+        "zh" => "列出当前及历史任务列表，可按 active / paused / archived 状态过滤。使用返回的 ID 调用 TaskList 查询具体列表。",
+        _ => "List current and historical task lists, optionally filtered by active, paused, or archived status. Use a returned ID with TaskList to inspect that list.",
+    }
+}
+
 /// TaskListCreate description。
 pub fn task_list_create(lang: &str) -> &'static str {
     match lang {
@@ -159,6 +166,7 @@ mod tests {
         assert_eq!(task_create("fr"), task_create("en"));
         assert!(task_get("zh").contains("按 ID 检索任务"));
         assert!(task_list("zh").contains("列出所有任务"));
+        assert!(task_lists("zh").contains("历史任务列表"));
         assert!(task_stop("zh").contains("停止"));
         for text in [task_update("zh"), task_update("en")] {
             assert!(text.contains("status:"));

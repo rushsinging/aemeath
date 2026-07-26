@@ -65,10 +65,23 @@ impl ContextApplicationService {
             last_cacheable.cache_break = true;
         }
         blocks.extend(prompt.uncached);
-        if let Some(reminder) = &request.task_reminder.text {
+        if request.task_reminder.has_unfinished() {
+            let id = request.task_reminder.task_list_id.as_deref().unwrap_or("?");
+            let summary = request.task_reminder.summary.as_deref().unwrap_or("未命名");
+            let reminder = if request.language.as_str() == "zh" {
+                format!(
+                    "当前 task list #{id}「{summary}」仍有 {} pending、{} in_progress。若与最新用户请求相关，调用 TaskList 查看详情；否则优先处理最新请求。",
+                    request.task_reminder.pending, request.task_reminder.in_progress
+                )
+            } else {
+                format!(
+                    "Current task list #{id} \"{summary}\" has {} pending and {} in_progress tasks. If it is relevant to the latest user request, call TaskList for details; otherwise prioritize the latest request.",
+                    request.task_reminder.pending, request.task_reminder.in_progress
+                )
+            };
             blocks.push(SystemBlock {
                 kind: "task_reminder".into(),
-                content: reminder.clone(),
+                content: reminder,
                 cacheable: false,
                 cache_break: false,
             });

@@ -368,16 +368,18 @@ where
     ) -> ContextRequest {
         let task_reminder = self
             .task_access()
-            .reminder_snapshot()
-            .items
-            .iter()
-            .any(|item| {
-                matches!(
-                    item.status,
-                    task::TaskStatus::Pending | task::TaskStatus::InProgress
-                )
+            .current_batch()
+            .and_then(|id| self.task_access().batch_snapshot(id))
+            .map(|snapshot| {
+                let stats = snapshot.stats();
+                TaskReminderSnapshot {
+                    task_list_id: Some(snapshot.batch().id().to_string()),
+                    summary: snapshot.batch().summary().map(str::to_owned),
+                    pending: stats.pending,
+                    in_progress: stats.in_progress,
+                }
             })
-            .then(|| "当前 task batch 仍有未完成任务；仅在与最新用户请求相关时继续。".to_string());
+            .unwrap_or_default();
         let raw_tool_schemas = self
             .tool_catalog()
             .snapshot(
@@ -405,9 +407,7 @@ where
             system_prompt: SystemPromptSpec::new(self.system_prompt_text),
             model_id: self.binding().model.model.clone(),
             effective_reasoning: self.reasoning(),
-            task_reminder: TaskReminderSnapshot {
-                text: task_reminder,
-            },
+            task_reminder,
             language: ContextLanguage::new(self.language),
             agent_roles: std::collections::HashMap::new(),
             config_snapshot: self.run_config().config().clone(),

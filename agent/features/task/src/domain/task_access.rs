@@ -1,7 +1,7 @@
 use crate::domain::{
-    Batch, BatchCreateSpec, BatchId, Task, TaskCommandError, TaskCommandResult, TaskCreateSpec,
-    TaskId, TaskLifecycleSnapshot, TaskPriority, TaskReminderSnapshot, TaskRevision, TaskStatus,
-    TaskStoreStats,
+    Batch, BatchCreateSpec, BatchId, Task, TaskBatchSnapshot, TaskCommandError, TaskCommandResult,
+    TaskCreateSpec, TaskId, TaskLifecycleSnapshot, TaskPriority, TaskReminderSnapshot,
+    TaskRevision, TaskStatus, TaskStoreStats,
 };
 
 /// Narrow, Task-owned capability for typed Task commands and queries.
@@ -95,6 +95,8 @@ pub trait TaskAccess: Send + Sync {
     fn current_task_by_seq(&self, seq: u64) -> Option<Task>;
     fn list(&self) -> Vec<Task>;
     fn list_batches(&self) -> Vec<Batch>;
+    fn batch_snapshot(&self, id: BatchId) -> Option<TaskBatchSnapshot>;
+    fn list_batch_snapshots(&self) -> Vec<TaskBatchSnapshot>;
     fn current_batch(&self) -> Option<BatchId>;
     fn stats(&self) -> TaskStoreStats;
     fn reminder_snapshot(&self) -> TaskReminderSnapshot;

@@ -1,4 +1,4 @@
-use super::{TaskListInput, TaskListResult};
+use super::{TaskListInput, TaskListMetadata, TaskListResult, TaskListStats};
 use crate::domain::types::ToolSchema;
 use task::{BatchCreateSpec, TaskCreateSpec, TaskPriority, TaskView};
 
@@ -28,11 +28,26 @@ fn task_list_input_schema_does_not_publish_session_id() {
     assert!(!properties.contains_key("sessionId"));
     assert!(properties.contains_key("status"));
     assert!(properties.contains_key("priority"));
+    assert!(properties.contains_key("task_list_id"));
 }
 
 #[test]
 fn task_list_result_serializes_each_task_with_the_stable_task_view_wire() {
     let value = serde_json::to_value(TaskListResult {
+        task_list: Some(TaskListMetadata {
+            id: "1".into(),
+            summary: "批次".into(),
+            status: "active".into(),
+            created_at: 10,
+            last_active_turn: 0,
+            silence_turns: 0,
+        }),
+        stats: TaskListStats {
+            total: 1,
+            pending: 1,
+            in_progress: 0,
+            completed: 0,
+        },
         tasks: vec![task_view("核验列表", "保持既有 wire", TaskPriority::Urgent)],
     })
     .expect("serialize task list result");
@@ -40,6 +55,20 @@ fn task_list_result_serializes_each_task_with_the_stable_task_view_wire() {
     assert_eq!(
         value,
         serde_json::json!({
+            "task_list": {
+                "id": "1",
+                "summary": "批次",
+                "status": "active",
+                "created_at": 10,
+                "last_active_turn": 0,
+                "silence_turns": 0
+            },
+            "stats": {
+                "total": 1,
+                "pending": 1,
+                "in_progress": 0,
+                "completed": 0
+            },
             "tasks": [{
                 "id": "1",
                 "subject": "核验列表",

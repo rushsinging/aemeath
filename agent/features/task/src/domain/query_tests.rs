@@ -44,6 +44,62 @@ fn get_and_collections_are_owned_and_sorted_by_typed_id() {
 }
 
 #[test]
+fn batch_snapshots_scope_stats_and_tasks_to_each_batch() {
+    let mut state = TaskStoreState::empty();
+    state.create_batch(batch_spec("first"), 1).unwrap();
+    let first_pending = state
+        .create_task(task_spec("first pending", TaskPriority::High), 2)
+        .unwrap()
+        .value;
+    let first_completed = state
+        .create_task(task_spec("first completed", TaskPriority::Normal), 3)
+        .unwrap()
+        .value;
+    let first_deleted = state
+        .create_task(task_spec("first deleted", TaskPriority::Urgent), 4)
+        .unwrap()
+        .value;
+    state
+        .transition(first_completed.id(), TaskStatus::Completed, 5)
+        .unwrap();
+    state.delete(first_deleted.id(), 6).unwrap();
+    state.pause_batch(BatchId::new(1)).unwrap();
+
+    state.create_batch(batch_spec("second"), 7).unwrap();
+    let second = state
+        .create_task(task_spec("second", TaskPriority::Low), 8)
+        .unwrap()
+        .value;
+    state
+        .transition(second.id(), TaskStatus::InProgress, 9)
+        .unwrap();
+
+    let first = state.batch_snapshot(BatchId::new(1)).unwrap();
+    assert_eq!(first.batch().summary(), Some("first"));
+    assert_eq!(first.stats().total, 2);
+    assert_eq!(first.stats().pending, 1);
+    assert_eq!(first.stats().completed, 1);
+    assert_eq!(
+        first.tasks().iter().map(Task::id).collect::<Vec<_>>(),
+        vec![first_pending.id(), first_completed.id()]
+    );
+
+    let second_snapshot = state.batch_snapshot(BatchId::new(2)).unwrap();
+    assert_eq!(second_snapshot.stats().total, 1);
+    assert_eq!(second_snapshot.stats().in_progress, 1);
+    assert_eq!(second_snapshot.tasks()[0].id(), second.id());
+    assert_eq!(state.batch_snapshot(BatchId::new(99)), None);
+    assert_eq!(
+        state
+            .list_batch_snapshots()
+            .iter()
+            .map(|snapshot| snapshot.batch().id())
+            .collect::<Vec<_>>(),
+        vec![BatchId::new(1), BatchId::new(2)]
+    );
+}
+
+#[test]
 fn stats_and_reminder_are_deterministic_pure_values() {
     let mut state = TaskStoreState::empty();
     state.create_batch(batch_spec("batch"), 1).unwrap();

@@ -1,9 +1,11 @@
-use crate::domain::types::task_list::{TaskListInput, TaskListResult};
+use crate::domain::types::task_list::{
+    TaskListInput, TaskListMetadata, TaskListResult, TaskListStats,
+};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use task::{TaskAccess, TaskPriority, TaskStatus, TaskView};
+use task::{BatchId, TaskAccess, TaskPriority, TaskStatus, TaskView};
 
 pub struct TaskListTool {
     pub access: Arc<dyn TaskAccess>,
@@ -67,38 +69,69 @@ impl TypedTool for TaskListTool {
             _ => None,
         });
         let priority = args.priority.as_deref().and_then(parse_priority);
-        let current_batch = self.access.current_batch();
-        let all_tasks = self.access.list();
+        let target_batch = match args.task_list_id.as_deref() {
+            Some(value) => match value.parse::<u64>() {
+                Ok(id) if id > 0 => BatchId::new(id),
+                _ => return TypedToolResult::error(format!("invalid task list id: {value}")),
+            },
+            None => match self.access.current_batch() {
+                Some(id) => id,
+                None => {
+                    return TypedToolResult::success(
+                        "No current task list",
+                        TaskListResult {
+                            task_list: None,
+                            stats: TaskListStats {
+                                total: 0,
+                                pending: 0,
+                                in_progress: 0,
+                                completed: 0,
+                            },
+                            tasks: Vec::new(),
+                        },
+                    )
+                }
+            },
+        };
+        let snapshot = match self.access.batch_snapshot(target_batch) {
+            Some(snapshot) => snapshot,
+            None => return TypedToolResult::error(format!("task list {target_batch} not found")),
+        };
+        let all_tasks = snapshot.tasks();
         let seq_by_id = all_tasks
             .iter()
-            .filter(|task| Some(task.batch()) == current_batch)
             .map(|task| (task.id(), task.seq().to_string()))
             .collect::<std::collections::HashMap<_, _>>();
-        let mut tasks: Vec<_> = all_tasks
-            .into_iter()
-            .filter(|task| Some(task.batch()) == current_batch)
-            .collect();
+        let mut tasks: Vec<_> = all_tasks.iter().collect();
         if let Some(status) = status {
             tasks.retain(|task| task.status() == status);
         }
         if let Some(priority) = priority {
             tasks.retain(|task| task.priority() == priority);
         }
-        let stats = self.access.stats();
-        let message = if tasks.is_empty() {
-            "No tasks found".to_owned()
-        } else {
-            format!(
-                "{} tasks ({} pending, {} in_progress, {} completed)",
-                stats.total - stats.deleted,
-                stats.pending,
-                stats.in_progress,
-                stats.completed
-            )
-        };
+        let stats = snapshot.stats();
+        let message = format!(
+            "{} tasks ({} pending, {} in_progress, {} completed)",
+            stats.total, stats.pending, stats.in_progress, stats.completed
+        );
+        let batch = snapshot.batch();
         TypedToolResult::success(
             message,
             TaskListResult {
+                task_list: Some(TaskListMetadata {
+                    id: batch.id().to_string(),
+                    summary: batch.summary().unwrap_or_default().to_owned(),
+                    status: format!("{:?}", batch.status()).to_ascii_lowercase(),
+                    created_at: batch.created_at(),
+                    last_active_turn: batch.last_active_turn(),
+                    silence_turns: batch.silence_turns(),
+                }),
+                stats: TaskListStats {
+                    total: stats.total,
+                    pending: stats.pending,
+                    in_progress: stats.in_progress,
+                    completed: stats.completed,
+                },
                 tasks: tasks
                     .iter()
                     .map(|task| {

@@ -196,6 +196,36 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskListDisplay)
 });
 
+// ── TaskLists ────────────────────────────────────────────────────
+
+struct TaskListsDisplay;
+impl ToolDisplay for TaskListsDisplay {
+    fn name(&self) -> &str {
+        "TaskLists"
+    }
+    fn format_header(&self, _input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        self.display_name().to_string()
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
+    }
+}
+inventory::submit!(ToolDisplayEntry {
+    name: "TaskLists",
+    display: || Box::new(TaskListsDisplay)
+});
+
 // ── TaskListCreate ───────────────────────────────────────────────
 
 struct TaskListCreateDisplay;

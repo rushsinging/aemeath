@@ -121,7 +121,10 @@ fn request() -> ContextRequest {
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
         task_reminder: TaskReminderSnapshot {
-            text: Some("reminder".into()),
+            task_list_id: Some("1".into()),
+            summary: Some("测试任务".into()),
+            pending: 1,
+            in_progress: 0,
         },
         language: Language::new("zh"),
         agent_roles: Default::default(),
@@ -196,6 +199,15 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
         .map(|block| block.kind.as_str())
         .collect();
     assert_eq!(cache_breaks, vec!["active_summary"]);
+    let reminder = window
+        .system_blocks
+        .iter()
+        .find(|block| block.kind == "task_reminder")
+        .expect("structured task reminder");
+    assert!(reminder.content.contains("task list #1"));
+    assert!(reminder.content.contains("测试任务"));
+    assert!(reminder.content.contains("1 pending"));
+    assert!(!reminder.cacheable);
 }
 
 #[tokio::test]
