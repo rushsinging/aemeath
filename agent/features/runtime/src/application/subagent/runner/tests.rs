@@ -18,6 +18,72 @@ use std::sync::Arc;
 use tools::AgentProgressKind;
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
+/// #1248 Task 3: shared test factory for CliAgentRunner in tests.
+fn test_rt_factory() -> Arc<crate::application::runtime_context_factory::RuntimeContextFactory> {
+    let tool_ports = tools::composition::TestCatalogExecutionFactory::empty();
+    let services = crate::application::runtime_context::RuntimeServices {
+        tool_catalog: tool_ports.catalog_port(),
+        tool_execution: tool_ports.execution(),
+        tool_context_binding: tool_ports.binding(),
+        policy: Arc::new(policy::AllowAllPolicy),
+        reflection_history: {
+            struct FakeRefl;
+            #[async_trait]
+            impl memory::api::ReflectionHistoryQuery for FakeRefl {
+                async fn list(
+                    &self,
+                    _limit: usize,
+                ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::MemoryError>
+                {
+                    Ok(vec![])
+                }
+            }
+            #[async_trait]
+            impl memory::api::ReflectionHistoryStore for FakeRefl {
+                async fn append(
+                    &self,
+                    _record: &memory::api::ReflectionRecord,
+                ) -> Result<(), memory::MemoryError> {
+                    Ok(())
+                }
+                async fn upsert(
+                    &self,
+                    _record: &memory::api::ReflectionRecord,
+                ) -> Result<(), memory::MemoryError> {
+                    Ok(())
+                }
+            }
+            Arc::new(FakeRefl)
+        },
+        task: crate::application::testing::test_task_access(),
+        hooks: {
+            struct FakeHook;
+            #[async_trait]
+            impl hook::HookPort for FakeHook {
+                async fn dispatch(
+                    &self,
+                    _invocation: hook::HookInvocation,
+                    _cancellation: &tokio_util::sync::CancellationToken,
+                ) -> hook::HookOutcome {
+                    hook::HookOutcome::proceed()
+                }
+            }
+            Arc::new(FakeHook)
+        },
+    };
+    Arc::new(
+        crate::application::runtime_context_factory::RuntimeContextFactory::new(
+            services.tool_catalog,
+            services.tool_execution,
+            services.tool_context_binding,
+            services.policy,
+            services.reflection_history,
+            services.task,
+            services.hooks,
+        ),
+    )
+}
+
 struct EmptySkillMaterializer;
 
 #[async_trait]
@@ -179,6 +245,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
         ),
         skill_materializer: empty_skill_materializer(),
         parent_context: parent_source,
+        runtime_context_factory: test_rt_factory(),
     };
     let ctx_a = test_ctx();
     let ctx_b = test_ctx();
@@ -1513,6 +1580,7 @@ fn test_runner_with_provider(
             ),
             skill_materializer: empty_skill_materializer(),
             parent_context: src,
+            runtime_context_factory: test_rt_factory(),
         },
         guard,
     )

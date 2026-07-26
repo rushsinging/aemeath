@@ -18,7 +18,7 @@ impl InteractionContinuation {
     pub fn resume_status(&self) -> RunStatus {
         match self {
             Self::CompleteToolCall(_) | Self::ContinueAfterHardPause => RunStatus::ExecutingTools,
-            Self::ContinueToolApproval(_) => RunStatus::AwaitingToolApproval,
+            Self::ContinueToolApproval(_) => RunStatus::ExecutingTools,
             Self::ContinuePlanApproval => RunStatus::PreparingContext,
         }
     }
@@ -257,4 +257,20 @@ pub enum RunCancellationRequest {
     Accepted,
     AlreadyCancelling,
     AlreadyTerminal,
+}
+
+/// #1248 Task 6: Typed outcome of recording a stop hook block.
+///
+/// Count belongs to `Run` (not `StuckGuard`).  The shared Loop uses this
+/// to decide whether to continue with feedback or fail the Run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopHookBlockResult {
+    /// Block recorded; count < 15.  Loop should inject feedback and
+    /// transition to DrainingInput for another attempt.
+    Blocked {
+        /// Current block count (1-based after this record).
+        count: usize,
+    },
+    /// 16th block → retry exhausted.  Run must transition to Failed.
+    RetryExhausted { count: usize },
 }

@@ -72,12 +72,14 @@ Hook 执行重试不是 Run 状态迁移；Run 只观察最终 HookOutcome。
 
 `stop_block_count`：
 
-- 属于 Run 内存态；
+- 属于 Run 内存态（`Run::stop_hook_block_count`）；
 - Run 创建时为 0；
 - 主动 Block 与 Stop 执行失败 Block 都递增；
 - 普通 model/tool step 不清零；
 - Stop Continue 后 Run 结束；
 - 不持久化，崩溃后新 Run 从头开始。
+- #1248 Task 6：`Run::record_stop_hook_block()` 返回 typed `StopHookBlockResult`：1-15 次 `Blocked { count }`，第 16 次 `RetryExhausted { count }` → 状态 `Failed(StopHookRetryExhausted)`。共享 Loop Engine 调用此方法，旧 `StuckGuard` 中的计数逻辑已退役。
+- RuntimeContextFactory 按 `HookBindingMode`（Full / BoundaryOnly）验证并装配 hooks 端口；BoundaryOnly 需 parent。
 
 `max_stop_hook_blocks=15` 的默认值由 ConfigSnapshot 提供，Runtime 应用；用户 HookSubscription 不能覆盖该上限。
 

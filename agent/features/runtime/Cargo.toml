@@ -16,7 +16,6 @@ storage = { path = "../storage" }
 task = { path = "../task" }
 hook = { path = "../hook" }
 audit = { path = "../audit" }
-workflow = { path = "../workflow" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 serde = { workspace = true }

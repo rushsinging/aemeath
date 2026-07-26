@@ -1,8 +1,8 @@
 # Agent Runtime · 运行时所有权与统一装配
 
 > 层级：02-modules / runtime（模块战术设计）  
-> 状态：Target（目标设计）｜对应 Issue：[#1385](https://github.com/rushsinging/aemeath/issues/1385)、[#1397](https://github.com/rushsinging/aemeath/issues/1397)  
-> 本文记录 #1385 review 后确定的目标边界。现有 `MainSessionShell`、`RuntimeContextParts`、`MainRunPort`、`SubAgentRun` 和 `from_args.rs` 均属于迁移现状，不构成目标模型。
+> 状态：Target（目标设计）｜对应 Issue：[#1385](https://github.com/rushsinging/aemeath/issues/1385)、[#1397](https://github.com/rushsinging/aemeath/issues/1397)、[#1248](https://github.com/rushsinging/aemeath/issues/1248)\
+> 本文记录 #1385 review 后确定的目标边界。#1248 已落地 RuntimeContextFactory、Interaction/Hook/Reasoning 三能力穷举装配与 Stop Hook 三分支；`RuntimeContextParts`、`assemble_main_runtime_context`、`ModelStep::StopHookBlocked`、`InteractionBridge::disabled()` 已退役。`MainSessionShell`、`MainRunPort`、`SubAgentRun` 和 `from_args.rs` 的部分旧路径仍由 #1397/#1399 收口，不构成目标模型。
 
 ## 1. 决策摘要
 

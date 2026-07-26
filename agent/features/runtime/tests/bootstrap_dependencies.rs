@@ -204,6 +204,17 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
             tool_result_materializer.clone(),
             active_run.clone(),
         ),
+        {
+            Arc::new(runtime::RuntimeContextFactory::new(
+                tools.catalog_port(),
+                tools.execution(),
+                tools.binding(),
+                Arc::new(policy::AllowAllPolicy),
+                history.clone(),
+                access.clone(),
+                hook_runner.clone(),
+            ))
+        },
     );
 
     // ── Arc identity: Core dependencies ──

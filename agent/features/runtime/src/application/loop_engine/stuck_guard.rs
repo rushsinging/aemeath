@@ -12,33 +12,30 @@ pub enum StuckDecision {
     Fail { reason: String },
 }
 
+/// Guard against stuck loops (repeated text, tool call loops, timeout).
+///
+/// #1248 Task 6: Stop hook block counting has been moved to `Run` domain.
+/// `record_stop_hook_block` and `stop_hook_block_limit`/`stop_hook_block_count`
+/// are removed — the shared Loop now uses `Run::record_stop_hook_block()`.
 pub struct StuckGuard {
     stall: StallDetector,
     tool_fuse: ToolCallFuse,
     timeout: Duration,
     started_at: Instant,
-    stop_hook_block_limit: usize,
-    stop_hook_block_count: usize,
     text_stall_count: usize,
 }
 
 impl StuckGuard {
-    pub fn new(timeout: Duration, stop_hook_block_limit: usize) -> Self {
-        Self::with_started_at(timeout, stop_hook_block_limit, Instant::now())
+    pub fn new(timeout: Duration) -> Self {
+        Self::with_started_at(timeout, Instant::now())
     }
 
-    pub fn with_started_at(
-        timeout: Duration,
-        stop_hook_block_limit: usize,
-        started_at: Instant,
-    ) -> Self {
+    pub fn with_started_at(timeout: Duration, started_at: Instant) -> Self {
         Self {
             stall: StallDetector::new(),
             tool_fuse: ToolCallFuse::new(),
             timeout,
             started_at,
-            stop_hook_block_limit,
-            stop_hook_block_count: 0,
             text_stall_count: 0,
         }
     }
@@ -74,27 +71,6 @@ impl StuckGuard {
         } else {
             StuckDecision::Fail {
                 reason: format!("run timed out after {} seconds", self.timeout.as_secs()),
-            }
-        }
-    }
-
-    pub fn record_stop_hook_block(&mut self) -> StuckDecision {
-        self.stop_hook_block_count = self.stop_hook_block_count.saturating_add(1);
-        if self.stop_hook_block_limit > 0
-            && self.stop_hook_block_count >= self.stop_hook_block_limit
-        {
-            StuckDecision::Fail {
-                reason: format!(
-                    "stop hook blocked completion {} times",
-                    self.stop_hook_block_count
-                ),
-            }
-        } else {
-            StuckDecision::SoftBlock {
-                reason: format!(
-                    "stop hook blocked completion {} times",
-                    self.stop_hook_block_count
-                ),
             }
         }
     }

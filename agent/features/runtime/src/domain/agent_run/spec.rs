@@ -6,6 +6,101 @@ pub enum RunKind {
     Sub,
 }
 
+// ── #1248 Task 1: capability-semantic enums ──
+
+/// Interaction binding mode — who mediates user interaction for this run.
+///
+/// Ordering (most → least permissive): `Client` > `ParentMediated` > `Unavailable`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InteractionBindingMode {
+    /// Direct client interaction (Main run; historical `Interactive`).
+    Client,
+    /// Interaction mediated through the parent run (Sub that can AskUser /
+    /// request approval through the parent seam).
+    ParentMediated,
+    /// No interaction available. Any attempt to register a request immediately
+    /// fails with a typed unavailable error.
+    Unavailable,
+}
+
+impl InteractionBindingMode {
+    /// `self` must not be more permissive than `ceiling`.
+    pub fn is_within(&self, ceiling: &Self) -> bool {
+        !matches!(
+            (self, ceiling),
+            (
+                InteractionBindingMode::Client,
+                InteractionBindingMode::ParentMediated
+            ) | (
+                InteractionBindingMode::Client,
+                InteractionBindingMode::Unavailable
+            ) | (
+                InteractionBindingMode::ParentMediated,
+                InteractionBindingMode::Unavailable
+            )
+        )
+    }
+}
+
+/// Hook binding mode — which lifecycle hooks are active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookBindingMode {
+    /// All hooks active (Main run).
+    Full,
+    /// Only start/stop lifecycle hooks (Sub run).
+    BoundaryOnly,
+}
+
+impl HookBindingMode {
+    pub fn is_within(&self, ceiling: &Self) -> bool {
+        !matches!(
+            (self, ceiling),
+            (HookBindingMode::Full, HookBindingMode::BoundaryOnly)
+        )
+    }
+}
+
+/// Reasoning binding mode — how the run selects its reasoning effort.
+///
+/// Ordering (most → least permissive):
+/// `Adaptive` > `Fixed` > `Inherit` > `NoOp`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReasoningBindingMode {
+    /// Graph-driven adaptive reasoning (Main run; historical `GraphDriven`).
+    Adaptive,
+    /// Fixed effort level declared by role / RunSpec.
+    Fixed,
+    /// Inherit parent's effective requested level at construction time;
+    /// `observe` does not advance the parent graph.
+    Inherit,
+    /// No reasoning — `observe` / `set_level` are no-ops.
+    NoOp,
+}
+
+impl ReasoningBindingMode {
+    pub fn is_within(&self, ceiling: &Self) -> bool {
+        !matches!(
+            (self, ceiling),
+            (ReasoningBindingMode::Adaptive, ReasoningBindingMode::Fixed)
+                | (
+                    ReasoningBindingMode::Adaptive,
+                    ReasoningBindingMode::Inherit
+                )
+                | (ReasoningBindingMode::Adaptive, ReasoningBindingMode::NoOp)
+                | (ReasoningBindingMode::Fixed, ReasoningBindingMode::Inherit)
+                | (ReasoningBindingMode::Fixed, ReasoningBindingMode::NoOp)
+                | (ReasoningBindingMode::Inherit, ReasoningBindingMode::NoOp)
+        )
+    }
+}
+
+// ── legacy capability enums (retained for backward compat until #1397) ──
+//
+// Migration note: these will be removed when #1397 completes the capability
+// wiring.  New code should use the *BindingMode enums above for
+// capability-semantic dimensions.  Do NOT add #[deprecated] — the workspace
+// still uses these for existing fixed-profile dimensions until #1397 lands.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     SessionQueue,
@@ -19,6 +114,10 @@ impl InputMode {
     }
 }
 
+/// Legacy interaction mode — governs whether the run can prompt a human user.
+///
+/// Retained for the six legacy fixed-profile dimensions until #1397.
+/// New capability-semantic interaction decisions use [`InteractionBindingMode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractionMode {
     Interactive,
@@ -97,7 +196,7 @@ pub enum RunSpecError {
 /// Parent capability ceiling for sub-run specs.
 /// Stored when created via [`RunSpec::derive_sub`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct CapsCeiling {
+struct CapabilityCeiling {
     input: InputMode,
     interaction: InteractionMode,
     events: EventRoute,
@@ -106,9 +205,13 @@ struct CapsCeiling {
     memory: MemoryMode,
     tools: ToolScope,
     timeout: Duration,
+    // #1248 Task 1: new capability-semantic dimensions
+    interaction_kind: InteractionBindingMode,
+    hooks: HookBindingMode,
+    reasoning: ReasoningBindingMode,
 }
 
-impl CapsCeiling {
+impl CapabilityCeiling {
     fn from_spec(spec: &RunSpec) -> Self {
         Self {
             input: spec.input,
@@ -119,6 +222,9 @@ impl CapsCeiling {
             memory: spec.memory,
             tools: spec.tools,
             timeout: spec.timeout,
+            interaction_kind: spec.interaction_kind,
+            hooks: spec.hooks,
+            reasoning: spec.reasoning,
         }
     }
 }
@@ -135,9 +241,15 @@ pub struct RunSpec {
     pub workspace: ResourceMode,
     pub memory: MemoryMode,
     pub tools: ToolScope,
+    /// #1248 Task 1: capability-semantic dimensions (private — use accessors).
+    /// Private to prevent direct mutation that would bypass the capability
+    /// ceiling check.
+    interaction_kind: InteractionBindingMode,
+    hooks: HookBindingMode,
+    reasoning: ReasoningBindingMode,
     /// When set (for sub specs via `derive_sub`), capability ceilings
     /// inherited from the parent. `with_*` methods validate against this.
-    ceiling: Option<CapsCeiling>,
+    ceiling: Option<CapabilityCeiling>,
 }
 
 impl RunSpec {
@@ -161,6 +273,9 @@ impl RunSpec {
             workspace: ResourceMode::Shared,
             memory: MemoryMode::Enabled,
             tools: ToolScope::Full,
+            interaction_kind: InteractionBindingMode::Client,
+            hooks: HookBindingMode::Full,
+            reasoning: ReasoningBindingMode::Adaptive,
             ceiling: None,
         }
     }
@@ -177,6 +292,9 @@ impl RunSpec {
             workspace: ResourceMode::Isolated,
             memory: MemoryMode::Disabled,
             tools: ToolScope::Restricted,
+            interaction_kind: InteractionBindingMode::ParentMediated,
+            hooks: HookBindingMode::BoundaryOnly,
+            reasoning: ReasoningBindingMode::Inherit,
             ceiling: None,
         }
     }
@@ -208,6 +326,10 @@ impl RunSpec {
             || !sub.workspace.is_within(&self.workspace)
             || !sub.memory.is_within(&self.memory)
             || !sub.tools.is_within(&self.tools)
+            // #1248 Task 1: validate new capability-semantic dimensions
+            || !sub.interaction_kind.is_within(&self.interaction_kind)
+            || !sub.hooks.is_within(&self.hooks)
+            || !sub.reasoning.is_within(&self.reasoning)
         {
             return Err(RunSpecError::CapabilityEscalation);
         }
@@ -215,7 +337,7 @@ impl RunSpec {
         // Store parent's current values as the ceiling.
         // If parent itself has a ceiling, we inherit the *effective* values
         // (which are already bounded), not the original ceiling.
-        sub.ceiling = Some(CapsCeiling::from_spec(self));
+        sub.ceiling = Some(CapabilityCeiling::from_spec(self));
         Ok(sub)
     }
 
@@ -273,6 +395,29 @@ impl RunSpec {
         Ok(self)
     }
 
+    // ── #1248 Task 1: capability-semantic builders ──
+
+    pub fn with_interaction_kind(
+        mut self,
+        interaction_kind: InteractionBindingMode,
+    ) -> Result<Self, RunSpecError> {
+        self.check_ceiling(|c| interaction_kind.is_within(&c.interaction_kind))?;
+        self.interaction_kind = interaction_kind;
+        Ok(self)
+    }
+
+    pub fn with_hooks(mut self, hooks: HookBindingMode) -> Result<Self, RunSpecError> {
+        self.check_ceiling(|c| hooks.is_within(&c.hooks))?;
+        self.hooks = hooks;
+        Ok(self)
+    }
+
+    pub fn with_reasoning(mut self, reasoning: ReasoningBindingMode) -> Result<Self, RunSpecError> {
+        self.check_ceiling(|c| reasoning.is_within(&c.reasoning))?;
+        self.reasoning = reasoning;
+        Ok(self)
+    }
+
     pub fn with_timeout(mut self, timeout: Duration) -> Result<Self, RunSpecError> {
         self.check_ceiling(|c| {
             if c.timeout.is_zero() {
@@ -284,12 +429,43 @@ impl RunSpec {
         Ok(self)
     }
 
-    /// Fixed sub-profile guard: rejects relaxing any of the six immutable
+    // ── #1248 Task 1: read-only capability accessors ──
+    //
+    // Fields are private to prevent mutation that bypasses the ceiling check.
+    // Use the `with_*` builders for mutation; use these accessors for
+    // read-only inspection.
+
+    /// Read-only access to the interaction binding mode.
+    pub fn interaction_binding(&self) -> InteractionBindingMode {
+        self.interaction_kind
+    }
+
+    /// Read-only access to the hook binding mode.
+    pub fn hook_binding(&self) -> HookBindingMode {
+        self.hooks
+    }
+
+    /// Read-only access to the reasoning binding mode.
+    pub fn reasoning_binding(&self) -> ReasoningBindingMode {
+        self.reasoning
+    }
+
+    /// Legacy fixed-profile guard: rejects relaxing any of the six immutable
     /// dimensions (input, interaction, events, context, workspace, tools).
     ///
-    /// This check is defined once and is **orthogonal** to `check_ceiling` —
-    /// both must pass independently.  It applies to *all* sub runs (standalone
-    /// or derived), regardless of the parent capability ceiling.
+    /// These six dimensions are **always** pinned to Sub defaults for any
+    /// `RunKind::Sub` — they cannot be relaxed, even when a parent ceiling
+    /// would otherwise permit it.  This is the historical fixed-profile
+    /// contract.
+    ///
+    /// The #1248 capability-semantic dimensions (interaction_kind, hooks,
+    /// reasoning) are **not** governed by this guard — they relax
+    /// independently up to the [`CapabilityCeiling`] via `check_ceiling`.
+    ///
+    /// Both guards are orthogonal: `enforce_sub_fixed` checks the six legacy
+    /// fixed-profile fields; `check_ceiling` checks the three new
+    /// capability-semantic fields against the parent ceiling.  A `with_*`
+    /// call must pass both to succeed.
     fn enforce_sub_fixed(&self, within_fixed: bool) -> Result<(), RunSpecError> {
         if self.kind == RunKind::Sub && !within_fixed {
             return Err(RunSpecError::CapabilityEscalation);
@@ -299,7 +475,10 @@ impl RunSpec {
 
     /// Check `pred` against the capability ceiling if one exists.
     /// Without a ceiling (Main spec or standalone `sub()`), everything is allowed.
-    fn check_ceiling(&self, pred: impl FnOnce(&CapsCeiling) -> bool) -> Result<(), RunSpecError> {
+    fn check_ceiling(
+        &self,
+        pred: impl FnOnce(&CapabilityCeiling) -> bool,
+    ) -> Result<(), RunSpecError> {
         match &self.ceiling {
             Some(ceiling) if !pred(ceiling) => Err(RunSpecError::CapabilityEscalation),
             _ => Ok(()),

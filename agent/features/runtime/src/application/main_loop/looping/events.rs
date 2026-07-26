@@ -1,11 +1,9 @@
-use provider::ReasoningLevel;
 use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
 use share::message::Message;
 use share::session_types::PersistedWorkspaceContext;
 use std::future::Future;
 use std::pin::Pin;
 use tools::{AgentProgressEvent, ImageData};
-use workflow::api::ReasoningNode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeTurnContext {
@@ -236,12 +234,7 @@ pub enum RuntimeStreamEvent {
     ConfigReloaded {
         changed_keys: Vec<String>,
     },
-    /// Reasoning Graph 阶段变化通知（Phase 2）。
-    GraphPhaseChanged {
-        node: ReasoningNode,
-        effort: ReasoningLevel,
-        prev: ReasoningNode,
-    },
+
     /// Compact 进度通知。`current`/`total` 为 map-reduce chunk 计数（单次摘要时为 None）。
     CompactProgress {
         stage: CompactStage,

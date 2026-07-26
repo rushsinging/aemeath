@@ -269,17 +269,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             event.changed_keys,
             event.scopes
         ),
-        sdk::ChatEvent::GraphPhaseChanged {
-            node,
-            effort,
-            prev,
-        } => crate::tui::log_trace!(
-            "{} graph_phase_changed node={} effort={} prev={}",
-            stage,
-            node,
-            effort,
-            prev
-        ),
         sdk::ChatEvent::SessionReset => {
             crate::tui::log_trace!("{} session_reset", stage)
         }

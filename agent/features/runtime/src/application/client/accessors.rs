@@ -4,20 +4,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::application::main_loop::ChatEventSinkHandle;
-use crate::application::run_config::RunConfigSnapshot;
-use crate::application::runtime_context::{
-    ParentRunContextSource, RunCancellationScope, RunInputBufferHandle, RunUsageTracker,
-    RuntimeContext, RuntimeContextParts,
-};
-use crate::domain::agent_run::RunSpec;
-use hook::HookPort;
-use memory::api::{MemoryPort, ReflectionHistoryStore};
+use crate::application::runtime_context::ParentRunContextSource;
+use crate::application::runtime_context_factory::RuntimeContextFactory;
 use sdk::ChatEvent;
 use share::config::models::ResolvedModel;
 use share::config::MemoryConfig;
-use task::TaskAccess;
-use tools::{AgentRunner, ToolCatalogPort, ToolExecutionContextBindingPort, ToolExecutionPort};
-use workflow::api::ReasoningPort;
+use tools::AgentRunner;
 
 pub(crate) type InputPortFactory = dyn Fn(
         Option<Arc<dyn sdk::QueueDrainPort>>,
@@ -39,7 +31,7 @@ pub struct InputPortPair {
 ///
 /// #1385: Separated from per-Run [`RuntimeContext`] so that each Run gets its own
 /// frozen provider binding, cancellation scope, and bound context/memory ports
-/// via [`MainSessionShell::assemble_main_runtime_context`].
+/// via [`RuntimeContextFactory::assemble`] (held in `runtime_context_factory`).
 ///
 /// Fields are grouped by §2.2 categories:
 /// - Session identity, wiring, workspace
@@ -112,20 +104,41 @@ pub struct MainSessionShell {
     pub session_reminders: std::sync::Arc<std::sync::RwLock<share::memory::SessionReminders>>,
 
     // ── Parent capability ports (cloned into per-Run RuntimeContext) ──
-    pub(crate) tool_catalog: Arc<dyn ToolCatalogPort>,
-    pub(crate) tool_execution: Arc<dyn ToolExecutionPort>,
-    pub(crate) tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
-    pub(crate) hook_runner: Arc<dyn HookPort>,
-    pub(crate) policy: Arc<dyn crate::ports::PolicyPort>,
-    pub(crate) task_access: Arc<dyn TaskAccess>,
-    pub(crate) reflection_history: Arc<dyn ReflectionHistoryStore>,
+    // #1248 Task 3: These ports are held in RuntimeContextFactory → RuntimeServices.
+    // Access them via shell.runtime_context_factory.services() rather than
+    // duplicating the Arc references here.
+    //
+    // tool_catalog, tool_execution, and hook_runner are still exposed through
+    // tui_launch_context via factory services accessors.
+
+    // ── #1248 Task 3: RuntimeContextFactory (constructed once from static ports) ──
+    pub(crate) runtime_context_factory: Arc<RuntimeContextFactory>,
 }
 
 /// Error returned when RuntimeContext assembly fails.
-#[derive(Debug, thiserror::Error)]
+///
+/// Merged from `client::RuntimeContextAssemblyError` and
+/// `runtime_context_factory::RuntimeContextAssemblyError` (no duplicate naming).
+///
+/// #1248 Task 3: Typed error variants.  Role/model errors are retained as typed;
+/// provider build errors have their own variant.  `SubDerivationFailed` is
+/// reserved for truly untyped derivation failures (e.g. spec derivation
+/// errors from the domain layer or tool catalog snapshot errors).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RuntimeContextAssemblyError {
-    #[error("RunSpec {spec:?} is not supported for Main assembly")]
-    UnsupportedSpec { spec: RunSpec },
+    /// The RunSpec requests `ParentMediated` interaction but no parent
+    /// RuntimeContext was provided.
+    #[error("interaction is unavailable — ParentMediated requires a parent")]
+    InteractionUnavailable,
+    /// The RunSpec requests `BoundaryOnly` hooks but no parent
+    /// RuntimeContext was provided.
+    #[error("hooks are unavailable — BoundaryOnly requires a parent")]
+    HookUnavailable,
+    /// The RunSpec requests `Inherit` reasoning but no parent
+    /// RuntimeContext was provided.  Inherit without a parent is a
+    /// hard error — no fallback to NoOp.
+    #[error("reasoning is unavailable — Inherit requires a parent")]
+    ReasoningUnavailable,
     /// #1385 Task 6: sub-agent role not found in config.
     #[error("sub-agent role `{role}` not found in config")]
     SubRoleNotFound { role: String },
@@ -138,76 +151,14 @@ pub enum RuntimeContextAssemblyError {
     /// #1385 Task 6: unknown model for sub-agent role.
     #[error("unknown model `{model}` for sub-agent role `{role}`")]
     SubUnknownModel { model: String, role: String },
-    /// #1385 Task 6: derivation guard failed.
+    /// #1248 Task 3: provider factory failed to build a binding for the
+    /// sub-agent role.
+    #[error("provider build failed for sub-agent role `{role}`: {message}")]
+    SubProviderBuildFailed { role: String, message: String },
+    /// #1385 Task 6: derivation guard failed (catch-all for spec/tool-catalog
+    /// errors; role/model errors have their own typed variants above).
     #[error("sub derivation failed: {reason}")]
     SubDerivationFailed { reason: String },
-}
-
-impl MainSessionShell {
-    /// Assemble a per-Run [`RuntimeContext`] from this session shell.
-    ///
-    /// #1385: This is the seam that Task 5 will call when wiring MainRunPort.
-    /// Each call produces a fresh cancellation scope and freezes the current
-    /// provider binding. Parent capability ports (policy, hook, task, tools,
-    /// reflection) are shared via Arc clone.
-    ///
-    /// `context` and `memory` come from [`context::BoundMainRun`]
-    /// (obtained via `wiring.bind_main_run()`). They are bound to the committed
-    /// session snapshot and must not outlive the run.
-    ///
-    /// `config` is the frozen [`RunConfigSnapshot`] — the caller must capture
-    /// this from [`context::MainSessionWiring::committed_config()`] or from
-    /// the [`context::BoundMainRun`] snapshot.  No default Config / fixed
-    /// revision is used inside this method.
-    ///
-    /// #1385: Per-run adapters for input/events/usage are injected via
-    /// RuntimeContext. Input goes through `RunInputBufferHandle`; events through
-    /// the real `ChatEventSinkHandle`; usage through `RunUsageTracker`.
-    ///
-    /// `event_sink` is constructed by the loop_runner from the current session
-    /// sink and passed in — no inline noop placeholder.
-    ///
-    /// `reasoning` is a per-Run adapter; production implementations are wired
-    /// in Task 5.
-    pub fn assemble_main_runtime_context(
-        &self,
-        spec: &RunSpec,
-        config: RunConfigSnapshot,
-        context: Arc<dyn crate::ports::ContextPort>,
-        memory: Arc<dyn MemoryPort>,
-        reasoning: Arc<dyn ReasoningPort>,
-        event_sink: crate::application::main_loop::ChatEventSinkHandle,
-    ) -> Result<RuntimeContext, RuntimeContextAssemblyError> {
-        if spec.kind != crate::domain::agent_run::RunKind::Main {
-            return Err(RuntimeContextAssemblyError::UnsupportedSpec { spec: spec.clone() });
-        }
-
-        let binding = self.current_binding.read().unwrap().clone();
-        let cancel = RunCancellationScope::new();
-
-        let parts = RuntimeContextParts {
-            context,
-            provider: binding,
-            tool_catalog: self.tool_catalog.clone(),
-            tool_execution: self.tool_execution.clone(),
-            tool_context_binding: self.tool_context_binding.clone(),
-            policy: self.policy.clone(),
-            interaction: self.interaction_bridge.clone(),
-            memory,
-            reflection_history: self.reflection_history.clone(),
-            task: self.task_access.clone(),
-            hooks: self.hook_runner.clone(),
-            reasoning,
-            config,
-            cancel,
-            // #1385 Task 12: I/O seams populated with real per-Run handles from caller.
-            event_sink,
-            usage: RunUsageTracker::new(),
-            input: RunInputBufferHandle::new(),
-        };
-
-        Ok(RuntimeContext::new(parts))
-    }
 }
 
 // ─── 结构体定义 ───
@@ -259,6 +210,7 @@ impl AgentClientImpl {
 
     pub fn tui_launch_context(&self) -> crate::adapters::tui_launch::TuiLaunchContext {
         let shell = &self.inner.shell;
+        let services = shell.runtime_context_factory.services();
         crate::adapters::tui_launch::TuiLaunchContext {
             session_id: shell.session_id.clone(),
             model_display: super::mapping::model_display(
@@ -267,8 +219,8 @@ impl AgentClientImpl {
                 &shell.resolved_model.model.id,
             ),
             binding: shell.current_binding.read().unwrap().clone(),
-            tool_catalog: shell.tool_catalog.clone(),
-            tool_execution: shell.tool_execution.clone(),
+            tool_catalog: services.tool_catalog.clone(),
+            tool_execution: services.tool_execution.clone(),
             system_blocks: shell.system_blocks.clone(),
             system_prompt_text: shell.system_prompt_text.clone(),
             initial_git_context: shell.initial_git_context.clone(),
@@ -282,7 +234,7 @@ impl AgentClientImpl {
             agent_semaphore: shell.agent_semaphore.clone(),
             memory_config: super::mapping::memory_config_to_sdk(shell.memory_config.clone()),
             skills_map: shell.skills_map.clone(),
-            hook_runner: shell.hook_runner.clone(),
+            hook_runner: services.hooks.clone(),
             session_reminders: Arc::new(std::sync::Mutex::new(tools::SessionReminders::new())),
             workspace_root: shell.cwd.clone(),
         }

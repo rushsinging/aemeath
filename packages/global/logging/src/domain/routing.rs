@@ -26,7 +26,6 @@ pub(crate) enum ModuleOwner {
     Policy,
     Audit,
     Update,
-    Workflow,
     Context,
     Config,
     Memory,
@@ -50,7 +49,6 @@ pub(crate) enum DiagnosticSinkId {
     Policy,
     AuditDiagnostic,
     Update,
-    Workflow,
     Context,
     Config,
     Memory,
@@ -136,12 +134,6 @@ const TARGETS: &[TargetSpec] = &[
         "audit-diagnostic.log"
     ),
     target!("aemeath:agent:update", Update, Update, "agent-update.log"),
-    target!(
-        "aemeath:agent:workflow",
-        Workflow,
-        Workflow,
-        "agent-workflow.log"
-    ),
     target!("aemeath:context", Context, Context, "context.log"),
 ];
 

@@ -5,7 +5,7 @@ use async_trait::async_trait;
 ///
 /// #1385 Task 7: 退化为真正启动参数（`verbose`/`resume`）。
 /// 原先的 `RuntimeResources` bag 已被删除；所有服务由
-/// `MainSessionShell` → `RuntimeContextParts` → `RuntimeContext` 装配。
+/// `MainSessionShell` → `RuntimeContextFactory::assemble()` → `RuntimeContext` 装配。
 #[derive(Clone)]
 pub struct ChatRuntimeContext {
     pub verbose: bool,

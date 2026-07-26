@@ -76,6 +76,7 @@
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
 | 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution/binding、Skill ports、Tool Result materializer 与 ActiveRunRegistry；Runtime bootstrap 只消费 injected resources，禁止恢复 Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
 | 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher；Runtime Main/Sub 只消费 injected HookPort，禁止恢复 HookRunner / dispatcher factory |
+| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | RuntimeContextFactory 是 RuntimeContext 唯一生产构造入口；RunKind不驱动控制流分支；退役符号（RuntimeContextParts/assemble_main_runtime_context/ModelStep::StopHookBlocked/InteractionBridge::disabled）不存在于生产代码；stop hook 计数由Run独占；Interaction/Hook/Reasoning三能力按RunSpec穷举装配 |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |

@@ -88,7 +88,6 @@ run_with_timeout() {
 
 packages=(
   share
-  workflow
   runtime
   project
   policy

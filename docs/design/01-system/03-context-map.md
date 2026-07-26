@@ -79,6 +79,8 @@
 
 Interaction 同样不是第 16 个 BC：Runtime-owned `InteractionPort` 隔离 TUI / Server / parent-mediated request-reply detail。AskUser Tool 只返回 Tool-owned typed suspension，由 Runtime ACL 映射为 `InteractionRequest`、保存 continuation 并独占 `AwaitingUser` / resume 状态转换；Tool BC **NEVER** 再发布同义 `UserInteraction` port。
 
+**#1248 RuntimeContextFactory**：Composition 构造唯一 `RuntimeContextFactory`，按 `RunSpec` 的 `InteractionBindingMode`（Client / ParentMediated / Unavailable）、`HookBindingMode`（Full / BoundaryOnly）与 `ReasoningBindingMode`（Adaptive / Fixed / Inherit / NoOp）穷举装配 `RuntimeContext`。ParentMediated 复用父 context 的同一 `InteractionPort` Arc；Inherit 从父 reasoning `current()` snapshot 创建独立 `GraphlessReasoningPort`（不持有父 Arc）。Main/Sub 不是生产类型。`#1397`/`#1399` 保留退役边界。
+
 `WorkspaceMode` 是 `RunSpec` 的装配策略，不形成 Runtime → Project 出站边。Composition 在 active-main-session-slot scope 中保留 Project wiring：Main agent 启动时只选择一次 production wiring，同一 Session 的全部 Main Run 复用；运行期 resume 在排他 gate 内替换完整 state。Sub 由 composition-provided AgentDispatch 对父 scope 执行 isolated derivation；Runtime **NEVER** 持有 Project 端口或 wiring。
 
 ### 4.1 支撑 BC 之间的直接能力边

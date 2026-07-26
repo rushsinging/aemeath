@@ -12,14 +12,15 @@ use crate::application::loop_engine::{
 use crate::application::main_loop::looping::InvocationResponse;
 use crate::application::runtime_context::RuntimeContext;
 use crate::application::subagent::Agent;
-use crate::domain::agent_run::{RunDomainEvent, RunSpec};
-use crate::ports::{InvocationOptions, InvocationRequest, ReasoningLevel, StopReason};
+use crate::domain::agent_run::{RunDomainEvent, RunSpec, ToolCallStatus};
+use crate::ports::{InvocationOptions, InvocationRequest, StopReason};
 use async_trait::async_trait;
 use provider::RequestSystemBlock;
 use share::message::Message;
 use share::string_idx::slice_head;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio_util::sync::CancellationToken;
 use tools::AgentRunTerminal;
 use tools::{AgentProgressEvent, AgentProgressKind};
 
@@ -109,7 +110,8 @@ pub(super) struct SubAgentRun<'a> {
     /// Owned (not Arc) — derived context is already owned by the caller.
     pub runtime_context: RuntimeContext,
     pub max_tokens: u32,
-    pub level: ReasoningLevel,
+    /// #1248 Task 7: reasoning level comes from RuntimeContext's
+    /// ReasoningPort (not a duplicate static field).
     pub workspace_root: std::path::PathBuf,
     pub tool_schemas: Vec<serde_json::Value>,
     pub config_snapshot: share::config::domain::snapshot::ConfigSnapshot,
@@ -146,6 +148,15 @@ pub(super) struct SubAgentRun<'a> {
     /// Input strategy: encapsulates the fixed-prompt drain logic with epoch
     /// tracking and tool-result continuation support (#1272, #1384).
     pub input_strategy: crate::application::loop_engine::input_strategy::SubInputStrategy<'a>,
+    /// #1248 Task 5: Whether this sub-run is operating in plan mode.
+    pub plan_mode: bool,
+    /// #1248 Task 5: Interaction receivers for polling completions.
+    pub interaction_receivers: Vec<(
+        crate::application::interaction::InteractionRequestMetadata,
+        tokio::sync::oneshot::Receiver<crate::application::interaction::InteractionCompletion>,
+    )>,
+    /// #1248: Pending interaction work set by the engine for multi-interaction rounds.
+    pub pending_work: Option<crate::application::loop_engine::PendingInteractionWork>,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -178,7 +189,12 @@ impl<'a> SubAgentRun<'a> {
                 .to_vec(),
             system_prompt: crate::ports::SystemPromptSpec::new(&self.system),
             model_id: self.model_name_for_log.clone(),
-            effective_reasoning: self.level,
+            // #1248 Task 7: effective reasoning from assembled ReasoningPort.
+            effective_reasoning: *self
+                .runtime_context
+                .reasoning_ref()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
             task_reminder: crate::ports::TaskReminderSnapshot::default(),
             language: crate::ports::Language::new(&self.language),
             agent_roles: self
@@ -648,8 +664,15 @@ impl ToolStrategy for SubAgentRun<'_> {
 
 #[async_trait]
 impl crate::application::loop_engine::llm_strategy::LlmStrategy for SubAgentRun<'_> {
+    /// #1248 Task 7: reasoning level from the assembled RuntimeContext's
+    /// ReasoningPort (not a static `self.level` field). This ensures
+    /// both Main and Sub read via the same port accessor.
     fn reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        self.level
+        *self
+            .runtime_context
+            .reasoning_ref()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
     }
 
     fn committed_delta(&self) -> bool {
@@ -766,6 +789,44 @@ impl RunLoopPort for SubAgentRun<'_> {
         self.invoke_model_impl().await
     }
 
+    /// #1248 Task 6: Shared Loop evaluates Stop hook via this seam.
+    /// Sub agents use the same `evaluate_stop_hook` coordinator as Main,
+    /// but with their RuntimeContext's hook port. Feedback is injected
+    /// through the same message stream for blocked retries.
+    async fn evaluate_stop_hook(
+        &mut self,
+        turns: usize,
+    ) -> Result<crate::application::stop_hook_coordination::StopHookDecision, LoopEngineError> {
+        let decision = crate::application::stop_hook_coordination::evaluate_stop_hook(
+            &self.runtime_context.hooks(),
+            turns,
+            &self.workspace_root,
+        )
+        .await;
+
+        if let crate::application::stop_hook_coordination::StopHookDecision::Block(ref block) =
+            &decision
+        {
+            let feedback =
+                crate::application::stop_hook_coordination::materialize_stop_hook_feedback(
+                    &block.detail,
+                    &block.reason,
+                    &self.session_id,
+                    &self.language,
+                )
+                .await;
+            let llm_text = format!(
+                "<system-reminder>\n{}\n</system-reminder>",
+                feedback.llm_text
+            );
+            let msg = share::message::Message::stop_hook_feedback(llm_text, feedback.payload);
+            self.messages.push(msg);
+            // Sub-event sink is a noop, but we still push the message.
+        }
+
+        Ok(decision)
+    }
+
     async fn finalize_step(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
         let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
             return Ok(());
@@ -828,6 +889,254 @@ impl RunLoopPort for SubAgentRun<'_> {
             .await
     }
 
+    // ── #1248 Task 5: Interaction seams ──
+
+    fn interaction_port(&self) -> &dyn crate::application::interaction::InteractionPort {
+        self.runtime_context.interaction_ref().as_ref()
+    }
+
+    async fn publish_interaction(
+        &mut self,
+        request: &sdk::InteractionRequest,
+    ) -> Result<(), LoopEngineError> {
+        // #1248: Publish real progress event via parent UI event seam,
+        // not just a debug string. The parent TUI picks these up.
+        (self.progress)(
+            Some(self.turn_count),
+            &format!("Interaction: id={}", request.id),
+        );
+        Ok(())
+    }
+
+    fn store_interaction(
+        &mut self,
+        metadata: crate::application::interaction::InteractionRequestMetadata,
+        receiver: tokio::sync::oneshot::Receiver<
+            crate::application::interaction::InteractionCompletion,
+        >,
+    ) -> Result<(), LoopEngineError> {
+        self.interaction_receivers.push((metadata, receiver));
+        Ok(())
+    }
+
+    async fn poll_interaction(
+        &mut self,
+    ) -> Result<Option<crate::application::interaction::InteractionResolution>, LoopEngineError>
+    {
+        let mut resolved = None;
+        let mut remaining = Vec::new();
+        for (metadata, mut rx) in std::mem::take(&mut self.interaction_receivers) {
+            match rx.try_recv() {
+                Ok(completion) => {
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[SubAgentRun::poll_interaction] resolved rid={:?}",
+                        metadata.request_id
+                    );
+                    resolved = Some(
+                        crate::application::interaction::InteractionResolution::Resolved {
+                            metadata,
+                            completion,
+                        },
+                    );
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "[SubAgentRun::poll_interaction] closed rid={:?}",
+                        metadata.request_id
+                    );
+                    resolved = Some(
+                        crate::application::interaction::InteractionResolution::Closed { metadata },
+                    );
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                    remaining.push((metadata, rx)); // still pending
+                }
+            }
+        }
+        self.interaction_receivers = remaining;
+        Ok(resolved)
+    }
+
+    fn set_pending_interaction_work(
+        &mut self,
+        work: crate::application::loop_engine::PendingInteractionWork,
+    ) {
+        self.pending_work = Some(work);
+    }
+
+    async fn finish_interaction_work(
+        &mut self,
+        metadata: &crate::application::interaction::InteractionRequestMetadata,
+        completion: &crate::application::interaction::InteractionCompletion,
+        _cancel: &CancellationToken,
+    ) -> Result<crate::application::loop_engine::InteractionWorkOutcome, LoopEngineError> {
+        use crate::application::interaction::InteractionCompletion;
+        use crate::application::subagent::ToolExecution;
+        use crate::domain::agent_run::InteractionContinuation;
+
+        // Take the current work: current item resolves, queue stays for next.
+        let work = self.pending_work.take();
+        let current = work.as_ref().and_then(|w| w.current.clone());
+        let remaining_queue: Vec<_> = work.as_ref().map(|w| w.queue.clone()).unwrap_or_default();
+
+        let (call_id, status) = match (&metadata.continuation, completion) {
+            (
+                InteractionContinuation::CompleteToolCall(id),
+                InteractionCompletion::Replied(reply),
+            ) => {
+                // Use the original call's provider_id/name from the suspended_call.
+                let (provider_id, tool_name) = current
+                    .as_ref()
+                    .and_then(|ci| ci.suspended_call.as_ref())
+                    .map(|sc| (sc.call.provider_id.clone(), sc.call.name.clone()))
+                    .unwrap_or_else(|| (String::new(), "AskUserQuestion".to_string()));
+                if let sdk::InteractionReply::UserQuestions(answers) = reply {
+                    let text = answers
+                        .iter()
+                        .enumerate()
+                        .map(|(i, a)| format!("Q{}: {}", i + 1, a.0))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let outcome = tools::ToolOutcome {
+                        text,
+                        data: serde_json::json!({"status": "ok", "answers": answers}),
+                        is_error: false,
+                        images: Vec::new(),
+                    };
+                    let execution =
+                        ToolExecution::from_parts(id.clone(), provider_id, tool_name, outcome);
+                    append_tool_results(
+                        self.tool_result_materializer.as_ref(),
+                        &mut self.messages,
+                        vec![execution],
+                        &self.session_id,
+                    )
+                    .await;
+                    self.mark_tool_results_pending();
+                    (id.clone(), ToolCallStatus::Success)
+                } else {
+                    (id.clone(), ToolCallStatus::Error)
+                }
+            }
+            (
+                InteractionContinuation::CompleteToolCall(id),
+                InteractionCompletion::Cancelled(_),
+            ) => {
+                let (provider_id, tool_name) = current
+                    .as_ref()
+                    .and_then(|ci| ci.suspended_call.as_ref())
+                    .map(|sc| (sc.call.provider_id.clone(), sc.call.name.clone()))
+                    .unwrap_or_else(|| (String::new(), "AskUserQuestion".to_string()));
+                let outcome = tools::ToolOutcome::error("user cancelled interaction");
+                let execution =
+                    ToolExecution::from_parts(id.clone(), provider_id, tool_name, outcome);
+                append_tool_results(
+                    self.tool_result_materializer.as_ref(),
+                    &mut self.messages,
+                    vec![execution],
+                    &self.session_id,
+                )
+                .await;
+                (id.clone(), ToolCallStatus::Cancelled)
+            }
+            (
+                InteractionContinuation::ContinueToolApproval(id),
+                InteractionCompletion::Replied(reply),
+            ) => {
+                if matches!(
+                    reply,
+                    sdk::InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve)
+                ) {
+                    // Execute via agent's tool_execution port using the stored
+                    // ApprovalRequiredCall from current — no re-policy.
+                    if let Some(approval_call) =
+                        current.as_ref().and_then(|ci| ci.approval_call.clone())
+                    {
+                        let call = &approval_call.call;
+                        let mut input = call.input.clone();
+                        tools::strip_runtime_meta(&mut input);
+                        let invocation = tools::ToolInvocation::new(
+                            call.name.as_str(),
+                            input,
+                            self.agent.ctx.scope().clone(),
+                        )
+                        .with_authorization(approval_call.authorization);
+                        let domain = self
+                            .agent
+                            .execution
+                            .execute(invocation, self.agent.ctx.cancellation().as_ref())
+                            .await;
+                        let outcome = crate::application::subagent::legacy_outcome(domain);
+                        let execution = ToolExecution::from_parts(
+                            id.clone(),
+                            call.provider_id.clone(),
+                            call.name.clone(),
+                            outcome.clone(),
+                        );
+                        append_tool_results(
+                            self.tool_result_materializer.as_ref(),
+                            &mut self.messages,
+                            vec![execution],
+                            &self.session_id,
+                        )
+                        .await;
+                        self.mark_tool_results_pending();
+                        let status = if outcome.is_error {
+                            ToolCallStatus::Error
+                        } else {
+                            ToolCallStatus::Success
+                        };
+                        (id.clone(), status)
+                    } else {
+                        // No approval_call stored — error
+                        let outcome =
+                            tools::ToolOutcome::error("tool approval call data not found");
+                        let execution = ToolExecution::from_parts(
+                            id.clone(),
+                            String::new(),
+                            "ToolApproval".to_string(),
+                            outcome,
+                        );
+                        append_tool_results(
+                            self.tool_result_materializer.as_ref(),
+                            &mut self.messages,
+                            vec![execution],
+                            &self.session_id,
+                        )
+                        .await;
+                        (id.clone(), ToolCallStatus::Error)
+                    }
+                } else {
+                    // Denied — no execution
+                    (id.clone(), ToolCallStatus::Cancelled)
+                }
+            }
+            (
+                InteractionContinuation::ContinueToolApproval(id),
+                InteractionCompletion::Cancelled(_),
+            ) => (id.clone(), ToolCallStatus::Cancelled),
+            _ => {
+                return Ok(
+                    crate::application::loop_engine::InteractionWorkOutcome::Completed {
+                        call_id: sdk::ToolCallId::new_v7(),
+                        status: ToolCallStatus::Success,
+                        remaining_queue,
+                    },
+                );
+            }
+        };
+
+        Ok(
+            crate::application::loop_engine::InteractionWorkOutcome::Completed {
+                call_id,
+                status,
+                remaining_queue,
+            },
+        )
+    }
+
     async fn on_stuck(
         &mut self,
         decision: &crate::application::loop_engine::StuckDecision,
@@ -851,6 +1160,10 @@ impl RunLoopPort for SubAgentRun<'_> {
             turn_count: self.turn_count,
         };
         strategy.emit(events).await
+    }
+
+    fn needs_plan_approval(&self) -> bool {
+        self.plan_mode
     }
 }
 

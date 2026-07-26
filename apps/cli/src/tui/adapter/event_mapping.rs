@@ -308,11 +308,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::UserMessagesWithdrawn { texts } => {
             TuiRuntimeEvent::UserMessagesWithdrawn { texts }
         }
-        ChatEvent::GraphPhaseChanged { node, effort, prev } => TuiRuntimeEvent::GraphPhaseChanged {
-            node,
-            effort,
-            previous: prev,
-        },
         ChatEvent::Result(result) => TuiRuntimeEvent::CommandResultText {
             text: result.text,
             is_error: false,

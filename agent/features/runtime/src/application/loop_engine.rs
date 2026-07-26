@@ -10,8 +10,10 @@ pub(crate) mod tool_strategy;
 
 pub(crate) use engine::fail_run;
 pub use engine::{
-    run_loop, DrainEpoch, DrainOutcome, InternalContinuationKind, LoopDirective, LoopEngineError,
-    LoopInput, ModelStep, RunLoopPort, StepTokenUsage, ToolGuardDecision, ToolStep,
+    run_loop, ApprovalRequiredCall, DrainEpoch, DrainOutcome, InteractionWorkOutcome,
+    InternalContinuationKind, LoopDirective, LoopEngineError, LoopInput, ModelStep,
+    PendingInteractionItem, PendingInteractionWork, RunLoopPort, StepTokenUsage, SuspendedQuestion,
+    SuspendedToolCall, ToolGuardDecision, ToolStep,
 };
 pub use input::{split_input_events, RuntimeControl, RuntimeInputBatch, UserRunInput};
 pub use stuck_guard::{StuckDecision, StuckGuard};

@@ -679,6 +679,22 @@
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent narrow Hook facade policy",
       "status": "active"
+    },
+    {
+      "id": "policy.runtime.capability-assembly",
+      "guard": "check-runtime-capability-assembly.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "classification": "target_capability_policy",
+      "owner": "runtime",
+      "reason": "RuntimeContextFactory is the sole production constructor; RunKind does not drive control flow; retired symbols are absent; stop hook block count lives on Run; Interaction/Reasoning/Hook binding modes are exhaustively wired",
+      "tracking_issue": 1248,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Runtime capability assembly policy",
+      "status": "active"
     }
   ]
 }

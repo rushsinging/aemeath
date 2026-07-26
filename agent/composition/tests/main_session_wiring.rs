@@ -427,11 +427,11 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             workspace,
             wiring,
             composition::provider::provider_factory(),
-            reflection_history,
+            reflection_history.clone(),
             Arc::new(policy::AllowAllPolicy),
-            task_access,
+            task_access.clone(),
             session_management,
-            hook_runner,
+            hook_runner.clone(),
         ),
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),
@@ -442,6 +442,17 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             tool_result_materializer,
             active_run,
         ),
+        {
+            Arc::new(runtime::RuntimeContextFactory::new(
+                tools.catalog_port(),
+                tools.execution(),
+                tools.binding(),
+                Arc::new(policy::AllowAllPolicy),
+                reflection_history,
+                task_access,
+                hook_runner,
+            ))
+        },
     );
 
     let args = ChatBootstrapArgs {
