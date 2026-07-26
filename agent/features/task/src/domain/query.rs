@@ -28,6 +28,49 @@ impl TaskPriorityStats {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TaskBatchStats {
+    pub total: usize,
+    pub pending: usize,
+    pub in_progress: usize,
+    pub completed: usize,
+    pub by_priority: TaskPriorityStats,
+}
+
+impl TaskBatchStats {
+    fn increment(&mut self, task: &Task) {
+        self.total += 1;
+        match task.status() {
+            TaskStatus::Pending => self.pending += 1,
+            TaskStatus::InProgress => self.in_progress += 1,
+            TaskStatus::Completed => self.completed += 1,
+            TaskStatus::Deleted => return,
+        }
+        self.by_priority.increment(task.priority());
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskBatchSnapshot {
+    batch: Batch,
+    stats: TaskBatchStats,
+    tasks: Vec<Task>,
+}
+
+impl TaskBatchSnapshot {
+    pub fn batch(&self) -> &Batch {
+        &self.batch
+    }
+
+    pub const fn stats(&self) -> TaskBatchStats {
+        self.stats
+    }
+
+    pub fn tasks(&self) -> &[Task] {
+        &self.tasks
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TaskStoreStats {
     pub total: usize,
     pub pending: usize,
@@ -96,6 +139,35 @@ impl TaskStoreState {
         let mut batches: Vec<_> = self.batches().values().cloned().collect();
         batches.sort_unstable_by_key(Batch::id);
         batches
+    }
+
+    /// Returns an owned, coherent read model for one Batch.
+    pub fn batch_snapshot(&self, id: BatchId) -> Option<TaskBatchSnapshot> {
+        let batch = self.batches().get(&id)?.clone();
+        let mut tasks: Vec<_> = self
+            .tasks()
+            .values()
+            .filter(|task| task.batch() == id && task.status() != TaskStatus::Deleted)
+            .cloned()
+            .collect();
+        tasks.sort_unstable_by_key(Task::id);
+        let mut stats = TaskBatchStats::default();
+        for task in &tasks {
+            stats.increment(task);
+        }
+        Some(TaskBatchSnapshot {
+            batch,
+            stats,
+            tasks,
+        })
+    }
+
+    /// Returns all Batch read models in ascending typed-ID order.
+    pub fn list_batch_snapshots(&self) -> Vec<TaskBatchSnapshot> {
+        self.list_batches()
+            .into_iter()
+            .filter_map(|batch| self.batch_snapshot(batch.id()))
+            .collect()
     }
 
     pub fn stats(&self) -> TaskStoreStats {

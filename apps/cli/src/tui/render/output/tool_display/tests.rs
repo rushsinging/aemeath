@@ -9,6 +9,8 @@ fn line_to_string(line: &Line<'_>) -> String {
 
 #[test]
 fn test_lookup_display_finds_task_list_create() {
+    assert!(lookup_display("TaskListGet").is_some());
+    assert!(lookup_display("TaskLists").is_some());
     let display = lookup_display("TaskListCreate");
     assert!(
         display.is_some(),

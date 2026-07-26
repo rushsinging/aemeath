@@ -1,10 +1,10 @@
 use std::sync::{Mutex, MutexGuard};
 
 use crate::domain::{
-    Batch, BatchCreateSpec, BatchId, PreparedTaskRestore, Task, TaskCommandError,
-    TaskCommandResult, TaskCreateSpec, TaskId, TaskLifecycleSnapshot, TaskPriority,
-    TaskReminderSnapshot, TaskRevision, TaskSnapshot, TaskSnapshotValidationError, TaskStatus,
-    TaskStoreState, TaskStoreStats,
+    Batch, BatchCreateSpec, BatchId, PreparedTaskRestore, Task, TaskBatchSnapshot,
+    TaskCommandError, TaskCommandResult, TaskCreateSpec, TaskId, TaskLifecycleSnapshot,
+    TaskPriority, TaskReminderSnapshot, TaskRevision, TaskSnapshot, TaskSnapshotValidationError,
+    TaskStatus, TaskStoreState, TaskStoreStats,
 };
 use crate::{TaskAccess, TaskPersist};
 
@@ -216,6 +216,14 @@ impl TaskAccess for TaskStore {
 
     fn list_batches(&self) -> Vec<Batch> {
         self.lock().list_batches()
+    }
+
+    fn batch_snapshot(&self, id: BatchId) -> Option<TaskBatchSnapshot> {
+        self.lock().batch_snapshot(id)
+    }
+
+    fn list_batch_snapshots(&self) -> Vec<TaskBatchSnapshot> {
+        self.lock().list_batch_snapshots()
     }
 
     fn current_batch(&self) -> Option<BatchId> {

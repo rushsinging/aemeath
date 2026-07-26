@@ -69,7 +69,16 @@ impl SessionRevision {
 /// Task BC 提供给 Context 的稳定只读提醒投影。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TaskReminderSnapshot {
-    pub text: Option<String>,
+    pub task_list_id: Option<String>,
+    pub summary: Option<String>,
+    pub pending: usize,
+    pub in_progress: usize,
+}
+
+impl TaskReminderSnapshot {
+    pub const fn has_unfinished(&self) -> bool {
+        self.pending > 0 || self.in_progress > 0
+    }
 }
 
 /// 构建 window 的不可变输入；历史由 Context backing 独占。

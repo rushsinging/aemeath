@@ -28,7 +28,7 @@ fn test_static_prompt_says_task_reminders_may_be_unrelated() {
     let text = static_system_prompt_for_test("/tmp/project", true, "en");
 
     assert!(text.contains("When the user says \"continue\""));
-    assert!(text.contains("call TaskList first"));
+    assert!(text.contains("call TaskListGet first"));
     assert!(text.contains("may refer to older task batches"));
     assert!(text.contains("prioritize the latest user request"));
 }

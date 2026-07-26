@@ -19,7 +19,9 @@ static TOOL_DISPLAY_NAMES: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("TaskCreate", "Task"),
         ("TaskUpdate", "Task"),
         ("TaskGet", "Task"),
+        ("TaskListGet", "Tasks"),
         ("TaskList", "Tasks"),
+        ("TaskLists", "Task Lists"),
         ("TaskListCreate", "New Task List"),
         ("TaskListComplete", "Complete List"),
         ("TaskStop", "Stop Task"),
@@ -105,7 +107,9 @@ mod tests {
         assert_eq!(tool_display_name("TaskCreate"), "Task");
         assert_eq!(tool_display_name("TaskUpdate"), "Task");
         assert_eq!(tool_display_name("TaskGet"), "Task");
+        assert_eq!(tool_display_name("TaskListGet"), "Tasks");
         assert_eq!(tool_display_name("TaskList"), "Tasks");
+        assert_eq!(tool_display_name("TaskLists"), "Task Lists");
         assert_eq!(tool_display_name("TaskListCreate"), "New Task List");
         assert_eq!(tool_display_name("TaskListComplete"), "Complete List");
         assert_eq!(tool_display_name("TaskStop"), "Stop Task");

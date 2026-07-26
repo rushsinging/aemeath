@@ -123,7 +123,7 @@ impl<T> TaskCommandResult<T> {
 
 Batch lifecycle 命令全部按 id 且 fallible：`pause_batch(Active)` 原子变为 Paused 并清空 current；`resume_batch(Paused)` 仅在无其他 Active 时原子设为 Active/current；`archive_batch(Active|Paused)` 原子变为 Archived 并按需清空 current，重复 archive 幂等返回 Archived 实体。不存在、非法迁移或另一 Active 存在均返回 typed error 且不改 state。公开 Target **NEVER** 保留依赖隐式 current 的 `complete_batch()` shortcut。
 
-`TaskReminderSnapshot` 是 Task-owned 只读 PL，只包含 `current_batch` 与按稳定顺序排列的 `TaskReminderItem { id, subject, status, blocked }`；不含 store handle、依赖图内部缓存或渲染文本。Runtime `context_coordination` 可读取该纯值后传入 `ContextRequest`，Context Management 独占 reminder 的格式、位置与 token budget。
+`TaskReminderSnapshot` 是 Task-owned 只读 PL，携带 current Batch 的 `BatchId`、summary 与 batch-local pending / in-progress 数量；不含 store handle、依赖图内部缓存或渲染文本。Runtime 只把该结构化纯值投影进 `ContextRequest`，Context Management 根据请求语言独占 reminder 的格式、位置与 token budget。Task BC 同时发布 `TaskBatchStats` / `TaskBatchSnapshot` 作为按 Batch 查询的唯一只读投影：snapshot 包含 Batch 元数据、batch-local live Task 统计与稳定排序任务；`TaskAccess::batch_snapshot(id)` 查询指定 Batch，`list_batch_snapshots()` 用于历史发现。Tools 与 Runtime **NEVER** 从全局 `stats()` 或原始 `list()` 重复计算 Batch 统计。
 
 ### 1.2 恢复协议类型（#888 / #890，非 #887 范围）
 
@@ -203,7 +203,8 @@ Context Map §7 和 §10 决策：Task 类型是 Task BC 的 Published Language�
 | `TaskCommandError` | 日常命令的封闭结构化失败类型 | Runtime、TaskTool ACL |
 | `Batch` | `TaskStoreState` 聚合内的批次实体 | Runtime、TUI |
 | `BatchStatus` | 批次状态枚举（Active / Paused / Archived） | Runtime、TUI |
-| `TaskReminderSnapshot` / `TaskReminderItem` | 稳定排序、无渲染文本的 Context reminder 输入 | Runtime → Context Management |
+| `TaskReminderSnapshot` | current Batch 的结构化提醒输入：ID、summary 与 batch-local 未完成统计；最终文案归 Context Management | Runtime → Context Management |
+| `TaskBatchStats` / `TaskBatchSnapshot` | 指定 Batch 的稳定只读查询投影；统一承载 Batch 元数据、局部 live Task 统计和任务，供按 ID 查询与历史发现复用 | Runtime、TaskTool |
 | `TaskLifecycleSnapshot` | 带显式 stale threshold 的 Batch lifecycle 纯值输入 | Runtime |
 | `TaskSnapshot` | 可持久化快照 | Context Management |
 | `PersistedTask` | `TaskSnapshot` 内部持久化 DTO；不含派生 `blocks` | Context Management（只随 snapshot） |
@@ -349,3 +350,4 @@ Agent Runtime 通过 `TaskAccess` 管理 Task 作为自身执行规划的投影�
 | 2026-07-12 | 初稿：Task 访问契约、PL 清单与发布位置、Storage 集成、跨 BC 快照组装 | #791 |
 | 2026-07-14 | 拆分 TaskAccess / TaskPersist；快照恢复改为无副作用 prepare + gate 内无失败 commit，并明确 absent legacy / captured empty | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 新建命令改为 typed/fallible spec，补齐 Batch pause/resume/archive-by-id 并移除 current-only complete shortcut | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-26 | 增加 Batch-scoped 查询投影、历史发现与结构化 reminder 边界，禁止消费方用全局统计代替 Batch 统计 | [#1415](https://github.com/rushsinging/aemeath/issues/1415) |

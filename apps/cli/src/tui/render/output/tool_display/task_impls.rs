@@ -166,12 +166,12 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskUpdateDisplay)
 });
 
-// ── TaskList ─────────────────────────────────────────────────────
+// ── TaskListGet ──────────────────────────────────────────────────
 
-struct TaskListDisplay;
-impl ToolDisplay for TaskListDisplay {
+struct TaskListGetDisplay;
+impl ToolDisplay for TaskListGetDisplay {
     fn name(&self) -> &str {
-        "TaskList"
+        "TaskListGet"
     }
     fn format_header(&self, _input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         self.display_name().to_string()
@@ -192,8 +192,38 @@ impl ToolDisplay for TaskListDisplay {
     }
 }
 inventory::submit!(ToolDisplayEntry {
-    name: "TaskList",
-    display: || Box::new(TaskListDisplay)
+    name: "TaskListGet",
+    display: || Box::new(TaskListGetDisplay)
+});
+
+// ── TaskLists ────────────────────────────────────────────────────
+
+struct TaskListsDisplay;
+impl ToolDisplay for TaskListsDisplay {
+    fn name(&self) -> &str {
+        "TaskLists"
+    }
+    fn format_header(&self, _input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        self.display_name().to_string()
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Standard,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Visible {
+                max_lines: Some(5),
+                render_kind: ResultRender::Plain,
+                tail_mode: false,
+            },
+        }
+    }
+}
+inventory::submit!(ToolDisplayEntry {
+    name: "TaskLists",
+    display: || Box::new(TaskListsDisplay)
 });
 
 // ── TaskListCreate ───────────────────────────────────────────────
