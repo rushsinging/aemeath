@@ -9,7 +9,8 @@ use crate::ChatMessage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// 会话恢复时由 Context 发布的结构化 RunStep 展示投影。
+/// 会话恢复时由 Context 发布的完整用户可见 RunStep 历史投影。
+/// compact 仅影响 Runtime active context，不过滤此展示投影。
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ResumedSessionStep {
     pub run_id: String,

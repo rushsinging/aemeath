@@ -78,13 +78,15 @@ impl OutputDocumentRenderer {
             self.render_node(root, outer_width, 0, animation_frame, &mut group);
             groups.push(group);
         }
-        let blocks = trim_root_groups_to_max_lines(groups, MAX_LINES);
+        let groups = trim_root_groups_to_max_lines(groups, MAX_LINES);
+        let document = RenderedDocument::with_root_groups(groups);
+        let blocks = &document.blocks;
         // O(n) 构建 HashSet，使后续两处 retain 各降为 O(n) 而非 O(n²)。
         let live_set: HashSet<&str> = blocks.iter().map(|b| b.block_id.as_str()).collect();
         self.cache.retain(&live_set);
         // gutted 缓存同步清理：移除已不在渲染树中的条目，防止内存泄漏。
         self.gutted.retain(|id, _| live_set.contains(id.as_str()));
-        RenderedDocument { blocks }
+        document
     }
 
     fn render_node(
@@ -250,7 +252,7 @@ fn user_message_card_spacer_line(gutter_cols: usize) -> RenderedLine {
 fn trim_root_groups_to_max_lines(
     groups: Vec<Vec<RenderedBlock>>,
     max_lines: usize,
-) -> Vec<RenderedBlock> {
+) -> Vec<Vec<RenderedBlock>> {
     if max_lines == 0 {
         return Vec::new();
     }
@@ -266,7 +268,7 @@ fn trim_root_groups_to_max_lines(
         kept.push(group);
     }
     kept.reverse();
-    kept.into_iter().flatten().collect()
+    kept
 }
 
 #[cfg(test)]

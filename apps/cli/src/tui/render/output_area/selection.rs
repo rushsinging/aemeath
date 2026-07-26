@@ -244,6 +244,7 @@ mod document_selection_tests {
                     RenderedLine::new(vec![Span::raw("世界")]),
                 ]),
             }],
+            root_group_block_counts: Vec::new(),
         });
         let view = output_selection_view_for_test((0, CharIdx::new(0)), (1, CharIdx::new(2)));
         let copied = area.selected_text_for_view(&view, &LiveStatusViewModel::default());

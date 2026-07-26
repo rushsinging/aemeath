@@ -4,6 +4,7 @@ mod chat;
 mod completion;
 mod driver;
 mod harness;
+mod history_window;
 mod input;
 mod interaction;
 mod links;

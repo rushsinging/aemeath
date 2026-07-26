@@ -27,6 +27,7 @@ fn test_render_reserves_scrollbar_column_and_wraps_long_lines() {
                 RenderedLine::new(vec![Span::raw("line 2")]),
             ]),
         }],
+        root_group_block_counts: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 6, 2);
     let view = OutputViewState {
@@ -69,6 +70,7 @@ fn test_render_document_paints_spans_and_overlays_selection() {
             block_id: "a".into(),
             lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("hello")])]),
         }],
+        root_group_block_counts: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 10, 3);
     let view = OutputViewState {
@@ -95,6 +97,7 @@ fn test_output_area_paints_fill_style_for_short_and_empty_lines() {
                 RenderedLine::empty().with_fill_style(fill),
             ]),
         }],
+        root_group_block_counts: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 8, 3);
     let view = OutputViewState {
@@ -122,6 +125,7 @@ fn test_output_area_selection_overrides_fill_style_on_text_cells() {
             block_id: "filled".into(),
             lines: Rc::new(vec![RenderedLine::from_plain("hello").with_fill_style(fill)]),
         }],
+        root_group_block_counts: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 8, 2);
     let view = OutputViewState {
@@ -152,6 +156,7 @@ fn test_render_document_with_gutter_offsets_selection_and_skips_gutter() {
             block_id: "a".into(),
             lines: Rc::new(vec![line]),
         }],
+        root_group_block_counts: Vec::new(),
     });
     // 选中 plain 字符 [0,3) = "hel"
     let view = OutputViewState {
@@ -193,6 +198,7 @@ fn test_render_user_message_paints_full_visible_line_background() {
             block_id: "u".into(),
             lines: Rc::new(vec![line]),
         }],
+        root_group_block_counts: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 12, 2);
     let view = OutputViewState {
@@ -224,6 +230,7 @@ fn test_click_on_gutter_line_maps_to_content_char() {
             block_id: "a".into(),
             lines: Rc::new(vec![line]),
         }],
+        root_group_block_counts: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 12, 3);
     let view = OutputViewState {
@@ -277,6 +284,7 @@ fn test_render_spinner_does_not_overflow_into_scrollbar_gap_narrow_terminal() {
             block_id: "a".into(),
             lines: Rc::new(doc_lines),
         }],
+        root_group_block_counts: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 30, 3);
     let view = OutputViewState {
@@ -314,6 +322,7 @@ fn test_render_spinner_does_not_overflow_into_scrollbar_gap_very_narrow_terminal
             block_id: "a".into(),
             lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("doc")])]),
         }],
+        root_group_block_counts: Vec::new(),
     });
     // 更窄：width=18，content_width=15
     let area_rect = Rect::new(0, 0, 18, 2);

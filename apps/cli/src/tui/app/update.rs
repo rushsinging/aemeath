@@ -137,11 +137,17 @@ impl App {
             TuiMsg::AgentEvent(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::Key(key) => self.update_key(key, spawn_refs),
             TuiMsg::Mouse(mouse) => {
-                let expanded_before = self.view_state.output.expanded;
+                let history_window_before = (
+                    self.view_state.output.render_line_limit(),
+                    self.view_state.output.history_window_tail_offset,
+                );
                 let effects = self.handle_mouse_event(mouse, self.layout.output_area_rect);
-                // 懒加载：滚轮到顶触发 expand（在 mouse_handler 内设置 expanded=true），
-                // 需 mark_output_dirty 触发 document 重建跳过 MAX_RENDER_LINES 裁剪。
-                if !expanded_before && self.view_state.output.expanded {
+                // 懒加载：预算增长或 3000 行窗口向更早历史滑动时都必须重建文档。
+                let history_window_after = (
+                    self.view_state.output.render_line_limit(),
+                    self.view_state.output.history_window_tail_offset,
+                );
+                if history_window_after != history_window_before {
                     self.mark_output_dirty();
                 }
                 UpdateResult {
@@ -222,9 +228,16 @@ impl App {
             }
             TuiMsg::TerminalKey(key) => self.update_key(key, spawn_refs),
             TuiMsg::TerminalMouse(mouse) => {
-                let expanded_before = self.view_state.output.expanded;
+                let history_window_before = (
+                    self.view_state.output.render_line_limit(),
+                    self.view_state.output.history_window_tail_offset,
+                );
                 let effects = self.handle_mouse_event(mouse, self.layout.output_area_rect);
-                if !expanded_before && self.view_state.output.expanded {
+                let history_window_after = (
+                    self.view_state.output.render_line_limit(),
+                    self.view_state.output.history_window_tail_offset,
+                );
+                if history_window_after != history_window_before {
                     self.mark_output_dirty();
                 }
                 UpdateResult {
@@ -474,11 +487,23 @@ impl App {
                 return;
             }
         };
-        let document = if self.view_state.output.expanded {
-            document
-        } else {
-            Self::trim_document_to_max_lines(document)
-        };
+        self.view_state
+            .output
+            .observe_source_document(document.total_lines());
+        crate::tui::log_trace!(
+            "tui.output.history_metrics source_lines={} render_limit={} before_lines={} scroll_offset={} auto_scroll={} pending_load_older={}",
+            self.view_state.output.source_total_lines,
+            self.view_state.output.render_line_limit(),
+            before_lines,
+            self.view_state.output.scroll_offset,
+            self.view_state.output.auto_scroll,
+            self.view_state.output.pending_load_older
+        );
+        let document = Self::trim_document_to_line_limit(
+            document,
+            self.view_state.output.render_line_limit(),
+            self.view_state.output.history_window_tail_offset,
+        );
         let after_lines = document.total_lines();
         crate::tui::log_trace!(
             "tui.output.refresh_document revision={} width={} term_width={} spinner_frame={} roots={} timeline_items={} chats={} before_lines={} after_lines={} rebuilt={}",
@@ -496,12 +521,11 @@ impl App {
         self.output_area.replace_document(document);
     }
 
-    /// 最大渲染行数。超过此值的旧消息被裁剪，滚到顶部时懒加载展开。
-    const MAX_RENDER_LINES: usize = 1000;
-
-    /// 裁剪文档到最大行数，保留最新的行。如果裁剪了，顶部插入提示行。
-    fn trim_document_to_max_lines(
+    /// 裁剪文档到当前历史窗口行预算，保留最新的完整 block。
+    fn trim_document_to_line_limit(
         document: crate::tui::render::output::rendered::RenderedDocument,
+        line_limit: usize,
+        tail_offset: usize,
     ) -> crate::tui::render::output::rendered::RenderedDocument {
         use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
         use ratatui::style::Style;
@@ -509,29 +533,81 @@ impl App {
         use std::rc::Rc;
 
         let total = document.total_lines();
-        if total <= Self::MAX_RENDER_LINES {
-            return document;
+        let skip_lines = if tail_offset == 0 {
+            0
+        } else {
+            total.saturating_sub(line_limit).saturating_sub(tail_offset)
+        };
+        if skip_lines == 0 {
+            if document.total_lines() <= line_limit {
+                return document;
+            }
+            // 已经到达最早历史：窗口从 0 开始，不应再显示“更早消息”提示。
+            let group_counts = document.root_group_block_counts();
+            let mut groups = Vec::with_capacity(group_counts.len());
+            let mut blocks = document.blocks.into_iter();
+            for count in group_counts {
+                groups.push(blocks.by_ref().take(count).collect::<Vec<_>>());
+            }
+            let mut kept_groups = Vec::new();
+            let mut kept_lines = 0usize;
+            for group in groups {
+                let group_lines = group.iter().map(|block| block.lines.len()).sum::<usize>();
+                if kept_lines > 0 && kept_lines.saturating_add(group_lines) > line_limit {
+                    break;
+                }
+                kept_lines = kept_lines.saturating_add(group_lines);
+                kept_groups.push(group);
+                if kept_lines > line_limit {
+                    break;
+                }
+            }
+            return crate::tui::render::output::rendered::RenderedDocument::with_root_groups(
+                kept_groups,
+            );
         }
 
-        let mut kept = Self::MAX_RENDER_LINES;
-        let folded = total - kept;
+        let group_counts = document.root_group_block_counts();
+        let mut groups = Vec::with_capacity(group_counts.len());
+        let mut blocks = document.blocks.into_iter();
+        for count in group_counts {
+            groups.push(blocks.by_ref().take(count).collect::<Vec<_>>());
+        }
 
-        // 从后向前按 block 边界保留：一旦某 block 无法完整放入剩余预算，跳过整个 block
-        // （不截断 block 内部，保证消息完整性）。继续向前找更小的 block 填满预算。
-        let mut new_blocks: Vec<RenderedBlock> = Vec::new();
-        for block in document.blocks.into_iter().rev() {
-            if kept == 0 {
+        // source document 顺序是旧 → 新；滑动到更早历史时按完整 root group
+        // 跳过和保留，确保 ToolCall 与其 ToolResult 子块不可分割。
+        let mut skipped = 0usize;
+        let mut start = 0usize;
+        while start < groups.len() {
+            let group_lines = groups[start]
+                .iter()
+                .map(|block| block.lines.len())
+                .sum::<usize>();
+            if skipped.saturating_add(group_lines) > skip_lines {
                 break;
             }
-            let block_len = block.lines.len();
-            if block_len > kept {
-                // 该 block 放不下剩余预算，跳过（不截断）
-                continue;
-            }
-            new_blocks.push(block);
-            kept -= block_len;
+            skipped += group_lines;
+            start += 1;
         }
-        new_blocks.reverse();
+
+        let mut kept_lines = 0usize;
+        let mut kept_groups = Vec::new();
+        for group in groups.into_iter().skip(start) {
+            let group_lines = group.iter().map(|block| block.lines.len()).sum::<usize>();
+            if kept_lines > 0 && kept_lines.saturating_add(group_lines) > line_limit {
+                break;
+            }
+            kept_lines = kept_lines.saturating_add(group_lines);
+            kept_groups.push(group);
+            if kept_lines > line_limit {
+                // 单个 root group 超过窗口时保持完整，允许窗口略超预算。
+                break;
+            }
+        }
+
+        let folded = skipped;
+        let mut root_group_block_counts = kept_groups.iter().map(Vec::len).collect::<Vec<_>>();
+        let mut new_blocks = kept_groups.into_iter().flatten().collect::<Vec<_>>();
 
         // 顶部插入提示行
         let hint_line = RenderedLine::with_plain(
@@ -549,7 +625,11 @@ impl App {
             },
         );
 
-        crate::tui::render::output::rendered::RenderedDocument { blocks: new_blocks }
+        root_group_block_counts.insert(0, 1);
+        crate::tui::render::output::rendered::RenderedDocument {
+            blocks: new_blocks,
+            root_group_block_counts,
+        }
     }
     pub(crate) fn flush_dirty_view_models(&mut self) {
         if self.view_state.dirty.output {

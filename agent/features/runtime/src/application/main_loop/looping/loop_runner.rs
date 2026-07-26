@@ -287,11 +287,11 @@ where
                     {
                         Ok(projection) => {
                             session_id = projection.session_id.clone();
-                            messages = projection.messages.clone();
+                            messages = projection.active_messages.clone();
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::SessionResumed {
                                     steps: projection
-                                        .steps
+                                        .display_steps
                                         .into_iter()
                                         .map(|step| super::RuntimeResumedSessionStep {
                                             run_id: step.run_id,

@@ -104,6 +104,118 @@ fn test_scroll_to_top_jumps_to_max_offset() {
 }
 
 #[test]
+fn history_window_loads_older_lines_in_five_hundred_line_batches() {
+    let mut state = OutputViewState {
+        last_visible_height: 20,
+        ..Default::default()
+    };
+
+    state.observe_source_document(1_800);
+    assert_eq!(state.render_line_limit(), 1_000);
+    state.scroll_to_top(1_000);
+    assert_eq!(state.render_line_limit(), 1_500);
+
+    state.sync_document_metrics(1_500, 20);
+    assert!(state.try_load_older_at_top(1_500));
+    assert_eq!(state.render_line_limit(), 1_800);
+}
+
+#[test]
+fn history_window_stops_loading_when_all_source_lines_are_visible() {
+    let mut state = OutputViewState {
+        last_visible_height: 20,
+        ..Default::default()
+    };
+    state.observe_source_document(1_240);
+    state.scroll_to_top(1_000);
+
+    assert_eq!(state.render_line_limit(), 1_240);
+    state.sync_document_metrics(1_240, 20);
+    assert!(!state.try_load_older_at_top(1_240));
+}
+
+#[test]
+fn history_window_can_request_older_history_after_three_thousand_line_budget() {
+    let mut state = OutputViewState {
+        last_visible_height: 20,
+        ..Default::default()
+    };
+    state.observe_source_document(6_000);
+    for _ in 0..4 {
+        assert!(state.scroll_to_top(state.render_line_limit()));
+    }
+    assert_eq!(state.render_line_limit(), 3_000);
+    assert!(state.request_load_older_at_top());
+}
+
+#[test]
+fn history_window_stops_at_three_thousand_lines() {
+    let mut state = OutputViewState {
+        last_visible_height: 20,
+        ..Default::default()
+    };
+    state.observe_source_document(5_000);
+
+    for expected in [1_500, 2_000, 2_500, 3_000] {
+        assert!(state.scroll_to_top(expected - 500));
+        assert_eq!(state.render_line_limit(), expected);
+    }
+
+    assert_eq!(state.render_line_limit(), 3_000);
+    state.sync_document_metrics(3_000, 20);
+    assert!(state.try_load_older_at_top(3_000));
+    assert_eq!(state.render_line_limit(), 3_000);
+}
+
+#[test]
+fn source_growth_while_scrolled_respects_three_thousand_line_cap() {
+    let mut state = OutputViewState {
+        last_visible_height: 20,
+        scroll_offset: 100,
+        auto_scroll: false,
+        ..Default::default()
+    };
+    state.observe_source_document(2_900);
+    state.render_line_limit = 2_900;
+
+    state.observe_source_document(3_500);
+
+    assert_eq!(state.render_line_limit(), 3_000);
+}
+
+#[test]
+fn source_growth_while_scrolled_expands_budget_to_preserve_visible_anchor() {
+    let mut state = OutputViewState {
+        last_visible_height: 20,
+        scroll_offset: 100,
+        auto_scroll: false,
+        ..Default::default()
+    };
+    state.observe_source_document(1_500);
+    state.scroll_to_top(1_000);
+    let before = state.render_line_limit();
+
+    state.observe_source_document(1_537);
+
+    assert_eq!(state.render_line_limit(), before + 37);
+}
+
+#[test]
+fn returning_to_bottom_resets_history_window_budget() {
+    let mut state = OutputViewState {
+        last_visible_height: 20,
+        ..Default::default()
+    };
+    state.observe_source_document(2_000);
+    state.scroll_to_top(1_000);
+    assert_eq!(state.render_line_limit(), 1_500);
+
+    state.scroll_to_bottom();
+
+    assert_eq!(state.render_line_limit(), 1_000);
+}
+
+#[test]
 fn test_sync_document_metrics_keeps_valid_view_scroll() {
     let mut state = OutputViewState {
         scroll_offset: 5,
