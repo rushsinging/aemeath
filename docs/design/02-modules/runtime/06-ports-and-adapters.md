@@ -102,10 +102,11 @@ Loop Engine 直接编排 `Run + RunExecutionState + RuntimeContext`，不消费�
 
 Runtime-owned Port 只对应真实外部 seam：
 
-- `InputPort`：drain/await 输入，不拥有 Step 或 continuation；
+- `InputPort`：SessionIngress 分类后的 Run 输入接纳端口，只接收 `UserMessage`，负责 FIFO、batch drain、epoch、Open/Sealed/Closed 生命周期和 AwaitingInput park；不拥有 Step 或 continuation；
 - `EventSink`：接收领域事件并做外向投影；
 - `ProviderPort`、`ToolCatalogPort`、`ToolExecutionPort`、`ContextPort`：执行单一外部能力；
-- `InteractionPort`：一次 request/reply transport；
+- `InteractionPort`：一次 request/reply transport；reply/cancel 按 `run_id + request_id` 直接完成 pending interaction，**NEVER** 经普通输入队列排队；
+- `CommandScheduler`：接收已分类的 Runtime command，按 ImmediateControl、AtRunBoundary、SessionQuery 三类决定执行时机，不把命令伪装成 UserMessage；
 - `HookPort`：Hook BC 的 typed dispatch；
 - `UsageSink`、`ActiveRunRegistryPort`：非业务流程的窄出口。
 
@@ -124,7 +125,7 @@ Runtime-owned Port 只对应真实外部 seam：
 | Workflow | `ReasoningPort` | effort 调节；见 [Workflow](../workflow/01-reasoning-graph.md) |
 | Config | `ConfigSnapshot` PL | 本 Run 的只读配置快照；见 [Config](../config/01-config-layer.md) |
 
-`ProviderPort`、`InteractionPort`、`EventSink` 与 `UsageSink` 隔离 Runtime 策略和易变外部 detail，因此由 Runtime 拥有。它们的**唯一签名真相源**分别是：`ProviderPort` 见本文 §2.1；`InteractionPort` 及其 Published Language 见本文 §2.2；`EventSink` / `UsageSink` 见本文 §2.3。Provider 文档只登记 adapter 实现面，本文其余章节和其他供应方文档只登记使用面或 adapter 行为，**NEVER** 复制第二份 trait：
+`ProviderPort`、`InteractionPort`、`EventSink`、`UsageSink`、`InputPort`、`CommandScheduler` 与 `InteractionInbox` 隔离 Runtime 策略和易变外部 detail，因此由 Runtime 拥有。它们的**唯一签名真相源**分别是：`ProviderPort` 见本文 §2.1；`InteractionPort` 及其 Published Language 见本文 §2.2；`EventSink` / `UsageSink` 见本文 §2.3。Provider 文档只登记 adapter 实现面，本文其余章节和其他供应方文档只登记使用面或 adapter 行为，**NEVER** 复制第二份 trait：
 
 ### 2.1 Runtime-owned ProviderPort
 

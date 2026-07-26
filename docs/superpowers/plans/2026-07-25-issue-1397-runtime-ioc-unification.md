@@ -256,10 +256,11 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 
 1. 将 CLI/SDK args 先转换为 typed bootstrap request；参数解析不直接创建 Provider、Tool、Hook、Workspace、RuntimeContext 或具体 Client 依赖。
 2. 将具体 adapter、factory、registry、runner、materializer 和跨 BC object graph 留在 `agent/composition`。
-3. Runtime bootstrap 只负责创建 / 恢复 Session、初始化 `SessionState`、确定 snapshot 时机并提交 `RunPreparationRequest`；输入通过 `InputPort` 独立提交，不得形成含 initial input 的特殊启动入口。
-4. 拆解或删除 `application/client/from_args.rs` 中的参数解析、Session 恢复、模型绑定、Tool/Skill 查询、Prompt 构建、并发配置、runner 创建和 Client 构造职责。
-5. 更新 `AgentClient` / SDK / CLI 的公开入站 façade，不让调用方看到 `RuntimeServices` 内部 wiring 或 bindings。
-6. 补 Composition L2/L3 组装契约和 runtime bootstrap 场景测试，覆盖独立 Run 与派生 Run 的同一准备入口。
+3. Runtime bootstrap 只负责创建 / 恢复 Session、初始化 `SessionState`、确定 snapshot 时机，并把 SDK 的唯一 ingress 分类为 `UserMessage`、`Command` 或 `InteractionCommand`；首次与后续 `UserMessage` 均通过同一个 `InputPort` 提交，不得形成含 initial input 的特殊启动入口。
+4. 删除 `ChatRequest` 中 `prompt` / `input_rx` / `interaction_rx` 多输入源，替换为单一 `SessionIngress`；分类后分别投递到 Run InputQueue、CommandScheduler 与 InteractionInbox。
+5. 拆解或删除 `application/client/from_args.rs` 中的参数解析、Session 恢复、模型绑定、Tool/Skill 查询、Prompt 构建、并发配置、runner 创建和 Client 构造职责。
+6. 更新 `AgentClient` / SDK / CLI 的公开入站 façade，不让调用方看到 `RuntimeServices` 内部 wiring 或 bindings。
+7. 补 Composition L2/L3 组装契约和 runtime bootstrap 场景测试，覆盖独立 Run 与派生 Run 的同一准备入口，以及三类 ingress 的无损分类。
 
 **主要文件**：
 
@@ -281,11 +282,12 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 **实施**：
 
 1. 设计并落地统一 Engine API：`run_loop(&mut Run, &mut RunExecutionState, &RuntimeContext)`，返回 typed terminal outcome。
-2. 将 input drain/await、epoch 校验、Step 创建、context/compact、model invocation/retry、tool coordination、interaction continuation、Hook coordination、control/cancel、finalization 和 event drain 改为 Engine 内部流程。
-3. 把 `RunLoopPort` 中真正的外部边界拆为窄 Port：InputPort、EventSink、UsageSink、ActiveRunRegistryPort 及对应 capability contracts；不得把 freeze/finalize/invoke/execute/claim/store 等流程方法留在统一 Port。
-4. 将现有 `MainRunPort` 和 `SubAgentRun` 的差异迁移到 factory 绑定的 Input/Event/Provider/Tool/Interaction/Hook capability adapter；Engine 不出现 `is_sub`、Main/Sub enum 或角色分支。
-5. 保持 `#1272` drain epoch、internal continuation、input adoption 和 termination seal 语义；保持 compact/reflection、retry/cancel、tool result adjacency、Stop Hook 三分支和 pending interaction 语义。
-6. 先为 Engine 的单阶段协作补 L2 测试，再用 Runtime crate integration / scenario tests 验证完整 Run journey。
+2. 将 input drain/await、epoch 校验、Step 创建、command scheduling、context/compact、model invocation/retry、tool coordination、interaction continuation、Hook coordination、control/cancel、finalization 和 event drain 改为 Engine 内部流程。
+3. 把 `RunLoopPort` 中真正的外部边界拆为窄 Port：InputPort、CommandScheduler、InteractionInbox、EventSink、UsageSink、ActiveRunRegistryPort 及对应 capability contracts；不得把 freeze/finalize/invoke/execute/claim/store 等流程方法留在统一 Port。
+4. 让普通输入只进入 Run InputQueue；ImmediateControl command 立即生效，AtRunBoundary command 在安全边界执行，SessionQuery 不污染 Run；interaction reply/cancel 按 `run_id + request_id` 定向完成 pending interaction，绝不经过 InputQueue。
+5. 将现有 `MainRunPort` 和 `SubAgentRun` 的差异迁移到 factory 绑定的 Input/Event/Provider/Tool/Interaction/Hook capability adapter；Engine 不出现 `is_sub`、Main/Sub enum 或角色分支。
+6. 保持 `#1272` drain epoch、internal continuation、input adoption 和 termination seal 语义；保持 compact/reflection、retry/cancel、tool result adjacency、Stop Hook 三分支和 pending interaction 语义。
+7. 先为 Engine 的单阶段协作补 L2 测试，再用 Runtime crate integration / scenario tests 验证完整 Run journey，包括 AwaitingInput 与 AwaitingInteraction 互不消费对方消息。
 
 **主要文件**：
 
@@ -308,12 +310,13 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 
 **实施**：
 
-1. Main session 启动和 Sub Agent dispatch 都通过统一 `RunPreparationRequest / PreparedRun / RunLauncher` 创建 Idle Run，并通过同一个 `InputPort` 提交任务输入。
-2. 删除 `MainSessionShell`、`MainRunPort`、`SubAgentRun`、`DerivedSubRun`、Main/Sub strategy 和对应 module exports；不能留下只被测试引用的死代码。
-3. 删除 `RuntimeContextParts`、`RunContextBindings`、旧 `assemble_main_runtime_context` / `derive_sub_run` 和第二条 Context 装配路径。
-4. 清理 `ports/legacy.rs`、兼容 re-export、旧测试 fixture 和注释中把迁移形状描述为长期模型的内容。
-5. 审计 `main_loop` / `subagent` 目录命名；只有仍表达真实用例边界的模块保留，不能用目录历史名称制造生产类型差异。
-6. 更新 public API、crate root exports、测试夹具和 source guards，确保旧符号既无生产引用也无隐性测试可达路径。
+1. Main session 启动和 Sub Agent dispatch 都通过统一 `RunPreparationRequest / PreparedRun / RunLauncher` 创建 Idle Run；其任务输入都封装为同一种 `UserMessage`，经 `SessionIngress` 分类后提交到目标 Run 的 `InputPort`。
+2. 迁移 SDK/TUI 到单一 `SessionIngress`，删除 `ChatRequest.prompt`、`input_rx`、`interaction_rx` 及 interaction-as-input 兼容桥；不得保留隐式第二输入源。
+3. 删除 `MainSessionShell`、`MainRunPort`、`SubAgentRun`、`DerivedSubRun`、Main/Sub strategy 和对应 module exports；不能留下只被测试引用的死代码。
+4. 删除 `RuntimeContextParts`、`RunContextBindings`、旧 `assemble_main_runtime_context` / `derive_sub_run` 和第二条 Context 装配路径。
+5. 清理 `ports/legacy.rs`、兼容 re-export、旧测试 fixture 和注释中把迁移形状描述为长期模型的内容。
+6. 审计 `main_loop` / `subagent` 目录命名；只有仍表达真实用例边界的模块保留，不能用目录历史名称制造生产类型差异。
+7. 更新 public API、crate root exports、测试夹具和 source guards，确保旧符号既无生产引用也无隐性测试可达路径。
 
 **主要文件**：
 
@@ -366,8 +369,8 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 | Run / RunExecutionState | 状态迁移、唯一 owner、pending interaction | Run preparation 字段与 terminal 契约 | 完整 Run 生命周期 | source/API/无重复状态守卫 |
 | RuntimeServices / SessionState | 字段归属、snapshot 不变 | RuntimeContextFactory 输入输出契约 | Session 创建→Run→后续 Session 变更隔离 | construction ownership |
 | Capability factory | mode/ceiling/unavailable 组合 | Interaction/Hook/Provider/Tool/Workspace adapter 契约 | parent-child dispatch / interaction journey | capability assembly、hexagonal dependency |
-| Loop Engine | 每阶段编排、epoch、finalization | 统一 Engine 与外部 Port 契约 | model→tool→interaction→terminal journey | shared loop、Main/Sub branch absence |
-| Composition/bootstrap | factory 注入、生命周期 | SDK/CLI bootstrap boundary | 启动→Run→终态 | cross-BC construction ownership |
+| Loop Engine | 每阶段编排、epoch、command scheduling、input/interaction 等待态隔离、finalization | 统一 Engine 与外部 Port 契约 | user input / command / interaction → model/tool → terminal journey | shared loop、Main/Sub branch absence |
+| Composition/bootstrap | factory 注入、生命周期、SessionIngress 分类 | SDK/CLI bootstrap boundary、单一输入源 | 启动→分类→目标 mailbox→Run→终态 | cross-BC construction ownership |
 | TUI/SDK projection | 现有纯值映射单元 | Interaction / event field completeness | 用户交互闭环（受影响时） | crate/API boundary |
 
 测试必须遵循：生产逻辑前先建立失败证据；跨层改动每层都有相邻测试；不得以 L4 替代 L1-L3；不得扩大测试专用生产 API；测试文件按 owning layer 分离，禁止新增 `mod.rs`、万能 `test_utils` 或 inline test 违背仓库守卫。

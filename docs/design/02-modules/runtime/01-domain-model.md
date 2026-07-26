@@ -16,6 +16,107 @@
 
 层级对齐：`Session → Run → Run Step`（≈ OpenAI Thread / Run / Run Step）。
 
+### 1.1 模块架构图
+
+```mermaid
+flowchart TB
+    subgraph Client["SDK / CLI / TUI"]
+        ClientMessage["SessionIngressMessage\n纯值入站消息"]
+    end
+
+    subgraph RuntimeApplication["Runtime Application"]
+        Ingress["SessionIngress\n唯一入站入口"]
+        Router["Ingress Router\n按消息语义与 identity 分类"]
+        CommandScheduler["CommandScheduler\nImmediateControl / AtRunBoundary / SessionQuery"]
+        InteractionInbox["InteractionInbox\n按 run_id + request_id 定向完成"]
+        Factory["RuntimeContextFactory\n唯一 Run 准备入口"]
+        Engine["Loop Engine\n统一执行流程，零来源分支"]
+    end
+
+    subgraph RuntimeLifetime["Agent Runtime 生命周期"]
+        Services["RuntimeServices\n稳定 Port / Factory / 基础设施"]
+    end
+
+    subgraph SessionLifetime["Session 生命周期"]
+        Session["SessionState\nidentity / revisions / active runs"]
+        Snapshot["SessionSnapshot\n准备时冻结的窄事实"]
+    end
+
+    subgraph RunLifetime["每个 Run 独立拥有"]
+        Spec["RunSpec\npurpose / topology / capability modes"]
+        ParentCaps["ParentRunCapabilities?\n只收缩 capability ceiling"]
+        InputQueue["InputQueue\nUserMessage FIFO / epoch / seal"]
+        Run["Run\n领域聚合与唯一状态机"]
+        Execution["RunExecutionState\nLoop 工作集"]
+        Context["RuntimeContext\n冻结的 per-Run 能力绑定"]
+        Pending["PendingInteraction\ntyped continuation"]
+    end
+
+    subgraph ExternalCapabilities["外部能力 / Bounded Context"]
+        Provider["ProviderPort"]
+        ContextPort["ContextPort"]
+        Tools["ToolCatalogPort / ToolExecutionPort"]
+        Policy["PolicyPort"]
+        Hooks["HookPort"]
+        Interaction["InteractionPort"]
+        Events["EventSink / UsageSink"]
+    end
+
+    ClientMessage --> Ingress --> Router
+    Router -->|UserMessage| InputQueue
+    Router -->|Command| CommandScheduler
+    Router -->|InteractionCommand| InteractionInbox
+
+    Session -->|snapshot_for_run| Snapshot
+    Services --> Factory
+    Snapshot --> Factory
+    Spec --> Factory
+    ParentCaps -. capability ceiling .-> Factory
+    Factory -->|PreparedRun| Run
+    Factory -->|PreparedRun| Execution
+    Factory -->|PreparedRun| Context
+    Factory --> InputQueue
+
+    InputQueue --> Engine
+    CommandScheduler --> Engine
+    InteractionInbox --> Pending
+    Pending --> Engine
+    Run --> Engine
+    Execution --> Engine
+    Context --> Engine
+
+    Context --> Provider
+    Context --> ContextPort
+    Context --> Tools
+    Context --> Policy
+    Context --> Hooks
+    Context --> Interaction
+    Context --> Events
+
+    Engine -->|领域 mutation| Run
+    Engine -->|工作数据| Execution
+
+    classDef domain fill:#eed49f,stroke:#8f6f1e,color:#181926;
+    classDef application fill:#8aadf4,stroke:#34548a,color:#181926;
+    classDef state fill:#a6da95,stroke:#4f7942,color:#181926;
+    classDef external fill:#c6a0f6,stroke:#6e4e8e,color:#181926;
+
+    class Run,Spec,ParentCaps,Pending domain;
+    class Ingress,Router,CommandScheduler,InteractionInbox,Factory,Engine application;
+    class Services,Session,Snapshot,InputQueue,Execution,Context state;
+    class Provider,ContextPort,Tools,Policy,Hooks,Interaction,Events external;
+```
+
+架构约束：
+
+1. `SessionIngress` 是 Session Runtime 唯一入站入口；SDK 不再分别提供 prompt、普通输入 channel 和 interaction channel。
+2. `UserMessage`、`Command`、`InteractionCommand` 在入口处按语义分类，分别进入目标 Run 的 `InputQueue`、`CommandScheduler` 和 `InteractionInbox`，不得靠 Loop 的 poll 顺序猜测类别。
+3. `RuntimeServices` 只拥有稳定依赖，`SessionState` 只拥有会话动态事实，二者不得重新合并为综合资源袋。
+4. `RuntimeContextFactory` 根据 `RunSpec + SessionSnapshot + ParentRunCapabilities?` 原子产生 `PreparedRun { Run, RuntimeContext, RunExecutionState }`；准备请求不含初始输入。
+5. `Run`、`RuntimeContext` 与 `RunExecutionState` 分别拥有领域状态、冻结能力绑定和执行工作集；三者不得复制同一事实。
+6. Root/child、交互/后台等差异只由 purpose、父子拓扑和 capability mode 表达；Main/Sub 不构成生产类型。
+7. `AwaitingInput` 只消费 InputQueue，`AwaitingInteraction` 只等待匹配 identity 的 reply/cancel；两种等待不得共享 mailbox 或恢复路径。
+
 **终态装配**：唯一 `RuntimeContextFactory` 是 `RuntimeContext` 的唯一生产构造入口。所有 Run 来源只提交 `RunPreparationRequest`，由 factory 按 `InteractionBindingMode` / `HookBindingMode` / `ReasoningBindingMode` 及父 capability ceiling 产生 `PreparedRun { Run, RuntimeContext, RunExecutionState }`；不存在 `RuntimeContextParts`、`RunContextBindings` 或多路径手工填充。Main/Sub 不是生产类型，差异由 `RunSpec`、父子拓扑和已绑定 capability adapter 表达，Loop Engine 零来源分支。
 
 ## 2. Run 聚合
@@ -28,7 +129,7 @@ struct Run {
     parent: Option<RunId>,     // Sub Run 指向父 Run（结果/事件回传）
     status: RunStatus,         // 唯一状态机；目标终态仅 Completed / Failed / Terminated
     termination: Option<RunTermination>, // TerminateRun 接受后的 reason + absolute deadline
-    pending_interaction: Option<PendingInteraction>, // 与 AwaitingUser 同步存活，不持久化
+    pending_interaction: Option<PendingInteraction>, // 与 AwaitingInteraction 同步存活，不持久化
     steps: Vec<RunStep>,       // 内部实体序列
     started_at: Instant,
 }
@@ -123,7 +224,7 @@ Provider ACL **MUST** 在 `InvocationResponse` 进入 Runtime 前完成 token �
 6. `AwaitingToolApproval` 未决时，不可进入 `ExecutingTools`
 7. **timeout > 0 时**，墙钟超时强制迁移到 `Failed`（timeout=0 表示无限，见 §5）
 8. 每个 Run **必须独占**一个 cancellation scope；子 Run 从父 scope 派生，NEVER 共享可替换的 Session 级 token 槽
-9. `AwaitingUser` 与唯一 `PendingInteraction` **MUST** 同时存活；reply / cancel 必须匹配 `request_id`，每个 continuation 至多完成一次
+9. `AwaitingInteraction` 与唯一 `PendingInteraction` **MUST** 同时存活；reply / cancel 必须匹配 `run_id + request_id`，每个 continuation 至多完成一次。普通 `UserMessage` 只能进入 InputQueue，**NEVER** 完成 interaction continuation
 10. 一个 Run 任一时刻至多一个 PendingInteraction；并发 Tool suspension 必须按原 RunStep 的 ToolCall 顺序串行 resolve，**NEVER** 为同一 Run 同时注册多个 waiter
 11. 一个完成的 RunStep 恰好产生一次 `ContextAppend`；assistant 与全部最终 Tool result 按协议顺序一起提交，**NEVER** 逐 suspension 持久化半成品
 12. `ContextAppend` **MUST** 携带稳定 `RunId + RunStepId`，Context Management **MUST** 保存 Step 与其 messages 的结构关系；`Vec<Message>` 扁平化只允许发生在最终 `ContextWindow → InvocationRequest` 投影，**NEVER** 作为 compact recent-tail 切分输入
@@ -245,7 +346,7 @@ struct RuntimeContext {
     usage:     Arc<dyn UsageSink>,      // 非阻塞；Audit MVP 只记录 metadata
     config:    ConfigSnapshot,          // Main/Sub 共享
     clock:     Arc<dyn Clock>,          // request builder 冻结 CalendarDate；Prompt 不读全局时钟
-    input:     Arc<dyn InputBuffer>,    // 入站：Main=TUI通道+忙期buffer; Sub=固定初始队列
+    input:     Arc<dyn InputPort>,      // 统一 Run 输入队列；首次/后续/派生任务输入同一路径
     events:    Arc<dyn EventSink>,      // 出站纯投影：Main→TUI；Sub→父级诊断（业务结果走 typed return）
     cancel:    RunCancellationScope,    // per-Run；Provider/Tool/Compact/Hook 共享或派生
 }

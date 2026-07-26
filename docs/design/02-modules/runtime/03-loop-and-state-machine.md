@@ -106,7 +106,7 @@ async fn run_loop(
 
 | 能力面 | 可绑定实现示例 |
 |---|---|
-| Input | live session input / fixed initial input / scheduler queue |
+| Input | live session queue / parent-dispatched task queue / scheduler queue |
 | Event | client event sink / parent diagnostic sink / no-op sink |
 | Interaction | client / parent-mediated / unavailable |
 | Hook | full / boundary-only / disabled |
@@ -115,6 +115,8 @@ async fn run_loop(
 Engine 不知道某个 Run 来自 Main、Sub、Reflection 或 Scheduler，也不按来源选择流程。`MainRunPort`、`SubAgentRun`、fat `RunLoopPort`、`MainInputStrategy` / `SubInputStrategy`、`MainEventStrategy` / `SubEventStrategy` 均不属于终态。模型调用、Tool 编排、Stop Hook、Interaction、finalization 和 terminal mutation 必须只有一份 application 流程。
 
 `RunExecutionState` 持有 messages、accepted inputs、context window、tool working data、continuation working data 与 stream projection；`RuntimeContext` 只持绑定好的外部能力；`Run` 只持领域状态。三者不得反向调用 Engine 或复制状态。
+
+Session 对外只有一个 `SessionIngress`。入口先把纯值消息分类为 `UserMessage`、`Command` 或 `InteractionCommand`，再分别投递到目标 Run 的 `InputQueue`、`CommandScheduler` 或 `InteractionInbox`。Loop 不读取 SDK channel，也不以 poll 顺序猜测消息类别。
 
 ### 2.1 Step/Run 控制与持久化原则
 
@@ -188,10 +190,18 @@ async fn run_loop(
             return Ok(terminal);
         }
 
-        let outcome = if run.status() == RunStatus::AwaitingUser {
-            context.input().await_input(expected_epoch).await?
-        } else {
-            context.input().drain(expected_epoch).await?
+        let outcome = match run.status() {
+            RunStatus::AwaitingInput => {
+                context.input().await_input(expected_epoch).await?
+            }
+            RunStatus::AwaitingInteraction { request_id } => {
+                let completion = context.interactions()
+                    .await_completion(run.id(), request_id)
+                    .await?;
+                resume_interaction(run, execution, context, completion).await?;
+                continue;
+            }
+            _ => context.input().drain(expected_epoch).await?,
         };
         validate_epoch(expected_epoch, &outcome)?;
 
@@ -223,8 +233,9 @@ async fn run_loop(
 **#1272 关键点：**
 - 正常完成（Complete/Continue/StopHookBlocked/ToolsCompleted）均进入 `ContinueAfterResponse` / `ToolsCompleted` → `DrainingInput`，不加中间状态；
 - `Completed` 只能由 `EmptyAndSealed` 产生；
-- AwaitUser 恢复：`NoInput` 时 `InputPort::await_input` 保持同一 future 异步等待且 epoch 不推进；输入到达产生 `Ready` 后执行 `UserResumed`；
-- Sub 固定 prompt：epoch 0 `Ready(prompt)` → epoch 1 `EmptyAndSealed`，与 Main 走完全相同的 Loop 路径。
+- AwaitingInput 恢复：`NoInput` 时 `InputPort::await_input` 保持同一 future 异步等待且 epoch 不推进；用户输入到达产生 `Ready` 后执行 `UserResumed`；
+- AwaitingInteraction 恢复：只等待匹配 `run_id + request_id` 的 reply/cancel，普通用户输入仍留在 InputQueue，不得误恢复 interaction continuation；
+- 派生任务输入：创建 Idle child Run 后由 SessionIngress 投递 `UserMessage`；epoch 0 `Ready(task)`，后续是否 seal 由 Run admission policy 决定，不存在固定 prompt adapter。
 
 ### 2.6 控制协议：请求同步，完成异步
 
@@ -277,7 +288,7 @@ StepFinalizer 读取 child `RunSpec.finalization`：
 
 ### InputBuffer（入站端口）— 支撑追问
 
-Loop Engine 每轮在门禁点调用 `RuntimeContext.input().drain(epoch)` 或 `await_input(epoch)`。live session、fixed initial input 和未来 scheduler queue 由不同 `InputPort` adapter 表达；Engine 不感知来源，也不按 Main/Sub 区分。
+Loop Engine 每轮在门禁点调用 `RuntimeContext.input().drain(epoch)` 或 `await_input(epoch)`。live session、parent-dispatched task 与未来 scheduler 来源都在 `SessionIngress` 分类后进入目标 Run 的同一种 InputQueue；Engine 不感知来源，也不按 Main/Sub 区分。不存在 `fixed initial input` adapter。
 
 Run-owned atomic input buffer 是 live-session `InputPort` adapter 使用的 drain-or-seal 原语：
 
