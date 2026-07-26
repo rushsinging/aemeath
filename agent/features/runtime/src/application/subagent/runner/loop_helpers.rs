@@ -11,7 +11,7 @@ impl<'a> SubAgentRun<'a> {
             Some(turn_number),
             &format!(
                 "Tools done ({}s elapsed), {} results",
-                self.start_time.elapsed().as_secs(),
+                self.execution.elapsed().as_secs(),
                 result_count
             ),
         );

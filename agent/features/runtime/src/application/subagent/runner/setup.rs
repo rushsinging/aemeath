@@ -466,7 +466,6 @@ impl AgentRunner for CliAgentRunner {
             }
 
             // Helper to emit progress
-            let session_id_for_log = session_id.clone();
             let progress_role = role_name_for_log.clone();
             let progress_model = model_display.clone();
             let progress = move |turn: Option<usize>, msg: &str| {
@@ -499,41 +498,9 @@ impl AgentRunner for CliAgentRunner {
                 }
             };
             let tool_schemas = sub_catalog.model_schemas();
-            let schema_count = tool_schemas.len();
-
-            // ── Log request messages callback ──
-            let log_session_id = session_id_for_log.clone();
-            let log_provider = binding.model.provider.clone();
-            let log_model = model_name.clone();
-            let log_role = role_name_for_log.clone();
-            let log_request_messages = move |turn: usize, messages: &[Message]| {
-                let latest: Vec<serde_json::Value> = messages
-                    .iter()
-                    .rev()
-                    .take(3)
-                    .map(|m| {
-                        serde_json::json!({
-                            "role": m.role,
-                            "len": m.content.len(),
-                        })
-                    })
-                    .collect();
-                log::info!(target: crate::LOG_TARGET,
-                    "[subagent_llm_request] session={}, turn={}, provider={}, model={}, role={}, messages={}, tools={}, latest_roles={}",
-                    log_session_id,
-                    turn,
-                    log_provider,
-                    log_model,
-                    log_role,
-                    messages.len(),
-                    schema_count,
-                    serde_json::to_string(&latest).unwrap_or_default(),
-                );
-            };
 
             // ── #1385: Execution scope from derived workspace (the single source) ──
-            let sub_views = derived.workspace.views();
-            let sub_scope = tools::ExecutionScope::builder(
+            let sub_views = derived.workspace.views();            let sub_scope = tools::ExecutionScope::builder(
                 sub_run_id.to_string(),
                 sub_views.read().workspace_id(),
                 sub_views.read().current_workspace_root(),
@@ -607,22 +574,11 @@ impl AgentRunner for CliAgentRunner {
                 tool_schemas,
                 config_snapshot: config_snapshot.clone(),
                 language: config_snapshot.language().to_string(),
-                messages,
-                committed_message_count: 0,
-                context_request: None,
-                accepted_input: Vec::new(),
-                context_window: None,
-                log_request_messages: Box::new(log_request_messages),
                 agent,
                 runtime_cancellation: runtime_token,
-                turn_count: 0,
-                // #1385 Task 12: last_total_tokens eliminated — usage tracker is single source.
                 active_run: self.active_run.clone(),
-                terminal: None,
-                start_time: std::time::Instant::now(),
                 session_id: derived.session_id,
-                run_id: sub_run_id,
-                parent_run_id,
+                run_id: sub_run_id,                parent_run_id,
                 role_name_for_log: role_name_for_log.clone(),
                 model_name_for_log: model_name,
                 resolved_spec: Some(model_display),
@@ -635,10 +591,12 @@ impl AgentRunner for CliAgentRunner {
                         prompt,
                     ),
                 plan_mode: plan_mode_active,
-                interaction_receivers: Vec::new(),
-                pending_work: None,
-            }
-            .run_loop()
+              execution: {
+                  let mut state = crate::application::run_execution_state::RunExecutionState::with_messages_and_turn_count(messages, 0);
+                  state.mark_started();
+                  state
+              },
+          }            .run_loop()
             .await
         })
         .await

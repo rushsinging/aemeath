@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use share::message::{Message, MessageSource, Role};
+use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
 use crate::application::context_coordination::ContextCoordinator;
@@ -64,77 +64,20 @@ pub(crate) fn request_log_context(
     })
 }
 
-/// 以语义所有权记录尚未绑定与当前 RunStep 已绑定的消息，禁止通过位置索引推断。
-#[derive(Default)]
-pub(crate) struct StepMessageOwnership {
-    pending: Vec<Message>,
-    active: Vec<Message>,
-    accepted_input: Vec<Message>,
-    outcome: Vec<Message>,
-}
-
-impl StepMessageOwnership {
-    pub(crate) fn new(pending: Vec<Message>) -> Self {
-        Self {
-            pending,
-            active: Vec::new(),
-            accepted_input: Vec::new(),
-            outcome: Vec::new(),
-        }
-    }
-
-    fn freeze(&mut self, prefix: Option<Message>, inputs: &[LoopInput]) -> Vec<Message> {
-        let mut messages = prefix.into_iter().collect::<Vec<_>>();
-        if inputs.is_empty() {
-            messages.extend(std::mem::take(&mut self.pending));
-        } else {
-            messages.extend(inputs.iter().map(|input| {
-                if input.images.is_empty() {
-                    Message::user(input.text.clone())
-                } else {
-                    super::super::input_gate::user_message_with_images(
-                        input.text.clone(),
-                        input.images.clone(),
-                    )
-                }
-            }));
-        }
-        self.active = messages.clone();
-        self.accepted_input = messages
-            .iter()
-            .filter(|message| {
-                message.role == Role::User
-                    && message.metadata.as_ref().is_none_or(|metadata| {
-                        !matches!(
-                            metadata.source,
-                            MessageSource::SystemGenerated | MessageSource::StopHook
-                        )
-                    })
-            })
-            .cloned()
-            .collect();
-        self.outcome.clear();
-        messages
-    }
-
-    fn accepted_user_messages(&self) -> Vec<Message> {
-        self.accepted_input.clone()
-    }
-
-    fn record(&mut self, message: Message) {
-        self.active.push(message.clone());
-        self.outcome.push(message);
-    }
-
-    fn outcome(&self) -> Vec<Message> {
-        self.outcome.clone()
-    }
-
-    fn committed(&mut self) {
-        self.active.clear();
-        self.accepted_input.clear();
-        self.outcome.clear();
-    }
+fn loop_input_messages(inputs: &[LoopInput]) -> Vec<Message> {
+    inputs
+        .iter()
+        .map(|input| {
+            if input.images.is_empty() {
+                Message::user(input.text.clone())
+            } else {
+                super::super::input_gate::user_message_with_images(
+                    input.text.clone(),
+                    input.images.clone(),
+                )
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -142,8 +85,9 @@ pub(crate) fn fixture_bind_pending(
     pending: Vec<Message>,
     inputs: &[LoopInput],
 ) -> (Vec<Message>, Vec<Message>) {
-    let mut ownership = StepMessageOwnership::new(pending);
-    let frozen = ownership.freeze(None, inputs);
+    let mut execution = crate::application::run_execution_state::RunExecutionState::new();
+    execution.replace_pending_step_messages(pending);
+    let frozen = execution.freeze_step_input_messages(None, loop_input_messages(inputs));
     (frozen.clone(), frozen)
 }
 
@@ -153,9 +97,10 @@ pub(crate) fn fixture_accepted_user_messages(
     prefix: Option<Message>,
     inputs: &[LoopInput],
 ) -> Vec<Message> {
-    let mut ownership = StepMessageOwnership::new(pending);
-    ownership.freeze(prefix, inputs);
-    ownership.accepted_user_messages()
+    let mut execution = crate::application::run_execution_state::RunExecutionState::new();
+    execution.replace_pending_step_messages(pending);
+    execution.freeze_step_input_messages(prefix, loop_input_messages(inputs));
+    execution.accepted_input_snapshot()
 }
 
 #[cfg(test)]
@@ -163,12 +108,15 @@ pub(crate) fn fixture_finalize_messages(
     pending: Vec<Message>,
     produced: Vec<Message>,
 ) -> Vec<Message> {
-    let mut ownership = StepMessageOwnership::new(pending);
-    let accepted = ownership.freeze(None, &[]);
+    let mut execution = crate::application::run_execution_state::RunExecutionState::new();
+    execution.freeze_step_messages(pending.clone());
     for message in produced {
-        ownership.record(message);
+        execution.record_step_message(message);
     }
-    accepted.into_iter().chain(ownership.outcome()).collect()
+    pending
+        .into_iter()
+        .chain(execution.step_outcome())
+        .collect()
 }
 
 /// Simulate a two-step freeze lifecycle (first step with buffer-sourced
@@ -185,11 +133,12 @@ pub(crate) fn fixture_two_step_accepted(
     first_inputs: &[LoopInput],
     second_inputs: &[LoopInput],
 ) -> (Vec<Message>, Vec<Message>) {
-    let mut ownership = StepMessageOwnership::new(pending);
-    ownership.freeze(None, first_inputs);
-    let first_accepted = ownership.accepted_user_messages();
-    ownership.freeze(None, second_inputs);
-    let second_accepted = ownership.accepted_user_messages();
+    let mut execution = crate::application::run_execution_state::RunExecutionState::new();
+    execution.replace_pending_step_messages(pending);
+    execution.freeze_step_input_messages(None, loop_input_messages(first_inputs));
+    let first_accepted = execution.accepted_input_snapshot();
+    execution.freeze_step_input_messages(None, loop_input_messages(second_inputs));
+    let second_accepted = execution.accepted_input_snapshot();
     (first_accepted, second_accepted)
 }
 
@@ -212,11 +161,6 @@ where
     pub(crate) queue: &'a Q,
     pub(crate) input_events: &'a I,
     pub(crate) system_prompt_text: &'a str,
-    pub(crate) context_request: Option<crate::ports::ContextRequest>,
-    pub(crate) context_window: Option<crate::ports::ContextWindow>,
-    /// 当前 RunStep 的显式消息所有权；历史长度不参与归属判断。
-    pub(crate) step_messages: StepMessageOwnership,
-    pub(crate) messages: Vec<Message>,
     pub(crate) context_size: usize,
     pub(crate) workspace: &'a project::WorkspaceViews,
     pub(crate) session_id: &'a str,
@@ -233,33 +177,19 @@ where
     /// pending-input reference, and drain/await logic
     /// (#1272 per-turn drain-or-seal linearization).
     pub(crate) input_strategy: MainInputStrategy<'a, Q, I>,
-    /// #1272: Per-turn adopted (InputId, Message) pairs collected during
-    /// freeze_step from LoopInput::input_id. Emitted via UserMessagesAdopted
-    /// after accept_step_input durable success. Cleared after emission.
-    pub(crate) per_turn_adopted: Vec<(sdk::InputId, Message)>,
     pub(crate) run_id: sdk::RunId,
     pub(crate) active_run: &'a dyn crate::domain::agent_run::ActiveRunPort,
-    pub(crate) turn_count: usize,
     pub(crate) turn_context: RuntimeTurnContext,
     // #1385 Task 12: last_total_tokens eliminated — usage tracker is the
     // single source via runtime_context.usage().
     pub(crate) task_reminder_state: &'a mut TaskReminderState,
     pub(crate) tool_identity:
         &'a crate::application::tool_coordination::identity::ToolIdentityRegistry,
-    pub(crate) started_at: Instant,
     /// #1248 Task 5: Whether this Run is operating in plan mode.
     /// When true, Complete responses trigger plan approval before proceeding.
     pub(crate) plan_mode: bool,
-    // ── #1248 Task 5: Interaction state ──
-    /// Stored interaction receivers keyed by request id.
-    /// The engine calls `store_interaction` to deposit receivers with metadata,
-    /// and `poll_interaction` to check for completions.
-    pub(crate) interaction_receivers: Vec<(
-        crate::application::interaction::InteractionRequestMetadata,
-        tokio::sync::oneshot::Receiver<crate::application::interaction::InteractionCompletion>,
-    )>,
-    /// #1248: Pending interaction work set by the engine for multi-interaction rounds.
-    pub(crate) pending_work: Option<crate::application::loop_engine::PendingInteractionWork>,
+    /// Loop 工作数据的唯一 owner；首批迁移 interaction continuation 工作集。
+    pub(crate) execution: crate::application::run_execution_state::RunExecutionState,
 }
 
 impl<Q, I> MainRunPort<'_, Q, I>
@@ -429,10 +359,13 @@ where
         &mut self,
         cause: crate::ports::FinalizeCause,
     ) -> Result<(), LoopEngineError> {
-        let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
+        let (Some(request), Some(window)) = (
+            self.execution.context_request(),
+            self.execution.context_window(),
+        ) else {
             return Ok(());
         };
-        let messages = self.step_messages.outcome();
+        let messages = self.execution.step_outcome();
         self.context_coordinator()
             .append_finalized(
                 request,
@@ -445,7 +378,7 @@ where
             )
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        self.step_messages.committed();
+        self.execution.commit_step_messages();
         Ok(())
     }
 
@@ -542,22 +475,23 @@ where
     async fn invoke_model_impl(
         &mut self,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
-        if self.context_window.is_none() {
-            if let Some(request) = &self.context_request {
+        if self.execution.context_window().is_none() {
+            if let Some(request) = self.execution.context_request() {
                 let window = self
                     .context_coordinator()
                     .build_window(request)
                     .await
                     .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-                self.context_window = Some(window);
+                *self.execution.context_window_mut() = Some(window);
             }
         }
         let window = self
-            .context_window
-            .clone()
+            .execution
+            .context_window()
+            .cloned()
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
         self.task_reminder_state
-            .update_from_messages(self.turn_count as u64, &window.messages);
+            .update_from_messages(self.execution.turn_count() as u64, &window.messages);
         let ctx =
             crate::application::loop_engine::llm_strategy::extract_invocation_context(&window);
         log_llm_input(
@@ -695,7 +629,7 @@ where
 
         let token_usage = crate::application::loop_engine::llm_strategy::build_step_token_usage(
             &resp,
-            request_context_size(self.context_request.as_ref()) as u64,
+            request_context_size(self.execution.context_request()) as u64,
             window.token_estimation.system_tokens,
             window.token_estimation.tool_schema_tokens,
             window.token_estimation.message_tokens,
@@ -710,12 +644,14 @@ where
                 elapsed_secs: api_elapsed,
             })
             .await;
-        self.messages.push(resp.assistant_message.clone());
-        self.step_messages.record(resp.assistant_message.clone());
+        self.execution
+            .append_message(resp.assistant_message.clone());
+        self.execution
+            .record_step_message(resp.assistant_message.clone());
         self.runtime_context
             .event_sink()
             .send_event(RuntimeStreamEvent::TurnStarted {
-                messages: self.messages.clone(),
+                messages: self.execution.messages_snapshot(),
             })
             .await;
 
@@ -743,7 +679,7 @@ where
         // Loop engine — adapter no longer calls observe directly.
         if should_run_turn_reflection(
             self.memory_config(),
-            self.turn_count,
+            self.execution.turn_count(),
             !calls.is_empty(),
             &resp.stop_reason,
             false,
@@ -751,8 +687,8 @@ where
             let _ = submit_interval_reflection(
                 self.reflection_tasks,
                 self.memory_config(),
-                self.turn_count,
-                &self.messages,
+                self.execution.turn_count(),
+                self.execution.messages(),
                 self.binding(),
                 self.system_prompt_text,
                 self.language,
@@ -858,12 +794,12 @@ where
                     self.session_id,
                 )
                 .await;
-                self.messages.push(tool_results.clone());
-                self.step_messages.record(tool_results);
+                self.execution.append_message(tool_results.clone());
+                self.execution.record_step_message(tool_results);
                 self.runtime_context
                     .event_sink()
                     .send_event(RuntimeStreamEvent::PostToolExecutionSync {
-                        messages: self.messages.clone(),
+                        messages: self.execution.messages_snapshot(),
                     })
                     .await;
                 if has_task_mutation {
@@ -932,12 +868,12 @@ where
         });
         let tool_results =
             tool_results_for_api(self.tool_result_materializer, all_results, self.session_id).await;
-        self.messages.push(tool_results.clone());
-        self.step_messages.record(tool_results);
+        self.execution.append_message(tool_results.clone());
+        self.execution.record_step_message(tool_results);
         self.runtime_context
             .event_sink()
             .send_event(RuntimeStreamEvent::PostToolExecutionSync {
-                messages: self.messages.clone(),
+                messages: self.execution.messages_snapshot(),
             })
             .await;
         if has_task_mutation {
@@ -960,7 +896,7 @@ where
             self.hook_runner(),
             &agent.runtime_cancellation,
             raw_calls.len(),
-            self.turn_count,
+            self.execution.turn_count(),
             &self.current_cwd(),
         )
         .await;
@@ -1025,32 +961,36 @@ where
         // inject the feedback as a system-prefix message.
         let feedback = self.input_strategy.pending_stop_hook_feedback.take();
         let has_stop_hook_feedback = feedback.is_some();
-        let _pending_messages = self.step_messages.freeze(feedback, inputs);
+        self.execution
+            .freeze_step_input_messages(feedback, loop_input_messages(inputs));
         if has_stop_hook_feedback {
-            self.messages
-                .extend(inputs.iter().map(|input| Message::user(input.text.clone())));
+            self.execution
+                .extend_messages(inputs.iter().map(|input| Message::user(input.text.clone())));
         }
         // #1272 per-turn drain identity: collect (InputId, Message) pairs
         // for UserMessagesAdopted emission after durable accept succeeds.
-        self.per_turn_adopted = inputs
-            .iter()
-            .filter_map(|input| {
-                input.input_id.as_ref().map(|id| {
-                    let message = if input.images.is_empty() {
-                        Message::user(input.text.clone())
-                    } else {
-                        super::super::input_gate::user_message_with_images(
-                            input.text.clone(),
-                            input.images.clone(),
-                        )
-                    };
-                    (id.clone(), message)
+        self.execution.replace_adopted_input(
+            inputs
+                .iter()
+                .filter_map(|input| {
+                    input.input_id.as_ref().map(|id| {
+                        let message = if input.images.is_empty() {
+                            Message::user(input.text.clone())
+                        } else {
+                            super::super::input_gate::user_message_with_images(
+                                input.text.clone(),
+                                input.images.clone(),
+                            )
+                        };
+                        (id.clone(), message)
+                    })
                 })
-            })
-            .collect();
-        if !self.per_turn_adopted.is_empty() {
+                .collect(),
+        );
+        if !self.execution.adopted_input().is_empty() {
             let input_ids: Vec<_> = self
-                .per_turn_adopted
+                .execution
+                .adopted_input()
                 .iter()
                 .map(|(id, _)| id.as_str().to_string())
                 .collect();
@@ -1060,21 +1000,23 @@ where
                 self.run_id,
                 step_id,
                 input_ids,
-                self.per_turn_adopted.len()
+                self.execution.adopted_input().len()
             );
         }
-        self.context_request = Some(self.freeze_request(step_id, self.step_messages.outcome()));
-        self.context_window = None;
+        self.execution.replace_context_projection(
+            self.freeze_request(step_id, self.execution.step_outcome()),
+            None,
+        );
     }
 
     async fn accept_step_input(&mut self, step_id: &RunStepId) -> Result<(), LoopEngineError> {
-        let accepted = self.step_messages.accepted_user_messages();
+        let accepted = self.execution.accepted_input_snapshot();
         if accepted.is_empty() {
             return Ok(());
         }
         let request = self
-            .context_request
-            .as_ref()
+            .execution
+            .context_request()
             .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
         debug_assert_eq!(&request.step_id, step_id);
         self.context_coordinator()
@@ -1085,7 +1027,7 @@ where
         // #1272 per-turn drain identity: emit UserMessagesAdopted strictly
         // after durable accept succeeds. The TUI uses this to clear queued
         // placeholders by input_id and append formal user messages.
-        let adopted = std::mem::take(&mut self.per_turn_adopted);
+        let adopted = self.execution.take_adopted_input();
         if !adopted.is_empty() {
             let queued = self
                 .input_strategy
@@ -1140,11 +1082,11 @@ where
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
         let (needed, window) =
             crate::application::loop_engine::shared::needs_compaction_with_window(
-                self.context_request.as_ref(),
+                self.execution.context_request(),
                 &self.context_coordinator(),
             )
             .await?;
-        self.context_window = Some(window);
+        *self.execution.context_window_mut() = Some(window);
         Ok(needed)
     }
 
@@ -1154,23 +1096,24 @@ where
         // PreCompact reflection; the recent tail stays in `recent_messages` and
         // is observable by the next LLM turn without going through Memory.
         let pre_compact_snapshot: Vec<share::message::Message> = self
-            .context_window
-            .as_ref()
+            .execution
+            .context_window()
             .map(|window| {
                 context::compact::messages_selected_for_precompact_memory(&window.messages)
             })
             .unwrap_or_default();
         let source_revision = self
-            .context_window
-            .as_ref()
+            .execution
+            .context_window()
             .map(|window| window.backing_revision)
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
+        let request = self.execution.context_request().cloned();
         let outcome = compact_core(
-            self.context_request.as_ref(),
+            request.as_ref(),
             source_revision,
             &self.context_coordinator(),
             &self.runtime_context.usage(),
-            &mut self.context_window,
+            self.execution.context_window_mut(),
         )
         .await?;
         // Production PreCompact reflection trigger (#1284): only the success
@@ -1252,14 +1195,14 @@ where
                 let msg =
                     share::message::Message::stop_hook_feedback(llm_text, feedback_msg.payload);
                 self.input_strategy.stop_hook_feedback = Some(msg.clone());
-                self.step_messages.record(msg.clone());
-                self.messages.push(msg);
+                self.execution.record_step_message(msg.clone());
+                self.execution.append_message(msg);
 
                 // Emit UI event.
                 self.runtime_context
                     .event_sink()
                     .send_event(RuntimeStreamEvent::StopHookBlocked {
-                        messages: self.messages.clone(),
+                        messages: self.execution.messages_snapshot(),
                     })
                     .await;
 
@@ -1281,7 +1224,7 @@ where
     }
 
     async fn finalize_step(&mut self, step_id: &RunStepId) -> Result<(), LoopEngineError> {
-        let Some(request) = &self.context_request else {
+        let Some(request) = self.execution.context_request() else {
             return Ok(());
         };
         debug_assert_eq!(&request.step_id, step_id);
@@ -1293,7 +1236,7 @@ where
         &mut self,
         step_id: &RunStepId,
     ) -> Result<(), LoopEngineError> {
-        let Some(request) = &self.context_request else {
+        let Some(request) = self.execution.context_request() else {
             return Ok(());
         };
         debug_assert_eq!(&request.step_id, step_id);
@@ -1338,7 +1281,8 @@ where
             crate::application::interaction::InteractionCompletion,
         >,
     ) -> Result<(), LoopEngineError> {
-        self.interaction_receivers.push((metadata, receiver));
+        self.execution
+            .store_interaction_receiver(metadata, receiver);
         Ok(())
     }
 
@@ -1349,7 +1293,7 @@ where
         // Check each stored receiver; return the first completed one.
         let mut resolved = None;
         let mut remaining = Vec::new();
-        for (metadata, mut rx) in std::mem::take(&mut self.interaction_receivers) {
+        for (metadata, mut rx) in self.execution.take_interaction_receivers() {
             match rx.try_recv() {
                 Ok(completion) => {
                     log::debug!(
@@ -1379,7 +1323,7 @@ where
                 }
             }
         }
-        self.interaction_receivers = remaining;
+        self.execution.replace_interaction_receivers(remaining);
         Ok(resolved)
     }
 
@@ -1387,7 +1331,7 @@ where
         &mut self,
         work: crate::application::loop_engine::PendingInteractionWork,
     ) {
-        self.pending_work = Some(work);
+        self.execution.set_pending_interaction_work(work);
     }
 
     async fn finish_interaction_work(
@@ -1402,7 +1346,7 @@ where
 
         // Take the current work: current item is what's being resolved,
         // queue is what remains to be started.
-        let work = self.pending_work.take();
+        let work = self.execution.take_pending_interaction_work();
         let current = work.as_ref().and_then(|w| w.current.clone());
         let remaining_queue: Vec<_> = work.as_ref().map(|w| w.queue.clone()).unwrap_or_default();
 
@@ -1442,8 +1386,8 @@ where
                         self.session_id,
                     )
                     .await;
-                    self.messages.push(msg.clone());
-                    self.step_messages.record(msg);
+                    self.execution.append_message(msg.clone());
+                    self.execution.record_step_message(msg);
                     self.mark_tool_results_pending();
                     (id.clone(), ToolCallStatus::Success)
                 } else {
@@ -1470,8 +1414,8 @@ where
                     self.session_id,
                 )
                 .await;
-                self.messages.push(msg.clone());
-                self.step_messages.record(msg);
+                self.execution.append_message(msg.clone());
+                self.execution.record_step_message(msg);
                 (id.clone(), ToolCallStatus::Cancelled)
             }
             (
@@ -1524,8 +1468,8 @@ where
                                 self.session_id,
                             )
                             .await;
-                        self.messages.push(msg.clone());
-                        self.step_messages.record(msg);
+                        self.execution.append_message(msg.clone());
+                        self.execution.record_step_message(msg);
                         self.mark_tool_results_pending();
                         let status = if outcome.is_error {
                             ToolCallStatus::Error
@@ -1551,8 +1495,8 @@ where
                                 self.session_id,
                             )
                             .await;
-                        self.messages.push(msg.clone());
-                        self.step_messages.record(msg);
+                        self.execution.append_message(msg.clone());
+                        self.execution.record_step_message(msg);
                         (id.clone(), ToolCallStatus::Error)
                     }
                 } else {
@@ -1629,9 +1573,9 @@ where
             turn_context: &self.turn_context,
             task_access: self.task_access(),
             model: &self.binding().model.model,
-            started_at: self.started_at,
-            turn_count: self.turn_count,
-            messages_snapshot: self.messages.clone(),
+            started_at: self.execution.started_at().unwrap_or_else(Instant::now),
+            turn_count: self.execution.turn_count(),
+            messages_snapshot: self.execution.messages_snapshot(),
         };
         strategy.emit(events).await
     }

@@ -15,6 +15,9 @@ pub mod model_invocation;
 pub mod prompt;
 pub mod reflection;
 pub(crate) mod run_config;
+pub mod run_execution_state;
+#[cfg(test)]
+mod run_execution_state_tests;
 pub mod run_launcher;
 pub mod runtime_context;
 pub mod runtime_context_factory;

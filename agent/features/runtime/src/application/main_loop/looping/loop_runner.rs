@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use sdk::ids::{ChatId, ChatTurnId};
 use share::message::Message;
@@ -482,7 +481,8 @@ where
                 let turn_context = RuntimeTurnContext::new(chat_id.clone(), turn_id.clone());
                 sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
                     .await;
-                let started_at = Instant::now();
+                let mut execution = crate::application::run_execution_state::RunExecutionState::with_messages_and_turn_count(messages.clone(), turn_count);
+                execution.mark_started();
                 cwd = workspace.read().current_workspace_root();
 
                 // returns Ready with user input.
@@ -571,17 +571,12 @@ where
 
                 let mut port = MainRunPort {
                     // #1385: per-run service contracts from RuntimeContext (non-Option)
-                    runtime_context: run_ctx_ref,
-                    messages: messages.clone(),
-                    step_messages: main_run_port::StepMessageOwnership::new(Vec::new()),
-                    queue: &queue,
-                    input_events: &input_events,
-                    system_prompt_text: &cacheable_system_prompt,
-                    context_request: None,
-                    context_window: None,
-                    context_size,
-                    workspace: &workspace,
-                    session_id: &session_id,
+                  runtime_context: run_ctx_ref,
+                  queue: &queue,
+                  input_events: &input_events,
+                  system_prompt_text: &cacheable_system_prompt,
+                  context_size,
+                  workspace: &workspace,                    session_id: &session_id,
                     read_files: &read_files,
                     session_reminders: &session_reminders,
                     agent_runner: &agent_runner,
@@ -603,23 +598,17 @@ where
                         pending_tool_results: false,
                         run_id: run_id.clone(),
                     },
-                    per_turn_adopted: Vec::new(),
                     run_id: run_id.clone(),
                     active_run: active_run.as_ref(),
-                    turn_count,
                     turn_context,
                     // #1385 Task 12: last_total_tokens eliminated — usage tracker from RuntimeContext.
                     task_reminder_state: &mut task_reminder_state,
                     tool_identity: &tool_identity,
-                    started_at,
                     plan_mode: false,
-                    interaction_receivers: Vec::new(),
-                    pending_work: None,
+                    execution,
                 };
-                // #1272: the idle gate consumed the user input from the channel
-                // and placed it in `messages`.  Seed the run_input_buffer with
-                // the original gate-adopted events (not synthetic) so that
-                // InputId and images are preserved through drain→freeze→adopt.
+                // #1272: The idle gate consumed the user input from the channel
+                // and placed it in `messages`. Seed the run_input_buffer with                // InputId and images are preserved through drain→freeze→adopt.
                 // This ensures drain_input returns Ready (not EmptyAndSealed)
                 // on the first drain call, and freeze_step captures the correct
                 // (InputId, Message) pairs for accept_step_input's Adopted emission.

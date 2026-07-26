@@ -3470,14 +3470,14 @@ fn freeze_empty_inputs_uses_pending_with_images() {
 /// subsequent step has empty inputs (InternalContinuation / ToolResults).
 ///
 /// Before the fix, `loop_runner` passed the same gate-adopted messages to
-/// both `RunInputBuffer` (as step input) and `StepMessageOwnership::new()`
+/// both `RunInputBuffer` (as step input) and the Run execution state's pending input
 /// (as pending). On the first step the buffer drain was non-empty, so
 /// `freeze` consumed the drained inputs and left `pending` untouched. On
 /// the next step with empty inputs (e.g., ToolResults continuation),
 /// `freeze` fell through to `pending`, re-introducing the same user
 /// messages into `accepted_input` and the LLM context.
 ///
-/// After the fix, `StepMessageOwnership::new()` receives an empty `Vec`.
+/// After the fix, the execution state starts with an empty pending input set.
 /// The gate-adopted input enters the Run exclusively via `RunInputBuffer`.
 #[test]
 fn idle_initial_input_not_replayed_on_empty_continuation_step() {
@@ -3515,7 +3515,7 @@ fn idle_initial_input_not_replayed_on_empty_continuation_step() {
         "InternalContinuation batch must be empty"
     );
 
-    // --- StepMessageOwnership lifecycle (after fix: empty pending) ---
+    // --- RunExecutionState pending-input lifecycle (after fix: empty pending) ---
     let (first_accepted, second_accepted) = fixture_two_step_accepted(
         Vec::new(),     // FIX: empty pending (not messages.clone())
         &first_inputs,  // from buffer drain
@@ -3537,7 +3537,7 @@ fn idle_initial_input_not_replayed_on_empty_continuation_step() {
         "second step must NOT replay the initial input (no stale pending)"
     );
 
-    // UserMessagesAdopted: per_turn_adopted is derived from inputs' input_id.
+    // UserMessagesAdopted: adopted input is now owned by RunExecutionState and derived from inputs' input_id.
     // First step has input_id → exactly one UserMessagesAdopted.
     // Second step has empty inputs → zero UserMessagesAdopted.
     // This proves exactly-once adoption across both steps.

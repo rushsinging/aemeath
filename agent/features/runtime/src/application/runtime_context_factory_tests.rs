@@ -14,7 +14,7 @@ use crate::application::interaction::InteractionBridge;
 use crate::application::run_config::RunConfigSnapshot;
 use crate::application::runtime_context::{
     RunCancellationScope, RunContextBindings, RunInputBufferHandle, RunUsageTracker,
-    RuntimeContext, RuntimeContextAssemblyToken, RuntimeServices,
+    RuntimeContext, RuntimeServices,
 };
 use crate::application::runtime_context_factory::RuntimeContextFactory;
 use crate::domain::agent_run::{

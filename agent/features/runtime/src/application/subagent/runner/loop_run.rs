@@ -116,21 +116,10 @@ pub(super) struct SubAgentRun<'a> {
     pub tool_schemas: Vec<serde_json::Value>,
     pub config_snapshot: share::config::domain::snapshot::ConfigSnapshot,
     pub language: String,
-    pub messages: Vec<Message>,
-    pub committed_message_count: usize,
-    /// #1385 Task 12: ContextCoordinator constructed on-demand from
-    /// runtime_context.context() — no stored copy.
-    pub context_request: Option<crate::ports::ContextRequest>,
-    pub accepted_input: Vec<Message>,
-    pub context_window: Option<crate::ports::ContextWindow>,
-    pub log_request_messages: Box<dyn Fn(usize, &[Message]) + Send + Sync + 'a>,
     pub agent: Agent,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
-    pub turn_count: usize,
     /// #1385 Task 12: last_total_tokens eliminated — usage tracker is the single source.
     pub active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
-    pub terminal: Option<AgentRunTerminal>,
-    pub start_time: std::time::Instant,
     pub session_id: String,
     pub run_id: sdk::RunId,
     pub parent_run_id: Option<sdk::RunId>,
@@ -150,13 +139,8 @@ pub(super) struct SubAgentRun<'a> {
     pub input_strategy: crate::application::loop_engine::input_strategy::SubInputStrategy<'a>,
     /// #1248 Task 5: Whether this sub-run is operating in plan mode.
     pub plan_mode: bool,
-    /// #1248 Task 5: Interaction receivers for polling completions.
-    pub interaction_receivers: Vec<(
-        crate::application::interaction::InteractionRequestMetadata,
-        tokio::sync::oneshot::Receiver<crate::application::interaction::InteractionCompletion>,
-    )>,
-    /// #1248: Pending interaction work set by the engine for multi-interaction rounds.
-    pub pending_work: Option<crate::application::loop_engine::PendingInteractionWork>,
+    /// Loop 工作数据的唯一 owner；首批迁移 interaction continuation 工作集。
+    pub execution: crate::application::run_execution_state::RunExecutionState,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -184,8 +168,11 @@ impl<'a> SubAgentRun<'a> {
             request_id: crate::ports::ContextRequestId::new(uuid::Uuid::now_v7().to_string()),
             run_id: self.run_id.clone(),
             step_id: step_id.clone(),
-            pending_messages: self.messages
-                [self.committed_message_count + self.accepted_input.len()..]
+            pending_messages: self
+                .execution
+                .messages_slice_from(
+                    self.execution.committed_message_count() + self.execution.accepted_input_len(),
+                )
                 .to_vec(),
             system_prompt: crate::ports::SystemPromptSpec::new(&self.system),
             model_id: self.model_name_for_log.clone(),
@@ -248,8 +235,8 @@ impl<'a> SubAgentRun<'a> {
         // RunDomainEvent. Keep an infrastructure fallback so finalization still
         // runs if the engine itself cannot finish a transition.
         let terminal = self
-            .terminal
-            .take()
+            .execution
+            .take_terminal()
             .unwrap_or_else(|| AgentRunTerminal::Failed {
                 error: loop_result
                     .err()
@@ -271,8 +258,8 @@ impl<'a> SubAgentRun<'a> {
                 }
                 AgentRunTerminal::Cancelled => AgentRunStatus::Cancelled,
             },
-            turns: self.turn_count,
-            duration: self.start_time.elapsed(),
+            turns: self.execution.turn_count(),
+            duration: self.execution.elapsed(),
             role: Some(self.role_name_for_log.clone()),
             model: self.model_name_for_log.clone(),
         };
@@ -294,13 +281,13 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn progress_turn_start(&self, turn_number: usize) {
-        let msg_tokens = context::compact::estimate_messages_tokens(&self.messages);
+        let msg_tokens = self.execution.message_tokens();
         (self.progress)(
             Some(turn_number),
             &format!(
                 "Agent turn {}, messages: {}, est_tokens: {}",
                 turn_number,
-                self.messages.len(),
+                self.execution.messages_len(),
                 msg_tokens
             ),
         );
@@ -308,8 +295,8 @@ impl<'a> SubAgentRun<'a> {
 
     fn log_input(&self, system_blocks: &[RequestSystemBlock], tool_schemas: &[serde_json::Value]) {
         log_llm_input(
-            &self.messages,
-            self.committed_message_count,
+            self.execution.messages(),
+            self.execution.committed_message_count(),
             system_blocks,
             tool_schemas,
             &self.role_name_for_log,
@@ -384,8 +371,8 @@ impl<'a> SubAgentRun<'a> {
     async fn invoke_model_impl(
         &mut self,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
-        self.turn_count += 1;
-        let turn_number = self.turn_count;
+        self.execution.advance_turn();
+        let turn_number = self.execution.turn_count();
         logging::within(
             logging::LogContextPatch {
                 turn: logging::FieldPatch::Set(turn_number),
@@ -394,13 +381,10 @@ impl<'a> SubAgentRun<'a> {
             },
             async move {
                 self.progress_turn_start(turn_number);
-                (self.log_request_messages)(turn_number, &self.messages);
-
-                let window = if let Some(window) = self.context_window.clone() {
+                let window = if let Some(window) = self.execution.context_window().cloned() {
                     Some(window)
-                } else if let Some(request) = &self.context_request {
-                    let coordinator = self.ctx_coordinator();
-                    Some(
+                } else if let Some(request) = self.execution.context_request() {
+                    let coordinator = self.ctx_coordinator();                    Some(
                         coordinator
                             .build_window(request)
                             .await
@@ -412,7 +396,7 @@ impl<'a> SubAgentRun<'a> {
                 let messages_for_api = window
                     .as_ref()
                     .map(|window| messages_for_llm(&window.messages))
-                    .unwrap_or_else(|| messages_for_llm(&self.messages));
+                    .unwrap_or_else(|| messages_for_llm(self.execution.messages()));
                 let (effective_blocks, raw_tool_schemas) = match &window {
                     Some(w) => {
                         let ctx = crate::application::loop_engine::llm_strategy::extract_invocation_context(w);
@@ -426,9 +410,8 @@ impl<'a> SubAgentRun<'a> {
                     .map(|window| window.tool_schemas.clone())
                     .unwrap_or_default();
                 self.log_input(&effective_blocks, &raw_tool_schemas);
-                self.context_window = window;
-                let mut coordinator =
-                    crate::application::model_invocation::ModelInvocationCoordinator::new();
+                *self.execution.context_window_mut() = window;
+                let mut coordinator =                    crate::application::model_invocation::ModelInvocationCoordinator::new();
                 let api_start = Instant::now();
                 let resp = loop {
                     let request_context = sub_request_log_context(
@@ -511,9 +494,8 @@ impl<'a> SubAgentRun<'a> {
                 self.progress_api_ok(turn_number, &resp);
 
                 let est = self
-                    .context_window
-                    .as_ref()
-                    .map(|window| &window.token_estimation);
+                    .execution
+                    .context_window()                    .map(|window| &window.token_estimation);
                 let usage = crate::application::loop_engine::llm_strategy::build_step_token_usage(
                     &resp,
                     self.ctx_context_size as u64,
@@ -522,7 +504,7 @@ impl<'a> SubAgentRun<'a> {
                     est.map_or(0, |e| e.message_tokens),
                 );
 
-                self.messages.push(resp.assistant_message.clone());
+                self.execution.append_message(resp.assistant_message.clone());
                 self.log_output(&resp, api_start.elapsed().as_secs_f64());
                 self.send_text_progress(turn_number, &resp);
 
@@ -533,7 +515,7 @@ impl<'a> SubAgentRun<'a> {
                         "turn {}: 模型响应触发 max_tokens 限制，注入分块提示",
                         turn_number,
                     );
-                    self.messages.push(Message::user(
+                    self.execution.append_message(Message::user(
                         "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
                    请基于已有内容继续，或用更紧凑的方式重新组织响应：\
                    大文件改用 Edit 分块写入（每次 < 12k 字符），\
@@ -577,7 +559,7 @@ impl<'a> SubAgentRun<'a> {
         calls: &[(crate::application::subagent::ToolCall, ToolGuardDecision)],
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
-        let turn_number = self.turn_count;
+        let turn_number = self.execution.turn_count();
         logging::within(
             logging::LogContextPatch {
                 turn: logging::FieldPatch::Set(turn_number),
@@ -633,7 +615,7 @@ impl<'a> SubAgentRun<'a> {
                 self.log_tool_results(turn_number, &results, &call_info);
                 append_tool_results(
                     self.tool_result_materializer.as_ref(),
-                    &mut self.messages,
+                    self.execution.messages_mut(),
                     results,
                     &self.session_id,
                 )
@@ -700,32 +682,34 @@ impl RunLoopPort for SubAgentRun<'_> {
         step_id: &sdk::RunStepId,
         _inputs: &[crate::application::loop_engine::LoopInput],
     ) {
-        self.accepted_input = if self.committed_message_count == 0 {
-            self.messages
-                .first()
-                .filter(|message| message.role == share::message::Role::User)
-                .cloned()
-                .into_iter()
-                .collect()
-        } else {
-            Vec::new()
-        };
-        self.context_request = Some(self.freeze_request(step_id));
-        self.context_window = None;
+        self.execution
+            .replace_accepted_input(if self.execution.committed_message_count() == 0 {
+                self.execution
+                    .messages()
+                    .first()
+                    .filter(|message| message.role == share::message::Role::User)
+                    .cloned()
+                    .into_iter()
+                    .collect()
+            } else {
+                Vec::new()
+            });
+        self.execution
+            .replace_context_projection(self.freeze_request(step_id), None);
     }
 
     async fn accept_step_input(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
         let request = self
-            .context_request
-            .as_ref()
+            .execution
+            .context_request()
             .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
         debug_assert_eq!(&request.step_id, step_id);
-        if self.accepted_input.is_empty() {
+        if self.execution.accepted_input().is_empty() {
             return Ok(());
         }
         let coordinator = self.ctx_coordinator();
         coordinator
-            .append_accepted_input(request, self.accepted_input.clone())
+            .append_accepted_input(request, self.execution.accepted_input().to_vec())
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
         Ok(())
@@ -753,11 +737,11 @@ impl RunLoopPort for SubAgentRun<'_> {
         let coordinator = self.ctx_coordinator();
         let (needed, window) =
             crate::application::loop_engine::shared::needs_compaction_with_window(
-                self.context_request.as_ref(),
+                self.execution.context_request(),
                 &coordinator,
             )
             .await?;
-        self.context_window = Some(window);
+        *self.execution.context_window_mut() = Some(window);
         Ok(needed)
     }
 
@@ -766,17 +750,18 @@ impl RunLoopPort for SubAgentRun<'_> {
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(), LoopEngineError> {
         let source_revision = self
-            .context_window
-            .as_ref()
+            .execution
+            .context_window()
             .map(|window| window.backing_revision)
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
         let coordinator = self.ctx_coordinator();
+        let request = self.execution.context_request().cloned();
         compact_core(
-            self.context_request.as_ref(),
+            request.as_ref(),
             source_revision,
             &coordinator,
             &self.runtime_context.usage(),
-            &mut self.context_window,
+            self.execution.context_window_mut(),
         )
         .await?;
         Ok(())
@@ -820,7 +805,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                 feedback.llm_text
             );
             let msg = share::message::Message::stop_hook_feedback(llm_text, feedback.payload);
-            self.messages.push(msg);
+            self.execution.append_message(msg);
             // Sub-event sink is a noop, but we still push the message.
         }
 
@@ -828,12 +813,19 @@ impl RunLoopPort for SubAgentRun<'_> {
     }
 
     async fn finalize_step(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
-        let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
+        let (Some(request), Some(window)) = (
+            self.execution.context_request(),
+            self.execution.context_window(),
+        ) else {
             return Ok(());
         };
         debug_assert_eq!(&request.step_id, step_id);
-        let messages =
-            self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
+        let messages = self
+            .execution
+            .messages_slice_from(
+                self.execution.committed_message_count() + self.execution.accepted_input_len(),
+            )
+            .to_vec();
         let coordinator = self.ctx_coordinator();
         coordinator
             .append_finalized(
@@ -847,7 +839,7 @@ impl RunLoopPort for SubAgentRun<'_> {
             )
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        self.committed_message_count = self.messages.len();
+        self.execution.commit_all_messages();
         Ok(())
     }
 
@@ -855,12 +847,19 @@ impl RunLoopPort for SubAgentRun<'_> {
         &mut self,
         step_id: &sdk::RunStepId,
     ) -> Result<(), LoopEngineError> {
-        let (Some(request), Some(window)) = (&self.context_request, &self.context_window) else {
+        let (Some(request), Some(window)) = (
+            self.execution.context_request(),
+            self.execution.context_window(),
+        ) else {
             return Ok(());
         };
         debug_assert_eq!(&request.step_id, step_id);
-        let messages =
-            self.messages[self.committed_message_count + self.accepted_input.len()..].to_vec();
+        let messages = self
+            .execution
+            .messages_slice_from(
+                self.execution.committed_message_count() + self.execution.accepted_input_len(),
+            )
+            .to_vec();
         let coordinator = self.ctx_coordinator();
         coordinator
             .append_finalized(
@@ -874,7 +873,7 @@ impl RunLoopPort for SubAgentRun<'_> {
             )
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        self.committed_message_count = self.messages.len();
+        self.execution.commit_all_messages();
         Ok(())
     }
 
@@ -902,7 +901,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         // #1248: Publish real progress event via parent UI event seam,
         // not just a debug string. The parent TUI picks these up.
         (self.progress)(
-            Some(self.turn_count),
+            Some(self.execution.turn_count()),
             &format!("Interaction: id={}", request.id),
         );
         Ok(())
@@ -915,7 +914,8 @@ impl RunLoopPort for SubAgentRun<'_> {
             crate::application::interaction::InteractionCompletion,
         >,
     ) -> Result<(), LoopEngineError> {
-        self.interaction_receivers.push((metadata, receiver));
+        self.execution
+            .store_interaction_receiver(metadata, receiver);
         Ok(())
     }
 
@@ -925,7 +925,7 @@ impl RunLoopPort for SubAgentRun<'_> {
     {
         let mut resolved = None;
         let mut remaining = Vec::new();
-        for (metadata, mut rx) in std::mem::take(&mut self.interaction_receivers) {
+        for (metadata, mut rx) in self.execution.take_interaction_receivers() {
             match rx.try_recv() {
                 Ok(completion) => {
                     log::debug!(
@@ -955,7 +955,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                 }
             }
         }
-        self.interaction_receivers = remaining;
+        self.execution.replace_interaction_receivers(remaining);
         Ok(resolved)
     }
 
@@ -963,7 +963,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         &mut self,
         work: crate::application::loop_engine::PendingInteractionWork,
     ) {
-        self.pending_work = Some(work);
+        self.execution.set_pending_interaction_work(work);
     }
 
     async fn finish_interaction_work(
@@ -977,7 +977,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         use crate::domain::agent_run::InteractionContinuation;
 
         // Take the current work: current item resolves, queue stays for next.
-        let work = self.pending_work.take();
+        let work = self.execution.take_pending_interaction_work();
         let current = work.as_ref().and_then(|w| w.current.clone());
         let remaining_queue: Vec<_> = work.as_ref().map(|w| w.queue.clone()).unwrap_or_default();
 
@@ -1009,7 +1009,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                         ToolExecution::from_parts(id.clone(), provider_id, tool_name, outcome);
                     append_tool_results(
                         self.tool_result_materializer.as_ref(),
-                        &mut self.messages,
+                        self.execution.messages_mut(),
                         vec![execution],
                         &self.session_id,
                     )
@@ -1034,7 +1034,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                     ToolExecution::from_parts(id.clone(), provider_id, tool_name, outcome);
                 append_tool_results(
                     self.tool_result_materializer.as_ref(),
-                    &mut self.messages,
+                    self.execution.messages_mut(),
                     vec![execution],
                     &self.session_id,
                 )
@@ -1077,7 +1077,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                         );
                         append_tool_results(
                             self.tool_result_materializer.as_ref(),
-                            &mut self.messages,
+                            self.execution.messages_mut(),
                             vec![execution],
                             &self.session_id,
                         )
@@ -1101,7 +1101,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                         );
                         append_tool_results(
                             self.tool_result_materializer.as_ref(),
-                            &mut self.messages,
+                            self.execution.messages_mut(),
                             vec![execution],
                             &self.session_id,
                         )
@@ -1141,7 +1141,10 @@ impl RunLoopPort for SubAgentRun<'_> {
         &mut self,
         decision: &crate::application::loop_engine::StuckDecision,
     ) -> Result<(), LoopEngineError> {
-        (self.progress)(Some(self.turn_count), &format!("StuckGuard: {decision:?}"));
+        (self.progress)(
+            Some(self.execution.turn_count()),
+            &format!("StuckGuard: {decision:?}"),
+        );
         Ok(())
     }
 
@@ -1154,10 +1157,11 @@ impl RunLoopPort for SubAgentRun<'_> {
     }
 
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+        let turn_count = self.execution.turn_count();
         let mut strategy = SubEventStrategy {
             progress: &*self.progress,
-            terminal: &mut self.terminal,
-            turn_count: self.turn_count,
+            terminal: self.execution.terminal_mut(),
+            turn_count,
         };
         strategy.emit(events).await
     }
