@@ -329,7 +329,88 @@ struct RuntimeAssembly {
 }
 ```
 
-`RuntimeServices` 与 factory contracts 只暴露 Runtime 需要的窄能力，不暴露供应 BC concrete constructors。Composition 可以持有 Project、Context、Task、Config 的 opaque wiring 和 lease；这些对象 **NEVER** 进入 `RunPreparationRequest`、`RuntimeContext`、`RunExecutionState` 或 Tool/SDK Published Language。
+```rust
+// Composition 只实现 Runtime-owned contract；具体 wiring 不穿越边界。
+fn compose_runtime(graph: CompositionGraph) -> RuntimeAssembly {
+    let wiring = graph.build_opaque_wiring();
+    let services = RuntimeServices::from_factories(
+        ProviderBindingFactoryImpl::new(wiring.provider),
+        ContextBindingFactoryImpl::new(wiring.context),
+        ToolBindingFactoryImpl::new(wiring.tools),
+        InteractionBindingFactoryImpl::new(wiring.interaction),
+        HookBindingFactoryImpl::new(wiring.hooks),
+        WorkspaceBindingFactoryImpl::new(wiring.workspace),
+    );
+    RuntimeAssembly::new(
+        services.clone(),
+        Arc::new(RuntimeContextFactoryImpl::new(services)),
+        SessionState::restore(wiring.session_store),
+    )
+}
+
+// Runtime application 决定 capability mode，不创建 adapter。
+async fn launch_run(
+    assembly: &RuntimeAssembly,
+    session: &SessionState,
+    parent: Option<ParentRunCapabilities>,
+    input: InitialRunInput,
+) -> Result<AgentRunTerminal, RunError> {
+    let request = RunPreparationRequest {
+        spec: RunSpec::from_input_and_parent(&input, parent.as_ref())?,
+        session: session.snapshot_for_run()?,
+        parent,
+        initial_input: input,
+    };
+    let prepared = assembly.factory.prepare(request).await?;
+    loop_engine::run_loop(
+        &mut prepared.run,
+        &mut prepared.execution,
+        &prepared.context,
+    ).await
+}
+```
+
+`launch_run` 是唯一的调用链：入站 args → typed bootstrap → Session snapshot → RunSpec → `RunPreparationRequest` → factory `prepare` → `PreparedRun` → Loop Engine。任何调用方直接构造 Provider、Tool、Interaction、Hook、Workspace 或 `RuntimeContext`，都表示绕过 IoC；任何按 Main/Sub 选择 assembler 的路径，都表示重新引入角色化 Composition Root。
+
+### 3.1 IoC 合同与验证伪代码
+
+```rust
+#[test]
+fn composition_implements_runtime_contract_without_leaking_wiring() {
+    let assembly = compose_runtime(test_graph());
+    let prepared = block_on(assembly.factory.prepare(root_request())).unwrap();
+    assert!(prepared.context.has_provider());
+    assert!(!prepared.context.exposes_composition_wiring());
+}
+
+#[test]
+fn child_preparation_cannot_expand_parent_capabilities() {
+    let parent = parent_capabilities_with_tool_scope(ToolScope::ReadOnly);
+    let request = child_request(parent).with_tool_scope(ToolScope::Write);
+    assert!(matches!(prepare(request), Err(RunPreparationError::CapabilityExceeded)));
+}
+
+#[test]
+fn parent_mediated_interaction_is_child_scoped() {
+    let child_a = prepare_child("a");
+    let child_b = prepare_child("b");
+    let request_a = child_a.request_interaction();
+    let request_b = child_b.request_interaction();
+    assert_ne!(request_a.route_key(), request_b.route_key());
+    assert!(child_a.cancel(request_a.id()).is_ok());
+    assert!(child_b.is_pending(request_b.id()));
+}
+
+#[test]
+fn boundary_only_hook_rejects_tool_invocation() {
+    let hooks = prepare_with_hook(HookBindingMode::BoundaryOnly);
+    assert!(matches!(hooks.invoke(HookEvent::PreToolUse),
+        Err(HookError::InvocationNotAllowed)));
+    assert!(hooks.invoke(HookEvent::ChildStarted).is_ok());
+}
+```
+
+测试伪代码要求每个断言绑定一个 IoC 不变量：Composition 实现契约、Factory 执行能力选择、ParentMediated 隔离 identity、BoundaryOnly 在 adapter 入口过滤；不能只用最终 Loop 测试替代这些相邻契约。
 
 Run 准备时，Runtime bootstrap/application 从 `SessionState` 捕获一致的 `SessionSnapshot`；若为派生 Run，只提供受限 `ParentRunCapabilities`。Factory 实现可借助 composition-private wiring 获得 lease、派生 workspace、打开 Context/Memory、构造 Provider/Tool/Hook adapter，但返回给 Runtime 的只有冻结能力。lease 必须由返回 capability 的生命周期守卫持有，调用方不能单独缓存或释放。
 

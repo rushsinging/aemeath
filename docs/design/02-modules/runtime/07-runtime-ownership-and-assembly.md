@@ -215,6 +215,140 @@ Loop Engine 的顺序是：先请求 `Run` 完成合法状态迁移，再更新 
 
 `RuntimeContextFactory` 是 Runtime application 定义的应用服务，也是唯一允许构造 `RuntimeContext` 的入口。Composition 注入它所消费的窄 factory/port 实现，但不得拥有 `RunSpec` 的能力决策。
 
+### 5.0 IoC 端到端伪代码
+
+下面的伪代码描述的是职责和数据流，不是要求照抄的 Rust API。关键约束是：Composition 负责“有哪些实现和 wiring”，Runtime application 负责“本次 Run 需要什么能力”，Factory 负责“把声明转换为受限 capability”；三者不能越界。
+
+```rust
+// 1. Composition Root：只在 agent/composition 创建具体实现和 opaque wiring。
+fn compose_runtime(graph: CompositionGraph) -> RuntimeAssembly {
+    let wiring = graph.build_opaque_wiring();
+    let services = RuntimeServices::new(
+        ProviderBindingFactoryImpl::new(wiring.provider),
+        ContextBindingFactoryImpl::new(wiring.context),
+        ToolBindingFactoryImpl::new(wiring.tools),
+        InteractionBindingFactoryImpl::new(wiring.interaction),
+        HookBindingFactoryImpl::new(wiring.hooks),
+        WorkspaceBindingFactoryImpl::new(wiring.workspace),
+    );
+    let factory = RuntimeContextFactoryImpl::new(services.clone());
+
+    RuntimeAssembly {
+        services,
+        factory: Arc::new(factory),
+        session_wiring: wiring.session,
+    }
+}
+
+// 2. Runtime bootstrap：从入站 args 得到 typed request，初始化 SessionState；
+//    不创建 Provider、Tool、Hook、Workspace 或 RuntimeContext。
+async fn bootstrap_runtime(
+    request: BootstrapRequest,
+    assembly: &RuntimeAssembly,
+) -> Result<AgentRuntime, BootstrapError> {
+    let session = SessionState::restore(
+        assembly.services.session_store(),
+        request.session_identity,
+    ).await?;
+    Ok(AgentRuntime::new(assembly.factory.clone(), session))
+}
+
+// 3. Runtime application：在业务时机取得一致快照，并仅声明能力模式。
+async fn prepare_root_run(
+    runtime: &mut AgentRuntime,
+    input: InitialRunInput,
+) -> Result<PreparedRun, RunPreparationError> {
+    let snapshot = runtime.session.snapshot_for_run()?;
+    let spec = RunSpec::for_purpose(RunPurpose::Interactive)
+        .with_input_mode(InputMode::LiveSession)
+        .with_interaction(InteractionBindingMode::Client)
+        .with_hook(HookBindingMode::Full);
+
+    runtime.factory.prepare(RunPreparationRequest {
+        spec,
+        session: snapshot,
+        parent: None,
+        initial_input: input,
+    }).await
+}
+
+// 4. 派生 Run 使用同一个入口；parent 只提供受限 capability view。
+async fn prepare_child_run(
+    runtime: &mut AgentRuntime,
+    parent: &PreparedRun,
+    input: InitialRunInput,
+) -> Result<PreparedRun, RunPreparationError> {
+    let snapshot = runtime.session.snapshot_for_run()?;
+    let parent_caps = parent.run.child_capabilities();
+    let spec = RunSpec::for_purpose(RunPurpose::AgentTask)
+        .with_parent(parent.run.id())
+        .with_interaction(InteractionBindingMode::ParentMediated)
+        .with_hook(HookBindingMode::BoundaryOnly)
+        .with_capability_ceiling(parent_caps.ceiling());
+
+    runtime.factory.prepare(RunPreparationRequest {
+        spec,
+        session: snapshot,
+        parent: Some(parent_caps),
+        initial_input: input,
+    }).await
+}
+
+// 5. Factory：校验声明、选择 adapter、原子地产生三件 per-Run 对象。
+async fn prepare(
+    &self,
+    request: RunPreparationRequest,
+) -> Result<PreparedRun, RunPreparationError> {
+    let parent_ceiling = request.parent.as_ref().map(|p| p.capabilities());
+    request.spec.validate_against(parent_ceiling)?;
+
+    let interaction = match request.spec.interaction_mode {
+        InteractionBindingMode::Client =>
+            self.services.interaction.bind_client(request.session.clone()).await?,
+        InteractionBindingMode::ParentMediated =>
+            self.services.interaction.bind_parent_mediated(
+                request.parent.ok_or(MissingParent)?,
+            ).await?,
+        InteractionBindingMode::Unavailable =>
+            self.services.interaction.bind_unavailable(),
+    };
+    let hooks = match request.spec.hook_mode {
+        HookBindingMode::Full =>
+            self.services.hooks.bind_full(request.spec.hook_scope).await?,
+        HookBindingMode::BoundaryOnly =>
+            self.services.hooks.bind_boundary_only(parent_ceiling).await?,
+        HookBindingMode::Disabled => self.services.hooks.bind_disabled(),
+    };
+
+    let context = RuntimeContext::private_new(
+        self.services.provider.bind(&request.spec, &request.session).await?,
+        self.services.context.bind(&request.spec, &request.session).await?,
+        self.services.tools.bind_restricted(&request.spec, parent_ceiling).await?,
+        interaction,
+        hooks,
+        self.services.workspace.bind(&request.spec, &request.session).await?,
+        request.session.run_config_snapshot(),
+    );
+    let run = Run::new(request.spec, request.initial_input.clone());
+    let execution = RunExecutionState::from_initial_input(run.id(), request.initial_input);
+    Ok(PreparedRun { run, context, execution })
+}
+
+// 6. Loop Engine 只消费已绑定能力，不回调 adapter 决定业务流程。
+async fn execute(prepared: PreparedRun) -> Result<AgentRunTerminal, RunExecutionError> {
+    let PreparedRun { mut run, mut execution, context } = prepared;
+    loop_engine::run_loop(&mut run, &mut execution, &context).await
+}
+```
+
+伪代码表达的 IoC 边界：
+
+- `compose_runtime` 可以选择实现，但不能解析 `RunSpec` 决定能力升降；
+- `prepare_root_run` / `prepare_child_run` 可以声明模式，但不能 `new` 具体 Port；
+- `prepare` 可以按模式创建 capability adapter，但不能执行 Loop、恢复 Session 或持久化 Step；
+- `execute` 只能使用 `PreparedRun`，不能重新装配 Context，也不能按 Main/Sub 分支；
+- `RuntimeContext::private_new` 必须只对 factory 可达，失败时不得返回半装配的 `PreparedRun`。
+
 ### 5.1 输入与输出
 
 调用方只提交纯值准备请求：
