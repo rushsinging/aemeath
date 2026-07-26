@@ -121,6 +121,79 @@ flowchart TB
 
 ## 2. Run 聚合
 
+### 2.1 Run 状态机转换图
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle: RuntimeContextFactory.prepare
+    Idle --> DrainingInput: RunLauncher.launch
+
+    DrainingInput --> PreparingContext: Ready(batch) / InternalContinuation
+    DrainingInput --> AwaitingInput: Open + NoInput
+    AwaitingInput --> DrainingInput: UserMessage 到达
+    DrainingInput --> Completed: EmptyAndSealed
+
+    PreparingContext --> Compacting: needs_compaction
+    Compacting --> PreparingContext: compact 完成
+    PreparingContext --> InvokingModel: context ready
+    InvokingModel --> InvokingModel: retryable error / backoff
+    InvokingModel --> Compacting: context exceeded
+    InvokingModel --> ApplyingResponse: completion
+
+    ApplyingResponse --> AwaitingToolApproval: tool calls
+    ApplyingResponse --> AwaitingInteraction: plan approval request
+    ApplyingResponse --> FinalizingStep: end turn
+
+    AwaitingToolApproval --> ExecutingTools: policy / hook 全部放行
+    AwaitingToolApproval --> AwaitingInteraction: manual approval request
+    ExecutingTools --> AwaitingInteraction: tool suspension / hard pause
+    AwaitingInteraction --> AwaitingToolApproval: approval reply + continuation
+    AwaitingInteraction --> ExecutingTools: tool / hard-pause reply + continuation
+    AwaitingInteraction --> Failed: terminal cancellation / unavailable
+    ExecutingTools --> FinalizingStep: tool round 完成
+
+    FinalizingStep --> DrainingInput: step committed / continue
+    FinalizingStep --> Failed: fatal finalization error / stop retry exhausted
+
+    PreparingContext --> CancellingStep: CancelRunStep
+    Compacting --> CancellingStep: CancelRunStep
+    InvokingModel --> CancellingStep: CancelRunStep
+    ApplyingResponse --> CancellingStep: CancelRunStep
+    AwaitingToolApproval --> CancellingStep: CancelRunStep
+    ExecutingTools --> CancellingStep: CancelRunStep
+    AwaitingInteraction --> CancellingStep: CancelRunStep
+    CancellingStep --> FinalizingStep: deterministic receipts / deadline
+
+    Idle --> Terminating: TerminateRun
+    DrainingInput --> Terminating: TerminateRun
+    AwaitingInput --> Terminating: TerminateRun
+    PreparingContext --> Terminating: TerminateRun
+    Compacting --> Terminating: TerminateRun
+    InvokingModel --> Terminating: TerminateRun
+    ApplyingResponse --> Terminating: TerminateRun
+    AwaitingToolApproval --> Terminating: TerminateRun
+    ExecutingTools --> Terminating: TerminateRun
+    AwaitingInteraction --> Terminating: TerminateRun
+    CancellingStep --> Terminating: TerminateRun
+    FinalizingStep --> Terminating: TerminateRun
+    Terminating --> Terminated: StepFinalizer + Session flush
+
+    Completed --> [*]
+    Failed --> [*]
+    Terminated --> [*]
+```
+
+图中状态分为四组：
+
+- **输入生命周期**：`Idle → DrainingInput ↔ AwaitingInput`；只消费 InputQueue，不处理 interaction reply。
+- **Step 主流程**：`PreparingContext → Compacting / InvokingModel → ApplyingResponse → Tool / Interaction → FinalizingStep`。
+- **结构化交互暂停**：`AwaitingInteraction { request_id }` 只由匹配 `run_id + request_id` 的 reply/cancel 恢复，并按保存的 typed continuation 回到原工作阶段。
+- **控制旁路**：`CancelRunStep` 收口当前 Step 后回到 `DrainingInput`；`TerminateRun` 从任意非终态进入 `Terminating`，最终只能到 `Terminated`。
+
+`Completed`、`Failed`、`Terminated` 是唯一终态。所有领域 mutation 后必须立即发布对应事件；图中的边表示 Run 聚合允许的转换，不表示 Port 或 adapter 可以自行迁移状态。
+
+### 2.2 聚合结构
+
 ```rust
 // —— 聚合根 ——
 struct Run {
@@ -204,7 +277,7 @@ enum StopHookBlockResult {
 
 **实体 vs VO**：Run（聚合根）/ Run Step / Tool Call = 实体；Model Invocation = VO；`RunId/RunStepId/ToolCallId`、各 `*Status`、`UsageSnapshot`、`ToolCallArgs`、`ToolResult`、`ReasoningLevel` = VO。
 
-### 2.1 Usage 标准化边界
+### 2.3 Usage 标准化边界
 
 Provider ACL **MUST** 在 `InvocationResponse` 进入 Runtime 前完成 token 口径归一化：
 
@@ -231,7 +304,7 @@ Provider ACL **MUST** 在 `InvocationResponse` 进入 Runtime 前完成 token �
 
 ## 4. 领域事件（→ Event Projection → SDK ChatEvent）
 
-`RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser{request_id}/Resumed{request_id} · CompactionStarted/Completed · StuckDetected · RunStepCancellationRequested · RunStepFinalizationStarted · RunStepCancelled{confirmed} · RunDrainingInput · RunTerminationRequested{reason,deadline} · RunCompleted/Failed/Terminated{reason}`
+`RunStarted · RunDrainingInput · RunAwaitingInput/RunInputResumed · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunInteractionRequested{request_id}/RunInteractionResumed{request_id} · CompactionStarted/Completed · StuckDetected · RunStepCancellationRequested · RunStepFinalizationStarted · RunStepCancelled{confirmed} · RunTerminationRequested{reason,deadline} · RunCompleted/Failed/Terminated{reason}`
 
 > **Step 取消与 Run 终止分离**：`RunStepCancellationRequested` 在同步入口接受 `CancelRunStep` 时产生；`RunStepFinalizationStarted` / `RunStepCancelled` 描述确定性收口，随后 `RunDrainingInput`。`RunTerminationRequested` 在接受 `TerminateRun` 时产生，最终只有 `RunTerminated`。迁移期旧 `RunCancellationRequested/RunCancelled` 只用于现有生产兼容路径，必须由 #878/#879 与旧 `cancel_run` 一并退役。
 
@@ -464,7 +537,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-11 | 初稿：Run 聚合 + RunSpec + RuntimeContext 三元组、不变量、领域事件、控制权矩阵、安全铁律、差异矩阵 | #761 |
-| 2026-07-11 | RuntimeContext 补入站端口 input（InputBuffer）；澄清 result 不进 RuntimeContext | #761 |
+| 2026-07-11 | RuntimeContext 补入站 Port（InputQueue）；澄清 result 不进 RuntimeContext | #761 |
 | 2026-07-11 | output/result 定案：统一经 EventSink，result 为 RunCompleted 载荷（无独立 RunResult），靠终态事件识别 | #761 |
 | 2026-07-11 | 领域事件补终态族对称载荷（RunFailed{error} / RunCancelled）+ ModelInvocationRetrying | #761 |
 | 2026-07-12 | 取消语义收敛：per-Run cancellation scope、Cancelling 不变量、取消请求/完成双事件 | #700 |

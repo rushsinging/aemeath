@@ -6,55 +6,50 @@
 
 ## 1. Run 状态机（唯一，内存态）
 
-```
-DrainingInput
-  ├── Ready ──▶ PreparingContext ──▶ InvokingModel ──▶ ApplyingResponse
-  │              ▲                                     │
-  │              │ needs_compact            ┌──────────┴──────────┐
-  │              ▼                        有 ToolCall           无 ToolCall
-  │          Compacting                     │                    │
-  │              │                          ▼                    ▼
-  │              └─────────────▶ AwaitingToolApproval    ContinueAfterResponse
-  │                                         │                    │
-  │                                         ▼                    ▼
-  │                                  ExecutingTools          DrainingInput
-  │                                     │       │
-  │                              结果回收完   AwaitUser
-  │                                     │       │
-  │                                     ▼       ▼
-  │                              ToolsCompleted  AwaitingUser
-  │                                     │       │
-  │                                     ▼       │ (reply→UserResumed)
-  │                               DrainingInput ◀┘
-  │
-  ├── InternalContinuation(kind) ──▶ PreparingContext
-  ├── NoInput ──▶ AwaitUser（epoch 不推进、buffer 不 seal）
-  └── EmptyAndSealed ──▶ Completed
+完整 Mermaid 状态转换图及聚合不变量见 [领域模型 §2.1](01-domain-model.md#21-run-状态机转换图)。本章专注转换条件、Loop 编排顺序和异常收口，不维护第二份图形真相。
 
-AwaitingUser 收到匹配 reply 后按 continuation 回到
-AwaitingToolApproval / ExecutingTools / PreparingContext 之一。
-但恢复后 Run 状态迁移是 UserResumed → DrainingInput → drain_or_seal → 下一 Step。
+状态主干：
 
-Step 打断旁路：任意 active Step 态 ── CancelRunStep ──▶ CancellingStep
-               ── 确定性收口 + 持久化 ──▶ DrainingInput
-Run 终止旁路：任意非终态 ── TerminateRun ──▶ Terminating
-               ── 同一 StepFinalizer + Session flush ──▶ Terminated
-失败终态：Failed
+```text
+Idle → DrainingInput ⇄ AwaitingInput
+              │ Ready / InternalContinuation
+              ▼
+      PreparingContext ⇄ Compacting
+              │
+              ▼
+        InvokingModel → ApplyingResponse
+                              ├─ end turn ────────────────┐
+                              ├─ tool calls → Approval → Tools
+                              └─ interaction → AwaitingInteraction
+                                                   │ typed continuation
+                                                   └───────────────┐
+                                                                   ▼
+                                                            FinalizingStep
+                                                                   │
+                                                                   ▼
+                                                             DrainingInput
+
+CancelRunStep: active Step → CancellingStep → FinalizingStep → DrainingInput
+TerminateRun: 任意非终态 → Terminating → Terminated
+终态：Completed / Failed / Terminated
 ```
 
-迁移期仍保留旧 `cancel_run → Cancelling → Cancelled` 兼容路径；#1272 不改变该控制协议。正常 finalized Step 与 CancelRunStep 收口后均进入 `DrainingInput`，经 `drain_or_seal` 决定：有输入（`Ready`/`InternalContinuation`）继续下一 Step，无输入且 epoch 原子 seal（`EmptyAndSealed`）正常 `Completed`，无输入且不 seal（`NoInput`）返回 `AwaitUser`。`TerminateRun` 才终止整个 Run，并在退出前完成同等质量的 Step 收口和 Session flush。#1247 负责新 Run root / per-Step 控制协议接线，#879 才退役旧 `Cancelled` 状态与兼容投影。
+`AwaitingInput` 与 `AwaitingInteraction` 是正交状态：前者只等待普通 `UserMessage`，后者只等待匹配 interaction identity 的 reply/cancel。普通输入不得恢复 interaction continuation；interaction reply 不得进入 InputQueue。
 
-`DrainEpoch` 是 Run-owned 单调递增计数器，跨 `run_loop` 调用持久。每次成功 drain 后递增；AwaitUser → re-enter 不重置 epoch。engine 和 buffer 双向校验 epoch 匹配，不匹配返回错误。
+迁移期仍保留旧 `cancel_run → Cancelling → Cancelled` 兼容路径；它不属于目标状态机。正常 finalized Step 与 CancelRunStep 收口后均进入 `DrainingInput`：有输入（`Ready`/`InternalContinuation`）继续下一 Step；队列保持 Open 且暂无输入时进入 `AwaitingInput`；admission 已 seal 且为空时由 `EmptyAndSealed` 正常 `Completed`。`TerminateRun` 才终止整个 Run，并在退出前完成同等质量的 Step 收口和 Session flush。
+
+`DrainEpoch` 是 Run-owned 单调递增计数器，在同一 `run_loop` 生命周期内持续推进。每次成功 drain 后递增；`AwaitingInput` park 不重置 epoch。Engine 和 InputQueue 双向校验 epoch，不匹配返回 typed error。
 
 ### 状态转换矩阵
 
 | 源状态 | 事件/条件 | 目标状态 |
 |---|---|---|
-| Created | Start | DrainingInput |
-| DrainingInput | `drain_or_seal` → `Ready`（非空 batch） | PreparingContext |
-| DrainingInput | `drain_or_seal` → `InternalContinuation`（StopHookFeedback 或 ToolResults，可携同期用户输入） | PreparingContext |
-| DrainingInput | `drain_or_seal` → `EmptyAndSealed`（空队列且 epoch 原子 seal） | Completed(`InputDrained` 或 `StepCancelledAndInputDrained`) |
-| DrainingInput | `await_user_input` → `NoInput`（AwaitingUser 时空队列，不 seal、epoch 不推进） | AwaitUser 返回（同一 expected epoch 重入） |
+| Idle | `RunLauncher::launch` | DrainingInput |
+| DrainingInput | `drain` → `Ready`（非空 batch） | PreparingContext |
+| DrainingInput | `drain` → `InternalContinuation`（StopHookFeedback 或 ToolResults，可携同期用户输入） | PreparingContext |
+| DrainingInput | `drain` → `NoInput`（队列 Open，不 seal、epoch 不推进） | AwaitingInput |
+| AwaitingInput | `await_input` → `Ready(UserMessage)` | DrainingInput → PreparingContext |
+| DrainingInput | `drain` → `EmptyAndSealed`（admission 已 seal 且队列为空） | Completed(`InputDrained` 或 `StepCancelledAndInputDrained`) |
 | PreparingContext | needs_compaction | Compacting |
 | Compacting | 回收完成 | PreparingContext |
 | PreparingContext | 上下文就绪 | InvokingModel |
@@ -63,30 +58,29 @@ Run 终止旁路：任意非终态 ── TerminateRun ──▶ Terminating
 | InvokingModel | context 超限 | Compacting（compact 后重跑，非重试）|
 | InvokingModel | Fatal 错误(4xx) / 重试耗尽 | Failed |
 | ApplyingResponse | 有 tool_calls | AwaitingToolApproval |
-| ApplyingResponse | 需要 plan approval | AwaitingUser（`ContinuePlanApproval`） |
-| ApplyingResponse | 无 tool_calls / EndTurn | ContinueAfterResponse → DrainingInput |
-| ApplyingResponse | Stop Hook Block（text/Continue 场景进入 `ModelStep::StopHookBlocked`） | ContinueAfterResponse → DrainingInput（feedback 经 `InternalContinuation(StopHookFeedback)` 进入下一 Step） |
+| ApplyingResponse | 需要 plan approval | AwaitingInteraction（`ContinuePlanApproval`） |
+| ApplyingResponse | 无 tool_calls / EndTurn | FinalizingStep → DrainingInput |
+| ApplyingResponse | Stop Hook Block（未超过上限） | FinalizingStep → DrainingInput（feedback 经 `InternalContinuation(StopHookFeedback)` 进入下一 Step） |
 | AwaitingToolApproval | 全部放行 | ExecutingTools |
-| AwaitingToolApproval | 需人工确认(approval) | AwaitingUser（`ContinueToolApproval`） |
-| ExecutingTools | Tool 返回 `Suspended(UserInteraction)` | AwaitingUser（`CompleteToolCall`） |
-| ExecutingTools | StuckGuard `HardPause` | Main：AwaitingUser（`ContinueAfterHardPause`）；Sub / unavailable：Failed |
-| ExecutingTools | 结果回收完 | ToolsCompleted → DrainingInput |
-| AwaitingUser | 匹配 reply | 经 `complete_interaction` 恢复到原工作状态（ExecutingTools / AwaitingToolApproval / PreparingContext），正常收口进入 `DrainingInput`，再经 `drain_or_seal` 获得下一 batch → PreparingContext |
-| DrainingInput | `AwaitingUser` 恢复后 drain 到 `NoInput`（buffer 空、不 seal） | AwaitUser 返回，caller 等待用户输入后以同一 expected epoch 重入 |
-| AwaitingUser | completion=`Cancelled` + Tool continuation | ToolCall 得到 typed Cancelled，回原 Tool 状态继续 |
-| AwaitingUser | completion=`Cancelled` + Plan/HardPause continuation | Failed（typed PlanApprovalCancelled / HardPauseCancelled） |
+| AwaitingToolApproval | 需人工确认 | AwaitingInteraction（`ContinueToolApproval`） |
+| ExecutingTools | Tool 返回 `Suspended(UserInteraction)` | AwaitingInteraction（`CompleteToolCall`） |
+| ExecutingTools | StuckGuard `HardPause` | capability 可用：AwaitingInteraction（`ContinueAfterHardPause`）；unavailable：Failed |
+| ExecutingTools | 结果回收完 | FinalizingStep → DrainingInput |
+| AwaitingInteraction | 匹配 reply | 按 typed continuation 恢复到 ExecutingTools / AwaitingToolApproval / PreparingContext |
+| AwaitingInteraction | completion=`Cancelled` + Tool continuation | ToolCall 得到 typed Cancelled，回原 Tool 状态继续 |
+| AwaitingInteraction | completion=`Cancelled` + Plan/HardPause continuation | Failed（typed PlanApprovalCancelled / HardPauseCancelled） |
 | 任意 active Step 态 | `CancelRunStep` 获胜 | CancellingStep |
 | CancellingStep | StepFinalizer 完成或 10s deadline 到达 | FinalizingStep（持久化 deterministic receipts / partial step） |
 | FinalizingStep | cancel 原因的 Step 已持久化（`StepCancelled → DrainingInput`） | DrainingInput |
 | 任意非终态（除 Terminating） | `TerminateRun` 获胜 | Terminating |
 | Terminating | 同一 StepFinalizer 完成或 5s deadline 到达，Session flush 完成 | Terminated |
-| 任意非终态（除 AwaitingUser、Terminating） | timeout>0 且超时 | Failed |
+| 任意非终态（除 AwaitingInput、AwaitingInteraction、Terminating） | timeout>0 且超时 | Failed |
 
-> **AwaitingUser timeout 豁免**：`AwaitingUser` 状态 **MUST NOT** 计入 RunSpec.timeout 的墙钟计时。用户交互等待时间不可预测，timeout 在进入 `AwaitingUser` 时暂停、离开时恢复。`AwaitingToolApproval` 在全部自动放行时是**瞬时态**（不停留），仅在需人工确认时才进入 `AwaitingUser(ContinueToolApproval)`；因此自动放行路径不受 timeout 影响。
+> **等待态 timeout 语义**：`AwaitingInput` 与 `AwaitingInteraction` 均不计入 `RunSpec.timeout` 的活动执行时间。前者等待新的普通输入，后者等待特定结构化答复；进入等待态时暂停 activity timer，离开时恢复。`AwaitingToolApproval` 在全部自动放行时是瞬时态，仅需人工确认时才进入 `AwaitingInteraction`。
 
 **控制优先级**：一旦接受 `CancelRunStep`，当前 Step 进入 `CancellingStep`；该 Step 后续普通完成、timeout 或错误只作为收口诊断，NEVER 把它伪装为普通 Completed。Step 收口并持久化后 Run 必须进入 `DrainingInput`。一旦接受 `TerminateRun`，Run 进入 `Terminating`；后续 Step 完成仅作为终止收口事实，Run 最终只能进入 `Terminated`。重复控制命令必须幂等。
 
-**AwaitingUser 关键语义**：这是 **Run 内交互暂停**（Run 未完成，等特定 request id 的答复），必须同时保存 typed continuation，内存存活、不落盘；崩溃则整个 Run 从头开始（见 `05-recovery-semantics`）。reply / interaction cancellation 只能恢复或终结该 continuation，**NEVER** 统一跳到 `PreparingContext`。四类 completion 的穷尽映射见 [端口与适配器](06-ports-and-adapters.md) §2。这**区别于**"Run 完成后 Session 等下一条全新输入"（那是 Run 序列层，见 §3）。
+**等待边界**：`AwaitingInput` 不保存 interaction continuation，只等待 InputQueue；`AwaitingInteraction` 必须与唯一 `PendingInteraction` 同时存活，等待 `run_id + request_id` 的答复。reply / interaction cancellation 只能恢复或终结该 typed continuation，NEVER 统一跳到 `PreparingContext`。四类 completion 的穷尽映射见 [端口与适配器](06-ports-and-adapters.md) §2。
 
 ## 2. Loop Engine 骨架（统一执行，零来源分支）
 
@@ -134,14 +128,14 @@ Loop 在**每个** `.await` 返回后 **MUST** 检查当前 Step scope 与 Run r
 
 > 控制请求同步生效，收口异步完成。"马上"表示当前 scope 立即停止调度和唤醒在途 future，不表示跳过 Tool/Agent 收口、Step 持久化或 Session flush。
 
-### 2.1 Session 回放边界与 InputBuffer
+### 2.1 Session 回放边界与 InputQueue
 
 Session 是可回放数据的唯一真相源；"可回放"只承诺已经提交到 Session 的内容，**NEVER** 承诺重建 Runtime 内存态。
 
 - Provider partial、Tool/Agent progress 或结果只有在成为 Session committed content 后，才属于 resume/replay 边界；TUI 的临时流式 projection 本身不是 durable source。
 - CancelRunStep 收口时，当前 Step 的已确认事实、partial assistant、Tool/Agent deterministic receipts 通过 StepFinalizer 写入 Session；下一 Step 从 Session committed content 与新 drain batch 构建 Context。
-- InputBuffer 中的内容尚未进入 Session，因此 TerminateRun **MAY** 直接丢弃，不持久化、不恢复、不计入 Session 回放；只允许记录不含内容的 count/bytes 诊断。
-- 已经绑定当前 Step 并由 `append_accepted_input` 成功写入 Session 的 user input 不再属于 InputBuffer，必须随 Session 回放；该 handoff 发生在 `freeze_step` 后、首次 `build_window` / compact / model 前。handoff 只传 accepted user facts，**NEVER** 混入 system-generated Stop feedback、assistant、Tool result、RunStatus 或进行态。Context 在自己的 mutation gate 内取得提交 revision；后续 outcome 以 window 的 `backing_revision` CAS 补充同一 Step，**NEVER** 重复 user input。
+- InputQueue 中尚未被当前 Step 接纳的内容尚未进入 Session，因此 TerminateRun **MAY** 直接丢弃，不持久化、不恢复、不计入 Session 回放；只允许记录不含内容的 count/bytes 诊断。
+- 已经绑定当前 Step 并由 `append_accepted_input` 成功写入 Session 的 user input 不再属于 InputQueue，必须随 Session 回放；该 handoff 发生在 `freeze_step` 后、首次 `build_window` / compact / model 前。handoff 只传 accepted user facts，**NEVER** 混入 system-generated Stop feedback、assistant、Tool result、RunStatus 或进行态。Context 在自己的 mutation gate 内取得提交 revision；后续 outcome 以 window 的 `backing_revision` CAS 补充同一 Step，**NEVER** 重复 user input。
 - TerminateRun 完成前必须 flush Session 已有 committed content；不要求把未提交 buffer 内容提升为 Session 事实。
 
 ### 2.2 Stop Hook 持久化与 continuation 边界
@@ -155,25 +149,27 @@ Stop Hook 只裁决 Run 能否终止，**NEVER** 否决已完成 assistant / Too
    - `Block` 且超过上限：当前 Step 仍先经 `FinalizingStep` 提交，再进入 `Failed(StopHookRetryExhausted)`；
 3. Block 后的下一次 `drain_or_seal` 必须构造一个稳定 batch：**已提交的 assistant / Tool 历史**在 Context backing 中；新 batch 以 Stop feedback 为系统前缀，再追加该次 drain 收到的普通用户追问（FIFO）。三者在同一次下一 Step Context Window 中可见；
 4. Stop feedback 仅是 Runtime 生成的系统输入，不是 Hook BC 对 Session 的直接写入；Hook BC 只返回结构化 directive / reason；
-5. `CancelRunStep` 或 `TerminateRun` 一旦获胜，优先于尚未绑定的 Stop continuation：不得发起下一次模型调用。CancelRunStep 由 StepFinalizer 收口当前事实后进入 Drain；TerminateRun seal admission、丢弃未绑定 InputBuffer 并 flush 已提交 Session；
+5. `CancelRunStep` 或 `TerminateRun` 一旦获胜，优先于尚未绑定的 Stop continuation：不得发起下一次模型调用。CancelRunStep 由 StepFinalizer 收口当前事实后进入 Drain；TerminateRun seal admission、丢弃未绑定 InputQueue 内容并 flush 已提交 Session；
 6. commit handoff 后 owned commit 必须跑到明确成功或失败，caller cancellation **NEVER** 中断 durable commit；commit 成功后立即 `mark_step_persisted`，该 Step 从此不属于 partial、取消时 **NEVER** 回滚。
 
 > Session committed content 是唯一历史真相。Stop Block 的语义是“继续同一个 Run”，不是撤销 assistant 已产生的内容；feedback 和用户追问只决定该 Run 的**下一 Step**。
 
 ### 2.3 HardPause Continuation
 
-从 `ExecutingTools` 因 StuckGuard HardPause 进入 `AwaitingUser(ContinueAfterHardPause)` 时，continuation **MUST** 记录当前 step 和 tool phase：
+从 `ExecutingTools` 因 StuckGuard HardPause 进入 `AwaitingInteraction(ContinueAfterHardPause)` 时，continuation **MUST** 记录当前 step 和 tool phase：
 
 - 若恢复（HardPauseContinue）：回到 `ExecutingTools` 继续未完成的 Tool 调用，**NEVER** 直接跳到 `PreparingContext`；
 - 若取消：为当前 step 的全部未完成 ToolCall 生成 typed Cancelled results，按原顺序提交完整 step（保持 assistant/tool-result 邻接协议），**THEN** 进入 Failed。
 
 ### 2.4 领域事件发布不变量
 
-`Run` 是生命周期事件的唯一生产者。**每一次** Run 聚合状态 mutation 返回后，调用方都必须在执行下一条业务语句或 `.await` 前立即执行 `run.drain_events()` 并把结果交给 `EventSink`；禁止只在 response 或 loop 末尾批量 drain。该规则覆盖 `RunStarted`、`RunAwaitingUser`、`RunResumed`、`RunCancellationRequested`、step/tool 状态以及全部 terminal 事件。
+`Run` 是生命周期事件的唯一生产者。**每一次** Run 聚合状态 mutation 返回后，调用方都必须在执行下一条业务语句或 `.await` 前立即执行 `run.drain_events()` 并把结果交给 `EventSink`；禁止只在 response 或 loop 末尾批量 drain。该规则覆盖 `RunStarted`、`RunAwaitingInput`、`RunInteractionRequested`、对应 resumed 事件、step/tool 状态以及全部 terminal 事件。
 
-伪代码用 `mutate_and_publish(run, &ctx.events, |run| ...)` 表示这个原子编排约定：closure 内只做一次聚合 mutation，返回后 helper 立即 drain + emit。interaction coordinator 也必须逐次使用同一 helper，先发布 `RunAwaitingUser` 再 `.await` completion，恢复 continuation 后先发布 `RunResumed` 再继续。epilogue 只执行 `assert_terminal` / `assert_no_pending_events`；**NEVER** 在末尾补造终态或延迟发布事件。
+伪代码用 `mutate_and_publish(run, &ctx.events, |run| ...)` 表示这个原子编排约定：closure 内只做一次聚合 mutation，返回后 helper 立即 drain + emit。interaction coordinator 也必须逐次使用同一 helper，先发布 `RunInteractionRequested` 再 `.await` completion，恢复 continuation 后先发布 `RunInteractionResumed` 再继续。epilogue 只执行 `assert_terminal` / `assert_no_pending_events`；**NEVER** 在末尾补造终态或延迟发布事件。
 
-### 2.5 骨架伪代码
+### 2.5 Loop 内部逻辑伪代码
+
+以下伪代码展示完整 application 流程，而不只是 mailbox drain 骨架。辅助函数都属于 Loop Engine 内部协作器，不是可替换整段流程的 Port。
 
 ```rust
 async fn run_loop(
@@ -181,54 +177,218 @@ async fn run_loop(
     execution: &mut RunExecutionState,
     context: &RuntimeContext,
 ) -> Result<AgentRunTerminal, RunExecutionError> {
-    mutate_and_publish(run, context.events(), Run::start_draining)?;
-    let mut expected_epoch = run.next_drain_epoch();
+    if run.status() == RunStatus::Idle {
+        mutate_and_publish(run, context.events(), Run::start_draining)?;
+    }
 
     loop {
-        handle_control(run, execution, context).await?;
+        apply_immediate_control(run, execution, context).await?;
         if let Some(terminal) = run.terminal_result() {
+            assert_no_pending_events(run)?;
             return Ok(terminal);
         }
 
-        let outcome = match run.status() {
-            RunStatus::AwaitingInput => {
-                context.input().await_input(expected_epoch).await?
+        match run.status() {
+            RunStatus::DrainingInput => {
+                let epoch = run.next_drain_epoch();
+                match context.input().drain(epoch).await? {
+                    DrainOutcome::Ready { batch, epoch }
+                    | DrainOutcome::InternalContinuation { batch, epoch, .. } => {
+                        mutate_and_publish(run, context.events(), |run| {
+                            run.accept_drain(epoch, &batch)
+                        })?;
+                        execution.accept_inputs(batch)?;
+                    }
+                    DrainOutcome::NoInput { epoch } => {
+                        mutate_and_publish(run, context.events(), |run| {
+                            run.await_input(epoch)
+                        })?;
+                    }
+                    DrainOutcome::EmptyAndSealed { epoch } => {
+                        mutate_and_publish(run, context.events(), |run| {
+                            run.complete_after_drain(
+                                epoch,
+                                execution.terminal_projection(),
+                            )
+                        })?;
+                    }
+                }
             }
+
+            RunStatus::AwaitingInput => {
+                let epoch = run.next_drain_epoch();
+                let ready = context.input().await_input(epoch).await?;
+                // 这里只可能接受 UserMessage；command 由 scheduler 处理，
+                // interaction reply 由 InteractionInbox 处理。
+                mutate_and_publish(run, context.events(), |run| {
+                    run.resume_input(epoch, &ready)
+                })?;
+                execution.accept_inputs(ready.batch)?;
+            }
+
+            RunStatus::PreparingContext => {
+                freeze_and_persist_accepted_input(run, execution, context).await?;
+                if context.context().needs_compaction(execution)? {
+                    mutate_and_publish(run, context.events(), Run::start_compacting)?;
+                } else {
+                    build_invocation_window(run, execution, context).await?;
+                    mutate_and_publish(run, context.events(), Run::start_invoking_model)?;
+                }
+            }
+
+            RunStatus::Compacting => {
+                compact_context(run, execution, context).await?;
+                mutate_and_publish(run, context.events(), Run::finish_compacting)?;
+            }
+
+            RunStatus::InvokingModel => {
+                let completion = invoke_with_retry_and_control(
+                    run,
+                    execution,
+                    context,
+                ).await?;
+                execution.record_invocation(completion)?;
+                mutate_and_publish(run, context.events(), Run::start_applying_response)?;
+            }
+
+            RunStatus::ApplyingResponse => {
+                match apply_model_response(run, execution, context).await? {
+                    ResponseDirective::ToolCalls => {
+                        mutate_and_publish(
+                            run,
+                            context.events(),
+                            Run::start_tool_approval,
+                        )?;
+                    }
+                    ResponseDirective::Interaction(request, continuation) => {
+                        begin_interaction(
+                            run,
+                            execution,
+                            context,
+                            request,
+                            continuation,
+                        ).await?;
+                    }
+                    ResponseDirective::Finalize(cause) => {
+                        mutate_and_publish(run, context.events(), |run| {
+                            run.start_finalizing(cause)
+                        })?;
+                    }
+                }
+            }
+
+            RunStatus::AwaitingToolApproval => {
+                match evaluate_tool_approval(run, execution, context).await? {
+                    ApprovalDirective::Execute => {
+                        mutate_and_publish(run, context.events(), Run::start_tools)?;
+                    }
+                    ApprovalDirective::Ask(request, continuation) => {
+                        begin_interaction(
+                            run,
+                            execution,
+                            context,
+                            request,
+                            continuation,
+                        ).await?;
+                    }
+                    ApprovalDirective::Reject(results) => {
+                        execution.apply_tool_results(results)?;
+                        mutate_and_publish(run, context.events(), |run| {
+                            run.start_finalizing(FinalizeCause::ToolsCompleted)
+                        })?;
+                    }
+                }
+            }
+
+            RunStatus::ExecutingTools => {
+                match execute_tool_round(run, execution, context).await? {
+                    ToolDirective::Completed(results) => {
+                        execution.apply_tool_results(results)?;
+                        mutate_and_publish(run, context.events(), |run| {
+                            run.start_finalizing(FinalizeCause::ToolsCompleted)
+                        })?;
+                    }
+                    ToolDirective::Interaction(request, continuation) => {
+                        begin_interaction(
+                            run,
+                            execution,
+                            context,
+                            request,
+                            continuation,
+                        ).await?;
+                    }
+                }
+            }
+
             RunStatus::AwaitingInteraction { request_id } => {
                 let completion = context.interactions()
                     .await_completion(run.id(), request_id)
                     .await?;
-                resume_interaction(run, execution, context, completion).await?;
-                continue;
+                // identity 必须同时匹配 run_id + request_id；普通输入仍留在 InputQueue。
+                resume_typed_continuation(
+                    run,
+                    execution,
+                    context,
+                    completion,
+                ).await?;
             }
-            _ => context.input().drain(expected_epoch).await?,
-        };
-        validate_epoch(expected_epoch, &outcome)?;
 
-        match outcome {
-            DrainOutcome::Ready { batch, epoch }
-            | DrainOutcome::InternalContinuation { batch, epoch, .. } => {
-                mutate_and_publish(run, context.events(), |run| {
-                    run.accept_drain(epoch, &batch)
-                })?;
-                execution.accept_inputs(batch)?;
-                execute_step(run, execution, context).await?;
-                expected_epoch = run.next_drain_epoch();
+            RunStatus::CancellingStep => {
+                finalize_step(
+                    run,
+                    execution,
+                    context,
+                    FinalizeCause::StepCancelled,
+                ).await?;
+                mutate_and_publish(run, context.events(), Run::finish_cancelled_step)?;
             }
-            DrainOutcome::NoInput { .. } => {
-                continue;
+
+            RunStatus::FinalizingStep => {
+                let directive = finalize_current_step(run, execution, context).await?;
+                match directive {
+                    FinalizeDirective::Continue(batch) => {
+                        context.input().submit_internal(batch).await?;
+                        mutate_and_publish(run, context.events(), Run::start_draining)?;
+                    }
+                    FinalizeDirective::Drain => {
+                        mutate_and_publish(run, context.events(), Run::start_draining)?;
+                    }
+                    FinalizeDirective::Fail(error) => {
+                        mutate_and_publish(run, context.events(), |run| run.fail(error))?;
+                    }
+                }
             }
-            DrainOutcome::EmptyAndSealed { epoch } => {
-                mutate_and_publish(run, context.events(), |run| {
-                    run.complete_after_drain(epoch, execution.terminal_projection())
-                })?;
+
+            RunStatus::Terminating => {
+                terminate_with_shared_finalizer(run, execution, context).await?;
+                context.input().close_and_discard_unaccepted().await?;
+                context.context().flush_session().await?;
+                mutate_and_publish(run, context.events(), Run::finish_termination)?;
             }
+
+            RunStatus::Completed
+            | RunStatus::Failed
+            | RunStatus::Terminated => {
+                // 下一轮 loop 顶部返回唯一 terminal projection。
+            }
+
+            RunStatus::Idle => unreachable!("Idle 只允许在入口激活一次"),
         }
+
+        run_at_boundary_commands(run, execution, context).await?;
     }
 }
 ```
 
-`execute_step` 是 Engine 内部应用流程：冻结并接纳 input → 构建/压缩 context → invoke model → 记录 invocation → Tool/Interaction/Hook coordination → deterministic finalization。每个阶段只调用 `RuntimeContext` 的窄能力并更新唯一 `RunExecutionState`；不存在可替换整段流程的 adapter 方法。
+Loop 内部必须保持以下顺序约束：
+
+1. 每轮先处理 ImmediateControl；每次 `.await` 返回后再次观察 Step/Run cancellation scope。
+2. 所有状态转换必须经 Run 聚合方法；转换后立刻 drain domain events 到 `EventSink`。
+3. 已接纳的 `UserMessage` 在首次 model/compact 前提交 Session；未接纳的 InputQueue 内容不是 durable history。
+4. interaction 开始前先原子保存 `PendingInteraction + typed continuation` 并发布事件，再等待 reply；恢复时先验证 identity，再按 continuation 返回原工作阶段。
+5. Model、Tool、Compact、Hook 都只调用 `RuntimeContext` 的窄 Port；不得由 adapter 决定下一状态。
+6. 普通完成、取消和终止共用 deterministic StepFinalizer；区别只在 terminal intent、deadline 和收口后的目标状态。
+7. `AtRunBoundary` command 只在当前原子阶段完成后执行；`SessionQuery` 由 Session Runtime 直接处理，不进入本函数。
 
 **#1272 关键点：**
 - 正常完成（Complete/Continue/StopHookBlocked/ToolsCompleted）均进入 `ContinueAfterResponse` / `ToolsCompleted` → `DrainingInput`，不加中间状态；
@@ -239,10 +399,10 @@ async fn run_loop(
 
 ### 2.6 控制协议：请求同步，完成异步
 
-Runtime 入站命令区分两个 scope，均不经过 InputBuffer：
+Runtime 入站命令区分两个 scope，均不经过 InputQueue：
 
 1. `cancel_run_step(run_id, step_id?)`：同步原子迁移当前 Step 到 `CancellingStep`、触发 Step scope、返回 typed outcome；异步 StepFinalizer 最长 10s，完成后 Run 固定进入 `DrainingInput`。
-2. `terminate_run(run_id, reason)`：同步迁移 Run 到 `Terminating`、seal input admission、触发 Run root scope、返回 typed outcome；异步复用同一 StepFinalizer（最长 5s）、丢弃未进入 Session 的 InputBuffer、flush Session，最终进入 `Terminated`。
+2. `terminate_run(run_id, reason)`：同步迁移 Run 到 `Terminating`、seal input admission、触发 Run root scope、返回 typed outcome；异步复用同一 StepFinalizer（最长 5s）、丢弃未进入 Session 的 InputQueue 内容、flush Session，最终进入 `Terminated`。
 3. CancelRunStep 后 Drain 有输入则 `PreparingContext` 开下一 Step；无输入且 drain epoch 原子 seal 则 `Completed(reason=StepCancelledAndInputDrained)`。
 4. TerminateRun 不回到 Drain；resume 只回放 Session committed content，并创建新 Run。
 5. 当前不定义 Force Terminate。
@@ -283,34 +443,38 @@ StepFinalizer 读取 child `RunSpec.finalization`：
 
 **统一点**：Sub = 单次输入的一个 Run；Main = Session 层多个 Run 的序列，每个 Run 就是"单次输入"的特例。**Loop Engine 不感知这个区别**——它只跑一个 Run。
 
-- `AwaitingUser`（ask_user 暂停）：同一个 Run 内暂停/resume，Run 未完成
+- `AwaitingInteraction`（ask_user / approval / hard pause）：同一个 Run 内暂停/resume，Run 未完成；
+- `AwaitingInput`：同一个 Run 等新的普通 `UserMessage`，不持有 interaction continuation；
 - `Completed` 后等下一输入：Run 完成，Session 层开新 Run（不是同一 Run）
 
-### InputBuffer（入站端口）— 支撑追问
+### InputQueue（Run 入站 mailbox）— 支撑首次输入与追问
 
 Loop Engine 每轮在门禁点调用 `RuntimeContext.input().drain(epoch)` 或 `await_input(epoch)`。live session、parent-dispatched task 与未来 scheduler 来源都在 `SessionIngress` 分类后进入目标 Run 的同一种 InputQueue；Engine 不感知来源，也不按 Main/Sub 区分。不存在 `fixed initial input` adapter。
 
-Run-owned atomic input buffer 是 live-session `InputPort` adapter 使用的 drain-or-seal 原语：
+Run-owned atomic InputQueue 提供 drain、park 与 admission 生命周期：
 
 | 方法 | 行为 | seal? | epoch 推进? |
 |---|---|---|---|
-| `drain_or_seal(epoch)` | 用户输入非空 → `Ready`；空 → `EmptyAndSealed`（seal） | Yes（空时） | 总是 |
-| `take_internal_continuation(epoch)` | engine-driven continuation（StopHookFeedback/ToolResults） | Never | 总是 |
-| `try_drain_unsealed(epoch)` | AwaitingUser 用：非空 → `Ready`；空 → `Empty`（不 seal） | Never | 仅 Ready 时 |
-| `push_or_reject(event)` | 密封后拒绝 `UserMessage`，control 仍接受 | — | — |
-| `withdraw_all_user_texts()` | 撤回所有未绑定用户消息 | — | — |
-| `drain_all()` | Run 结束时排空所有事件 | — | — |
+| `drain(epoch)` | 用户输入非空 → `Ready`；队列 Open 且空 → `NoInput`；已 Sealed 且空 → `EmptyAndSealed` | 不隐式 seal | Ready / terminal drain 时 |
+| `submit_internal(batch)` | engine-driven continuation（StopHookFeedback/ToolResults） | Never | 下次 drain 时 |
+| `await_input(epoch)` | AwaitingInput 用；保持 future 直到 UserMessage 到达或 admission 关闭 | Never | 仅 Ready 时 |
+| `submit_or_reject(message)` | Open 时入队；Sealed/Closed 后 typed reject | — | — |
+| `seal()` | 禁止新 UserMessage；保留已排队输入供最终 drain | Yes | — |
+| `close_and_discard_unaccepted()` | Run 终止时清理未接纳输入，仅记录非内容诊断 | Closed | — |
 
-| | InputBuffer 装配 | 行为 |
+所有 Run 都绑定同一种语义的 InputQueue：
+
+| Run 来源 | 投递方式 | 行为 |
 |---|---|---|
-| Main | `RunInputBuffer`（Run-owned，live `ChatInputEvent` + 迁移期 queue） | 用户在 Run 执行中**追问** → `push_or_reject` → 下一轮 drain → append 进 Context Window 带上；`drain_or_seal` 原子判空。**AwaitingUser 追问经 `try_drain_unsealed` 在同一 Run 内绑定，不创建新 Run** |
-| Sub | FixedInputBuffer（`prompt_drained` 标志 + 独立 epoch） | 首轮 drain（epoch 0）：`Ready(prompt)` → `freeze_step` → `accepted_input`；次轮及以后（epoch 1+）：`EmptyAndSealed`。与 Main 复用完全相同的 Loop 状态机 |
+| client-facing interactive Run | `SessionIngress::UserMessage` | 首次输入与忙期追问均 FIFO 入队；`AwaitingInput` 时新消息唤醒同一 Loop |
+| parent-dispatched child Run | 父调度器提交 `SessionIngress::UserMessage` 并指定 child RunId | 任务文本不是构造参数，也不是 fixed adapter；是否允许后续输入由 admission/capability 决定 |
+| scheduler/background Run | scheduler 提交同一 `UserMessage` Published Language | Engine 不感知来源，仍通过相同 drain/epoch 契约消费 |
 
-- `input` 是 **RuntimeContext 的入站端口**（与出站端口同层，装配时确定）
-- `result` 是 `run_loop` 的 `LoopDirective`（`Terminal` / `AwaitUser`），供 call site 据此决定下一步；`EventSink` 只承载权威领域事实的外向投影。Main 把 terminal event 投影给 TUI；Sub 同样可投影诊断，但父 Run **NEVER** 订阅或反向消费 EventSink 来取得业务结果，也 **NEVER** 靠遍历 message 推断结果
-- `DrainEpoch`：Run-owned 单调递增计数器。跨 `run_loop` 调用持久（AwaitUser→re-enter 不重置）。engine 和 buffer 双向校验 epoch 匹配，不匹配返回错误
+- `input` 是 **RuntimeContext 的入站 Port**；InputQueue 的具体实现由 factory 绑定，但语义由 Runtime 拥有。
+- `run_loop` 只在 `Completed / Failed / Terminated` 返回 typed terminal；等待输入或 interaction 均在同一调用内 park，不向 caller 返回等待 directive。
+- `DrainEpoch` 是 Run-owned 单调计数器；Engine 和 InputQueue 双向校验，不匹配返回 typed error。
 
-## 4. 停止条件与 AwaitUser drain 语义
+## 4. 停止条件与等待态语义
 
 ### 停止条件
 
@@ -320,22 +484,33 @@ Run-owned atomic input buffer 是 live-session `InputPort` adapter 使用的 dra
 | Stop Hook Block（累计≤15） | 当前 Step 提交 → InternalContinuation(StopHookFeedback) + 同次 drain 用户追问 → PreparingContext，同一 Run 继续 |
 | Stop Hook Block 累计>15 | 当前 Step 提交 → Failed(StopHookRetryExhausted) |
 | timeout>0 且墙钟超时 | Failed |
-| StuckGuard HardPause | AwaitingUser（Main）/ Failed（Sub，无人应答）|
-| CancelRunStep 且 Drain 无新输入 | StepFinalizer → DrainingInput → EmptyAndSealed → Completed(`StepCancelledAndInputDrained`) |
+| StuckGuard HardPause | interaction capability 可用 → AwaitingInteraction；Unavailable → Failed |
+| CancelRunStep 且 Drain 无新输入、admission 保持 Open | StepFinalizer → DrainingInput → AwaitingInput |
 | CancelRunStep 且 Drain 有输入 | StepFinalizer → DrainingInput → Ready → PreparingContext，继续下一 Step |
-| TerminateRun | 同一 StepFinalizer（≤5s）+ 丢弃未入 Session 的 InputBuffer + Session flush → Terminated |
+| CancelRunStep 且 admission 已 seal 且无输入 | StepFinalizer → DrainingInput → EmptyAndSealed → Completed(`StepCancelledAndInputDrained`) |
+| TerminateRun | 同一 StepFinalizer（≤5s）+ 丢弃未入 Session 的 InputQueue 内容 + Session flush → Terminated |
 | LLM Fatal 错误 / 重试耗尽 | Failed（Retryable 先退避重试；context 超限→compact 重跑）|
 
-### AwaitUser drain 语义（#1272）
+### AwaitingInput 语义
 
-`AwaitingUser` 是 Run 内暂停（非终态）。Loop engine 在检测到 `AwaitingUser` 时调用绑定后的 `InputPort::await_input(epoch)` 而非 `drain(epoch)`：
+`AwaitingInput` 是 Run 内等待普通 `UserMessage` 的非终态。Loop Engine 在检测到该状态时调用绑定后的 `InputPort::await_input(epoch)`：
 
-- `await_input` 内部使用不密封语义：**从不 seal buffer**；
-- 暂无用户输入时，`await_input` 保持同一可取消 future 继续等待，epoch **不推进**，Loop 不退出也不重入；
-- 用户输入到达后返回 `Ready`，Engine 执行 `UserResumed` 并在同一 `run_loop` 调用内继续；
-- 这与"Run 完成后 Session 等下一条全新输入"（Run 序列层，见 §3）是不同语义。
+- `await_input` 从不 seal InputQueue；
+- 暂无用户输入时保持同一可取消 future，epoch 不推进，Loop 不退出也不返回给 caller；
+- 用户输入到达后返回 `Ready`，Engine 执行 `RunInputResumed` 并在同一 `run_loop` 调用内继续；
+- `Command` 和 `InteractionCommand` 不由该 future 消费，分别由 CommandScheduler 和 InteractionInbox 处理。
 
-> **去掉 max_turns**：不再用轮次上限，改由 `timeout`（0=无限，Main 默认 0）+ StuckGuard 双重兜底（见 `04-stuck-prevention`）。
+### AwaitingInteraction 语义
+
+`AwaitingInteraction { request_id }` 是 Run 内等待结构化 reply/cancel 的非终态：
+
+- 进入前必须保存唯一 `PendingInteraction` 和 typed continuation，并发布 `RunInteractionRequested`；
+- `InteractionInbox` 只接受匹配 `run_id + request_id` 的 completion，重复、陈旧、不匹配的 reply 返回 typed error；
+- 普通 `UserMessage` 可以继续进入 InputQueue，但不得唤醒或完成 interaction continuation；
+- completion 到达后先验证 identity，再发布 `RunInteractionResumed`，按 continuation 恢复 Tool、Approval 或 HardPause 工作；
+- cancel、timeout、parent disconnect 和 session shutdown 都必须走 typed completion，不能伪造普通用户输入。
+
+两种等待均不属于终态；只有 `Completed / Failed / Terminated` 才能结束 `run_loop`。
 
 ## 5. 重试策略（LLM 错误）
 
@@ -377,7 +552,7 @@ Run-owned atomic input buffer 是 live-session `InputPort` adapter 使用的 dra
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-11 | 初稿：Run 单状态机 + 迁移表、Loop Engine 零分支骨架、单 Run vs Session 多 Run 序列、停止条件 | #761 |
-| 2026-07-11 | 补 InputBuffer 入站端口（Loop 门禁 drain 支撑追问）+ input/result 归属；agent_execution→agent_run | #761 |
+| 2026-07-11 | 补 InputQueue 入站 Port（Loop 门禁 drain 支撑追问）+ input/result 归属；agent_execution→agent_run | #761 |
 | 2026-07-11 | result 统一经 EventSink + 终态族对称载荷（RunCompleted / RunFailed / RunCancelled）| #761 |
 | 2026-07-11 | Model Invocation 补重试：Retryable(超时/5xx/429)退避重试、context 超限→compact、仅 Fatal/耗尽→Failed；emit ModelInvocationRetrying | #761 |
 | 2026-07-11 | 重试升级为梯度重试 §5：T0 即时/T1 退避/T2 降级/T3 故障转移(pool)/T4 放弃 | #761 |
@@ -386,10 +561,10 @@ Run-owned atomic input buffer 是 live-session `InputPort` adapter 使用的 dra
 | 2026-07-12 | 重试补可见输出门禁：已提交 delta 且无法回滚时禁止自动重试 | #788 |
 | 2026-07-12 | Finishing 接入 Stop Hook：命令执行最多 3 次、Run 阻断上限 15，第 16 次 RunFailed | #790 |
 | 2026-07-14 | Loop 直接落实 ContextPort 四方法、per-step append、reasoning/ToolCatalog invocation 冻结与 Tool suspension 原序串行交互 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-15 | 以 `CancelRunStep` 与 `TerminateRun` 取代 Run 级 Cancel：增加 `DrainingInput/CancellingStep/FinalizingStep/Terminating/Terminated`；Cancel 10s、Terminate 5s 共用 deterministic StepFinalizer，永不调用 LLM summary；Session 是唯一回放源，未入 Session 的 InputBuffer 在 Terminate 时可丢弃 | [#700](https://github.com/rushsinging/aemeath/issues/700) |
+| 2026-07-15 | 以 `CancelRunStep` 与 `TerminateRun` 取代 Run 级 Cancel：增加 `DrainingInput/CancellingStep/FinalizingStep/Terminating/Terminated`；Cancel 10s、Terminate 5s 共用 deterministic StepFinalizer，永不调用 LLM summary；Session 是唯一回放源，未入 Session 的 InputQueue 内容在 Terminate 时可丢弃 | [#700](https://github.com/rushsinging/aemeath/issues/700) |
 | 2026-07-18 | #875 将重试口径明确为首次调用 + 最多 10 次重试（最多 11 attempts），单次退避封顶 60 秒 | [#875](https://github.com/rushsinging/aemeath/issues/875) |
 | 2026-07-15 | 补充 Agent Tool 控制传播：Main CancelRunStep 对 child Run 递归发送 TerminateRun；全树共享父绝对 deadline；StepFinalizer 按 RunSpec 区分 Main deterministic summary+Full receipt 与 Sub None+Safety receipt | [#700](https://github.com/rushsinging/aemeath/issues/700) |
 | 2026-07-19 | #876 落地共享 Loop 的 `freeze_step`/真实 RunStepId、Main/Sub ContextCoordinator、Provider ContextTooLong typed compact 回环、普通完成与当前兼容 cancel 的 finalized append。`TerminateRun → FinalizeCause::RunTerminated` 的生产 control 入口仍由 #879 原子切换承接，本文目标语义不变 | [#876](https://github.com/rushsinging/aemeath/issues/876) / [#879](https://github.com/rushsinging/aemeath/issues/879) |
 | 2026-07-21 | #1278 将 Context durable schema 收口为 `FinalizedOutcomeProjection`，并更正 Stop Hook Block：当前 assistant / Tool outcome 先持久化，feedback 仅进入下一 Step；#1247 继续承接生产控制命令与 deterministic receipt 的完整接线 | #1278 / #1247 |
 | 2026-07-20 | 纠正 Stop Hook 的历史语义：Block 只阻断 Run 终止，已完成 assistant / Tool Step 必须先持久化；feedback 与同次 drain 的用户追问组成下一 Step，控制请求优先于 continuation | #743 |
-| 2026-07-22 | #1272 落地 per-turn drain-or-seal：`DrainOutcome` 全量（`Ready`/`InternalContinuation(StopHookFeedback,ToolResults)`/`EmptyAndSealed`/`NoInput`）、`DrainEpoch` 双向校验、Main `RunInputBuffer`（`drain_or_seal`/`take_internal_continuation`/`try_drain_unsealed`/`push_or_reject`）、Sub FixedInputBuffer epoch 0/1、AwaitUser 同一 Run 恢复、正常完成路径移除 `Finishing` 直通 `DrainingInput`；#1277 accepted input 已接入、#1278 所有权不变、#1247 `PendingInteraction` 生产接线仍 out of scope、#879 物理退役仍后续 | [#1272](https://github.com/rushsinging/aemeath/issues/1272) / [#1277](https://github.com/rushsinging/aemeath/issues/1277)
+| 2026-07-22 | #1272 落地 per-turn drain/admission：`DrainOutcome` 全量（`Ready`/`InternalContinuation(StopHookFeedback,ToolResults)`/`EmptyAndSealed`/`NoInput`），`DrainEpoch` 双向校验，统一 InputQueue 接受 live session、parent-dispatched task 与 scheduler UserMessage；AwaitingInput 同一 Run park，普通输入与 interaction reply mailbox 分离 | [#1272](https://github.com/rushsinging/aemeath/issues/1272) |
