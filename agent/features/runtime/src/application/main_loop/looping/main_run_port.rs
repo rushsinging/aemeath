@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -17,7 +16,6 @@ use crate::application::loop_engine::{
     DrainEpoch, DrainOutcome, LoopEngineError, LoopInput, ModelStep, RunLoopPort,
     ToolGuardDecision, ToolStep,
 };
-use crate::application::main_loop::looping::finalize::run_stop_hook_before_finish;
 use crate::application::main_loop::looping::post_batch::run_post_tool_batch;
 use crate::application::main_loop::looping::reflection::{
     maybe_submit_pre_compact_reflection, should_run_turn_reflection, submit_interval_reflection,
@@ -31,22 +29,12 @@ use crate::application::main_loop::looping::{
     ChatEventSink, InputEventDrainPort, QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
 use crate::application::runtime_context::RuntimeContext;
-use crate::application::subagent::runner::{AgentRunOutcome, AgentRunStatus};
 use crate::application::subagent::{Agent, ToolCall};
-use crate::domain::agent_run::RunDomainEvent;
+use crate::domain::agent_run::{RunDomainEvent, ToolCallStatus};
 use crate::ports::{
     ContextRequest, ContextRequestId, Language as ContextLanguage, RunStepId, SessionId,
     SystemPromptSpec, TaskReminderSnapshot,
 };
-use workflow::api::{ReasoningPort, ReasoningSignal};
-
-/// Test-only static: when set to `true` before constructing `MainRunPort`,
-/// `execute_tools` returns `ToolStep::AwaitUser` for `AskUserQuestion` tool
-/// calls instead of processing them inline.  This lets session-level tests
-/// deterministically exercise the same-Run AwaitUser recovery loop (#1272).
-#[cfg(test)]
-pub(crate) static TEST_AWAIT_USER_MODE: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
 
 /// Aborts a spawned request companion task even when the invocation future is dropped.
 struct AbortTaskOnDrop(tokio::task::JoinHandle<()>);
@@ -259,6 +247,19 @@ where
     pub(crate) tool_identity:
         &'a crate::application::tool_coordination::identity::ToolIdentityRegistry,
     pub(crate) started_at: Instant,
+    /// #1248 Task 5: Whether this Run is operating in plan mode.
+    /// When true, Complete responses trigger plan approval before proceeding.
+    pub(crate) plan_mode: bool,
+    // ── #1248 Task 5: Interaction state ──
+    /// Stored interaction receivers keyed by request id.
+    /// The engine calls `store_interaction` to deposit receivers with metadata,
+    /// and `poll_interaction` to check for completions.
+    pub(crate) interaction_receivers: Vec<(
+        crate::application::interaction::InteractionRequestMetadata,
+        tokio::sync::oneshot::Receiver<crate::application::interaction::InteractionCompletion>,
+    )>,
+    /// #1248: Pending interaction work set by the engine for multi-interaction rounds.
+    pub(crate) pending_work: Option<crate::application::loop_engine::PendingInteractionWork>,
 }
 
 impl<Q, I> MainRunPort<'_, Q, I>
@@ -307,12 +308,12 @@ where
         self.runtime_context.reflection_history_ref()
     }
     #[inline]
-    fn reasoning(&self) -> &dyn ReasoningPort {
-        self.runtime_context.reasoning_ref().as_ref()
-    }
-    #[inline]
-    fn interaction_bridge(&self) -> &Arc<crate::application::interaction::InteractionBridge> {
-        self.runtime_context.interaction_ref()
+    fn reasoning(&self) -> crate::ports::ReasoningLevel {
+        *self
+            .runtime_context
+            .reasoning_ref()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
     }
     #[inline]
     fn run_config(&self) -> &crate::application::run_config::RunConfigSnapshot {
@@ -403,7 +404,7 @@ where
             pending_messages,
             system_prompt: SystemPromptSpec::new(self.system_prompt_text),
             model_id: self.binding().model.model.clone(),
-            effective_reasoning: self.reasoning().current_requested_level(),
+            effective_reasoning: self.reasoning(),
             task_reminder: TaskReminderSnapshot {
                 text: task_reminder,
             },
@@ -535,16 +536,6 @@ where
             agent_semaphore: agent_semaphore.clone(),
             workspace_persist: workspace.persist(),
             runtime_cancellation: cancel.clone(),
-        }
-    }
-
-    fn outcome(&self, status: AgentRunStatus) -> AgentRunOutcome {
-        AgentRunOutcome {
-            status,
-            turns: self.turn_count,
-            duration: self.started_at.elapsed(),
-            role: None,
-            model: self.binding().model.model.clone(),
         }
     }
 
@@ -748,17 +739,8 @@ where
             ));
         }
 
-        let observation = self.reasoning().observe(ReasoningSignal::TextOnly);
-        if observation.changed() {
-            self.runtime_context
-                .event_sink()
-                .send_event(RuntimeStreamEvent::GraphPhaseChanged {
-                    node: observation.current,
-                    effort: observation.requested,
-                    prev: observation.previous,
-                })
-                .await;
-        }
+        // #1248 Task 7: TextOnly reasoning observation moved to shared
+        // Loop engine — adapter no longer calls observe directly.
         if should_run_turn_reflection(
             self.memory_config(),
             self.turn_count,
@@ -779,45 +761,9 @@ where
             );
         }
 
-        let outcome = self.outcome(AgentRunStatus::Completed);
-        let sink = self.runtime_context.event_sink();
-        if let Some(feedback) = run_stop_hook_before_finish(
-            &outcome,
-            &sink,
-            self.hook_runner(),
-            self.session_id,
-            self.language,
-            &self.current_cwd(),
-            &self.cancel_token(),
-        )
-        .await
-        {
-            if self.cancel_token().is_cancelled() {
-                return Err(LoopEngineError::Cancelled);
-            }
-            let feedback = Message::stop_hook_feedback(
-                format!(
-                    "<system-reminder>\n{}\n</system-reminder>",
-                    feedback.llm_text
-                ),
-                feedback.payload,
-            );
-            self.input_strategy.stop_hook_feedback = Some(feedback.clone());
-            self.step_messages.record(feedback.clone());
-            self.messages.push(feedback);
-            self.runtime_context
-                .event_sink()
-                .send_event(RuntimeStreamEvent::StopHookBlocked {
-                    messages: self.messages.clone(),
-                })
-                .await;
-            return Ok((
-                ModelStep::StopHookBlocked {
-                    text: resp.assistant_message.text_content(),
-                },
-                token_usage,
-            ));
-        }
+        // #1248 Task 6: Stop hook evaluation moved to shared Loop via
+        // `evaluate_stop_hook` seam.  The adapter simply returns Complete
+        // and the engine triggers the hook through RunLoopPort.
         Ok((
             ModelStep::Complete {
                 text: resp.assistant_message.text_content(),
@@ -836,17 +782,6 @@ where
     ) -> Result<ToolStep, LoopEngineError> {
         if calls.is_empty() {
             return Ok(ToolStep::Continue);
-        }
-        // #1272 test hook: when TEST_AWAIT_USER_MODE is set and any call is
-        // AskUserQuestion, return AwaitUser so the session actor exercises
-        // its same-Run recovery loop.  The normal inline ask_user path is
-        // bypassed — the test driver injects user input through the
-        // channel instead.
-        #[cfg(test)]
-        if TEST_AWAIT_USER_MODE.load(std::sync::atomic::Ordering::Relaxed)
-            && calls.iter().any(|(call, _)| call.name == "AskUserQuestion")
-        {
-            return Ok(ToolStep::AwaitUser);
         }
         let raw_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
         let agent = Self::make_agent(
@@ -871,7 +806,7 @@ where
         )
         .map_err(LoopEngineError::Adapter)?;
         let sink = self.runtime_context.event_sink();
-        let (all_results, fuse_bypassed) = execute_tool_round(
+        let round_result = execute_tool_round(
             &self.turn_context,
             &raw_calls,
             self.tool_catalog(),
@@ -886,52 +821,110 @@ where
             self.language,
             &self.current_cwd(),
             calls,
-            self.interaction_bridge(),
         )
         .await;
-        let cancelled = cancel.is_cancelled();
 
+        let has_interaction =
+            !round_result.suspensions.is_empty() || !round_result.approvals.is_empty();
+
+        if has_interaction {
+            // #1248: Collect interaction call IDs so we can separate them from
+            // completed non-interaction results.
+            let interaction_call_ids: std::collections::HashSet<sdk::ToolCallId> = round_result
+                .suspensions
+                .iter()
+                .map(|s| s.call.id.clone())
+                .chain(round_result.approvals.iter().map(|a| a.call.id.clone()))
+                .collect();
+
+            // Process non-interaction results: record messages, events, reasoning.
+            let non_interaction_results: Vec<_> = round_result
+                .results
+                .iter()
+                .filter(|r| !interaction_call_ids.contains(&r.call_id))
+                .cloned()
+                .collect();
+            if !non_interaction_results.is_empty() {
+                // Reasoning graph does not observe tool completion; tool results
+                // only advance the shared Run state machine.
+                let has_task_mutation = non_interaction_results.iter().any(|result| {
+                    crate::application::main_loop::looping::events::is_task_store_mutation(
+                        &result.tool_name,
+                    )
+                });
+                let tool_results = tool_results_for_api(
+                    self.tool_result_materializer,
+                    non_interaction_results,
+                    self.session_id,
+                )
+                .await;
+                self.messages.push(tool_results.clone());
+                self.step_messages.record(tool_results);
+                self.runtime_context
+                    .event_sink()
+                    .send_event(RuntimeStreamEvent::PostToolExecutionSync {
+                        messages: self.messages.clone(),
+                    })
+                    .await;
+                if has_task_mutation {
+                    let snapshot =
+                        crate::application::main_loop::looping::task_snapshot::build_task_snapshot(
+                            &**self.task_access(),
+                        );
+                    self.runtime_context
+                        .event_sink()
+                        .send_event(RuntimeStreamEvent::TasksSnapshot {
+                            tasks: Box::new(snapshot),
+                        })
+                        .await;
+                }
+            }
+
+            // Build completed_results from guarded_calls minus interaction calls.
+            let completed_results: Vec<(sdk::ToolCallId, ToolCallStatus)> = calls
+                .iter()
+                .filter(|(call, _)| !interaction_call_ids.contains(&call.id))
+                .map(|(call, decision)| {
+                    let bypassed = round_result.fuse_bypassed.contains(&call.id);
+                    let status = if matches!(decision, ToolGuardDecision::Allow) || bypassed {
+                        ToolCallStatus::Success
+                    } else {
+                        ToolCallStatus::Cancelled
+                    };
+                    (call.id.clone(), status)
+                })
+                .collect();
+
+            let fuse_bypassed = round_result.fuse_bypassed.clone();
+
+            if !round_result.suspensions.is_empty() {
+                return Ok(ToolStep::InteractionSuspended {
+                    suspended: round_result.suspensions,
+                    completed_results,
+                    fuse_bypassed,
+                });
+            }
+            if !round_result.approvals.is_empty() {
+                return Ok(ToolStep::AwaitingToolApproval {
+                    calls_needing_approval: round_result.approvals,
+                    completed_results,
+                    fuse_bypassed,
+                });
+            }
+            // Fallthrough: should not happen, but continue as normal
+        }
+
+        let cancelled = cancel.is_cancelled();
         let all_results = if cancelled {
             crate::application::tool_coordination::complete_cancelled_tool_round(
                 &raw_calls,
-                all_results,
+                round_result.results,
             )
         } else {
-            all_results
+            round_result.results
         };
 
-        let metadata: HashMap<&str, (Option<&str>, Option<&str>)> = raw_calls
-            .iter()
-            .map(|call| {
-                let command = (call.name == "Bash")
-                    .then(|| call.input.get("command").and_then(|value| value.as_str()))
-                    .flatten();
-                let phase = call.input.get("phase").and_then(|value| value.as_str());
-                (call.provider_id.as_str(), (command, phase))
-            })
-            .collect();
-        for result in &all_results {
-            let (command, phase) = metadata
-                .get(result.provider_id.as_str())
-                .copied()
-                .unwrap_or((None, None));
-            let observation = self.reasoning().observe(ReasoningSignal::ToolCompleted {
-                tool_name: result.tool_name.clone(),
-                bash_command: command.map(str::to_string),
-                is_error: result.outcome.is_error,
-                declared_phase: phase.map(str::to_string),
-            });
-            if observation.changed() {
-                self.runtime_context
-                    .event_sink()
-                    .send_event(RuntimeStreamEvent::GraphPhaseChanged {
-                        node: observation.current,
-                        effort: observation.requested,
-                        prev: observation.previous,
-                    })
-                    .await;
-            }
-        }
+        // Reasoning graph does not observe tool completion.
         let has_task_mutation = all_results.iter().any(|result| {
             crate::application::main_loop::looping::events::is_task_store_mutation(
                 &result.tool_name,
@@ -975,7 +968,9 @@ where
         // fresh batch of user input. Mark the port so the next drain will
         // emit `InternalContinuation::ToolResults` instead of an empty Ready.
         self.mark_tool_results_pending();
-        Ok(tool_strategy::step_from_fuse_bypass(fuse_bypassed))
+        Ok(tool_strategy::step_from_fuse_bypass(
+            round_result.fuse_bypassed,
+        ))
     }
 }
 
@@ -1000,7 +995,7 @@ where
     I: InputEventDrainPort,
 {
     fn reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        self.reasoning().current_requested_level()
+        self.reasoning()
     }
 
     fn committed_delta(&self) -> bool {
@@ -1204,6 +1199,87 @@ where
         self.invoke_model_impl().await
     }
 
+    /// #1248 Task 6: Shared Loop evaluates Stop hook via this seam.
+    /// Uses the existing `dispatch_hook` to emit HookEvent UI events,
+    /// then interprets the returned `RuntimeHookDispatch` as a typed
+    /// `StopHookDecision`.
+    async fn evaluate_stop_hook(
+        &mut self,
+        turns: usize,
+    ) -> Result<crate::application::stop_hook_coordination::StopHookDecision, LoopEngineError> {
+        use crate::application::hook_types::RuntimeHookDirective;
+        use crate::application::main_loop::looping::hook_ui::dispatch_hook;
+        use crate::application::stop_hook_coordination::StopHookDecision;
+
+        let sink = self.runtime_context.event_sink();
+        let dispatch = dispatch_hook(
+            self.hook_runner(),
+            &sink,
+            hook::HookInvocation::Stop(hook::StopInput { turns }),
+            &self.current_cwd(),
+            &self.cancel_token(),
+        )
+        .await;
+
+        log::info!(
+            target: crate::LOG_TARGET,
+            "[stop_hook] directive={:?} executions={}",
+            dispatch.directive,
+            dispatch.executions.len(),
+        );
+
+        match &dispatch.directive {
+            RuntimeHookDirective::Block { reason } => {
+                let detail = dispatch
+                    .block_detail
+                    .clone()
+                    .expect("Stop hook Block must carry the blocking subscription detail");
+
+                let feedback_msg =
+                    crate::application::stop_hook_coordination::materialize_stop_hook_feedback(
+                        &detail,
+                        reason,
+                        self.session_id,
+                        self.language,
+                    )
+                    .await;
+
+                let llm_text = format!(
+                    "<system-reminder>\n{}\n</system-reminder>",
+                    feedback_msg.llm_text
+                );
+                let payload = feedback_msg.payload.clone();
+                let msg =
+                    share::message::Message::stop_hook_feedback(llm_text, feedback_msg.payload);
+                self.input_strategy.stop_hook_feedback = Some(msg.clone());
+                self.step_messages.record(msg.clone());
+                self.messages.push(msg);
+
+                // Emit UI event.
+                self.runtime_context
+                    .event_sink()
+                    .send_event(RuntimeStreamEvent::StopHookBlocked {
+                        messages: self.messages.clone(),
+                    })
+                    .await;
+
+                use crate::application::stop_hook_coordination::StopHookBlock;
+
+                Ok(StopHookDecision::Block(Box::new(StopHookBlock {
+                    reason: reason.clone(),
+                    detail,
+                    messages: dispatch.messages.clone(),
+                    feedback:
+                        crate::application::stop_hook_coordination::StopHookFeedbackMaterial {
+                            llm_text: feedback_msg.llm_text,
+                            payload,
+                        },
+                })))
+            }
+            _ => Ok(StopHookDecision::Proceed),
+        }
+    }
+
     async fn finalize_step(&mut self, step_id: &RunStepId) -> Result<(), LoopEngineError> {
         let Some(request) = &self.context_request else {
             return Ok(());
@@ -1236,12 +1312,289 @@ where
             .await
     }
 
+    // ── #1248 Task 5: Interaction seams ──
+
+    fn interaction_port(&self) -> &dyn crate::application::interaction::InteractionPort {
+        self.runtime_context.interaction_ref().as_ref()
+    }
+
+    async fn publish_interaction(
+        &mut self,
+        request: &sdk::InteractionRequest,
+    ) -> Result<(), LoopEngineError> {
+        self.runtime_context
+            .event_sink()
+            .send_event(RuntimeStreamEvent::InteractionRequested {
+                request: request.clone(),
+            })
+            .await;
+        Ok(())
+    }
+
+    fn store_interaction(
+        &mut self,
+        metadata: crate::application::interaction::InteractionRequestMetadata,
+        receiver: tokio::sync::oneshot::Receiver<
+            crate::application::interaction::InteractionCompletion,
+        >,
+    ) -> Result<(), LoopEngineError> {
+        self.interaction_receivers.push((metadata, receiver));
+        Ok(())
+    }
+
+    async fn poll_interaction(
+        &mut self,
+    ) -> Result<Option<crate::application::interaction::InteractionResolution>, LoopEngineError>
+    {
+        // Check each stored receiver; return the first completed one.
+        let mut resolved = None;
+        let mut remaining = Vec::new();
+        for (metadata, mut rx) in std::mem::take(&mut self.interaction_receivers) {
+            match rx.try_recv() {
+                Ok(completion) => {
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[MainRunPort::poll_interaction] resolved rid={:?}",
+                        metadata.request_id
+                    );
+                    resolved = Some(
+                        crate::application::interaction::InteractionResolution::Resolved {
+                            metadata,
+                            completion,
+                        },
+                    );
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "[MainRunPort::poll_interaction] closed rid={:?}",
+                        metadata.request_id
+                    );
+                    resolved = Some(
+                        crate::application::interaction::InteractionResolution::Closed { metadata },
+                    );
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                    remaining.push((metadata, rx)); // still pending
+                }
+            }
+        }
+        self.interaction_receivers = remaining;
+        Ok(resolved)
+    }
+
+    fn set_pending_interaction_work(
+        &mut self,
+        work: crate::application::loop_engine::PendingInteractionWork,
+    ) {
+        self.pending_work = Some(work);
+    }
+
+    async fn finish_interaction_work(
+        &mut self,
+        metadata: &crate::application::interaction::InteractionRequestMetadata,
+        completion: &crate::application::interaction::InteractionCompletion,
+        _cancel: &CancellationToken,
+    ) -> Result<crate::application::loop_engine::InteractionWorkOutcome, LoopEngineError> {
+        use crate::application::interaction::InteractionCompletion;
+        use crate::application::subagent::ToolExecution;
+        use crate::domain::agent_run::InteractionContinuation;
+
+        // Take the current work: current item is what's being resolved,
+        // queue is what remains to be started.
+        let work = self.pending_work.take();
+        let current = work.as_ref().and_then(|w| w.current.clone());
+        let remaining_queue: Vec<_> = work.as_ref().map(|w| w.queue.clone()).unwrap_or_default();
+
+        let (call_id, status) = match (&metadata.continuation, completion) {
+            (
+                InteractionContinuation::CompleteToolCall(id),
+                InteractionCompletion::Replied(reply),
+            ) => {
+                // UserQuestions: serialize answers as tool result.
+                // Use the original call's provider_id and name from the
+                // suspended_call stored in the current item.
+                let (provider_id, tool_name) = current
+                    .as_ref()
+                    .and_then(|ci| ci.suspended_call.as_ref())
+                    .map(|sc| (sc.call.provider_id.clone(), sc.call.name.clone()))
+                    .unwrap_or_else(|| (String::new(), "AskUserQuestion".to_string()));
+                if let sdk::InteractionReply::UserQuestions(answers) = reply {
+                    let text = answers
+                        .iter()
+                        .enumerate()
+                        .map(|(i, a)| format!("Q{}: {}", i + 1, a.0))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let outcome = tools::ToolOutcome {
+                        text,
+                        data: serde_json::json!({"status": "ok", "answers": answers}),
+                        is_error: false,
+                        images: Vec::new(),
+                    };
+                    let execution =
+                        ToolExecution::from_parts(id.clone(), provider_id, tool_name, outcome);
+                    // Append tool result message and send event
+                    let materializer = self.tool_result_materializer;
+                    let msg = crate::application::main_loop::looping::tools::tool_results_for_api(
+                        materializer,
+                        vec![execution],
+                        self.session_id,
+                    )
+                    .await;
+                    self.messages.push(msg.clone());
+                    self.step_messages.record(msg);
+                    self.mark_tool_results_pending();
+                    (id.clone(), ToolCallStatus::Success)
+                } else {
+                    (id.clone(), ToolCallStatus::Error)
+                }
+            }
+            (
+                InteractionContinuation::CompleteToolCall(id),
+                InteractionCompletion::Cancelled(_),
+            ) => {
+                // User questions cancelled: write error result using original call info
+                let (provider_id, tool_name) = current
+                    .as_ref()
+                    .and_then(|ci| ci.suspended_call.as_ref())
+                    .map(|sc| (sc.call.provider_id.clone(), sc.call.name.clone()))
+                    .unwrap_or_else(|| (String::new(), "AskUserQuestion".to_string()));
+                let outcome = tools::ToolOutcome::error("user cancelled interaction");
+                let execution =
+                    ToolExecution::from_parts(id.clone(), provider_id, tool_name, outcome);
+                let materializer = self.tool_result_materializer;
+                let msg = crate::application::main_loop::looping::tools::tool_results_for_api(
+                    materializer,
+                    vec![execution],
+                    self.session_id,
+                )
+                .await;
+                self.messages.push(msg.clone());
+                self.step_messages.record(msg);
+                (id.clone(), ToolCallStatus::Cancelled)
+            }
+            (
+                InteractionContinuation::ContinueToolApproval(id),
+                InteractionCompletion::Replied(reply),
+            ) => {
+                if matches!(
+                    reply,
+                    sdk::InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve)
+                ) {
+                    // Execute the approved tool directly using the approval_call
+                    // from the current item — no re-policy evaluation.
+                    if let Some(approval_call) =
+                        current.as_ref().and_then(|ci| ci.approval_call.clone())
+                    {
+                        let call = &approval_call.call;
+                        let mut input = call.input.clone();
+                        tools::strip_runtime_meta(&mut input);
+                        let ws_read = self.workspace.read();
+                        let scope = tools::ExecutionScope::builder(
+                            self.run_id.to_string(),
+                            ws_read.workspace_id(),
+                            ws_read.current_workspace_root(),
+                        )
+                        .build();
+                        let invocation =
+                            tools::ToolInvocation::new(call.name.as_str(), input, scope)
+                                .with_authorization(approval_call.authorization);
+                        let domain = self
+                            .tool_execution()
+                            .execute(
+                                invocation,
+                                &*crate::adapters::tool_runtime::cancellation(
+                                    self.runtime_context.cancel_ref().token().clone(),
+                                ),
+                            )
+                            .await;
+                        let outcome = crate::application::subagent::legacy_outcome(domain);
+                        let execution = ToolExecution::from_parts(
+                            id.clone(),
+                            call.provider_id.clone(),
+                            call.name.clone(),
+                            outcome.clone(),
+                        );
+                        let materializer = self.tool_result_materializer;
+                        let msg =
+                            crate::application::main_loop::looping::tools::tool_results_for_api(
+                                materializer,
+                                vec![execution],
+                                self.session_id,
+                            )
+                            .await;
+                        self.messages.push(msg.clone());
+                        self.step_messages.record(msg);
+                        self.mark_tool_results_pending();
+                        let status = if outcome.is_error {
+                            ToolCallStatus::Error
+                        } else {
+                            ToolCallStatus::Success
+                        };
+                        (id.clone(), status)
+                    } else {
+                        // No approval_call stored — treat as error
+                        let outcome =
+                            tools::ToolOutcome::error("tool approval call data not found");
+                        let execution = ToolExecution::from_parts(
+                            id.clone(),
+                            String::new(),
+                            "ToolApproval".to_string(),
+                            outcome,
+                        );
+                        let materializer = self.tool_result_materializer;
+                        let msg =
+                            crate::application::main_loop::looping::tools::tool_results_for_api(
+                                materializer,
+                                vec![execution],
+                                self.session_id,
+                            )
+                            .await;
+                        self.messages.push(msg.clone());
+                        self.step_messages.record(msg);
+                        (id.clone(), ToolCallStatus::Error)
+                    }
+                } else {
+                    // Denied — no execution, mark Cancelled
+                    (id.clone(), ToolCallStatus::Cancelled)
+                }
+            }
+            (
+                InteractionContinuation::ContinueToolApproval(id),
+                InteractionCompletion::Cancelled(_),
+            ) => (id.clone(), ToolCallStatus::Cancelled),
+            _ => {
+                // HardPause / PlanApproval: no tool call work needed
+                return Ok(
+                    crate::application::loop_engine::InteractionWorkOutcome::Completed {
+                        call_id: sdk::ToolCallId::new_v7(),
+                        status: ToolCallStatus::Success,
+                        remaining_queue,
+                    },
+                );
+            }
+        };
+
+        Ok(
+            crate::application::loop_engine::InteractionWorkOutcome::Completed {
+                call_id,
+                status,
+                remaining_queue,
+            },
+        )
+    }
+
     async fn on_stuck(
         &mut self,
         decision: &crate::application::loop_engine::StuckDecision,
     ) -> Result<(), LoopEngineError> {
         let _ = decision;
         Ok(())
+    }
+
+    fn needs_plan_approval(&self) -> bool {
+        self.plan_mode
     }
 
     fn register_step_scope(

@@ -113,7 +113,7 @@ fn interaction_continuation_exhaustively_restores_its_origin_phase() {
         (
             RunStatus::AwaitingToolApproval,
             InteractionContinuation::ContinueToolApproval(call_id),
-            RunStatus::AwaitingToolApproval,
+            RunStatus::ExecutingTools,
         ),
         (
             RunStatus::ApplyingResponse,
@@ -1572,4 +1572,198 @@ fn drain_epoch_persists_across_run_operations() {
         .unwrap();
     assert_eq!(run.next_drain_epoch(), 2);
     assert_eq!(run.status(), RunStatus::Completed);
+}
+
+// ── #1248 Task 1: capability-semantic enums ──
+
+#[test]
+fn interaction_value_domain() {
+    // Client is most permissive, Unavailable least.
+    assert!(InteractionBindingMode::Unavailable.is_within(&InteractionBindingMode::ParentMediated));
+    assert!(InteractionBindingMode::Unavailable.is_within(&InteractionBindingMode::Client));
+    assert!(InteractionBindingMode::ParentMediated.is_within(&InteractionBindingMode::Client));
+    // Escalation: permissive value exceeds restrictive ceiling.
+    assert!(!InteractionBindingMode::ParentMediated.is_within(&InteractionBindingMode::Unavailable));
+    assert!(!InteractionBindingMode::Client.is_within(&InteractionBindingMode::ParentMediated));
+    assert!(!InteractionBindingMode::Client.is_within(&InteractionBindingMode::Unavailable));
+}
+
+#[test]
+fn hook_value_domain() {
+    assert!(HookBindingMode::BoundaryOnly.is_within(&HookBindingMode::Full));
+    assert!(!HookBindingMode::Full.is_within(&HookBindingMode::BoundaryOnly));
+}
+
+#[test]
+fn reasoning_value_domain() {
+    // NoOp < Inherit < Fixed < Adaptive
+    assert!(ReasoningBindingMode::NoOp.is_within(&ReasoningBindingMode::Inherit));
+    assert!(ReasoningBindingMode::NoOp.is_within(&ReasoningBindingMode::Fixed));
+    assert!(ReasoningBindingMode::NoOp.is_within(&ReasoningBindingMode::Adaptive));
+    assert!(ReasoningBindingMode::Inherit.is_within(&ReasoningBindingMode::Fixed));
+    assert!(ReasoningBindingMode::Inherit.is_within(&ReasoningBindingMode::Adaptive));
+    assert!(ReasoningBindingMode::Fixed.is_within(&ReasoningBindingMode::Adaptive));
+
+    // Escalation
+    assert!(!ReasoningBindingMode::Adaptive.is_within(&ReasoningBindingMode::Fixed));
+    assert!(!ReasoningBindingMode::Adaptive.is_within(&ReasoningBindingMode::Inherit));
+    assert!(!ReasoningBindingMode::Fixed.is_within(&ReasoningBindingMode::Inherit));
+    assert!(!ReasoningBindingMode::Fixed.is_within(&ReasoningBindingMode::NoOp));
+    assert!(!ReasoningBindingMode::Inherit.is_within(&ReasoningBindingMode::NoOp));
+}
+
+#[test]
+fn main_spec_has_client_interaction_full_hook_adaptive_reasoning() {
+    let spec = RunSpec::main();
+    assert_eq!(spec.interaction_binding(), InteractionBindingMode::Client);
+    assert_eq!(spec.hook_binding(), HookBindingMode::Full);
+    assert_eq!(spec.reasoning_binding(), ReasoningBindingMode::Adaptive);
+}
+
+#[test]
+fn sub_spec_has_parent_mediated_interaction_boundary_hook_inherit_reasoning() {
+    let spec = RunSpec::sub("reviewer", Duration::from_secs(60));
+    assert_eq!(
+        spec.interaction_binding(),
+        InteractionBindingMode::ParentMediated
+    );
+    assert_eq!(spec.hook_binding(), HookBindingMode::BoundaryOnly);
+    assert_eq!(spec.reasoning_binding(), ReasoningBindingMode::Inherit);
+}
+
+#[test]
+fn derive_sub_can_relax_interaction_to_parent_ceiling() {
+    let parent = RunSpec::main(); // InteractionBindingMode::Client
+    let sub = parent.derive_sub("coder", Duration::from_secs(30)).unwrap();
+    assert_eq!(
+        sub.interaction_binding(),
+        InteractionBindingMode::ParentMediated
+    );
+
+    // Can relax to parent ceiling (Client).
+    let sub = sub
+        .with_interaction_kind(InteractionBindingMode::Client)
+        .unwrap();
+    assert_eq!(sub.interaction_binding(), InteractionBindingMode::Client);
+}
+
+#[test]
+fn derive_sub_rejects_interaction_escalation() {
+    // Parent with ParentMediated ceiling — sub can't relax to Client.
+    let parent = RunSpec::main()
+        .with_interaction_kind(InteractionBindingMode::ParentMediated)
+        .unwrap(); // ceiling = ParentMediated
+    let sub = parent.derive_sub("sub", Duration::from_secs(30)).unwrap();
+    assert_eq!(
+        sub.interaction_binding(),
+        InteractionBindingMode::ParentMediated
+    );
+
+    // Exceeds parent ceiling (ParentMediated) → escalation.
+    assert_eq!(
+        sub.with_interaction_kind(InteractionBindingMode::Client),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+}
+
+#[test]
+fn derive_sub_can_relax_hook_to_parent_ceiling() {
+    let parent = RunSpec::main(); // HookBindingMode::Full
+    let sub = parent.derive_sub("coder", Duration::from_secs(30)).unwrap();
+    assert_eq!(sub.hook_binding(), HookBindingMode::BoundaryOnly);
+
+    let sub = sub.with_hooks(HookBindingMode::Full).unwrap();
+    assert_eq!(sub.hook_binding(), HookBindingMode::Full);
+}
+
+#[test]
+fn derive_sub_rejects_hook_escalation() {
+    let parent = RunSpec::main()
+        .with_hooks(HookBindingMode::BoundaryOnly)
+        .unwrap(); // ceiling = BoundaryOnly
+    let sub = parent.derive_sub("sub", Duration::from_secs(30)).unwrap();
+    assert_eq!(sub.hook_binding(), HookBindingMode::BoundaryOnly);
+
+    assert_eq!(
+        sub.with_hooks(HookBindingMode::Full),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+}
+
+#[test]
+fn derive_sub_can_relax_reasoning_to_parent_ceiling() {
+    let parent = RunSpec::main(); // ReasoningBindingMode::Adaptive
+    let sub = parent.derive_sub("coder", Duration::from_secs(30)).unwrap();
+    assert_eq!(sub.reasoning_binding(), ReasoningBindingMode::Inherit);
+
+    let sub = sub.with_reasoning(ReasoningBindingMode::Adaptive).unwrap();
+    assert_eq!(sub.reasoning_binding(), ReasoningBindingMode::Adaptive);
+}
+
+#[test]
+fn derive_sub_rejects_reasoning_escalation() {
+    let parent = RunSpec::main()
+        .with_reasoning(ReasoningBindingMode::Fixed)
+        .unwrap(); // ceiling = Fixed
+    let sub = parent.derive_sub("sub", Duration::from_secs(30)).unwrap();
+    assert_eq!(sub.reasoning_binding(), ReasoningBindingMode::Inherit);
+
+    assert_eq!(
+        sub.with_reasoning(ReasoningBindingMode::Adaptive),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+}
+
+#[test]
+fn standalone_sub_can_relax_interaction_to_client() {
+    // Standalone sub (no ceiling) can use any interaction mode
+    let spec = RunSpec::sub("r", Duration::from_secs(30))
+        .with_interaction_kind(InteractionBindingMode::Client)
+        .unwrap();
+    assert_eq!(spec.interaction_binding(), InteractionBindingMode::Client);
+    assert_eq!(spec.kind, RunKind::Sub);
+}
+
+#[test]
+fn standalone_sub_can_set_interaction_unavailable() {
+    let spec = RunSpec::sub("r", Duration::from_secs(30))
+        .with_interaction_kind(InteractionBindingMode::Unavailable)
+        .unwrap();
+    assert_eq!(
+        spec.interaction_binding(),
+        InteractionBindingMode::Unavailable
+    );
+}
+
+#[test]
+fn nested_sub_can_further_restrict_interaction() {
+    let parent = RunSpec::main(); // InteractionBindingMode::Client
+    let sub1 = parent
+        .derive_sub("sub1", Duration::from_secs(60))
+        .unwrap()
+        .with_interaction_kind(InteractionBindingMode::ParentMediated)
+        .unwrap(); // ceiling = Client
+
+    // sub2 inherits sub1's effective values as ceiling
+    let sub2 = sub1.derive_sub("sub2", Duration::from_secs(30)).unwrap();
+    assert_eq!(
+        sub2.interaction_binding(),
+        InteractionBindingMode::ParentMediated
+    );
+
+    // Can relax to ParentMediated (parent ceiling was Client, effective was ParentMediated)
+    // sub1's effective interaction_kind = ParentMediated, so sub2's ceiling = ParentMediated
+    let sub2 = sub2
+        .with_interaction_kind(InteractionBindingMode::ParentMediated)
+        .unwrap();
+    assert_eq!(
+        sub2.interaction_binding(),
+        InteractionBindingMode::ParentMediated
+    );
+
+    // Cannot relax to Client (exceeds sub1's effective ceiling)
+    assert_eq!(
+        sub2.with_interaction_kind(InteractionBindingMode::Client),
+        Err(RunSpecError::CapabilityEscalation)
+    );
 }

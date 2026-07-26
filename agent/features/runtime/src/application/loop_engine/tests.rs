@@ -1,15 +1,76 @@
 use super::*;
+use crate::application::interaction::{InteractionBridge, InteractionPort};
 use crate::application::subagent::ToolCall;
-use sdk::ChatInputEvent;
+use sdk::{ChatInputEvent, InteractionRequest};
 use serde_json::json;
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
-use crate::application::loop_engine::engine::{
+use crate::application::loop_engine::{
     DrainEpoch, DrainOutcome, InternalContinuationKind, LoopInput,
 };
-use crate::domain::agent_run::{Run, RunControl, RunDomainEvent, RunSpec, RunStatus};
+use crate::domain::agent_run::{
+    InteractionContinuation, Run, RunControl, RunDomainEvent, RunSpec, RunStatus, ToolCallStatus,
+};
+
+/// #1248: Fake ToolExecutionPort that counts execute calls and returns configurable results.
+/// Used for production-level tests of the approval flow through the full engine roundtrip.
+#[derive(Clone)]
+struct FakeToolExecutionPort {
+    execute_count: Arc<std::sync::atomic::AtomicUsize>,
+    recorded_invocations: Arc<std::sync::Mutex<Vec<tools::ToolInvocation>>>,
+    result_text: Arc<std::sync::Mutex<String>>,
+    /// Records the last text returned by execute() so tests can assert on it.
+    returned_text: Arc<std::sync::Mutex<Option<String>>>,
+}
+
+impl FakeToolExecutionPort {
+    fn new() -> Self {
+        Self {
+            execute_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            recorded_invocations: Arc::new(std::sync::Mutex::new(Vec::new())),
+            result_text: Arc::new(std::sync::Mutex::new(String::new())),
+            returned_text: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    fn execute_count(&self) -> usize {
+        self.execute_count
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn set_result_text(&self, text: &str) {
+        *self.result_text.lock().unwrap() = text.to_string();
+    }
+
+    fn returned_text(&self) -> Option<String> {
+        self.returned_text.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl tools::ToolExecutionPort for FakeToolExecutionPort {
+    async fn execute(
+        &self,
+        invocation: tools::ToolInvocation,
+        cancellation: &dyn tools::CancellationSignal,
+    ) -> tools::ToolExecutionOutcome {
+        let _ = cancellation;
+        self.execute_count
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.recorded_invocations.lock().unwrap().push(invocation);
+        let text = self.result_text.lock().unwrap().clone();
+        let outcome_text = if text.is_empty() {
+            "fake result".to_string()
+        } else {
+            text.clone()
+        };
+        *self.returned_text.lock().unwrap() = Some(outcome_text.clone());
+        tools::ToolExecutionOutcome::success_text(outcome_text)
+    }
+}
 
 struct ScriptedPort {
     model_steps: VecDeque<ModelStep>,
@@ -39,6 +100,23 @@ struct ScriptedPort {
     fail_accept_input: bool,
     needs_compaction: bool,
     fail_emit_once: bool,
+    /// #1248 Task 5: Test interaction bridge used by `interaction_port()`.
+    interaction_bridge: Arc<InteractionBridge>,
+    /// #1248 Task 5: Records published interaction requests.
+    published_interactions: Arc<std::sync::Mutex<Vec<InteractionRequest>>>,
+    /// #1248 Task 5: Stored interaction receivers.
+    stored_receivers: std::sync::Mutex<
+        VecDeque<
+            tokio::sync::oneshot::Receiver<crate::application::interaction::InteractionCompletion>,
+        >,
+    >,
+    /// #1248: Pending interaction work stored by the engine.
+    pending_work: std::sync::Mutex<Option<super::engine::PendingInteractionWork>>,
+    /// #1248: Stored interaction metadata alongside receivers for full roundtrip tests.
+    stored_metadata:
+        std::sync::Mutex<VecDeque<crate::application::interaction::InteractionRequestMetadata>>,
+    /// #1248: Fake tool execution port for counting/tracking approvals.
+    fake_tool_port: Option<Arc<FakeToolExecutionPort>>,
 }
 
 impl Default for ScriptedPort {
@@ -80,6 +158,12 @@ impl Default for ScriptedPort {
             fail_accept_input: false,
             needs_compaction: false,
             fail_emit_once: false,
+            interaction_bridge: Arc::new(InteractionBridge::new()),
+            published_interactions: Arc::new(std::sync::Mutex::new(Vec::new())),
+            stored_receivers: std::sync::Mutex::new(VecDeque::new()),
+            pending_work: std::sync::Mutex::new(None),
+            stored_metadata: std::sync::Mutex::new(VecDeque::new()),
+            fake_tool_port: None,
         }
     }
 }
@@ -300,6 +384,153 @@ impl RunLoopPort for ScriptedPort {
         self.controls.lock().unwrap().pop_front()
     }
 
+    fn interaction_port(&self) -> &dyn InteractionPort {
+        self.interaction_bridge.as_ref()
+    }
+
+    async fn publish_interaction(
+        &mut self,
+        request: &InteractionRequest,
+    ) -> Result<(), LoopEngineError> {
+        self.calls.push("publish_interaction");
+        self.published_interactions
+            .lock()
+            .unwrap()
+            .push(request.clone());
+        Ok(())
+    }
+
+    fn store_interaction(
+        &mut self,
+        metadata: crate::application::interaction::InteractionRequestMetadata,
+        receiver: tokio::sync::oneshot::Receiver<
+            crate::application::interaction::InteractionCompletion,
+        >,
+    ) -> Result<(), LoopEngineError> {
+        self.calls.push("store_interaction");
+        self.stored_metadata.lock().unwrap().push_back(metadata);
+        self.stored_receivers.lock().unwrap().push_back(receiver);
+        Ok(())
+    }
+
+    async fn poll_interaction(
+        &mut self,
+    ) -> Result<Option<crate::application::interaction::InteractionResolution>, LoopEngineError>
+    {
+        self.calls.push("poll_interaction");
+        let mut receivers = self.stored_receivers.lock().unwrap();
+        let mut metas = self.stored_metadata.lock().unwrap();
+        match (receivers.pop_front(), metas.pop_front()) {
+            (Some(mut receiver), Some(metadata)) => match receiver.try_recv() {
+                Ok(completion) => Ok(Some(
+                    crate::application::interaction::InteractionResolution::Resolved {
+                        metadata,
+                        completion,
+                    },
+                )),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                    receivers.push_front(receiver);
+                    metas.push_front(metadata);
+                    Ok(None)
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => Ok(Some(
+                    crate::application::interaction::InteractionResolution::Closed { metadata },
+                )),
+            },
+            _ => Ok(None),
+        }
+    }
+
+    fn set_pending_interaction_work(&mut self, work: super::engine::PendingInteractionWork) {
+        self.calls.push("set_pending_interaction_work");
+        *self.pending_work.lock().unwrap() = Some(work);
+    }
+
+    async fn finish_interaction_work(
+        &mut self,
+        metadata: &crate::application::interaction::InteractionRequestMetadata,
+        completion: &crate::application::interaction::InteractionCompletion,
+        _cancel: &CancellationToken,
+    ) -> Result<super::engine::InteractionWorkOutcome, LoopEngineError> {
+        self.calls.push("finish_interaction_work");
+        use crate::application::interaction::InteractionCompletion;
+        use crate::domain::agent_run::InteractionContinuation;
+
+        let work = self.pending_work.lock().unwrap().take();
+        let current = work.as_ref().and_then(|w| w.current.clone());
+        let remaining_queue: Vec<_> = work.as_ref().map(|w| w.queue.clone()).unwrap_or_default();
+
+        let (call_id, status) = match &metadata.continuation {
+            InteractionContinuation::CompleteToolCall(id) => {
+                let status = match completion {
+                    InteractionCompletion::Replied(_) => ToolCallStatus::Success,
+                    InteractionCompletion::Cancelled(_) => ToolCallStatus::Cancelled,
+                };
+                (id.clone(), status)
+            }
+            InteractionContinuation::ContinueToolApproval(id) => {
+                let status = match completion {
+                    InteractionCompletion::Replied(reply) => {
+                        if matches!(
+                            reply,
+                            sdk::InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve)
+                        ) {
+                            // Execute via fake_tool_port if available (counts invocations)
+                            if let Some(ref fake) = self.fake_tool_port {
+                                if let Some(approval_call) =
+                                    current.as_ref().and_then(|ci| ci.approval_call.clone())
+                                {
+                                    let call = &approval_call.call;
+                                    let mut input = call.input.clone();
+                                    tools::strip_runtime_meta(&mut input);
+                                    let scope = tools::ExecutionScope::builder(
+                                        "test-run".to_string(),
+                                        project::WorkspaceId::from("test-ws".to_string()),
+                                        std::path::PathBuf::from("/tmp"),
+                                    )
+                                    .build();
+                                    let invocation = tools::ToolInvocation::new(
+                                        call.name.as_str(),
+                                        input,
+                                        scope,
+                                    )
+                                    .with_authorization(approval_call.authorization);
+                                    let signal = crate::adapters::tool_runtime::cancellation(
+                                        CancellationToken::new(),
+                                    );
+                                    let _ = tools::ToolExecutionPort::execute(
+                                        fake.as_ref(),
+                                        invocation,
+                                        signal.as_ref(),
+                                    )
+                                    .await;
+                                }
+                            }
+                            ToolCallStatus::Success
+                        } else {
+                            ToolCallStatus::Cancelled
+                        }
+                    }
+                    InteractionCompletion::Cancelled(_) => ToolCallStatus::Cancelled,
+                };
+                (id.clone(), status)
+            }
+            _ => {
+                return Ok(super::engine::InteractionWorkOutcome::Completed {
+                    call_id: sdk::ToolCallId::new_v7(),
+                    status: ToolCallStatus::Success,
+                    remaining_queue,
+                });
+            }
+        };
+
+        Ok(super::engine::InteractionWorkOutcome::Completed {
+            call_id,
+            status,
+            remaining_queue,
+        })
+    }
+
     fn register_step_scope(
         &self,
         _run_id: &sdk::RunId,
@@ -359,8 +590,8 @@ fn input_split_keeps_user_content_and_controls_separate() {
 #[test]
 fn stuck_guard_detects_repeated_text_for_every_run_kind() {
     for mut guard in [
-        StuckGuard::new(Duration::ZERO, 2),
-        StuckGuard::new(Duration::from_secs(30), 2),
+        StuckGuard::new(Duration::ZERO),
+        StuckGuard::new(Duration::from_secs(30)),
     ] {
         assert_eq!(guard.inspect_text("same"), StuckDecision::Allow);
         assert_eq!(guard.inspect_text("same"), StuckDecision::Allow);
@@ -373,7 +604,7 @@ fn stuck_guard_detects_repeated_text_for_every_run_kind() {
 
 #[test]
 fn stuck_guard_detects_tool_loops_and_escalates() {
-    let mut guard = StuckGuard::new(Duration::ZERO, 2);
+    let mut guard = StuckGuard::new(Duration::ZERO);
     let repeated = call("Read", json!({"file_path": "a.rs"}));
 
     assert_eq!(guard.inspect_tool(&repeated), StuckDecision::Allow);
@@ -392,8 +623,8 @@ fn stuck_guard_detects_tool_loops_and_escalates() {
 #[test]
 fn timeout_zero_is_unlimited_and_positive_timeout_fails() {
     let now = Instant::now();
-    let unlimited = StuckGuard::with_started_at(Duration::ZERO, 2, now);
-    let finite = StuckGuard::with_started_at(Duration::from_secs(5), 2, now);
+    let unlimited = StuckGuard::with_started_at(Duration::ZERO, now);
+    let finite = StuckGuard::with_started_at(Duration::from_secs(5), now);
 
     assert_eq!(
         unlimited.inspect_timeout(now + Duration::from_secs(60)),
@@ -405,19 +636,10 @@ fn timeout_zero_is_unlimited_and_positive_timeout_fails() {
     ));
 }
 
-#[test]
-fn stop_hook_limit_fails_instead_of_looping_forever() {
-    let mut guard = StuckGuard::new(Duration::ZERO, 2);
-
-    assert!(matches!(
-        guard.record_stop_hook_block(),
-        StuckDecision::SoftBlock { .. }
-    ));
-    assert!(matches!(
-        guard.record_stop_hook_block(),
-        StuckDecision::Fail { .. }
-    ));
-}
+// #1248 Task 6: Stop hook block counting moved to Run domain.
+// The following test is removed because record_stop_hook_block no longer
+// exists on StuckGuard. Equivalent coverage is in domain/agent_run/tests.rs
+// and application/stop_hook_coordination_tests.rs.
 
 #[tokio::test]
 async fn engine_completes_text_only_run_through_the_run_fsm() {
@@ -1667,4 +1889,740 @@ async fn terminate_while_awaiting_user_finishes_as_terminated() {
         .events
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// #1248 Task 5: Four-body interaction routing engine tests (RED)
+// ═══════════════════════════════════════════════════════════════════
+
+mod interaction_routing {
+    use super::*;
+    use crate::application::loop_engine::{
+        ApprovalRequiredCall, SuspendedQuestion, SuspendedToolCall,
+    };
+
+    /// Helper: Create a port+run with Tools model step and given tool_step.
+    fn setup_tool_run(
+        model_step: ModelStep,
+        tool_step: ToolStep,
+    ) -> (Run, CancellationToken, ScriptedPort) {
+        let run = Run::new(RunSpec::main(), None);
+        let root = CancellationToken::new();
+        let mut drain_q = VecDeque::new();
+        drain_q.push_back(DrainOutcome::ready(
+            vec![LoopInput {
+                text: "user input".to_string(),
+                input_id: None,
+                images: Vec::new(),
+            }],
+            DrainEpoch(0),
+        ));
+        drain_q.push_back(DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        });
+
+        let port = ScriptedPort {
+            model_steps: VecDeque::from([model_step]),
+            tool_steps: VecDeque::from([tool_step]),
+            drain_outcomes: drain_q,
+            ..Default::default()
+        };
+        (run, root, port)
+    }
+
+    // ── UserQuestions: InteractionSuspended → engine creates intent ──
+
+    /// InteractionSuspended registers via coordinator, publishes to UI,
+    /// stores receiver, and returns AwaitUser.
+    #[tokio::test]
+    async fn user_questions_suspension_creates_awaiting_user() {
+        let call = call("AskUserQuestion", json!({"question": "continue?"}));
+        let suspended = SuspendedToolCall {
+            call: call.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "continue?".to_string(),
+                options: vec!["yes".to_string(), "no".to_string()],
+                allow_multi: false,
+            }],
+        };
+
+        let (mut run, root, mut port) = setup_tool_run(
+            ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call],
+            },
+            ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended],
+            },
+        );
+
+        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+        assert_eq!(run.status(), RunStatus::AwaitingUser);
+        assert!(run.pending_interaction().is_some());
+        assert!(
+            port.calls.contains(&"publish_interaction"),
+            "should have published: {:?}",
+            port.calls
+        );
+        assert!(
+            port.calls.contains(&"store_interaction"),
+            "should have stored receiver: {:?}",
+            port.calls
+        );
+    }
+
+    // ── Continuation identity ──
+
+    /// InteractionSuspended preserves CompleteToolCall continuation with
+    /// the call ID from the suspended tool call.
+    #[tokio::test]
+    async fn interaction_suspended_preserves_continuation_identity() {
+        let call_id = sdk::ids::ToolCallId::from_legacy_or_new("my-call-id");
+        let call = ToolCall {
+            id: call_id.clone(),
+            provider_id: "provider-1".to_string(),
+            name: "AskUserQuestion".to_string(),
+            index: 0,
+            input: json!({"question": "q"}),
+        };
+
+        let suspended = SuspendedToolCall {
+            call: call.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "q".to_string(),
+                options: vec!["a".to_string()],
+                allow_multi: false,
+            }],
+        };
+
+        let (mut run, root, mut port) = setup_tool_run(
+            ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call],
+            },
+            ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended],
+            },
+        );
+
+        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+
+        let pending = run
+            .pending_interaction()
+            .expect("should have pending interaction");
+        assert_eq!(
+            pending.continuation,
+            InteractionContinuation::CompleteToolCall(call_id)
+        );
+
+        // Verify published interaction has UserQuestions body
+        let published = port.published_interactions.lock().unwrap();
+        assert_eq!(published.len(), 1);
+        assert!(matches!(
+            published[0].body,
+            sdk::InteractionRequestBody::UserQuestions(_)
+        ));
+    }
+
+    // ── L2: ToolApproval: AwaitingToolApproval → coordinator ──
+
+    /// AwaitingToolApproval creates ToolApproval intent via coordinator,
+    /// stores the receiver, and returns AwaitUser.
+    #[tokio::test]
+    async fn tool_approval_creates_awaiting_user() {
+        let call = call("Bash", json!({"command": "ls"}));
+        let call_id = call.id.clone();
+        let approval = ApprovalRequiredCall {
+            call: call.clone(),
+            authorization: tools::AuthorizationContext::STANDARD,
+            reason: "approval required: high risk".to_string(),
+            subject: "exec".to_string(),
+        };
+
+        let (mut run, root, mut port) = setup_tool_run(
+            ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call],
+            },
+            ToolStep::AwaitingToolApproval {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                calls_needing_approval: vec![approval],
+            },
+        );
+
+        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+        assert!(run.pending_interaction().is_some());
+        let pending = run.pending_interaction().unwrap();
+        assert_eq!(
+            pending.continuation,
+            InteractionContinuation::ContinueToolApproval(call_id)
+        );
+    }
+
+    // ── Multi-suspension: serial two AskUserQuestion ──
+
+    /// Two AskUserQuestion calls: only the first is started immediately;
+    /// the second is queued via PendingInteractionWork.
+    #[tokio::test]
+    async fn multi_suspension_queues_second_and_does_not_complete_step() {
+        let call1 = call("AskUserQuestion", json!({"question": "q1"}));
+        let call2 = call("AskUserQuestion", json!({"question": "q2"}));
+        let suspended1 = SuspendedToolCall {
+            call: call1.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "q1".to_string(),
+                options: vec!["a".to_string()],
+                allow_multi: false,
+            }],
+        };
+        let suspended2 = SuspendedToolCall {
+            call: call2.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "q2".to_string(),
+                options: vec!["b".to_string()],
+                allow_multi: false,
+            }],
+        };
+
+        let (mut run, root, mut port) = setup_tool_run(
+            ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call1, call2],
+            },
+            ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended1, suspended2],
+            },
+        );
+
+        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+        assert!(run.pending_interaction().is_some());
+        // Only one interaction was started; the second is queued on the port
+        let pending_work = port.pending_work.lock().unwrap();
+        assert!(
+            pending_work.is_some(),
+            "second suspension should be queued via set_pending_interaction_work"
+        );
+        let work = pending_work.as_ref().unwrap();
+        assert_eq!(work.queue.len(), 1, "one item should be in the queue");
+        assert!(
+            work.active_step_id.is_some(),
+            "active step should be preserved"
+        );
+    }
+
+    // ── RequireApproval: full engine roundtrip approve ──
+
+    /// Full engine roundtrip for tool approval: setup fake_tool_port,
+    /// first run_loop → AwaitUser, reply approve via bridge,
+    /// second run_loop → tool executes → Success.
+    #[tokio::test]
+    async fn require_approval_approve_full_roundtrip() {
+        let mut run = Run::new(RunSpec::main(), None);
+        let cancel = CancellationToken::new();
+        let fake = Arc::new(FakeToolExecutionPort::new());
+        fake.set_result_text("approved result");
+
+        let call = call("Bash", json!({"command": "ls"}));
+        let call_id = call.id.clone();
+
+        let mut drain_q = VecDeque::new();
+        drain_q.push_back(DrainOutcome::ready(
+            vec![LoopInput {
+                text: "run ls".to_string(),
+                input_id: None,
+                images: Vec::new(),
+            }],
+            DrainEpoch(0),
+        ));
+        drain_q.push_back(DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        });
+
+        let mut port = ScriptedPort {
+            model_steps: VecDeque::from([ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call.clone()],
+            }]),
+            tool_steps: VecDeque::from([ToolStep::AwaitingToolApproval {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                calls_needing_approval: vec![ApprovalRequiredCall {
+                    call: call.clone(),
+                    authorization: tools::AuthorizationContext::STANDARD,
+                    reason: "dangerous".to_string(),
+                    subject: "exec".to_string(),
+                }],
+            }]),
+            drain_outcomes: drain_q,
+            fake_tool_port: Some(fake.clone()),
+            ..Default::default()
+        };
+
+        // First run_loop: engine creates ToolApproval intent → AwaitUser
+        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+        assert_eq!(run.status(), RunStatus::AwaitingUser);
+
+        // Get the request_id from stored metadata
+        let request_id = {
+            let metas = port.stored_metadata.lock().unwrap();
+            let meta = metas.front().expect("should have stored metadata");
+            meta.request_id.clone()
+        };
+
+        // Reply approve via the interaction bridge
+        let reply = sdk::InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve);
+        let outcome = port.interaction_bridge.reply(&request_id, reply);
+        assert_eq!(outcome, sdk::InteractionCommandOutcome::Accepted);
+
+        // Set up drain outcomes for second run_loop: complete after resolution
+        port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        }]);
+
+        // Second run_loop: polls resolved interaction, finishes work, completes
+        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::Terminal);
+        assert_eq!(run.status(), RunStatus::Completed);
+
+        // Assertions: tool executed once with correct invocation
+        assert_eq!(fake.execute_count(), 1);
+        let invocations = fake.recorded_invocations.lock().unwrap();
+        assert_eq!(invocations.len(), 1);
+        assert_eq!(invocations[0].tool_name.as_str(), "Bash");
+        assert_eq!(invocations[0].input, json!({"command": "ls"}));
+        assert_eq!(
+            invocations[0].authorization,
+            tools::AuthorizationContext::STANDARD
+        );
+        // set_result_text was used — verify the returned text
+        assert_eq!(fake.returned_text(), Some("approved result".to_string()));
+
+        // Verify the tool call has Success status in the Run
+        let step = &run.steps()[0];
+        assert_eq!(step.tool_calls().len(), 1);
+        assert_eq!(step.tool_calls()[0].status(), ToolCallStatus::Success);
+        assert_eq!(step.tool_calls()[0].id(), &call_id);
+
+        // Verify finish_interaction_work was called
+        assert!(port.calls.contains(&"finish_interaction_work"));
+    }
+
+    // ── RequireApproval: full engine roundtrip deny ──
+
+    /// Full engine roundtrip for tool approval deny:
+    /// first run_loop → AwaitUser, reply deny via bridge,
+    /// second run_loop → tool NOT executed, Cancelled.
+    #[tokio::test]
+    async fn require_approval_deny_full_roundtrip() {
+        let mut run = Run::new(RunSpec::main(), None);
+        let cancel = CancellationToken::new();
+        let fake = Arc::new(FakeToolExecutionPort::new());
+
+        let call = call("Bash", json!({"command": "rm -rf /"}));
+        let call_id = call.id.clone();
+
+        let mut drain_q = VecDeque::new();
+        drain_q.push_back(DrainOutcome::ready(
+            vec![LoopInput {
+                text: "dangerous cmd".to_string(),
+                input_id: None,
+                images: Vec::new(),
+            }],
+            DrainEpoch(0),
+        ));
+        drain_q.push_back(DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        });
+
+        let mut port = ScriptedPort {
+            model_steps: VecDeque::from([ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call.clone()],
+            }]),
+            tool_steps: VecDeque::from([ToolStep::AwaitingToolApproval {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                calls_needing_approval: vec![ApprovalRequiredCall {
+                    call: call.clone(),
+                    authorization: tools::AuthorizationContext::STANDARD,
+                    reason: "dangerous".to_string(),
+                    subject: "destroy".to_string(),
+                }],
+            }]),
+            drain_outcomes: drain_q,
+            fake_tool_port: Some(fake.clone()),
+            ..Default::default()
+        };
+
+        // First run_loop → AwaitUser
+        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+
+        // Reply deny via the interaction bridge
+        let request_id = {
+            let metas = port.stored_metadata.lock().unwrap();
+            metas.front().unwrap().request_id.clone()
+        };
+        let reply =
+            sdk::InteractionReply::ToolApproval(sdk::ApprovalDecision::Deny { reason: None });
+        let outcome = port.interaction_bridge.reply(&request_id, reply);
+        assert_eq!(outcome, sdk::InteractionCommandOutcome::Accepted);
+
+        // Second run_loop: resolve → Cancelled
+        port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        }]);
+        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::Terminal);
+        assert_eq!(run.status(), RunStatus::Completed);
+
+        // Assertions: tool was NOT executed
+        assert_eq!(fake.execute_count(), 0);
+
+        // Tool call status is Cancelled
+        let step = &run.steps()[0];
+        assert_eq!(step.tool_calls().len(), 1);
+        assert_eq!(step.tool_calls()[0].status(), ToolCallStatus::Cancelled);
+        assert_eq!(step.tool_calls()[0].id(), &call_id);
+
+        assert!(port.calls.contains(&"finish_interaction_work"));
+    }
+
+    // ── UserQuestions: single question full roundtrip ──
+
+    /// Full engine roundtrip for a single UserQuestions interaction:
+    /// run_loop → AwaitUser, reply via bridge, re-enter → Success.
+    #[tokio::test]
+    async fn user_questions_full_roundtrip() {
+        let mut run = Run::new(RunSpec::main(), None);
+        let cancel = CancellationToken::new();
+
+        let call = call("AskUserQuestion", json!({"question": "continue?"}));
+        let call_id = call.id.clone();
+        let suspended = SuspendedToolCall {
+            call: call.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "continue?".to_string(),
+                options: vec!["yes".to_string(), "no".to_string()],
+                allow_multi: false,
+            }],
+        };
+
+        let mut drain_q = VecDeque::new();
+        drain_q.push_back(DrainOutcome::ready(
+            vec![LoopInput {
+                text: "ask question".to_string(),
+                input_id: None,
+                images: Vec::new(),
+            }],
+            DrainEpoch(0),
+        ));
+        drain_q.push_back(DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        });
+
+        let mut port = ScriptedPort {
+            model_steps: VecDeque::from([ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call.clone()],
+            }]),
+            tool_steps: VecDeque::from([ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended],
+            }]),
+            drain_outcomes: drain_q,
+            ..Default::default()
+        };
+
+        // First run_loop → AwaitUser
+        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+        assert_eq!(run.status(), RunStatus::AwaitingUser);
+
+        // Reply via bridge
+        let request_id = {
+            let metas = port.stored_metadata.lock().unwrap();
+            metas.front().unwrap().request_id.clone()
+        };
+        let reply = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("yes".to_string())]);
+        let outcome = port.interaction_bridge.reply(&request_id, reply);
+        assert_eq!(outcome, sdk::InteractionCommandOutcome::Accepted);
+
+        // Second run_loop: resolve → Success
+        port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        }]);
+        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::Terminal);
+        assert_eq!(run.status(), RunStatus::Completed);
+
+        // Tool call is Success
+        let step = &run.steps()[0];
+        assert_eq!(step.tool_calls().len(), 1);
+        assert_eq!(step.tool_calls()[0].status(), ToolCallStatus::Success);
+        assert_eq!(step.tool_calls()[0].id(), &call_id);
+
+        assert!(port.calls.contains(&"finish_interaction_work"));
+    }
+
+    // ── UserQuestions: two questions serial roundtrip ──
+
+    /// Two AskUserQuestion calls: first resolved → second becomes active,
+    /// second resolved → step completes. No direct finish seam.
+    #[tokio::test]
+    async fn user_questions_two_full_roundtrip() {
+        let mut run = Run::new(RunSpec::main(), None);
+        let cancel = CancellationToken::new();
+
+        let call1 = call("AskUserQuestion", json!({"question": "q1"}));
+        let call2 = call("AskUserQuestion", json!({"question": "q2"}));
+        let call1_id = call1.id.clone();
+        let call2_id = call2.id.clone();
+
+        let suspended1 = SuspendedToolCall {
+            call: call1.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "q1".to_string(),
+                options: vec!["a".to_string()],
+                allow_multi: false,
+            }],
+        };
+        let suspended2 = SuspendedToolCall {
+            call: call2.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "q2".to_string(),
+                options: vec!["b".to_string()],
+                allow_multi: false,
+            }],
+        };
+
+        let mut drain_q = VecDeque::new();
+        drain_q.push_back(DrainOutcome::ready(
+            vec![LoopInput {
+                text: "ask two".to_string(),
+                input_id: None,
+                images: Vec::new(),
+            }],
+            DrainEpoch(0),
+        ));
+        drain_q.push_back(DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        });
+
+        let mut port = ScriptedPort {
+            model_steps: VecDeque::from([ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call1.clone(), call2.clone()],
+            }]),
+            tool_steps: VecDeque::from([ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended1, suspended2],
+            }]),
+            drain_outcomes: drain_q,
+            ..Default::default()
+        };
+
+        // First run_loop: first question active, second queued → AwaitUser
+        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+        assert_eq!(run.status(), RunStatus::AwaitingUser);
+
+        // Reply to first question via bridge
+        let request_id1 = {
+            let metas = port.stored_metadata.lock().unwrap();
+            metas.front().unwrap().request_id.clone()
+        };
+        let reply1 = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("a".to_string())]);
+        assert_eq!(
+            port.interaction_bridge.reply(&request_id1, reply1),
+            sdk::InteractionCommandOutcome::Accepted
+        );
+
+        // Second run_loop: resolve first, start second → AwaitUser again
+        port.drain_outcomes = VecDeque::from([DrainOutcome::NoInput {
+            epoch: DrainEpoch(1),
+        }]);
+        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+        assert_eq!(run.status(), RunStatus::AwaitingUser);
+
+        // First call now Success, step still active (second interaction pending)
+        let step = &run.steps()[0];
+        let tc1 = step
+            .tool_calls()
+            .iter()
+            .find(|tc| tc.id() == &call1_id)
+            .unwrap();
+        assert_eq!(tc1.status(), ToolCallStatus::Success);
+        assert!(
+            run.active_step_id().is_some(),
+            "step should still be active while second interaction is pending"
+        );
+
+        // Reply to second question via bridge
+        let request_id2 = {
+            let metas = port.stored_metadata.lock().unwrap();
+            metas.front().unwrap().request_id.clone()
+        };
+        let reply2 = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("b".to_string())]);
+        assert_eq!(
+            port.interaction_bridge.reply(&request_id2, reply2),
+            sdk::InteractionCommandOutcome::Accepted
+        );
+
+        // Third run_loop: resolve second, complete step → terminal
+        port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        }]);
+        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::Terminal);
+        assert_eq!(run.status(), RunStatus::Completed);
+
+        // Both calls are Success, step is completed
+        let step = &run.steps()[0];
+        let tc1 = step
+            .tool_calls()
+            .iter()
+            .find(|tc| tc.id() == &call1_id)
+            .unwrap();
+        let tc2 = step
+            .tool_calls()
+            .iter()
+            .find(|tc| tc.id() == &call2_id)
+            .unwrap();
+        assert_eq!(tc1.status(), ToolCallStatus::Success);
+        assert_eq!(tc2.status(), ToolCallStatus::Success);
+        assert!(
+            run.active_step_id().is_none(),
+            "step should be completed after all interactions resolve"
+        );
+
+        // finish_interaction_work called twice
+        let finish_count = port
+            .calls
+            .iter()
+            .filter(|&&c| c == "finish_interaction_work")
+            .count();
+        assert_eq!(finish_count, 2);
+    }
+
+    // ── Mixed: completed_results + suspended roundtrip ──
+
+    /// Mixed round: one non-interaction call + one suspended question.
+    /// First run_loop: non-interaction already Success, suspension creates AwaitUser.
+    /// After reply: suspension becomes Success, non-interaction is NOT re-advanced.
+    #[tokio::test]
+    async fn mixed_completed_and_suspension_full_roundtrip() {
+        let mut run = Run::new(RunSpec::main(), None);
+        let cancel = CancellationToken::new();
+
+        let bash_call = call("Bash", json!({"command": "ls"}));
+        let question_call = call("AskUserQuestion", json!({"question": "go?"}));
+        let bash_id = bash_call.id.clone();
+        let question_id = question_call.id.clone();
+
+        let suspended_q = SuspendedToolCall {
+            call: question_call.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "go?".to_string(),
+                options: vec!["yes".to_string()],
+                allow_multi: false,
+            }],
+        };
+
+        let mut drain_q = VecDeque::new();
+        drain_q.push_back(DrainOutcome::ready(
+            vec![LoopInput {
+                text: "mixed".to_string(),
+                input_id: None,
+                images: Vec::new(),
+            }],
+            DrainEpoch(0),
+        ));
+        drain_q.push_back(DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        });
+
+        let mut port = ScriptedPort {
+            model_steps: VecDeque::from([ModelStep::Tools {
+                text: String::new(),
+                calls: vec![bash_call.clone(), question_call.clone()],
+            }]),
+            tool_steps: VecDeque::from([ToolStep::InteractionSuspended {
+                completed_results: vec![(bash_id.clone(), ToolCallStatus::Success)],
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended_q],
+            }]),
+            drain_outcomes: drain_q,
+            ..Default::default()
+        };
+
+        // First run_loop: non-interaction → Success, suspension → AwaitUser
+        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+        assert_eq!(run.status(), RunStatus::AwaitingUser);
+
+        // Bash call already Success (advanced by engine before interaction)
+        let step = &run.steps()[0];
+        let bash_tc = step
+            .tool_calls()
+            .iter()
+            .find(|tc| tc.id() == &bash_id)
+            .unwrap();
+        assert_eq!(
+            bash_tc.status(),
+            ToolCallStatus::Success,
+            "non-interaction call should be Success after first run"
+        );
+
+        // Reply to the question via bridge
+        let request_id = {
+            let metas = port.stored_metadata.lock().unwrap();
+            metas.front().unwrap().request_id.clone()
+        };
+        let reply = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("yes".to_string())]);
+        assert_eq!(
+            port.interaction_bridge.reply(&request_id, reply),
+            sdk::InteractionCommandOutcome::Accepted
+        );
+
+        // Second run_loop: resolve suspension → complete step
+        port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        }]);
+        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        assert_eq!(directive, LoopDirective::Terminal);
+        assert_eq!(run.status(), RunStatus::Completed);
+
+        // Both calls are Success; bash was NOT re-advanced
+        let step = &run.steps()[0];
+        let bash_tc = step
+            .tool_calls()
+            .iter()
+            .find(|tc| tc.id() == &bash_id)
+            .unwrap();
+        let question_tc = step
+            .tool_calls()
+            .iter()
+            .find(|tc| tc.id() == &question_id)
+            .unwrap();
+        assert_eq!(bash_tc.status(), ToolCallStatus::Success);
+        assert_eq!(question_tc.status(), ToolCallStatus::Success);
+
+        assert!(port.calls.contains(&"finish_interaction_work"));
+    }
 }

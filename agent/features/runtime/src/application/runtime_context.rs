@@ -8,13 +8,19 @@
 //! #1385：冻结生产契约 —— 只持当前生产可用的 per-Run 活契约；
 //! WorkspacePort / MainSessionWiring / SessionQueryPort / ConfigQuery / ConfigWriter 不进入。
 //! Main 由 Composition 提供父能力装配；Sub 从父收缩派生。
+//!
+//! #1248 Task 3 refactor —— 生命周期拆分：
+//! - [`RuntimeServices`]：跨 Run 稳定共享（tool/policy/reflection/task/hooks + 未来 adapter factories）。
+//! - [`RunContextBindings`]：per-Run 构造输入（context/provider/interaction/memory/reasoning + I/O seams），
+//!   不是 Snapshot（含活契约），装配后不可变。
+//! - [`RuntimeContext`]：装配产物，私有字段 + 只读 accessor。
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use sdk::ChatInputEvent;
 use tokio_util::sync::CancellationToken;
 
-use crate::application::interaction::InteractionBridge;
+use crate::application::interaction::InteractionPort;
 use crate::application::main_loop::looping::run_input_buffer::RunInputBuffer;
 use crate::application::main_loop::ChatEventSinkHandle;
 use crate::application::run_config::RunConfigSnapshot;
@@ -24,7 +30,6 @@ use hook::HookPort;
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 use task::TaskAccess;
 use tools::{ToolCatalogPort, ToolExecutionContextBindingPort, ToolExecutionPort};
-use workflow::api::ReasoningPort;
 
 /// per-Run 协作式取消作用域；属于 RuntimeContext 活资源，不持久化。
 ///
@@ -204,47 +209,81 @@ impl Default for RunInputBufferHandle {
     }
 }
 
-// ── 装配输入 ──
+// ── #1248 Task 3: 装配输入拆分 ──
 
-/// 一次 `RuntimeContext` 装配所需的全部活契约部件。
+/// 长生命周期共享端口与工厂——会话级作用域，跨 Run 共享。
 ///
-/// 由 Composition Root (Main) 或父 RuntimeContext (Sub) 提供。
-/// 所有部件必须在同一时间点装配；构造后部件不可替换。
-pub struct RuntimeContextParts {
-    /// Context Management BC 出站端口。
-    pub context: Arc<dyn ContextPort>,
-    /// 本次 Run 使用的 Provider 绑定（含 `Arc<dyn ProviderPort>` 与调用冻结属性）。
-    pub provider: Arc<ProviderBinding>,
-    /// Tool BC 只读目录端口（生产 `tools::ToolCatalogPort`）。
+/// 只持跨 Run 稳定的能力：tool catalog/execution/binding、policy、
+/// reflection history、task、hooks，以及后续 adapter factories。
+/// **不持** per-Run 已绑定的 context/provider/interaction/memory ——
+/// 这些属于 [`RunContextBindings`]。
+///
+/// 由 Composition Root 创建一次，通过 [`RuntimeContextFactory`]
+/// 注入每次 Run 装配。所有字段均为 `Arc` 共享，Clone 即浅拷贝。
+#[derive(Clone)]
+pub struct RuntimeServices {
+    /// Tool BC 只读目录端口。
     pub tool_catalog: Arc<dyn ToolCatalogPort>,
-    /// Tool BC 执行端口（生产 `tools::ToolExecutionPort`）。
+    /// Tool BC 执行端口。
     pub tool_execution: Arc<dyn ToolExecutionPort>,
     /// 工具执行上下文绑定（作用域守卫）。
     pub tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
     /// Policy BC 出站端口。
     pub policy: Arc<dyn PolicyPort>,
-    /// 交互桥（ask_user / permission gate）。
-    pub interaction: Arc<InteractionBridge>,
-    /// Memory BC 出站端口。
-    pub memory: Arc<dyn MemoryPort>,
-    /// Reflection 历史存储。
+    /// Reflection 历史存储（会话级）。
     pub reflection_history: Arc<dyn ReflectionHistoryStore>,
-    /// Task BC 低权限访问端口。
+    /// Task BC 低权限访问端口（会话级）。
     pub task: Arc<dyn TaskAccess>,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookPort>,
-    /// Reasoning 出站端口。
-    pub reasoning: Arc<dyn ReasoningPort>,
+}
+
+/// per-Run 构造输入——每次 Run 装配时提供的活契约集合。
+///
+/// 不是 Snapshot（Snapshot 暗示静态快照，但此处持有 `Arc<dyn Trait>`
+/// 活契约端口）。由调用方在装配点提供；[`RuntimeContextFactory::assemble`]
+/// 根据 [`RunSpec`] 的 capability-semantic 字段决定是否覆写其中某些端口
+///（如 interaction、reasoning）。
+///
+/// # 生命周期语义
+///
+/// | 字段 | 作用域 | 说明 |
+/// |---|---|---|
+/// | `context` | per-Run | Context BC 出站端口 |
+/// | `provider` | per-Run | Provider 绑定（含 model 冻结属性） |
+/// | `interaction` | per-Run | 交互桥（ask_user / permission gate） |
+/// | `memory` | per-Run | Memory BC 出站端口 |
+/// | `reasoning` | per-Run | Reasoning 端口——factory 按 spec 覆写 |
+/// | `config` | per-Run | Run 级固定配置快照 |
+/// | `cancel` | per-Run | 取消作用域 |
+/// | `event_sink` | per-Run | 事件输出 sink |
+/// | `usage` | per-Run | token 用量追踪 |
+/// | `input` | per-Run | 输入缓冲 handle（推入侧） |
+#[derive(Clone)]
+pub struct RunContextBindings {
+    /// Context Management BC 出站端口。
+    pub context: Arc<dyn ContextPort>,
+    /// Provider 绑定（含 `Arc<dyn ProviderPort>` 与调用冻结属性）。
+    pub provider: Arc<ProviderBinding>,
+    /// 交互桥（ask_user / permission gate）。
+    pub interaction: Arc<dyn InteractionPort>,
+    /// Memory BC 出站端口。
+    pub memory: Arc<dyn MemoryPort>,
     /// Run 级固定配置快照。
     pub config: RunConfigSnapshot,
     /// per-Run 取消作用域。
     pub cancel: RunCancellationScope,
-    /// 事件输出 sink（生产 `main_loop::ChatEventSinkHandle`）。
+    /// 事件输出 sink。
     pub event_sink: ChatEventSinkHandle,
     /// per-Run token 用量追踪。
     pub usage: RunUsageTracker,
     /// per-Run 输入缓冲 handle（推入侧）。
     pub input: RunInputBufferHandle,
+    /// 静态 reasoning level，随 Run 冻结。
+    pub reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
+    /// #1248 Task 3: per-Run tool_catalog override (e.g. restricted catalog for sub-runs).
+    /// When `None`, the factory's session-level catalog is used.
+    pub tool_catalog: Option<Arc<dyn ToolCatalogPort>>,
 }
 
 /// 按 RunSpec 装配出的执行资源容器。
@@ -279,12 +318,12 @@ pub struct RuntimeContext {
     tool_execution: Arc<dyn ToolExecutionPort>,
     tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
     policy: Arc<dyn PolicyPort>,
-    interaction: Arc<InteractionBridge>,
+    interaction: Arc<dyn InteractionPort>,
     memory: Arc<dyn MemoryPort>,
     reflection_history: Arc<dyn ReflectionHistoryStore>,
     task: Arc<dyn TaskAccess>,
     hooks: Arc<dyn HookPort>,
-    reasoning: Arc<dyn ReasoningPort>,
+    reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
     config: RunConfigSnapshot,
     cancel: RunCancellationScope,
     /// 事件输出 sink。
@@ -295,27 +334,58 @@ pub struct RuntimeContext {
     input: RunInputBufferHandle,
 }
 
+/// Token that gates [`RuntimeContext::new`] — only [`RuntimeContextFactory`]
+/// can construct one, preventing sibling modules from bypassing the factory.
+///
+/// #1248 Task 3: `RuntimeContext::new` must go through the factory so that
+/// assembly rules (interaction/hook/reasoning binding modes) are validated.
+pub struct RuntimeContextAssemblyToken(());
+
+impl RuntimeContextAssemblyToken {
+    /// Construct a token.  Only [`RuntimeContextFactory`] calls this in
+    /// production; test code uses [`RuntimeContextAssemblyToken::new_for_test`].
+    pub(crate) fn new() -> Self {
+        Self(())
+    }
+}
+
+#[cfg(test)]
+impl RuntimeContextAssemblyToken {
+    /// Test-only constructor so factory tests can build parent
+    /// [`RuntimeContext`] instances directly.  Production code must
+    /// go through [`RuntimeContextFactory::assemble`].
+    pub(crate) fn new_for_test() -> Self {
+        Self(())
+    }
+}
+
 impl RuntimeContext {
-    /// 由 Composition Root 或父 RuntimeContext 在 Run 创建点构造。
-    pub fn new(parts: RuntimeContextParts) -> Self {
+    /// 仅 [`RuntimeContextFactory`](super::runtime_context_factory::RuntimeContextFactory)
+    /// 可构造；外部通过 factory 装配。`_token` 由 factory 内部提供，
+    /// 阻止 sibling 模块直接调用此构造函数。
+    pub fn new(
+        services: RuntimeServices,
+        bindings: RunContextBindings,
+        _token: RuntimeContextAssemblyToken,
+    ) -> Self {
         Self {
-            context: parts.context,
-            provider: parts.provider,
-            tool_catalog: parts.tool_catalog,
-            tool_execution: parts.tool_execution,
-            tool_context_binding: parts.tool_context_binding,
-            policy: parts.policy,
-            interaction: parts.interaction,
-            memory: parts.memory,
-            reflection_history: parts.reflection_history,
-            task: parts.task,
-            hooks: parts.hooks,
-            reasoning: parts.reasoning,
-            config: parts.config,
-            cancel: parts.cancel,
-            event_sink: parts.event_sink,
-            usage: parts.usage,
-            input: parts.input,
+            context: bindings.context,
+            provider: bindings.provider,
+            tool_catalog: services.tool_catalog,
+            tool_execution: services.tool_execution,
+            tool_context_binding: services.tool_context_binding,
+            policy: services.policy,
+            interaction: bindings.interaction,
+            memory: bindings.memory,
+            reflection_history: services.reflection_history,
+            task: services.task,
+            hooks: services.hooks,
+            reasoning: bindings.reasoning,
+            config: bindings.config,
+            cancel: bindings.cancel,
+            event_sink: bindings.event_sink,
+            usage: bindings.usage,
+            input: bindings.input,
         }
     }
 
@@ -346,7 +416,7 @@ impl RuntimeContext {
         self.policy.clone()
     }
     /// 交互桥，`Arc` clone。
-    pub fn interaction(&self) -> Arc<InteractionBridge> {
+    pub fn interaction(&self) -> Arc<dyn InteractionPort> {
         self.interaction.clone()
     }
     /// Memory 端口，`Arc` clone。
@@ -366,7 +436,7 @@ impl RuntimeContext {
         self.hooks.clone()
     }
     /// Reasoning 端口，`Arc` clone。
-    pub fn reasoning(&self) -> Arc<dyn ReasoningPort> {
+    pub fn reasoning(&self) -> Arc<Mutex<share::reasoning::ReasoningLevel>> {
         self.reasoning.clone()
     }
 
@@ -407,8 +477,8 @@ impl RuntimeContext {
     pub fn policy_ref(&self) -> &Arc<dyn PolicyPort> {
         &self.policy
     }
-    /// Interaction bridge reference.
-    pub fn interaction_ref(&self) -> &Arc<InteractionBridge> {
+    /// Interaction port reference.
+    pub fn interaction_ref(&self) -> &Arc<dyn InteractionPort> {
         &self.interaction
     }
     /// Memory port reference.
@@ -428,7 +498,7 @@ impl RuntimeContext {
         &self.hooks
     }
     /// Reasoning port reference.
-    pub fn reasoning_ref(&self) -> &Arc<dyn ReasoningPort> {
+    pub fn reasoning_ref(&self) -> &Arc<Mutex<share::reasoning::ReasoningLevel>> {
         &self.reasoning
     }
     /// Run config snapshot reference.

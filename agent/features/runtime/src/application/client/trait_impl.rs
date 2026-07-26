@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use sdk::{AgentClient, ChatRequest, ChatStream, SdkError};
 
 use super::accessors::AgentClientImpl;
+use crate::application::interaction::InteractionPort;
 
 #[async_trait]
 impl AgentClient for AgentClientImpl {

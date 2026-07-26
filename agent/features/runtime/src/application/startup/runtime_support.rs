@@ -26,6 +26,9 @@ pub fn build_agent_runner(
     workspace: project::WorkspaceViews,
     skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
     parent_context_source: ParentRunContextSource,
+    runtime_context_factory: Arc<
+        crate::application::runtime_context_factory::RuntimeContextFactory,
+    >,
 ) -> Arc<agent_runner::CliAgentRunner> {
     Arc::new(agent_runner::CliAgentRunner {
         factory,
@@ -37,6 +40,7 @@ pub fn build_agent_runner(
         workspace: crate::application::workspace_access::RuntimeWorkspaceAccess::new(workspace),
         skill_materializer,
         parent_context: parent_context_source,
+        runtime_context_factory,
     })
 }
 
@@ -97,6 +101,7 @@ mod tests {
 
         let skill_wiring = tools::composition::wire_skills();
         let skill_materializer = skill_wiring.materializer();
+        let tool_ports = tools::composition::TestCatalogExecutionFactory::empty();
         let snapshot = share::config::domain::snapshot::ConfigSnapshot::new(Config::default());
         let config_reader: Arc<dyn config::ConfigReader> = Arc::new(
             crate::application::subagent::runner::test_config_reader::FixedConfigReader::from_snapshot(
@@ -113,6 +118,60 @@ mod tests {
             workspace,
             skill_materializer.clone(),
             ParentRunContextSource::new(),
+            Arc::new({
+                let refl: Arc<dyn memory::api::ReflectionHistoryStore> = {
+                    struct FakeRefl;
+                    #[async_trait::async_trait]
+                    impl memory::api::ReflectionHistoryQuery for FakeRefl {
+                        async fn list(
+                            &self,
+                            _limit: usize,
+                        ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::MemoryError>
+                        {
+                            Ok(vec![])
+                        }
+                    }
+                    #[async_trait::async_trait]
+                    impl memory::api::ReflectionHistoryStore for FakeRefl {
+                        async fn append(
+                            &self,
+                            _record: &memory::api::ReflectionRecord,
+                        ) -> Result<(), memory::MemoryError> {
+                            Ok(())
+                        }
+                        async fn upsert(
+                            &self,
+                            _record: &memory::api::ReflectionRecord,
+                        ) -> Result<(), memory::MemoryError> {
+                            Ok(())
+                        }
+                    }
+                    Arc::new(FakeRefl)
+                };
+                let hooks: Arc<dyn hook::HookPort> = {
+                    struct FakeHook;
+                    #[async_trait::async_trait]
+                    impl hook::HookPort for FakeHook {
+                        async fn dispatch(
+                            &self,
+                            _invocation: hook::HookInvocation,
+                            _cancellation: &tokio_util::sync::CancellationToken,
+                        ) -> hook::HookOutcome {
+                            hook::HookOutcome::proceed()
+                        }
+                    }
+                    Arc::new(FakeHook)
+                };
+                crate::application::runtime_context_factory::RuntimeContextFactory::new(
+                    tool_ports.catalog_port(),
+                    tool_ports.execution(),
+                    tool_ports.binding(),
+                    Arc::new(policy::AllowAllPolicy),
+                    refl,
+                    crate::application::testing::test_task_access(),
+                    hooks,
+                )
+            }),
         );
 
         // #1385: runner now only carries fields used by run_agent / complete;

@@ -6,12 +6,13 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::application::interaction::InteractionBridge;
+use crate::application::interaction::{InteractionBridge, InteractionPort};
 use crate::application::run_config::RunConfigSnapshot;
 use crate::application::runtime_context::{
-    ParentRunContextSource, ParentRunFrame, RunCancellationScope, RunInputBufferHandle,
-    RunUsageTracker, RuntimeContext, RuntimeContextParts,
+    ParentRunContextSource, ParentRunFrame, RunCancellationScope, RunContextBindings,
+    RunInputBufferHandle, RunUsageTracker, RuntimeContext,
 };
+use crate::application::runtime_context_factory::RuntimeContextFactory;
 use crate::ports::{
     ContextPort, PolicyDecision, PolicyPort, PolicyRequest, ProviderBinding, ProviderPort,
 };
@@ -22,7 +23,6 @@ use tools::{
     ToolExecutionContextBindingPort, ToolExecutionOutcome, ToolExecutionPort, ToolInvocation,
     ToolProfileName,
 };
-use workflow::api::ReasoningPort;
 
 // ── Test helper: noop event sink ──
 
@@ -194,33 +194,29 @@ impl HookPort for FakeHook {
         HookOutcome::proceed()
     }
 }
+// ── #1248 Task 3: Factory-based context construction helper ──
 
-struct FakeReasoning;
-impl ReasoningPort for FakeReasoning {
-    fn observe(
-        &self,
-        _signal: workflow::api::ReasoningSignal,
-    ) -> workflow::api::ReasoningObservation {
-        workflow::api::ReasoningObservation {
-            previous: workflow::api::ReasoningNode::Idle,
-            current: workflow::api::ReasoningNode::Idle,
-            requested: provider::ReasoningLevel::Medium,
-        }
-    }
-    fn current_requested_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Medium
-    }
-    fn set_level(&self, level: provider::ReasoningLevel) -> provider::ReasoningLevel {
-        level
-    }
-    fn reset_default_level(&self, level: provider::ReasoningLevel) -> provider::ReasoningLevel {
-        level
-    }
+fn make_context() -> RuntimeContext {
+    let factory = make_factory();
+    let bindings = make_bindings();
+    factory
+        .assemble(&crate::domain::agent_run::RunSpec::main(), bindings, None)
+        .expect("test context assembly must succeed")
 }
 
-// ── 辅助构造 ──
+fn make_factory() -> RuntimeContextFactory {
+    RuntimeContextFactory::new(
+        Arc::new(FakeToolCatalog),
+        Arc::new(FakeToolExecution),
+        Arc::new(FakeToolContextBinding),
+        Arc::new(FakePolicy),
+        Arc::new(FakeReflectionHistory),
+        Arc::new(task::TaskStore::new()),
+        Arc::new(FakeHook),
+    )
+}
 
-fn make_parts() -> RuntimeContextParts {
+fn make_bindings() -> RunContextBindings {
     let provider_port: Arc<dyn ProviderPort> = Arc::new(FakeProviderPort);
     let binding = ProviderBinding {
         provider: provider_port.clone(),
@@ -233,19 +229,11 @@ fn make_parts() -> RuntimeContextParts {
         context_window: None,
     };
 
-    RuntimeContextParts {
+    RunContextBindings {
         context: Arc::new(FakeContextPort),
         provider: Arc::new(binding),
-        tool_catalog: Arc::new(FakeToolCatalog),
-        tool_execution: Arc::new(FakeToolExecution),
-        tool_context_binding: Arc::new(FakeToolContextBinding),
-        policy: Arc::new(FakePolicy),
         interaction: Arc::new(InteractionBridge::new()),
         memory: Arc::new(memory::NoOpMemory),
-        reflection_history: Arc::new(FakeReflectionHistory),
-        task: Arc::new(task::TaskStore::new()),
-        hooks: Arc::new(FakeHook),
-        reasoning: Arc::new(FakeReasoning),
         config: RunConfigSnapshot::capture(
             share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
                 share::config::domain::snapshot::ConfigRevision::new(1),
@@ -256,6 +244,8 @@ fn make_parts() -> RuntimeContextParts {
         event_sink: noop_event_sink(),
         usage: RunUsageTracker::new(),
         input: RunInputBufferHandle::new(),
+        reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
+        tool_catalog: None,
     }
 }
 
@@ -281,27 +271,28 @@ fn main_runtime_context_preserves_injected_port_identity() {
     let tool_ctx_binding_arc: Arc<dyn ToolExecutionContextBindingPort> =
         Arc::new(FakeToolContextBinding);
     let policy_arc: Arc<dyn PolicyPort> = Arc::new(FakePolicy);
-    let interaction_arc = Arc::new(InteractionBridge::new());
+    let interaction_arc: Arc<dyn InteractionPort> = Arc::new(InteractionBridge::new());
     let memory_arc: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
     let reflection_history_arc: Arc<dyn memory::api::ReflectionHistoryStore> =
         Arc::new(FakeReflectionHistory);
     let task_arc: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
     let hooks_arc: Arc<dyn HookPort> = Arc::new(FakeHook);
-    let reasoning_arc: Arc<dyn ReasoningPort> = Arc::new(FakeReasoning);
+    let reasoning_arc = Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium));
 
-    let parts = RuntimeContextParts {
+    let factory = RuntimeContextFactory::new(
+        tool_catalog_arc.clone(),
+        tool_execution_arc.clone(),
+        tool_ctx_binding_arc.clone(),
+        policy_arc.clone(),
+        reflection_history_arc.clone(),
+        task_arc.clone(),
+        hooks_arc.clone(),
+    );
+    let bindings = RunContextBindings {
         context: context_arc.clone(),
         provider: provider_arc.clone(),
-        tool_catalog: tool_catalog_arc.clone(),
-        tool_execution: tool_execution_arc.clone(),
-        tool_context_binding: tool_ctx_binding_arc.clone(),
-        policy: policy_arc.clone(),
         interaction: interaction_arc.clone(),
         memory: memory_arc.clone(),
-        reflection_history: reflection_history_arc.clone(),
-        task: task_arc.clone(),
-        hooks: hooks_arc.clone(),
-        reasoning: reasoning_arc.clone(),
         config: RunConfigSnapshot::capture(
             share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
                 share::config::domain::snapshot::ConfigRevision::new(1),
@@ -312,9 +303,13 @@ fn main_runtime_context_preserves_injected_port_identity() {
         event_sink: noop_event_sink(),
         usage: RunUsageTracker::new(),
         input: RunInputBufferHandle::new(),
+        reasoning: reasoning_arc.clone(),
+        tool_catalog: None,
     };
 
-    let ctx = RuntimeContext::new(parts);
+    let ctx = factory
+        .assemble(&crate::domain::agent_run::RunSpec::main(), bindings, None)
+        .expect("test context assembly");
 
     assert!(Arc::ptr_eq(&ctx.context(), &context_arc));
     assert!(Arc::ptr_eq(&ctx.provider(), &provider_arc));
@@ -340,8 +335,8 @@ fn main_runtime_context_preserves_injected_port_identity() {
 
 #[test]
 fn runtime_context_cancel_scope_is_per_run() {
-    let ctx1 = RuntimeContext::new(make_parts());
-    let ctx2 = RuntimeContext::new(make_parts());
+    let ctx1 = make_context();
+    let ctx2 = make_context();
 
     assert!(!ctx1.cancel().token().is_cancelled());
     assert!(!ctx2.cancel().token().is_cancelled());
@@ -369,7 +364,7 @@ fn child_cancel_does_not_propagate_to_parent() {
 
 #[test]
 fn runtime_context_has_all_required_accessors() {
-    let ctx = RuntimeContext::new(make_parts());
+    let ctx = make_context();
 
     let _context = ctx.context();
     let _provider = ctx.provider();
@@ -389,7 +384,7 @@ fn runtime_context_has_all_required_accessors() {
 
 #[test]
 fn runtime_context_config_accessor_returns_snapshot() {
-    let ctx = RuntimeContext::new(make_parts());
+    let ctx = make_context();
     let cfg = ctx.config();
     let _revision = cfg.revision();
     let _allow_all = cfg.allow_all();
@@ -405,7 +400,7 @@ fn runtime_context_config_accessor_returns_snapshot() {
 /// results from their injected implementations.
 #[test]
 fn runtime_context_ports_are_functional_not_just_identity() {
-    let ctx = RuntimeContext::new(make_parts());
+    let ctx = make_context();
 
     // Tool catalog: snapshot() returns a valid catalog.
     let catalog = ctx
@@ -439,16 +434,11 @@ fn runtime_context_ports_are_functional_not_just_identity() {
         "default config has allow_all=false"
     );
 
-    // Reasoning: prove the port is callable through RuntimeContext.
-    let obs = ctx
-        .reasoning()
-        .observe(workflow::api::ReasoningSignal::UserMessage {
-            text: String::new(),
-            turn_count: 0,
-        });
-    assert!(
-        matches!(obs.current, workflow::api::ReasoningNode::Idle),
-        "fake reasoning returns Idle"
+    assert_eq!(
+        *ctx.reasoning()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()),
+        provider::ReasoningLevel::Medium,
     );
 }
 
@@ -471,7 +461,7 @@ fn parent_run_context_source_install_recovers_from_poison() {
     // After poison, install must still succeed (recover, not panic).
     let frame = Arc::new(ParentRunFrame {
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(RuntimeContext::new(make_parts())),
+        context: Arc::new(make_context()),
     });
     let _guard = source.install(frame);
     // If we got here without panicking, poison recovery works.
@@ -486,7 +476,7 @@ fn parent_run_context_source_get_recovers_from_poison() {
     // Pre-populate a frame so get() has something to return.
     let frame = Arc::new(ParentRunFrame {
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(RuntimeContext::new(make_parts())),
+        context: Arc::new(make_context()),
     });
     let _guard = source.install(frame);
 
@@ -516,7 +506,7 @@ fn parent_run_frame_guard_drop_does_not_double_panic_on_poison() {
     let source = ParentRunContextSource::new();
     let frame = Arc::new(ParentRunFrame {
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(RuntimeContext::new(make_parts())),
+        context: Arc::new(make_context()),
     });
     let guard = source.install(frame);
 
@@ -550,7 +540,7 @@ fn parent_run_context_source_install_works_after_poison_recovery() {
     // Install a new frame after poison.
     let frame = Arc::new(ParentRunFrame {
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(RuntimeContext::new(make_parts())),
+        context: Arc::new(make_context()),
     });
     let guard = source.install(frame);
 
@@ -637,7 +627,7 @@ fn run_cancellation_scope_clone_shares_state() {
 /// context sees the same token as the original.
 #[test]
 fn runtime_context_clone_shares_cancellation() {
-    let ctx_a = RuntimeContext::new(make_parts());
+    let ctx_a = make_context();
     let ctx_b = ctx_a.clone();
 
     ctx_a.cancel().token().cancel();
@@ -653,7 +643,7 @@ fn runtime_context_clone_shares_cancellation() {
 /// because both references point to the same `RunCancellationScope`.
 #[test]
 fn runtime_context_arc_shared_cancellation_propagates() {
-    let ctx = Arc::new(RuntimeContext::new(make_parts()));
+    let ctx = Arc::new(make_context());
     let ctx2 = Arc::clone(&ctx);
 
     ctx.cancel().token().cancel();
@@ -787,42 +777,32 @@ fn run_input_buffer_handle_new_handles_are_isolated() {
 
 // ── RuntimeContext I/O seam accessor tests ──
 
-fn make_parts_with_io_seams() -> (
-    RuntimeContextParts,
+fn make_context_with_io_seams() -> (
+    RuntimeContext,
     crate::application::main_loop::ChatEventSinkHandle,
     RunUsageTracker,
     RunInputBufferHandle,
 ) {
-    use crate::application::main_loop::ChatEventSink;
-
-    #[derive(Clone)]
-    struct NoOpSink;
-    impl ChatEventSink for NoOpSink {
-        fn send_event<'a>(
-            &'a self,
-            _event: crate::application::main_loop::RuntimeStreamEvent,
-        ) -> crate::application::main_loop::EventFuture<'a> {
-            Box::pin(std::future::ready(()))
-        }
-        fn try_send_event(&self, _event: crate::application::main_loop::RuntimeStreamEvent) {}
-    }
-
-    let event_sink = crate::application::main_loop::ChatEventSinkHandle::new(NoOpSink);
+    let event_sink = noop_event_sink();
     let usage = RunUsageTracker::new();
     let input = RunInputBufferHandle::new();
 
-    let mut parts = make_parts();
-    parts.event_sink = event_sink.clone();
-    parts.usage = usage.clone();
-    parts.input = input.clone();
+    let factory = make_factory();
+    let mut bindings = make_bindings();
+    bindings.event_sink = event_sink.clone();
+    bindings.usage = usage.clone();
+    bindings.input = input.clone();
 
-    (parts, event_sink, usage, input)
+    let ctx = factory
+        .assemble(&crate::domain::agent_run::RunSpec::main(), bindings, None)
+        .expect("test context assembly must succeed");
+
+    (ctx, event_sink, usage, input)
 }
 
 #[test]
 fn runtime_context_event_sink_accessor_preserves_identity() {
-    let (parts, event_sink, _usage, _input) = make_parts_with_io_seams();
-    let ctx = RuntimeContext::new(parts);
+    let (ctx, event_sink, _usage, _input) = make_context_with_io_seams();
     // Smoke test — calling event_sink() works.
     let _ = ctx.event_sink();
     let _ = event_sink;
@@ -830,8 +810,7 @@ fn runtime_context_event_sink_accessor_preserves_identity() {
 
 #[test]
 fn runtime_context_usage_accessor_preserves_identity() {
-    let (parts, _event_sink, usage, _input) = make_parts_with_io_seams();
-    let ctx = RuntimeContext::new(parts);
+    let (ctx, _event_sink, usage, _input) = make_context_with_io_seams();
 
     usage.update(123);
     assert_eq!(ctx.usage().get(), Some(123));
@@ -842,16 +821,14 @@ fn runtime_context_usage_accessor_preserves_identity() {
 
 #[test]
 fn runtime_context_input_accessor_preserves_identity() {
-    let (parts, _event_sink, _usage, input) = make_parts_with_io_seams();
-    let ctx = RuntimeContext::new(parts);
+    let (ctx, _event_sink, _usage, input) = make_context_with_io_seams();
 
     assert_eq!(input.is_sealed(), ctx.input().is_sealed());
 }
 
 #[test]
 fn runtime_context_clone_shares_io_seams() {
-    let (parts, _event_sink, usage, input) = make_parts_with_io_seams();
-    let ctx = RuntimeContext::new(parts);
+    let (ctx, _event_sink, usage, input) = make_context_with_io_seams();
     let clone = ctx.clone();
 
     usage.update(777);
@@ -868,11 +845,8 @@ fn runtime_context_clone_shares_io_seams() {
 
 #[test]
 fn runtime_context_new_runs_have_isolated_io_seams() {
-    let (parts1, _sink1, usage1, input1) = make_parts_with_io_seams();
-    let ctx1 = RuntimeContext::new(parts1);
-
-    let (parts2, _sink2, usage2, input2) = make_parts_with_io_seams();
-    let ctx2 = RuntimeContext::new(parts2);
+    let (ctx1, _sink1, usage1, input1) = make_context_with_io_seams();
+    let (ctx2, _sink2, usage2, input2) = make_context_with_io_seams();
 
     ctx1.usage().update(100);
     ctx2.usage().update(200);
@@ -895,8 +869,7 @@ fn runtime_context_new_runs_have_isolated_io_seams() {
 
 #[test]
 fn runtime_context_has_all_required_accessors_with_io_seams() {
-    let (parts, _sink, _usage, _input) = make_parts_with_io_seams();
-    let ctx = RuntimeContext::new(parts);
+    let (ctx, _sink, _usage, _input) = make_context_with_io_seams();
 
     // Existing accessors still work.
     let _context = ctx.context();
@@ -1001,12 +974,12 @@ fn run_usage_tracker_update_zero_versus_reset() {
     assert_eq!(tracker.get(), None);
 }
 
-/// Proves that a real event sink passed to `assemble_main_runtime_context`
+/// Proves that a real event sink passed through the factory
 /// is the same handle returned by `RuntimeContext::event_sink()` —
 /// both point to the same inner `Arc`.
 /// Uses an observable `SharedEventSink` that records events.
 #[test]
-fn assemble_main_runtime_context_event_sink_is_real_not_noop() {
+fn factory_assembled_context_event_sink_is_real_not_noop() {
     use crate::application::main_loop::ChatEventSink;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -1032,10 +1005,13 @@ fn assemble_main_runtime_context_event_sink_is_real_not_noop() {
     let sink = SharedSink { seen: seen.clone() };
     let handle = crate::application::main_loop::ChatEventSinkHandle::new(sink);
 
-    // Build a RuntimeContext with this real handle.
-    let mut parts = make_parts();
-    parts.event_sink = handle;
-    let ctx = RuntimeContext::new(parts);
+    // Build a RuntimeContext with this real handle via factory.
+    let factory = make_factory();
+    let mut bindings = make_bindings();
+    bindings.event_sink = handle;
+    let ctx = factory
+        .assemble(&crate::domain::agent_run::RunSpec::main(), bindings, None)
+        .expect("test context assembly");
 
     // Send an event through the RuntimeContext's event_sink.
     let event_sink = ctx.event_sink();

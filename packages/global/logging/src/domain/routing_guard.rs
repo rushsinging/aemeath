@@ -121,10 +121,6 @@ const OWNERS: &[(&str, OwnerRule)] = &[
         OwnerRule::new("update", "aemeath:agent:update", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/workflow",
-        OwnerRule::new("workflow", "aemeath:agent:workflow", "crate::LOG_TARGET"),
-    ),
-    (
         "agent/shared",
         OwnerRule::new("share", "aemeath:shared", "crate::LOG_TARGET"),
     ),

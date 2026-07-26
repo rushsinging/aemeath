@@ -16,6 +16,8 @@
 
 层级对齐：`Session → Run → Run Step`（≈ OpenAI Thread / Run / Run Step）。
 
+**#1248 已落地**：唯一 `RuntimeContextFactory` 是 `RuntimeContext` 的唯一生产构造入口，按 `RunSpec` 的 `InteractionBindingMode` / `HookBindingMode` / `ReasoningBindingMode` 穷举装配；不再存在 `RuntimeContextParts`、`assemble_main_runtime_context` 等多路径手工填充 context。Main/Sub 不是生产类型，差异由 `RunSpec` + 父子拓扑表达，Loop Engine 零分支。
+
 ## 2. Run 聚合
 
 ```rust
@@ -90,6 +92,12 @@ enum InteractionContinuation {
     ContinueToolApproval(ToolCallId),
     ContinuePlanApproval,
     ContinueAfterHardPause,
+}
+
+/// #1248 Task 6: Stop Hook typed outcome — Run 拥有计数，第 16 次进入 Failed。
+enum StopHookBlockResult {
+    Blocked { count: usize },       // 1-15: 继续 Run，注入 feedback
+    RetryExhausted { count: usize }, // ≥16: typed Failed，不伪造 Completed
 }
 ```
 
@@ -191,6 +199,27 @@ enum ReasoningMode {
     Inherit,
 } // Main: GraphDriven; Sub: EffortOnly/Inherit
 enum TaskMode      { Shared, Isolated }
+
+/// #1248: InteractionBindingMode 驱动 factory 的 InteractionPort 选择。
+enum InteractionBindingMode {
+    Client,             // 直接绑定 SDK/TUI InteractionBridge
+    ParentMediated,     // 复用父 context 的 InteractionPort（需 parent）
+    Unavailable,        // typed unavailable，不悬挂
+}
+
+/// #1248: ReasoningBindingMode 驱动 factory 的 ReasoningPort 选择。
+enum ReasoningBindingMode {
+    Adaptive,           // graph-driven（Main）
+    Fixed(ReasoningLevel), // 固定 effort（Sub 角色预设）
+    Inherit,            // 从父 context snapshot 继承，独立实例
+    NoOp,               // 所有写操作无副作用
+}
+
+/// #1248: HookBindingMode 驱动 factory 的 HookPort 验证。
+enum HookBindingMode {
+    Full,               // per-tool hook dispatch
+    BoundaryOnly,       // 仅 start/stop（Sub 需 parent）
+}
 ```
 
 `SummaryMode` 只控制是否为下一轮 Context 生成 deterministic 文本投影，所有模式都 **NEVER** 调用 LLM summary。`ReceiptDetail::Safety` 是不可降低的安全下限：必须保留 child/run/tool identity、terminal status、artifact refs、可能副作用与 `CancellationUnconfirmed`；`None` 只表示没有 Context summary，**NEVER** 表示丢弃终态 receipt。Main 默认 `Deterministic + Full`；Sub 默认 `None + Safety`。只有明确需要自身 continuation 的特殊 Sub 才可声明 `Deterministic + Full`，且仍受父级预算收缩。
@@ -289,6 +318,32 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | 父 Step 取消 | 取消 Main 当前 Step | 对关联 Sub 递归执行 TerminateRun，不允许 Sub 回 Drain 续跑 |
 
 > **差异 100% 由 RunSpec + Composition 装配 + RuntimeContext + Event adapter 表达，Loop Engine 零分支。**
+
+### 8.1 #1248 交互能力边界
+
+| InteractionBindingMode | Main | Sub（parent 可达）| Sub（无 parent）|
+|---|---|---|---|
+| `Client` | ✅ TUI/SDK InteractionBridge | ✅ 可装配 | ❌ 不可用 |
+| `ParentMediated` | ❌（Main 无父）| ✅ 复用父 context InteractionPort | ❌ → `InteractionUnavailable` |
+| `Unavailable` | ❌ | ✅ typed unavailable（不悬挂）| ✅ typed unavailable |
+
+四种 `InteractionContinuation`（UserQuestions、ToolApproval、PlanApproval、HardPause）均由统一 `InteractionCoordinator` 驱动 Run continuation；`reply` / `cancel` 均经 `InteractionPort` 分派。parent-mediated 复用父 context 的同一 Arc<dyn InteractionPort>——identity 与 reply/cancel 语义不变。
+
+### 8.2 Reasoning 隔离
+
+| ReasoningBindingMode | Port 实例 | observe 行为 |
+|---|---|---|
+| `Adaptive` | `AdaptiveReasoningPort`（含 ReasoningGraph）| 推进 graph，可能改变 current |
+| `Fixed(level)` | `GraphlessReasoningPort` | 固定返回 level |
+| `Inherit` | `GraphlessReasoningPort::from_parent` | snapshot 父 current → 独立实例，observe 不推进 graph、不修改父 requested |
+| `NoOp` | `NoOpReasoningPort` | 默认 Off，写操作无副作用 |
+
+> **#1142 deferred**：Provider requested→effective clamp 链未端到端接线；五节点固定默认 effort（Config `reasoning_graph` 已退役）。是否保留并接线由 v0.2.0 #1142 决策。
+
+### 8.3 退役边界
+
+- `MainRunPort`、`SubAgentRun`、fat `RunLoopPort`：由 #1397/#1399 收口，本 Issue 不删除。
+- `run_launcher` / `reenter_run_loop` / `RunLauncher::launch` 已统一 Main/Sub 启动入口；#1280 已合并。
 
 ## 9. 相关文档
 

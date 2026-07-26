@@ -453,15 +453,6 @@ pub(crate) fn project_stream_event(
                 },
             }
         }
-        crate::application::main_loop::RuntimeStreamEvent::GraphPhaseChanged {
-            node,
-            effort,
-            prev,
-        } => ChatEvent::GraphPhaseChanged {
-            node: format!("{node}"),
-            effort: format!("{effort:?}").to_lowercase(),
-            prev: format!("{prev}"),
-        },
         crate::application::main_loop::RuntimeStreamEvent::SessionReset => ChatEvent::SessionReset,
         crate::application::main_loop::RuntimeStreamEvent::UserMessagesWithdrawn { texts } => {
             ChatEvent::UserMessagesWithdrawn { texts }

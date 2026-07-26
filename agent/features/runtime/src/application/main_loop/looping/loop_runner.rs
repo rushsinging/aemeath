@@ -14,9 +14,10 @@ use crate::application::main_loop::looping::{
     ChatEventSink, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
     QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
-use crate::application::runtime_context::RuntimeContext;
+use crate::application::runtime_context::{
+    RunCancellationScope, RunContextBindings, RunInputBufferHandle, RunUsageTracker, RuntimeContext,
+};
 use crate::domain::agent_run::RunSpec;
-use workflow::api::ReasoningSignal;
 
 use super::loop_context::ChatLoopContext;
 
@@ -76,10 +77,10 @@ where
                 shell.active_run.clone();
             let provider_factory = shell.provider_factory.clone();
             let config_query_for_switch = shell.config_query.clone();
-            let task_access = shell.task_access.clone();
+            let task_access = shell.runtime_context_factory.services().task.clone();
 
             let binding = shell.current_binding.read().unwrap().clone();
-            let reasoning = workflow::adaptive_reasoning(binding.requested_reasoning);
+            let reasoning = Arc::new(std::sync::Mutex::new(binding.requested_reasoning));
             let mut context_size = shell.context_size;
             let mut session_id = shell.session_id.clone();
             let mut messages = initial_messages;
@@ -163,7 +164,8 @@ where
                 PendingCommand::SwitchModel { selection } => {
                     match (build_switched_client)(&selection).await {
                         Ok((new_binding, result)) => {
-                            reasoning.reset_default_level(new_binding.requested_reasoning);
+                            *reasoning.lock().unwrap_or_else(|error| error.into_inner()) =
+                                new_binding.requested_reasoning;
                             // #1385: Write to shell.current_binding so the next Run assembler picks it up
                             *shell.current_binding.write().unwrap() = Arc::new(new_binding);
                             context_size = result.context_window;
@@ -483,20 +485,7 @@ where
                 let started_at = Instant::now();
                 cwd = workspace.read().current_workspace_root();
 
-                let text = messages
-                    .last()
-                    .map(|message| message.text_content())
-                    .unwrap_or_default();
-                let observation =
-                    reasoning.observe(ReasoningSignal::UserMessage { text, turn_count });
-                if observation.changed() {
-                    sink.send_event(RuntimeStreamEvent::GraphPhaseChanged {
-                        node: observation.current,
-                        effort: observation.requested,
-                        prev: observation.previous,
-                    })
-                    .await;
-                }
+                // returns Ready with user input.
 
                 let config_reader = wiring.config_reader();
                 let _refresh = handle_turn_boundary_config(
@@ -536,18 +525,40 @@ where
                 let run_memory = bound_main_run.memory_arc();
                 let run_id = sdk::RunId::new_v7();
 
-                // #1385: per-run RuntimeContext assembly — freezes provider binding,
-                // cancellation scope, and all service ports for the duration of this Run.
-                // Non-Option: tests must provide a real MainSessionShell.
+                // #1248 Task 3: per-run RuntimeContext assembly via factory.
+                // Freezes provider binding, allocates per-Run cancellation scope and
+                // I/O seams. RunContextBindings carries per-Run ports; RuntimeServices
+                // are already in the factory (session-scoped).
                 let spec = RunSpec::main();
-                let runtime_context = shell.assemble_main_runtime_context(
-                    &spec,
-                    run_config.clone(),
-                    bound_main_run.context(),
-                    run_memory.clone(),
-                    reasoning.clone(),
-                    sink_handle.clone(),
-                ).expect("main runtime context assembly must succeed");
+                let binding = shell.current_binding.read().unwrap().clone();
+                let bindings = RunContextBindings {
+                    context: bound_main_run.context(),
+                    provider: binding,
+                    interaction: shell.interaction_bridge.clone(),
+                    memory: run_memory.clone(),
+                    config: run_config.clone(),
+                    cancel: RunCancellationScope::new(),
+                    event_sink: sink_handle.clone(),
+                    usage: RunUsageTracker::new(),
+                    input: RunInputBufferHandle::new(),
+                    reasoning: reasoning.clone(),
+                    tool_catalog: None,
+                };
+                let runtime_context = match shell
+                    .runtime_context_factory
+                    .assemble(&spec, bindings, None)
+                {
+                    Ok(ctx) => ctx,
+                    Err(error) => {
+                        log::error!(target: crate::LOG_TARGET, "main runtime context assembly failed: {error}");
+                        sink.send_event(RuntimeStreamEvent::CommandResultText {
+                            text: format!("无法启动 Run：{error}"),
+                            is_error: true,
+                        })
+                        .await;
+                        continue;
+                    }
+                };
 
                 let cancel = runtime_context.cancel().token().clone();
                 let cacheable_system_prompt = system_blocks
@@ -601,6 +612,9 @@ where
                     task_reminder_state: &mut task_reminder_state,
                     tool_identity: &tool_identity,
                     started_at,
+                    plan_mode: false,
+                    interaction_receivers: Vec::new(),
+                    pending_work: None,
                 };
                 // #1272: the idle gate consumed the user input from the channel
                 // and placed it in `messages`.  Seed the run_input_buffer with

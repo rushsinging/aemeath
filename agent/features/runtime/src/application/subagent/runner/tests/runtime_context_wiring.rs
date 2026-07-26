@@ -2,9 +2,9 @@ use super::*;
 use crate::application::interaction::InteractionBridge;
 use crate::application::run_config::RunConfigSnapshot;
 use crate::application::runtime_context::{
-    RunCancellationScope, RunInputBufferHandle, RunUsageTracker, RuntimeContext,
-    RuntimeContextParts,
+    RunCancellationScope, RunContextBindings, RunInputBufferHandle, RunUsageTracker, RuntimeContext,
 };
+use crate::application::runtime_context_factory::RuntimeContextFactory;
 use crate::application::testing::test_task_access;
 use crate::domain::agent_run::RunSpec;
 use crate::ports::{PolicyDecision, PolicyPort, PolicyRequest, ProviderBinding, ProviderPort};
@@ -95,30 +95,6 @@ impl hook::HookPort for LocalFakeHookPort {
         hook::HookOutcome::proceed()
     }
 }
-
-struct LocalFakeReasonPort;
-impl workflow::api::ReasoningPort for LocalFakeReasonPort {
-    fn observe(
-        &self,
-        _signal: workflow::api::ReasoningSignal,
-    ) -> workflow::api::ReasoningObservation {
-        workflow::api::ReasoningObservation {
-            previous: workflow::api::ReasoningNode::Idle,
-            current: workflow::api::ReasoningNode::Idle,
-            requested: provider::ReasoningLevel::Medium,
-        }
-    }
-    fn current_requested_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Medium
-    }
-    fn set_level(&self, level: provider::ReasoningLevel) -> provider::ReasoningLevel {
-        level
-    }
-    fn reset_default_level(&self, level: provider::ReasoningLevel) -> provider::ReasoningLevel {
-        level
-    }
-}
-
 /// A catalog that records whether `snapshot` was called, delegating to
 /// a real built-in catalog.
 struct SpyToolCatalog {
@@ -164,10 +140,27 @@ fn noop_event_sink() -> crate::application::main_loop::ChatEventSinkHandle {
     crate::application::main_loop::ChatEventSinkHandle::new(NoOp)
 }
 
-fn make_spy_parent_context(
-    cat_called: Arc<AtomicBool>,
-    policy_called: Arc<AtomicBool>,
-) -> RuntimeContext {
+/// #1248 Task 3: shared test factory for CliAgentRunner wiring tests.
+#[allow(dead_code)]
+fn wiring_test_factory() -> Arc<RuntimeContextFactory> {
+    Arc::new(RuntimeContextFactory::new(
+        Arc::new(sub_context_derivation_tests::FakeToolCat),
+        Arc::new(sub_context_derivation_tests::FakeToolExec),
+        Arc::new(sub_context_derivation_tests::FakeToolCtxBind),
+        Arc::new(sub_context_derivation_tests::FakePolicyPort),
+        Arc::new(sub_context_derivation_tests::FakeReflHist),
+        test_task_access(),
+        Arc::new(LocalFakeHookPort),
+    ))
+}
+/// #1248 Task 3: shared factory-based context construction for wiring tests.
+fn assemble_test_context(
+    tool_catalog: Arc<dyn tools::ToolCatalogPort>,
+    tool_execution: Arc<dyn tools::ToolExecutionPort>,
+    tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
+    policy: Arc<dyn PolicyPort>,
+    config: RunConfigSnapshot,
+) -> (RuntimeContext, RuntimeContextFactory) {
     let provider_port: Arc<dyn ProviderPort> = Arc::new(LocalFakeProvPort);
     let binding = ProviderBinding {
         provider: provider_port.clone(),
@@ -180,6 +173,38 @@ fn make_spy_parent_context(
         context_window: None,
     };
 
+    let factory = RuntimeContextFactory::new(
+        tool_catalog,
+        tool_execution,
+        tool_context_binding,
+        policy,
+        Arc::new(sub_context_derivation_tests::FakeReflHist),
+        test_task_access(),
+        Arc::new(LocalFakeHookPort),
+    );
+    let bindings = RunContextBindings {
+        context: Arc::new(LocalFakeCtxPort),
+        provider: Arc::new(binding),
+        interaction: Arc::new(InteractionBridge::new()),
+        memory: Arc::new(memory::NoOpMemory),
+        config,
+        cancel: RunCancellationScope::new(),
+        event_sink: noop_event_sink(),
+        usage: RunUsageTracker::new(),
+        input: RunInputBufferHandle::new(),
+        reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
+        tool_catalog: None,
+    };
+    let ctx = factory
+        .assemble(&crate::domain::agent_run::RunSpec::main(), bindings, None)
+        .expect("test wiring context assembly");
+    (ctx, factory)
+}
+
+fn make_spy_parent_context(
+    cat_called: Arc<AtomicBool>,
+    policy_called: Arc<AtomicBool>,
+) -> RuntimeContext {
     let config_snap = test_config_snapshot();
     let run_config = RunConfigSnapshot::capture(config_snap);
 
@@ -196,26 +221,14 @@ fn make_spy_parent_context(
         called: policy_called,
     });
 
-    let parts = RuntimeContextParts {
-        context: Arc::new(LocalFakeCtxPort),
-        provider: Arc::new(binding),
-        tool_catalog: catalog,
-        tool_execution: ports.execution(),
-        tool_context_binding: ports.binding(),
+    let (ctx, _factory) = assemble_test_context(
+        catalog,
+        ports.execution(),
+        ports.binding(),
         policy,
-        interaction: Arc::new(InteractionBridge::new()),
-        memory: Arc::new(memory::NoOpMemory),
-        reflection_history: Arc::new(sub_context_derivation_tests::FakeReflHist),
-        task: test_task_access(),
-        hooks: Arc::new(LocalFakeHookPort),
-        reasoning: Arc::new(LocalFakeReasonPort),
-        config: run_config,
-        cancel: RunCancellationScope::new(),
-        event_sink: noop_event_sink(),
-        usage: RunUsageTracker::new(),
-        input: RunInputBufferHandle::new(),
-    };
-    RuntimeContext::new(parts)
+        run_config,
+    );
+    ctx
 }
 
 // ── M1: catalog access goes through derived.context's tool_catalog ──
@@ -354,28 +367,15 @@ async fn derived_context_integration_verifies_binding_policy_catalog() {
         called: cat_called.clone(),
     });
 
-    let parts = RuntimeContextParts {
-        context: Arc::new(LocalFakeCtxPort),
-        provider: Arc::new(make_fake_provider_binding()),
-        tool_catalog: catalog,
-        tool_execution: tool_ports.execution(),
-        tool_context_binding: spy_binding,
-        policy: Arc::new(SpyPolicy {
+    let (parent_ctx, shared_factory) = assemble_test_context(
+        catalog,
+        tool_ports.execution(),
+        spy_binding,
+        Arc::new(SpyPolicy {
             called: policy_called.clone(),
         }),
-        interaction: Arc::new(InteractionBridge::new()),
-        memory: Arc::new(memory::NoOpMemory),
-        reflection_history: Arc::new(sub_context_derivation_tests::FakeReflHist),
-        task: test_task_access(),
-        hooks: Arc::new(LocalFakeHookPort),
-        reasoning: Arc::new(LocalFakeReasonPort),
-        config: RunConfigSnapshot::capture(test_config_snapshot()),
-        cancel: RunCancellationScope::new(),
-        event_sink: noop_event_sink(),
-        usage: RunUsageTracker::new(),
-        input: RunInputBufferHandle::new(),
-    };
-    let parent_ctx = RuntimeContext::new(parts);
+        RunConfigSnapshot::capture(test_config_snapshot()),
+    );
 
     let source = crate::application::runtime_context::ParentRunContextSource::new();
     let parent_frame_guard = source.install(Arc::new(
@@ -389,6 +389,9 @@ async fn derived_context_integration_verifies_binding_policy_catalog() {
         ProviderErrorKind::Network,
         "integration-spy",
     ));
+    // #1248 Task 3: Use the same factory as the parent context so static
+    // ports (policy, hooks, reflection) are Arc-identical.
+    runner.runtime_context_factory = Arc::new(shared_factory);
     runner.parent_context = source;
     let ctx = test_ctx();
 
@@ -514,28 +517,15 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     });
 
     // ── Parent context with spies ──
-    let parts = RuntimeContextParts {
-        context: Arc::new(LocalFakeCtxPort),
-        provider: Arc::new(make_fake_provider_binding()),
-        tool_catalog: catalog,
-        tool_execution: tool_ports.execution(),
-        tool_context_binding: spy_binding,
-        policy: Arc::new(SpyPolicy {
+    let (parent_ctx, shared_factory) = assemble_test_context(
+        catalog,
+        tool_ports.execution(),
+        spy_binding,
+        Arc::new(SpyPolicy {
             called: policy_called.clone(),
         }),
-        interaction: Arc::new(InteractionBridge::new()),
-        memory: Arc::new(memory::NoOpMemory),
-        reflection_history: Arc::new(sub_context_derivation_tests::FakeReflHist),
-        task: test_task_access(),
-        hooks: Arc::new(LocalFakeHookPort),
-        reasoning: Arc::new(LocalFakeReasonPort),
-        config: RunConfigSnapshot::capture(test_config_snapshot()),
-        cancel: RunCancellationScope::new(),
-        event_sink: noop_event_sink(),
-        usage: RunUsageTracker::new(),
-        input: RunInputBufferHandle::new(),
-    };
-    let parent_ctx = RuntimeContext::new(parts);
+        RunConfigSnapshot::capture(test_config_snapshot()),
+    );
 
     let source = crate::application::runtime_context::ParentRunContextSource::new();
     let parent_frame_guard = source.install(Arc::new(
@@ -618,6 +608,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
         workspace,
         skill_materializer: empty_skill_materializer(),
         parent_context: source,
+        runtime_context_factory: Arc::new(shared_factory),
     };
     let ctx = test_ctx();
 
@@ -749,28 +740,15 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
 
     let catalog: Arc<dyn tools::ToolCatalogPort> = tool_ports.catalog_port();
 
-    let parts = RuntimeContextParts {
-        context: Arc::new(LocalFakeCtxPort),
-        provider: Arc::new(make_fake_provider_binding()),
-        tool_catalog: catalog,
-        tool_execution: tool_ports.execution(),
-        tool_context_binding: tool_ports.binding(),
-        policy: Arc::new(SpyPolicy {
+    let (parent_ctx, shared_factory) = assemble_test_context(
+        catalog,
+        tool_ports.execution(),
+        tool_ports.binding(),
+        Arc::new(SpyPolicy {
             called: Arc::new(AtomicBool::new(false)),
         }),
-        interaction: Arc::new(InteractionBridge::new()),
-        memory: Arc::new(memory::NoOpMemory),
-        reflection_history: Arc::new(sub_context_derivation_tests::FakeReflHist),
-        task: test_task_access(),
-        hooks: Arc::new(LocalFakeHookPort),
-        reasoning: Arc::new(LocalFakeReasonPort),
-        config: RunConfigSnapshot::capture(test_config_snapshot()),
-        cancel: RunCancellationScope::new(),
-        event_sink: noop_event_sink(),
-        usage: RunUsageTracker::new(),
-        input: RunInputBufferHandle::new(),
-    };
-    let parent_ctx = RuntimeContext::new(parts);
+        RunConfigSnapshot::capture(test_config_snapshot()),
+    );
     // Hold the parent cancel scope so we can cancel from the test.
     let parent_cancel = parent_ctx.cancel().clone();
 
@@ -831,6 +809,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         workspace,
         skill_materializer: empty_skill_materializer(),
         parent_context: source,
+        runtime_context_factory: Arc::new(shared_factory),
     };
     let ctx = test_ctx();
     let (tx, _rx) = mpsc::channel::<tools::AgentProgressEvent>(8);
@@ -887,6 +866,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
 }
 
 /// Build a fake ProviderBinding for parent context construction.
+#[allow(dead_code)]
 fn make_fake_provider_binding() -> ProviderBinding {
     let provider_port: Arc<dyn ProviderPort> = Arc::new(LocalFakeProvPort);
     ProviderBinding {

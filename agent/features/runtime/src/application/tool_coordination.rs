@@ -33,6 +33,21 @@ pub(crate) struct PreparedToolRound {
     pub guard_blocked: Vec<ToolExecution>,
     pub denied: Vec<DeniedToolCall>,
     pub fuse_bypassed: Vec<sdk::ToolCallId>,
+    /// #1248 Task 5: Calls that Policy marked RequireApproval. The engine
+    /// reads this to create [`ToolApproval`] interaction intents instead of
+    /// denying them inline.  On approve, only this specific call is executed
+    /// with its original authorization; on deny, a typed denied result.
+    pub require_approval: Vec<RequireApprovalCall>,
+}
+
+/// #1248 Task 5: A tool call that needs approval before execution.
+#[derive(Clone)]
+#[allow(dead_code)] // fields used when full approval flow is wired
+pub(crate) struct RequireApprovalCall {
+    pub call: ToolCall,
+    pub authorization: tools::AuthorizationContext,
+    pub reason: String,
+    pub subject: String,
 }
 
 /// Applies catalog validity, Policy and Runtime guard in canonical order.
@@ -94,9 +109,14 @@ pub(crate) fn prepare_tool_round(
                 reason: format!("{reason:?}"),
             }),
             PolicyDecision::RequireApproval { reason, subject } => {
-                prepared.denied.push(DeniedToolCall {
+                // #1248 Task 5: Surface RequireApproval for the engine
+                // to create ToolApproval interaction intents. No longer
+                // deny inline.
+                prepared.require_approval.push(RequireApprovalCall {
                     call: call.clone(),
-                    reason: format!("approval required: {subject:?}: {reason:?}"),
+                    authorization: tools::AuthorizationContext::STANDARD,
+                    reason: format!("{reason:?}"),
+                    subject: format!("{subject:?}"),
                 });
             }
         }

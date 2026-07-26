@@ -1,4 +1,4 @@
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ToolCall {
     pub id: sdk::ids::ToolCallId,
     pub provider_id: String,

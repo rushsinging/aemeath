@@ -7,23 +7,23 @@ use crate::application::main_loop::looping::input_gate::{
 };
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
-use workflow::api::ReasoningPort;
 
 fn requested_level_for_thinking(
-    reasoning: &dyn ReasoningPort,
+    reasoning: &std::sync::Mutex<ReasoningLevel>,
     desired: Option<bool>,
 ) -> ReasoningLevel {
-    let current = reasoning.current_requested_level();
-    let enabled = desired.unwrap_or(matches!(current, ReasoningLevel::Off));
-    reasoning.set_level(if enabled {
+    let mut current = reasoning.lock().unwrap_or_else(|error| error.into_inner());
+    let enabled = desired.unwrap_or(matches!(*current, ReasoningLevel::Off));
+    *current = if enabled {
         ReasoningLevel::Medium
     } else {
         ReasoningLevel::Off
-    })
+    };
+    *current
 }
 
 pub(crate) async fn execute_set_thinking<S>(
-    reasoning: &dyn ReasoningPort,
+    reasoning: &std::sync::Mutex<ReasoningLevel>,
     sink: &S,
     desired: Option<bool>,
 ) -> ReasoningLevel
@@ -108,57 +108,5 @@ where
             IdleResult::Shutdown => return IdleResult::Shutdown,
             IdleResult::CommandRequested(command) => return IdleResult::CommandRequested(command),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Mutex;
-    use workflow::api::{ReasoningNode, ReasoningObservation, ReasoningSignal};
-
-    struct StubReasoningPort {
-        requested: Mutex<ReasoningLevel>,
-    }
-
-    impl ReasoningPort for StubReasoningPort {
-        fn observe(&self, _signal: ReasoningSignal) -> ReasoningObservation {
-            ReasoningObservation {
-                previous: ReasoningNode::Idle,
-                current: ReasoningNode::Idle,
-                requested: self.current_requested_level(),
-            }
-        }
-
-        fn current_requested_level(&self) -> ReasoningLevel {
-            *self.requested.lock().unwrap()
-        }
-
-        fn set_level(&self, level: ReasoningLevel) -> ReasoningLevel {
-            *self.requested.lock().unwrap() = level;
-            level
-        }
-
-        fn reset_default_level(&self, level: ReasoningLevel) -> ReasoningLevel {
-            *self.requested.lock().unwrap() = level;
-            level
-        }
-    }
-
-    #[test]
-    fn requested_level_for_thinking_uses_port_state_and_writes_toggle() {
-        let port = StubReasoningPort {
-            requested: Mutex::new(ReasoningLevel::Off),
-        };
-
-        assert_eq!(
-            requested_level_for_thinking(&port, Some(true)),
-            ReasoningLevel::Medium
-        );
-        assert_eq!(port.current_requested_level(), ReasoningLevel::Medium);
-        assert_eq!(
-            requested_level_for_thinking(&port, None),
-            ReasoningLevel::Off
-        );
     }
 }

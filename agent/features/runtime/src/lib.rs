@@ -16,6 +16,10 @@ pub use application::client::{
     from_args_with_workspace, resume_session_to_backing, AgentClientImpl, ResumeError,
     RuntimeBootstrapDependencies, RuntimeCoreDependencies, RuntimeToolAssemblyDependencies,
 };
+// #1248 Task 3: RuntimeContextFactory is the narrow crate-root construction
+// entry.  RuntimeServices stays internal; callers construct via
+// RuntimeContextFactory::new(…).
+pub use application::runtime_context_factory::RuntimeContextFactory;
 pub use ports::{ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort};
 pub use sdk::{
     AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ProjectContext,

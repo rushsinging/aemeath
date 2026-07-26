@@ -7,7 +7,7 @@ use super::spec::RunSpec;
 use super::state::{
     DrainDecision, InteractionContinuation, PendingInteraction, RunCancellationRequest, RunStatus,
     RunStep, RunStepCancellationRequest, RunStepId, RunStepStatus, RunTerminationRequest,
-    RunTransition, RunTransitionError, RunTransitionReason,
+    RunTransition, RunTransitionError, RunTransitionReason, StopHookBlockResult,
 };
 use super::step::{ModelInvocation, RunToolCall, ToolCallStatus};
 
@@ -27,6 +27,10 @@ pub struct Run {
     /// Persisted across `run_loop` calls so that AwaitUser→re-enter
     /// does not reset the epoch.  Each successful drain increments it.
     next_drain_epoch: u64,
+    /// #1248 Task 6: Stop hook block count owned by Run (not StuckGuard).
+    /// Incremented each time the stop hook blocks completion.
+    /// After 15 blocks the 16th triggers RetryExhausted → Run Failed.
+    stop_hook_block_count: usize,
     steps: Vec<RunStep>,
     started_at: Option<Instant>,
     events: Vec<RunDomainEvent>,
@@ -47,6 +51,7 @@ impl Run {
             pending_interaction: None,
             pending_completion_result: None,
             next_drain_epoch: 0,
+            stop_hook_block_count: 0,
             steps: Vec::new(),
             started_at: None,
             events: Vec::new(),
@@ -94,7 +99,8 @@ impl Run {
             (&continuation, self.status),
             (
                 InteractionContinuation::CompleteToolCall(_)
-                    | InteractionContinuation::ContinueAfterHardPause,
+                    | InteractionContinuation::ContinueAfterHardPause
+                    | InteractionContinuation::ContinueToolApproval(_),
                 RunStatus::ExecutingTools
             ) | (
                 InteractionContinuation::ContinueToolApproval(_),
@@ -485,6 +491,25 @@ impl Run {
     /// Called by the engine after validating the epoch match.
     pub fn advance_drain_epoch(&mut self) {
         self.next_drain_epoch += 1;
+    }
+
+    /// #1248 Task 6: Current stop hook block count for this Run.
+    pub fn stop_hook_block_count(&self) -> usize {
+        self.stop_hook_block_count
+    }
+
+    /// #1248 Task 6: Record a stop hook block and return the typed result.
+    ///
+    /// Increments the count.  Blocks 1-15 return `Blocked` (continue with
+    /// feedback).  The 16th block returns `RetryExhausted` (transition to Failed).
+    pub fn record_stop_hook_block(&mut self) -> StopHookBlockResult {
+        self.stop_hook_block_count = self.stop_hook_block_count.saturating_add(1);
+        let count = self.stop_hook_block_count;
+        if count >= 16 {
+            StopHookBlockResult::RetryExhausted { count }
+        } else {
+            StopHookBlockResult::Blocked { count }
+        }
     }
 
     pub fn apply_drain_decision(

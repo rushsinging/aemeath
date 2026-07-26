@@ -282,38 +282,9 @@ fn build_compact_test_port<'a>(
         task_reminder_state: &mut harness.task_reminder_state,
         tool_identity: &harness.tool_identity,
         started_at: Instant::now(),
-    }
-}
-
-use workflow::api::{ReasoningNode, ReasoningObservation, ReasoningPort, ReasoningSignal};
-
-struct StubReasoningPort;
-
-impl ReasoningPort for StubReasoningPort {
-    fn observe(&self, _signal: ReasoningSignal) -> ReasoningObservation {
-        ReasoningObservation {
-            previous: ReasoningNode::Idle,
-            current: ReasoningNode::Idle,
-            requested: self.current_requested_level(),
-        }
-    }
-
-    fn current_requested_level(&self) -> share::reasoning::ReasoningLevel {
-        share::reasoning::ReasoningLevel::Off
-    }
-
-    fn set_level(
-        &self,
-        level: share::reasoning::ReasoningLevel,
-    ) -> share::reasoning::ReasoningLevel {
-        level
-    }
-
-    fn reset_default_level(
-        &self,
-        level: share::reasoning::ReasoningLevel,
-    ) -> share::reasoning::ReasoningLevel {
-        level
+        plan_mode: false,
+        interaction_receivers: Vec::new(),
+        pending_work: None,
     }
 }
 
@@ -348,7 +319,7 @@ struct CompactHarness {
     // #1385 Task 12: sink and last_total_tokens eliminated — both from runtime_context.
     task_reminder_state: TaskReminderState,
     tool_identity: crate::application::tool_coordination::identity::ToolIdentityRegistry,
-    reasoning: Arc<dyn workflow::api::ReasoningPort>,
+    reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     runtime_context: crate::application::runtime_context::RuntimeContext,
 }
 
@@ -388,23 +359,29 @@ impl CompactHarness {
         let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
         let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
         let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(1));
-        let reasoning: Arc<dyn workflow::api::ReasoningPort> = Arc::new(StubReasoningPort);
-        let runtime_context = crate::application::runtime_context::RuntimeContext::new(
-            crate::application::runtime_context::RuntimeContextParts {
+        let reasoning = Arc::new(std::sync::Mutex::new(share::reasoning::ReasoningLevel::Off));
+        let runtime_context = {
+            use crate::application::runtime_context::{
+                RunCancellationScope, RunContextBindings, RunInputBufferHandle, RunUsageTracker,
+            };
+            use crate::application::runtime_context_factory::RuntimeContextFactory;
+
+            let factory = RuntimeContextFactory::new(
+                tool_catalog.clone(),
+                tool_execution.clone(),
+                tool_context_binding.clone(),
+                Arc::new(policy::AllowAllPolicy),
+                reflection_history.clone(),
+                task_access.clone(),
+                hook_runner.clone(),
+            );
+            let bindings = RunContextBindings {
                 context: stub.clone(),
                 provider: binding.clone(),
-                tool_catalog: tool_catalog.clone(),
-                tool_execution: tool_execution.clone(),
-                tool_context_binding: tool_context_binding.clone(),
-                policy: Arc::new(policy::AllowAllPolicy),
                 interaction: Arc::new(crate::application::interaction::InteractionBridge::new()),
                 memory: memory.clone(),
-                reflection_history: reflection_history.clone(),
-                task: task_access.clone(),
-                hooks: hook_runner.clone(),
-                reasoning: reasoning.clone(),
                 config: run_config.clone(),
-                cancel: crate::application::runtime_context::RunCancellationScope::new(),
+                cancel: RunCancellationScope::new(),
                 event_sink: {
                     #[derive(Clone)]
                     struct NoOpSink;
@@ -424,10 +401,15 @@ impl CompactHarness {
                     }
                     crate::application::main_loop::ChatEventSinkHandle::new(NoOpSink)
                 },
-                usage: crate::application::runtime_context::RunUsageTracker::new(),
-                input: crate::application::runtime_context::RunInputBufferHandle::new(),
-            },
-        );
+                usage: RunUsageTracker::new(),
+                input: RunInputBufferHandle::new(),
+                reasoning: reasoning.clone(),
+                tool_catalog: None,
+            };
+            factory
+                .assemble(&crate::domain::agent_run::RunSpec::main(), bindings, None)
+                .expect("pre-compact context assembly must succeed")
+        };
         Self {
             adapter,
             coordinator,

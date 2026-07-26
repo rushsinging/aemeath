@@ -1,0 +1,275 @@
+//! Stop Hook coordination —— 共享 Loop 触发的 typed decision。
+//!
+//! #1248 Task 6: 将 Stop Hook outcome 从 adapter 预解释 (ModelStep::StopHookBlocked)
+//! 迁入共享 Loop 与 Run 状态机。Coordinator 只消费 HookPort / Hook PL，返回
+//! Runtime-owned typed decision；保留 block detail/messages，禁止用 reason 字符串
+//! 区分主动 Block 与 ExecutionFailed。Hook 内部三次 retry 仍归 Hook BC。
+//!
+//! 设计约束：
+//! - **typed decision**：`Proceed` | `Block { reason, detail, messages, feedback }`
+//!   其中 `reason` 保持 `RuntimeHookReason` variant，`StopHookExecutionFailed`
+//!   永远作为 typed variant 保留，绝不转字符串后再识别。
+//! - **纯转换**：不解析 stdout / JSON，不维护 Run 状态，不触碰 IO。
+//!   Hook BC 已完成所有分类 / JSON 解析；此处仅做类型化搬运。
+//! - **feedback materialization**：Main/Sub 都调用本模块的统一异步函数，
+//!   使用同一语言、预览截断和长输出落盘规则。
+
+use crate::application::hook_types::{
+    RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookReason,
+};
+use hook::{HookInvocation, HookPort, StopInput};
+use share::message::StopHookFeedback;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+/// Runtime-owned typed stop hook decision.
+///
+/// 由 `evaluate_stop_hook` 产出，是 Loop 消费 stop hook 结果的唯一入口。
+/// Loop 根据此 decision 决定 Proceed（正常完成）或 Block（记录计数、注入 feedback）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum StopHookDecision {
+    /// Stop hook 放行，Run 可以正常完成。
+    Proceed,
+    /// Stop hook 阻断。携带完整的 typed reason、block detail、feedback 材料。
+    /// 第 1-15 次 Block 走 continue-with-feedback；第 16 次 Block 触发 Run Failed。
+    Block(Box<StopHookBlock>),
+}
+
+/// Block variant data — boxed to avoid large size difference with `Proceed`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StopHookBlock {
+    /// 结构化阻断原因（永远 typed，绝不转字符串）。
+    pub reason: RuntimeHookReason,
+    /// Block detail（触发 Block 的 subscription 与 execution）。
+    pub detail: RuntimeHookBlockDetail,
+    /// BC 保留的展示消息（按源顺序 1:1 投影，用于 UI 展示）。
+    pub messages: Vec<super::hook_types::RuntimeHookDisplayMessage>,
+    /// Feedback materialization 所需材料；adapter 在 seam 实现中完成构造。
+    pub feedback: StopHookFeedbackMaterial,
+}
+
+/// Feedback 材料：由 adapter 层的 `evaluate_stop_hook` 实现消费，
+/// 构造 `Message::stop_hook_feedback` 并注入消息流。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopHookFeedbackMaterial {
+    /// LLM 可见的提示文本（含 command/exit_code/reason/stdout/stderr 摘要）。
+    pub llm_text: String,
+    /// 结构化 feedback payload（TUI 展示用）。
+    pub payload: StopHookFeedback,
+}
+
+/// Block detail（与 RuntimeHookBlockDetail 语义一致，但作为 StopHookDecision 内嵌类型重新导出）。
+pub use crate::application::hook_types::RuntimeHookBlockDetail;
+
+/// 执行 stop hook 并返回 typed decision。
+///
+/// 此函数只做 Hook BC 调用 + 纯值投影，不维护 Run 状态。
+/// feedback 材料返回给 adapter 侧完成 materialization。
+///
+/// # Arguments
+/// * `hook_port` - Hook 执行端口
+/// * `turns` - 当前 run 的 turns 数
+/// * `workspace_root` - 工作区根路径
+///
+/// # Returns
+/// * `StopHookDecision::Proceed` - 放行
+/// * `StopHookDecision::Block { .. }` - 阻断（含 typed reason 和 feedback 材料）
+pub async fn evaluate_stop_hook(
+    hook_port: &Arc<dyn HookPort>,
+    turns: usize,
+    workspace_root: &std::path::Path,
+) -> StopHookDecision {
+    let outcome = hook_port
+        .dispatch_at(
+            HookInvocation::Stop(StopInput { turns }),
+            hook::HookDispatchContext::new(workspace_root),
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
+
+    let dispatch: RuntimeHookDispatch = (&outcome).into();
+
+    match &dispatch.directive {
+        RuntimeHookDirective::Block { reason } => {
+            let detail = dispatch
+                .block_detail
+                .clone()
+                .expect("Stop hook Block must carry the blocking subscription detail");
+
+            StopHookDecision::Block(Box::new(StopHookBlock {
+                reason: reason.clone(),
+                detail: detail.clone(),
+                messages: dispatch.messages.clone(),
+                feedback: build_inline_stop_hook_feedback(&detail, reason),
+            }))
+        }
+        _ => StopHookDecision::Proceed,
+    }
+}
+
+// ─── Feedback materialization helpers ─────────────────────────────
+
+const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
+const TUI_STDOUT_PREVIEW_LINES: usize = 3;
+const TUI_STDERR_PREVIEW_LINES: usize = 5;
+
+/// Build inline English feedback for the typed decision returned by the
+/// coordinator. Adapters MUST call [`materialize_stop_hook_feedback`] before
+/// injecting a blocked decision into a message stream.
+fn build_inline_stop_hook_feedback(
+    detail: &RuntimeHookBlockDetail,
+    reason: &RuntimeHookReason,
+) -> StopHookFeedbackMaterial {
+    build_stop_hook_feedback(detail, reason, "en", None)
+}
+
+/// Materialize Stop Hook feedback with the same behavior for Main and Sub.
+/// Long output is persisted under a per-session temp directory and the model
+/// receives the real readable path.
+pub(crate) async fn materialize_stop_hook_feedback(
+    detail: &RuntimeHookBlockDetail,
+    reason: &RuntimeHookReason,
+    session_id: &str,
+    language: &str,
+) -> StopHookFeedbackMaterial {
+    let output = full_hook_output(detail, reason);
+    let output_file = if output.len() > INLINE_HOOK_OUTPUT_LIMIT {
+        write_long_hook_feedback(session_id, &detail.command, &output)
+            .await
+            .map(|path| path.display().to_string())
+    } else {
+        None
+    };
+    build_stop_hook_feedback(detail, reason, language, output_file)
+}
+
+fn build_stop_hook_feedback(
+    detail: &RuntimeHookBlockDetail,
+    reason: &RuntimeHookReason,
+    language: &str,
+    output_file: Option<String>,
+) -> StopHookFeedbackMaterial {
+    let summary = match language {
+        "zh" => "Stop hook 阻止了停止。".to_string(),
+        _ => "Stop hook prevented stopping.".to_string(),
+    };
+    let command = detail.command.clone();
+    let reason_text = format_reason(reason);
+    let (stdout_preview, stdout_truncated) =
+        truncate_lines(&detail.execution.stdout, TUI_STDOUT_PREVIEW_LINES);
+    let (stderr_preview, stderr_truncated) =
+        truncate_lines(&detail.execution.stderr, TUI_STDERR_PREVIEW_LINES);
+    let payload = StopHookFeedback {
+        summary,
+        command,
+        exit_code: detail.execution.exit_code,
+        reason: reason_text,
+        stdout_preview,
+        stderr_preview,
+        stdout_truncated,
+        stderr_truncated,
+        output_file,
+    };
+
+    let mut llm_text = stop_hook_llm_text_english(&payload);
+    if language == "zh" {
+        llm_text = llm_text.replace("Stop hook prevented stopping.", "Stop hook 阻止了停止。");
+    }
+    StopHookFeedbackMaterial { llm_text, payload }
+}
+
+fn full_hook_output(detail: &RuntimeHookBlockDetail, reason: &RuntimeHookReason) -> String {
+    format!(
+        "command: {}\nexit_code: {:?}\nreason: {}\n\nstdout:\n{}\n\nstderr:\n{}",
+        detail.command,
+        detail.execution.exit_code,
+        format_reason(reason),
+        detail.execution.stdout,
+        detail.execution.stderr,
+    )
+}
+
+async fn write_long_hook_feedback(
+    session_id: &str,
+    command: &str,
+    details: &str,
+) -> Option<PathBuf> {
+    let dir = std::env::temp_dir()
+        .join("aemeath-hook-results")
+        .join(session_id);
+    tokio::fs::create_dir_all(&dir).await.ok()?;
+    let path = dir.join(format!("{}.txt", sanitized_file_stem(command)));
+    tokio::fs::write(&path, details).await.ok()?;
+    Some(path)
+}
+
+fn sanitized_file_stem(command: &str) -> String {
+    let mut stem: String = command
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    while stem.contains("--") {
+        stem = stem.replace("--", "-");
+    }
+    let stem = stem.trim_matches('-');
+    if stem.is_empty() {
+        "hook-output".to_string()
+    } else {
+        stem.chars().take(80).collect()
+    }
+}
+fn format_reason(reason: &RuntimeHookReason) -> String {
+    match reason {
+        RuntimeHookReason::ExitCode { code, .. } => format!("exit code {code}"),
+        RuntimeHookReason::JsonBlock { reason } => reason.clone(),
+        RuntimeHookReason::JsonContinueFalse { stop_reason } => stop_reason
+            .clone()
+            .unwrap_or_else(|| "hook returned continue:false".to_string()),
+        RuntimeHookReason::StopHookExecutionFailed { error }
+        | RuntimeHookReason::PolicyBlock { error } => error.clone(),
+    }
+}
+
+fn stop_hook_llm_text_english(payload: &StopHookFeedback) -> String {
+    let mut text = format!(
+        "{}\nCommand: {}\nExit code: {}\nReason: {}",
+        payload.summary,
+        payload.command,
+        payload
+            .exit_code
+            .map_or_else(|| "unknown".to_string(), |code| code.to_string()),
+        payload.reason
+    );
+    if let Some(path) = &payload.output_file {
+        text.push_str(&format!(
+            "\nFull hook output is saved to {path}; use the Read tool to inspect it."
+        ));
+    } else {
+        if !payload.stderr_preview.trim().is_empty() {
+            text.push_str(&format!("\nstderr:\n{}", payload.stderr_preview));
+        }
+        if !payload.stdout_preview.trim().is_empty() {
+            text.push_str(&format!("\nstdout:\n{}", payload.stdout_preview));
+        }
+    }
+    text
+}
+
+fn truncate_lines(text: &str, max_lines: usize) -> (String, bool) {
+    let lines: Vec<&str> = text.lines().collect();
+    let truncated = lines.len() > max_lines;
+    (
+        lines
+            .into_iter()
+            .take(max_lines)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        truncated,
+    )
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────
+
+#[cfg(test)]
+#[path = "stop_hook_coordination_tests.rs"]
+mod tests;

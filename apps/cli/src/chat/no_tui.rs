@@ -208,45 +208,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::ConfigReloaded { .. }
         | sdk::ChatEvent::SessionReset
         | sdk::ChatEvent::UserMessagesWithdrawn { .. }
-        | sdk::ChatEvent::GraphPhaseChanged { .. }
-        | sdk::ChatEvent::CompactProgress { .. }
-        | sdk::ChatEvent::ModelSwitched { .. }
-        | sdk::ChatEvent::ThinkingChanged { .. }
-        | sdk::ChatEvent::ContextEstimated { .. }
-        | sdk::ChatEvent::CommandResultText { .. }
-        | sdk::ChatEvent::SessionResumed { .. }
-        | sdk::ChatEvent::ToolCallUpdate { .. }
-        | sdk::ChatEvent::ModelList { .. }
-        | sdk::ChatEvent::ReminderList { .. }
-        | sdk::ChatEvent::SessionList { .. }
-        | sdk::ChatEvent::ProjectInfo { .. }
-        | sdk::ChatEvent::TasksSnapshot { .. }
-        | sdk::ChatEvent::CostUpdate { .. } => {}
-        sdk::ChatEvent::ReflectionHistory { records } => {
-            eprintln!("Reflection history ({}):", records.len());
-            for record in records {
-                let tokens = record.token_usage.map_or_else(
-                    || "n/a".to_string(),
-                    |usage| format!("{}/{}", usage.input_tokens, usage.output_tokens),
-                );
-                let error = record
-                    .error_category
-                    .map_or_else(|| "none".to_string(), |category| format!("{category:?}"));
-                eprintln!(
-                    "- timestamp={} trigger={:?} status={:?} counts(deviations/suggestions/outdated)={}/{}/{} apply={:?} error={} tokens(in/out)={} duration={}ms",
-                    record.timestamp,
-                    record.trigger,
-                    record.status,
-                    record.deviations,
-                    record.suggestions,
-                    record.outdated,
-                    record.apply_status,
-                    error,
-                    tokens,
-                    record.duration_ms,
-                );
-            }
-        }
+        | sdk::ChatEvent::ReflectionHistory { .. } => {}
         sdk::ChatEvent::ApiError { error, .. } => {
             eprintln!("\n  ✗ API 错误: {error}");
         }
@@ -305,6 +267,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
             eprintln!("⚠️  恢复失败 [{label}] id={id}: {message}");
             eprintln!("    用 `/sessions` 查看可用会话，或直接开始新会话。");
         }
+        _ => {}
     }
     Ok(())
 }

@@ -596,13 +596,6 @@ fn catalog_covers_exactly_runtime_owners() {
             "agent-update.log",
         ),
         (
-            "agent/features/workflow",
-            "aemeath:agent:workflow",
-            Owner::Workflow,
-            Sink::Workflow,
-            "agent-workflow.log",
-        ),
-        (
             "agent/shared",
             "aemeath:shared",
             Owner::Shared,

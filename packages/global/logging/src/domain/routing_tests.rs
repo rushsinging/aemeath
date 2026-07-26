@@ -52,7 +52,6 @@ fn route_boundaries_are_fail_closed() {
 fn registers_all_current_production_targets() {
     for (target, file) in [
         ("aemeath:agent:update", "agent-update.log"),
-        ("aemeath:agent:workflow", "agent-workflow.log"),
         ("aemeath:context", "context.log"),
     ] {
         assert_eq!(

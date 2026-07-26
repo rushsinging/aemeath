@@ -2,6 +2,7 @@ use config::ConfigReader;
 use std::sync::Arc;
 
 use crate::application::runtime_context::ParentRunContextSource;
+use crate::application::runtime_context_factory::RuntimeContextFactory;
 use crate::ports::ProviderFactory;
 
 mod finalize;
@@ -34,6 +35,9 @@ pub struct CliAgentRunner {
     /// #1385 Task 6: Injectable parent context source — set by the Main Run
     /// loop before tool execution so sub-agent runs can derive from it.
     pub parent_context: ParentRunContextSource,
+    /// #1248 Task 3: RuntimeContextFactory — same instance as MainSessionShell's.
+    /// Used for sub-run RuntimeContext assembly without a separate factory.
+    pub runtime_context_factory: Arc<RuntimeContextFactory>,
 }
 
 impl CliAgentRunner {

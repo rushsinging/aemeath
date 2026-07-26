@@ -344,13 +344,6 @@ pub enum ChatEvent {
     ConfigReloaded {
         event: crate::ConfigReloadedEvent,
     },
-    /// loop 完成 reset 清理后发出，TUI 据此同步清空镜像。
-    /// Reasoning Graph 阶段变化（Phase 2）。
-    GraphPhaseChanged {
-        node: String,
-        effort: String,
-        prev: String,
-    },
     SessionReset,
     /// 批量撤回 pending 输入（#391 S3）。texts 为被撤回文本，TUI join("\n") 还原输入框。
     UserMessagesWithdrawn {

@@ -1,9 +1,10 @@
 use super::loop_run::SubAgentRun;
 use super::CliAgentRunner;
-use crate::application::interaction::InteractionBridge;
+use crate::application::interaction::UnavailableInteractionPort;
 use crate::application::runtime_context::{
-    RunInputBufferHandle, RunUsageTracker, RuntimeContext, RuntimeContextParts,
+    RunContextBindings, RunInputBufferHandle, RunUsageTracker, RuntimeContext,
 };
+use crate::application::runtime_context_factory::RuntimeContextFactory;
 use crate::application::subagent::Agent;
 use crate::application::workspace_access::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::RunSpec;
@@ -131,17 +132,22 @@ impl tools::CancellationSignal for CombinedCancellationSignal {
 /// - **interaction**: disabled bridge (sub-agents are non-interactive).
 ///   Returns `InteractionCommandOutcome::NotFound` on any register/reply/cancel attempt.
 /// - **provider**: built fresh from role config via factory; does NOT reuse parent transport.
-/// - **task/hook/reflection/reasoning/config**: shared from parent.
+/// - **task/hook/reflection/config**: shared from parent.
+/// - **reasoning**: Inherit mode via factory (`workflow::inherited_reasoning`) — independent port.
 /// - **workspace**: isolated via `parent_workspace.derive_isolated()` — used exactly once here;
 ///   all downstream access comes from the returned `DerivedSubRun.workspace`.
 ///   **Never call `derive_isolated` a second time.**
+///
+/// #1248 Task 3: Uses `runtime_context_factory.assemble()` for capability-semantic
+/// decisions; the same factory instance serves both Main and Sub runs.
 pub fn derive_sub_run(
     parent_spec: &RunSpec,
     parent_context: &RuntimeContext,
     parent_workspace: &RuntimeWorkspaceAccess,
     request: &SubRunRequest,
-    factory: &dyn crate::ports::ProviderFactory,
+    provider_factory: &dyn crate::ports::ProviderFactory,
     skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    runtime_context_factory: &RuntimeContextFactory,
 ) -> Result<DerivedSubRun, crate::application::client::RuntimeContextAssemblyError> {
     use crate::application::client::RuntimeContextAssemblyError;
 
@@ -175,7 +181,7 @@ pub fn derive_sub_run(
     }
     let resolved_spec = role.model.clone();
 
-    // 4. Build provider binding via factory.
+    // 4. Build provider binding via provider_factory.
     let sub_binding = {
         let model_lookup = config.models().find_model(&resolved_spec);
         let (_source_key, source_config, model_entry) =
@@ -227,11 +233,12 @@ pub fn derive_sub_run(
             timeout: std::time::Duration::from_secs(config_snapshot.config().api_timeout_secs()),
             user_agent: config_snapshot.config().user_agent().to_string(),
         };
-        factory
-            .build(build_spec)
-            .map_err(|e| RuntimeContextAssemblyError::SubDerivationFailed {
-                reason: e.to_string(),
-            })?
+        provider_factory.build(build_spec).map_err(|e| {
+            RuntimeContextAssemblyError::SubProviderBuildFailed {
+                role: request.role.clone(),
+                message: e.to_string(),
+            }
+        })?
     };
 
     let max_tokens = sub_binding.max_tokens;
@@ -269,32 +276,19 @@ pub fn derive_sub_run(
             )),
         );
 
-    // 7. Assemble RuntimeContext.  All ports stream from parent context
-    // (execution, binding, policy, hooks, etc.) — the caller never uses
-    // self-owned bypass fields.
+    // 7. #1248 Task 3: Assemble RuntimeContext via factory.
+    // All per-Run ports go into RunContextBindings; the factory handles
+    // capability-semantic decisions (reasoning Inherit → inherited_reasoning,
+    // interaction ParentMediated validation, etc.).
+    // Restricted tool catalog is passed as bindings.tool_catalog override.
     let cancel = parent_context.cancel().child_scope();
-    let parts = RuntimeContextParts {
+    let bindings = RunContextBindings {
         context: skills_context_port,
         provider: Arc::new(sub_binding.clone()),
-        tool_catalog: restricted_catalog,
-        tool_execution: parent_context.tool_execution(),
-        tool_context_binding: parent_context.tool_context_binding(),
-        policy: parent_context.policy(),
-        // Sub-agents are non-interactive: use an explicitly disabled bridge.
-        // Any register/reply/cancel returns InteractionCommandOutcome::NotFound
-        // (the most appropriate existing error for "no interaction capability").
-        // The SDK enum should not be extended across crates.
-        interaction: Arc::new(InteractionBridge::disabled()),
+        interaction: Arc::new(UnavailableInteractionPort),
         memory: Arc::new(memory::NoOpMemory),
-        reflection_history: parent_context.reflection_history(),
-        task: parent_context.task(),
-        hooks: parent_context.hooks(),
-        reasoning: parent_context.reasoning(),
         config: config_snapshot.clone(),
         cancel,
-        // #1385 Task 12: Sub-agent gets derived I/O seams.
-        // event_sink uses the canonical SubAgentEventSink (from loop_run),
-        // not an inline noop.  Usage and input are fresh per sub-run.
         event_sink: {
             crate::application::main_loop::ChatEventSinkHandle::new(
                 super::loop_run::SubAgentEventSink,
@@ -302,9 +296,16 @@ pub fn derive_sub_run(
         },
         usage: RunUsageTracker::new(),
         input: RunInputBufferHandle::new(),
+        reasoning: Arc::new(std::sync::Mutex::new(
+            *parent_context
+                .reasoning_ref()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+        )),
+        tool_catalog: Some(restricted_catalog),
     };
 
-    let context = RuntimeContext::new(parts);
+    let context = runtime_context_factory.assemble(&spec, bindings, Some(parent_context))?;
 
     Ok(DerivedSubRun {
         spec,
@@ -331,6 +332,7 @@ impl AgentRunner for CliAgentRunner {
         // #1385: request catalog/memory are NOT used for child;
         // all catalog/memory access comes from derived.context.
         let plan_mode = request.plan_mode;
+        let plan_mode_active = plan_mode.is_plan_mode().unwrap_or(false);
         let guidance = request.guidance;
         let timeout = request.timeout;
         let parent_run_id = Some(sdk::RunId::from_legacy_or_new(identity.run_id()));
@@ -358,6 +360,7 @@ impl AgentRunner for CliAgentRunner {
             &sub_request,
             self.factory.as_ref(),
             self.skill_materializer.clone(),
+            self.runtime_context_factory.as_ref(),
         ) {
             Ok(d) => d,
             Err(error) => {
@@ -390,7 +393,10 @@ impl AgentRunner for CliAgentRunner {
         let model_display = derived.model_display.clone();
         let model_name = derived.model_name.clone();
         let max_tokens = derived.max_tokens;
-        let level = derived.reasoning_level;
+        // #1248 Task 7: reasoning level from RuntimeContext's ReasoningPort,
+        // not a duplicate static field. DerivedSubRun.reasoning_level is
+        // still available for diagnostics but no longer used at construction.
+        let _reasoning_level = derived.reasoning_level;
         let binding = derived.context.provider();
 
         let session_id = identity
@@ -597,7 +603,6 @@ impl AgentRunner for CliAgentRunner {
                   // is already owned by the caller.
                   runtime_context: derived.context,
                   max_tokens,
-                  level,
                 workspace_root,
                 tool_schemas,
                 config_snapshot: config_snapshot.clone(),
@@ -629,6 +634,9 @@ impl AgentRunner for CliAgentRunner {
                     crate::application::loop_engine::input_strategy::SubInputStrategy::new(
                         prompt,
                     ),
+                plan_mode: plan_mode_active,
+                interaction_receivers: Vec::new(),
+                pending_work: None,
             }
             .run_loop()
             .await

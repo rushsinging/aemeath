@@ -20,6 +20,8 @@ pub(super) async fn list_reflection_history_impl(
     let records = me
         .inner
         .shell
+        .runtime_context_factory
+        .services()
         .reflection_history
         .list(limit)
         .await
