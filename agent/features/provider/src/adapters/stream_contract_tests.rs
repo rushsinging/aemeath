@@ -10,6 +10,13 @@ async fn response_from_fixture(
     body: &'static str,
     content_type: &'static str,
 ) -> reqwest::Response {
+    response_from_bytes_fixture(body.as_bytes(), content_type).await
+}
+
+async fn response_from_bytes_fixture(
+    body: &'static [u8],
+    content_type: &'static str,
+) -> reqwest::Response {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind stream contract fixture");
@@ -19,13 +26,17 @@ async fn response_from_fixture(
         let mut request = [0_u8; 1024];
         let _ = socket.read(&mut request).await;
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\n\r\n{body}",
-            body.len()
+            "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\n\r\n",
+            body.len(),
         );
         socket
             .write_all(response.as_bytes())
             .await
-            .expect("write fixture response");
+            .expect("write fixture response headers");
+        socket
+            .write_all(body)
+            .await
+            .expect("write fixture response body");
     });
     reqwest::get(format!("http://{address}/stream"))
         .await
@@ -131,12 +142,12 @@ async fn openai_chunked_body_eof_emits_retryable_stream_interrupted_failure() {
         let _ = socket.read(&mut request).await;
         socket
             .write_all(
-                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n20\r\ndata: {\"choices\":[{\"delta\":{\r\n",
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\nA\r\ndata: {}\n\n\r\nF",
             )
             .await
-            .expect("write partial chunked response");
-        // The advertised chunk is deliberately incomplete. Dropping the socket
-        // reproduces a proxy/upstream connection cut during an SSE body read.
+            .expect("write response ending during a chunk-size line");
+        // The first chunk is complete. The trailing `F` starts the next chunk-size
+        // line, and dropping the socket reproduces an unexpected EOF in that line.
     });
 
     let response = reqwest::get(format!("http://{address}/stream"))
@@ -151,11 +162,43 @@ async fn openai_chunked_body_eof_emits_retryable_stream_interrupted_failure() {
     .collect()
     .await;
 
-    assert!(matches!(
-        events.as_slice(),
-        [InvocationEvent::Failed(error)]
-            if error.kind == ProviderErrorKind::StreamTruncated && error.retryable
-    ));
+    let [InvocationEvent::Failed(error)] = events.as_slice() else {
+        panic!("chunk-size EOF must emit exactly one failed terminal event: {events:?}");
+    };
+    assert_eq!(error.kind, ProviderErrorKind::StreamTruncated);
+    assert!(error.retryable);
+    let message = error.safe_message.to_ascii_lowercase();
+    assert!(
+        message.contains("connection interrupted"),
+        "failure must preserve the interrupted-connection context: {message}"
+    );
+    assert!(
+        message.contains("eof") || message.contains("chunk"),
+        "failure must preserve the chunked EOF cause: {message}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn openai_complete_malformed_body_emits_fatal_protocol_failure() {
+    let response = response_from_bytes_fixture(
+        b"data: {\"choices\":[]}\n\ndata: \xff\n\n",
+        "text/event-stream",
+    )
+    .await;
+    let events: Vec<_> = invocation_stream_from_decoder(
+        response,
+        ReasoningLevel::Off,
+        CancellationToken::new(),
+        InvocationDecoder::OpenAiChat,
+    )
+    .collect()
+    .await;
+
+    let [InvocationEvent::Failed(error)] = events.as_slice() else {
+        panic!("malformed complete body must emit exactly one failed terminal event: {events:?}");
+    };
+    assert_eq!(error.kind, ProviderErrorKind::Protocol);
+    assert!(!error.retryable);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

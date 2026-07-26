@@ -192,7 +192,10 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
     ))
 }
 
-use crate::application::testing::text_completion_stream;
+use crate::application::testing::{
+    advance_until_retry_condition, empty_completion, successful_completion, text_completion_stream,
+    ScriptedInvocationProvider, RETRY_ADVANCE_LIMITS,
+};
 
 use async_trait::async_trait;
 use hook::HookPort;
@@ -649,6 +652,9 @@ impl RecordingSink {
                 format!("ReflectionHistory:{}", records.len())
             }
             RuntimeStreamEvent::SessionResumed { .. } => "SessionResumed".to_string(),
+            RuntimeStreamEvent::ModelInvocationRetrying { attempt, delay, .. } => {
+                format!("ModelInvocationRetrying:{attempt}:{}", delay.as_millis())
+            }
             _ => "Other".to_string(),
         };
         self.events.lock().unwrap().push(name);
@@ -756,6 +762,247 @@ impl LlmProvider for SequenceProvider {
     fn provider_name(&self) -> &str {
         "test-provider"
     }
+}
+
+fn retryable_stream_failure() -> InvocationEvent {
+    InvocationEvent::Failed(ProviderError::retryable(
+        ProviderErrorKind::StreamTruncated,
+        "stream connection interrupted: unexpected EOF during chunk size line",
+    ))
+}
+
+fn retry_main_context(
+    provider: Arc<ScriptedInvocationProvider>,
+    sink: RecordingSink,
+    input_events: ChannelInputEvents,
+) -> ChatLoopContext<RecordingSink, SequenceQueueDrainPort, ChannelInputEvents> {
+    retry_main_context_with_wiring(provider, sink, input_events).0
+}
+
+fn retry_main_context_with_wiring(
+    provider: Arc<ScriptedInvocationProvider>,
+    sink: RecordingSink,
+    input_events: ChannelInputEvents,
+) -> (
+    ChatLoopContext<RecordingSink, SequenceQueueDrainPort, ChannelInputEvents>,
+    Arc<context::MainSessionWiring>,
+) {
+    let mut shell = test_shell();
+    let wiring = shell.wiring.clone();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(provider),
+    ));
+    shell.session_id = "test-main-terminal-retry".to_string();
+    (
+        test_chat_loop_ctx(
+            sink,
+            SequenceQueueDrainPort::new(Vec::new()),
+            input_events,
+            shell,
+        ),
+        wiring,
+    )
+}
+
+async fn wait_for_retry_test_condition(description: &str, condition: impl Fn() -> bool) {
+    for _ in 0..10_000 {
+        if condition() {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("timed out waiting for {description}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn main_partial_stream_failure_retries_without_rollback() {
+    let provider = Arc::new(ScriptedInvocationProvider::new(vec![
+        vec![
+            InvocationEvent::Delta(InvocationDelta::Text("partial".to_string())),
+            retryable_stream_failure(),
+        ],
+        vec![
+            InvocationEvent::Delta(InvocationDelta::Text("complete".to_string())),
+            successful_completion("complete"),
+        ],
+    ]));
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let ctx = retry_main_context(provider.clone(), sink.clone(), input_events);
+    let run = tokio::spawn(process_chat_loop(ctx));
+    advance_until_retry_condition(
+        "successful retry",
+        std::time::Duration::from_secs(11),
+        || provider.calls() == 2,
+    )
+    .await;
+    wait_for_retry_test_condition("completed Main turn", || {
+        sink.events()
+            .iter()
+            .any(|event| event == "DoneWithDuration")
+    })
+    .await;
+    drop(input_tx);
+    run.await.unwrap();
+
+    assert_eq!(provider.calls(), 2);
+    let events = sink.events();
+    let partial = events
+        .iter()
+        .position(|event| event == "Text:partial")
+        .unwrap();
+    let retry = events
+        .iter()
+        .position(|event| event == "ModelInvocationRetrying:2:10000")
+        .unwrap();
+    let complete = events
+        .iter()
+        .position(|event| event == "Text:complete")
+        .unwrap();
+    assert!(partial < retry && retry < complete, "events: {events:?}");
+    assert!(
+        !events.iter().any(|event| event.starts_with("ApiError:")),
+        "events: {events:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn main_empty_completion_retries_and_succeeds() {
+    let provider = Arc::new(ScriptedInvocationProvider::new(vec![
+        vec![empty_completion()],
+        vec![
+            InvocationEvent::Delta(InvocationDelta::Text("complete".to_string())),
+            successful_completion("complete"),
+        ],
+    ]));
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let (ctx, wiring) =
+        retry_main_context_with_wiring(provider.clone(), sink.clone(), input_events);
+    let run = tokio::spawn(process_chat_loop(ctx));
+    advance_until_retry_condition(
+        "successful empty-completion retry",
+        std::time::Duration::from_secs(11),
+        || provider.calls() == 2,
+    )
+    .await;
+    wait_for_retry_test_condition("completed Main turn", || {
+        sink.events()
+            .iter()
+            .any(|event| event == "DoneWithDuration")
+    })
+    .await;
+    drop(input_tx);
+    run.await.unwrap();
+
+    assert_eq!(provider.calls(), 2);
+    let events = sink.events();
+    assert!(
+        events
+            .iter()
+            .any(|event| event == "ModelInvocationRetrying:2:10000"),
+        "events: {events:?}"
+    );
+    assert!(events.iter().any(|event| event == "Text:complete"));
+    assert!(!events.iter().any(|event| event == "Text:"));
+    assert!(!events.iter().any(|event| event.starts_with("ApiError:")));
+    assert!(sink.synced_messages().iter().flatten().all(|message| {
+        message.role != Role::Assistant || !message.text_content().trim().is_empty()
+    }));
+    let committed = wiring.committed_session();
+    let committed_messages = committed
+        .run_slices
+        .iter()
+        .flat_map(|slice| slice.steps.iter())
+        .filter_map(|step| step.outcome.as_ref())
+        .flat_map(|outcome| outcome.messages.iter());
+    let committed_assistant_texts = committed_messages
+        .filter(|message| message.role == Role::Assistant)
+        .map(Message::text_content)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        committed_assistant_texts,
+        vec!["complete"],
+        "only the valid terminal assistant response may be finalized"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn main_empty_completion_exhaustion_fails_instead_of_completing() {
+    let provider = Arc::new(ScriptedInvocationProvider::new(
+        (0..11).map(|_| vec![empty_completion()]).collect(),
+    ));
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let ctx = retry_main_context(provider.clone(), sink.clone(), input_events);
+    let run = tokio::spawn(process_chat_loop(ctx));
+    for (retry_index, virtual_time_limit) in RETRY_ADVANCE_LIMITS.into_iter().enumerate() {
+        let expected_calls = retry_index + 2;
+        advance_until_retry_condition("next empty completion retry", virtual_time_limit, || {
+            provider.calls() == expected_calls
+        })
+        .await;
+    }
+    wait_for_retry_test_condition("exhaustion ApiError", || {
+        sink.events()
+            .iter()
+            .any(|event| event.starts_with("ApiError:"))
+    })
+    .await;
+    drop(input_tx);
+    run.await.unwrap();
+
+    assert_eq!(provider.calls(), 11);
+    let events = sink.events();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.starts_with("ModelInvocationRetrying:"))
+            .count(),
+        10,
+        "events: {events:?}"
+    );
+    let retry_events = events
+        .iter()
+        .filter(|event| event.starts_with("ModelInvocationRetrying:"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        retry_events,
+        vec![
+            "ModelInvocationRetrying:2:10000",
+            "ModelInvocationRetrying:3:20146",
+            "ModelInvocationRetrying:4:40219",
+            "ModelInvocationRetrying:5:80041",
+            "ModelInvocationRetrying:6:120000",
+            "ModelInvocationRetrying:7:120000",
+            "ModelInvocationRetrying:8:120000",
+            "ModelInvocationRetrying:9:120000",
+            "ModelInvocationRetrying:10:120000",
+            "ModelInvocationRetrying:11:120000",
+        ],
+        "retry attempts and capped delays must remain observable: {events:?}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .find(|event| event.starts_with("ApiError:"))
+            .map(String::as_str),
+        Some("ApiError:loop adapter error: protocol error: provider completed without assistant text or tool call"),
+        "the final ApiError must preserve the last empty-terminal failure: {events:?}"
+    );
 }
 
 fn test_hook_port() -> Arc<dyn HookPort> {

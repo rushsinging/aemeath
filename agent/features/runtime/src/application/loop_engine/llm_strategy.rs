@@ -33,9 +33,9 @@ pub(crate) trait LlmStrategy {
     /// Main returns the current dynamic level; Sub returns its fixed level.
     fn reasoning_level(&self) -> ReasoningLevel;
 
-    /// Whether stream deltas are committed to a user-visible sink.
-    /// Main: `true` (deltas are projected to the chat UI).
-    /// Sub: `false` (deltas go to a no-op sink so are safe to retry).
+    /// Whether stream deltas are projected to a user-visible sink.
+    /// Main returns `true` for chat UI projection; Sub returns `false` for its
+    /// no-op sink. This flag is diagnostic and does not affect retry eligibility.
     fn committed_delta(&self) -> bool;
 
     /// Called when a retry is scheduled. Main emits `ModelInvocationRetrying`

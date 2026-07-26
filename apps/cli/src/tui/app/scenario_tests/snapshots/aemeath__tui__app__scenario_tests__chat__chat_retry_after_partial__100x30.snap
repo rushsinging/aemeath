@@ -1,0 +1,35 @@
+---
+source: apps/cli/src/tui/app/scenario_tests/chat.rs
+assertion_line: 186
+expression: screen
+---
+
+  Aemeath - AI Agent
+
+
+  Type /help for available commands
+
+
+● partial before interruption
+
+  Retrying model invocation (attempt 2) in 10.0s.
+
+● replacement after retry
+
+
+
+
+
+
+
+
+
+
+
+
+
+┌ Input ───────────────────────────────────────────────────────────────────────────────────────────┐
+│ 输 入 消 息 ...                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ Ready │ scenario-model │ in 0 │ out 0
+ │ main │ AskMe │ session scenario-session

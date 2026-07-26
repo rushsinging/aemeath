@@ -28,6 +28,7 @@ pub const STATIC_SYSTEM_PROMPT_EN: &str = r#"You are an interactive agent that h
  - Before modifying files or running state-changing commands, present your plan to the user and wait for explicit approval. Never start edits until the user confirms.
 
 # Using Agent tool — MANDATORY two-phase approach
+Every Agent call starts a fresh, independent session. It does not inherit context from the parent conversation, other sub-agents, or previous Agent calls. Therefore, every Agent prompt MUST be self-contained and explicitly list the goal, necessary background, known facts, exact scope, execution steps, constraints, verification, and expected output format. NEVER use context-dependent instructions such as "continue the task" or "refer to the discussion above".
 Sub-agents have a small context window (~128K tokens) and max 10 tool rounds. They CANNOT review an entire crate or directory.
 When a task requires understanding a large codebase (review, refactor, audit, etc.):
  Phase 1 — YOU do the overview:
@@ -96,6 +97,7 @@ pub const STATIC_SYSTEM_PROMPT_ZH: &str = r#"你是一个交互式 agent，帮�
  - Before modifying files or running state-changing commands, present your plan to the user and wait for explicit approval. Never start edits until the user confirms.
 
 # Using Agent tool — MANDATORY two-phase approach
+每次 Agent 调用都会启动一个全新的独立会话，不继承主会话、其他 subagent 或历史 Agent 调用的上下文。因此，每个 Agent prompt 必须自包含，并明确列出目标、必要背景、已知事实、精确范围、执行步骤、约束、验证方式和期望返回格式。禁止使用“继续处理”“参考上文”等依赖隐含上下文的指令。
 Sub-agents have a small context window (~128K tokens) and max 10 tool rounds. They CANNOT review an entire crate or directory.
 When a task requires understanding a large codebase (review, refactor, audit, etc.):
  Phase 1 — YOU do the overview:
@@ -168,6 +170,25 @@ mod tests {
             assert!(s.contains("path_base"));
             assert!(s.contains("workspace_root"));
         }
+    }
+
+    #[test]
+    fn static_system_prompt_requires_self_contained_agent_prompts() {
+        let zh = static_system_prompt("zh");
+        assert!(zh.contains("全新的独立会话"));
+        assert!(zh.contains("不继承主会话"));
+        assert!(zh.contains(
+            "目标、必要背景、已知事实、精确范围、执行步骤、约束、验证方式和期望返回格式"
+        ));
+        assert!(zh.contains("继续处理"));
+        assert!(zh.contains("参考上文"));
+
+        let en = static_system_prompt("en");
+        assert!(en.contains("fresh, independent session"));
+        assert!(en.contains("does not inherit context from the parent conversation"));
+        assert!(en.contains("goal, necessary background, known facts, exact scope, execution steps, constraints, verification, and expected output format"));
+        assert!(en.contains("continue the task"));
+        assert!(en.contains("refer to the discussion above"));
     }
 
     #[test]
