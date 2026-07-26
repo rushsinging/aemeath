@@ -54,9 +54,9 @@
 - 对应测试
 
 **TDD**：
-1. 先锁定 schema：`TaskListInput.task_list_id` 可选字符串；旧空输入仍合法；`TaskListsInput.status` 可选。
+1. 先锁定 schema：`TaskListInput.task_list_id` 可选字符串，`status` 可选；旧空输入仍合法；`TaskList` 不发布 priority 过滤；`TaskListsInput.status` 可选。
 2. 先锁定 wire：`TaskListResult` 含 list 元数据、batch-local stats、tasks；`TaskListsResult` 含稳定排序列表。
-3. `TaskList`：未传 ID 时查询 current；无 current 返回稳定空/提示结果；传 ID 时使用 `BatchId::parse_tool_input`，不存在返回 typed tool error；status/priority 只过滤 tasks，但 list stats 始终描述完整目标 Batch，并明确返回筛选后的数量。
+3. `TaskList`：未传 ID 时查询 current；无 current 返回稳定空/提示结果；传 ID 时使用十进制 Batch ID，解析失败或不存在返回 tool error；status 只过滤结构化 `tasks`。text summary 始终包含 Batch ID/summary、完整 batch-local stats，以及过滤后的 Batch 内任务状态/标题/依赖列表。
 4. `TaskLists`：可按 active/paused/archived 过滤，非法状态报错；注册为 Main-only、`TaskRead`、只读并发安全。
 5. 更新中英文 description，明确先发现后按 ID 查询历史。
 
@@ -117,5 +117,5 @@
 - `TaskListResult` 增加字段属于 additive wire change；保留 `tasks` 字段，SDK re-export 指向同一权威类型。
 - `TaskListInput` 新字段可选，旧调用 `{}` 行为保持默认 current。
 - Batch ID 对 Tool wire 使用十进制字符串；不复用当前 build.rs 对 `BatchId` 的 integer 映射。
-- stats 描述目标 Batch 全量 live Task；status/priority 过滤只影响返回 tasks，避免过滤条件改变列表总体状态语义。
+- stats 描述目标 Batch 全量 live Task；status 过滤影响结构化 `tasks` 和 text 中的任务明细，但不改变列表总体统计语义。
 - 不修改 Session schema、不清理 Archived Task、不引入独立 Storage 路径。

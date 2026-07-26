@@ -27,7 +27,7 @@ fn task_list_input_schema_does_not_publish_session_id() {
     assert!(!properties.contains_key("session_id"));
     assert!(!properties.contains_key("sessionId"));
     assert!(properties.contains_key("status"));
-    assert!(properties.contains_key("priority"));
+    assert!(!properties.contains_key("priority"));
     assert!(properties.contains_key("task_list_id"));
 }
 

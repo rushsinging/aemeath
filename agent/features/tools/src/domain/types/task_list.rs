@@ -38,8 +38,6 @@ pub struct TaskListInput {
     pub task_list_id: Option<String>,
     /// Filter by status
     pub status: Option<String>,
-    /// Filter by priority
-    pub priority: Option<String>,
 }
 
 #[cfg(test)]
