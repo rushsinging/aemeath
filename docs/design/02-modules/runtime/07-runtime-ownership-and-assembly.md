@@ -253,10 +253,9 @@ async fn bootstrap_runtime(
     Ok(AgentRuntime::new(assembly.factory.clone(), session))
 }
 
-// 3. Runtime application：在业务时机取得一致快照，并仅声明能力模式。
+// 3. Runtime application：创建 Idle Run，只声明能力模式。
 async fn prepare_root_run(
     runtime: &mut AgentRuntime,
-    input: InitialRunInput,
 ) -> Result<PreparedRun, RunPreparationError> {
     let snapshot = runtime.session.snapshot_for_run()?;
     let spec = RunSpec::for_purpose(RunPurpose::Interactive)
@@ -268,20 +267,19 @@ async fn prepare_root_run(
         spec,
         session: snapshot,
         parent: None,
-        initial_input: input,
     }).await
 }
 
-// 4. 派生 Run 使用同一个入口；parent 只提供受限 capability view。
+// 4. 派生 Run 同样先创建 Idle Run；任务输入仍通过 InputPort 提交。
 async fn prepare_child_run(
     runtime: &mut AgentRuntime,
     parent: &PreparedRun,
-    input: InitialRunInput,
 ) -> Result<PreparedRun, RunPreparationError> {
     let snapshot = runtime.session.snapshot_for_run()?;
     let parent_caps = parent.run.child_capabilities();
     let spec = RunSpec::for_purpose(RunPurpose::AgentTask)
         .with_parent(parent.run.id())
+        .with_input_mode(InputMode::Fixed)
         .with_interaction(InteractionBindingMode::ParentMediated)
         .with_hook(HookBindingMode::BoundaryOnly)
         .with_capability_ceiling(parent_caps.ceiling());
@@ -290,11 +288,18 @@ async fn prepare_child_run(
         spec,
         session: snapshot,
         parent: Some(parent_caps),
-        initial_input: input,
     }).await
 }
 
-// 5. Factory：校验声明、选择 adapter、原子地产生三件 per-Run 对象。
+// 5. 输入与 Run 创建解耦：任何来源都通过 InputPort 激活 Idle Run。
+async fn submit_input(
+    prepared: &PreparedRun,
+    input: InputEnvelope,
+) -> Result<(), InputError> {
+    prepared.context.input().submit(input).await
+}
+
+// 6. Factory：校验声明、选择 adapter，原子地产生 Idle Run 的三件对象。
 async fn prepare(
     &self,
     request: RunPreparationRequest,
@@ -329,12 +334,12 @@ async fn prepare(
         self.services.workspace.bind(&request.spec, &request.session).await?,
         request.session.run_config_snapshot(),
     );
-    let run = Run::new(request.spec, request.initial_input.clone());
-    let execution = RunExecutionState::from_initial_input(run.id(), request.initial_input);
+    let run = Run::idle(request.spec);
+    let execution = RunExecutionState::empty(run.id());
     Ok(PreparedRun { run, context, execution })
 }
 
-// 6. Loop Engine 只消费已绑定能力，不回调 adapter 决定业务流程。
+// 7. Loop Engine 只消费已绑定能力；Idle Run 由 InputPort 输入激活。
 async fn execute(prepared: PreparedRun) -> Result<AgentRunTerminal, RunExecutionError> {
     let PreparedRun { mut run, mut execution, context } = prepared;
     loop_engine::run_loop(&mut run, &mut execution, &context).await
@@ -344,7 +349,8 @@ async fn execute(prepared: PreparedRun) -> Result<AgentRunTerminal, RunExecution
 伪代码表达的 IoC 边界：
 
 - `compose_runtime` 可以选择实现，但不能解析 `RunSpec` 决定能力升降；
-- `prepare_root_run` / `prepare_child_run` 可以声明模式，但不能 `new` 具体 Port；
+- `prepare_root_run` / `prepare_child_run` 可以声明模式，但不能 `new` 具体 Port 或携带输入内容；
+- `submit_input` 是外部输入进入 Run 的唯一入口，首次输入不具有特殊装配语义；
 - `prepare` 可以按模式创建 capability adapter，但不能执行 Loop、恢复 Session 或持久化 Step；
 - `execute` 只能使用 `PreparedRun`，不能重新装配 Context，也不能按 Main/Sub 分支；
 - `RuntimeContext::private_new` 必须只对 factory 可达，失败时不得返回半装配的 `PreparedRun`。
@@ -358,7 +364,6 @@ struct RunPreparationRequest {
     spec: RunSpec,
     session: SessionSnapshot,
     parent: Option<ParentRunCapabilities>,
-    initial_input: InitialRunInput,
 }
 
 struct ParentRunCapabilities {
@@ -375,7 +380,7 @@ struct PreparedRun {
 }
 ```
 
-`SessionSnapshot`、`InitialRunInput` 和 `ParentRunCapabilities` 只携带准备本次 Run 所需的窄事实或 capability view。它们不得暴露 `SessionState` 锁、Composition wiring、具体 adapter、完整父 `RuntimeContext` 或可越权的服务集合。
+`SessionSnapshot` 和 `ParentRunCapabilities` 只携带准备本次 Run 所需的窄事实或 capability view。它们不得暴露 `SessionState` 锁、Composition wiring、具体 adapter、完整父 `RuntimeContext` 或可越权的服务集合。`PreparedRun` 创建后处于 `Idle`，`RunExecutionState` 为空；首次输入和后续输入没有语义特例，全部经已绑定的 `InputPort::submit(InputEnvelope)` 进入 Run，并由状态机从 `Idle` 激活到 drain/step 流程。
 
 Factory 负责：
 
@@ -384,7 +389,7 @@ Factory 负责：
 3. 按模式创建 shared、isolated、restricted、parent-mediated 或 unavailable adapter；
 4. 创建 cancellation、input、event、usage 等 per-Run 实例；
 5. 冻结 `RunConfigSnapshot`、provider/model binding 与 workspace projection；
-6. 创建相互一致的 `Run`、`RuntimeContext`、`RunExecutionState`，返回 `PreparedRun`。
+6. 创建相互一致的 `Idle Run`、冻结 `RuntimeContext` 与空 `RunExecutionState`，返回 `PreparedRun`；输入随后只经 `InputPort` 激活状态机。
 
 Factory 不负责执行 Loop、恢复 Session、修改 `SessionState`、处理模型响应、持久化 Step 或发布终态事件。
 

@@ -49,28 +49,34 @@ fn compose_runtime(graph: CompositionGraph) -> RuntimeAssembly {
     )
 }
 
-// Runtime application：捕获 snapshot、声明 RunSpec，不能创建 concrete Port。
+// Runtime application：捕获 snapshot、声明 RunSpec，创建 Idle Run。
 async fn prepare_run(
     runtime: &mut AgentRuntime,
-    input: InitialRunInput,
     parent: Option<ParentRunCapabilities>,
 ) -> Result<PreparedRun, RunPreparationError> {
-    let spec = RunSpec::from_input_and_parent(&input, parent.as_ref())?;
+    let spec = RunSpec::from_parent(parent.as_ref())?;
     runtime.factory.prepare(RunPreparationRequest {
         spec,
         session: runtime.session.snapshot_for_run()?,
         parent,
-        initial_input: input,
     }).await
 }
 
-// Factory：校验 ceiling，按 mode 绑定窄 adapter，原子返回三件 per-Run 对象。
+// 输入独立于装配；首次和后续输入都通过同一个 Port 激活 Run。
+async fn submit_input(
+    prepared: &PreparedRun,
+    input: InputEnvelope,
+) -> Result<(), InputError> {
+    prepared.context.input().submit(input).await
+}
+
+// Factory：校验 ceiling，按 mode 绑定窄 adapter，原子返回 Idle per-Run 对象。
 async fn prepare(&self, request: RunPreparationRequest) -> Result<PreparedRun, RunPreparationError> {
     request.spec.validate_against(request.parent.as_ref())?;
     let interaction = self.interaction.bind(request.spec.interaction_mode,
-                                             request.parent.as_ref()).await?;
+                                              request.parent.as_ref()).await?;
     let hooks = self.hooks.bind(request.spec.hook_mode,
-                                request.parent.as_ref()).await?;
+                                 request.parent.as_ref()).await?;
     let context = RuntimeContext::private_new(
         self.provider.bind(&request.spec, &request.session).await?,
         self.context.bind(&request.spec, &request.session).await?,
@@ -80,8 +86,8 @@ async fn prepare(&self, request: RunPreparationRequest) -> Result<PreparedRun, R
         self.workspace.bind(&request.spec, &request.session).await?,
         request.session.run_config_snapshot(),
     );
-    let run = Run::new(request.spec, request.initial_input.clone());
-    let execution = RunExecutionState::from_initial_input(run.id(), request.initial_input);
+    let run = Run::idle(request.spec);
+    let execution = RunExecutionState::empty(run.id());
     Ok(PreparedRun { run, context, execution })
 }
 
@@ -98,8 +104,9 @@ async fn execute(prepared: PreparedRun) -> Result<AgentRunTerminal, RunExecution
 |---|---|---|
 | `compose_runtime` | P3/P4 | concrete constructor 只在 Composition，factory contracts 可注入 |
 | `snapshot_for_run` | P2/P4 | Session 变化不污染已准备 Run |
-| `RunSpec::from_input_and_parent` | P2 | 能力只收缩不扩权，无 Main/Sub 控制分支 |
-| `factory.prepare` | P3 | 单一入口、mode adapter、typed unavailable、无参数袋 |
+| `RunSpec::from_parent` | P2 | 能力只收缩不扩权，无 Main/Sub 控制分支 |
+| `factory.prepare` | P3 | 单一入口、mode adapter、typed unavailable、无参数袋、产出 Idle Run |
+| `InputPort::submit` | P1/P5 | 首次与后续输入同路径，Idle 状态只由输入激活 |
 | `ParentMediated` / `BoundaryOnly` | P3 | child identity 隔离、Hook invocation 入口过滤 |
 | `PreparedRun` | P1/P3 | Run、Context、Execution 一致创建且无双 owner |
 | `loop_engine::run_loop` | P5/P6 | Engine 直接编排，fat `RunLoopPort` 不再拥有流程 |
@@ -194,8 +201,8 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 2. 定义 Runtime-owned `SessionState`，只保存 session identity、模型/config/workspace revision、resume/reminder/read-files、active run 和 parent frame 等会话事实；不得保存 services、factory、RuntimeContext 或 RunExecutionState。
 3. 定义窄 `SessionSnapshot`，明确 snapshot 时机、不可变字段和 revision；后续 Session 变更不得污染已准备 Run。
 4. 定义 `RunSpec` 的 capability modes、purpose、parent relation 和 ceiling；能力差异由数据表达，不再由 Main/Sub 类型表达。
-5. 定义 `RunPreparationRequest`、`ParentRunCapabilities`、`PreparedRun` 和 typed preparation errors。输入不得暴露锁、完整父 Context、Composition wiring 或 concrete adapter。
-6. 为 snapshot 隔离、parent ceiling 收缩、unavailable capability 和 request 字段完整性补 L1/L2/L3 契约测试。
+5. 定义 `RunPreparationRequest`、`ParentRunCapabilities`、`PreparedRun` 和 typed preparation errors。准备请求不得包含输入内容，也不得暴露锁、完整父 Context、Composition wiring 或 concrete adapter；Factory 必须创建 `Idle Run + empty RunExecutionState`，首次和后续输入全部经 `InputPort` 激活。
+6. 为 snapshot 隔离、parent ceiling 收缩、unavailable capability、request 字段完整性，以及 `prepare → Idle → InputPort 激活` 补 L1/L2/L3 契约测试。
 
 **主要文件**：
 
@@ -249,7 +256,7 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 
 1. 将 CLI/SDK args 先转换为 typed bootstrap request；参数解析不直接创建 Provider、Tool、Hook、Workspace、RuntimeContext 或具体 Client 依赖。
 2. 将具体 adapter、factory、registry、runner、materializer 和跨 BC object graph 留在 `agent/composition`。
-3. Runtime bootstrap 只负责创建 / 恢复 Session、初始化 `SessionState`、确定 snapshot 时机并提交 RunPreparationRequest。
+3. Runtime bootstrap 只负责创建 / 恢复 Session、初始化 `SessionState`、确定 snapshot 时机并提交 `RunPreparationRequest`；输入通过 `InputPort` 独立提交，不得形成含 initial input 的特殊启动入口。
 4. 拆解或删除 `application/client/from_args.rs` 中的参数解析、Session 恢复、模型绑定、Tool/Skill 查询、Prompt 构建、并发配置、runner 创建和 Client 构造职责。
 5. 更新 `AgentClient` / SDK / CLI 的公开入站 façade，不让调用方看到 `RuntimeServices` 内部 wiring 或 bindings。
 6. 补 Composition L2/L3 组装契约和 runtime bootstrap 场景测试，覆盖独立 Run 与派生 Run 的同一准备入口。
@@ -301,7 +308,7 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 
 **实施**：
 
-1. Main session 启动和 Sub Agent dispatch 都通过统一 RunPreparationRequest / PreparedRun / RunLauncher。
+1. Main session 启动和 Sub Agent dispatch 都通过统一 `RunPreparationRequest / PreparedRun / RunLauncher` 创建 Idle Run，并通过同一个 `InputPort` 提交任务输入。
 2. 删除 `MainSessionShell`、`MainRunPort`、`SubAgentRun`、`DerivedSubRun`、Main/Sub strategy 和对应 module exports；不能留下只被测试引用的死代码。
 3. 删除 `RuntimeContextParts`、`RunContextBindings`、旧 `assemble_main_runtime_context` / `derive_sub_run` 和第二条 Context 装配路径。
 4. 清理 `ports/legacy.rs`、兼容 re-export、旧测试 fixture 和注释中把迁移形状描述为长期模型的内容。
