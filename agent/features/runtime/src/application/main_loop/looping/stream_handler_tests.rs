@@ -2,8 +2,8 @@ use super::events::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use super::stream_handler::{should_emit_model_stream_waiting, InvocationEventReducer};
 use crate::application::tool_coordination::identity::ToolIdentityRegistry;
 use provider::{
-    InvocationDelta, InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderStopReason,
-    ProviderToolCall, ProviderToolCallId, ReasoningLevel,
+    InvocationDelta, InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderErrorKind,
+    ProviderStopReason, ProviderToolCall, ProviderToolCallId, ReasoningLevel,
 };
 use std::sync::{Arc, Mutex};
 
@@ -90,13 +90,67 @@ fn reducer_progress_tracks_visible_deltas_and_waiting_phase() {
     assert!(thinking.first_visible_event_seen);
 
     reducer
-        .apply(completion(vec![ProviderContentBlock::Thinking {
-            thinking: "thinking".into(),
-            signature: None,
-        }]))
+        .apply(completion(vec![ProviderContentBlock::Text(
+            "answer".into(),
+        )]))
         .unwrap();
     let waiting = progress.lock().unwrap().snapshot();
     assert_eq!(waiting.phase, "waiting_model_output");
+}
+
+#[test]
+fn reducer_rejects_empty_terminal_completions_as_retryable_protocol_errors() {
+    let cases = [
+        ("empty output", Vec::new()),
+        (
+            "empty text",
+            vec![ProviderContentBlock::Text(String::new())],
+        ),
+        (
+            "whitespace text",
+            vec![ProviderContentBlock::Text("   \n".into())],
+        ),
+        (
+            "thinking only",
+            vec![ProviderContentBlock::Thinking {
+                thinking: "internal reasoning".into(),
+                signature: None,
+            }],
+        ),
+    ];
+
+    for (label, output) in cases {
+        let mut reducer = InvocationEventReducer::new(RecordingSink::default());
+        let error = reducer.apply(completion(output)).expect_err(label);
+        assert_eq!(error.kind, ProviderErrorKind::Protocol, "{label}");
+        assert!(error.retryable, "{label}");
+        assert!(
+            error.safe_message.contains("assistant text or tool call"),
+            "{label}: {}",
+            error.safe_message
+        );
+    }
+}
+
+#[test]
+fn reducer_accepts_nonblank_text_and_tool_call_terminal_completions() {
+    let cases = [
+        vec![ProviderContentBlock::Text("answer".into())],
+        vec![ProviderContentBlock::ToolCall(ProviderToolCall {
+            id: ProviderToolCallId("tool-1".into()),
+            name: "Read".into(),
+            arguments: serde_json::json!({}),
+        })],
+    ];
+
+    for output in cases {
+        let mut reducer = InvocationEventReducer::new(RecordingSink::default());
+        let response = reducer.apply(completion(output)).unwrap().unwrap();
+        assert_eq!(
+            response.assistant_message.role,
+            share::message::Role::Assistant
+        );
+    }
 }
 
 #[test]
@@ -127,6 +181,31 @@ fn reducer_projects_block_transitions_without_callback_contract() {
     assert!(events
         .iter()
         .any(|event| matches!(event, RuntimeStreamEvent::Text { text, .. } if text == "answer")));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, RuntimeStreamEvent::BlockComplete { .. })));
+}
+
+#[test]
+fn reducer_closes_active_block_for_synthetic_raw_eof_failure() {
+    let sink = RecordingSink::default();
+    let mut reducer = InvocationEventReducer::new(sink.clone());
+    reducer
+        .apply(InvocationEvent::Delta(InvocationDelta::Text(
+            "partial".into(),
+        )))
+        .unwrap();
+
+    let error = provider::ProviderError::retryable(
+        ProviderErrorKind::StreamTruncated,
+        "provider stream ended without terminal event",
+    );
+    let returned = reducer
+        .apply(InvocationEvent::Failed(error.clone()))
+        .expect_err("failure event should terminate the invocation");
+    assert_eq!(returned.kind, ProviderErrorKind::StreamTruncated);
+
+    let events = sink.0.lock().unwrap();
     assert!(events
         .iter()
         .any(|event| matches!(event, RuntimeStreamEvent::BlockComplete { .. })));

@@ -78,3 +78,24 @@ fn ask_user_batch_is_retired_and_mapped_to_nop() {
 
     assert!(matches!(mapped, SdkEventMapping::Nop));
 }
+
+#[test]
+fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
+    let expected_chat_id = sdk::ids::ChatId::new("chat-retry");
+    let expected_turn_id = sdk::ids::ChatTurnId::new("turn-retry");
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ModelInvocationRetrying {
+        context: sdk::ChatEventContext::new(expected_chat_id.clone(), expected_turn_id.clone()),
+        attempt: 2,
+        delay: std::time::Duration::from_millis(10_250),
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ModelInvocationRetrying {
+            context,
+            attempt: 2,
+            delay_ms: 10_250,
+        }) if context.chat_id == expected_chat_id.as_str()
+            && context.turn_id == expected_turn_id.as_str()
+    ));
+}

@@ -90,3 +90,32 @@ fn hook_message_projection_preserves_system_message_attempt() {
         other => panic!("unexpected event: {other:?}"),
     }
 }
+
+#[test]
+fn model_invocation_retry_projection_preserves_context_attempt_and_delay() {
+    let context = RuntimeTurnContext::new(
+        sdk::ids::ChatId::new("chat-retry"),
+        sdk::ids::ChatTurnId::new("turn-retry"),
+    );
+    let expected_chat_id = context.chat_id.clone();
+    let expected_turn_id = context.turn_id.clone();
+    let event = RuntimeStreamEvent::ModelInvocationRetrying {
+        context,
+        attempt: 2,
+        delay: std::time::Duration::from_millis(10_250),
+    };
+
+    match project_stream_event(event) {
+        sdk::ChatEvent::ModelInvocationRetrying {
+            context,
+            attempt,
+            delay,
+        } => {
+            assert_eq!(context.chat_id, expected_chat_id);
+            assert_eq!(context.turn_id, expected_turn_id);
+            assert_eq!(attempt, 2);
+            assert_eq!(delay, std::time::Duration::from_millis(10_250));
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}

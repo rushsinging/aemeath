@@ -69,6 +69,21 @@ pub struct InvocationEventReducer<S: ChatEventSink> {
     saw_visible_delta: bool,
 }
 
+fn has_actionable_output(output: &[provider::ProviderContentBlock]) -> bool {
+    output.iter().any(|block| match block {
+        provider::ProviderContentBlock::Text(text) => !text.trim().is_empty(),
+        provider::ProviderContentBlock::ToolCall(_) => true,
+        provider::ProviderContentBlock::Thinking { .. } => false,
+    })
+}
+
+fn empty_completion_error() -> provider::ProviderError {
+    provider::ProviderError::retryable(
+        provider::ProviderErrorKind::Protocol,
+        "provider completed without assistant text or tool call",
+    )
+}
+
 impl<S: ChatEventSink> InvocationEventReducer<S> {
     pub fn new(sink: S) -> Self {
         Self {
@@ -139,6 +154,9 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
             }
             InvocationEvent::Completed(completion) => {
                 self.handler.complete_active_streaming_block();
+                if !has_actionable_output(&completion.output) {
+                    return Err(empty_completion_error());
+                }
                 if !self.saw_visible_delta {
                     for block in &completion.output {
                         match block {

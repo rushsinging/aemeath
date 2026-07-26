@@ -158,7 +158,7 @@ impl RetryPolicy {
     pub(crate) fn decide(
         &self,
         attempt: u32,
-        visible_delta: bool,
+        _visible_delta: bool,
         error: &ProviderError,
         jitter_millis: u64,
     ) -> RetryDecision {
@@ -166,7 +166,6 @@ impl RetryPolicy {
             return RetryDecision::Compact;
         }
         if error.kind == ProviderErrorKind::RateLimited
-            || visible_delta
             || !error.retryable
             || attempt >= self.max_attempts
         {
@@ -210,9 +209,10 @@ impl ModelInvocationCoordinator {
     /// Pull and reduce one provider attempt.
     ///
     /// `delta_is_committed` is deliberately supplied by the caller: main-chat
-    /// deltas are projected to a user-visible sink and cannot be rolled back, while
-    /// sub-agent deltas go to a no-op sink and remain safe to retry. A stream ending
-    /// without a reducer-produced terminal value is a protocol failure.
+    /// deltas are already projected to a user-visible sink, while sub-agent deltas
+    /// go to a no-op sink. The resulting flag is diagnostic (and may inform future
+    /// presentation policy), but does not determine retry eligibility.
+    /// A stream ending without a reducer-produced terminal value is a protocol failure.
     pub(crate) async fn pull_stream<T, S, Apply>(
         &self,
         mut stream: S,
@@ -240,7 +240,13 @@ impl ModelInvocationCoordinator {
             };
 
             let Some(event) = event else {
-                return Err((missing_terminal_error(), committed_delta));
+                let error = missing_terminal_error();
+                // A raw EOF has no provider terminal event, so synthesize the
+                // retryable failure through the reducer before returning to the
+                // coordinator. This lets stream consumers close any active
+                // text/thinking block before the next attempt starts.
+                let _ = apply(InvocationEvent::Failed(error.clone()));
+                return Err((error, committed_delta));
             };
             let terminal_event = matches!(
                 event,
@@ -528,16 +534,21 @@ mod tests {
     }
 
     #[test]
-    fn visible_delta_and_fatal_error_disable_retry() {
+    fn visible_delta_does_not_disable_structurally_retryable_error() {
         let policy = RetryPolicy::default();
         assert_eq!(
-            policy.decide(1, true, &retryable(ProviderErrorKind::Network), 0),
-            RetryDecision::Fail
+            policy.decide(1, true, &retryable(ProviderErrorKind::StreamTruncated), 0,),
+            RetryDecision::RetryAfter(Duration::from_secs(10))
         );
+    }
+
+    #[test]
+    fn fatal_error_still_fails_after_visible_delta() {
+        let policy = RetryPolicy::default();
         assert_eq!(
             policy.decide(
                 1,
-                false,
+                true,
                 &ProviderError::fatal(ProviderErrorKind::Authentication, "safe"),
                 0,
             ),
@@ -599,7 +610,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn main_committed_delta_disables_retry() {
+    async fn main_committed_delta_remains_diagnostic_but_can_retry() {
         let coordinator = ModelInvocationCoordinator::new();
         let cancel = CancellationToken::new();
         let events = futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Text(
@@ -618,18 +629,53 @@ mod tests {
         assert_eq!(error.kind, ProviderErrorKind::StreamTruncated);
         assert!(committed_delta);
         assert_eq!(
-            coordinator.policy.decide(
-                1,
-                committed_delta,
-                &retryable(ProviderErrorKind::Network),
-                0
-            ),
-            RetryDecision::Fail
+            coordinator.policy.decide(1, committed_delta, &error, 0),
+            RetryDecision::RetryAfter(Duration::from_secs(10))
         );
     }
 
     #[tokio::test]
-    async fn sub_agent_rollbackable_delta_can_retry() {
+    async fn raw_eof_dispatches_retryable_failure_through_reducer_for_stream_cleanup() {
+        let coordinator = ModelInvocationCoordinator::new();
+        let cancel = CancellationToken::new();
+        let events = futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Text(
+            "partial".to_string(),
+        ))]);
+        let reducer_events = std::cell::RefCell::new(Vec::new());
+
+        let outcome = coordinator
+            .pull_stream(events, &cancel, true, |event| {
+                reducer_events.borrow_mut().push(event);
+                Ok::<Option<()>, ProviderError>(None)
+            })
+            .await;
+
+        assert!(matches!(
+            outcome,
+            Err((
+                ProviderError {
+                    kind: ProviderErrorKind::StreamTruncated,
+                    retryable: true,
+                    ..
+                },
+                true
+            ))
+        ));
+        assert!(matches!(
+            reducer_events.borrow().as_slice(),
+            [
+                InvocationEvent::Delta(InvocationDelta::Text(_)),
+                InvocationEvent::Failed(ProviderError {
+                    kind: ProviderErrorKind::StreamTruncated,
+                    retryable: true,
+                    ..
+                })
+            ]
+        ));
+    }
+
+    #[tokio::test]
+    async fn sub_agent_uncommitted_delta_can_retry() {
         let coordinator = ModelInvocationCoordinator::new();
         let cancel = CancellationToken::new();
         let events = futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Text(
