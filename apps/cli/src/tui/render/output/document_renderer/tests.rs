@@ -288,8 +288,8 @@ fn test_trim_root_groups_drops_oldest_group_when_over_max_lines() {
     let trimmed = trim_root_groups_to_max_lines(groups, 3);
 
     assert_eq!(trimmed.len(), 1);
-    assert_eq!(trimmed[0].block_id, "new");
-    assert_eq!(trimmed[0].lines.len(), 2);
+    assert_eq!(trimmed[0][0].block_id, "new");
+    assert_eq!(trimmed[0][0].lines.len(), 2);
 }
 
 #[test]
@@ -299,7 +299,11 @@ fn test_trim_root_groups_never_splits_subtree() {
     let new_group = vec![rb("p-new", 1), rb("c-new", 1)];
     let trimmed = trim_root_groups_to_max_lines(vec![old_group, new_group], 3);
 
-    let ids: Vec<&str> = trimmed.iter().map(|b| b.block_id.as_str()).collect();
+    let ids: Vec<&str> = trimmed
+        .iter()
+        .flatten()
+        .map(|b| b.block_id.as_str())
+        .collect();
     // 最新子树的父与子都在；最旧子树的父与子都不在——子树从不被拆开。
     assert_eq!(
         ids,
@@ -315,7 +319,7 @@ fn test_trim_root_groups_keeps_newest_even_if_over_max() {
     let trimmed = trim_root_groups_to_max_lines(groups, 3);
 
     assert_eq!(trimmed.len(), 1);
-    assert_eq!(trimmed[0].block_id, "new");
+    assert_eq!(trimmed[0][0].block_id, "new");
 }
 
 #[test]

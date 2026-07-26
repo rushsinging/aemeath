@@ -37,13 +37,16 @@ fn two_step_session() -> CanonicalSession {
 fn restore_preserves_run_step_boundaries_for_display_projection() {
     let restore = SessionRestore::from_canonical(&two_step_session());
 
-    assert_eq!(restore.steps.len(), 2);
-    assert_eq!(restore.steps[0].run_id, "run-1");
-    assert_eq!(restore.steps[0].step_id, "step-1");
-    assert_eq!(restore.steps[0].messages[0].text_content(), "first");
-    assert_eq!(restore.steps[1].run_id, "run-1");
-    assert_eq!(restore.steps[1].step_id, "step-2");
-    assert_eq!(restore.steps[1].messages[0].text_content(), "second");
+    assert_eq!(restore.display_steps.len(), 2);
+    assert_eq!(restore.display_steps[0].run_id, "run-1");
+    assert_eq!(restore.display_steps[0].step_id, "step-1");
+    assert_eq!(restore.display_steps[0].messages[0].text_content(), "first");
+    assert_eq!(restore.display_steps[1].run_id, "run-1");
+    assert_eq!(restore.display_steps[1].step_id, "step-2");
+    assert_eq!(
+        restore.display_steps[1].messages[0].text_content(),
+        "second"
+    );
 }
 
 #[test]
@@ -88,8 +91,17 @@ fn restore_reads_only_steps_from_active_marker() {
 
     assert_eq!(restore.active_messages.len(), 1);
     assert_eq!(restore.active_messages[0].text_content(), "visible");
-    assert_eq!(restore.steps.len(), 1);
-    assert_eq!(restore.steps[0].run_id, "run-2");
-    assert_eq!(restore.steps[0].step_id, "step-2");
-    assert_eq!(restore.steps[0].messages[0].text_content(), "visible");
+    assert_eq!(restore.display_steps.len(), 2);
+    assert_eq!(restore.display_steps[0].run_id, "run-1");
+    assert_eq!(restore.display_steps[0].step_id, "step-1");
+    assert_eq!(
+        restore.display_steps[0].messages[0].text_content(),
+        "hidden"
+    );
+    assert_eq!(restore.display_steps[1].run_id, "run-2");
+    assert_eq!(restore.display_steps[1].step_id, "step-2");
+    assert_eq!(
+        restore.display_steps[1].messages[0].text_content(),
+        "visible"
+    );
 }

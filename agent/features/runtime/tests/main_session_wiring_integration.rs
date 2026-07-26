@@ -130,7 +130,7 @@ async fn startup_resume_truly_restores_messages() {
         .expect("resume should succeed");
 
     assert_eq!(projection.session_id, "resume-target-1");
-    let messages = projection.messages;
+    let messages = projection.active_messages;
     assert!(
         messages
             .iter()
@@ -165,7 +165,14 @@ async fn runtime_resume_is_equivalent_to_startup_resume() {
         .expect("second resume");
 
     assert_eq!(projection1.session_id, projection2.session_id);
-    assert_eq!(projection1.messages.len(), projection2.messages.len());
+    assert_eq!(
+        projection1.active_messages.len(),
+        projection2.active_messages.len()
+    );
+    assert_eq!(
+        projection1.display_steps.len(),
+        projection2.display_steps.len()
+    );
 }
 
 // ─── Test 3: Bound lease blocks resume until run ends ────────────────
@@ -477,7 +484,7 @@ async fn resume_projection_matches_committed_session() {
 
     assert_eq!(projection.session_id, bound.session().id);
     assert!(projection
-        .messages
+        .active_messages
         .iter()
         .any(|message| message.text_content().contains("hello from saved session")));
 }

@@ -106,8 +106,8 @@ impl SessionMetadataUpdate {
 #[derive(Debug, Clone)]
 pub struct SessionResumeProjection {
     pub session_id: String,
-    pub messages: Vec<Message>,
-    pub steps: Vec<SessionRestoreStep>,
+    pub active_messages: Vec<Message>,
+    pub display_steps: Vec<SessionRestoreStep>,
     pub created_at: String,
     pub trimmed: usize,
     pub repaired: usize,

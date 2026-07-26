@@ -17,8 +17,8 @@ impl crate::application::MainSessionWiring {
         let restore = SessionRestore::from_canonical(&committed);
         Ok(SessionResumeProjection {
             session_id: committed.id.clone(),
-            messages: restore.active_messages,
-            steps: restore.steps,
+            active_messages: restore.active_messages,
+            display_steps: restore.display_steps,
             created_at: restore.created_at,
             trimmed: restore.trimmed,
             repaired: restore.repaired,
