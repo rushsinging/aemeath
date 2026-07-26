@@ -16,7 +16,7 @@
 
 层级对齐：`Session → Run → Run Step`（≈ OpenAI Thread / Run / Run Step）。
 
-**#1248 已落地**：唯一 `RuntimeContextFactory` 是 `RuntimeContext` 的唯一生产构造入口，按 `RunSpec` 的 `InteractionBindingMode` / `HookBindingMode` / `ReasoningBindingMode` 穷举装配；不再存在 `RuntimeContextParts`、`assemble_main_runtime_context` 等多路径手工填充 context。Main/Sub 不是生产类型，差异由 `RunSpec` + 父子拓扑表达，Loop Engine 零分支。
+**终态装配**：唯一 `RuntimeContextFactory` 是 `RuntimeContext` 的唯一生产构造入口。所有 Run 来源只提交 `RunPreparationRequest`，由 factory 按 `InteractionBindingMode` / `HookBindingMode` / `ReasoningBindingMode` 及父 capability ceiling 产生 `PreparedRun { Run, RuntimeContext, RunExecutionState }`；不存在 `RuntimeContextParts`、`RunContextBindings` 或多路径手工填充。Main/Sub 不是生产类型，差异由 `RunSpec`、父子拓扑和已绑定 capability adapter 表达，Loop Engine 零来源分支。
 
 ## 2. Run 聚合
 
@@ -203,7 +203,7 @@ enum TaskMode      { Shared, Isolated }
 /// #1248: InteractionBindingMode 驱动 factory 的 InteractionPort 选择。
 enum InteractionBindingMode {
     Client,             // 直接绑定 SDK/TUI InteractionBridge
-    ParentMediated,     // 复用父 context 的 InteractionPort（需 parent）
+    ParentMediated,     // 独立 child-scoped adapter，经父边界路由（需 parent）
     Unavailable,        // typed unavailable，不悬挂
 }
 
@@ -215,10 +215,10 @@ enum ReasoningBindingMode {
     NoOp,               // 所有写操作无副作用
 }
 
-/// #1248: HookBindingMode 驱动 factory 的 HookPort 验证。
+/// HookBindingMode 驱动 factory 装配受限 Hook capability adapter。
 enum HookBindingMode {
     Full,               // per-tool hook dispatch
-    BoundaryOnly,       // 仅 start/stop（Sub 需 parent）
+    BoundaryOnly,       // 仅 start/stop（需 parent capability）
 }
 ```
 
@@ -240,7 +240,7 @@ struct RuntimeContext {
     memory:    Arc<dyn MemoryPort>,     // Sub(Disabled): NoOpMemory
     reflection: Arc<dyn ReflectionPromptPort>, // 纯 prompt / parse / format；apply 仍走同一 memory Arc
     task:      Arc<dyn TaskAccess>,     // Sub: 独立实例；NEVER 暴露 TaskPersist
-    hooks:     Arc<dyn HookPort>,       // Sub: BoundaryOnly
+    hooks:     Arc<dyn HookPort>,       // Full / BoundaryOnly capability adapter
     reasoning: Arc<dyn ReasoningPort>,  // 发布 requested level；Sub: EffortOnly/Inherit
     usage:     Arc<dyn UsageSink>,      // 非阻塞；Audit MVP 只记录 metadata
     config:    ConfigSnapshot,          // Main/Sub 共享
@@ -324,7 +324,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | InteractionBindingMode | Main | Sub（parent 可达）| Sub（无 parent）|
 |---|---|---|---|
 | `Client` | ✅ TUI/SDK InteractionBridge | ✅ 可装配 | ❌ 不可用 |
-| `ParentMediated` | ❌（Main 无父）| ✅ 复用父 context InteractionPort | ❌ → `InteractionUnavailable` |
+| `ParentMediated` | ❌（无父 capability）| ✅ 创建 child-scoped mediated adapter | ❌ → `InteractionUnavailable` |
 | `Unavailable` | ❌ | ✅ typed unavailable（不悬挂）| ✅ typed unavailable |
 
 四种 `InteractionContinuation`（UserQuestions、ToolApproval、PlanApproval、HardPause）均由统一 `InteractionCoordinator` 驱动 Run continuation；`reply` / `cancel` 均经 `InteractionPort` 分派。parent-mediated 复用父 context 的同一 Arc<dyn InteractionPort>——identity 与 reply/cancel 语义不变。
@@ -342,7 +342,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 
 ### 8.3 退役边界
 
-- `MainRunPort`、`SubAgentRun`、fat `RunLoopPort`：由 #1397/#1399 收口，本 Issue 不删除。
+- `MainRunPort`、`SubAgentRun`、fat `RunLoopPort`、Main/Sub strategies 均不属于终态；Loop Engine 直接编排 `Run + RuntimeContext + RunExecutionState`。
 - `run_launcher` / `reenter_run_loop` / `RunLauncher::launch` 已统一 Main/Sub 启动入口；#1280 已合并。
 
 ## 9. 相关文档

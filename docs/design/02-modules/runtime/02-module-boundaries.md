@@ -90,10 +90,10 @@ agent/features/runtime/src/
 - **不持有** RuntimeContext（作为参数流转），**不直接调 Port**（经 loop_engine + coordinators）
 
 ### loop_engine（Main/Sub 共用）
-- **职责**：ReAct 循环骨架（推理→行动→观察）+ 停止条件 + 步进 + 门禁 `InputBuffer.drain`（纳入追问）
-- **内置 StuckGuard**（4 层防 stuck，见 `04-stuck-prevention`）——Main/Sub 统一获得保护
-- **零分支**：Main/Sub 差异全在传入的 `RuntimeContext` + `RunSpec`
-- 消费：入站 `InputBuffer`（drain 输入）、`HookPort`（Stop hook 时机——**判定归 Hook，重试编排归本模块**）
+- **职责**：ReAct 循环骨架（推理→行动→观察）+ 停止条件 + 步进 + InputPort 门禁；直接编排 `Run + RunExecutionState + RuntimeContext`
+- **内置 StuckGuard**（4 层防 stuck，见 `04-stuck-prevention`）——所有 Run 统一获得保护
+- **零来源分支**：差异全在 `RunSpec` 与 factory 已绑定的 capability adapter；Engine 不消费 fat `RunLoopPort`，不允许 Main/Sub adapter 拥有流程
+- 消费：`RuntimeContext` 中的 `InputPort`、`EventSink` 及其他窄能力
 - 依赖：调度 model_invocation / tool_coordination / context_coordination / interaction
 
 ### model_invocation
@@ -125,13 +125,12 @@ agent/features/runtime/src/
 - projection **NEVER** 执行 channel send、watch 更新、I/O 或状态 mutation；这些副作用只属于 sink adapter。#874 已收口纯转换与 SDK identity 契约，`AgentId` 的生产接线和旧 AskUser sender 退役由 #878/#943/#944 完成
 
 ### model_invocation 的 Usage 出口
-- Provider ACL 返回 provider-neutral `RawUsageSnapshot` 后，model_invocation 在逻辑 Invocation 的 retry/fallback 收口点映射为 Runtime `UsageSnapshot`，再使用 SDK 发布的唯一 `SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 构造一条 Audit-owned `UsageRecord`；Runtime **NEVER** 解释 vendor wire 字段或重复定义 Usage DTO
-- 经 `UsageSink.try_record` 非阻塞提交；Audit 接受/丢弃均不改变 Run 状态
-- **v0.1.0 #875 边界**：本期交付每 attempt 唯一 `ModelInvocationId` 与 `RawUsageSnapshot → UsageRecord` 纯映射 seam；`None` 与 `Some(0)` 不得混淆，input/output 任一未报告时明确不构造记录。当前 legacy `RunLoopPort` 不发布 `RunStepId`，因此生产 `UsageSink` 写入由 #878 完成 shared Loop/RuntimeContext 切换后与 #931 的 Audit adapter 一起接通，#875 **NEVER** 伪造 identity 或零值。
+- Provider ACL 返回 provider-neutral `RawUsageSnapshot` 后，model_invocation 在逻辑 Invocation 的 retry/fallback 收口点映射为 Runtime `UsageSnapshot`，再使用 SDK 发布的唯一 `SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 构造一条 Audit-owned `UsageRecord`；`RunStepId` 由 Loop Engine 直接从 Run 聚合取得，**NEVER** 经 adapter 伪造或旁路。
+- `UsageSink.try_record` 非阻塞提交；Audit 接受/丢弃均不改变 Run 状态。Runtime 只消费 Provider ACL 标准化结果，**NEVER** 解释 vendor wire 字段或重复定义 Usage DTO。
 
 ### agent_client（入站 façade）
-- **职责**：实现入站端口 `AgentClient`（OHS + PL）；`RuntimeContext` 装配入口（含入站 `InputBuffer`）；SubAgent 派生时装配子 RuntimeContext
-- **注**：真正的生产装配收敛在 Composition Root（见 `06-ports-and-adapters`），`agent_client` 只负责 Runtime 内的命令路由与接线；它是 `agent_execution` 的入站 façade，**NEVER** 作为独立 slice，也 **NEVER** 引入通用 `api/` 层
+- **职责**：实现入站端口 `AgentClient`（OHS + PL）；将命令标准化为 typed bootstrap/session/run request，并调用 application service
+- **注**：生产对象图和具体 adapter 只在 Composition Root；`agent_client` 不创建 Provider、Tool、Hook、Workspace 或 RuntimeContext，也不参与 Main/Sub 分型。所有 Run 创建统一提交 `RunPreparationRequest` 给 `RuntimeContextFactory`
 
 ### Runtime / Hook 边界（跨模块）
 Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtime 编排**：
@@ -152,8 +151,9 @@ Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtim
 | StuckGuard 计数（stall/fuse）| loop_engine | 循环级 |
 | ToolCall 双 ID 映射表 | tool_coordination | 运行时映射 |
 | Context Window（临时）| context_coordination | 每轮构建 |
-| RuntimeContext（活资源）| 由 agent_client / 派生逻辑发起装配，**流经各模块作参数** | 不属任何模块的持久状态 |
-| InputBuffer 入站缓冲（追问排队）| loop_engine（经 RuntimeContext 注入）| Main 忙期排队；Sub 固定队列 |
+| RuntimeContext（活资源）| `RuntimeContextFactory` | 按 Run 构造后冻结，流经各模块作只读参数 |
+| RunExecutionState（工作集）| loop_engine | messages、input adoption、window、tool/continuation working data |
+| InputBuffer 入站缓冲 | `InputPort` adapter | live/fixed/queue 差异在装配期绑定，Loop 不感知来源 |
 
 ## 5. 六边形依赖方向
 

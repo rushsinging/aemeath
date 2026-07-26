@@ -96,16 +96,20 @@ enum InteractionCommandOutcome {
 
 ## 2. Runtime 消费的能力契约
 
-### Main/Sub RunLoop adapter 策略边界（#1382）
+### Loop Engine 与窄能力 Port
 
-`RunLoopPort` 是 Loop Engine 消费的 application contract；`MainRunPort` 与 `SubAgentRun` 是该 contract 的两个 adapter。adapter 内部通过 `InputStrategy`、`EventStrategy`、`LlmStrategy`、`ToolStrategy` 四个窄策略面注入差异，策略实现归 `application/loop_engine/` 所有，不是跨 Feature Port，也不进入 Runtime crate façade。
+Loop Engine 直接编排 `Run + RunExecutionState + RuntimeContext`，不消费可替换整段流程的 application adapter。`RunLoopPort`、`MainRunPort`、`SubAgentRun` 及按 Main/Sub 分类的 Input/Event/LLM/Tool strategy 不属于目标模型。
 
-- Input：Main channel + RunInputBuffer；Sub fixed prompt。
-- Event：Main RuntimeStreamEvent projection；Sub typed terminal extraction。
-- LLM：共享 window 映射、usage 构造和日志 schema；保留各自 retry/reasoning/stream 语义。
-- Tool：只共享结果物化和 continuation 标记；Main 的 Interaction/Hook/Agent 派发与 Sub 的隔离执行 **NEVER** 强行合并。
+Runtime-owned Port 只对应真实外部 seam：
 
-这些策略使用具体类型静态分发，**NEVER** 形成 50+ 字段的 Main/Sub 超集或 `is_sub` 条件分支。生产对象选择仍由现有 Main/Sub 构造点和 Composition Root 完成。
+- `InputPort`：drain/await 输入，不拥有 Step 或 continuation；
+- `EventSink`：接收领域事件并做外向投影；
+- `ProviderPort`、`ToolCatalogPort`、`ToolExecutionPort`、`ContextPort`：执行单一外部能力；
+- `InteractionPort`：一次 request/reply transport；
+- `HookPort`：Hook BC 的 typed dispatch；
+- `UsageSink`、`ActiveRunRegistryPort`：非业务流程的窄出口。
+
+`freeze_step`、`accept_step_input`、`invoke_model`、`execute_tools`、`evaluate_stop_hook`、`finalize_step`、`claim_terminal` 等是 application 流程或领域动作，不得放进 Port。不同 Run 来源的差异必须在 `RuntimeContextFactory` 装配期绑定为 capability adapter，Engine 不按来源分支。
 
 供应能力发布的 OHS **MUST** 只在各自战术文档定义完整签名；本文只登记 Runtime 的使用面，**NEVER** 复制第二份 trait 真相。Runtime 只消费这些 façade，**NEVER** 再定义同义 wrapper：
 
@@ -236,7 +240,7 @@ enum InteractionCompletion {
 }
 ```
 
-`InteractionPort` 只承载一次 request/reply 交换，**NEVER** 自行修改 Run 或发布 `RunResumed`。Runtime interaction coordinator 在调用前以 request id + continuation 进入 `AwaitingUser`，收到匹配 reply 后恢复 continuation并发布权威事件；取消与 reply 竞争时 cancellation 优先，陈旧 / 重复 id 返回结构化错误。Main adapter 把 request 映射为 SDK event 并等待 TUI / Server 回复；Sub 只能使用 Composition 明确装配的 parent-mediated adapter，否则返回 unavailable，**NEVER** 暗中共用 Main UI channel。
+`InteractionPort` 只承载一次 request/reply 交换，**NEVER** 自行修改 Run 或发布 `RunResumed`。Runtime interaction coordinator 在调用前以 request id + continuation 进入 `AwaitingUser`，收到匹配 reply 后恢复 continuation并发布权威事件；取消与 reply 竞争时 cancellation 优先，陈旧 / 重复 id 返回结构化错误。Client adapter 把 request 映射为 SDK event 并等待 TUI / Server 回复；`ParentMediated` 必须装配独立的 child-scoped adapter，维护 `child_run_id + child_request_id → parent route` 映射，**NEVER** 直接复用父 `InteractionPort` Arc 或暗中共用 Main UI channel。child teardown 只 drain 自身请求，不能影响 parent 或 sibling；父级诊断/进度是 EventSink 投影，不是 interaction completion。
 
 reply 必须与 request body 同 variant；`InvalidReply` 不消费 waiter。`InteractionCompletion::Cancelled` 是“取消这次交互”，不是 `CancelRunStep` / `TerminateRun` 的别名；Runtime 按 continuation 穷尽映射 typed 结果：
 
@@ -251,9 +255,7 @@ Run root / Step cancellation scope 若与 reply/cancel 竞争则永远优先：`
 
 并发 Tool execution 可以同时产生多个 `ToolOutcome::Suspended`，但 Runtime **MUST** 先收集 outcomes，再按 RunStep 原始 ToolCallId / 调用顺序逐个注册 request。前一个 continuation resolve 并清空 PendingInteraction 后才能注册下一个；全部调用得到 final outcome 后，按原调用顺序做 L1 budget reduction，并以一次 `append_and_persist` 提交 assistant + tool results。
 
-Main adapter **MUST** 在 Runtime-side interaction bridge 中先注册 `InteractionRequestId → pending waiter`，再发出纯值 `ChatEvent::InteractionRequested { request_id, run_id, body }`。`AgentClient::reply_interaction` / `cancel_interaction` 回到同一 bridge，校验 body-specific reply 后恰好一次完成 waiter；stream、TUI 与 SDK event **NEVER** 携带 sender。processing teardown 不拥有 waiter，Run cancellation 才由 Runtime drain 该 Run 的 pending request 并发布权威 cancellation 事件。
-
-> **迁移状态（#1245）**：Run-owned `PendingInteraction` / 四类 continuation、Runtime-side waiter bridge 与 SDK `AgentClient` reply/cancel 纯值命令契约已建立，并由 L1-L3 测试覆盖；bridge 尚未注入生产 Main/Sub adapter。Main Tool suspension 生产切线由 #1246，Sub/Hook/Reasoning 装配由 #1248，Run control drain 接线由 #1247 承接。旧 `AskUserBatch.reply_tx` 在这些 leaf 完成前仍是兼容路径，NEVER 视为 Target。
+Client interaction adapter **MUST** 在 Runtime-side bridge 中先注册 `InteractionRequestId → pending waiter`，再发出纯值 `ChatEvent::InteractionRequested { request_id, run_id, body }`。`AgentClient::reply_interaction` / `cancel_interaction` 回到同一 bridge，校验 body-specific reply 后恰好一次完成 waiter；stream、TUI 与 SDK event **NEVER** 携带 sender。processing teardown 不拥有 waiter，Run cancellation 才由 Runtime drain 该 Run 的 pending request 并发布权威 cancellation 事件。
 
 ### 2.3 Runtime-owned EventSink / UsageSink
 
@@ -286,162 +288,76 @@ submit(trigger, owned message snapshot)
 - completion 与日志只能含 trigger、status、error category、token/count、duration、record id 等 metadata；**NEVER** 含 prompt、消息、Memory content、provider raw response、parsed/formatted output 或正文截断。
 - Run teardown 必须 drain 该 Run 的 Reflection slot；到结束 deadline 仍未完成时 cancel，并等待 cancellation/timeout 终态清槽后再释放 Run lease，**NEVER** 留下 detached job。adapter 自身的执行 timeout 同样只产出安全终态 metadata。
 
-## 3. RuntimeContext、active Session 与 Workspace 装配
+## 3. RuntimeContext、SessionState 与 IoC 装配
 
-`RuntimeContext` **MUST** 只持有本 Run 消费的活契约，**NEVER** 持有 Project wiring、composition scope、Session coordinator 或 active resource slot。Composition 同时保存 Project-owned `WorkspaceWiring` 与 Context-owned `MainSessionWiring`；前者守护 workspace 隔离，后者守护稳定 Session backing、Task / Memory 身份与同一个 shared/exclusive `session-switch` gate。
+`RuntimeContext` **MUST** 只持有本 Run 消费的活契约，**NEVER** 持有 Project wiring、composition scope、Session coordinator 或 active resource slot。`RuntimeServices` 持有 Runtime 生命周期稳定的共享 Port 与 Runtime-owned factory contracts；`SessionState` 持有跨 Run 变化的会话事实。Composition 保存供应 BC 的 opaque wiring，并实现 Runtime 定义的 factory/port；Runtime application 决定 snapshot 时机与 `RunSpec` 能力选择。
+
+调用方只提交 `RunPreparationRequest { spec, session, parent, initial_input }`。统一 `RuntimeContextFactory::prepare` 通过注入的 `ProviderBindingFactory`、`ContextBindingFactory`、`ToolBindingFactory`、`InteractionBindingFactory`、`HookBindingFactory` 与 `WorkspaceBindingFactory` 创建 `PreparedRun { run, context, execution }`。调用方不得构造具体 Port 后通过 `RunContextBindings`、`RuntimeContextParts` 或同构参数袋手填 Context。
 
 ```rust
-// agent/composition 内部类型；NEVER 进入 feature 的业务 API。
-struct CompositionWorkspaceScope {
-    workspace: WorkspaceWiring,
+// Runtime-owned application contracts.
+trait RuntimeContextFactory: Send + Sync {
+    async fn prepare(
+        &self,
+        request: RunPreparationRequest,
+    ) -> Result<PreparedRun, RunPreparationError>;
 }
 
-struct MainAgentAssembly {
-    workspace_scope: Arc<CompositionWorkspaceScope>,
-    task: TaskWiring,        // Task-owned opaque handle；只由 Composition 持有
-    config: ConfigWiring,    // Config-owned opaque handle；只由 Composition 持有
-    session: MainSessionWiring, // Context-owned opaque composition handle
+struct RunPreparationRequest {
+    spec: RunSpec,
+    session: SessionSnapshot,
+    parent: Option<ParentRunCapabilities>,
+    initial_input: InitialRunInput,
 }
 
-// bind_main_run().await 在 owned shared lease 下返回同一 active resource slot 的快照。
-struct BoundMainRun {
-    context: Arc<dyn ContextPort>,
-    memory: Arc<dyn MemoryPort>,
-    config: ConfigSnapshot,
-    lease: MainRunLease,
+struct PreparedRun {
+    run: Run,
+    context: RuntimeContext,
+    execution: RunExecutionState,
 }
 
-// lease 必须活到 Main Run、全部 Tool 与其派生 Sub 均收口。
-struct AssembledRun {
-    runtime: RuntimeContext,
-    workspace_scope: Arc<CompositionWorkspaceScope>,
-    main_lease: Option<MainRunLease>,
-}
-
-async fn open_main_agent(cwd: PathBuf, root: &CompositionRoot)
-    -> Result<MainAgentAssembly, AssemblyError>
-{
-    let workspace = project::wire_production_workspace(cwd)?;
-    let task = task::wire_task();
-    let config_location = map_project_to_config_location(
-        &workspace.read().project_identity(),
-    )?;
-    let config = config::wire_project_config(
-        root.config_sources(),
-        &config_location,
-    )
-        .await?;
-    let initial_config = config.participant().snapshot();
-    let memory_opener = root.memory_factory();
-    let initial_memory = memory_opener
-        .open_for_project(
-            &workspace.read().project_identity(),
-            initial_config.memory_config(),
-        )
-        .await?;
-    let session = context::wire_main_session(MainSessionDependencies {
-        workspace_read: workspace.read(),
-        workspace_persist: workspace.persist(),
-        task_persist: task.persist(),
-        memory_opener,
-        initial_memory,
-        config: config.participant(),
-        guidance_source: root.guidance_source(),
-        skill_materialization: root.skill_materialization(),
-        // Session storage/config 省略；factory 内建立唯一 gate 与 resume coordinator。
-    })?;
-
-    Ok(MainAgentAssembly {
-        workspace_scope: Arc::new(CompositionWorkspaceScope { workspace }),
-        task,
-        config,
-        session,
-    })
-}
-
-fn assemble_with_scope(
-    spec: &RunSpec,
-    parent_runtime: Option<&RuntimeContext>,
-    workspace_scope: Arc<CompositionWorkspaceScope>,
-    context: Arc<dyn ContextPort>,
-    task: Arc<dyn TaskAccess>,
-    memory: Arc<dyn MemoryPort>,
-    config: ConfigSnapshot,
-    main_lease: Option<MainRunLease>,
-    root: &CompositionRoot,
-) -> Result<AssembledRun, AssemblyError> {
-    let workspace_read = workspace_scope.workspace.read();
-    let (tool_catalog, tool_execution) = root.tools_for(
-        &spec.tools,
-        &config,
-        workspace_read,
-        workspace_scope.workspace.control(),
-        Arc::clone(&task),
-        Arc::clone(&memory),
-    );
-    let inherited_requested = parent_runtime
-        .map(|parent| parent.reasoning.current_requested_level());
-    let reasoning = root.reasoning_for(
-        &spec.reasoning,
-        inherited_requested,
-    );
-
-    let runtime = RuntimeContext {
-        context,
-        provider:  root.provider_for(&spec.model, &config),
-        tool_catalog,
-        tool_execution,
-        policy:    root.policy_for(&config),
-        interaction: root.interaction_for(spec, parent_runtime),
-        memory,
-        task,
-        hooks:     root.hooks_for(&config),
-        reasoning,
-        reflection: root.reflection_prompt_for(&config),
-        usage:     root.usage_sink(),
-        config,
-        clock:     root.clock(),
-        input:     root.input_for(spec),
-        events:    root.event_sink_for(spec, parent_runtime),
-        cancel:    root.cancel_scope_for(parent_runtime),
-    };
-
-    Ok(AssembledRun { runtime, workspace_scope, main_lease })
+// agent/composition 内部；实现 Runtime-owned factory contracts，
+// 但不进入 Runtime 的业务 API。
+struct RuntimeAssembly {
+    runtime_services: RuntimeServices,
+    session_state: SessionState,
+    runtime_context_factory: Arc<dyn RuntimeContextFactory>,
+    workspace_wiring: project::WorkspaceWiring,
+    session_wiring: context::SessionWiring,
+    task_wiring: task::TaskWiring,
+    config_wiring: config::ConfigWiring,
 }
 ```
 
-`reasoning_for` **MUST** 只构造 Workflow-owned requested-level 状态：GraphDriven 使用五节点固定默认 effort（Config `reasoning_graph` 已退役，#921），`EffortOnly(level)` 固定该 requested level，`Inherit` 使用上面冻结的父 requested value。它 **NEVER** 接收 ProviderPort、ModelCapability 或 provider ceiling。每次 invocation 的 model clamp 由 loop 在 `build_window` 前调用 `provider.resolve_invocation_options` 完成。
+`RuntimeServices` 与 factory contracts 只暴露 Runtime 需要的窄能力，不暴露供应 BC concrete constructors。Composition 可以持有 Project、Context、Task、Config 的 opaque wiring 和 lease；这些对象 **NEVER** 进入 `RunPreparationRequest`、`RuntimeContext`、`RunExecutionState` 或 Tool/SDK Published Language。
+
+Run 准备时，Runtime bootstrap/application 从 `SessionState` 捕获一致的 `SessionSnapshot`；若为派生 Run，只提供受限 `ParentRunCapabilities`。Factory 实现可借助 composition-private wiring 获得 lease、派生 workspace、打开 Context/Memory、构造 Provider/Tool/Hook adapter，但返回给 Runtime 的只有冻结能力。lease 必须由返回 capability 的生命周期守卫持有，调用方不能单独缓存或释放。
+
+`InteractionBindingMode::ParentMediated` 创建独立 child-scoped adapter；`HookBindingMode::BoundaryOnly` 创建只允许边界 invocation 的 adapter。两者都必须在 factory 内完成，不能先返回完整父 Port 再要求调用方自律过滤。
+
+`reasoning` 装配 **MUST** 只构造 Workflow-owned requested-level 状态：Adaptive 使用五节点固定默认 effort，Fixed 使用 RunSpec 声明值，Inherit 冻结父 requested value，NoOp 绑定无副作用实现。它 **NEVER** 接收具体 Provider client；每次 invocation 的 model clamp 由 Loop 在 `build_window` 前经 `ProviderPort` 完成。
 
 > **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域模型已完成迁移但 Runtime **尚未**在生产链路调用 `resolve_invocation_options`；ReasoningPort **尚未**接线到生产 loop。上述 clamp 链是 Target 设计，v0.1.0 未接生产链路。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
 
-Main 装配 **MUST** 要求 `WorkspaceMode::Inherit`，先 await `MainSessionWiring::bind_main_run()` 取得 Context / Memory / ConfigSnapshot / owned shared lease，再从 `MainAgentAssembly.task.access()` 取得同一 Task backing 的低权限 view，并原样传给 `assemble_with_scope`。`bind_main_run` 取得 lease 后才读取 active slots；返回的 Arc、snapshot 与 `TaskAccess` **MUST** 绑定该 lease 的逻辑生命周期，**NEVER** 缓存或逃逸到 lease 之外。由此 Context、Runtime、MemoryTool、TaskTool 与 Reflection 都看到同一实例与项目配置，而 restore authority 只留在 session wiring 持有的 `TaskPersist`。
+以 `WorkspaceMode::Inherit` 创建的 Run，factory 实现必须在一致性 gate 下取得当前 Session 的 Context / Memory / ConfigSnapshot / TaskAccess 与 owned shared lease；返回的能力必须绑定该 lease 的逻辑生命周期，不能单独缓存或逃逸。由此 Context、MemoryTool、TaskTool 与 Reflection 看到同一实例与项目配置，而 restore authority 仍留在 composition-private session wiring。
 
-`MainRunLease` **MUST** 保持到 Main Run、全部 Tool、后台 Reflection job 与该 Run 派生的 Sub 全部结束或取消收口；运行期 resume 只有取得 exclusive lease 后才可 prepare / commit。无 active Run 的 Session / Task / Workspace / Memory query、control、snapshot 或 mutation 也 **MUST** 临时取得同一 shared lease。exclusive resume 前必须 join 或取消仍持 lease 的 Reflection / Tool；因此旧 Memory Arc **NEVER** 在切换后继续写旧项目。
+shared lease 必须保持到该 Run、全部 Tool、后台 Reflection job 与其派生 Run 均结束或取消收口。运行期 resume 只有取得 exclusive lease 后才可 prepare/commit；exclusive resume 前必须 join 或取消仍持 lease 的工作，旧 Memory/Task/Workspace capability 不得在切换后继续写旧项目。
 
-`MainSessionWiring` 内部持有唯一 `SessionSwitchCoordinator`、稳定 Session backing、同一 backing 的 `TaskPersist`、active Memory slot 与 Config participant view；Config-owned `ConfigAppService` 才是 active project config 的唯一真相，session wiring **NEVER** 复制第二个 Config slot。resume 在 exclusive lease 下先取得 Project 验证 identity，经 ACL 映射 `ProjectConfigLocation` 并 await Config prepare，再以 candidate MemoryConfig eager-open Memory，最后 prepare Task；无失败提交段替换 Task / Workspace、发布 Session、安装目标 Memory Arc，并以 Config commit + watch publish 收尾。Runtime / Tool 只能获得 `TaskAccess`；active slot、participant commit authority 与 coordinator **NEVER** 进入 RuntimeContext、ToolInvocation、Published Language 或普通 ContextPort 方法。
+session wiring 内部可持有唯一 SessionSwitchCoordinator、稳定 backing、TaskPersist、active Memory slot 与 Config participant view；这些 active slot 与 commit authority **NEVER** 进入 RuntimeContext。所有 project-scoped factory 必须显式消费 `SessionSnapshot` 中冻结的 config revision/snapshot，不得回读 Composition Root 的动态 current config。
 
-所有 project-scoped factory（Provider / Tool scope / Hook / Policy / Reflection）**MUST** 显式接收 `BoundMainRun.config`，**NEVER** 再读取 Composition Root / ConfigReader 的 current snapshot。Config prepare **MUST** 加载并验证目标项目的 `.agents/aemeath.json` / 兼容配置及由其决定的 provider / tool / hook 必要输入；失败时整个 resume 保持旧 Project、Memory 与 Config。Sub 继承父 BoundMainRun 的同一只读 ConfigSnapshot。
-
-Project production factory 与 `wire_main_session` **MUST** 都只在 Main agent 启动时调用一次。active Main session slot 的 Run N、Run N+1 复用同一两组 wiring；运行期 resume 只替换 wiring 内的完整 live state，**NEVER** 重建 wiring。
-
-Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scope.workspace.derive_isolated()` 创建 child scope，并新建 isolated Task / Context。`MemoryMode::Disabled` 使用 NoOp；显式 `share_memory` 则 clone 父 `BoundMainRun.memory` 的同一 Arc，并由父 `MainRunLease` 覆盖整个 Sub 生命周期，**NEVER** 为同一 project 再打开第二个 Memory service。其他 Main / Sub 与 WorkspaceMode / MemoryMode 组合 **MUST** 拒绝。
-
-注入 dispatch Tool 的 composition-provided `AgentDispatch` / Sub-run factory **MUST** 捕获父 scope 与 lease，或以 RunId 在 composition-private registry 中索引它们，再调用同一 `assemble_with_scope`。这些装配类型 **NEVER** 进入 RuntimeContext、ToolInvocation、ContextRequest、ContextPort 或 ToolExecutionPort。
-
-**安全铁律落地**（见 [01-domain-model.md](01-domain-model.md) §7）：Registry Scope 只能移除 Tool/Resource，Tool Profile 的 capability 集只能收缩；`policy` 不放宽；Sub workspace **MUST** 通过 parent scope 的 `derive_isolated()` 派生。
+`WorkspaceMode::Snapshot` 只允许从 parent capability 派生 isolated workspace，并按 `RunSpec` 创建 isolated Task/Context。`MemoryMode::Disabled` 绑定 NoOp；显式 shared memory 只能复用父 capability 所允许的 Arc，并由父 lease 覆盖派生 Run 生命周期。Registry Scope、Tool Profile、Policy、Hook 与 Interaction 能力都只能保持或收缩，不能因来源名称获得特权。
 
 ## 4. Composition Root
 
-- **唯一生产装配入口**：`agent/composition`。Runtime 的 `domain/application/ports/adapters` 只定义领域行为、应用用例、边界契约与 Runtime-owned 转换，**NEVER** 选择具体生产实现或触发生产 factory。#1294 后 Composition 一次装配 Tool Catalog/Execution/binding、Skill Catalog/materializer、Tool Result materializer 与 `ActiveRunRegistry`；#1295 后同样从 committed ConfigSnapshot 构造 Hook dispatcher；全部经 `RuntimeBootstrapDependencies` 注入，Main/Sub 复用同一 Skill materializer、Tool Result materializer、active-run registry 与 HookPort。
-- `agent/composition` 持有各 Port 的具体实现或模块提供的 composition-only opaque wiring（provider driver / tool registry / storage / workspace / hook …），提供 `assemble()` 所需的 `root.*()` 工厂。MCP Ready、连接/断连、动态 Catalog revision 和稳定身份接线由 [#1327](https://github.com/rushsinging/aemeath/issues/1327) 单独承接；#1294 不保留 Runtime 到 Tools 私有 `CatalogExecutionWiring` 的过渡 seam。
+- **唯一生产对象图入口**：`agent/composition`。Runtime 的 `domain/application/ports/adapters` 定义领域行为、应用用例、能力选择规则、Runtime-owned factory/port contracts 与转换；Composition 实例化具体实现并把 object graph 注入 Runtime。Runtime application 在业务时机调用统一 `RuntimeContextFactory`，但不触发供应 BC 的 concrete constructor。
+- `agent/composition` 持有各 Port 的具体实现或供应模块提供的 composition-only opaque wiring（provider driver / tool registry / storage / workspace / hook …），并实现 Runtime-owned factory contracts。动态 Catalog 与 MCP lifecycle 仍由对应供应边界管理，不能泄漏 concrete wiring 给 Runtime。
 - **Provider 构造独占（#907）**：Composition 实现 Runtime-owned `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占具体 provider client / driver / transport 构造。非 Composition crate **NEVER** 引用 `provider::composition` 或具体构造符号（`LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider`）。`check-provider-construction-ownership.sh` 守卫以零白名单与负向探针锁定此边界。
 - Runtime feature 内 **NEVER** 建立 `bootstrap/`、service locator 或第二个 Composition Root；现有 Runtime `utils/bootstrap` 的生产构造责任迁入 `agent/composition`，其余代码按单一 `agent_execution` 能力的六边形职责归位。
 - `RuntimeContext` 属 application：它只传递本 Run 的活契约，**NEVER** 进入 domain 或通用 shared，也 **NEVER** 保存具体 Provider、Registry、Store 或全局 Config reader。
 - Runtime 当前只有一个完整业务能力，因此 **NEVER** 添加单元素 `capabilities/agent_execution` 包装；没有真实跨 capability 复用内容时也 **NEVER** 创建 `shared/`。
 - Project workspace 的生产装配 **MUST** 经 Project-owned factory 取得 `WorkspaceWiring`，并 **MUST** 只保存在 `CompositionWorkspaceScope`；Composition **NEVER** 向 Runtime 或业务模块分发 handle / scope。
-- Main agent：Composition Root 初次建立 active-session-slot 的 Workspace 与 MainSession 两组 wiring 并跨 Main Run 保留；每个 Main Run 只在 shared lease 下取得同一 Context / Task / Memory 实例。resume 在 exclusive lease 内更新完整 live state，**NEVER** 重建 wiring。
-- Config-owned `ConfigWiring` **MUST** 先按当前 Project identity 的 ACL location 准备 project-aware snapshot；Memory opener 再消费同一 candidate 的 MemoryConfig。Context-owned `MainSessionWiring` 把同一 Task / Memory Arc 与 Config participant snapshot 绑定到每个 Main Run；resume 复用相同 Config → Memory 顺序，全部 participant 成功后才进入无失败提交段。
-- Sub Run：dispatch Tool 经 composition-provided AgentDispatch 从 parent scope 执行 `derive_isolated()`，再装配相同结构；Runtime tool coordination 只编排 `ToolExecutionPort` 调用。
+- 独立根 Run：Composition Root 初次建立 Workspace 与 Session wiring 并跨 Run 保留；每个 Run 由 Runtime 从 `SessionState` 捕获 snapshot 后调用统一 factory。resume 在 exclusive lease 内更新完整 live state，**NEVER** 重建 wiring。
+- 派生 Run：Runtime 提交带 `ParentRunCapabilities` 的同一种 `RunPreparationRequest`；factory adapter 从 parent workspace capability 隔离派生并装配相同结构。Runtime tool coordination 只消费统一 `PreparedRun` / typed terminal。
 - 任何模块 **NEVER** 私自 `new` Port 实现绕过 Composition Root。
 
 ## 5. 关键 ACL

@@ -88,20 +88,33 @@ Run 终止旁路：任意非终态 ── TerminateRun ──▶ Terminating
 
 **AwaitingUser 关键语义**：这是 **Run 内交互暂停**（Run 未完成，等特定 request id 的答复），必须同时保存 typed continuation，内存存活、不落盘；崩溃则整个 Run 从头开始（见 `05-recovery-semantics`）。reply / interaction cancellation 只能恢复或终结该 continuation，**NEVER** 统一跳到 `PreparingContext`。四类 completion 的穷尽映射见 [端口与适配器](06-ports-and-adapters.md) §2。这**区别于**"Run 完成后 Session 等下一条全新输入"（那是 Run 序列层，见 §3）。
 
-## 2. Loop Engine 骨架（Main/Sub 共用，零分支）
+## 2. Loop Engine 骨架（统一执行，零来源分支）
 
-### 2.0 Adapter 内部策略注入（#1382）
+### 2.0 控制反转与能力注入
 
-`run_loop` 只依赖 `RunLoopPort`，**NEVER** 按 Main/Sub 分支。两个 adapter 内部进一步用四个静态分发策略面隔离真实差异：
+`run_loop` 直接接收 `Run`、`RunExecutionState` 与冻结的 `RuntimeContext`。Loop Engine 是完整执行流程的唯一 owner；它通过 Runtime-owned 窄 Port 调用外部能力，不通过 fat adapter 回调流程步骤。
 
-| 策略 | Main | Sub |
-|---|---|---|
-| `InputStrategy` | `MainInputStrategy`：RunInputBuffer、输入 channel、StopHook/ToolResults continuation | `SubInputStrategy`：固定 prompt、epoch、ToolResults continuation |
-| `EventStrategy` | `MainEventStrategy`：投影 RuntimeStreamEvent、完成收口 | `SubEventStrategy`：提取 typed `AgentRunTerminal`、报告 progress |
-| `LlmStrategy` | 动态 reasoning、visible delta、retry event | 固定 reasoning、non-visible delta、retry log/cancellation propagation |
-| `ToolStrategy` | Main tool result continuation | Sub tool result continuation |
+```rust
+async fn run_loop(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    context: &RuntimeContext,
+) -> Result<AgentRunTerminal, RunExecutionError>
+```
 
-策略使用具体类型和泛型静态分发，**NEVER** 用 trait object 组成超集 struct。共享纯流程位于 `loop_engine::{shared,llm_log,llm_strategy,tool_strategy}`；Main 独有的输入交错、reflection、Stop Hook、InteractionBridge、任务快照和 Sub 独有的 max-output-tokens 恢复仍留在各自 adapter。`RunLoopPort` impl 仅保留 engine contract 与薄委托，业务差异不进入 engine。
+差异只存在于 `RuntimeContextFactory` 已绑定的 capability adapter：
+
+| 能力面 | 可绑定实现示例 |
+|---|---|
+| Input | live session input / fixed initial input / scheduler queue |
+| Event | client event sink / parent diagnostic sink / no-op sink |
+| Interaction | client / parent-mediated / unavailable |
+| Hook | full / boundary-only / disabled |
+| Context、Tool、Memory、Workspace | shared / isolated / restricted / no-op |
+
+Engine 不知道某个 Run 来自 Main、Sub、Reflection 或 Scheduler，也不按来源选择流程。`MainRunPort`、`SubAgentRun`、fat `RunLoopPort`、`MainInputStrategy` / `SubInputStrategy`、`MainEventStrategy` / `SubEventStrategy` 均不属于终态。模型调用、Tool 编排、Stop Hook、Interaction、finalization 和 terminal mutation 必须只有一份 application 流程。
+
+`RunExecutionState` 持有 messages、accepted inputs、context window、tool working data、continuation working data 与 stream projection；`RuntimeContext` 只持绑定好的外部能力；`Run` 只持领域状态。三者不得反向调用 Engine 或复制状态。
 
 ### 2.1 Step/Run 控制与持久化原则
 
@@ -163,95 +176,54 @@ Stop Hook 只裁决 Run 能否终止，**NEVER** 否决已完成 assistant / Too
 ```rust
 async fn run_loop(
     run: &mut Run,
-    cancel: &CancellationToken,
-    port: &mut impl RunLoopPort,
-) -> Result<LoopDirective, LoopEngineError> {
-    if run.status() == RunStatus::Created {
-        run.start_draining()?;
-        emit_events(run, port).await?;
-    }
-
-    // #1272: engine-owned epoch。从 Run 持久 epoch 初始化，AwaitUser→re-enter 不重置。
-    let mut expected_epoch = DrainEpoch(run.next_drain_epoch());
-    let mut terminal_text: Option<String> = None;
+    execution: &mut RunExecutionState,
+    context: &RuntimeContext,
+) -> Result<AgentRunTerminal, RunExecutionError> {
+    mutate_and_publish(run, context.events(), Run::start_draining)?;
+    let mut expected_epoch = run.next_drain_epoch();
 
     loop {
-        if handle_interrupt(run, cancel, port).await? {
-            return Ok(LoopDirective::Terminal);
-        }
-        if run.status().is_terminal() {
-            return Ok(LoopDirective::Terminal);
+        handle_control(run, execution, context).await?;
+        if let Some(terminal) = run.terminal_result() {
+            return Ok(terminal);
         }
 
-        // ---- drain 阶段 ----
-        let awaiting_user = run.status() == RunStatus::AwaitingUser;
-        let drain_future = if awaiting_user {
-            port.await_user_input(expected_epoch)   // #1272: 从不 seal，空时 epoch 不推进
+        let outcome = if run.status() == RunStatus::AwaitingUser {
+            context.input().await_input(expected_epoch).await?
         } else {
-            port.drain_input(expected_epoch)
+            context.input().drain(expected_epoch).await?
         };
-        let outcome = await_interruptible(run, cancel, drain_future).await?;
-
-        // epoch 双向校验
-        if outcome.epoch() != expected_epoch {
-            return Err(LoopEngineError::Adapter("epoch mismatch"));
-        }
+        validate_epoch(expected_epoch, &outcome)?;
 
         match outcome {
-            DrainOutcome::Ready { batch, .. } => {
-                run.advance_drain_epoch();
-                expected_epoch = expected_epoch.next();
-                if run.status() == RunStatus::AwaitingUser {
-                    run.transition(RunTransition::UserResumed)?;  // #1272: 同一 Run 恢复
-                }
-                run.apply_drain_decision(DrainDecision::Inputs, None)?;
-                execute_step(run, cancel, port, &mut guard, &batch, &mut terminal_text).await?;
-            }
-            DrainOutcome::InternalContinuation { kind: _, batch, .. } => {
-                run.advance_drain_epoch();
-                expected_epoch = expected_epoch.next();
-                if run.status() == RunStatus::AwaitingUser && batch.is_empty() {
-                    return Ok(LoopDirective::AwaitUser);  // 纯 continuation 不自动 resume
-                }
-                if run.status() == RunStatus::AwaitingUser {
-                    run.transition(RunTransition::UserResumed)?;
-                }
-                run.apply_drain_decision(DrainDecision::InternalContinuation, None)?;
-                execute_step(run, cancel, port, &mut guard, &batch, &mut terminal_text).await?;
+            DrainOutcome::Ready { batch, epoch }
+            | DrainOutcome::InternalContinuation { batch, epoch, .. } => {
+                mutate_and_publish(run, context.events(), |run| {
+                    run.accept_drain(epoch, &batch)
+                })?;
+                execution.accept_inputs(batch)?;
+                execute_step(run, execution, context).await?;
+                expected_epoch = run.next_drain_epoch();
             }
             DrainOutcome::NoInput { .. } => {
-                // #1272: buffer 不 seal、epoch 不推进。caller 等待用户输入后
-                // 以相同 expected epoch 重入 run_loop。
-                return Ok(LoopDirective::AwaitUser);
+                continue;
             }
-            DrainOutcome::EmptyAndSealed { .. } => {
-                if run.status() == RunStatus::AwaitingUser {
-                    return Ok(LoopDirective::AwaitUser);  // seal 前仍在等用户
-                }
-                run.advance_drain_epoch();
-                expected_epoch = expected_epoch.next();
-                if !port.claim_terminal(run.id()) {
-                    cancel_run(run, port).await?;
-                    return Ok(LoopDirective::Terminal);
-                }
-                let text = terminal_text.as_deref();
-                run.apply_drain_decision(DrainDecision::EmptyAndSealed, text)?;
-                emit_events(run, port).await?;
-                return Ok(LoopDirective::Terminal);
+            DrainOutcome::EmptyAndSealed { epoch } => {
+                mutate_and_publish(run, context.events(), |run| {
+                    run.complete_after_drain(epoch, execution.terminal_projection())
+                })?;
             }
         }
     }
-
-    // ... TerminateRun 收口 ...
 }
 ```
 
-`execute_step` 驱动一线 Step：`freeze_step` → `accept_step_input` → compact check → `invoke_model` → `record_model_invocation` → `apply_drain_decision` → `complete_step` → `finalize_step`。每一步后检查 control/cancel/timeout。
+`execute_step` 是 Engine 内部应用流程：冻结并接纳 input → 构建/压缩 context → invoke model → 记录 invocation → Tool/Interaction/Hook coordination → deterministic finalization。每个阶段只调用 `RuntimeContext` 的窄能力并更新唯一 `RunExecutionState`；不存在可替换整段流程的 adapter 方法。
 
 **#1272 关键点：**
 - 正常完成（Complete/Continue/StopHookBlocked/ToolsCompleted）均进入 `ContinueAfterResponse` / `ToolsCompleted` → `DrainingInput`，不加中间状态；
 - `Completed` 只能由 `EmptyAndSealed` 产生；
-- AwaitUser 恢复：`NoInput` → `LoopDirective::AwaitUser`，caller 等待用户输入后以同一 epoch 重入，`Ready` 时执行 `UserResumed`；
+- AwaitUser 恢复：`NoInput` 时 `InputPort::await_input` 保持同一 future 异步等待且 epoch 不推进；输入到达产生 `Ready` 后执行 `UserResumed`；
 - Sub 固定 prompt：epoch 0 `Ready(prompt)` → epoch 1 `EmptyAndSealed`，与 Main 走完全相同的 Loop 路径。
 
 ### 2.6 控制协议：请求同步，完成异步
@@ -268,7 +240,7 @@ Step scope 是 Run root scope 的 child；CancelRunStep 不污染下一 Step tok
 
 ### 2.7 Agent Tool / Sub Run 控制传播
 
-Main 当前 Step 接受 `CancelRunStep` 后，对普通 Tool 取消该 Tool operation；对 Agent Tool **MUST** 向关联 child Run 发送 `TerminateRun(ParentStepCancelled)`，**NEVER** 向 child 发送 CancelRunStep 后让它回到 Drain 继续执行。child 再对其嵌套 Agent Tool 递归传播 TerminateRun。
+父 Run 当前 Step 接受 `CancelRunStep` 后，对普通 Tool 取消该 Tool operation；对 Agent Tool **MUST** 向关联 child Run 发送 `TerminateRun(ParentStepCancelled)`，**NEVER** 向 child 发送 CancelRunStep 后让它回到 Drain 继续执行。child 再对其嵌套 Agent Tool 递归传播 TerminateRun。
 
 所有层级共享父控制请求创建的**绝对 deadline**：
 
@@ -305,9 +277,9 @@ StepFinalizer 读取 child `RunSpec.finalization`：
 
 ### InputBuffer（入站端口）— 支撑追问
 
-Loop Engine 每轮在门禁点调用 `port.drain_input(epoch)` 或 `port.await_user_input(epoch)`。Main/Sub 靠不同 `RunLoopPort` 实现区分，引擎零分支。
+Loop Engine 每轮在门禁点调用 `RuntimeContext.input().drain(epoch)` 或 `await_input(epoch)`。live session、fixed initial input 和未来 scheduler queue 由不同 `InputPort` adapter 表达；Engine 不感知来源，也不按 Main/Sub 区分。
 
-**#1272 RunInputBuffer（Main adapter）** 是 Run-owned 的原子 drain-or-seal 原语：
+Run-owned atomic input buffer 是 live-session `InputPort` adapter 使用的 drain-or-seal 原语：
 
 | 方法 | 行为 | seal? | epoch 推进? |
 |---|---|---|---|
@@ -345,12 +317,11 @@ Loop Engine 每轮在门禁点调用 `port.drain_input(epoch)` 或 `port.await_u
 
 ### AwaitUser drain 语义（#1272）
 
-`AwaitingUser` 是 Run 内暂停（非终态）。Loop engine 在检测到 `AwaitingUser` 时调用 `port.await_user_input(epoch)` 而非 `port.drain_input(epoch)`：
+`AwaitingUser` 是 Run 内暂停（非终态）。Loop engine 在检测到 `AwaitingUser` 时调用绑定后的 `InputPort::await_input(epoch)` 而非 `drain(epoch)`：
 
-- `await_user_input` 内部使用 `try_drain_unsealed`：**从不 seal buffer**；
-- 无用户输入时返回 `NoInput { epoch }`，epoch **不推进**，caller 返回 `LoopDirective::AwaitUser`；
-- 外部等待用户输入后，以**相同 expected epoch** 重入 `run_loop`；
-- 用户输入到达后返回 `Ready`，engine 执行 `UserResumed` 恢复到 `PreparingContext`；
+- `await_input` 内部使用不密封语义：**从不 seal buffer**；
+- 暂无用户输入时，`await_input` 保持同一可取消 future 继续等待，epoch **不推进**，Loop 不退出也不重入；
+- 用户输入到达后返回 `Ready`，Engine 执行 `UserResumed` 并在同一 `run_loop` 调用内继续；
 - 这与"Run 完成后 Session 等下一条全新输入"（Run 序列层，见 §3）是不同语义。
 
 > **去掉 max_turns**：不再用轮次上限，改由 `timeout`（0=无限，Main 默认 0）+ StuckGuard 双重兜底（见 `04-stuck-prevention`）。

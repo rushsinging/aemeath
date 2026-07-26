@@ -2,7 +2,7 @@
 
 > 层级：02-modules / runtime（模块战术设计）  
 > 状态：Target（目标设计）｜对应 Issue：[#1385](https://github.com/rushsinging/aemeath/issues/1385)、[#1397](https://github.com/rushsinging/aemeath/issues/1397)、[#1248](https://github.com/rushsinging/aemeath/issues/1248)\
-> 本文记录 #1385 review 后确定的目标边界。#1248 已落地 RuntimeContextFactory、Interaction/Hook/Reasoning 三能力穷举装配与 Stop Hook 三分支；`RuntimeContextParts`、`assemble_main_runtime_context`、`ModelStep::StopHookBlocked`、`InteractionBridge::disabled()` 已退役。`MainSessionShell`、`MainRunPort`、`SubAgentRun` 和 `from_args.rs` 的部分旧路径仍由 #1397/#1399 收口，不构成目标模型。
+> 本文记录 Runtime 的最终所有权、控制反转与装配边界。它只描述终态，不记录实现进度。任何按 Main/Sub 分类的生产类型、调用方手填的 `RunContextBindings`、fat `RunLoopPort` 或 Runtime 内第二 Composition Root 都不属于目标模型。
 
 ## 1. 决策摘要
 
@@ -17,40 +17,68 @@ Runtime 最终收敛为六个核心类型：
 | `Run` | Run | 受状态机约束地可变 | 本次 Run 在领域上进行到哪一步？ |
 | `RunExecutionState` | Run | 可变 | Loop 当前处理哪些工作数据？ |
 
-创建与执行关系：
+创建与执行关系遵循控制反转：Runtime application 定义所需 factory/port，Composition 注入实现；调用路径只提交纯值 request，不创建具体能力。
 
 ```text
-Composition
+Composition Root
   ├─ RuntimeServices
+  │    ├─ ProviderBindingFactory
+  │    ├─ ContextBindingFactory
+  │    ├─ ToolBindingFactory
+  │    ├─ HookBindingFactory
+  │    ├─ InteractionBindingFactory
+  │    ├─ WorkspaceBindingFactory
+  │    └─ 长生命周期共享 Port
   └─ RuntimeContextFactory
 
 Runtime bootstrap
   └─ SessionState
 
-RuntimeServices + SessionState snapshot + RunSpec
-                         │
-                         ▼
-              RuntimeContextFactory
-                         │
-                         ▼
-                  RuntimeContext
+RunPreparationRequest
+  ├─ RunSpec
+  ├─ SessionSnapshot
+  ├─ ParentRunCapabilities?
+  └─ InitialInput
+                 │
+                 ▼
+        RuntimeContextFactory
+          ├─ 校验能力 ceiling
+          ├─ 选择/收缩 capability adapter
+          └─ 创建 per-Run resource
+                 │
+                 ▼
+          PreparedRun
+          ├─ Run
+          ├─ RuntimeContext
+          └─ RunExecutionState
+                 │
+                 ▼
+            RunLauncher
+                 │
+                 ▼
+            Loop Engine
+```
 
-RunSpec ────────────────▶ Run
-launch input ───────────▶ RunExecutionState
+依赖方向：
 
-Run + RuntimeContext + RunExecutionState
-                         │
-                         ▼
-                    Loop Engine
+```text
+Composition adapters ──implements──▶ Runtime-owned factory/port contracts
+                                           ▲
+                                           │ consumes
+                                 Runtime application
+                                           │
+                                           ▼
+                                      Runtime domain
 ```
 
 强制结论：
 
-1. 生产类型和 Loop 不再以 Main/Sub 分类；差异由 `RunSpec` 和父子拓扑表达。
+1. 生产类型和 Loop 不再以 Main/Sub 分类；差异由 `RunSpec`、父子拓扑及能力 adapter 表达。
 2. 静态活依赖与动态会话状态必须分离，禁止恢复综合资源袋。
-3. `RuntimeContext` 只有统一装配入口；禁止各调用路径手填同构参数包。
-4. Composition 负责实例化、连接与生命周期；Runtime application 负责业务决策、状态转换与快照时机。
-5. `Run` 与 `RunExecutionState` 必须各有唯一状态所有权，不得复制同一事实。
+3. `RuntimeContext` 只有统一装配入口；调用方不得构造具体 Port，也不得手填同构参数包。
+4. Runtime application 拥有 factory/port 抽象、能力选择规则、状态转换与快照时机；Composition 只实现并连接这些抽象。
+5. Loop Engine 拥有完整执行流程，不通过 fat port 把流程控制权反向交给 adapter。
+6. `Run` 与 `RunExecutionState` 必须各有唯一状态所有权，不得复制同一事实。
 
 ## 2. 去除 Main/Sub 生产类型区别
 
@@ -185,34 +213,133 @@ Loop Engine 的顺序是：先请求 `Run` 完成合法状态迁移，再更新 
 
 ## 5. 统一 `RuntimeContextFactory`
 
-`RuntimeContextFactory` 是唯一允许构造 `RuntimeContext` 的入口。它负责：
+`RuntimeContextFactory` 是 Runtime application 定义的应用服务，也是唯一允许构造 `RuntimeContext` 的入口。Composition 注入它所消费的窄 factory/port 实现，但不得拥有 `RunSpec` 的能力决策。
 
-1. 接收 `RunSpec`；
-2. 接收或捕获窄的 session snapshot；
-3. 从 `RuntimeServices` 取得 factory 与父能力；
-4. 按能力模式选择 shared、isolated、restricted 或 disabled adapter；
-5. 创建 cancellation、input、event、usage 等 per-Run 实例；
-6. 校验派生 Run 不超过父 capability ceiling；
-7. 返回完整且冻结的 `RuntimeContext`。
+### 5.1 输入与输出
 
-它不负责执行 Loop、恢复 Session、修改 `SessionState`、保存消息、处理模型响应或创建 `RunExecutionState`。
+调用方只提交纯值准备请求：
 
-`RuntimeContext::new` 必须收窄为 factory 内部可见。`RuntimeContextParts` 与 `RuntimeContext` 字段一比一重复，没有领域语义、约束和所有权价值，应删除。父 Run 派生与独立 Run 创建是不同输入来源，不得形成两套公开 assembler。
+```rust
+struct RunPreparationRequest {
+    spec: RunSpec,
+    session: SessionSnapshot,
+    parent: Option<ParentRunCapabilities>,
+    initial_input: InitialRunInput,
+}
 
-## 6. Composition 与 Runtime application 边界
+struct ParentRunCapabilities {
+    run_id: RunId,
+    context: RuntimeContextCapabilityView,
+    cancellation: RunCancellationScope,
+    workspace: ParentWorkspaceCapability,
+}
 
-### 6.1 Composition 负责
+struct PreparedRun {
+    run: Run,
+    context: RuntimeContext,
+    execution: RunExecutionState,
+}
+```
+
+`SessionSnapshot`、`InitialRunInput` 和 `ParentRunCapabilities` 只携带准备本次 Run 所需的窄事实或 capability view。它们不得暴露 `SessionState` 锁、Composition wiring、具体 adapter、完整父 `RuntimeContext` 或可越权的服务集合。
+
+Factory 负责：
+
+1. 校验 `RunSpec` 与 parent capability ceiling；
+2. 从 `RuntimeServices` 的窄 factories 选择并绑定 Context、Provider、Tool、Policy、Hook、Memory、Task、Reasoning、Interaction、Reflection 和 Workspace capability；
+3. 按模式创建 shared、isolated、restricted、parent-mediated 或 unavailable adapter；
+4. 创建 cancellation、input、event、usage 等 per-Run 实例；
+5. 冻结 `RunConfigSnapshot`、provider/model binding 与 workspace projection；
+6. 创建相互一致的 `Run`、`RuntimeContext`、`RunExecutionState`，返回 `PreparedRun`。
+
+Factory 不负责执行 Loop、恢复 Session、修改 `SessionState`、处理模型响应、持久化 Step 或发布终态事件。
+
+### 5.2 禁止调用方手填依赖
+
+`RuntimeContext::new` 仅对 factory 实现可见。以下形状不属于终态：
+
+- `RuntimeContextParts`、`RunContextBindings` 或任何与 `RuntimeContext` 字段近似一一对应的参数袋；
+- Main、Sub、Reflection、Scheduler 各自公开 assembler；
+- 调用方先创建 Provider、Context、Interaction、Hook adapter，再让 factory 被动复制；
+- 通过 `Option<Arc<dyn Port>>` 表示能力开关；
+- 直接传入完整父 `RuntimeContext` 并复用其无关能力。
+
+新 Run 来源可以不同，但准备入口只有一个。独立 Run、派生 Run、后台 Run 与未来 Scheduler Run 都构造 `RunPreparationRequest`，不能建立第二条装配路径。
+
+### 5.3 Interaction 的 IoC 绑定
+
+`InteractionBindingMode` 的终态语义：
+
+- `Client`：绑定 client-facing interaction adapter；
+- `ParentMediated`：创建新的 `ParentMediatedInteractionPort`，不得直接复用父 `InteractionPort` Arc；
+- `Unavailable`：绑定立即返回 typed unavailable 的 adapter。
+
+`ParentMediatedInteractionPort` 拥有 child 请求到 parent 请求的映射，至少以 `child_run_id + child_request_id` 隔离 identity。它负责向父边界发布请求、将匹配 reply/cancel 路由回 child waiter，并在 child teardown 时只 drain 该 child 的请求。父 `InteractionPort` 只提供传输能力，不拥有 child continuation；continuation 和 pending interaction 仍由 child `Run` 所有。
+
+并发 child 之间不得共享无命名 pending slot。任何 reply 必须同时匹配 parent route、child run 和 request identity；父 Run 取消可以向下传播，child 取消不得清空父或 sibling 的 pending request。可选的父级进度/诊断事件是 Event adapter 的投影，不进入 InteractionPort 的业务完成语义。
+
+### 5.4 Hook 的 IoC 绑定
+
+`HookBindingMode` 必须在装配期产生真实 capability adapter：
+
+- `Full`：允许 RunSpec 声明范围内的全部 Hook invocation；
+- `BoundaryOnly`：由 `BoundaryHookPort` 只允许 Run/child start-stop 边界事件；
+- 若未来存在 `Disabled`：绑定 typed no-op/disabled adapter，而不是 `Option`。
+
+`BoundaryOnly` 不能只校验 parent 存在后复用完整 HookPort。过滤发生在 adapter 调用入口，禁止调用方绕过 adapter 取得底层 HookPort。Hook BC 继续拥有 subscription、脚本执行、重试和 typed directive；Runtime-owned `HookCoordinator` 统一拥有触发时机、Stop 三分支、反馈 materialization 与 Run 状态编排。Main/Sub 不得分别实现 Stop Hook 流程。
+
+### 5.5 Factory Port 所有权
+
+Runtime 定义自己需要的构造契约，例如 `ProviderBindingFactory`、`ContextBindingFactory`、`ToolBindingFactory`、`InteractionBindingFactory`、`HookBindingFactory` 和 `WorkspaceBindingFactory`。契约参数必须是 `RunSpec`、session snapshot、parent capability 等 Runtime 语言；返回值必须是 Runtime 消费的窄能力。
+
+Composition 或供应 BC adapter 实现这些契约。Runtime 不依赖 `provider::composition`、`context::wire_*`、Workspace wiring 或具体 Registry；Composition 也不得解析 `RunSpec` 后自行决定能力升降。
+
+## 6. Loop Engine 的控制反转
+
+Loop Engine 是 Agent Execution 用例的流程 owner。它直接编排 `Run`、`RunExecutionState` 和 `RuntimeContext` 中的窄能力，不通过 adapter 回调决定业务顺序。
+
+```rust
+async fn run_loop(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    context: &RuntimeContext,
+) -> Result<AgentRunTerminal, RunExecutionError>
+```
+
+Engine 负责：
+
+- input drain/await、epoch 校验与 Step 创建；
+- context window/compact、model invocation 与 retry；
+- Tool coordination、Interaction continuation、Hook coordination；
+- control/cancellation、Step finalization 和 terminal mutation；
+- 每次领域 mutation 后立即 drain event 并交给 `EventSink`。
+
+`RuntimeContext` 中的 Port 只执行外部能力；`RunExecutionState` 只保存工作集；二者均不得调用回 Engine 或决定下一阶段。fat `RunLoopPort` 必须删除，不能以“统一接口”为名保留以下混合职责：
+
+- `freeze_step`、`accept_step_input`、`finalize_step` 等流程方法；
+- `needs_compaction`、`invoke_model`、`execute_tools` 等 coordinator 包装；
+- `claim_terminal`、`take_control` 等聚合/registry 操作；
+- `store_interaction`、`set_pending_interaction_work` 等重复状态槽；
+- `emit` 与具体 UI/progress 投影混合。
+
+确有外部边界价值的能力拆为窄 Port，例如 `InputPort`、`EventSink`、`UsageSink`、`ActiveRunRegistryPort`；它们由 Runtime 定义、Composition 注入，不承载 Loop 流程。
+
+Input 差异由绑定后的 `InputPort` 表达：live session input、fixed initial input 或未来 queue/scheduler input 都实现相同 drain/await 契约。Event 差异由 `EventSink` 表达。Provider、Tool、Hook 与 Interaction 差异同理由 capability adapter 表达。任何差异都不得重新形成 `MainInputStrategy` / `SubInputStrategy`、`MainEventStrategy` / `SubEventStrategy` 等生产类型。
+
+## 7. Composition 与 Runtime application 边界
+
+### 7.1 Composition 负责
 
 Composition 回答“使用哪个实现、如何连接、生命周期多长”：
 
 - 实例化具体 adapter；
 - 连接跨 BC Port；
 - 构造 `RuntimeServices`；
-- 构造并注入统一 `RuntimeContextFactory`；
+- 构造并注入 `RuntimeContextFactory` 及其依赖的 factory/port 实现；
 - 创建长期 registry、runner、materializer、scheduler 和 typed factory；
 - 管理进程/Agent Runtime 级资源生命周期。
 
-### 6.2 Runtime application 负责
+### 7.2 Runtime application 负责
 
 Runtime application 回答“何时发生什么业务动作”：
 
@@ -220,11 +347,11 @@ Runtime application 回答“何时发生什么业务动作”：
 - 读取 committed snapshot 的时机；
 - 初始化和更新 `SessionState`；
 - 解析本次会话或 Run 的模型选择；
-- 接纳输入并创建 `RunSpec`、`Run`、`RunExecutionState`；
-- 在 Run 创建点调用 `RuntimeContextFactory`；
+- 接纳输入并创建 `RunSpec` 与 `RunPreparationRequest`；
+- 在 Run 创建点调用 `RuntimeContextFactory::prepare` 取得 `PreparedRun`；
 - 驱动 Loop 和领域状态迁移。
 
-### 6.3 退役 `from_args.rs` 大装配器
+### 7.3 退役 `from_args.rs` 大装配器
 
 当前 `from_args.rs` 同时承担参数解析、Session 恢复、模型绑定、Tool/Skill 查询、Prompt 构建、并发配置、Agent runner 创建、基础设施创建和 Client 构造，已形成 Runtime 内第二个 Composition Root。
 
@@ -234,11 +361,11 @@ Runtime application 回答“何时发生什么业务动作”：
 - Composition 完成具体 adapter/object graph；
 - Runtime bootstrap 只执行 Session 启动用例并创建 `SessionState`；
 - Provider、Prompt、Skill 初始化委托各自 application service；
-- Run 创建统一进入 `RuntimeContextFactory`。
+- Run 创建统一提交 `RunPreparationRequest`。
 
 最终 `from_args.rs` 应删除，或收敛为很薄的 `bootstrap_runtime(request, services)` 入口。
 
-## 7. Workspace、Prompt、Skills 与 Config
+## 8. Workspace、Prompt、Skills 与 Config
 
 ### Workspace
 
@@ -267,25 +394,29 @@ Workspace 不得继续绕过 `RuntimeContext` 旁路进入 Loop adapter。
 
 `RunConfigSnapshot` 只有在裁剪并守护 Run 配置边界时才保留；若仅代理完整 `ConfigSnapshot` 而不提供不变量，应消除无价值包装。
 
-## 8. 迁移映射
+## 9. 终态类型映射
 
-| 当前类型或入口 | 目标处理 |
+| 非终态形状 | 终态处理 |
 |---|---|
-| `RuntimeHandle` | 重构为 `AgentRuntime` |
-| `MainSessionShell` | 删除，拆为 `RuntimeServices + SessionState` |
-| `RuntimeBootstrapDependencies` 及分层参数袋 | 由 Composition 直接构造有职责的服务对象 |
-| `RuntimeContextParts` | 删除 |
-| `assemble_main_runtime_context` | 删除 |
-| `derive_sub_run` 手填 Context | 改走统一 factory |
-| `RunKind::Main/Sub` | 审计消费点后删除 |
-| `MainRunPort` / `SubAgentRun` | 删除 |
-| fat `RunLoopPort` | 删除或收窄为真正外部副作用契约 |
-| `ChatLoopContext` | 拆为 bootstrap/launch input 与 session command driver |
-| `ParentRunContextSource` | 归入 `SessionState`，按唯一槽/registry 真实语义重命名 |
-| `DerivedSubRun` | 改为通用 prepared/launch result，或由统一 launcher 输入替代 |
-| `RuntimeWorkspaceAccess` 旁路 | 收入 factory 的 workspace capability binding |
+| `RuntimeHandle` 综合句柄 | 拆为入站 `AgentRuntime` façade、`RuntimeServices` 与 `SessionState` |
+| `MainSessionShell` | 删除，动态事实进入 `SessionState`，长生命周期能力进入 `RuntimeServices` |
+| `RuntimeBootstrapDependencies` 及分层参数袋 | 由 Composition 构造有职责的 services/factories，bootstrap 只接 typed request |
+| `RuntimeContextParts` / `RunContextBindings` | 删除；调用方只提交 `RunPreparationRequest` |
+| `assemble_main_runtime_context` / `derive_sub_run` 手填 Context | 统一进入 `RuntimeContextFactory::prepare` |
+| `RunKind::Main/Sub` | 删除；使用 purpose、父子拓扑和 capability modes |
+| `MainRunPort` / `SubAgentRun` | 删除；执行统一为 `Run + RuntimeContext + RunExecutionState` |
+| fat `RunLoopPort` | 删除；真实外部 seam 拆为窄 Port，流程归 Loop Engine |
+| `MainInputStrategy` / `SubInputStrategy` | 删除；factory 绑定统一 `InputPort` adapter |
+| `MainEventStrategy` / `SubEventStrategy` | 删除；factory 绑定统一 `EventSink` adapter |
+| 直接复用父 `InteractionPort` | 改为 child-scoped `ParentMediatedInteractionPort` |
+| `BoundaryOnly` 仅做存在性校验 | 改为装配 `BoundaryHookPort` 执行能力过滤 |
+| `ChatLoopContext` | 拆为 session command driver、`RunPreparationRequest` 与 `RunExecutionState` |
+| `ParentRunContextSource` | 以 parent capability registry/frame 的真实语义归入 `SessionState` |
+| `DerivedSubRun` | 删除；所有来源统一返回 `PreparedRun` |
+| `RuntimeWorkspaceAccess` 旁路 | 收入 `WorkspaceBindingFactory` 产生的窄 Run capability |
+| `from_args.rs` 大装配器 | 删除或收敛为 `bootstrap_runtime(request, services)` 薄入口 |
 
-## 9. 命名约束
+## 10. 命名约束
 
 目标类型名必须表达领域角色、所有权和生命周期：
 
@@ -300,12 +431,17 @@ Workspace 不得继续绕过 `RuntimeContext` 旁路进入 Loop adapter。
 
 全仓命名原则应在根 `AGENTS.md` 登记，Rust 细则归 `specs/rust-coding.md`；本文只记录 Runtime 模型中的具体应用。
 
-## 10. 验收条件
+## 11. 验收条件
 
 - 生产类型、Factory 和 Loop Engine 不含 Main/Sub 分类或行为分支。
 - `RuntimeServices` 与 `SessionState` 无字段类别交叉。
+- Runtime 拥有 factory/port 抽象和能力选择规则；Composition 只提供实现与对象图。
+- 所有 Run 来源只提交 `RunPreparationRequest`，并取得统一 `PreparedRun`。
 - `RuntimeContext` 只能由统一 factory 构造，且创建后能力不可替换。
-- `RuntimeContextParts`、多套 assembler 和 Runtime 内第二 Composition Root 均退役。
+- `RuntimeContextParts`、`RunContextBindings`、多套 assembler 和 Runtime 内第二 Composition Root 均退役。
+- fat `RunLoopPort`、Main/Sub Loop adapter 和 Main/Sub strategy 类型均退役；流程只由 Loop Engine 拥有。
+- `ParentMediated` 使用 child-scoped adapter，具备 request ownership、并发隔离和精确 teardown。
+- `BoundaryOnly` 使用真实 Hook capability adapter，禁止访问非边界 Hook invocation。
 - `Run` 与 `RunExecutionState` 无重复状态所有权。
 - Workspace、Prompt、Skills、Config 均按本文生命周期边界流动。
-- 每层装配、状态转换、能力不扩权和端到端场景都有相邻契约测试。
+- 每层装配、状态转换、能力不扩权、父子并发隔离和端到端场景都有相邻契约测试。
