@@ -4,7 +4,7 @@
 
 ## 目标
 
-让 Task List 的发现、按 ID 查询、批次局部统计与 LLM reminder 形成闭环：`TaskList` 默认查询当前 Batch、可按 `task_list_id` 查询历史；`TaskLists` 发现全部 Batch；所有统计由 Task BC 按 Batch 计算；Context 使用结构化 reminder 输入生成最终 system block。
+让 Task List 的发现、按 ID 查询、批次局部统计与 LLM reminder 形成闭环：`TaskListGet` 默认查询当前 Batch、可按 `task_list_id` 查询历史；`TaskLists` 发现全部 Batch；所有统计由 Task BC 按 Batch 计算；Context 使用结构化 reminder 输入生成最终 system block。
 
 ## 根因与边界
 
@@ -38,7 +38,7 @@
 
 **验证**：`cargo test -p task`。
 
-## 任务 2：扩展 TaskList wire 与新增 TaskLists
+## 任务 2：扩展 TaskListGet wire 与新增 TaskLists
 
 **文件**：
 - `agent/features/tools/src/domain/types/task_list.rs`
@@ -54,10 +54,10 @@
 - 对应测试
 
 **TDD**：
-1. 先锁定 schema：`TaskListInput.task_list_id` 可选字符串，`status` 可选；旧空输入仍合法；`TaskList` 不发布 priority 过滤；`TaskListsInput.status` 可选。
+1. 先锁定 schema：`TaskListInput.task_list_id` 可选字符串，`status` 可选；旧空输入仍合法；`TaskListGet` 不发布 priority 过滤；`TaskListsInput.status` 可选。
 2. 先锁定 wire：`TaskListResult` 含 list 元数据、batch-local stats、tasks；`TaskListsResult` 含稳定排序列表。
-3. `TaskList`：未传 ID 时查询 current；无 current 返回稳定空/提示结果；传 ID 时使用十进制 Batch ID，解析失败或不存在返回 tool error；status 只过滤结构化 `tasks`。text summary 始终包含 Batch ID/summary、完整 batch-local stats，以及过滤后的 Batch 内任务状态/标题/依赖列表。
-4. `TaskLists`：可按 active/paused/archived 过滤，非法状态报错；注册为 Main-only、`TaskRead`、只读并发安全。
+3. `TaskListGet`：未传 ID 时查询 current；无 current 返回稳定空/提示结果；传 ID 时使用十进制 Batch ID，解析失败或不存在返回 tool error；status 只过滤结构化 `tasks`。text summary 始终包含 Batch ID/summary、完整 batch-local stats，以及过滤后的 Batch 内任务状态/标题/依赖列表。
+4. `TaskLists`：可按 active/paused/archived 过滤，非法状态报错；text summary 为每个列表输出 ID、summary、状态与 batch-local stats；注册为 Main-only、`TaskRead`、只读并发安全。
 5. 更新中英文 description，明确先发现后按 ID 查询历史。
 
 **验证**：`cargo test -p tools`、`cargo test -p sdk`。
@@ -88,7 +88,7 @@
 
 **TDD**：
 1. 新增 `TaskLists` display lookup 和 display-name 测试。
-2. `TaskList` header 在显式 ID 时可显示目标列表，结果预览继续走 Plain、有界行数。
+2. `TaskListGet` 的生产 display name 保持 `Tasks`；TUI 的 display-name 映射继续兼容历史会话中的旧 `TaskList` 名称，结果预览继续走 Plain、有界行数。
 3. 新增 TaskLists 稳定只读结果展示，不泄漏 raw input 或产生诊断噪声。
 4. 用跨层已有 harness 验证工具名、结构化结果和 TUI 投影字段不丢失。
 
@@ -115,7 +115,7 @@
 ## 风险与兼容策略
 
 - `TaskListResult` 增加字段属于 additive wire change；保留 `tasks` 字段，SDK re-export 指向同一权威类型。
-- `TaskListInput` 新字段可选，旧调用 `{}` 行为保持默认 current。
+- `TaskListGet` 仅重命名生产工具；TUI display-name 保留旧 `TaskList` 映射以兼容历史会话重放。
 - Batch ID 对 Tool wire 使用十进制字符串；不复用当前 build.rs 对 `BatchId` 的 integer 映射。
 - stats 描述目标 Batch 全量 live Task；status 过滤影响结构化 `tasks` 和 text 中的任务明细，但不改变列表总体统计语义。
 - 不修改 Session schema、不清理 Archived Task、不引入独立 Storage 路径。

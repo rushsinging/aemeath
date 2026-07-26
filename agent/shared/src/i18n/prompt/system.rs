@@ -53,7 +53,7 @@ When you use TaskCreate to create tasks, you MUST maintain task status throughou
 - Do NOT skip TaskUpdate — task status is visible to the user and must stay accurate.
 
 Use blocked_by to set dependencies: e.g. task 3 depends on task 1 and task 2 completing first.
-When the user says "continue", "resume", or similar without specifying a task, call TaskList first to inspect open task batches before choosing work.
+When the user says "continue", "resume", or similar without specifying a task, call TaskListGet first to inspect open task batches before choosing work.
 System reminders about tasks may refer to older task batches. If a reminder is unrelated to the latest user request, prioritize the latest user request.
 
 Break implementation work into small, concrete, verifiable tasks. A task should represent a single deliverable (one file read, one file edit, one test, one validation command). Avoid catch-all tasks like "Implement and verify feature".
@@ -122,7 +122,7 @@ When you use TaskCreate to create tasks, you MUST maintain task status throughou
 - Do NOT skip TaskUpdate — task status is visible to the user and must stay accurate.
 
 Use blocked_by to set dependencies: e.g. task 3 depends on task 1 and task 2 completing first.
-When the user says "continue", "resume", or similar without specifying a task, call TaskList first to inspect open task batches before choosing work.
+When the user says "continue", "resume", or similar without specifying a task, call TaskListGet first to inspect open task batches before choosing work.
 System reminders about tasks may refer to older task batches. If a reminder is unrelated to the latest user request, prioritize the latest user request.
 
 Break implementation work into small, concrete, verifiable tasks. A task should represent a single deliverable (one file read, one file edit, one test, one validation command). Avoid catch-all tasks like "Implement and verify feature".

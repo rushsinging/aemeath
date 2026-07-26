@@ -21,6 +21,13 @@ async fn task_lists_discovers_historical_and_current_batches() {
         .await;
 
     assert!(!result.is_error, "{}", result.text);
+    assert!(result.text.contains("2 task lists"));
+    assert!(result
+        .text
+        .contains("#1 | archived | 历史 | 0 total, 0 pending, 0 in_progress, 0 completed"));
+    assert!(result
+        .text
+        .contains("#2 | active | 当前 | 0 total, 0 pending, 0 in_progress, 0 completed"));
     let value = serde_json::to_value(result.data.unwrap()).unwrap();
     assert_eq!(value["task_lists"].as_array().unwrap().len(), 2);
     assert_eq!(value["task_lists"][0]["task_list"]["id"], "1");

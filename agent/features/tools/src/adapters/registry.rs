@@ -151,7 +151,7 @@ pub(crate) fn register_named_scope(
         }
     );
     builtin!(
-        "TaskList",
+        "TaskListGet",
         Caps::TaskRead,
         [true, false],
         task_list::TaskListTool {
@@ -313,7 +313,7 @@ mod tests {
         "Agent",
         "TaskCreate",
         "TaskUpdate",
-        "TaskList",
+        "TaskListGet",
         "TaskLists",
         "TaskListCreate",
         "TaskListComplete",
@@ -357,7 +357,7 @@ mod tests {
     #[test]
     fn side_effect_capability_characterization_matches_builtin_behavior() {
         let main_scope = assembled_scope(BuiltinRegistryScope::Main);
-        for name in ["TaskGet", "TaskList", "TaskLists"] {
+        for name in ["TaskGet", "TaskListGet", "TaskLists"] {
             let spec = main_scope
                 .get(&crate::domain::published_language::ToolName::new(name))
                 .unwrap();

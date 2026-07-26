@@ -52,7 +52,7 @@ fn format_task_line(
 impl TypedTool for TaskListTool {
     type Output = TaskListResult;
     fn name(&self) -> &str {
-        "TaskList"
+        "TaskListGet"
     }
     fn description(&self) -> &str {
         "List all tasks and their status. Use to discover pending work with no unresolved dependencies."

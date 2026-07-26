@@ -23,7 +23,7 @@ impl TypedTool for TaskListsTool {
     }
 
     fn description(&self) -> &str {
-        "List current and historical task lists. Use their IDs with TaskList to inspect a specific list."
+        "List current and historical task lists. Use their IDs with TaskListGet to inspect a specific list."
     }
 
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
@@ -92,10 +92,20 @@ impl TypedTool for TaskListsTool {
                 }
             })
             .collect::<Vec<_>>();
-        TypedToolResult::success(
-            format!("{} task lists", task_lists.len()),
-            TaskListsResult { task_lists },
-        )
+        let mut text = format!("{} task lists", task_lists.len());
+        for list in &task_lists {
+            text.push_str(&format!(
+                "\n#{} | {} | {} | {} total, {} pending, {} in_progress, {} completed",
+                list.task_list.id,
+                list.task_list.status,
+                list.task_list.summary,
+                list.stats.total,
+                list.stats.pending,
+                list.stats.in_progress,
+                list.stats.completed
+            ));
+        }
+        TypedToolResult::success(text, TaskListsResult { task_lists })
     }
 }
 
