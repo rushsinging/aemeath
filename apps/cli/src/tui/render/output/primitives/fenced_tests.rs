@@ -62,6 +62,22 @@ fn fence_internal_blank_lines_survive_compact_and_style_does_not_leak() {
 }
 
 #[test]
+fn narrow_table_falls_back_without_dropping_separator_or_rows() {
+    let lines = render_fenced_markdown(
+        "| a | b |\n|---|---|\n| 1 | 2 |",
+        Style::default().fg(theme::TEXT),
+        20,
+        &MarkdownSpacingPolicy::normal(),
+    );
+    let plains = lines
+        .iter()
+        .map(|line| line.plain.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(plains, vec!["| a | b |", "|---|---|", "| 1 | 2 |"]);
+}
+
+#[test]
 fn table_and_diff_fence_keep_existing_rendering() {
     let table_lines = render(
         "| a | b |\n|---|---|\n| 1 | 2 |",

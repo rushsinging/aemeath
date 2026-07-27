@@ -30,6 +30,28 @@ use crate::tui::view_assembler::output::OutputViewAssembler;
 use crate::tui::view_model::LiveStatusViewModel;
 use tokio::sync::mpsc;
 
+fn markdown_spacing_overrides_to_sdk(
+    overrides: crate::tui::render::output::spacing::MarkdownSpacingOverrides,
+) -> sdk::MarkdownSpacingOverridesView {
+    fn element(
+        value: Option<crate::tui::render::output::spacing::ElementSpacing>,
+    ) -> Option<sdk::ElementSpacingView> {
+        value.map(|spacing| sdk::ElementSpacingView {
+            before: spacing.before,
+            after: spacing.after,
+        })
+    }
+
+    sdk::MarkdownSpacingOverridesView {
+        paragraph: element(overrides.paragraph),
+        heading: element(overrides.heading),
+        list: element(overrides.list),
+        code_block: element(overrides.code_block),
+        table: element(overrides.table),
+        blockquote: element(overrides.blockquote),
+    }
+}
+
 fn ui_event_name(event: &UiEvent) -> &'static str {
     match event {
         UiEvent::Text { .. } => "Text",
@@ -356,6 +378,8 @@ impl App {
                         sdk::MarkdownSpacingModeView::Compact
                     }
                 };
+                self.config_view.markdown_spacing_overrides =
+                    markdown_spacing_overrides_to_sdk(view.markdown_spacing.overrides());
             }
             TuiRuntimeEvent::SessionResumed {
                 steps,

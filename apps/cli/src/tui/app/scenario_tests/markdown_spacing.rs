@@ -48,6 +48,13 @@ fn sdk_config_reload_switches_existing_markdown_from_normal_to_compact() {
             scopes: vec![sdk::ConfigApplicationScopeView::Immediate],
             view: sdk::ConfigView {
                 markdown_spacing: sdk::MarkdownSpacingModeView::Compact,
+                markdown_spacing_overrides: sdk::MarkdownSpacingOverridesView {
+                    heading: Some(sdk::ElementSpacingView {
+                        before: Some(2),
+                        after: Some(1),
+                    }),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         },
@@ -59,6 +66,13 @@ fn sdk_config_reload_switches_existing_markdown_from_normal_to_compact() {
     assert_eq!(
         harness.app.model.ui_preferences.markdown_spacing().mode(),
         crate::tui::render::output::spacing::MarkdownSpacingMode::Compact
+    );
+    assert_eq!(
+        harness.app.config_view.markdown_spacing_overrides.heading,
+        Some(sdk::ElementSpacingView {
+            before: Some(2),
+            after: Some(1),
+        })
     );
 }
 

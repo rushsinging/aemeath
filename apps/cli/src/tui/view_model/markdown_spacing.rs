@@ -72,7 +72,6 @@ impl MarkdownSpacingPolicy {
         self.mode
     }
 
-    #[cfg(test)]
     pub const fn overrides(self) -> MarkdownSpacingOverrides {
         self.overrides
     }
