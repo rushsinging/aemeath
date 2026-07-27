@@ -8,15 +8,7 @@ use std::sync::Arc;
 impl App {
     /// Run the TUI event loop.
     /// `agent_client` 是唯一的 runtime 注入点；`resume_id` 由 CLI 启动参数决定。
-    pub async fn run(
-        &mut self,
-        _agent_client: Arc<dyn sdk::AgentClient>,
-        resume_id: Option<String>,
-    ) -> io::Result<()> {
-        // #567：resume 走事件流。启动时存储 resume_id，
-        // start_chat 后发 ResumeSession 事件，runtime 通过 SessionResumed 回传。
-        self.session.pending_resume_id = resume_id;
-
+    pub async fn run(&mut self, _agent_client: Arc<dyn sdk::AgentClient>) -> io::Result<()> {
         // #567：list_sessions / list_models 走事件流（ManageSession / ListModels）。
         // 不再启动时同步拉取。
 

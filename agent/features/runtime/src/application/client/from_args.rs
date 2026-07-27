@@ -254,7 +254,7 @@ pub async fn from_args_with_workspace(
 
     // 3. Session — startup resume is scoped to the current project identity.
     // A rejected cross-project id leaves the committed snapshot unchanged.
-    let session_id = if let Some(resume_id) = args.resume.as_ref() {
+    let (session_id, startup_resume) = if let Some(resume_id) = args.resume.as_ref() {
         match crate::application::client::resume_helper::resume_session_to_backing(
             resume_id, &wiring,
         )
@@ -262,7 +262,37 @@ pub async fn from_args_with_workspace(
         {
             Ok(projection) => {
                 log::info!(target: crate::LOG_TARGET, "startup resume: {}", projection.session_id);
-                projection.session_id
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "resume_lifecycle boundary=startup_projection stage=created session_id={} steps={} messages={} last_step_messages={} last_message_role={} last_message_text_len={}",
+                    projection.session_id,
+                    projection.display_steps.len(),
+                    projection.display_steps.iter().map(|step| step.messages.len()).sum::<usize>(),
+                    projection.display_steps.last().map(|step| step.messages.len()).unwrap_or(0),
+                    projection.display_steps.last().and_then(|step| step.messages.last()).map(|message| format!("{:?}", message.role)).unwrap_or_else(|| "-".to_string()),
+                    projection.display_steps.last().and_then(|step| step.messages.last()).map(|message| message.text_content().len()).unwrap_or(0)
+                );
+                let session_id = projection.session_id.clone();
+                let startup_resume = sdk::SessionResumeView {
+                    steps: projection
+                        .display_steps
+                        .into_iter()
+                        .map(|step| sdk::ResumedSessionStep {
+                            run_id: step.run_id,
+                            step_id: step.step_id,
+                            messages: step
+                                .messages
+                                .into_iter()
+                                .map(crate::application::client::message_to_sdk)
+                                .collect(),
+                        })
+                        .collect(),
+                    session_id: projection.session_id,
+                    created_at: chrono::DateTime::parse_from_rfc3339(&projection.created_at)
+                        .map(|dt| dt.timestamp_millis() as u64)
+                        .unwrap_or(0),
+                };
+                (session_id, Some(startup_resume))
             }
             Err(error) => {
                 return Err(SdkError::Init(format!(
@@ -275,7 +305,7 @@ pub async fn from_args_with_workspace(
         // and the Context coordinator share the same canonical session.
         let session_id = wiring.committed_session().id.clone();
         log::info!(target: crate::LOG_TARGET, "session started");
-        session_id
+        (session_id, None)
     };
     // Session id determined above; committed_config remains bound to the
     // current project because cross-project resume is rejected.
@@ -507,6 +537,7 @@ pub async fn from_args_with_workspace(
         allow_all: args.allow_all,
         verbose: args.verbose,
         resume: args.resume,
+        startup_resume,
         agent_runner,
         parent_context_source,
         tool_result_materializer,
@@ -806,6 +837,7 @@ mod tests {
             allow_all: true,
             verbose: false,
             resume: None,
+            startup_resume: None,
             agent_runner,
             parent_context_source,
             tool_result_materializer,

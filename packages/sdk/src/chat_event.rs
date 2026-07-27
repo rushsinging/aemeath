@@ -18,6 +18,14 @@ pub struct ResumedSessionStep {
     pub messages: Vec<ChatMessage>,
 }
 
+/// 启动 `--resume` 已完成一次 backing 恢复后交给前端的历史投影。
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SessionResumeView {
+    pub steps: Vec<ResumedSessionStep>,
+    pub session_id: String,
+    pub created_at: u64,
+}
+
 /// Runtime stream context used to bind UI events to the authoritative chat/turn.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatEventContext {

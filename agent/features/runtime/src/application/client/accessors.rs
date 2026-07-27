@@ -83,6 +83,8 @@ pub struct MainSessionShell {
     pub verbose: bool,
     /// #1385 Task 7: resume session-id，从 `ChatRuntimeContext` 迁移至 shell。
     pub resume: Option<String>,
+    /// 启动 `--resume` 已完成的单次恢复投影；供 Composition/TUI 直接初始化历史。
+    pub startup_resume: Option<sdk::SessionResumeView>,
 
     // ── Cross-run shared resources ──
     pub(crate) agent_runner: Arc<dyn AgentRunner>,
@@ -213,6 +215,7 @@ impl AgentClientImpl {
         let services = shell.runtime_context_factory.services();
         crate::adapters::tui_launch::TuiLaunchContext {
             session_id: shell.session_id.clone(),
+            startup_resume: shell.startup_resume.clone(),
             model_display: super::mapping::model_display(
                 &shell.resolved_model.source_key,
                 &shell.resolved_model.model.name,

@@ -54,11 +54,6 @@ impl App {
             Some(spawn_ctx) => {
                 let handle = processing::spawn_processing(spawn_ctx);
                 self.chat.set_processing_handle(handle);
-                // #567：resume 走事件流。启动后如果有 pending_resume_id，发 ResumeSession。
-                if let Some(id) = self.session.pending_resume_id.take() {
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::ResumeSession { id });
-                }
             }
             None => self.append_error_notice("SDK agent client is unavailable"),
         }

@@ -113,10 +113,14 @@ impl OutputViewState {
             self.load_older_batch()
         } else {
             let before = self.history_window_tail_offset;
+            let max_tail_offset = self
+                .source_total_lines
+                .saturating_sub(self.render_line_limit);
             self.history_window_tail_offset = self
                 .history_window_tail_offset
-                .saturating_sub(HISTORY_LOAD_BATCH_LINES);
-            self.history_window_tail_offset < before
+                .saturating_add(HISTORY_LOAD_BATCH_LINES)
+                .min(max_tail_offset);
+            self.history_window_tail_offset > before
         };
         if expanded {
             crate::tui::log_debug!(
@@ -179,9 +183,6 @@ impl OutputViewState {
             return false;
         }
         self.render_line_limit = next_limit;
-        self.history_window_tail_offset = self
-            .source_total_lines
-            .saturating_sub(self.render_line_limit);
         true
     }
 

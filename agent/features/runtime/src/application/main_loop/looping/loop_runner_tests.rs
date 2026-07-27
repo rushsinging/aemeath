@@ -319,6 +319,7 @@ fn test_shell() -> crate::application::client::MainSessionShell {
         allow_all: true,
         verbose: false,
         resume: None,
+        startup_resume: None,
         agent_runner: Arc::new(NoopAgentRunner),
         parent_context_source: crate::application::runtime_context::ParentRunContextSource::new(),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
@@ -652,6 +653,7 @@ impl RecordingSink {
                 format!("ReflectionHistory:{}", records.len())
             }
             RuntimeStreamEvent::SessionResumed { .. } => "SessionResumed".to_string(),
+            RuntimeStreamEvent::SessionResumeFailed { .. } => "SessionResumeFailed".to_string(),
             RuntimeStreamEvent::ModelInvocationRetrying { attempt, delay, .. } => {
                 format!("ModelInvocationRetrying:{attempt}:{}", delay.as_millis())
             }
@@ -2300,6 +2302,77 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
             .all(|message| message.text_content() != "/save"),
         "ControlCommand 永不作为 user message 进入历史: {:?}",
         sink.events()
+    );
+}
+
+#[tokio::test]
+async fn resume_session_failure_emits_failure_and_returns_to_idle() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = RecordingProvider::new();
+    let requested_id = "missing-resume-session";
+
+    input_tx
+        .send(sdk::ChatInputEvent::ResumeSession {
+            id: requested_id.to_string(),
+        })
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .any(|event| event == "SessionResumeFailed")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            driver_provider.calls().is_empty(),
+            "resume 命令不得触发 LLM turn"
+        );
+        input_tx
+            .send(sdk::ChatInputEvent::user_message(
+                "after resume",
+                Vec::new(),
+            ))
+            .unwrap();
+        loop {
+            if driver_provider.calls().len() == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let mut shell = test_shell();
+    shell.current_binding = Arc::new(std::sync::RwLock::new(
+        crate::application::testing::binding_from_llm_provider(Arc::new(provider.clone())),
+    ));
+    shell.runtime_context_factory =
+        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
+    shell.session_id = "test-resume-failure-returns-idle".to_string();
+    let ctx = test_chat_loop_ctx(
+        sink.clone(),
+        SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        shell,
+    );
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("resume 失败后 loop 应继续接受用户输入并在 shutdown 后返回");
+    driver.await.unwrap();
+
+    assert_eq!(
+        provider.calls(),
+        vec!["after resume".to_string()],
+        "resume 失败只发失败事件，随后回 idle 等待真实用户输入"
     );
 }
 

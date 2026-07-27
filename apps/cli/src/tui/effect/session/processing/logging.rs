@@ -315,14 +315,12 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             text.len(),
             is_error
         ),
-        sdk::ChatEvent::SessionResumed { steps, session_id, .. } => crate::tui::log_trace!(
-            "{} session_resumed id={} step_count={} msg_count={}",
-            stage,
+        sdk::ChatEvent::SessionResumed { steps, session_id, .. } => crate::tui::log_debug!(
+            "resume_lifecycle boundary=sdk_stream stage=session_resumed_received session_id={} steps={} messages={}",
             session_id,
             steps.len(),
             steps.iter().map(|step| step.messages.len()).sum::<usize>()
-        ),
-        sdk::ChatEvent::Result(result) => crate::tui::log_trace!(
+        ),        sdk::ChatEvent::Result(result) => crate::tui::log_trace!(
             "{} result text_len={} tokens_used={:?}",
             stage,
             result.text.len(),
@@ -404,6 +402,43 @@ pub(super) fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             json_value_kind(content),
             is_error,
             images.len()
+        ),
+        _ => {}
+    }
+}
+
+pub(crate) fn log_tui_runtime_delivery(
+    event: &crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent,
+    outcome: &'static str,
+) {
+    use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
+
+    match event {
+        TuiRuntimeEvent::Text { context, text } => crate::tui::log_debug!(
+            "event_delivery boundary=sdk_to_tui kind=Text chat_id={} turn_id={} size={} outcome={}",
+            context.chat_id,
+            context.turn_id,
+            text.len(),
+            outcome
+        ),
+        TuiRuntimeEvent::BlockComplete { context, text } => crate::tui::log_debug!(
+            "event_delivery boundary=sdk_to_tui kind=BlockComplete chat_id={} turn_id={} size={} outcome={}",
+            context.chat_id,
+            context.turn_id,
+            text.len(),
+            outcome
+        ),
+        TuiRuntimeEvent::UserMessagesAdopted { items, queued } => crate::tui::log_debug!(
+            "event_delivery boundary=sdk_to_tui kind=UserMessagesAdopted items={} queued={} outcome={}",
+            items.len(),
+            queued.len(),
+            outcome
+        ),
+        TuiRuntimeEvent::Done { context, .. } => crate::tui::log_debug!(
+            "event_delivery boundary=sdk_to_tui kind=Done chat_id={} turn_id={} size=0 outcome={}",
+            context.chat_id,
+            context.turn_id,
+            outcome
         ),
         _ => {}
     }

@@ -15,6 +15,7 @@ pub type AgentClientHandle = Arc<dyn AgentClient>;
 pub struct AgentClientBootstrap {
     pub client: AgentClientHandle,
     pub session_id: String,
+    pub startup_resume: Option<sdk::SessionResumeView>,
     pub cwd: PathBuf,
     pub model_display: String,
     pub allow_all: bool,
@@ -303,6 +304,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     Ok(AgentClientBootstrap {
         client,
         session_id: launch.session_id,
+        startup_resume: launch.startup_resume,
         cwd,
         model_display: launch.model_display,
         allow_all: launch.allow_all,

@@ -10,8 +10,6 @@ pub(crate) struct SessionState {
     pub session_created_at: Option<String>,
     pub current_model_display: String,
     pub memory_config: sdk::MemoryConfigView,
-    /// #567：启动时存储 resume_id，start_chat 后发 ResumeSession 事件
-    pub pending_resume_id: Option<String>,
 }
 
 impl SessionState {
@@ -35,7 +33,6 @@ mod tests {
             session_created_at: None,
             current_model_display: String::new(),
             memory_config: sdk::MemoryConfigView::default(),
-            pending_resume_id: None,
         }
     }
 

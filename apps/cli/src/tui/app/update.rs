@@ -257,6 +257,22 @@ impl App {
     }
 
     fn update_runtime_event(&mut self, event: TuiRuntimeEvent) -> UpdateResult {
+        let diagnostic_kind = match &event {
+            TuiRuntimeEvent::Text { .. } => Some("Text"),
+            TuiRuntimeEvent::BlockComplete { .. } => Some("BlockComplete"),
+            TuiRuntimeEvent::UserMessagesAdopted { .. } => Some("UserMessagesAdopted"),
+            TuiRuntimeEvent::Done { .. } => Some("Done"),
+            _ => None,
+        };
+        if let Some(kind) = diagnostic_kind {
+            crate::tui::log_debug!(
+                "event_delivery boundary=tui_channel_to_reducer kind={} outcome=received timeline_items={} queued={} revision={}",
+                kind,
+                self.model.conversation.timeline.items().len(),
+                self.model.conversation.queued_submissions.len(),
+                self.model.conversation.revision()
+            );
+        }
         // UserMessagesAdopted 需要在 mapper/reducer 之外执行清占位 + 用户回显，
         // 因为这些副作用依赖 App 级方法且不产生 Intent。
         match &event {
@@ -267,6 +283,11 @@ impl App {
                     }
                     self.append_user_echo(item.text_content());
                 }
+                // 用户消息已经成为已提交的会话尾部内容。即使 resume 后用户先向上
+                // 浏览过历史，也必须把视图恢复到最新窗口，否则新消息只进入 model，
+                // 仍会被旧的 history_window_tail_offset 裁掉。
+                self.view_state.output.scroll_to_bottom();
+                self.mark_output_dirty();
             }
             TuiRuntimeEvent::TurnStarted { .. } => {
                 self.spinner_phase(SpinnerPhase::Thinking);
@@ -295,7 +316,20 @@ impl App {
                 session_id,
                 created_at,
             } => {
+                crate::tui::log_debug!(
+                    "resume_lifecycle boundary=tui_runtime stage=session_resumed_received session_id={} steps={} messages={}",
+                    session_id,
+                    steps.len(),
+                    steps.iter().map(|step| step.messages.len()).sum::<usize>()
+                );
                 self.resume_session_messages(session_id, steps.clone(), created_at.to_string());
+                crate::tui::log_debug!(
+                    "resume_lifecycle boundary=tui_runtime stage=session_resumed_applied session_id={} timeline_items={} chats={} revision={}",
+                    session_id,
+                    self.model.conversation.timeline.items().len(),
+                    self.model.conversation.chats.len(),
+                    self.model.conversation.revision()
+                );
                 return UpdateResult {
                     effects: Vec::new(),
                     spawn_effect: None,
@@ -351,7 +385,27 @@ impl App {
             _ => {}
         }
         let mapping = map_runtime_event(&event);
+        if let Some(kind) = diagnostic_kind {
+            crate::tui::log_debug!(
+                "event_delivery boundary=tui_mapper kind={} outcome=mapped conversation_intents={} diagnostic_intents={} session_intents={}",
+                kind,
+                mapping.conversation.len(),
+                mapping.diagnostic.len(),
+                mapping.session.len()
+            );
+        }
         let model_result = reduce_agent_event(&mut self.model, mapping);
+        if let Some(kind) = diagnostic_kind {
+            crate::tui::log_debug!(
+                "event_delivery boundary=tui_reducer kind={} outcome=reduced timeline_items={} queued={} revision={} dirty_output={} effects={}",
+                kind,
+                self.model.conversation.timeline.items().len(),
+                self.model.conversation.queued_submissions.len(),
+                self.model.conversation.revision(),
+                model_result.dirty.output,
+                model_result.effects.len()
+            );
+        }
         crate::tui::update::dirty::merge_dirty(&mut self.view_state.dirty, model_result.dirty);
         UpdateResult {
             effects: model_result.effects,
@@ -533,38 +587,9 @@ impl App {
         use std::rc::Rc;
 
         let total = document.total_lines();
-        let skip_lines = if tail_offset == 0 {
-            0
-        } else {
-            total.saturating_sub(line_limit).saturating_sub(tail_offset)
-        };
-        if skip_lines == 0 {
-            if document.total_lines() <= line_limit {
-                return document;
-            }
-            // 已经到达最早历史：窗口从 0 开始，不应再显示“更早消息”提示。
-            let group_counts = document.root_group_block_counts();
-            let mut groups = Vec::with_capacity(group_counts.len());
-            let mut blocks = document.blocks.into_iter();
-            for count in group_counts {
-                groups.push(blocks.by_ref().take(count).collect::<Vec<_>>());
-            }
-            let mut kept_groups = Vec::new();
-            let mut kept_lines = 0usize;
-            for group in groups {
-                let group_lines = group.iter().map(|block| block.lines.len()).sum::<usize>();
-                if kept_lines > 0 && kept_lines.saturating_add(group_lines) > line_limit {
-                    break;
-                }
-                kept_lines = kept_lines.saturating_add(group_lines);
-                kept_groups.push(group);
-                if kept_lines > line_limit {
-                    break;
-                }
-            }
-            return crate::tui::render::output::rendered::RenderedDocument::with_root_groups(
-                kept_groups,
-            );
+        let skip_lines = total.saturating_sub(line_limit).saturating_sub(tail_offset);
+        if total <= line_limit {
+            return document;
         }
 
         let group_counts = document.root_group_block_counts();

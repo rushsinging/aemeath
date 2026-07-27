@@ -105,6 +105,37 @@ fn assert_tool_groups_are_complete(harness: &TuiScenarioHarness) {
 }
 
 #[test]
+fn resumed_history_initial_window_keeps_newest_complete_groups() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    let steps = (0..1_200)
+        .map(|index| TuiResumedSessionStep {
+            run_id: "resume-tail-run".into(),
+            step_id: format!("resume-tail-step-{index}"),
+            messages: vec![TuiChatMessage::assistant_text(format!(
+                "RESUME-TAIL-ANSWER-{index:04}"
+            ))],
+        })
+        .collect();
+
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps,
+        session_id: "resume-tail".into(),
+        created_at: 0,
+    });
+    harness.render();
+
+    let document = harness.app.output_area.document();
+    let plain = document
+        .iter_lines()
+        .map(|line| line.plain.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(plain.contains("RESUME-TAIL-ANSWER-1199"));
+    assert!(!plain.contains("RESUME-TAIL-ANSWER-0000"));
+    assert!(plain.contains("更早的消息已折叠"));
+}
+
+#[test]
 fn resumed_history_window_never_splits_edit_call_and_diff_result() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     for index in 0..180 {
@@ -147,8 +178,14 @@ fn resumed_history_window_reaches_oldest_history_without_folded_hint() {
     }
 
     assert_eq!(
-        harness.app.view_state.output.history_window_tail_offset, 0,
-        "到达最早历史后窗口起点必须为 0"
+        harness.app.view_state.output.history_window_tail_offset,
+        harness
+            .app
+            .view_state
+            .output
+            .source_total_lines
+            .saturating_sub(harness.app.view_state.output.render_line_limit()),
+        "到达最早历史后窗口尾部偏移必须达到最早可见位置"
     );
     assert!(
         !harness.screen().contains("更早的消息已折叠"),
@@ -163,7 +200,7 @@ fn scrolling_to_top_loads_history_in_five_hundred_line_batches() {
     seed_history(&mut harness, 1_300);
 
     assert_eq!(harness.app.view_state.output.render_line_limit(), 1_000);
-    assert!(!harness
+    assert!(harness
         .app
         .output_area
         .document()
@@ -297,6 +334,62 @@ fn top_request_before_first_resume_render_loads_after_source_is_observed() {
         harness.app.view_state.output.render_line_limit(),
         harness.app.view_state.output.source_total_lines.min(1_500)
     );
+}
+
+#[test]
+fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    let steps = (0..2_000)
+        .map(|index| TuiResumedSessionStep {
+            run_id: "resume-adopted-run".into(),
+            step_id: format!("resume-adopted-step-{index}"),
+            messages: vec![TuiChatMessage::assistant_text(format!(
+                "RESUME-ADOPTED-ANSWER-{index:04}"
+            ))],
+        })
+        .collect();
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps,
+        session_id: "resume-adopted".into(),
+        created_at: 0,
+    });
+    harness.render();
+    for _ in 0..20 {
+        harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
+        harness.render();
+    }
+    assert!(harness.app.view_state.output.history_window_tail_offset > 0);
+    assert!(!harness.app.view_state.output.auto_scroll);
+
+    harness.runtime_event(TuiRuntimeEvent::UserMessagesAdopted {
+        items: vec![TuiChatMessage {
+            role: "user".into(),
+            content: vec![crate::tui::adapter::runtime_view::TuiContentBlock::text(
+                "RESUME-ADOPTED-NEW-USER",
+            )],
+            input_id: Some("resume-adopted-input".into()),
+            source: crate::tui::adapter::runtime_view::TuiMessageSource::User,
+            stop_hook: None,
+        }],
+        queued: vec![],
+    });
+    harness.render();
+
+    assert_eq!(harness.app.view_state.output.history_window_tail_offset, 0);
+    assert!(harness.app.view_state.output.auto_scroll);
+    assert!(harness.screen().contains("RESUME-ADOPTED-NEW-USER"));
+
+    let context = context(9_999);
+    harness.runtime_event(TuiRuntimeEvent::Text {
+        context: context.clone(),
+        text: "RESUME-ADOPTED-NEXT-ASSISTANT".into(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::BlockComplete {
+        context,
+        text: "RESUME-ADOPTED-NEXT-ASSISTANT".into(),
+    });
+    harness.render();
+    assert!(harness.screen().contains("RESUME-ADOPTED-NEXT-ASSISTANT"));
 }
 
 #[test]
