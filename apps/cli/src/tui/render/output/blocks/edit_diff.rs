@@ -151,15 +151,20 @@ pub fn render_edit_diff(
     width: u16,
 ) -> Option<Vec<RenderedLine>> {
     let parsed = edit_diff_from_data(data).or_else(|| parse_edit_diff(result))?;
+    #[cfg(test)]
+    let started = std::time::Instant::now();
     let ext = file_ext_for_edit(summary, result);
-    Some(diff_from(
+    let lines = diff_from(
         &parsed.old,
         &parsed.new,
         parsed.start_line,
         parsed.start_line,
         ext.as_deref(),
         width,
-    ))
+    );
+    #[cfg(test)]
+    crate::tui::render::performance::record_edit_diff(started.elapsed());
+    Some(lines)
 }
 
 #[cfg(test)]

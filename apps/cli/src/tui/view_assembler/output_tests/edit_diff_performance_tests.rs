@@ -1,0 +1,206 @@
+use super::super::OutputViewAssembler;
+use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::intent::{StartChat, ToolCallUpdate, ToolResult};
+use crate::tui::model::conversation::model::ConversationModel;
+use crate::tui::model::conversation::tool_call::ToolCallStatus;
+use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
+use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
+use crate::tui::render::performance::{capture, percentiles_ns, RenderPerformanceSnapshot};
+use crate::tui::view_model::OutputBlockKind;
+use std::time::Instant;
+
+fn source_lines(count: usize, changed_index: Option<usize>) -> String {
+    (0..count)
+        .map(|index| {
+            if changed_index == Some(index) {
+                format!("fn item_{index}() {{ println!(\"新值 {index} ✓\"); }}")
+            } else if index + 1 == count {
+                format!(
+                    "fn item_{index}() {{ println!(\"{}\"); }}",
+                    "x".repeat(4096)
+                )
+            } else {
+                format!("fn item_{index}() {{ println!(\"旧值 {index} — Unicode\"); }}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn edit_conversation(edit_count: usize, lines_per_diff: usize) -> ConversationModel {
+    let mut conversation = ConversationModel::default();
+    conversation.apply(StartChat {
+        submission: "恢复长会话并检查 Edit 历史".to_string(),
+    });
+    let chat_id = ChatId::new("chat-main");
+    let turn_id = ChatTurnId::new("turn-main");
+
+    for index in 0..edit_count {
+        let id = ToolCallId::new(format!("edit-{index}"));
+        let provider_id = format!("provider-edit-{index}");
+        let old = source_lines(lines_per_diff, None);
+        let new = source_lines(lines_per_diff, Some(lines_per_diff / 2));
+        let arguments = serde_json::json!({
+            "file_path": format!("src/generated_{index}.rs"),
+            "old_string": "old",
+            "new_string": "new"
+        })
+        .to_string();
+        conversation.apply(ToolCallUpdate {
+            chat_id: chat_id.clone(),
+            turn_id: turn_id.clone(),
+            id: id.clone(),
+            provider_id: Some(provider_id.clone()),
+            name: "Edit".to_string(),
+            index,
+            arguments: Some(arguments),
+            status: ToolCallStatus::Ready,
+        });
+        conversation.apply(ToolResult {
+            chat_id: chat_id.clone(),
+            turn_id: turn_id.clone(),
+            id,
+            provider_id,
+            tool_name: "Edit".to_string(),
+            output: format!("replaced 1 occurrence(s) in src/generated_{index}.rs"),
+            content: serde_json::json!({
+                "file_path": format!("src/generated_{index}.rs"),
+                "replacements_made": 1,
+                "dry_run": false,
+                "old": old,
+                "new": new,
+                "start_line": 1
+            }),
+            is_error: false,
+            image_count: 0,
+        });
+    }
+    conversation
+}
+
+fn tool_result_count(vm: &crate::tui::view_model::output::OutputViewModel) -> usize {
+    vm.roots
+        .iter()
+        .flat_map(|root| root.children.iter())
+        .filter(|child| matches!(child.kind, OutputBlockKind::ToolResult(_)))
+        .count()
+}
+
+#[test]
+fn edit_fixture_assembles_expected_tool_result_children() {
+    let conversation = edit_conversation(4, 20);
+    let vm = OutputViewAssembler::assemble_from_conversation(
+        &conversation,
+        conversation.revision(),
+        None,
+    );
+    assert_eq!(tool_result_count(&vm), 4);
+}
+
+#[test]
+fn edit_cold_work_scales_and_spinner_warm_render_reuses_static_diff() {
+    fn render(edit_count: usize) -> (RenderPerformanceSnapshot, RenderPerformanceSnapshot) {
+        let conversation = edit_conversation(edit_count, 40);
+        let vm = OutputViewAssembler::assemble_from_conversation(
+            &conversation,
+            conversation.revision(),
+            None,
+        );
+        let mut renderer = OutputDocumentRenderer::default();
+        let (_, cold) = capture(|| {
+            renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal())
+        });
+        let (_, warm) = capture(|| {
+            renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+        });
+        (cold, warm)
+    }
+
+    let (small, _) = render(2);
+    let (large, warm) = render(6);
+
+    assert_eq!(small.edit_diff_calls, 2);
+    assert_eq!(large.edit_diff_calls, 6);
+    assert!(large.diff_build_output_lines > small.diff_build_output_lines);
+    assert!(large.syntax_highlight_calls > small.syntax_highlight_calls);
+    assert_eq!(warm.edit_diff_calls, 0);
+    assert_eq!(warm.diff_build_calls, 0);
+    assert_eq!(warm.syntax_highlight_calls, 0);
+    assert_eq!(
+        warm.gutted_cache_hits, 13,
+        "用户 root + 每个 Edit 的 ToolCall/ToolResult"
+    );
+}
+
+#[test]
+#[ignore = "性能基线；手动运行：cargo test -p cli --release edit_diff_release_workload -- --ignored --nocapture"]
+#[allow(clippy::print_stdout)]
+fn edit_diff_release_workload() {
+    const SAMPLES: usize = 20;
+    println!("\n=== #1418 Edit diff 性能基线（width=100, samples={SAMPLES}）===");
+
+    for (edit_count, lines_per_diff) in [(5, 20), (10, 50), (10, 100)] {
+        let conversation = edit_conversation(edit_count, lines_per_diff);
+        let mut assemble_ns = Vec::with_capacity(SAMPLES);
+        let mut cold_ns = Vec::with_capacity(SAMPLES);
+        let mut warm_ns = Vec::with_capacity(SAMPLES);
+        let mut representative = RenderPerformanceSnapshot::default();
+
+        for sample in 0..SAMPLES {
+            let started = Instant::now();
+            let vm = OutputViewAssembler::assemble_from_conversation(
+                &conversation,
+                conversation.revision(),
+                None,
+            );
+            assemble_ns.push(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX));
+
+            let mut renderer = OutputDocumentRenderer::default();
+            let ((), cold) = capture(|| {
+                let started = Instant::now();
+                let _ = renderer.render_model_document(
+                    &vm,
+                    100,
+                    100,
+                    0,
+                    MarkdownSpacingPolicy::normal(),
+                );
+                cold_ns.push(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX));
+            });
+            let ((), warm) = capture(|| {
+                let started = Instant::now();
+                let _ = renderer.render_model_document(
+                    &vm,
+                    100,
+                    100,
+                    1,
+                    MarkdownSpacingPolicy::normal(),
+                );
+                warm_ns.push(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX));
+            });
+            if sample == 0 {
+                representative = cold;
+                assert_eq!(warm.syntax_highlight_calls, 0);
+            }
+        }
+
+        let (assemble_p50, assemble_p95) = percentiles_ns(&assemble_ns).unwrap();
+        let (cold_p50, cold_p95) = percentiles_ns(&cold_ns).unwrap();
+        let (warm_p50, warm_p95) = percentiles_ns(&warm_ns).unwrap();
+        println!(
+            "edits={edit_count:>2} lines_per_diff={lines_per_diff:>4} total_source_lines={:>5} | assemble_p50/p95={:.2}/{:.2}ms cold_p50/p95={:.2}/{:.2}ms warm_p50/p95={:.3}/{:.3}ms | diff_calls={} diff_output_lines={} highlighter_creations={} highlight_calls={} highlight_bytes={} block_miss={} gutted_miss={}",            edit_count * lines_per_diff,
+            assemble_p50 as f64 / 1_000_000.0,
+            assemble_p95 as f64 / 1_000_000.0,
+            cold_p50 as f64 / 1_000_000.0,
+            cold_p95 as f64 / 1_000_000.0,
+            warm_p50 as f64 / 1_000_000.0,
+            warm_p95 as f64 / 1_000_000.0,
+            representative.edit_diff_calls,
+            representative.diff_build_output_lines,
+            representative.syntax_highlighter_creations,
+            representative.syntax_highlight_calls,            representative.syntax_highlight_input_bytes,
+            representative.block_cache_misses,
+            representative.gutted_cache_misses,
+        );
+    }
+}

@@ -83,6 +83,8 @@ impl OutputDocumentRenderer {
         animation_frame: u64,
         markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
     ) -> RenderedDocument {
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         // 按 root 分组渲染：每个 root 子树（父块 + 全部后代）落入独立 group，
         // 以便 MAX_LINES 裁剪以整棵子树为单位，NEVER 切断 parent/child 关系。
         let mut groups: Vec<Vec<RenderedBlock>> = Vec::new();
@@ -106,6 +108,8 @@ impl OutputDocumentRenderer {
         self.cache.retain(&live_set);
         // gutted 缓存同步清理：移除已不在渲染树中的条目，防止内存泄漏。
         self.gutted.retain(|id, _| live_set.contains(id.as_str()));
+        #[cfg(test)]
+        crate::tui::render::performance::record_document_render(started.elapsed());
         document
     }
 
@@ -154,6 +158,8 @@ impl OutputDocumentRenderer {
         // gutted 缓存命中：key 完全一致时直接复用（lines 为 Rc，clone 廉价）。
         if let Some((cached_key, cached_block)) = self.gutted.get(&node.block_id) {
             if *cached_key == gkey {
+                #[cfg(test)]
+                crate::tui::render::performance::record_gutted_cache_hit();
                 out.push(cached_block.clone());
                 for child in &node.children {
                     self.render_node(
@@ -168,6 +174,8 @@ impl OutputDocumentRenderer {
                 return;
             }
         }
+        #[cfg(test)]
+        crate::tui::render::performance::record_gutted_cache_miss();
 
         // gutted 缓存未命中：走完整 render_self + apply_gutter 路径。
         #[cfg(test)]

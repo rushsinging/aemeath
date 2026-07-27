@@ -4,6 +4,7 @@ use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
 use crate::tui::view_model::output::{
     BlockNode, ModelStreamPlaceholderBlockView, OutputBlockKind, OutputViewModel, TextBlockView,
+    ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
 };
 use crate::tui::view_model::style::SemanticStyle;
 
@@ -563,6 +564,79 @@ fn test_gutted_cache_reuses_static_block_across_frames() {
         after_first,
         "静态 block 跨 frame 应复用 gutted 缓存"
     );
+}
+
+#[test]
+fn static_edit_diff_reuses_render_and_highlight_across_spinner_frames() {
+    let old = (0..80)
+        .map(|index| format!("fn item_{index}() {{ println!(\"old {index}\"); }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut new_lines = old.lines().map(str::to_string).collect::<Vec<_>>();
+    new_lines[40] = "fn item_40() { println!(\"new 40\"); }".to_string();
+    let new = new_lines.join("\n");
+    let result_text = "replaced 1 occurrence(s) in src/lib.rs".to_string();
+    let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
+        key: "edit-result".into(),
+        tool_title: "Edit".into(),
+        args_preview: Some(r#"{"file_path":"src/lib.rs"}"#.into()),
+        result_text: result_text.clone(),
+        data: Some(serde_json::json!({ "old": old, "new": new, "start_line": 1 })),
+        style: SemanticStyle::Success,
+    });
+    let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+        key: "edit".into(),
+        chat_id: None,
+        turn_id: None,
+        tool_call_id: Some("edit".into()),
+        title: "Edit".into(),
+        icon: "✓".into(),
+        semantic_status: ToolSemanticStatus::Success,
+        style: SemanticStyle::Success,
+        args_preview: Some(r#"{"file_path":"src/lib.rs"}"#.into()),
+        activity_lines: Vec::new(),
+        result_summary: Some(result_text),
+        result_payload: None,
+        workspace_root: None,
+        collapsible: false,
+        collapsed: false,
+        agent_meta: None,
+    });
+    let vm = vm_with_roots(vec![BlockNode {
+        block_id: "edit".into(),
+        block_version: tool_kind.cache_version(),
+        kind: tool_kind,
+        children: vec![BlockNode {
+            block_id: "edit-result".into(),
+            block_version: result_kind.cache_version(),
+            kind: result_kind,
+            children: Vec::new(),
+        }],
+    }]);
+    let mut renderer = OutputDocumentRenderer::default();
+
+    let (_, cold) = crate::tui::render::performance::capture(|| {
+        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal())
+    });
+    let (_, warm) = crate::tui::render::performance::capture(|| {
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+    });
+
+    assert_eq!(cold.edit_diff_calls, 1);
+    assert_eq!(cold.diff_build_calls, 1);
+    assert!(cold.syntax_highlight_calls > 0);
+    assert_eq!(cold.block_cache_misses, 2);
+    assert_eq!(cold.gutted_cache_misses, 2);
+    assert_eq!(warm.edit_diff_calls, 0);
+    assert_eq!(warm.diff_build_calls, 0);
+    assert_eq!(warm.syntax_highlight_calls, 0);
+    assert_eq!(
+        warm.block_cache_hits, 0,
+        "gutted cache 命中应短路内层 block cache"
+    );
+    assert_eq!(warm.block_cache_misses, 0);
+    assert_eq!(warm.gutted_cache_hits, 2);
+    assert_eq!(warm.gutted_cache_misses, 0);
 }
 
 #[test]
