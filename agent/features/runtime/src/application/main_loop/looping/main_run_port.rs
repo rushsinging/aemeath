@@ -258,6 +258,9 @@ where
         crate::application::interaction::InteractionRequestMetadata,
         tokio::sync::oneshot::Receiver<crate::application::interaction::InteractionCompletion>,
     )>,
+    /// Completions consumed by the temporary AwaitingUser wakeup select and
+    /// handed to the engine through its existing `poll_interaction` seam.
+    pub(crate) resolved_interactions: Vec<crate::application::interaction::InteractionResolution>,
     /// #1248: Pending interaction work set by the engine for multi-interaction rounds.
     pub(crate) pending_work: Option<crate::application::loop_engine::PendingInteractionWork>,
 }
@@ -1137,6 +1140,48 @@ where
         self.input_strategy.await_user_input(expected_epoch).await
     }
 
+    /// #1425 temporary compatibility wakeup.
+    ///
+    /// Main previously parked only on `input_events`, so an accepted interaction
+    /// reply could not wake the Run until unrelated user input arrived. Keep this
+    /// select until the concurrent RuntimeContext/Interaction refactor provides
+    /// one owner-level AwaitingUser wakeup seam. That refactor MUST preserve the
+    /// invariant that a reply alone resumes the Run, without an extra ChatInputEvent.
+    async fn await_user_wakeup(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        if self.interaction_receivers.is_empty() {
+            return self.input_strategy.await_user_input(expected_epoch).await;
+        }
+
+        tokio::select! {
+            biased;
+            resolution = async {
+                let (metadata, receiver) = self
+                    .interaction_receivers
+                    .first_mut()
+                    .expect("checked non-empty above");
+                match receiver.await {
+                    Ok(completion) => {
+                        crate::application::interaction::InteractionResolution::Resolved {
+                            metadata: metadata.clone(),
+                            completion,
+                        }
+                    }
+                    Err(_) => crate::application::interaction::InteractionResolution::Closed {
+                        metadata: metadata.clone(),
+                    },
+                }
+            } => {
+                self.interaction_receivers.remove(0);
+                self.resolved_interactions.push(resolution);
+                Ok(DrainOutcome::NoInput { epoch: expected_epoch })
+            }
+            outcome = self.input_strategy.await_user_input(expected_epoch) => outcome,
+        }
+    }
+
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
         let (needed, window) =
             crate::application::loop_engine::shared::needs_compaction_with_window(
@@ -1346,6 +1391,9 @@ where
         &mut self,
     ) -> Result<Option<crate::application::interaction::InteractionResolution>, LoopEngineError>
     {
+        if !self.resolved_interactions.is_empty() {
+            return Ok(Some(self.resolved_interactions.remove(0)));
+        }
         // Check each stored receiver; return the first completed one.
         let mut resolved = None;
         let mut remaining = Vec::new();

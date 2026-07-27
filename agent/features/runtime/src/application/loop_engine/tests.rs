@@ -115,6 +115,13 @@ struct ScriptedPort {
     /// #1248: Stored interaction metadata alongside receivers for full roundtrip tests.
     stored_metadata:
         std::sync::Mutex<VecDeque<crate::application::interaction::InteractionRequestMetadata>>,
+    /// #1425: When true, mirror Main's blocking AwaitingUser path by waiting
+    /// for the interaction receiver instead of returning a scripted drain outcome.
+    await_interaction_completion: bool,
+    /// Interaction resolutions consumed by the blocking waiter and handed back
+    /// through `poll_interaction` on the same loop invocation.
+    resolved_interactions:
+        std::sync::Mutex<VecDeque<crate::application::interaction::InteractionResolution>>,
     /// #1248: Fake tool execution port for counting/tracking approvals.
     fake_tool_port: Option<Arc<FakeToolExecutionPort>>,
 }
@@ -163,6 +170,8 @@ impl Default for ScriptedPort {
             stored_receivers: std::sync::Mutex::new(VecDeque::new()),
             pending_work: std::sync::Mutex::new(None),
             stored_metadata: std::sync::Mutex::new(VecDeque::new()),
+            await_interaction_completion: false,
+            resolved_interactions: std::sync::Mutex::new(VecDeque::new()),
             fake_tool_port: None,
         }
     }
@@ -230,6 +239,46 @@ impl RunLoopPort for ScriptedPort {
             }
         }
         Ok(outcome)
+    }
+
+    async fn await_user_wakeup(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        if self.await_interaction_completion {
+            self.calls.push("await_interaction");
+            let receiver = self
+                .stored_receivers
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("pending interaction receiver");
+            let metadata = self
+                .stored_metadata
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("pending interaction metadata");
+            let resolution = match receiver.await {
+                Ok(completion) => {
+                    crate::application::interaction::InteractionResolution::Resolved {
+                        metadata,
+                        completion,
+                    }
+                }
+                Err(_) => {
+                    crate::application::interaction::InteractionResolution::Closed { metadata }
+                }
+            };
+            self.resolved_interactions
+                .lock()
+                .unwrap()
+                .push_back(resolution);
+            return Ok(DrainOutcome::NoInput {
+                epoch: expected_epoch,
+            });
+        }
+        self.await_user_input(expected_epoch).await
     }
 
     fn freeze_step(&mut self, step_id: &sdk::RunStepId, _inputs: &[LoopInput]) {
@@ -418,6 +467,9 @@ impl RunLoopPort for ScriptedPort {
     ) -> Result<Option<crate::application::interaction::InteractionResolution>, LoopEngineError>
     {
         self.calls.push("poll_interaction");
+        if let Some(resolution) = self.resolved_interactions.lock().unwrap().pop_front() {
+            return Ok(Some(resolution));
+        }
         let mut receivers = self.stored_receivers.lock().unwrap();
         let mut metas = self.stored_metadata.lock().unwrap();
         match (receivers.pop_front(), metas.pop_front()) {
@@ -2376,6 +2428,87 @@ mod interaction_routing {
         assert_eq!(step.tool_calls()[0].id(), &call_id);
 
         assert!(port.calls.contains(&"finish_interaction_work"));
+    }
+
+    #[tokio::test]
+    async fn user_questions_reply_wakes_blocked_awaiting_user_without_extra_input() {
+        let mut run = Run::new(RunSpec::main(), None);
+        let cancel = CancellationToken::new();
+        let bridge = Arc::new(InteractionBridge::new());
+
+        let call = call("AskUserQuestion", json!({"question": "continue?"}));
+        let call_id = call.id.clone();
+        let suspended = SuspendedToolCall {
+            call: call.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "continue?".to_string(),
+                options: vec!["yes".to_string(), "no".to_string()],
+                allow_multi: false,
+            }],
+        };
+        let mut port = ScriptedPort {
+            model_steps: VecDeque::from([ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call],
+            }]),
+            tool_steps: VecDeque::from([ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended],
+            }]),
+            drain_outcomes: VecDeque::from([
+                DrainOutcome::ready(
+                    vec![LoopInput {
+                        text: "ask question".to_string(),
+                        input_id: None,
+                        images: Vec::new(),
+                    }],
+                    DrainEpoch(0),
+                ),
+                DrainOutcome::EmptyAndSealed {
+                    epoch: DrainEpoch(1),
+                },
+            ]),
+            interaction_bridge: bridge.clone(),
+            await_interaction_completion: true,
+            ..Default::default()
+        };
+        let published = port.published_interactions.clone();
+
+        let reply_task = tokio::spawn(async move {
+            loop {
+                if let Some(request) = published.lock().unwrap().first().cloned() {
+                    assert_eq!(
+                        bridge.reply(
+                            &request.id,
+                            sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer(
+                                "yes".to_string(),
+                            )]),
+                        ),
+                        sdk::InteractionCommandOutcome::Accepted
+                    );
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        });
+
+        let directive = tokio::time::timeout(
+            Duration::from_secs(1),
+            run_loop(&mut run, &cancel, &mut port),
+        )
+        .await
+        .expect("interaction reply should wake the blocked Run without extra input")
+        .unwrap();
+        reply_task.await.unwrap();
+
+        assert_eq!(directive, LoopDirective::Terminal);
+        assert_eq!(run.status(), RunStatus::Completed);
+        assert_eq!(run.steps()[0].tool_calls()[0].id(), &call_id);
+        assert_eq!(
+            run.steps()[0].tool_calls()[0].status(),
+            ToolCallStatus::Success
+        );
     }
 
     // ── UserQuestions: two questions serial roundtrip ──

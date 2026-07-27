@@ -296,6 +296,17 @@ pub trait RunLoopPort: Send {
             expected_epoch,
         )))
     }
+    /// Wait until an `AwaitingUser` Run has a reason to re-enter the Loop.
+    ///
+    /// The default preserves the legacy input-only behavior. Interaction-aware
+    /// adapters MUST also wake when a stored interaction receiver completes;
+    /// otherwise an accepted reply remains parked until unrelated user input.
+    async fn await_user_wakeup(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        self.await_user_input(expected_epoch).await
+    }
     fn freeze_step(&mut self, _step_id: &sdk::RunStepId, _inputs: &[LoopInput]) {}
     async fn accept_step_input(
         &mut self,
@@ -536,7 +547,7 @@ where
         // to future user input in the same Run.
         let awaiting_user = run.status() == RunStatus::AwaitingUser;
         let drain_future = if awaiting_user {
-            port.await_user_input(expected_epoch)
+            port.await_user_wakeup(expected_epoch)
         } else {
             port.drain_input(expected_epoch)
         };
@@ -557,6 +568,16 @@ where
                 return Ok(LoopDirective::Terminal);
             }
         };
+
+        // #1425: AwaitingUser may have been woken by an interaction receiver,
+        // not by input. Consume that completion before interpreting the neutral
+        // NoInput wakeup; ordinary scripted NoInput retains its AwaitUser contract.
+        if awaiting_user && run.pending_interaction().is_some() {
+            if let Some(completion) = port.poll_interaction().await? {
+                handle_interaction_completion(run, port, cancel, completion).await?;
+                continue;
+            }
+        }
 
         // #1272: validate that the adapter returned the epoch the engine expects.
         if outcome.epoch() != expected_epoch {

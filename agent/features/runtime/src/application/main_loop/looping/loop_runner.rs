@@ -638,6 +638,7 @@ where
                     started_at,
                     plan_mode: false,
                     interaction_receivers: Vec::new(),
+                    resolved_interactions: Vec::new(),
                     pending_work: None,
                 };
                 // #1272: the idle gate consumed the user input from the channel

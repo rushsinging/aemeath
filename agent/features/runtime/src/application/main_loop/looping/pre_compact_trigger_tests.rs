@@ -284,6 +284,7 @@ fn build_compact_test_port<'a>(
         started_at: Instant::now(),
         plan_mode: false,
         interaction_receivers: Vec::new(),
+        resolved_interactions: Vec::new(),
         pending_work: None,
     }
 }
