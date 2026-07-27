@@ -3,9 +3,9 @@
 //! 合并旧 `main_loop/looping/llm_log.rs` 和 `subagent/runner/logging.rs`。
 //! schema 以 Main 版本为基准（更完整），Sub 调用时传入 `role` 参数。
 
-use crate::application::main_loop::logged_input_messages;
-use crate::application::main_loop::looping::InvocationResponse;
-use crate::application::subagent::ToolCall;
+use crate::application::loop_engine::chat::logged_input_messages;
+use crate::application::loop_engine::chat::InvocationResponse;
+use crate::application::tool::agent::ToolCall;
 use provider::RequestSystemBlock;
 use sdk::ids::ToolCallId;
 use share::message::Message;

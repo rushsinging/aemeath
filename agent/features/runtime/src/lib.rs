@@ -7,8 +7,8 @@ pub mod domain;
 pub mod ports;
 
 pub use adapters::tool_result_blob::AtomicBlobToolResultStore;
-pub use application::active_run::ActiveRunRegistry;
-pub use application::tool_result_materialization::{
+pub use application::run::active_registry::ActiveRunRegistry;
+pub use application::tool::result_materialization::{
     ToolResultMaterializationPolicy, ToolResultMaterializer,
 };
 
@@ -22,9 +22,9 @@ pub use application::client::{
 // RuntimeContextFactory::new(…).
 pub use application::prompt::build::{build_system_prompt_parts, PromptContext};
 pub use application::prompt::prompt_build_ext::build_static_prompt;
-pub use application::runtime_context::ParentRunContextSource;
-pub use application::runtime_context_factory::RuntimeContextFactory;
-pub use application::runtime_preparation::{
+pub use application::run::context::ParentRunContextSource;
+pub use application::run::context_factory::RuntimeContextFactory;
+pub use application::run::preparation::{
     ParentRunCapabilities, PreparedRun, RunPreparationError, RunPreparationRequest,
     SessionSnapshot, SessionState,
 };
@@ -41,6 +41,54 @@ pub use sdk::{
 #[cfg(test)]
 mod boundary_tests {
     use std::path::Path;
+
+    #[test]
+    fn application_top_level_modules_have_stable_owners() {
+        let application = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application");
+        let allowed = [
+            "client",
+            "context",
+            "cost",
+            "hook",
+            "interaction",
+            "loop_engine",
+            "model",
+            "prompt",
+            "reflection",
+            "run",
+            "session",
+            "startup",
+            "testing",
+            "tool",
+            "workspace",
+        ];
+        let mut unexpected = std::fs::read_dir(&application)
+            .expect("read Runtime application directory")
+            .filter_map(|entry| {
+                let path = entry.expect("read Runtime application entry").path();
+                let file_name = path.file_name()?.to_str()?;
+                let module_name = if path.is_dir() {
+                    file_name
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    let stem = path.file_stem()?.to_str()?;
+                    if stem.ends_with("_tests") {
+                        return None;
+                    }
+                    stem
+                } else {
+                    return None;
+                };
+                (!allowed.contains(&module_name)).then(|| file_name.to_string())
+            })
+            .collect::<Vec<_>>();
+        unexpected.sort();
+
+        assert_eq!(
+            unexpected,
+            Vec::<String>::new(),
+            "Runtime application modules must belong to a stable capability owner"
+        );
+    }
 
     #[test]
     fn runtime_source_does_not_name_task_persistence_or_legacy_projection() {

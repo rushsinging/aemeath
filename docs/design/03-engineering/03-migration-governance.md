@@ -68,7 +68,7 @@ O6 只有在 Runtime #874/#878 与 TUI 三个 issue 的退出证据全部附于�
 
 | 已完成基线 | Current 证据 |
 |---|---|
-| Main / Sub 共享唯一 Loop Engine 与显式 `Run` / `RunId` / `RunStatus` | Main `application/main_loop/looping/loop_runner.rs` 与 Sub `application/subagent/runner/loop_run.rs` 都调用 `application::loop_engine::run_loop`；聚合位于 `domain/agent_run` |
+| Main / Sub 共享唯一 Loop Engine 与显式 `Run` / `RunId` / `RunStatus` | Main `application/loop_engine/chat/loop_runner.rs` 与 Sub `application/run/derived/loop_run.rs` 都调用 `application::loop_engine::run_loop`；聚合位于 `domain/agent_run` |
 | Main / Sub 共享 StuckGuard | `application/loop_engine/engine.rs` 在统一入口建立 `StuckGuard`，内部复用 stall / tool fuse |
 | 单一同步 `cancel_run(RunId)` 与 Cancelling → Cancelled | `packages/sdk/src/client.rs` 只发布 `cancel_run`；Runtime active-run registry、Run cancellation transition 与 SDK 两阶段事件已接线；这是 #878/#879 切换前的生产兼容基线，**NEVER** 再当作 Target |
 

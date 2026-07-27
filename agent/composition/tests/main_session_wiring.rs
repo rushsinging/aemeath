@@ -469,14 +469,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
                 result: String::new(),
             }
         }
-        async fn complete(
-            &self,
-            _prompt: &str,
-            _system: &str,
-            _cancellation: Arc<dyn tools::CancellationSignal>,
-        ) -> String {
-            String::new()
-        }
     }
     let agent_runner = runtime::AgentRunnerAssembly {
         runner: Arc::new(NoopRunner),
@@ -492,7 +484,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             wiring,
             provider_factory,
             session_management,
-            hook_runner.clone(),
         ),
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),

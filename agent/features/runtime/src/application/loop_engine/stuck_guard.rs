@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
-use crate::application::main_loop::looping::stall::StallDetector;
-use crate::application::subagent::ToolCall;
-use crate::application::tool_coordination::loop_guard::{ToolCallFuse, ToolFuseDecision};
+use crate::application::loop_engine::chat::stall::StallDetector;
+use crate::application::tool::agent::ToolCall;
+use crate::application::tool::coordination::loop_guard::{ToolCallFuse, ToolFuseDecision};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StuckDecision {

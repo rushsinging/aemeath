@@ -1,6 +1,6 @@
 use super::*;
-use crate::application::interaction::{InteractionBridge, InteractionPort};
-use crate::application::subagent::ToolCall;
+use crate::application::interaction::port::{InteractionBridge, InteractionPort};
+use crate::application::tool::agent::ToolCall;
 use sdk::{ChatInputEvent, InteractionRequest};
 use serde_json::json;
 use std::collections::VecDeque;
@@ -9,23 +9,30 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 #[test]
-fn execution_state_is_published_as_narrow_port_and_run_loop_port_is_retired() {
-    let source = include_str!("engine.rs");
-    assert!(source.contains("pub trait ExecutionStatePort: Send"));
-    assert!(!source.contains("pub trait RunLoopPort"));
-    assert!(source.contains("execution_state_mut"));
+fn execution_state_is_owned_by_engine_and_not_exposed_as_a_port() {
+    let engine_source = include_str!("engine.rs");
+    let main_source = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub_source = include_str!("../run/derived/loop_run.rs");
+
+    assert!(!engine_source.contains("pub trait ExecutionStatePort"));
+    assert!(!engine_source.contains("execution_state_mut"));
+    assert!(!engine_source.contains("std::mem::swap"));
+    assert!(!engine_source.contains("pub trait RunLoopPort"));
+    assert!(!main_source
+        .contains("pub execution: crate::application::run::execution_state::RunExecutionState"));
+    assert!(!sub_source.contains("pub(super) struct SubRunCapabilities<'a> {\n    pub execution:"));
 }
 
 #[test]
 fn production_engine_owns_step_state_reset() {
     let source = include_str!("engine.rs");
-    assert!(source.contains("port.execution_state_mut()"));
-    assert!(source.contains("std::mem::swap(execution, port.execution_state_mut())"));
+    assert!(source.contains("execution.begin_step()"));
+    assert!(source.contains("run_loop(run, execution, cancel, port)"));
 
-    let main_source = include_str!("../main_loop/looping/loop_runner.rs");
-    let sub_source = include_str!("../subagent/runner/loop_run.rs");
-    assert!(main_source.contains("crate::application::run_launcher::launch_prepared("));
-    assert!(sub_source.contains("crate::application::run_launcher::launch_prepared("));
+    let main_source = include_str!("../loop_engine/chat/loop_runner.rs");
+    let sub_source = include_str!("../run/derived/loop_run.rs");
+    assert!(main_source.contains("crate::application::run::launcher::launch_prepared("));
+    assert!(sub_source.contains("crate::application::run::launcher::launch_prepared("));
     assert!(!main_source.contains("loop_engine::run_loop("));
     assert!(!sub_source.contains("loop_engine::run_loop("));
 }
@@ -34,7 +41,7 @@ fn production_engine_owns_step_state_reset() {
 fn production_engine_entry_uses_supplied_execution_and_context() {
     let source = include_str!("engine.rs");
     assert!(!source.contains("let _ = (execution, context)"));
-    assert!(source.contains("std::mem::swap(execution, port.execution_state_mut())"));
+    assert!(source.contains("run_loop(run, execution, cancel, port)"));
     assert!(source.contains("context.event_sink()") || source.contains("context.input()"));
 }
 
@@ -43,170 +50,108 @@ use crate::application::loop_engine::{
 };
 
 #[test]
-fn plan_approval_is_published_as_narrow_port() {
-    let source = include_str!("engine.rs");
-    assert!(source.contains("pub trait PlanApprovalPort: Send"));
-    let run_loop_trait = source
-        .split("pub trait LoopEnginePort")
-        .nth(1)
-        .and_then(|tail| tail.split("enum Interrupt").next())
-        .expect("LoopEnginePort trait block");
-    assert!(
-        !run_loop_trait.contains("needs_plan_approval"),
-        "needs_plan_approval leaked into LoopEnginePort"
-    );
-}
+fn p6_9_engine_has_no_fat_capability_aggregation_trait() {
+    let engine = include_str!("engine.rs");
+    let launcher = include_str!("../run/launcher.rs");
+    let main = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub = include_str!("../run/derived/loop_run.rs");
+    let sub_setup = include_str!("../run/derived/setup.rs");
 
-#[test]
-fn stuck_handling_is_published_as_narrow_port() {
-    let source = include_str!("engine.rs");
-    assert!(source.contains("pub trait StuckHandlingPort: Send"));
-    let run_loop_trait = source
-        .split("pub trait LoopEnginePort")
-        .nth(1)
-        .and_then(|tail| tail.split("enum Interrupt").next())
-        .expect("LoopEnginePort trait block");
     assert!(
-        !run_loop_trait.contains("on_stuck"),
-        "on_stuck leaked into LoopEnginePort"
+        !engine.contains("pub trait LoopEnginePort"),
+        "narrow stage capabilities must not be re-aggregated into LoopEnginePort"
     );
-}
-
-#[test]
-fn tool_orchestration_is_published_as_narrow_port() {
-    let source = include_str!("engine.rs");
-    assert!(source.contains("pub trait ToolOrchestrationPort: Send"));
-    let run_loop_trait = source
-        .split("pub trait LoopEnginePort")
-        .nth(1)
-        .and_then(|tail| tail.split("enum Interrupt").next())
-        .expect("LoopEnginePort trait block");
-    assert!(
-        !run_loop_trait.contains("execute_tools"),
-        "execute_tools leaked into LoopEnginePort"
-    );
+    assert!(!launcher.contains("LoopEnginePort"));
+    for retired in [
+        "MainRunPort",
+        "SubAgentRun",
+        "SubAgentLaunch",
+        "DerivedSubRun",
+    ] {
+        assert!(
+            !main.contains(retired) && !sub.contains(retired) && !sub_setup.contains(retired),
+            "retired role-shaped execution shell remains: {retired}"
+        );
+    }
+    assert!(main.contains("struct MainRunCapabilities"));
+    assert!(sub.contains("struct SubRunCapabilities"));
+    assert!(sub.contains("async fn launch_sub_run("));
 }
 
 #[test]
 fn stop_hook_is_published_as_narrow_port() {
     let source = include_str!("engine.rs");
     assert!(source.contains("pub trait StopHookPort: Send"));
-    let run_loop_trait = source
-        .split("pub trait LoopEnginePort")
-        .nth(1)
-        .and_then(|tail| tail.split("enum Interrupt").next())
-        .expect("LoopEnginePort trait block");
+    assert!(source.contains("fn stop_hook_context(&self) -> StopHookContext"));
+    assert!(source.contains("async fn project_stop_hook_outcome"));
+    assert!(source.contains("orchestrate_stop_hook("));
+}
+
+#[test]
+fn p6_3_model_invocation_has_one_shared_orchestration() {
+    let coordinator = include_str!("../model/invocation.rs");
+    let main = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub = include_str!("../run/derived/loop_run.rs");
+
     assert!(
-        !run_loop_trait.contains("evaluate_stop_hook"),
-        "evaluate_stop_hook leaked into LoopEnginePort"
+        coordinator.contains("pub(crate) async fn orchestrate_model_invocation"),
+        "model coordinator must own the complete invocation orchestration"
+    );
+    assert_eq!(
+        coordinator.matches("async fn invoke_model_impl(").count(),
+        1,
+        "the shared coordinator must contain the only invoke_model_impl"
+    );
+    for (name, source) in [("Main", main), ("Sub", sub)] {
+        assert!(
+            !source.contains("async fn invoke_model_impl"),
+            "{name} must not retain a role-specific model invocation algorithm"
+        );
+        assert!(
+            !source.contains("ModelInvocationCoordinator::new()"),
+            "{name} must not drive retry/stream orchestration directly"
+        );
+        assert!(
+            !source.contains("provider.invoke("),
+            "{name} must not invoke the provider directly"
+        );
+    }
+}
+
+#[test]
+fn p6_8_agent_dispatch_has_no_direct_completion_bypass() {
+    let dispatch = include_str!("../../../../tools/src/domain/agent_port.rs");
+    let sub_runner = include_str!("../run/derived/setup.rs");
+    let sub_type = include_str!("../run/derived.rs");
+
+    assert!(dispatch.contains("async fn run_agent("));
+    assert!(
+        !dispatch.contains("async fn complete("),
+        "AgentDispatch must not expose an agentless completion path"
+    );
+    assert!(
+        !sub_runner.contains("binding.provider.invoke("),
+        "Sub runner must not invoke a provider outside the shared Run Engine"
+    );
+    assert!(
+        !sub_type.contains("pub config_reader:"),
+        "CliAgentRunner must not retain config state solely for direct completion"
     );
 }
 
 #[test]
-fn compaction_is_published_as_narrow_port() {
-    let source = include_str!("engine.rs");
-    assert!(source.contains("pub trait CompactionPort: Send"));
-    let run_loop_trait = source
-        .split("pub trait LoopEnginePort")
-        .nth(1)
-        .and_then(|tail| tail.split("enum Interrupt").next())
-        .expect("LoopEnginePort trait block");
-    for method in ["needs_compaction", "compact"] {
-        assert!(
-            !run_loop_trait.contains(method),
-            "{method} leaked into LoopEnginePort"
-        );
+fn p6_6_step_transaction_calculation_has_single_engine_owner() {
+    let engine = include_str!("engine.rs");
+    let main_adapter = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub_adapter = include_str!("../run/derived/loop_run.rs");
+
+    assert!(engine.contains("struct StepCommit"));
+    assert!(engine.contains("fn prepare_step_commit"));
+    for adapter in [main_adapter, sub_adapter] {
+        assert!(!adapter.contains("committed_message_count() + execution.accepted_input_len()"));
+        assert!(!adapter.contains("execution.commit_all_messages()"));
+        assert!(!adapter.contains("execution.commit_step_messages()"));
     }
-}
-
-#[test]
-fn model_invocation_is_published_as_narrow_port() {
-    let source = include_str!("engine.rs");
-    assert!(source.contains("pub trait ModelInvocationPort: Send"));
-    let run_loop_trait = source
-        .split("pub trait LoopEnginePort")
-        .nth(1)
-        .and_then(|tail| tail.split("enum Interrupt").next())
-        .expect("LoopEnginePort trait block");
-    assert!(
-        !run_loop_trait.contains("invoke_model"),
-        "invoke_model leaked into LoopEnginePort"
-    );
-}
-
-#[test]
-fn step_persistence_is_published_as_narrow_port() {
-    let source = include_str!("engine.rs");
-    assert!(source.contains("pub trait StepPersistencePort: Send"));
-    let run_loop_trait = source
-        .split("pub trait LoopEnginePort")
-        .nth(1)
-        .and_then(|tail| tail.split("enum Interrupt").next())
-        .expect("LoopEnginePort trait block");
-    for method in [
-        "freeze_step",
-        "accept_step_input",
-        "finalize_step",
-        "finalize_cancelled_step",
-    ] {
-        assert!(
-            !run_loop_trait.contains(method),
-            "{method} leaked into LoopEnginePort"
-        );
-    }
-}
-
-#[test]
-fn interaction_mailbox_is_published_as_narrow_port() {
-    let source = include_str!("engine.rs");
-    assert!(source.contains("pub trait InteractionMailboxPort: Send"));
-    let run_loop_trait = source
-        .split("pub trait LoopEnginePort")
-        .nth(1)
-        .and_then(|tail| tail.split("enum Interrupt").next())
-        .expect("LoopEnginePort trait block");
-    for method in [
-        "interaction_port",
-        "publish_interaction",
-        "store_interaction",
-        "poll_interaction",
-        "set_pending_interaction_work",
-        "finish_interaction_work",
-    ] {
-        assert!(
-            !run_loop_trait.contains(method),
-            "{method} leaked into LoopEnginePort"
-        );
-    }
-}
-
-#[test]
-fn control_and_lifecycle_are_published_as_narrow_ports() {
-    let source = include_str!("engine.rs");
-    assert!(source.contains("pub trait RunControlPort: Send + Sync"));
-    assert!(source.contains("pub trait RunLifecyclePort: Send + Sync"));
-    let run_loop_trait = source
-        .split("pub trait LoopEnginePort")
-        .nth(1)
-        .and_then(|tail| tail.split("enum Interrupt").next())
-        .expect("LoopEnginePort trait block");
-    assert!(!run_loop_trait.contains("claim_terminal"));
-    assert!(!run_loop_trait.contains("claim_cancellation"));
-    assert!(!run_loop_trait.contains("take_control"));
-    assert!(!run_loop_trait.contains("register_step_scope"));
-}
-#[test]
-fn loop_external_boundaries_are_published_as_narrow_ports() {
-    let source = include_str!("engine.rs");
-    assert!(source.contains("pub trait InputPort: Send"));
-    assert!(source.contains("pub trait EventSinkPort: Send"));
-    assert!(source.contains("pub trait InteractionMailboxPort: Send"));
-    let run_loop_trait = source
-        .split("pub trait LoopEnginePort")
-        .nth(1)
-        .and_then(|tail| tail.split("enum Interrupt").next())
-        .expect("LoopEnginePort trait block");
-    assert!(!run_loop_trait.contains("drain_input"));
 }
 
 use crate::domain::agent_run::{
@@ -302,20 +247,10 @@ struct ScriptedPort {
     interaction_bridge: Arc<InteractionBridge>,
     /// #1248 Task 5: Records published interaction requests.
     published_interactions: Arc<std::sync::Mutex<Vec<InteractionRequest>>>,
-    /// #1248 Task 5: Stored interaction receivers.
-    stored_receivers: std::sync::Mutex<
-        VecDeque<
-            tokio::sync::oneshot::Receiver<crate::application::interaction::InteractionCompletion>,
-        >,
-    >,
     /// #1248: Pending interaction work stored by the engine.
     pending_work: std::sync::Mutex<Option<super::engine::PendingInteractionWork>>,
-    /// #1248: Stored interaction metadata alongside receivers for full roundtrip tests.
-    stored_metadata:
-        std::sync::Mutex<VecDeque<crate::application::interaction::InteractionRequestMetadata>>,
     /// #1248: Fake tool execution port for counting/tracking approvals.
     fake_tool_port: Option<Arc<FakeToolExecutionPort>>,
-    execution: crate::application::run_execution_state::RunExecutionState,
 }
 
 impl Default for ScriptedPort {
@@ -359,11 +294,8 @@ impl Default for ScriptedPort {
             fail_emit_once: false,
             interaction_bridge: Arc::new(InteractionBridge::new()),
             published_interactions: Arc::new(std::sync::Mutex::new(Vec::new())),
-            stored_receivers: std::sync::Mutex::new(VecDeque::new()),
             pending_work: std::sync::Mutex::new(None),
-            stored_metadata: std::sync::Mutex::new(VecDeque::new()),
             fake_tool_port: None,
-            execution: crate::application::run_execution_state::RunExecutionState::new(),
         }
     }
 }
@@ -422,7 +354,11 @@ impl InputPort for ScriptedPort {
 
 #[async_trait::async_trait]
 impl EventSinkPort for ScriptedPort {
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+    async fn emit(
+        &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
+        events: Vec<RunDomainEvent>,
+    ) -> Result<(), LoopEngineError> {
         self.calls.push("emit");
         if self.fail_emit_once {
             self.fail_emit_once = false;
@@ -464,18 +400,24 @@ impl RunLifecyclePort for ScriptedPort {
 
 #[async_trait::async_trait]
 impl StepPersistencePort for ScriptedPort {
-    fn freeze_step(
-        &mut self,
-        _run_id: &sdk::RunId,
-        step_id: &sdk::RunStepId,
-        _inputs: &[LoopInput],
-    ) {
+    fn observe_step_frozen(&mut self, step_id: &sdk::RunStepId) {
         self.calls.push("freeze_step");
         self.frozen_steps.push(step_id.clone());
     }
 
+    fn build_context_request(
+        &self,
+        _execution: &crate::application::run::execution_state::RunExecutionState,
+        _run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+    ) -> Option<crate::ports::ContextRequest> {
+        let _ = step_id;
+        None
+    }
+
     async fn accept_step_input(
         &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
         _step_id: &sdk::RunStepId,
     ) -> Result<(), LoopEngineError> {
         self.calls.push("accept_step_input");
@@ -487,30 +429,40 @@ impl StepPersistencePort for ScriptedPort {
         Ok(())
     }
 
-    async fn finalize_step(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
-        self.calls.push("finalize_step");
-        self.finalized_steps.push(step_id.clone());
-        Ok(())
-    }
-
-    async fn finalize_cancelled_step(
+    async fn persist_step_commit(
         &mut self,
-        step_id: &sdk::RunStepId,
+        commit: &super::engine::StepCommit,
     ) -> Result<(), LoopEngineError> {
-        self.calls.push("finalize_cancelled_step");
-        self.cancelled_steps.push(step_id.clone());
+        match commit.cause {
+            crate::ports::FinalizeCause::Completed => {
+                self.calls.push("finalize_step");
+                self.finalized_steps.push(commit.step_id.clone());
+            }
+            crate::ports::FinalizeCause::UserCancelledStep
+            | crate::ports::FinalizeCause::RunTerminated => {
+                self.calls.push("finalize_cancelled_step");
+                self.cancelled_steps.push(commit.step_id.clone());
+            }
+        }
         Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl CompactionPort for ScriptedPort {
-    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
+    async fn needs_compaction(
+        &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
+    ) -> Result<bool, LoopEngineError> {
         self.calls.push("needs_compaction");
         Ok(self.needs_compaction)
     }
 
-    async fn compact(&mut self, cancel: &CancellationToken) -> Result<(), LoopEngineError> {
+    async fn compact(
+        &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
+        cancel: &CancellationToken,
+    ) -> Result<(), LoopEngineError> {
         self.calls.push("compact");
         if self.cancel_when_compact_starts {
             let step_id = self
@@ -550,6 +502,7 @@ impl CompactionPort for ScriptedPort {
 impl ModelInvocationPort for ScriptedPort {
     async fn invoke_model(
         &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
         self.calls.push("model");
@@ -594,11 +547,12 @@ impl StopHookPort for ScriptedPort {}
 impl ToolOrchestrationPort for ScriptedPort {
     async fn execute_tools(
         &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
         calls: &[(ToolCall, ToolGuardDecision)],
         cancel: &CancellationToken,
-    ) -> Result<ToolStep, LoopEngineError> {
+    ) -> Result<crate::application::tool::coordination::ToolRoundOutcome, LoopEngineError> {
         self.calls.push("tools");
         self.guarded_calls
             .push(calls.iter().map(|(_, decision)| decision.clone()).collect());
@@ -621,13 +575,30 @@ impl ToolOrchestrationPort for ScriptedPort {
         }
         self.tool_steps
             .pop_front()
+            .map(
+                |step| crate::application::tool::coordination::ToolRoundOutcome {
+                    continuation: if matches!(
+                        step,
+                        ToolStep::Continue | ToolStep::ContinueWithFuseBypass(_)
+                    ) {
+                        crate::application::tool::coordination::ToolRoundContinuation::ToolResults
+                    } else {
+                        crate::application::tool::coordination::ToolRoundContinuation::None
+                    },
+                    step,
+                },
+            )
             .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))
     }
 }
 
 #[async_trait::async_trait]
 impl StuckHandlingPort for ScriptedPort {
-    async fn on_stuck(&mut self, _decision: &StuckDecision) -> Result<(), LoopEngineError> {
+    async fn on_stuck(
+        &mut self,
+        _execution: &crate::application::run::execution_state::RunExecutionState,
+        _decision: &StuckDecision,
+    ) -> Result<(), LoopEngineError> {
         self.calls.push("stuck");
         Ok(())
     }
@@ -635,16 +606,49 @@ impl StuckHandlingPort for ScriptedPort {
 
 impl PlanApprovalPort for ScriptedPort {}
 
-impl ExecutionStatePort for ScriptedPort {
-    fn execution_state_mut(
-        &mut self,
-    ) -> &mut crate::application::run_execution_state::RunExecutionState {
-        &mut self.execution
+#[async_trait::async_trait]
+impl InteractionCompletionPort for ScriptedPort {
+    fn interaction_execution_scope(&self) -> tools::ExecutionScope {
+        tools::ExecutionScope::builder(
+            "test-run".to_string(),
+            project::WorkspaceId::from("test-ws".to_string()),
+            std::path::PathBuf::from("/tmp"),
+        )
+        .build()
+    }
+
+    fn interaction_tool_execution(&self) -> &dyn tools::ToolExecutionPort {
+        self.fake_tool_port
+            .as_deref()
+            .expect("interaction test requires fake tool execution")
+    }
+
+    fn interaction_materializer(
+        &self,
+    ) -> &crate::application::tool::result_materialization::ToolResultMaterializer {
+        static MATERIALIZER: std::sync::OnceLock<
+            std::sync::Arc<
+                crate::application::tool::result_materialization::ToolResultMaterializer,
+            >,
+        > = std::sync::OnceLock::new();
+        MATERIALIZER
+            .get_or_init(crate::application::testing::test_tool_result_materializer)
+            .as_ref()
+    }
+
+    fn interaction_session_id(&self) -> &str {
+        "test-session"
+    }
+
+    fn interaction_cancellation(
+        &self,
+        step_cancel: CancellationToken,
+    ) -> std::sync::Arc<dyn tools::CancellationSignal> {
+        std::sync::Arc::new(
+            crate::application::run::context::RunCancellationScope::from_token(step_cancel),
+        )
     }
 }
-
-#[async_trait::async_trait]
-impl LoopEnginePort for ScriptedPort {}
 
 #[async_trait::async_trait]
 impl InteractionMailboxPort for ScriptedPort {
@@ -654,6 +658,7 @@ impl InteractionMailboxPort for ScriptedPort {
 
     async fn publish_interaction(
         &mut self,
+        _execution: &crate::application::run::execution_state::RunExecutionState,
         request: &InteractionRequest,
     ) -> Result<(), LoopEngineError> {
         self.calls.push("publish_interaction");
@@ -664,138 +669,16 @@ impl InteractionMailboxPort for ScriptedPort {
         Ok(())
     }
 
-    fn store_interaction(
+    fn set_pending_interaction_work(
         &mut self,
-        metadata: crate::application::interaction::InteractionRequestMetadata,
-        receiver: tokio::sync::oneshot::Receiver<
-            crate::application::interaction::InteractionCompletion,
-        >,
-    ) -> Result<(), LoopEngineError> {
-        self.calls.push("store_interaction");
-        self.stored_metadata.lock().unwrap().push_back(metadata);
-        self.stored_receivers.lock().unwrap().push_back(receiver);
-        Ok(())
-    }
-
-    async fn poll_interaction(
-        &mut self,
-    ) -> Result<Option<crate::application::interaction::InteractionResolution>, LoopEngineError>
-    {
-        self.calls.push("poll_interaction");
-        let mut receivers = self.stored_receivers.lock().unwrap();
-        let mut metas = self.stored_metadata.lock().unwrap();
-        match (receivers.pop_front(), metas.pop_front()) {
-            (Some(mut receiver), Some(metadata)) => match receiver.try_recv() {
-                Ok(completion) => Ok(Some(
-                    crate::application::interaction::InteractionResolution::Resolved {
-                        metadata,
-                        completion,
-                    },
-                )),
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
-                    receivers.push_front(receiver);
-                    metas.push_front(metadata);
-                    Ok(None)
-                }
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => Ok(Some(
-                    crate::application::interaction::InteractionResolution::Closed { metadata },
-                )),
-            },
-            _ => Ok(None),
-        }
-    }
-
-    fn set_pending_interaction_work(&mut self, work: super::engine::PendingInteractionWork) {
+        execution: &mut crate::application::run::execution_state::RunExecutionState,
+        work: super::engine::PendingInteractionWork,
+    ) {
         self.calls.push("set_pending_interaction_work");
+        execution.set_pending_interaction_work(work.clone());
         *self.pending_work.lock().unwrap() = Some(work);
     }
-
-    async fn finish_interaction_work(
-        &mut self,
-        metadata: &crate::application::interaction::InteractionRequestMetadata,
-        completion: &crate::application::interaction::InteractionCompletion,
-        _cancel: &CancellationToken,
-    ) -> Result<super::engine::InteractionWorkOutcome, LoopEngineError> {
-        self.calls.push("finish_interaction_work");
-        use crate::application::interaction::InteractionCompletion;
-        use crate::domain::agent_run::InteractionContinuation;
-
-        let work = self.pending_work.lock().unwrap().take();
-        let current = work.as_ref().and_then(|w| w.current.clone());
-        let remaining_queue: Vec<_> = work.as_ref().map(|w| w.queue.clone()).unwrap_or_default();
-
-        let (call_id, status) = match &metadata.continuation {
-            InteractionContinuation::CompleteToolCall(id) => {
-                let status = match completion {
-                    InteractionCompletion::Replied(_) => ToolCallStatus::Success,
-                    InteractionCompletion::Cancelled(_) => ToolCallStatus::Cancelled,
-                };
-                (id.clone(), status)
-            }
-            InteractionContinuation::ContinueToolApproval(id) => {
-                let status = match completion {
-                    InteractionCompletion::Replied(reply) => {
-                        if matches!(
-                            reply,
-                            sdk::InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve)
-                        ) {
-                            // Execute via fake_tool_port if available (counts invocations)
-                            if let Some(ref fake) = self.fake_tool_port {
-                                if let Some(approval_call) =
-                                    current.as_ref().and_then(|ci| ci.approval_call.clone())
-                                {
-                                    let call = &approval_call.call;
-                                    let mut input = call.input.clone();
-                                    tools::strip_runtime_meta(&mut input);
-                                    let scope = tools::ExecutionScope::builder(
-                                        "test-run".to_string(),
-                                        project::WorkspaceId::from("test-ws".to_string()),
-                                        std::path::PathBuf::from("/tmp"),
-                                    )
-                                    .build();
-                                    let invocation = tools::ToolInvocation::new(
-                                        call.name.as_str(),
-                                        input,
-                                        scope,
-                                    )
-                                    .with_authorization(approval_call.authorization);
-                                    let signal = crate::adapters::tool_runtime::cancellation(
-                                        CancellationToken::new(),
-                                    );
-                                    let _ = tools::ToolExecutionPort::execute(
-                                        fake.as_ref(),
-                                        invocation,
-                                        signal.as_ref(),
-                                    )
-                                    .await;
-                                }
-                            }
-                            ToolCallStatus::Success
-                        } else {
-                            ToolCallStatus::Cancelled
-                        }
-                    }
-                    InteractionCompletion::Cancelled(_) => ToolCallStatus::Cancelled,
-                };
-                (id.clone(), status)
-            }
-            _ => {
-                return Ok(super::engine::InteractionWorkOutcome::Completed {
-                    call_id: sdk::ToolCallId::new_v7(),
-                    status: ToolCallStatus::Success,
-                    remaining_queue,
-                });
-            }
-        };
-
-        Ok(super::engine::InteractionWorkOutcome::Completed {
-            call_id,
-            status,
-            remaining_queue,
-        })
-    }
 }
-
 fn new_run(timeout: Duration) -> Run {
     Run::new(RunSpec::new("test", timeout), None)
 }
@@ -896,7 +779,14 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     assert_eq!(port.frozen_steps.len(), 1);
@@ -940,7 +830,14 @@ async fn engine_accepts_input_before_building_context() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     let accepted = port
         .calls
@@ -964,7 +861,14 @@ async fn engine_stops_before_context_when_accepted_input_durable_write_fails() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Failed);
     assert!(port.calls.contains(&"accept_step_input"));
@@ -1011,7 +915,14 @@ async fn engine_executes_tools_then_reenters_the_same_loop() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     assert_eq!(
@@ -1044,7 +955,14 @@ async fn engine_pauses_for_user_without_completing_the_run() {
         ..Default::default()
     };
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
@@ -1064,7 +982,14 @@ async fn provider_context_too_long_compacts_then_rebuilds_before_reinvoking() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     assert_eq!(
@@ -1098,7 +1023,14 @@ async fn provider_context_too_long_after_compaction_fails_without_looping() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Failed);
     assert_eq!(
@@ -1122,7 +1054,14 @@ async fn cancel_step_during_compaction_finalizes_then_returns_to_drain() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &root, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     assert_eq!(port.cancelled_steps, port.frozen_steps);
@@ -1152,7 +1091,14 @@ async fn engine_cancels_in_flight_compaction_and_emits_terminal_ack() {
         cancel_for_task.cancel();
     });
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
     canceller.await.unwrap();
 
     assert_eq!(directive, LoopDirective::Terminal);
@@ -1179,7 +1125,14 @@ async fn engine_cancels_in_flight_model_and_emits_terminal_ack() {
         cancel_for_task.cancel();
     });
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
     canceller.await.unwrap();
 
     assert_eq!(directive, LoopDirective::Terminal);
@@ -1259,7 +1212,14 @@ async fn engine_passes_soft_block_decision_to_the_single_tool_adapter() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(port.guarded_calls.len(), 3);
     assert_eq!(port.guarded_calls[0], vec![ToolGuardDecision::Allow]);
@@ -1281,7 +1241,12 @@ async fn engine_timeout_interrupts_a_blocked_model_call() {
 
     tokio::time::timeout(
         Duration::from_secs(1),
-        run_loop(&mut run, &cancel, &mut port),
+        run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &cancel,
+            &mut port,
+        ),
     )
     .await
     .expect("deadline must interrupt blocked model")
@@ -1303,13 +1268,27 @@ async fn awaiting_user_does_not_resume_without_input() {
         ..Default::default()
     };
     assert_eq!(
-        run_loop(&mut run, &cancel, &mut port).await.unwrap(),
+        run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &cancel,
+            &mut port
+        )
+        .await
+        .unwrap(),
         LoopDirective::AwaitUser
     );
     let model_calls = port.calls.iter().filter(|call| **call == "model").count();
 
     assert_eq!(
-        run_loop(&mut run, &cancel, &mut port).await.unwrap(),
+        run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &cancel,
+            &mut port
+        )
+        .await
+        .unwrap(),
         LoopDirective::AwaitUser
     );
     assert_eq!(run.status(), RunStatus::AwaitingUser);
@@ -1328,7 +1307,14 @@ async fn failed_event_delivery_is_restored_to_the_run_outbox() {
         ..Default::default()
     };
 
-    let error = run_loop(&mut run, &cancel, &mut port).await.unwrap_err();
+    let error = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap_err();
 
     assert!(matches!(error, LoopEngineError::Adapter(_)));
     assert!(matches!(
@@ -1348,7 +1334,14 @@ async fn engine_timeout_fails_before_starting_new_work() {
     let mut port = ScriptedPort::default();
 
     tokio::time::sleep(Duration::from_millis(1)).await;
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Failed);
     assert!(!port.calls.contains(&"model"));
@@ -1379,7 +1372,14 @@ async fn engine_processes_internal_continuation() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     // drain_input + freeze + accept + compaction check + emit + model + finalize + emit
@@ -1421,7 +1421,14 @@ async fn internal_continuation_while_awaiting_user_without_input_stays_awaiting(
         ..Default::default()
     };
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
     let calls_before_second_loop = port.calls.len();
@@ -1445,7 +1452,14 @@ async fn internal_continuation_while_awaiting_user_without_input_stays_awaiting(
         },
     ]);
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         directive,
         LoopDirective::AwaitUser,
@@ -1498,7 +1512,14 @@ async fn internal_continuation_while_awaiting_user_with_input_resumes() {
         ..Default::default()
     };
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
     let calls_before = port.calls.len();
@@ -1525,7 +1546,14 @@ async fn internal_continuation_while_awaiting_user_with_input_resumes() {
         },
     ]);
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
     assert_eq!(run.status(), RunStatus::Completed);
     // New calls were made (step frozen, model invoked, etc.)
     assert!(
@@ -1552,7 +1580,14 @@ async fn engine_completed_event_carries_last_assistant_text() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     // The Completed event must carry the assistant text from the model step.
@@ -1609,7 +1644,14 @@ async fn engine_terminal_text_is_the_last_assistant_text_not_the_first() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     let completed = port
@@ -1655,7 +1697,14 @@ async fn engine_rejects_wrong_epoch() {
         ..Default::default()
     };
 
-    let err = run_loop(&mut run, &cancel, &mut port).await.unwrap_err();
+    let err = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap_err();
     assert!(
         matches!(&err, LoopEngineError::Adapter(msg) if msg.contains("drain epoch 不匹配")),
         "Expected Chinese epoch mismatch error, got: {err:?}"
@@ -1694,7 +1743,14 @@ async fn await_user_input_empty_preserves_run_epoch() {
         ..Default::default()
     };
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
 
@@ -1742,7 +1798,14 @@ async fn await_user_input_empty_then_input_same_epoch_reenter() {
 
     // First run_loop: consumes Ready(0), executes step → AwaitUser,
     // then consumes EmptyAndSealed(1) during AwaitingUser → returns AwaitUser.
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.next_drain_epoch(), 1);
 
@@ -1765,7 +1828,14 @@ async fn await_user_input_empty_then_input_same_epoch_reenter() {
     }]);
 
     // Re-enter: same epoch (1), user input consumed, run completes.
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::Terminal);
     assert_eq!(run.status(), RunStatus::Completed);
     // Epoch advanced: Ready(1) → 2, EmptyAndSealed(2) → 3
@@ -1795,7 +1865,13 @@ async fn drain_input_epoch_mismatch_does_not_advance_run_epoch() {
     };
 
     let epoch_before = run.next_drain_epoch();
-    let result = run_loop(&mut run, &cancel, &mut port).await;
+    let result = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await;
     assert!(result.is_err(), "should return epoch mismatch error");
     // The Run's drain epoch must NOT have advanced
     assert_eq!(
@@ -1840,7 +1916,13 @@ async fn run_loop_empty_ready_returns_err_without_executing_step() {
     };
 
     let epoch_before = run.next_drain_epoch();
-    let result = run_loop(&mut run, &cancel, &mut port).await;
+    let result = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await;
 
     let err = result.expect_err("empty Ready must produce an error");
     assert!(
@@ -1883,7 +1965,6 @@ struct DrainOnlyPort {
     tool_steps: VecDeque<ToolStep>,
     events: Vec<RunDomainEvent>,
     calls: Vec<&'static str>,
-    execution: crate::application::run_execution_state::RunExecutionState,
 }
 
 #[async_trait::async_trait]
@@ -1912,9 +1993,40 @@ impl InputPort for DrainOnlyPort {
 
 #[async_trait::async_trait]
 impl EventSinkPort for DrainOnlyPort {
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+    async fn emit(
+        &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
+        events: Vec<RunDomainEvent>,
+    ) -> Result<(), LoopEngineError> {
         self.events.extend(events);
         Ok(())
+    }
+}
+
+impl InteractionCompletionPort for DrainOnlyPort {
+    fn interaction_execution_scope(&self) -> tools::ExecutionScope {
+        unreachable!("DrainOnlyPort does not complete interactions")
+    }
+
+    fn interaction_tool_execution(&self) -> &dyn tools::ToolExecutionPort {
+        unreachable!("DrainOnlyPort does not complete interactions")
+    }
+
+    fn interaction_materializer(
+        &self,
+    ) -> &crate::application::tool::result_materialization::ToolResultMaterializer {
+        unreachable!("DrainOnlyPort does not complete interactions")
+    }
+
+    fn interaction_session_id(&self) -> &str {
+        "drain-only"
+    }
+
+    fn interaction_cancellation(
+        &self,
+        _step_cancel: CancellationToken,
+    ) -> std::sync::Arc<dyn tools::CancellationSignal> {
+        unreachable!("DrainOnlyPort does not complete interactions")
     }
 }
 
@@ -1948,11 +2060,18 @@ impl RunLifecyclePort for DrainOnlyPort {
 
 #[async_trait::async_trait]
 impl CompactionPort for DrainOnlyPort {
-    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
+    async fn needs_compaction(
+        &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
+    ) -> Result<bool, LoopEngineError> {
         Ok(false)
     }
 
-    async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {
+    async fn compact(
+        &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
+        _cancel: &CancellationToken,
+    ) -> Result<(), LoopEngineError> {
         Ok(())
     }
 }
@@ -1961,6 +2080,7 @@ impl CompactionPort for DrainOnlyPort {
 impl ModelInvocationPort for DrainOnlyPort {
     async fn invoke_model(
         &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
         _cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
         self.calls.push("model");
@@ -1978,37 +2098,44 @@ impl StopHookPort for DrainOnlyPort {}
 impl ToolOrchestrationPort for DrainOnlyPort {
     async fn execute_tools(
         &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
         _calls: &[(ToolCall, ToolGuardDecision)],
         _cancel: &CancellationToken,
-    ) -> Result<ToolStep, LoopEngineError> {
+    ) -> Result<crate::application::tool::coordination::ToolRoundOutcome, LoopEngineError> {
         self.calls.push("tools");
         self.tool_steps
             .pop_front()
+            .map(
+                |step| crate::application::tool::coordination::ToolRoundOutcome {
+                    continuation: if matches!(
+                        step,
+                        ToolStep::Continue | ToolStep::ContinueWithFuseBypass(_)
+                    ) {
+                        crate::application::tool::coordination::ToolRoundContinuation::ToolResults
+                    } else {
+                        crate::application::tool::coordination::ToolRoundContinuation::None
+                    },
+                    step,
+                },
+            )
             .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))
     }
 }
 
 #[async_trait::async_trait]
 impl StuckHandlingPort for DrainOnlyPort {
-    async fn on_stuck(&mut self, _decision: &StuckDecision) -> Result<(), LoopEngineError> {
+    async fn on_stuck(
+        &mut self,
+        _execution: &crate::application::run::execution_state::RunExecutionState,
+        _decision: &StuckDecision,
+    ) -> Result<(), LoopEngineError> {
         Ok(())
     }
 }
 
 impl PlanApprovalPort for DrainOnlyPort {}
-
-impl ExecutionStatePort for DrainOnlyPort {
-    fn execution_state_mut(
-        &mut self,
-    ) -> &mut crate::application::run_execution_state::RunExecutionState {
-        &mut self.execution
-    }
-}
-
-#[async_trait::async_trait]
-impl LoopEnginePort for DrainOnlyPort {}
 
 /// A port that only implements `drain_input` (no `await_user_input` override)
 /// must receive a Chinese Adapter error when the Run enters `AwaitingUser`,
@@ -2041,10 +2168,15 @@ async fn default_await_user_input_returns_error_not_delegating_to_drain() {
         tool_steps: VecDeque::from([ToolStep::AwaitUser]),
         events: Vec::new(),
         calls: Vec::new(),
-        execution: crate::application::run_execution_state::RunExecutionState::new(),
     };
 
-    let result = run_loop(&mut run, &cancel, &mut port).await;
+    let result = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut port,
+    )
+    .await;
     let err = result.expect_err("default await_user_input must return Err");
 
     assert!(
@@ -2080,7 +2212,14 @@ async fn terminate_run_during_compaction_finishes_as_terminated() {
         ..Default::default()
     };
 
-    let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(directive, LoopDirective::Terminal);
     assert_eq!(run.status(), RunStatus::Terminated);
@@ -2108,7 +2247,14 @@ async fn cancel_step_during_model_finalizes_then_returns_to_drain() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &root, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     assert!(port.calls.contains(&"model"));
@@ -2137,7 +2283,14 @@ async fn cancel_step_during_tools_finalizes_then_returns_to_drain() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &root, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut port,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     assert!(port.calls.contains(&"tools"));
@@ -2166,7 +2319,14 @@ async fn terminate_while_awaiting_user_finishes_as_terminated() {
     };
 
     // First run_loop: enters AwaitingUser.
-    let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut port,
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
 
@@ -2188,7 +2348,14 @@ async fn terminate_while_awaiting_user_finishes_as_terminated() {
         });
     root.cancel();
 
-    let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut port,
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::Terminal);
     assert_eq!(run.status(), RunStatus::Terminated);
     assert!(!port
@@ -2268,18 +2435,20 @@ mod interaction_routing {
             },
         );
 
-        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        let directive = run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &root,
+            &mut port,
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
         assert!(run.pending_interaction().is_some());
         assert!(
             port.calls.contains(&"publish_interaction"),
             "should have published: {:?}",
-            port.calls
-        );
-        assert!(
-            port.calls.contains(&"store_interaction"),
-            "should have stored receiver: {:?}",
             port.calls
         );
     }
@@ -2320,7 +2489,14 @@ mod interaction_routing {
             },
         );
 
-        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        let directive = run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &root,
+            &mut port,
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
 
         let pending = run
@@ -2367,7 +2543,14 @@ mod interaction_routing {
             },
         );
 
-        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        let directive = run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &root,
+            &mut port,
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert!(run.pending_interaction().is_some());
         let pending = run.pending_interaction().unwrap();
@@ -2414,7 +2597,14 @@ mod interaction_routing {
             },
         );
 
-        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        let directive = run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &root,
+            &mut port,
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert!(run.pending_interaction().is_some());
         // Only one interaction was started; the second is queued on the port
@@ -2480,16 +2670,20 @@ mod interaction_routing {
         };
 
         // First run_loop: engine creates ToolApproval intent → AwaitUser
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+        let directive = run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
 
-        // Get the request_id from stored metadata
-        let request_id = {
-            let metas = port.stored_metadata.lock().unwrap();
-            let meta = metas.front().expect("should have stored metadata");
-            meta.request_id.clone()
-        };
+        // Get the request_id from execution-owned mailbox metadata
+        let request_id = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
 
         // Reply approve via the interaction bridge
         let reply = sdk::InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve);
@@ -2502,7 +2696,9 @@ mod interaction_routing {
         }]);
 
         // Second run_loop: polls resolved interaction, finishes work, completes
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let directive = run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .unwrap();
         assert_eq!(directive, LoopDirective::Terminal);
         assert_eq!(run.status(), RunStatus::Completed);
 
@@ -2524,9 +2720,6 @@ mod interaction_routing {
         assert_eq!(step.tool_calls().len(), 1);
         assert_eq!(step.tool_calls()[0].status(), ToolCallStatus::Success);
         assert_eq!(step.tool_calls()[0].id(), &call_id);
-
-        // Verify finish_interaction_work was called
-        assert!(port.calls.contains(&"finish_interaction_work"));
     }
 
     // ── RequireApproval: full engine roundtrip deny ──
@@ -2577,14 +2770,19 @@ mod interaction_routing {
         };
 
         // First run_loop → AwaitUser
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+        let directive = run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
 
         // Reply deny via the interaction bridge
-        let request_id = {
-            let metas = port.stored_metadata.lock().unwrap();
-            metas.front().unwrap().request_id.clone()
-        };
+        let request_id = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
         let reply =
             sdk::InteractionReply::ToolApproval(sdk::ApprovalDecision::Deny { reason: None });
         let outcome = port.interaction_bridge.reply(&request_id, reply);
@@ -2594,7 +2792,9 @@ mod interaction_routing {
         port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
             epoch: DrainEpoch(1),
         }]);
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let directive = run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .unwrap();
         assert_eq!(directive, LoopDirective::Terminal);
         assert_eq!(run.status(), RunStatus::Completed);
 
@@ -2606,8 +2806,6 @@ mod interaction_routing {
         assert_eq!(step.tool_calls().len(), 1);
         assert_eq!(step.tool_calls()[0].status(), ToolCallStatus::Cancelled);
         assert_eq!(step.tool_calls()[0].id(), &call_id);
-
-        assert!(port.calls.contains(&"finish_interaction_work"));
     }
 
     // ── UserQuestions: single question full roundtrip ──
@@ -2658,15 +2856,20 @@ mod interaction_routing {
         };
 
         // First run_loop → AwaitUser
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+        let directive = run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
 
         // Reply via bridge
-        let request_id = {
-            let metas = port.stored_metadata.lock().unwrap();
-            metas.front().unwrap().request_id.clone()
-        };
+        let request_id = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
         let reply = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("yes".to_string())]);
         let outcome = port.interaction_bridge.reply(&request_id, reply);
         assert_eq!(outcome, sdk::InteractionCommandOutcome::Accepted);
@@ -2675,7 +2878,9 @@ mod interaction_routing {
         port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
             epoch: DrainEpoch(1),
         }]);
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let directive = run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .unwrap();
         assert_eq!(directive, LoopDirective::Terminal);
         assert_eq!(run.status(), RunStatus::Completed);
 
@@ -2684,8 +2889,6 @@ mod interaction_routing {
         assert_eq!(step.tool_calls().len(), 1);
         assert_eq!(step.tool_calls()[0].status(), ToolCallStatus::Success);
         assert_eq!(step.tool_calls()[0].id(), &call_id);
-
-        assert!(port.calls.contains(&"finish_interaction_work"));
     }
 
     // ── UserQuestions: two questions serial roundtrip ──
@@ -2747,15 +2950,20 @@ mod interaction_routing {
         };
 
         // First run_loop: first question active, second queued → AwaitUser
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+        let directive = run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
 
         // Reply to first question via bridge
-        let request_id1 = {
-            let metas = port.stored_metadata.lock().unwrap();
-            metas.front().unwrap().request_id.clone()
-        };
+        let request_id1 = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
         let reply1 = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("a".to_string())]);
         assert_eq!(
             port.interaction_bridge.reply(&request_id1, reply1),
@@ -2766,7 +2974,9 @@ mod interaction_routing {
         port.drain_outcomes = VecDeque::from([DrainOutcome::NoInput {
             epoch: DrainEpoch(1),
         }]);
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let directive = run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
 
@@ -2784,10 +2994,12 @@ mod interaction_routing {
         );
 
         // Reply to second question via bridge
-        let request_id2 = {
-            let metas = port.stored_metadata.lock().unwrap();
-            metas.front().unwrap().request_id.clone()
-        };
+        let request_id2 = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
         let reply2 = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("b".to_string())]);
         assert_eq!(
             port.interaction_bridge.reply(&request_id2, reply2),
@@ -2798,7 +3010,9 @@ mod interaction_routing {
         port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
             epoch: DrainEpoch(1),
         }]);
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let directive = run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .unwrap();
         assert_eq!(directive, LoopDirective::Terminal);
         assert_eq!(run.status(), RunStatus::Completed);
 
@@ -2820,14 +3034,6 @@ mod interaction_routing {
             run.active_step_id().is_none(),
             "step should be completed after all interactions resolve"
         );
-
-        // finish_interaction_work called twice
-        let finish_count = port
-            .calls
-            .iter()
-            .filter(|&&c| c == "finish_interaction_work")
-            .count();
-        assert_eq!(finish_count, 2);
     }
 
     // ── Mixed: completed_results + suspended roundtrip ──
@@ -2882,7 +3088,10 @@ mod interaction_routing {
         };
 
         // First run_loop: non-interaction → Success, suspension → AwaitUser
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+        let directive = run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
 
@@ -2900,10 +3109,12 @@ mod interaction_routing {
         );
 
         // Reply to the question via bridge
-        let request_id = {
-            let metas = port.stored_metadata.lock().unwrap();
-            metas.front().unwrap().request_id.clone()
-        };
+        let request_id = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
         let reply = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("yes".to_string())]);
         assert_eq!(
             port.interaction_bridge.reply(&request_id, reply),
@@ -2914,7 +3125,9 @@ mod interaction_routing {
         port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
             epoch: DrainEpoch(1),
         }]);
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let directive = run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .unwrap();
         assert_eq!(directive, LoopDirective::Terminal);
         assert_eq!(run.status(), RunStatus::Completed);
 
@@ -2932,7 +3145,5 @@ mod interaction_routing {
             .unwrap();
         assert_eq!(bash_tc.status(), ToolCallStatus::Success);
         assert_eq!(question_tc.status(), ToolCallStatus::Success);
-
-        assert!(port.calls.contains(&"finish_interaction_work"));
     }
 }

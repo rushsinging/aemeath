@@ -3,9 +3,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::application::main_loop::ChatEventSinkHandle;
-use crate::application::runtime_context::ParentRunContextSource;
-use crate::application::runtime_context_factory::RuntimeContextFactory;
+use crate::application::loop_engine::chat::ChatEventSinkHandle;
+use crate::application::run::context::ParentRunContextSource;
+use crate::application::run::context_factory::RuntimeContextFactory;
 use sdk::ChatEvent;
 use share::config::models::ResolvedModel;
 use share::config::MemoryConfig;
@@ -61,7 +61,7 @@ impl SessionModelState {
 ///
 /// #1385: Separated from per-Run [`RuntimeContext`] so that each Run gets its own
 /// frozen provider binding, cancellation scope, and bound context/memory ports
-/// via [`RuntimeContextFactory::assemble`] (held in `runtime_context_factory`).
+/// via [`RuntimeContextFactory::create`] (held in `runtime_context_factory`).
 ///
 /// Fields are grouped by §2.2 categories:
 /// - Session identity, wiring, workspace
@@ -74,7 +74,7 @@ impl SessionModelState {
 pub struct SessionRuntime {
     // ── Session identity & workspace ──
     pub(crate) session_state:
-        Arc<std::sync::RwLock<crate::application::runtime_preparation::SessionState>>,
+        Arc<std::sync::RwLock<crate::application::run::preparation::SessionState>>,
     pub workspace: project::WorkspaceViews,
     pub wiring: Arc<context::MainSessionWiring>,
 
@@ -110,6 +110,8 @@ pub struct SessionRuntime {
     pub verbose: bool,
     /// #1385 Task 7: resume session-id，从 `ChatRuntimeContext` 迁移至 shell。
     pub resume: Option<String>,
+    /// 启动 `--resume` 已完成的单次恢复投影；供 Composition/TUI 初始化历史。
+    pub startup_resume: Option<sdk::SessionResumeView>,
 
     // ── Cross-run shared resources ──
     pub(crate) agent_runner: Arc<dyn AgentRunner>,
@@ -117,10 +119,10 @@ pub struct SessionRuntime {
     /// loop before tool execution, read by sub-agent derivation.
     pub(crate) parent_context_source: ParentRunContextSource,
     pub(crate) tool_result_materializer:
-        Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
-    pub(crate) active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
-    pub(crate) interaction_bridge: Arc<crate::application::interaction::InteractionBridge>,
-    pub(crate) session_ingress: Arc<crate::application::session_ingress::SessionIngress>,
+        Arc<crate::application::tool::result_materialization::ToolResultMaterializer>,
+    pub(crate) active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
+    pub(crate) interaction_bridge: Arc<crate::application::interaction::port::InteractionBridge>,
+    pub(crate) session_ingress: Arc<crate::application::session::ingress::SessionIngress>,
 
     // ── Event/Input factories ──
     pub(crate) event_sink_factory: Arc<
@@ -146,9 +148,7 @@ pub struct SessionRuntime {
 impl SessionRuntime {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        session_state: Arc<
-            std::sync::RwLock<crate::application::runtime_preparation::SessionState>,
-        >,
+        session_state: Arc<std::sync::RwLock<crate::application::run::preparation::SessionState>>,
         workspace: project::WorkspaceViews,
         wiring: Arc<context::MainSessionWiring>,
         config_query: Arc<dyn config::ConfigQuery>,
@@ -170,17 +170,18 @@ impl SessionRuntime {
         allow_all: bool,
         verbose: bool,
         resume: Option<String>,
+        startup_resume: Option<sdk::SessionResumeView>,
         agent_runner: Arc<dyn AgentRunner>,
         parent_context_source: ParentRunContextSource,
         tool_result_materializer: Arc<
-            crate::application::tool_result_materialization::ToolResultMaterializer,
+            crate::application::tool::result_materialization::ToolResultMaterializer,
         >,
-        active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
+        active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
         runtime_context_factory: Arc<RuntimeContextFactory>,
     ) -> Self {
         let interaction_bridge =
-            Arc::new(crate::application::interaction::InteractionBridge::new());
-        let session_ingress = Arc::new(crate::application::session_ingress::SessionIngress::new(
+            Arc::new(crate::application::interaction::port::InteractionBridge::new());
+        let session_ingress = Arc::new(crate::application::session::ingress::SessionIngress::new(
             interaction_bridge.clone(),
         ));
         Self {
@@ -206,6 +207,7 @@ impl SessionRuntime {
             allow_all,
             verbose,
             resume,
+            startup_resume,
             agent_runner,
             parent_context_source,
             tool_result_materializer,
@@ -213,7 +215,7 @@ impl SessionRuntime {
             interaction_bridge,
             session_ingress,
             event_sink_factory: Arc::new(|tx| {
-                crate::application::main_loop::ChatEventSinkHandle::new(
+                crate::application::loop_engine::chat::ChatEventSinkHandle::new(
                     crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
                 )
             }),
@@ -230,15 +232,14 @@ impl SessionRuntime {
         }
     }
 
-    pub(crate) fn update_session_id(&self, session_id: impl Into<String>) {
+    #[cfg(test)]
+    pub(crate) fn set_test_session_id(&self, session_id: impl Into<String>) {
         let mut state = self.session_state.write().unwrap();
         let config = state.snapshot_for_run().config().clone();
         state.update_session(session_id, config);
     }
 
-    pub(crate) fn session_snapshot(
-        &self,
-    ) -> crate::application::runtime_preparation::SessionSnapshot {
+    pub(crate) fn session_snapshot(&self) -> crate::application::run::preparation::SessionSnapshot {
         self.session_state.read().unwrap().snapshot_for_run()
     }
 }
@@ -347,6 +348,7 @@ impl AgentClientImpl {
         let resolved_model = shell.model_state.resolved();
         crate::adapters::tui_launch::TuiLaunchContext {
             session_id: session_snapshot.session_id().to_string(),
+            startup_resume: shell.startup_resume.clone(),
             model_display: super::mapping::model_display(
                 &resolved_model.source_key,
                 &resolved_model.model.name,
@@ -361,6 +363,7 @@ impl AgentClientImpl {
             user_context: shell.user_context.clone(),
             context_size: shell.context_size,
             verbose: shell.verbose,
+            config_view: super::mapping::config_snapshot_to_sdk(session_snapshot.config()),
             agent_runner: shell.agent_runner.clone(),
             allow_all: shell.allow_all,
             max_tool_concurrency: shell.max_tool_concurrency,

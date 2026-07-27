@@ -1,6 +1,6 @@
 //! Concrete input buffer adapters — wrap SDK ports into Application drain interfaces.
 
-use crate::application::main_loop::{
+use crate::application::loop_engine::chat::{
     InputEventDrainPort, InputEventFuture, InputEventOptFuture, QueueDrainPort, QueueFuture,
 };
 use std::sync::Arc;

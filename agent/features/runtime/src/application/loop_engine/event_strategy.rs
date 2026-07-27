@@ -11,12 +11,12 @@
 
 use async_trait::async_trait;
 
-use crate::application::loop_engine::LoopEngineError;
-use crate::application::main_loop::looping::finalize::finish_completed_loop;
-use crate::application::main_loop::looping::{
+use crate::application::loop_engine::chat::finalize::finish_completed_loop;
+use crate::application::loop_engine::chat::{
     ChatEventSink as _, RuntimeStreamEvent, RuntimeTurnContext,
 };
-use crate::application::subagent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
+use crate::application::loop_engine::LoopEngineError;
+use crate::application::run::derived::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::domain::agent_run::RunDomainEvent;
 use tools::AgentRunTerminal;
 
@@ -73,10 +73,10 @@ pub(crate) trait EventStrategy {
 /// and sends cancellation/error events with message snapshots.
 ///
 /// #1385 Task 12: Uses [`ChatEventSinkHandle`] (from RuntimeContext) instead of
-/// generic `S: ChatEventSink`, so `MainRunPort::emit()` routes through the
+/// generic `S: ChatEventSink`, so `MainRunCapabilities::emit()` routes through the
 /// RuntimeContext I/O seam.
 pub(crate) struct MainEventStrategy<'a> {
-    pub sink: crate::application::main_loop::ChatEventSinkHandle,
+    pub sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
     pub session_id: &'a str,
     pub turn_context: &'a RuntimeTurnContext,
     pub task_access: &'a std::sync::Arc<dyn task::TaskAccess>,

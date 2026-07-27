@@ -74,9 +74,9 @@
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
-| 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution/binding、Skill ports、Tool Result materializer 与 ActiveRunRegistry，并把 Execution/binding 注入 `RuntimeContextFactory`；factory 通过 `RuntimeServices` 单一持有这两个静态能力，Runtime bootstrap 只持 injected factory，不得重复保存 Execution/binding，也禁止恢复 Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
-| 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher；Runtime Main/Sub 只消费 injected HookPort，禁止恢复 HookRunner / dispatcher factory |
-| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | RuntimeContextFactory 是 RuntimeContext 唯一生产构造入口；RunKind不驱动控制流分支；退役符号（RuntimeContextParts/assemble_main_runtime_context/ModelStep::StopHookBlocked/InteractionBridge::disabled）不存在于生产代码；stop hook 计数由Run独占；Interaction/Hook/Reasoning三能力按RunSpec穷举装配 |
+| 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution/binding、Skill ports、Tool Result materializer 与 ActiveRunRegistry，并把 Execution/binding 注入 `application/run/context_factory.rs` 的 `RuntimeContextFactory`；factory 通过 `RuntimeServices` 单一持有静态能力，Runtime bootstrap 只持 injected factory，不得重复保存 Execution/binding，也禁止恢复 Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
+| 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher 并注入 `RuntimeContextFactory`；Runtime bootstrap 只携带 injected factory，Main/Sub 只消费其中的 HookPort，禁止恢复 HookRunner / dispatcher factory |
+| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 RuntimeContext 唯一生产构造入口，factory-private `create()` 必须返回 typed assembly error；RunKind 不驱动控制流分支；退役符号不存在于生产代码；stop hook 计数由 Run 独占；Interaction/Hook/Reasoning 三能力按 RunSpec 穷举装配；`BoundaryOnly` 必须装配 `BoundaryHookPort`，仅转发 Session/SubRun start-stop 生命周期边界并在 adapter 入口过滤内部 invocation |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
@@ -234,7 +234,7 @@
 |---|---|---|
 | `agent/features/tools/src/business/mcp_manager/connection.rs` | `core` | MCP 连接触达 registry |
 
-- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：3 个精确 `path + target layer` 例外，均为 #995 只迁目录而不改变接线语义后仍存在的 Current 倒置：`application/client/accessors.rs → adapters`、`application/client/from_args.rs → adapters`、`ports/legacy.rs → application`。脚本对其做 stale 自检；由 #874–#879 删除，禁止扩张。#1385 已删除旧 `InputBufferPort`（`ports/input_buffer.rs → application`）与 `migration.runtime.shared-adapter-bridge`（`adapters/runtime.rs`），迁移债务预算同步降至 repository `4`、Runtime `3`。
+- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：当前精确 `path + target layer` 例外中已删除不存在的 `application/interaction/ask_user.rs → adapters`；其余路径必须通过 stale 自检，禁止扩张。
 
 - **#916 安全所有权规则（`check-context-architecture.sh` R8）**：Policy/Runtime 生产代码禁止恢复 `PathAccess` / `PathKind` / `path_accesses` / `requires_read_before_write` / Policy path helper；Bash safety 禁止与 `allow_all` 条件耦合。路径解析经 Project `WorkspaceRead`，read-before-write 与 Bash safety 留在 Tool adapter。规则无路径例外。
 

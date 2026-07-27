@@ -14,12 +14,12 @@ import sys
 root = Path.cwd()
 violations = []
 
-FACTORY = root / "agent/features/runtime/src/application/runtime_context_factory.rs"
+FACTORY = root / "agent/features/runtime/src/application/run/context_factory.rs"
 ENGINE = root / "agent/features/runtime/src/application/loop_engine/engine.rs"
 STUCK = root / "agent/features/runtime/src/application/loop_engine/stuck_guard.rs"
 RUN_DOMAIN = root / "agent/features/runtime/src/domain/agent_run/domain.rs"
-INTERACTION = root / "agent/features/runtime/src/application/interaction.rs"
-EMPTY_HOOK = root / "agent/features/runtime/src/application/empty_hook.rs"
+INTERACTION = root / "agent/features/runtime/src/application/interaction/port.rs"
+EMPTY_HOOK = root / "agent/features/runtime/src/application/hook/empty.rs"
 # ── helpers ──
 def strip_comments(text: str) -> str:
     """Remove //  and ///  and //!  line comments (but keep lines that contain code before the //)."""
@@ -55,7 +55,7 @@ for candidate in _glob.glob("agent/features/runtime/src/application/**/*.rs", re
     p = Path(candidate)
     if "_test" in p.stem or p.stem == "tests":
         continue
-    if p.name == "runtime_context_factory.rs":
+    if p.resolve() == FACTORY.resolve():
         continue
     prod = production_text(p)
     if re.search(r'RuntimeContext::new\s*\(', prod):
@@ -86,7 +86,7 @@ for candidate in _glob.glob("agent/**/*.rs", recursive=True):
             violations.append(f"3. Retired '{name}' in production: {p}")
 
 # ── 4. RunKind::Main/Sub not in factory, engine, or launcher ──
-for check_file in [FACTORY, ENGINE, root / "agent/features/runtime/src/application/run_launcher.rs"]:
+for check_file in [FACTORY, ENGINE, root / "agent/features/runtime/src/application/run/launcher.rs"]:
     if not check_file.is_file():
         continue
     prod = production_text(check_file)
@@ -129,23 +129,25 @@ if FACTORY.is_file():
     prod = production_text(FACTORY)
     if "ReasoningBindingMode::Fixed" not in prod:
         violations.append("8. Factory must wire retained static ReasoningBindingMode::Fixed")
-# ── 9. Sub Hook mode uses an empty capability adapter ──
+# ── 9. Sub Hook mode uses a boundary-filtering capability adapter ──
 if FACTORY.is_file():
     prod = production_text(FACTORY)
     if "HookBindingMode::BoundaryOnly" not in prod:
         violations.append("9. Factory must handle the Sub Hook binding mode")
-    if "EmptyHookPort" not in prod:
-        violations.append("9. Factory must bind Sub Runs to EmptyHookPort")
-    if "BoundaryHookPort" in prod:
-        violations.append("9. Factory must not retain BoundaryHookPort")
+    if "BoundaryHookPort" not in prod:
+        violations.append("9. Factory must bind Sub Runs to BoundaryHookPort")
+    if "EmptyHookPort" in prod:
+        violations.append("9. Factory must not collapse BoundaryOnly into EmptyHookPort")
 if EMPTY_HOOK.is_file():
     prod = production_text(EMPTY_HOOK)
+    if "struct BoundaryHookPort" not in prod:
+        violations.append("9. BoundaryHookPort implementation is missing")
+    if not all(point in prod for point in ["SessionStart", "SessionEnd", "SubRunStart", "SubRunStop"]):
+        violations.append("9. BoundaryHookPort must allow only Run/SubRun lifecycle boundaries")
     if "HookOutcome::proceed()" not in prod:
-        violations.append("9. EmptyHookPort must return a no-op proceed outcome")
-    if ".dispatch(" in prod or ".dispatch_at(" in prod:
-        violations.append("9. EmptyHookPort must not delegate to another HookPort")
+        violations.append("9. BoundaryHookPort must return proceed for filtered invocations")
 else:
-    violations.append("9. EmptyHookPort implementation is missing")
+    violations.append("9. Hook capability adapter implementation is missing")
 
 # ── 10. Workflow graph retired ──
 # Reasoning graph ownership is deferred for redesign; no workflow crate or
@@ -156,13 +158,86 @@ if INTERACTION.is_file():
     if "UnavailableInteractionPort" not in prod:
         violations.append("11. UnavailableInteractionPort must exist")
 
-# ── 12. Factory::assemble() returns typed errors ──
+# ── 12. Factory's private create() returns typed errors ──
 if FACTORY.is_file():
     prod = production_text(FACTORY)
-    if "fn assemble" not in prod:
-        violations.append("12. Factory must have assemble() method")
+    if "fn create" not in prod:
+        violations.append("12. Factory must have private create() method")
+    if re.search(r'pub\s+fn\s+create', prod):
+        violations.append("12. Factory create() must not be public")
     if "RuntimeContextAssemblyError" not in prod:
         violations.append("12. Factory must return typed RuntimeContextAssemblyError")
+
+# ── 13. P6.2 pure-value preparation entry ──
+PREPARER = root / "agent/features/runtime/src/application/run/preparer.rs"
+MAIN_CALLER = root / "agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs"
+SUB_CALLER = root / "agent/features/runtime/src/application/run/derived/setup.rs"
+if PREPARER.is_file():
+    prod = production_text(PREPARER)
+    signature = prod.partition("pub fn prepare(")[2].partition(") -> Result<PreparedRun")[0]
+    if "request: RunPreparationRequest" not in signature:
+        violations.append("13. RunPreparer::prepare must accept RunPreparationRequest")
+    for retired in ["RunCapabilityBindings", "RunContextBindings", "RuntimeContext"]:
+        if retired in signature:
+            violations.append(f"13. RunPreparer::prepare signature must not expose {retired}")
+for caller in [MAIN_CALLER, SUB_CALLER]:
+    if not caller.is_file():
+        continue
+    prod = production_text(caller)
+    for retired in ["RunCapabilityBindings", "RunContextBindings", "RuntimeContextParts", "SubRunCapabilitySource"]:
+        if retired in prod:
+            violations.append(f"13. Production Run caller assembles retired {retired}: {caller}")
+    if re.search(r'RuntimeContext::new\s*\(|\.create\s*\(', prod):
+        violations.append(f"13. Production Run caller bypasses RunPreparer: {caller}")
+
+# ── 14. P6.3 one model invocation orchestration ──
+MODEL_COORDINATOR = root / "agent/features/runtime/src/application/model/invocation.rs"
+MODEL_ADAPTERS = [
+    root / "agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs",
+    root / "agent/features/runtime/src/application/run/derived/loop_run.rs",
+]
+if MODEL_COORDINATOR.is_file():
+    prod = production_text(MODEL_COORDINATOR)
+    if "pub(crate) async fn orchestrate_model_invocation" not in prod:
+        violations.append("14. Model coordinator must expose the shared orchestration")
+    if len(re.findall(r'async\s+fn\s+invoke_model_impl\s*\(', prod)) != 1:
+        violations.append("14. Model coordinator must own exactly one invoke_model_impl")
+for adapter in MODEL_ADAPTERS:
+    if not adapter.is_file():
+        continue
+    prod = production_text(adapter)
+    for retired in ["async fn invoke_model_impl", "ModelInvocationCoordinator::new()", "provider.invoke("]:
+        if retired in prod:
+            violations.append(f"14. Role adapter retains model orchestration '{retired}': {adapter}")
+
+# ── 15. P6.4 one tool-round orchestration ──
+TOOL_COORDINATOR = root / "agent/features/runtime/src/application/tool/coordination.rs"
+TOOL_ADAPTERS = [
+    root / "agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs",
+    root / "agent/features/runtime/src/application/run/derived/loop_run.rs",
+]
+if TOOL_COORDINATOR.is_file():
+    prod = production_text(TOOL_COORDINATOR)
+    if "pub(crate) struct ToolRoundContext" not in prod:
+        violations.append("15. Tool coordinator must receive an explicit ToolRoundContext")
+    if "pub(crate) trait ToolRoundObserver" not in prod:
+        violations.append("15. Tool coordinator must expose a narrow ToolRoundObserver")
+    if "pub struct ToolRoundOutcome" not in prod or "pub enum ToolRoundContinuation" not in prod:
+        violations.append("15. Tool coordinator must return an explicit continuation outcome")
+    for retired in ["ToolRoundProjection", "mark_tool_results_pending"]:
+        if retired in prod:
+            violations.append(f"15. Tool coordinator retains vague boundary '{retired}'")
+    if "pub(crate) async fn orchestrate_tool_round" not in prod:
+        violations.append("15. Tool coordinator must expose the shared round orchestration")
+    if len(re.findall(r'async\s+fn\s+execute_tools_impl\s*<', prod)) != 1:
+        violations.append("15. Tool coordinator must own exactly one execute_tools_impl")
+for adapter in TOOL_ADAPTERS:
+    if not adapter.is_file():
+        continue
+    prod = production_text(adapter)
+    for retired in ["ToolRoundProjection", "mark_tool_results_pending", "async fn execute_tools_impl", "prepare_tool_round(", "execute_tool_round(", "agent.execute_prepared_tools("]:
+        if retired in prod:
+            violations.append(f"15. Role adapter retains tool orchestration '{retired}': {adapter}")
 
 # ── Report ──
 if violations:

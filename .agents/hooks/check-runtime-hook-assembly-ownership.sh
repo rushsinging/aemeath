@@ -21,8 +21,8 @@ if not bootstrap.is_file():
     violations.append("agent/features/runtime/src/application/client/from_args.rs: Runtime bootstrap source is missing")
 else:
     production = bootstrap.read_text().split("#[cfg(test)]", 1)[0]
-    if not re.search(r"\bhook_runner\b", production):
-        violations.append("agent/features/runtime/src/application/client/from_args.rs: Runtime dependencies must carry injected hook_runner")
+    if not re.search(r"\bruntime_context_factory\s*:", production):
+        violations.append("agent/features/runtime/src/application/client/from_args.rs: Runtime dependencies must carry injected RuntimeContextFactory")
 
 for path in runtime.rglob("*.rs"):
     if "tests" in path.parts or path.name.endswith("_tests.rs"):

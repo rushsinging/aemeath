@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use sdk::{AgentClient, ChatRequest, ChatStream, SdkError};
 
 use super::accessors::AgentClientImpl;
-use crate::application::session_ingress::InteractionCommand;
+use crate::application::session::ingress::InteractionCommand;
 
 #[async_trait]
 impl AgentClient for AgentClientImpl {

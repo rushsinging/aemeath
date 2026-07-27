@@ -1,6 +1,6 @@
 //! Tokio-specific tool runtime adapters.
 //!
-//! RuntimeWorkspaceAccess 类型在 application::workspace_access。
+//! RuntimeWorkspaceAccess 类型在 application::workspace::access。
 //! 本文件只保留 Tokio CancellationToken 和 mpsc channel 的 adapter 实现。
 
 use async_trait::async_trait;

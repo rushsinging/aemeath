@@ -13,7 +13,7 @@ import sys
 
 root = Path.cwd()
 runtime = root / "agent/features/runtime/src/application/client/from_args.rs"
-factory = root / "agent/features/runtime/src/application/runtime_context_factory.rs"
+factory = root / "agent/features/runtime/src/application/run/context_factory.rs"
 composition = root / "agent/composition/src/runtime.rs"
 violations = []
 
@@ -61,14 +61,14 @@ else:
     source = production_text(factory)
     factory_body = struct_body(source, "RuntimeContextFactory")
     if factory_body is None or not re.search(r"\bservices\s*:\s*RuntimeServices", factory_body):
-        violations.append("agent/features/runtime/src/application/runtime_context_factory.rs: RuntimeContextFactory must own RuntimeServices")
+        violations.append("agent/features/runtime/src/application/run/context_factory.rs: RuntimeContextFactory must own RuntimeServices")
     constructor = re.search(r"pub fn new\s*\((?P<params>[\s\S]*?)\)\s*->\s*Self", source)
     params = constructor.group("params") if constructor else ""
     for field in ["tool_execution", "tool_context_binding"]:
         if not re.search(rf"\b{field}\s*:", params):
-            violations.append(f"agent/features/runtime/src/application/runtime_context_factory.rs: RuntimeContextFactory constructor must receive {field}")
+            violations.append(f"agent/features/runtime/src/application/run/context_factory.rs: RuntimeContextFactory constructor must receive {field}")
         if not re.search(rf"(?<!:)\b{field}\s*(?:,|\}})", source):
-            violations.append(f"agent/features/runtime/src/application/runtime_context_factory.rs: RuntimeContextFactory must retain {field} in RuntimeServices")
+            violations.append(f"agent/features/runtime/src/application/run/context_factory.rs: RuntimeContextFactory must retain {field} in RuntimeServices")
 
 if not composition.is_file():
     violations.append(f"{composition}: Composition runtime assembly source is missing")

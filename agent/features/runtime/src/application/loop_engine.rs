@@ -1,3 +1,4 @@
+pub mod chat;
 mod engine;
 pub(crate) mod event_strategy;
 mod input;
@@ -11,12 +12,12 @@ pub(crate) mod tool_strategy;
 pub(crate) use engine::fail_run;
 pub use engine::{
     execute_prepared_loop, run_loop, ApprovalRequiredCall, CompactionPort, DrainEpoch,
-    DrainOutcome, EventSinkPort, ExecutionStatePort, InputPort, InteractionMailboxPort,
-    InteractionWorkOutcome, InternalContinuationKind, LoopDirective, LoopEngineError,
-    LoopEnginePort, LoopInput, ModelInvocationPort, ModelStep, PendingInteractionItem,
-    PendingInteractionWork, PlanApprovalPort, RunControlPort, RunLifecyclePort,
-    StepPersistencePort, StepTokenUsage, StopHookPort, StuckHandlingPort, SuspendedQuestion,
-    SuspendedToolCall, ToolGuardDecision, ToolOrchestrationPort, ToolStep,
+    DrainOutcome, EventSinkPort, InputPort, InteractionCompletionPort, InteractionMailboxPort,
+    InteractionWorkOutcome, InternalContinuationKind, LoopDirective, LoopEngineError, LoopInput,
+    ModelInvocationPort, ModelStep, PendingInteractionItem, PendingInteractionWork,
+    PlanApprovalPort, RunControlPort, RunLifecyclePort, StepCommit, StepPersistencePort,
+    StepTokenUsage, StopHookPort, StuckHandlingPort, SuspendedQuestion, SuspendedToolCall,
+    ToolGuardDecision, ToolOrchestrationPort, ToolStep,
 };
 pub use input::{split_input_events, RuntimeControl, RuntimeInputBatch, UserRunInput};
 pub use stuck_guard::{StuckDecision, StuckGuard};

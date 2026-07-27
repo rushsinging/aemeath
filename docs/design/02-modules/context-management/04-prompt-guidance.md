@@ -480,7 +480,7 @@ User guidance 归入 `cacheable_prefix`——变化频率低（用户偶尔编�
 
 - L2：`context/tests/application_service_contract.rs` 覆盖 prefix 顺序、唯一断点和日期/动态系统上下文零注入；`context/tests/isolated_context_with_skill.rs` 覆盖 skill block 不携带动态系统上下文。
 - L3：`agent/composition/src/provider_tests.rs` 覆盖唯一 `RequestSystemBlock::Cacheable` 到 Provider block 的转换；`provider/src/adapters/openai_compatible/{message_conversion_tests.rs,responses.rs}` 覆盖 Chat / Responses wire 不发送 `cache_control`。
-- L4：`runtime/src/application/prompt/build/prompt_build_tests.rs` 覆盖 Git 初始快照不进入 static prompt；`runtime/src/application/main_loop/looping/loop_runner_tests.rs` 覆盖 Main Run fixtures 的首次 Git 上下文链路。
+- L4：`runtime/src/application/prompt/build/prompt_build_tests.rs` 覆盖 Git 初始快照不进入 static prompt；`runtime/src/application/loop_engine/chat/loop_runner_tests.rs` 覆盖 Main Run fixtures 的首次 Git 上下文链路。
 - Gate：`cargo test -p context`、`cargo test -p provider --lib`、`cargo test -p runtime --lib`、`cargo test -p composition --lib`、`cargo check -p context -p provider -p runtime -p composition`、`cargo clippy -p context -p provider -p runtime -p composition -- -D warnings`，以及 pre-push 的完整 architecture guards / workspace 测试。
 
 ## 11. 相关文档

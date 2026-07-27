@@ -9,13 +9,13 @@
 use sdk::ChatInputEvent;
 use share::message::Message;
 
-use crate::application::loop_engine::{
-    DrainEpoch, DrainOutcome, InternalContinuationKind, LoopEngineError,
-};
-use crate::application::main_loop::looping::run_input_buffer::BufferDrain;
-use crate::application::main_loop::looping::{
+use crate::application::loop_engine::chat::run_input_buffer::BufferDrain;
+use crate::application::loop_engine::chat::{
     ChatEventSink, ChatEventSinkHandle, InputEventDrainPort, PendingInputBuffer, QueueDrainPort,
     RuntimeStreamEvent,
+};
+use crate::application::loop_engine::{
+    DrainEpoch, DrainOutcome, InternalContinuationKind, LoopEngineError,
 };
 
 /// Common interface for input-source strategies.
@@ -49,7 +49,7 @@ pub(crate) trait InputStrategy {
 /// #1385 Task 12: `sink` is now a [`ChatEventSinkHandle`] (shared with
 /// [`RuntimeContext`]) instead of a generic `&S`.  This eliminates the `S`
 /// generic parameter.
-pub(crate) struct MainInputStrategy<'a, Q, I>
+pub(crate) struct BufferedInputAdapter<'a, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -66,7 +66,7 @@ where
     /// User messages received during this Run are accumulated here and drained
     /// per-step within the same Run (#1272).  All access goes through
     /// [`RunInputBufferHandle::with_lock`].
-    pub run_input_buffer: crate::application::runtime_context::RunInputBufferHandle,
+    pub run_input_buffer: crate::application::run::context::RunInputBufferHandle,
     /// Stop-hook feedback set by `invoke_model`, consumed by drain to
     /// produce `InternalContinuation::StopHookFeedback`.
     pub stop_hook_feedback: Option<Message>,
@@ -79,7 +79,7 @@ where
     pub run_id: sdk::RunId,
 }
 
-impl<'a, Q, I> MainInputStrategy<'a, Q, I>
+impl<'a, Q, I> BufferedInputAdapter<'a, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -179,7 +179,7 @@ where
                 BufferDrain::AlreadySealed { epoch } => {
                     log::warn!(
                         target: crate::LOG_TARGET,
-                        "MainInputStrategy: take_internal_continuation returned AlreadySealed at epoch {:?}",
+                        "BufferedInputAdapter: take_internal_continuation returned AlreadySealed at epoch {:?}",
                         epoch,
                     );
                     return Ok(Some(DrainOutcome::EmptyAndSealed { epoch }));
@@ -224,7 +224,7 @@ where
                 BufferDrain::AlreadySealed { epoch } => {
                     log::warn!(
                         target: crate::LOG_TARGET,
-                        "MainInputStrategy: take_internal_continuation returned AlreadySealed at epoch {:?}",
+                        "BufferedInputAdapter: take_internal_continuation returned AlreadySealed at epoch {:?}",
                         epoch,
                     );
                     return Ok(Some(DrainOutcome::EmptyAndSealed { epoch }));
@@ -261,7 +261,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<Q, I> InputStrategy for MainInputStrategy<'_, Q, I>
+impl<Q, I> InputStrategy for BufferedInputAdapter<'_, Q, I>
 where
     Q: QueueDrainPort + Send,
     I: InputEventDrainPort + Send,
@@ -311,14 +311,14 @@ where
             BufferDrain::AlreadySealed { epoch } => {
                 log::warn!(
                     target: crate::LOG_TARGET,
-                    "MainInputStrategy: drain_or_seal returned AlreadySealed — buffer was already sealed"
+                    "BufferedInputAdapter: drain_or_seal returned AlreadySealed — buffer was already sealed"
                 );
                 Ok(DrainOutcome::EmptyAndSealed { epoch })
             }
             BufferDrain::EpochMismatch { expected, actual } => {
                 log::error!(
                     target: crate::LOG_TARGET,
-                    "MainInputStrategy: drain_or_seal epoch mismatch — expected {:?}, actual {:?}",
+                    "BufferedInputAdapter: drain_or_seal epoch mismatch — expected {:?}, actual {:?}",
                     expected,
                     actual,
                 );
@@ -414,7 +414,7 @@ where
 /// once (epoch 0), then `InternalContinuation::ToolResults` for each
 /// subsequent tool-result turn, and finally `EmptyAndSealed` when the model
 /// produces no further tool calls.
-pub(crate) struct SubInputStrategy<'a> {
+pub(crate) struct FixedInputAdapter<'a> {
     pub prompt: &'a str,
     /// Whether the initial prompt has already been consumed (#1272).
     pub prompt_drained: bool,
@@ -428,7 +428,7 @@ pub(crate) struct SubInputStrategy<'a> {
     pub has_tool_results_pending: bool,
 }
 
-impl<'a> SubInputStrategy<'a> {
+impl<'a> FixedInputAdapter<'a> {
     pub fn new(prompt: &'a str) -> Self {
         Self {
             prompt,
@@ -440,7 +440,7 @@ impl<'a> SubInputStrategy<'a> {
 }
 
 #[async_trait::async_trait]
-impl InputStrategy for SubInputStrategy<'_> {
+impl InputStrategy for FixedInputAdapter<'_> {
     async fn drain_input(
         &mut self,
         expected_epoch: DrainEpoch,

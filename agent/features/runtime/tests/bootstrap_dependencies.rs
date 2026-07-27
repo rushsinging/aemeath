@@ -91,15 +91,6 @@ impl tools::AgentRunner for NoopAgentRunner {
             result: String::new(),
         }
     }
-
-    async fn complete(
-        &self,
-        _prompt: &str,
-        _system: &str,
-        _cancellation: Arc<dyn tools::CancellationSignal>,
-    ) -> String {
-        String::new()
-    }
 }
 
 fn test_prompt_assembly() -> runtime::PromptAssembly {
@@ -272,7 +263,6 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
             wiring,
             Arc::new(TestProviderFactory),
             session_management.clone(),
-            hook_runner.clone(),
         ),
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),

@@ -6,12 +6,12 @@ ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 ENGINE="agent/features/runtime/src/application/loop_engine/engine.rs"
-MAIN="agent/features/runtime/src/application/main_loop/looping/loop_runner.rs"
-SUB="agent/features/runtime/src/application/subagent/runner/loop_run.rs"
-LAUNCHER="agent/features/runtime/src/application/run_launcher.rs"
-MAIN_PORT="agent/features/runtime/src/application/main_loop/looping/main_run_port.rs"
-CONTEXT_COORDINATION="agent/features/runtime/src/application/context_coordination.rs"
-OLD_FSM="agent/features/runtime/src/application/main_loop/looping/state.rs"
+MAIN="agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs"
+SUB="agent/features/runtime/src/application/run/derived/loop_run.rs"
+LAUNCHER="agent/features/runtime/src/application/run/launcher.rs"
+MAIN_PORT="agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs"
+CONTEXT_COORDINATION="agent/features/runtime/src/application/context/coordination.rs"
+OLD_FSM="agent/features/runtime/src/application/loop_engine/chat/state.rs"
 
 for path in "$ENGINE" "$MAIN" "$MAIN_PORT" "$SUB" "$LAUNCHER" "$CONTEXT_COORDINATION"; do
   if [ ! -f "$path" ]; then
@@ -19,6 +19,12 @@ for path in "$ENGINE" "$MAIN" "$MAIN_PORT" "$SUB" "$LAUNCHER" "$CONTEXT_COORDINA
     exit 2
   fi
 done
+
+if grep -RInF '#![allow(dead_code)]' \
+    agent/features/runtime/src/application --include='*.rs'; then
+  echo '{"decision":"block","reason":"Runtime application 禁止模块级 dead_code 豁免；必须分类接线、cfg(test) 或物理删除。"}'
+  exit 2
+fi
 
 if [ -e "$OLD_FSM" ]; then
   echo "{\"decision\":\"block\",\"reason\":\"旧 ChatLoopState FSM 禁止恢复：$OLD_FSM\"}"
@@ -32,22 +38,25 @@ if [ "$engine_defs" -ne 1 ]; then
   exit 2
 fi
 
-# #1280: Main/Sub may call run_launcher::launch / reenter_run_loop instead of
-# calling run_loop directly. The launcher itself must call run_loop.
-if ! grep -q 'run_loop(' "$LAUNCHER"; then
-  echo '{"decision":"block","reason":"RunLauncher 未调用共享 loop_engine::run_loop。"}'
+# #1397: Main/Sub must call launch_prepared; the launcher owns the single
+# execute_prepared_loop entry and the legacy launch/run_loop bridge is retired.
+if ! grep -q 'execute_prepared_loop(' "$LAUNCHER"; then
+  echo '{"decision":"block","reason":"RunLauncher 未调用统一 execute_prepared_loop 入口。"}'
+  exit 2
+fi
+if grep -q 'pub async fn launch<' "$LAUNCHER"; then
+  echo '{"decision":"block","reason":"RunLauncher 禁止恢复旧 launch/run_loop 兼容入口。"}'
   exit 2
 fi
 
-# Main: accept either direct run_loop or via run_launcher.
-if ! grep -qE 'run_loop\(&mut run, &cancel, &mut port\)|run_launcher::(launch|reenter_run_loop)' "$MAIN"; then
-  echo '{"decision":"block","reason":"Main Run 未调用共享 loop_engine::run_loop 或 RunLauncher。"}'
+# Main/Sub both enter through launch_prepared.
+if ! grep -q 'run::launcher::launch_prepared' "$MAIN"; then
+  echo '{"decision":"block","reason":"Main Run 未调用统一 launch_prepared 入口。"}'
   exit 2
 fi
 
-# Sub: accept either direct shared_run_loop or via run_launcher.
-if ! grep -qE 'shared_run_loop\(&mut run, &cancel, &mut self\)\.await|run_launcher::launch' "$SUB"; then
-  echo '{"decision":"block","reason":"Sub Run 未调用共享 loop_engine::run_loop 或 RunLauncher。"}'
+if ! grep -q 'run::launcher::launch_prepared' "$SUB"; then
+  echo '{"decision":"block","reason":"Sub Run 未调用统一 launch_prepared 入口。"}'
   exit 2
 fi
 

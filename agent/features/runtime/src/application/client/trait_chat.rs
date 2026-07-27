@@ -24,8 +24,8 @@ pub(super) async fn chat_impl(
     let inner = me.inner.clone();
     let session_context = logging::capture();
     logging::spawn_instrumented(session_context, async move {
-        crate::application::main_loop::process_chat_loop(
-            crate::application::main_loop::ChatLoopContext {
+        crate::application::loop_engine::chat::process_chat_loop(
+            crate::application::loop_engine::chat::ChatLoopContext {
                 sink,
                 queue: input_ports.queue,
                 input_events: input_ports.input_events,

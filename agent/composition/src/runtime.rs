@@ -312,7 +312,6 @@ pub(crate) async fn from_args_with_gateways(
         &snapshot,
     );
     let agent_runner = runtime::build_agent_runner(
-        wiring.config_reader(),
         gateways.provider.clone(),
         tool_assembly.active_run.clone(),
         max_tool_concurrency,
@@ -330,7 +329,6 @@ pub(crate) async fn from_args_with_gateways(
             wiring,
             gateways.provider,
             session_management,
-            hook_runner,
         ),
         runtime::RuntimeToolAssemblyDependencies::new(
             tool_assembly.catalog,

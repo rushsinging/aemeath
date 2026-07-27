@@ -1,0 +1,717 @@
+//! model_invocation — 调 Provider、组装流、提取 tool_calls、记录 usage。
+//!
+//! 对应设计：`docs/design/02-modules/runtime/02-module-boundaries.md` §2。
+//!
+//! 职责：
+//! - 调 `ProviderPort` 发起 LLM 调用
+//! - 组装流式响应
+//! - 提取 tool_calls
+//! - 记录 `RawUsageSnapshot` -> 构造 `UsageRecord` 经 `RuntimeStreamEvent::Usage` 路径发出
+//! - 退避重试：仅对 Retryable(超时/5xx/429/流中断) 指数退避重试
+//! - Fatal(4xx) 直接失败；context 超限 -> compact
+//! - 重试期 emit `ModelInvocationRetrying{attempt}`
+//!
+//! 状态：无（产出 `ModelInvocation` VO 交回 Run Step）
+//! 消费：`ProviderPort`、`ReasoningPort`
+//!
+//! 实现由 #875 负责。
+
+use std::time::{Duration, Instant};
+
+use async_trait::async_trait;
+use futures::{Stream, StreamExt};
+use provider::{InvocationEvent, ProviderError, ProviderErrorKind};
+use tokio_util::sync::CancellationToken;
+
+use crate::application::context::coordination::ContextCoordinator;
+use crate::application::loop_engine::chat::{
+    should_emit_model_stream_waiting, ChatEventSink, ChatEventSinkHandle, InvocationEventReducer,
+    InvocationResponse, RuntimeStreamEvent, RuntimeTurnContext,
+};
+use crate::application::loop_engine::llm_strategy::{
+    build_step_token_usage, extract_invocation_context,
+};
+use crate::application::loop_engine::{LoopEngineError, ModelStep, StepTokenUsage};
+use crate::application::run::context::RuntimeContext;
+use crate::application::run::execution_state::RunExecutionState;
+use crate::application::tool::agent::ToolCall;
+use crate::ports::{InvocationOptions, InvocationRequest};
+
+/// One initial invocation plus at most ten retries.
+const DEFAULT_MAX_ATTEMPTS: u32 = 11;
+const INITIAL_BACKOFF: Duration = Duration::from_secs(10);
+const MAX_BACKOFF: Duration = Duration::from_secs(120);
+
+struct AbortTaskOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortTaskOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetryDecision {
+    RetryAfter(Duration),
+    Compact,
+    Fail,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RetryPolicy {
+    max_attempts: u32,
+    max_backoff: Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: DEFAULT_MAX_ATTEMPTS,
+            max_backoff: MAX_BACKOFF,
+        }
+    }
+}
+
+impl RetryPolicy {
+    pub(crate) fn decide(
+        &self,
+        attempt: u32,
+        _visible_delta: bool,
+        error: &ProviderError,
+        jitter_millis: u64,
+    ) -> RetryDecision {
+        if error.kind == ProviderErrorKind::ContextTooLong {
+            return RetryDecision::Compact;
+        }
+        if error.kind == ProviderErrorKind::RateLimited
+            || !error.retryable
+            || attempt >= self.max_attempts
+        {
+            return RetryDecision::Fail;
+        }
+
+        let exponential = INITIAL_BACKOFF.saturating_mul(
+            1u32.checked_shl(attempt.saturating_sub(1))
+                .unwrap_or(u32::MAX),
+        );
+        let base_delay = error.retry_after.unwrap_or(exponential);
+        let delay = base_delay
+            .saturating_add(Duration::from_millis(jitter_millis))
+            .min(self.max_backoff);
+        RetryDecision::RetryAfter(delay)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetryStep {
+    Retry { attempt: u32, delay: Duration },
+    Compact,
+    Fail,
+    Cancelled,
+}
+
+#[async_trait]
+pub(crate) trait ModelInvocationProjection: Send {
+    fn runtime_context(&self) -> &RuntimeContext;
+    fn role(&self) -> &str;
+    fn request_log_context(&self, parent: &logging::LogContext) -> logging::LogContext;
+    fn context_size(&self, execution: &RunExecutionState) -> usize;
+    fn committed_delta(&self) -> bool;
+    fn build_reducer(&self) -> InvocationEventReducer<ChatEventSinkHandle>;
+    fn waiting_projection(&self) -> Option<(ChatEventSinkHandle, RuntimeTurnContext)> {
+        None
+    }
+    async fn on_window(&mut self, _execution: &RunExecutionState) {}
+    async fn pump_while_invoking<T: Send>(
+        &mut self,
+        invocation: impl std::future::Future<Output = T> + Send,
+    ) -> T {
+        invocation.await
+    }
+    async fn on_retry(&mut self, attempt: u32, delay: Duration);
+    async fn on_retry_cancelled(&mut self) {}
+    async fn on_response(
+        &mut self,
+        _execution: &mut RunExecutionState,
+        _response: &InvocationResponse,
+        _elapsed_secs: f64,
+    ) {
+    }
+    fn extract_tool_calls(&self, response: &InvocationResponse) -> Vec<ToolCall>;
+    async fn classify_terminal(
+        &mut self,
+        execution: &mut RunExecutionState,
+        response: &InvocationResponse,
+        calls: Vec<ToolCall>,
+        usage: StepTokenUsage,
+    ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError>;
+}
+
+pub(crate) async fn orchestrate_model_invocation(
+    projection: &mut impl ModelInvocationProjection,
+    execution: &mut RunExecutionState,
+    cancel: &CancellationToken,
+) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
+    invoke_model_impl(projection, execution, cancel).await
+}
+
+async fn invoke_model_impl(
+    projection: &mut impl ModelInvocationProjection,
+    execution: &mut RunExecutionState,
+    cancel: &CancellationToken,
+) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
+    if execution.context_window().is_none() {
+        if let Some(request) = execution.context_request() {
+            let coordinator = ContextCoordinator::new(projection.runtime_context().context());
+            let window = coordinator
+                .build_window(request)
+                .await
+                .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+            *execution.context_window_mut() = Some(window);
+        }
+    }
+    let window = execution
+        .context_window()
+        .cloned()
+        .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
+    projection.on_window(execution).await;
+    let invocation_context = extract_invocation_context(&window);
+    crate::application::loop_engine::llm_log::log_llm_input(
+        &invocation_context.messages_for_api,
+        window.messages.len(),
+        &invocation_context.system_blocks,
+        &invocation_context.tool_schemas,
+        projection.role(),
+    );
+
+    let binding = projection.runtime_context().provider();
+    let reasoning = *projection
+        .runtime_context()
+        .reasoning()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let started = Instant::now();
+    let mut coordinator = ModelInvocationCoordinator::new();
+    let response = loop {
+        let request_context = projection.request_log_context(&logging::capture());
+        let mut reducer = projection.build_reducer();
+        let provider = binding.provider.clone();
+        let model = binding.model.clone();
+        let max_tokens = binding.max_tokens;
+        let messages = invocation_context.messages_for_api.clone();
+        let system = invocation_context.system_blocks.clone();
+        let tools = window.tool_schemas.clone();
+        let stream_cancel = cancel.clone();
+        let committed_delta = projection.committed_delta();
+        let progress_handle = reducer.progress_handle();
+        let invocation = async {
+            let mut request = InvocationRequest::new(
+                model,
+                messages,
+                InvocationOptions::new(max_tokens, reasoning),
+            );
+            request.system = system;
+            request.tools = tools;
+            request.cancellation = stream_cancel.clone();
+            let stream = provider
+                .invoke(request, &stream_cancel)
+                .await
+                .map_err(|error| (error, false))?;
+            coordinator
+                .pull_stream(stream, &stream_cancel, committed_delta, |event| {
+                    reducer.apply(event)
+                })
+                .await
+        };
+        let waiting_projection = projection.waiting_projection();
+        let waiting_started_at = tokio::time::Instant::now();
+        let waiting_task = waiting_projection.map(|(sink, context)| {
+            AbortTaskOnDrop(logging::spawn_instrumented(
+                request_context.clone(),
+                async move {
+                    let mut next = waiting_started_at + Duration::from_secs(10);
+                    let mut last_version = None;
+                    loop {
+                        tokio::time::sleep_until(next).await;
+                        let snapshot = progress_handle
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner())
+                            .snapshot();
+                        if should_emit_model_stream_waiting(last_version, &snapshot) {
+                            sink.try_send_event(RuntimeStreamEvent::ModelStreamWaiting {
+                                context: context.clone(),
+                                elapsed_secs: waiting_started_at.elapsed().as_secs(),
+                                phase: snapshot.phase.to_string(),
+                            });
+                        }
+                        last_version = Some(snapshot.visible_progress_version);
+                        next += Duration::from_secs(10);
+                    }
+                },
+            ))
+        });
+        let result =
+            logging::instrument(request_context, projection.pump_while_invoking(invocation)).await;
+        drop(waiting_task);
+        match result {
+            Ok((response, _)) => break response,
+            Err((error, _)) if error.is_cancelled() || cancel.is_cancelled() => {
+                return Err(LoopEngineError::Cancelled);
+            }
+            Err((error, visible_delta)) => {
+                match coordinator
+                    .handle_failure(&error, visible_delta, cancel)
+                    .await
+                {
+                    RetryStep::Retry { attempt, delay } => {
+                        projection.on_retry(attempt, delay).await;
+                    }
+                    RetryStep::Cancelled => {
+                        projection.on_retry_cancelled().await;
+                        return Err(LoopEngineError::Cancelled);
+                    }
+                    RetryStep::Compact => {
+                        return Err(LoopEngineError::NeedsCompaction(error.to_string()));
+                    }
+                    RetryStep::Fail => return Err(LoopEngineError::Adapter(error.to_string())),
+                }
+            }
+        }
+    };
+    let elapsed_secs = started.elapsed().as_secs_f64();
+    projection
+        .runtime_context()
+        .usage()
+        .update(crate::application::model::token_usage::normalized_total_tokens(&response.usage));
+    let usage = build_step_token_usage(
+        &response,
+        projection.context_size(execution) as u64,
+        window.token_estimation.system_tokens,
+        window.token_estimation.tool_schema_tokens,
+        window.token_estimation.message_tokens,
+    );
+    execution.append_message(response.assistant_message.clone());
+    execution.record_step_message(response.assistant_message.clone());
+    projection
+        .on_response(execution, &response, elapsed_secs)
+        .await;
+    let calls = projection.extract_tool_calls(&response);
+    crate::application::loop_engine::llm_log::log_llm_output_and_tool_calls(
+        binding.model.provider.as_str(),
+        &response,
+        &calls,
+        elapsed_secs,
+        projection.role(),
+    );
+    projection
+        .classify_terminal(execution, &response, calls, usage)
+        .await
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ModelInvocationCoordinator {
+    policy: RetryPolicy,
+    attempt: u32,
+}
+
+impl ModelInvocationCoordinator {
+    pub(crate) fn new() -> Self {
+        Self {
+            policy: RetryPolicy::default(),
+            attempt: 1,
+        }
+    }
+
+    /// Pull and reduce one provider attempt.
+    ///
+    /// `delta_is_committed` is deliberately supplied by the caller: main-chat
+    /// deltas are already projected to a user-visible sink, while sub-agent deltas
+    /// go to a no-op sink. The resulting flag is diagnostic (and may inform future
+    /// presentation policy), but does not determine retry eligibility.
+    /// A stream ending without a reducer-produced terminal value is a protocol failure.
+    pub(crate) async fn pull_stream<T, S, Apply>(
+        &self,
+        mut stream: S,
+        cancel: &CancellationToken,
+        delta_is_committed: bool,
+        mut apply: Apply,
+    ) -> Result<(T, bool), (ProviderError, bool)>
+    where
+        S: Stream<Item = InvocationEvent> + Unpin,
+        Apply: FnMut(InvocationEvent) -> Result<Option<T>, ProviderError>,
+    {
+        let mut committed_delta = false;
+        loop {
+            let event = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => {
+                    // Reducers own stream projection cleanup (for example closing an
+                    // active text/thinking block), so cancellation must pass through
+                    // the same terminal failure path before control returns.
+                    let error = ProviderError::cancelled();
+                    let _ = apply(InvocationEvent::Failed(error.clone()));
+                    return Err((error, committed_delta));
+                }
+                event = stream.next() => event,
+            };
+
+            let Some(event) = event else {
+                let error = missing_terminal_error();
+                // A raw EOF has no provider terminal event, so synthesize the
+                // retryable failure through the reducer before returning to the
+                // coordinator. This lets stream consumers close any active
+                // text/thinking block before the next attempt starts.
+                let _ = apply(InvocationEvent::Failed(error.clone()));
+                return Err((error, committed_delta));
+            };
+            let terminal_event = matches!(
+                event,
+                InvocationEvent::Completed(_) | InvocationEvent::Failed(_)
+            );
+            if matches!(event, InvocationEvent::Delta(_)) && delta_is_committed {
+                committed_delta = true;
+            }
+            match apply(event) {
+                Ok(Some(value)) if terminal_event => return Ok((value, committed_delta)),
+                Ok(Some(_)) => return Err((non_terminal_value_error(), committed_delta)),
+                Err(error) => return Err((error, committed_delta)),
+                Ok(None) if terminal_event => {
+                    return Err((missing_terminal_error(), committed_delta));
+                }
+                Ok(None) => {}
+            }
+        }
+    }
+
+    pub(crate) async fn handle_failure(
+        &mut self,
+        error: &ProviderError,
+        visible_delta: bool,
+        cancel: &CancellationToken,
+    ) -> RetryStep {
+        let jitter_millis = deterministic_jitter_millis(self.attempt);
+        match self
+            .policy
+            .decide(self.attempt, visible_delta, error, jitter_millis)
+        {
+            RetryDecision::Compact => RetryStep::Compact,
+            RetryDecision::Fail => RetryStep::Fail,
+            RetryDecision::RetryAfter(delay) => {
+                self.attempt += 1;
+                let attempt = self.attempt;
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => RetryStep::Cancelled,
+                    _ = tokio::time::sleep(delay) => RetryStep::Retry { attempt, delay },
+                }
+            }
+        }
+    }
+}
+
+fn non_terminal_value_error() -> ProviderError {
+    ProviderError::fatal(
+        ProviderErrorKind::Protocol,
+        "invocation reducer returned a terminal value for a non-terminal event",
+    )
+}
+
+fn missing_terminal_error() -> ProviderError {
+    ProviderError::retryable(
+        ProviderErrorKind::StreamTruncated,
+        "provider stream ended without terminal event",
+    )
+}
+
+fn deterministic_jitter_millis(attempt: u32) -> u64 {
+    if attempt <= 1 {
+        0
+    } else {
+        u64::from(attempt.wrapping_mul(73) % 251)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use provider::InvocationDelta;
+
+    fn retryable(kind: ProviderErrorKind) -> ProviderError {
+        ProviderError::retryable(kind, "safe")
+    }
+
+    #[test]
+    fn retry_policy_rejects_rate_limits_and_uses_retry_after_or_capped_exponential_backoff() {
+        let policy = RetryPolicy::default();
+        assert_eq!(
+            policy.decide(1, false, &retryable(ProviderErrorKind::RateLimited), 0),
+            RetryDecision::Fail
+        );
+        assert_eq!(
+            policy.decide(1, false, &retryable(ProviderErrorKind::Timeout), 250),
+            RetryDecision::RetryAfter(Duration::from_millis(10_250))
+        );
+        assert_eq!(
+            policy.decide(4, false, &retryable(ProviderErrorKind::Network), 0),
+            RetryDecision::RetryAfter(Duration::from_secs(80))
+        );
+        assert_eq!(
+            policy.decide(8, false, &retryable(ProviderErrorKind::Network), 999),
+            RetryDecision::RetryAfter(Duration::from_secs(120))
+        );
+
+        let mut retry_after = retryable(ProviderErrorKind::Timeout);
+        retry_after.retry_after = Some(Duration::from_secs(30));
+        assert_eq!(
+            policy.decide(4, false, &retry_after, 250),
+            RetryDecision::RetryAfter(Duration::from_millis(30_250))
+        );
+    }
+
+    #[test]
+    fn retry_policy_clamps_retry_after_and_allows_ten_retries_after_first_attempt() {
+        let policy = RetryPolicy::default();
+        let mut error = retryable(ProviderErrorKind::Timeout);
+        error.retry_after = Some(Duration::from_secs(900));
+        assert_eq!(
+            policy.decide(10, false, &error, 999),
+            RetryDecision::RetryAfter(Duration::from_secs(120))
+        );
+        assert_eq!(policy.decide(11, false, &error, 0), RetryDecision::Fail);
+    }
+
+    #[test]
+    fn visible_delta_does_not_disable_structurally_retryable_error() {
+        let policy = RetryPolicy::default();
+        assert_eq!(
+            policy.decide(1, true, &retryable(ProviderErrorKind::StreamTruncated), 0,),
+            RetryDecision::RetryAfter(Duration::from_secs(10))
+        );
+    }
+
+    #[test]
+    fn fatal_error_still_fails_after_visible_delta() {
+        let policy = RetryPolicy::default();
+        assert_eq!(
+            policy.decide(
+                1,
+                true,
+                &ProviderError::fatal(ProviderErrorKind::Authentication, "safe"),
+                0,
+            ),
+            RetryDecision::Fail
+        );
+    }
+
+    #[tokio::test]
+    async fn main_committed_delta_remains_diagnostic_but_can_retry() {
+        let coordinator = ModelInvocationCoordinator::new();
+        let cancel = CancellationToken::new();
+        let events = futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Text(
+            "shown".to_string(),
+        ))]);
+
+        let outcome = coordinator
+            .pull_stream(events, &cancel, true, |_| {
+                Ok::<Option<()>, ProviderError>(None)
+            })
+            .await;
+
+        let Err((error, committed_delta)) = outcome else {
+            panic!("unterminated stream must fail");
+        };
+        assert_eq!(error.kind, ProviderErrorKind::StreamTruncated);
+        assert!(committed_delta);
+        assert_eq!(
+            coordinator.policy.decide(1, committed_delta, &error, 0),
+            RetryDecision::RetryAfter(Duration::from_secs(10))
+        );
+    }
+
+    #[tokio::test]
+    async fn raw_eof_dispatches_retryable_failure_through_reducer_for_stream_cleanup() {
+        let coordinator = ModelInvocationCoordinator::new();
+        let cancel = CancellationToken::new();
+        let events = futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Text(
+            "partial".to_string(),
+        ))]);
+        let reducer_events = std::cell::RefCell::new(Vec::new());
+
+        let outcome = coordinator
+            .pull_stream(events, &cancel, true, |event| {
+                reducer_events.borrow_mut().push(event);
+                Ok::<Option<()>, ProviderError>(None)
+            })
+            .await;
+
+        assert!(matches!(
+            outcome,
+            Err((
+                ProviderError {
+                    kind: ProviderErrorKind::StreamTruncated,
+                    retryable: true,
+                    ..
+                },
+                true
+            ))
+        ));
+        assert!(matches!(
+            reducer_events.borrow().as_slice(),
+            [
+                InvocationEvent::Delta(InvocationDelta::Text(_)),
+                InvocationEvent::Failed(ProviderError {
+                    kind: ProviderErrorKind::StreamTruncated,
+                    retryable: true,
+                    ..
+                })
+            ]
+        ));
+    }
+
+    #[tokio::test]
+    async fn sub_agent_uncommitted_delta_can_retry() {
+        let coordinator = ModelInvocationCoordinator::new();
+        let cancel = CancellationToken::new();
+        let events = futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Text(
+            "not projected".to_string(),
+        ))]);
+
+        let Err((error, committed_delta)) = coordinator
+            .pull_stream(events, &cancel, false, |_| {
+                Ok::<Option<()>, ProviderError>(None)
+            })
+            .await
+        else {
+            panic!("unterminated stream must fail");
+        };
+
+        assert_eq!(error.kind, ProviderErrorKind::StreamTruncated);
+        assert!(error.retryable);
+        assert!(!committed_delta);
+        assert_eq!(
+            coordinator.policy.decide(1, committed_delta, &error, 0),
+            RetryDecision::RetryAfter(Duration::from_secs(10))
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_stream_returns_terminal_value() {
+        let coordinator = ModelInvocationCoordinator::new();
+        let cancel = CancellationToken::new();
+        let events = futures::stream::iter(vec![InvocationEvent::Failed(ProviderError::fatal(
+            ProviderErrorKind::Authentication,
+            "denied",
+        ))]);
+
+        let outcome = coordinator
+            .pull_stream(events, &cancel, true, |event| match event {
+                InvocationEvent::Failed(error) => Err(error),
+                _ => Ok(None::<()>),
+            })
+            .await;
+
+        assert!(matches!(
+            outcome,
+            Err((
+                ProviderError {
+                    kind: ProviderErrorKind::Authentication,
+                    ..
+                },
+                false
+            ))
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancellation_calls_reducer_failure_for_streaming_cleanup() {
+        let coordinator = ModelInvocationCoordinator::new();
+        let cancel = CancellationToken::new();
+        let events = futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Text(
+            "partial".to_string(),
+        ))])
+        .chain(futures::stream::pending());
+        let reducer_events = std::cell::RefCell::new(Vec::new());
+        let streaming_block_active = std::cell::Cell::new(false);
+
+        let outcome = coordinator
+            .pull_stream(events, &cancel, true, |event| {
+                match &event {
+                    InvocationEvent::Delta(_) => {
+                        streaming_block_active.set(true);
+                        // Force cancellation after the reducer has opened a streaming block.
+                        cancel.cancel();
+                    }
+                    InvocationEvent::Failed(error) if error.is_cancelled() => {
+                        streaming_block_active.set(false);
+                    }
+                    _ => {}
+                }
+                reducer_events.borrow_mut().push(event);
+                Ok::<Option<()>, ProviderError>(None)
+            })
+            .await;
+
+        assert!(matches!(
+            outcome,
+            Err((
+                ProviderError {
+                    kind: ProviderErrorKind::Cancelled,
+                    ..
+                },
+                true
+            ))
+        ));
+        assert!(!streaming_block_active.get());
+        assert!(matches!(
+            reducer_events.borrow().as_slice(),
+            [
+                InvocationEvent::Delta(InvocationDelta::Text(_)),
+                InvocationEvent::Failed(ProviderError {
+                    kind: ProviderErrorKind::Cancelled,
+                    ..
+                })
+            ]
+        ));
+    }
+
+    #[tokio::test]
+    async fn reducer_value_from_delta_is_protocol_failure() {
+        let coordinator = ModelInvocationCoordinator::new();
+        let cancel = CancellationToken::new();
+        let events = futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Text(
+            "invalid terminal".to_string(),
+        ))]);
+
+        let outcome = coordinator
+            .pull_stream(events, &cancel, true, |_| {
+                Ok::<Option<()>, ProviderError>(Some(()))
+            })
+            .await;
+
+        assert!(matches!(
+            outcome,
+            Err((
+                ProviderError {
+                    kind: ProviderErrorKind::Protocol,
+                    retryable: false,
+                    ..
+                },
+                true
+            ))
+        ));
+    }
+
+    #[test]
+    fn context_too_long_requests_compaction_instead_of_retry() {
+        let policy = RetryPolicy::default();
+        assert_eq!(
+            policy.decide(
+                1,
+                false,
+                &ProviderError::fatal(ProviderErrorKind::ContextTooLong, "safe"),
+                0,
+            ),
+            RetryDecision::Compact
+        );
+    }
+}

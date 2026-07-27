@@ -1,9 +1,9 @@
 //! Loop Engine 共享逻辑——Main 和 Sub 完全一致的方法提取到此。
 
 use super::LoopEngineError;
-use crate::application::context_coordination::ContextCoordinator;
-use crate::application::subagent::ToolExecution;
-use crate::application::tool_result_materialization::ToolResultMaterializer;
+use crate::application::context::coordination::ContextCoordinator;
+use crate::application::tool::agent::ToolExecution;
+use crate::application::tool::result_materialization::ToolResultMaterializer;
 use crate::ports::{CompactOutcome, ContextRequest, ContextWindow, SessionRevision};
 
 /// 检查是否需要 compact，并返回最新 window。
@@ -30,10 +30,10 @@ pub(crate) async fn needs_compaction_with_window(
 /// Materialize a batch of [`ToolExecution`]s into a single [`Message`] with
 /// tool-result content blocks, mapping through `provider_id`.
 ///
-/// Shared by Main (`tools::tool_results_for_api`) and Sub
-/// (`loop_helpers::append_tool_results`). Previously both callers duplicated
-/// the same `ToolExecution → (provider_id, text, data, is_error, images)`
-/// mapping followed by `materialize_provider_results`.
+/// Shared tool-result materialization for every run kind. The Loop Engine owns
+/// this path so Main and Sub adapters cannot diverge on wire IDs or persistence.
+/// It maps each execution to `(provider_id, text, data, is_error, images)` and
+/// then delegates to `materialize_provider_results`.
 pub(crate) async fn materialize_tool_results(
     materializer: &ToolResultMaterializer,
     results: Vec<ToolExecution>,
@@ -73,7 +73,7 @@ pub(crate) async fn compact_core(
     context_request: Option<&ContextRequest>,
     source_revision: SessionRevision,
     context: &ContextCoordinator,
-    usage: &crate::application::runtime_context::RunUsageTracker,
+    usage: &crate::application::run::context::RunUsageTracker,
     context_window_out: &mut Option<ContextWindow>,
 ) -> Result<CompactOutcome, LoopEngineError> {
     let request = context_request
@@ -82,7 +82,7 @@ pub(crate) async fn compact_core(
         .compact(request, source_revision)
         .await
         .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-    crate::application::context_coordination::apply_automatic_compact_outcome(
+    crate::application::context::coordination::apply_automatic_compact_outcome(
         &outcome,
         usage,
         context_window_out,

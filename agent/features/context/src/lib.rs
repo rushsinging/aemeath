@@ -27,7 +27,7 @@ pub use application::{
 };
 
 pub mod api {
-    pub use crate::adapters::MemoryRetrieveAdapter;
+    pub use crate::adapters::{isolated_context_with_skill, MemoryRetrieveAdapter};
     pub use crate::ports::MemoryMaterialization;
 }
 

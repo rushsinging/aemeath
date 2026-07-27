@@ -1,12 +1,11 @@
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 fn test_workspaces(
-) -> &'static Mutex<HashMap<String, crate::application::workspace_access::RuntimeWorkspaceAccess>> {
+) -> &'static Mutex<HashMap<String, crate::application::workspace::access::RuntimeWorkspaceAccess>>
+{
     static WORKSPACES: OnceLock<
-        Mutex<HashMap<String, crate::application::workspace_access::RuntimeWorkspaceAccess>>,
+        Mutex<HashMap<String, crate::application::workspace::access::RuntimeWorkspaceAccess>>,
     > = OnceLock::new();
     WORKSPACES.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -19,7 +18,7 @@ pub(crate) fn test_tool_execution_context(
         .expect("workspace initialization")
         .into_views();
     let workspace =
-        crate::application::workspace_access::RuntimeWorkspaceAccess::new(views.clone());
+        crate::application::workspace::access::RuntimeWorkspaceAccess::new(views.clone());
     test_workspaces().lock().expect("test workspaces").insert(
         views.read().workspace_id().as_str().to_string(),
         workspace.clone(),
@@ -43,7 +42,7 @@ pub(crate) fn test_tool_execution_context(
 
 pub(crate) fn runtime_workspace(
     ctx: &tools::ToolExecutionContext,
-) -> crate::application::workspace_access::RuntimeWorkspaceAccess {
+) -> crate::application::workspace::access::RuntimeWorkspaceAccess {
     test_workspaces()
         .lock()
         .expect("test workspaces")
@@ -66,7 +65,7 @@ use provider::{
 };
 
 pub(crate) fn test_tool_result_materializer(
-) -> Arc<crate::application::tool_result_materialization::ToolResultMaterializer> {
+) -> Arc<crate::application::tool::result_materialization::ToolResultMaterializer> {
     struct TestBlobPort;
 
     #[async_trait]
@@ -84,9 +83,9 @@ pub(crate) fn test_tool_result_materializer(
     }
 
     Arc::new(
-        crate::application::tool_result_materialization::ToolResultMaterializer::new(
+        crate::application::tool::result_materialization::ToolResultMaterializer::new(
             Arc::new(TestBlobPort),
-            crate::application::tool_result_materialization::ToolResultMaterializationPolicy::new(
+            crate::application::tool::result_materialization::ToolResultMaterializationPolicy::new(
                 50_000, 2_000, 500,
             ),
         ),
@@ -279,22 +278,6 @@ impl TestProviderPort {
         }
     }
 
-    pub fn with_error(mut self, error: crate::ports::provider_port::ProviderError) -> Self {
-        self.error = Some(error);
-        self
-    }
-    pub fn with_blocking(mut self) -> Self {
-        self.blocking = true;
-        self
-    }
-    pub fn with_seen(mut self, seen: Arc<Mutex<Vec<::logging::LogContext>>>) -> Self {
-        self.seen = Some(seen);
-        self
-    }
-    pub fn with_calls(mut self, calls: Arc<Mutex<usize>>) -> Self {
-        self.calls = calls;
-        self
-    }
     /// Install a per-call invocation hook that overrides default behavior.
     pub fn with_invocation_fn(mut self, f: TestInvocationFn) -> Self {
         self.invocation_fn = Some(f);
@@ -403,38 +386,6 @@ pub(crate) fn test_model_id() -> provider::ModelId {
         provider: "test".to_string(),
         model: "test-model".to_string(),
     }
-}
-
-/// Build a `ProviderBinding` whose provider records the last user message of each
-/// invocation and returns `"response to {last_user}"`.
-///
-/// Returns the binding and a handle to the recorded message list. Use this to
-/// replace bespoke `RecordingProvider` impls in loop tests.
-pub(crate) fn recording_test_binding(
-) -> (Arc<crate::ports::ProviderBinding>, Arc<Mutex<Vec<String>>>) {
-    let recorded: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let recorded_for_hook = recorded.clone();
-    let port = TestProviderPort::new(Vec::new(), test_model_id()).with_invocation_fn(Arc::new(
-        move |_call_index, request, _cancel| {
-            let recorded = recorded_for_hook.clone();
-            Box::pin(async move {
-                let last_user = request
-                    .messages
-                    .iter()
-                    .rev()
-                    .find(|m| m.role == share::message::Role::User)
-                    .map(|m| m.text_content())
-                    .unwrap_or_default();
-                recorded.lock().unwrap().push(last_user.clone());
-                Ok(text_completion_stream(
-                    format!("response to {last_user}"),
-                    1,
-                    1,
-                ))
-            })
-        },
-    ));
-    (test_binding_from_port(port), recorded)
 }
 
 // ─── Test ProviderFactory (#907) ──────────────────────────────
@@ -590,40 +541,6 @@ pub(crate) fn binding_from_llm_provider(
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,
         context_window: Some(128_000),
     })
-}
-
-// ─── Test ModelsConfig helpers (#907) ─────────────────────────
-
-/// Build a `ModelsConfig` with one provider/model pair so the runner's
-/// `find_model` lookup succeeds for `<provider_key>/<model_id>`.
-///
-/// Tests use this when exercising `model_spec = Some("provider/model")`
-/// resolution paths without spinning up real model configs.
-pub(crate) fn models_config_with_model(
-    provider_key: &str,
-    model_id: &str,
-) -> share::config::ModelsConfig {
-    use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
-    let mut providers = std::collections::HashMap::new();
-    providers.insert(
-        provider_key.to_string(),
-        ProviderModelsConfig {
-            driver: "openai".to_string(),
-            api_key: "test-key".to_string(),
-            models: vec![ModelEntryConfig {
-                id: model_id.to_string(),
-                name: model_id.to_string(),
-                context_window: 128_000,
-                max_tokens: 8192,
-                ..Default::default()
-            }],
-            ..Default::default()
-        },
-    );
-    share::config::ModelsConfig {
-        providers,
-        ..Default::default()
-    }
 }
 
 // ─── Test TaskAccess assembly (#1385 Runtime port-consumption contract) ──

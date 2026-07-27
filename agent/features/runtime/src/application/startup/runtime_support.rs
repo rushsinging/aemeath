@@ -1,5 +1,5 @@
-use crate::application::runtime_context::ParentRunContextSource;
-use crate::application::subagent::runner as agent_runner;
+use crate::application::run::context::ParentRunContextSource;
+use crate::application::run::derived as agent_runner;
 use crate::ports::ProviderFactory;
 #[cfg(test)]
 use share::config::AgentsConfig;
@@ -23,31 +23,27 @@ pub struct AgentRunnerAssembly {
 
 #[allow(clippy::too_many_arguments)]
 pub fn build_agent_runner(
-    config_reader: Arc<dyn config::ConfigReader>,
     factory: Arc<dyn ProviderFactory>,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     tool_result_materializer: Arc<
-        crate::application::tool_result_materialization::ToolResultMaterializer,
+        crate::application::tool::result_materialization::ToolResultMaterializer,
     >,
     workspace: project::WorkspaceViews,
     skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
     parent_context_source: ParentRunContextSource,
-    runtime_context_factory: Arc<
-        crate::application::runtime_context_factory::RuntimeContextFactory,
-    >,
+    runtime_context_factory: Arc<crate::application::run::context_factory::RuntimeContextFactory>,
 ) -> AgentRunnerAssembly {
     let parent_context_for_runner = parent_context_source.clone();
     let semaphore_for_runner = agent_semaphore.clone();
     let runner: Arc<dyn tools::AgentRunner> = Arc::new(agent_runner::CliAgentRunner {
         factory,
         active_run,
-        config_reader,
         max_tool_concurrency,
         agent_semaphore: semaphore_for_runner,
         tool_result_materializer,
-        workspace: crate::application::workspace_access::RuntimeWorkspaceAccess::new(workspace),
+        workspace: crate::application::workspace::access::RuntimeWorkspaceAccess::new(workspace),
         skill_materializer,
         parent_context: parent_context_for_runner,
         runtime_context_factory,
@@ -119,16 +115,9 @@ mod tests {
         let skill_wiring = tools::composition::wire_skills();
         let skill_materializer = skill_wiring.materializer();
         let tool_ports = tools::composition::TestCatalogExecutionFactory::empty();
-        let snapshot = share::config::domain::snapshot::ConfigSnapshot::new(Config::default());
-        let config_reader: Arc<dyn config::ConfigReader> = Arc::new(
-            crate::application::subagent::runner::test_config_reader::FixedConfigReader::from_snapshot(
-                snapshot,
-            ),
-        );
         let runner = build_agent_runner(
-            config_reader,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
-            Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+            Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default()),
             10,
             Arc::new(tokio::sync::Semaphore::new(4)),
             crate::application::testing::test_tool_result_materializer(),
@@ -179,7 +168,7 @@ mod tests {
                     }
                     Arc::new(FakeHook)
                 };
-                crate::application::runtime_context_factory::RuntimeContextFactory::new(
+                crate::application::run::context_factory::RuntimeContextFactory::new(
                     tool_ports.catalog_port(),
                     tool_ports.execution(),
                     tool_ports.binding(),
