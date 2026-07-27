@@ -8,6 +8,7 @@ use crate::tui::render::theme;
 use crate::tui::view_model::output::{BlockNode, OutputViewModel};
 use ratatui::style::Style;
 use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 /// gutted 缓存的 key：唯一决定 gutted block 内容（含 gutter）的所有参数。
 /// 静态 block 的 `marker_frame` 为 `None`；运行中 ToolCall 每次闪烁周期推进时失效。
@@ -21,9 +22,25 @@ struct GuttedKey {
     marker_frame: Option<u64>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct RootLayoutKey {
+    fingerprint: u64,
+    outer_width: u16,
+    markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
+}
+
+#[derive(Clone, Copy)]
+struct RootLayoutEntry {
+    key: RootLayoutKey,
+    line_count: usize,
+}
+
 #[derive(Default)]
 pub struct OutputDocumentRenderer {
     cache: BlockCache,
+    /// root 子树的轻量布局索引。只保留 key 与总行数，不持有 rendered lines。
+    /// 用于在执行 Markdown/diff/syntax render 前选择 `MAX_LINES` 窗口。
+    root_layouts: HashMap<String, RootLayoutEntry>,
     /// 带 gutter 的 block 缓存：key = block_id，value = (GuttedKey, gutted RenderedBlock)。
     /// 命中时直接 clone（lines 为 Rc，廉价）；未命中则走完整 render_self + apply_gutter 路径。
     gutted: HashMap<String, (GuttedKey, RenderedBlock)>,
@@ -85,22 +102,64 @@ impl OutputDocumentRenderer {
     ) -> RenderedDocument {
         #[cfg(test)]
         let started = std::time::Instant::now();
-        // 按 root 分组渲染：每个 root 子树（父块 + 全部后代）落入独立 group，
-        // 以便 MAX_LINES 裁剪以整棵子树为单位，NEVER 切断 parent/child 关系。
-        let mut groups: Vec<Vec<RenderedBlock>> = Vec::new();
+        // 先用 root 轻量布局索引解析每棵子树的行数。索引命中只扫描 BlockNode
+        // 元数据，不执行 Markdown/diff/syntax render；未知或失效 root 本帧渲染一次完成测量。
+        let mut measured_groups: HashMap<String, Vec<RenderedBlock>> = HashMap::new();
+        let mut root_line_counts = Vec::with_capacity(view_model.roots.len());
+        let semantic_root_ids: HashSet<&str> = view_model
+            .roots
+            .iter()
+            .map(|root| root.block_id.as_str())
+            .collect();
+        self.root_layouts
+            .retain(|id, _| semantic_root_ids.contains(id.as_str()));
+
         for root in &view_model.roots {
-            let mut group = Vec::new();
-            self.render_node(
-                root,
-                outer_width,
-                0,
-                animation_frame,
-                markdown_spacing,
-                &mut group,
-            );
-            groups.push(group);
+            let key = root_layout_key(root, outer_width, animation_frame, markdown_spacing);
+            let cached_lines = self
+                .root_layouts
+                .get(&root.block_id)
+                .filter(|entry| entry.key == key)
+                .map(|entry| entry.line_count);
+            let line_count = if let Some(line_count) = cached_lines {
+                line_count
+            } else {
+                let mut group = Vec::new();
+                self.render_node(
+                    root,
+                    outer_width,
+                    0,
+                    animation_frame,
+                    markdown_spacing,
+                    &mut group,
+                );
+                let line_count = group.iter().map(|block| block.lines.len()).sum();
+                self.root_layouts
+                    .insert(root.block_id.clone(), RootLayoutEntry { key, line_count });
+                measured_groups.insert(root.block_id.clone(), group);
+                line_count
+            };
+            root_line_counts.push(line_count);
         }
-        let groups = trim_root_groups_to_max_lines(groups, MAX_LINES);
+
+        let selected_start = select_latest_root_start(&root_line_counts, MAX_LINES);
+        let mut groups = Vec::with_capacity(view_model.roots.len().saturating_sub(selected_start));
+        for root in &view_model.roots[selected_start..] {
+            if let Some(group) = measured_groups.remove(&root.block_id) {
+                groups.push(group);
+            } else {
+                let mut group = Vec::new();
+                self.render_node(
+                    root,
+                    outer_width,
+                    0,
+                    animation_frame,
+                    markdown_spacing,
+                    &mut group,
+                );
+                groups.push(group);
+            }
+        }
         let document = RenderedDocument::with_root_groups(groups);
         let blocks = &document.blocks;
         // O(n) 构建 HashSet，使后续两处 retain 各降为 O(n) 而非 O(n²)。
@@ -303,6 +362,62 @@ impl OutputDocumentRenderer {
     }
 }
 
+fn root_layout_key(
+    root: &BlockNode,
+    outer_width: u16,
+    animation_frame: u64,
+    markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
+) -> RootLayoutKey {
+    let mut hasher = DefaultHasher::new();
+    hash_node_layout(root, animation_frame, &mut hasher);
+    RootLayoutKey {
+        fingerprint: hasher.finish(),
+        outer_width,
+        markdown_spacing,
+    }
+}
+
+fn hash_node_layout(node: &BlockNode, animation_frame: u64, hasher: &mut DefaultHasher) {
+    node.block_id.hash(hasher);
+    node.block_version.hash(hasher);
+    node.children.len().hash(hasher);
+    match &node.kind {
+        crate::tui::view_model::output::OutputBlockKind::ToolCall(tool)
+            if tool.semantic_status
+                == crate::tui::view_model::output::ToolSemanticStatus::Running =>
+        {
+            (animation_frame / gutter::TOOL_MARKER_BLINK_DIVISOR).hash(hasher);
+        }
+        crate::tui::view_model::output::OutputBlockKind::ModelStreamPlaceholder(_) => {
+            (animation_frame
+                / crate::tui::render::output::blocks::thinking_placeholder::THINKING_DOT_FRAME_DIVISOR)
+                .hash(hasher);
+        }
+        _ => {}
+    }
+    for child in &node.children {
+        hash_node_layout(child, animation_frame, hasher);
+    }
+}
+
+/// 根据已知 root group 行数从最新端选择窗口起点。
+/// 最新 root 即使单独超过预算也完整保留，避免输出为空或拆断 parent/child。
+fn select_latest_root_start(root_line_counts: &[usize], max_lines: usize) -> usize {
+    if max_lines == 0 || root_line_counts.is_empty() {
+        return root_line_counts.len();
+    }
+    let mut start = root_line_counts.len();
+    let mut used = 0usize;
+    for (index, line_count) in root_line_counts.iter().enumerate().rev() {
+        if used > 0 && used.saturating_add(*line_count) > max_lines {
+            break;
+        }
+        start = index;
+        used = used.saturating_add(*line_count);
+    }
+    start
+}
+
 fn wrap_user_message_card_lines(lines: &mut Vec<RenderedLine>) {
     let gutter_cols = lines.first().map(|line| line.gutter_cols).unwrap_or(0);
     let spacer = user_message_card_spacer_line(gutter_cols);
@@ -314,33 +429,6 @@ fn user_message_card_spacer_line(gutter_cols: usize) -> RenderedLine {
     let mut line = RenderedLine::empty().with_fill_style(Style::default().bg(theme::USER_BG));
     line.gutter_cols = gutter_cols;
     line
-}
-
-/// 按 root 子树整组裁剪：从尾部（最新）向前累计每个 group 的总行数，
-/// 仅当加入该 group 不超过 `max_lines` 时保留整组；NEVER 拆分 group
-/// （即父块与其后代要么整体保留、要么整体丢弃）。
-/// 边界语义与旧的 per-block 裁剪一致：最新一组即便单独超限也始终保留
-/// （首组跳过超限判断），避免输出为空。
-fn trim_root_groups_to_max_lines(
-    groups: Vec<Vec<RenderedBlock>>,
-    max_lines: usize,
-) -> Vec<Vec<RenderedBlock>> {
-    if max_lines == 0 {
-        return Vec::new();
-    }
-
-    let mut kept: Vec<Vec<RenderedBlock>> = Vec::new();
-    let mut used = 0usize;
-    for group in groups.into_iter().rev() {
-        let group_lines: usize = group.iter().map(|b| b.lines.len()).sum();
-        if used > 0 && used.saturating_add(group_lines) > max_lines {
-            break;
-        }
-        used = used.saturating_add(group_lines);
-        kept.push(group);
-    }
-    kept.reverse();
-    kept
 }
 
 #[cfg(test)]

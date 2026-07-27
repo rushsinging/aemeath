@@ -135,7 +135,7 @@ fn edit_cold_work_scales_and_spinner_warm_render_reuses_static_diff() {
 }
 
 #[test]
-fn revision_update_after_history_trim_rebuilds_evicted_static_edit_diff() {
+fn revision_update_after_history_trim_reuses_windowed_static_edit_layout() {
     let mut conversation = edit_conversation(6, 2_000);
     let mut renderer = OutputDocumentRenderer::default();
     let first_vm = OutputViewAssembler::assemble_from_conversation(
@@ -161,12 +161,9 @@ fn revision_update_after_history_trim_rebuilds_evicted_static_edit_diff() {
 
     assert!(cold.block_cache_retain_evictions > 0);
     assert!(cold.gutted_cache_retain_evictions > 0);
-    assert!(
-        revised.block_cache_absent_misses > 0,
-        "被历史裁剪淘汰的静态 Edit block 会在下一次 revision render 时以 absent miss 重建"
-    );
-    assert!(revised.edit_diff_calls > 0);
-    assert!(revised.syntax_highlight_calls > 0);
+    assert_eq!(revised.edit_diff_calls, 0);
+    assert_eq!(revised.diff_build_calls, 0);
+    assert_eq!(revised.syntax_highlight_calls, 0);
 }
 
 #[test]
