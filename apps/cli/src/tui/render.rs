@@ -8,6 +8,12 @@ pub mod display;
 pub mod input;
 pub mod output;
 pub mod output_area;
+#[cfg(test)]
+pub(crate) mod performance;
 pub mod status;
 pub mod syntax;
 pub mod theme;
+
+#[cfg(test)]
+#[path = "render/performance_tests.rs"]
+mod performance_tests;

@@ -230,6 +230,43 @@ pub fn language_by_fence_info(info: &str) -> Option<syntect::parsing::SyntaxRefe
     language_by_extension(ext).or_else(|| SYNTAX_SET.find_syntax_by_name(&lang).cloned())
 }
 
+/// 一段同语言代码的有状态语法高亮会话。
+///
+/// 同一代码块或 diff 必须复用该会话，让 syntect 保留跨行解析状态，避免逐行重建
+/// `HighlightLines` 及其正则上下文。
+pub(crate) struct SyntaxHighlighter<'a> {
+    highlighter: HighlightLines<'a>,
+}
+
+impl<'a> SyntaxHighlighter<'a> {
+    pub(crate) fn new(syntax: &'a syntect::parsing::SyntaxReference) -> Self {
+        #[cfg(test)]
+        crate::tui::render::performance::record_syntax_highlighter_creation();
+        Self {
+            highlighter: HighlightLines::new(syntax, &THEME),
+        }
+    }
+
+    pub(crate) fn highlight_line(&mut self, line: &str) -> Option<Vec<SpanPart>> {
+        #[cfg(test)]
+        let started = std::time::Instant::now();
+        let ranges = self.highlighter.highlight_line(line, &SYNTAX_SET).ok();
+        #[cfg(test)]
+        crate::tui::render::performance::record_syntax_highlight(line.len(), started.elapsed());
+        let ranges = ranges?;
+
+        Some(
+            ranges
+                .into_iter()
+                .map(|(style, text)| SpanPart {
+                    text: text.to_string(),
+                    color: Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b),
+                })
+                .collect(),
+        )
+    }
+}
+
 /// 对单行代码进行语法高亮，返回带颜色的文本段。
 ///
 /// `syntax_ref` 为 None 时返回 None（调用方回退到纯色渲染）。
@@ -238,18 +275,7 @@ pub fn highlight_line(
     syntax_ref: Option<&syntect::parsing::SyntaxReference>,
 ) -> Option<Vec<SpanPart>> {
     let syntax = syntax_ref?;
-    let mut highlighter = HighlightLines::new(syntax, &THEME);
-    let ranges = highlighter.highlight_line(line, &SYNTAX_SET).ok()?;
-
-    Some(
-        ranges
-            .into_iter()
-            .map(|(style, text)| SpanPart {
-                text: text.to_string(),
-                color: Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b),
-            })
-            .collect(),
-    )
+    SyntaxHighlighter::new(syntax).highlight_line(line)
 }
 
 /// 从文件路径提取扩展名（不含点）。
@@ -262,63 +288,5 @@ pub fn extension_from_path(path: &str) -> Option<&str> {
 use ratatui::style::Color;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extension_from_path() {
-        assert_eq!(extension_from_path("src/lib.rs"), Some("rs"));
-        assert_eq!(extension_from_path("foo.tsx"), Some("tsx"));
-        assert_eq!(extension_from_path("Makefile"), None);
-        assert_eq!(extension_from_path("dir/file"), None);
-    }
-
-    #[test]
-    fn test_language_by_extension() {
-        let syntax = language_by_extension("rs");
-        assert!(syntax.is_some(), "Rust syntax should be found");
-    }
-
-    #[test]
-    fn test_language_by_fence_info_maps_rust_name() {
-        let by_name = language_by_fence_info("rust").expect("rust fence should resolve");
-        let by_ext = language_by_extension("rs").expect("rs extension should resolve");
-
-        assert_eq!(by_name.name, by_ext.name);
-    }
-
-    #[test]
-    fn test_language_by_fence_info_keeps_extension_path() {
-        let by_info = language_by_fence_info("rs").expect("rs fence should resolve");
-        let by_ext = language_by_extension("rs").expect("rs extension should resolve");
-
-        assert_eq!(by_info.name, by_ext.name);
-    }
-
-    #[test]
-    fn test_highlight_line_uses_catppuccin_macchiato_keyword_color() {
-        let syntax = language_by_extension("rs").unwrap();
-        let spans = highlight_line("if true {", Some(&syntax)).unwrap();
-        let keyword = spans.iter().find(|span| span.text == "if").unwrap();
-
-        assert_eq!(keyword.color, crate::tui::render::theme::ACCENT_BRIGHT);
-    }
-
-    #[test]
-    fn test_highlight_line_with_rust() {
-        let syntax = language_by_extension("rs").unwrap();
-        let result = highlight_line("fn main() {", Some(&syntax));
-        assert!(result.is_some());
-        let spans = result.unwrap();
-        assert!(!spans.is_empty());
-        // "fn" 应该被高亮为关键字
-        let fn_text: String = spans.iter().map(|s| s.text.as_str()).collect();
-        assert!(fn_text.contains("fn"));
-    }
-
-    #[test]
-    fn test_highlight_line_none_syntax() {
-        let result = highlight_line("hello", None);
-        assert!(result.is_none());
-    }
-}
+#[path = "syntax_tests.rs"]
+mod tests;

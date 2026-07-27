@@ -32,9 +32,13 @@ impl BlockCache {
     ) -> RenderedBlock {
         if let Some(cached) = self.map.get(block_id) {
             if cached.key == key {
+                #[cfg(test)]
+                crate::tui::render::performance::record_block_cache_hit();
                 return cached.rendered.clone();
             }
         }
+        #[cfg(test)]
+        crate::tui::render::performance::record_block_cache_miss();
         let ctx = RenderCtx {
             text_width: key.text_width,
             markdown_spacing: key.markdown_spacing,
