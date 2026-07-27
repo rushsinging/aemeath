@@ -13,6 +13,35 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
+const MAX_RUNTIME_EVENTS_PER_FRAME: usize = 256;
+
+fn collect_runtime_batch(
+    first: TuiRuntimeEvent,
+    runtime_rx: &mut mpsc::Receiver<TuiRuntimeEvent>,
+) -> Vec<TuiRuntimeEvent> {
+    let mut events = Vec::with_capacity(MAX_RUNTIME_EVENTS_PER_FRAME);
+    let first_ends_batch = matches!(first, TuiRuntimeEvent::SessionReset);
+    events.push(first);
+    if first_ends_batch {
+        return events;
+    }
+    while events.len() < MAX_RUNTIME_EVENTS_PER_FRAME {
+        match runtime_rx.try_recv() {
+            Ok(event) => {
+                let ends_batch = matches!(event, TuiRuntimeEvent::SessionReset);
+                events.push(event);
+                if ends_batch {
+                    break;
+                }
+            }
+            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected) => {
+                break;
+            }
+        }
+    }
+    events
+}
+
 pub(crate) fn tui_msg_name(msg: &TuiMsg) -> &'static str {
     match msg {
         TuiMsg::Key(_) => "Key",
@@ -22,6 +51,7 @@ pub(crate) fn tui_msg_name(msg: &TuiMsg) -> &'static str {
         TuiMsg::SpinnerTick => "SpinnerTick",
         TuiMsg::Ui(_) => "Ui",
         TuiMsg::Runtime(_) => "Runtime",
+        TuiMsg::RuntimeBatch(_) => "RuntimeBatch",
         TuiMsg::TerminalKey(_) => "TerminalKey",
         TuiMsg::TerminalMouse(_) => "TerminalMouse",
         TuiMsg::TerminalResize { .. } => "TerminalResize",
@@ -125,7 +155,9 @@ impl App {
             // --- TEA event collection: produce a TuiMsg ---
             let msg: Option<TuiMsg> = tokio::select! {
                 biased;
-                ev = runtime_rx.recv() => { ev.map(TuiMsg::Runtime) }
+                ev = runtime_rx.recv() => {
+                    ev.map(|first| TuiMsg::RuntimeBatch(collect_runtime_batch(first, &mut runtime_rx)))
+                }
                 ev = ui_rx.recv() => { ev.map(TuiMsg::Ui) }
                 _ = async { match &mut sig_term { Some(s) => s.recv().await, None => std::future::pending().await } } => {
                     log::info!(target: crate::LOG_TARGET, "received SIGTERM, initiating graceful shutdown");
@@ -251,3 +283,7 @@ impl App {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "run_loop_tests.rs"]
+mod tests;

@@ -120,6 +120,33 @@ impl UpdateResult {
             pending_slash: None,
         }
     }
+
+    fn append(&mut self, mut other: Self) {
+        self.effects.append(&mut other.effects);
+        debug_assert!(
+            other.spawn_effect.is_none(),
+            "runtime events must not emit spawn effects"
+        );
+        debug_assert!(
+            other.pending_slash.is_none(),
+            "runtime events must not emit slash continuations"
+        );
+    }
+
+    fn dedupe_render_requests(&mut self) {
+        let mut saw_render_request = false;
+        self.effects.retain(|effect| {
+            if !matches!(effect, Effect::RequestRender) {
+                return true;
+            }
+            if saw_render_request {
+                false
+            } else {
+                saw_render_request = true;
+                true
+            }
+        });
+    }
 }
 
 impl App {
@@ -134,6 +161,14 @@ impl App {
         match msg {
             TuiMsg::Ui(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::Runtime(ev) => self.update_runtime_event(ev),
+            TuiMsg::RuntimeBatch(events) => {
+                let mut batch_result = UpdateResult::none();
+                for event in events {
+                    batch_result.append(self.update_runtime_event(event));
+                }
+                batch_result.dedupe_render_requests();
+                batch_result
+            }
             TuiMsg::AgentEvent(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::Key(key) => self.update_key(key, spawn_refs),
             TuiMsg::Mouse(mouse) => {
@@ -265,7 +300,7 @@ impl App {
             _ => None,
         };
         if let Some(kind) = diagnostic_kind {
-            crate::tui::log_debug!(
+            crate::tui::log_trace!(
                 "event_delivery boundary=tui_channel_to_reducer kind={} outcome=received timeline_items={} queued={} revision={}",
                 kind,
                 self.model.conversation.timeline.items().len(),
@@ -386,7 +421,7 @@ impl App {
         }
         let mapping = map_runtime_event(&event);
         if let Some(kind) = diagnostic_kind {
-            crate::tui::log_debug!(
+            crate::tui::log_trace!(
                 "event_delivery boundary=tui_mapper kind={} outcome=mapped conversation_intents={} diagnostic_intents={} session_intents={}",
                 kind,
                 mapping.conversation.len(),
@@ -396,7 +431,7 @@ impl App {
         }
         let model_result = reduce_agent_event(&mut self.model, mapping);
         if let Some(kind) = diagnostic_kind {
-            crate::tui::log_debug!(
+            crate::tui::log_trace!(
                 "event_delivery boundary=tui_reducer kind={} outcome=reduced timeline_items={} queued={} revision={} dirty_output={} effects={}",
                 kind,
                 self.model.conversation.timeline.items().len(),

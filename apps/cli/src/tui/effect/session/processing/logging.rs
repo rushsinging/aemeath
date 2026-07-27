@@ -414,7 +414,7 @@ pub(crate) fn log_tui_runtime_delivery(
     use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 
     match event {
-        TuiRuntimeEvent::Text { context, text } => crate::tui::log_debug!(
+        TuiRuntimeEvent::Text { context, text } => crate::tui::log_trace!(
             "event_delivery boundary=sdk_to_tui kind=Text chat_id={} turn_id={} size={} outcome={}",
             context.chat_id,
             context.turn_id,

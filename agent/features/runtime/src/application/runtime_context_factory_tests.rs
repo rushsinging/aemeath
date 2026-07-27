@@ -14,7 +14,7 @@ use crate::application::interaction::InteractionBridge;
 use crate::application::run_config::RunConfigSnapshot;
 use crate::application::runtime_context::{
     RunCancellationScope, RunContextBindings, RunInputBufferHandle, RunUsageTracker,
-    RuntimeContext, RuntimeContextAssemblyToken, RuntimeServices,
+    RuntimeContext, RuntimeServices,
 };
 use crate::application::runtime_context_factory::RuntimeContextFactory;
 use crate::domain::agent_run::{
@@ -190,9 +190,6 @@ impl HookPort for FakeHook {
         HookOutcome::proceed()
     }
 }
-
-/// A reasoning port whose `current_requested_level` can be externally set
-/// for verification in tests that check which port was wired.
 
 fn noop_event_sink() -> crate::application::main_loop::ChatEventSinkHandle {
     #[derive(Clone)]
