@@ -149,6 +149,7 @@
     },
     "ConfigApplicationScopeView": {
       "enum": [
+        "immediate",
         "session_restart_required",
         "run"
       ],
@@ -206,6 +207,28 @@
             "$ref": "#/$defs/ConfigApplicationScopeView"
           },
           "type": "array"
+        },
+        "view": {
+          "$ref": "#/$defs/ConfigView",
+          "default": {
+            "context_size": 0,
+            "has_api_key": false,
+            "logging_level": "",
+            "markdown": false,
+            "markdown_spacing": "normal",
+            "markdown_spacing_overrides": {
+              "blockquote": null,
+              "code_block": null,
+              "heading": null,
+              "list": null,
+              "paragraph": null,
+              "table": null
+            },
+            "model_name": "",
+            "permission_mode": "",
+            "provider": null,
+            "verbose": false
+          }
         }
       },
       "required": [
@@ -286,6 +309,21 @@
         },
         "markdown": {
           "type": "boolean"
+        },
+        "markdown_spacing": {
+          "$ref": "#/$defs/MarkdownSpacingModeView",
+          "default": "normal"
+        },
+        "markdown_spacing_overrides": {
+          "$ref": "#/$defs/MarkdownSpacingOverridesView",
+          "default": {
+            "blockquote": null,
+            "code_block": null,
+            "heading": null,
+            "list": null,
+            "paragraph": null,
+            "table": null
+          }
         },
         "model_name": {
           "type": "string"
@@ -445,6 +483,31 @@
         "unix_millis"
       ],
       "title": "ControlDeadline",
+      "type": "object"
+    },
+    "ElementSpacingView": {
+      "properties": {
+        "after": {
+          "default": null,
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "before": {
+          "default": null,
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "HookMessageKindView": {
@@ -710,6 +773,84 @@
       "format": "uuid",
       "type": "string",
       "x-aemeath-uuid-version": 7
+    },
+    "MarkdownSpacingModeView": {
+      "enum": [
+        "normal",
+        "compact"
+      ],
+      "type": "string"
+    },
+    "MarkdownSpacingOverridesView": {
+      "properties": {
+        "blockquote": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ElementSpacingView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "code_block": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ElementSpacingView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "heading": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ElementSpacingView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "list": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ElementSpacingView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "paragraph": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ElementSpacingView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "table": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ElementSpacingView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
     },
     "ModelSummary": {
       "description": "`aemeath models` 展示所需的模型摘要。",

@@ -44,7 +44,7 @@ mod tests {
             text: "hello".into(),
             style: SemanticStyle::Normal,
         };
-        let block = render_user_message("u", &view, &RenderCtx { text_width: 80 });
+        let block = render_user_message("u", &view, &RenderCtx::for_width(80));
 
         assert_eq!(block.lines[0].plain, "hello");
         assert_eq!(block.lines[0].spans[0].style.fg, Some(theme::USER));
@@ -58,7 +58,7 @@ mod tests {
             text: "a\nb".into(),
             style: SemanticStyle::Normal,
         };
-        let block = render_user_message("u", &view, &RenderCtx { text_width: 80 });
+        let block = render_user_message("u", &view, &RenderCtx::for_width(80));
 
         assert_eq!(block.lines[0].plain, "a");
         assert_eq!(block.lines[1].plain, "b");
@@ -73,7 +73,7 @@ mod tests {
             text: "a\n\nb".into(),
             style: SemanticStyle::Normal,
         };
-        let block = render_user_message("u", &view, &RenderCtx { text_width: 80 });
+        let block = render_user_message("u", &view, &RenderCtx::for_width(80));
 
         assert_eq!(block.lines[0].plain, "a");
         assert_eq!(block.lines[1].plain, "");
@@ -88,7 +88,7 @@ mod tests {
             text: "abcdef".into(),
             style: SemanticStyle::Normal,
         };
-        let block = render_user_message("u", &view, &RenderCtx { text_width: 4 });
+        let block = render_user_message("u", &view, &RenderCtx::for_width(4));
 
         assert_eq!(
             block

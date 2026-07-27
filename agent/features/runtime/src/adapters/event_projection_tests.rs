@@ -92,6 +92,34 @@ fn hook_message_projection_preserves_system_message_attempt() {
 }
 
 #[test]
+fn config_reload_projection_preserves_immediate_scope_and_committed_view() {
+    let event = RuntimeStreamEvent::ConfigReloaded {
+        changed_keys: vec![
+            "config:reloaded".to_string(),
+            "config:scope:immediate".to_string(),
+        ],
+        view: sdk::ConfigView {
+            markdown_spacing: sdk::MarkdownSpacingModeView::Compact,
+            ..Default::default()
+        },
+    };
+
+    match project_stream_event(event) {
+        sdk::ChatEvent::ConfigReloaded { event } => {
+            assert_eq!(
+                event.scopes,
+                vec![sdk::ConfigApplicationScopeView::Immediate]
+            );
+            assert_eq!(
+                event.view.markdown_spacing,
+                sdk::MarkdownSpacingModeView::Compact
+            );
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
 fn model_invocation_retry_projection_preserves_context_attempt_and_delay() {
     let context = RuntimeTurnContext::new(
         sdk::ids::ChatId::new("chat-retry"),

@@ -57,6 +57,14 @@ pub(crate) fn reduce_intent(model: &mut TuiModel, intent: AgentIntent) -> TuiUpd
             model.runtime_presentation.apply(intent);
             result.dirty.mark_status();
         }
+        AgentIntent::UiPreferences(intent) => {
+            if matches!(
+                model.ui_preferences.apply(intent),
+                crate::tui::model::ui_preferences::UiPreferencesChange::MarkdownSpacingChanged
+            ) {
+                result.dirty.mark_output();
+            }
+        }
         AgentIntent::Input(intent) => {
             result.input_changes = model.input.apply(intent);
             result.dirty.mark_input();
@@ -126,6 +134,14 @@ pub(crate) fn reduce_agent_event(
     for intent in mapping.workspace {
         let change = model.workspace_provider.apply(intent);
         apply_workspace_change(&mut result, change);
+    }
+    for intent in mapping.ui_preferences {
+        if matches!(
+            model.ui_preferences.apply(intent),
+            crate::tui::model::ui_preferences::UiPreferencesChange::MarkdownSpacingChanged
+        ) {
+            result.dirty.mark_output();
+        }
     }
     result.dedupe_render_requests();
     if result.dirty.output || result.dirty.status || result.dirty.dialog {

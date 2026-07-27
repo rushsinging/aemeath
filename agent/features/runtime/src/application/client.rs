@@ -22,4 +22,5 @@ pub use from_args::{
     from_args_with_workspace, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
     RuntimeToolAssemblyDependencies,
 };
+pub use mapping::config_snapshot_to_sdk;
 pub use resume_helper::{resume_session_to_backing, ResumeError};

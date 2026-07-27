@@ -30,6 +30,28 @@ use crate::tui::view_assembler::output::OutputViewAssembler;
 use crate::tui::view_model::LiveStatusViewModel;
 use tokio::sync::mpsc;
 
+fn markdown_spacing_overrides_to_sdk(
+    overrides: crate::tui::render::output::spacing::MarkdownSpacingOverrides,
+) -> sdk::MarkdownSpacingOverridesView {
+    fn element(
+        value: Option<crate::tui::render::output::spacing::ElementSpacing>,
+    ) -> Option<sdk::ElementSpacingView> {
+        value.map(|spacing| sdk::ElementSpacingView {
+            before: spacing.before,
+            after: spacing.after,
+        })
+    }
+
+    sdk::MarkdownSpacingOverridesView {
+        paragraph: element(overrides.paragraph),
+        heading: element(overrides.heading),
+        list: element(overrides.list),
+        code_block: element(overrides.code_block),
+        table: element(overrides.table),
+        blockquote: element(overrides.blockquote),
+    }
+}
+
 fn ui_event_name(event: &UiEvent) -> &'static str {
     match event {
         UiEvent::Text { .. } => "Text",
@@ -346,6 +368,19 @@ impl App {
             TuiRuntimeEvent::SessionReset => {
                 return UpdateResult::one(Effect::ResetRuntimeState);
             }
+            TuiRuntimeEvent::ConfigChanged { view, .. }
+            | TuiRuntimeEvent::ConfigReloaded { view, .. } => {
+                self.config_view.markdown_spacing = match view.markdown_spacing.mode() {
+                    crate::tui::render::output::spacing::MarkdownSpacingMode::Normal => {
+                        sdk::MarkdownSpacingModeView::Normal
+                    }
+                    crate::tui::render::output::spacing::MarkdownSpacingMode::Compact => {
+                        sdk::MarkdownSpacingModeView::Compact
+                    }
+                };
+                self.config_view.markdown_spacing_overrides =
+                    markdown_spacing_overrides_to_sdk(view.markdown_spacing.overrides());
+            }
             TuiRuntimeEvent::SessionResumed {
                 steps,
                 session_id,
@@ -554,6 +589,7 @@ impl App {
                 width,
                 self.output_area.term_width,
                 self.view_state.animation.spinner_frame,
+                self.model.ui_preferences.markdown_spacing(),
             )
         }));
         // 无论渲染成败都把 view_model 放回 cache，保留 memo。

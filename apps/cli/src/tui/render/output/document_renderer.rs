@@ -16,6 +16,7 @@ struct GuttedKey {
     block_version: u64,
     text_width: u16,
     depth: usize,
+    markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
     /// 仅运行中 ToolCall 有值（= animation_frame / BLINK_DIVISOR），其他 block 为 None。
     marker_frame: Option<u64>,
 }
@@ -40,13 +41,19 @@ impl OutputDocumentRenderer {
         outer_width: u16,
         fallback_width: usize,
         animation_frame: u64,
+        markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
     ) -> RenderedDocument {
         let render_width = if outer_width > 1 {
             outer_width
         } else {
             u16::try_from(fallback_width.max(1)).unwrap_or(u16::MAX)
         };
-        self.render_tree_with_animation_frame(view_model, render_width, animation_frame)
+        self.render_tree_with_animation_frame(
+            view_model,
+            render_width,
+            animation_frame,
+            markdown_spacing,
+        )
     }
 
     /// 递归走 `view_model.roots`（DFS：父块先于子块），经 block 级缓存展平为线性文档。
@@ -60,7 +67,12 @@ impl OutputDocumentRenderer {
         view_model: &OutputViewModel,
         outer_width: u16,
     ) -> RenderedDocument {
-        self.render_tree_with_animation_frame(view_model, outer_width, 0)
+        self.render_tree_with_animation_frame(
+            view_model,
+            outer_width,
+            0,
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+        )
     }
 
     /// 带动画帧的 render_tree；动画只进入缓存外 gutter，不参与 block 内容缓存。
@@ -69,13 +81,21 @@ impl OutputDocumentRenderer {
         view_model: &OutputViewModel,
         outer_width: u16,
         animation_frame: u64,
+        markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
     ) -> RenderedDocument {
         // 按 root 分组渲染：每个 root 子树（父块 + 全部后代）落入独立 group，
         // 以便 MAX_LINES 裁剪以整棵子树为单位，NEVER 切断 parent/child 关系。
         let mut groups: Vec<Vec<RenderedBlock>> = Vec::new();
         for root in &view_model.roots {
             let mut group = Vec::new();
-            self.render_node(root, outer_width, 0, animation_frame, &mut group);
+            self.render_node(
+                root,
+                outer_width,
+                0,
+                animation_frame,
+                markdown_spacing,
+                &mut group,
+            );
             groups.push(group);
         }
         let groups = trim_root_groups_to_max_lines(groups, MAX_LINES);
@@ -95,6 +115,7 @@ impl OutputDocumentRenderer {
         outer_width: u16,
         depth: usize,
         animation_frame: u64,
+        markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
         out: &mut Vec<RenderedBlock>,
     ) {
         // #329 契约：block 内部 wrap 宽度 = outer_width - gutter_width(depth)，
@@ -126,6 +147,7 @@ impl OutputDocumentRenderer {
             block_version: node.block_version,
             text_width,
             depth,
+            markdown_spacing,
             marker_frame,
         };
 
@@ -134,7 +156,14 @@ impl OutputDocumentRenderer {
             if *cached_key == gkey {
                 out.push(cached_block.clone());
                 for child in &node.children {
-                    self.render_node(child, outer_width, depth + 1, animation_frame, out);
+                    self.render_node(
+                        child,
+                        outer_width,
+                        depth + 1,
+                        animation_frame,
+                        markdown_spacing,
+                        out,
+                    );
                 }
                 return;
             }
@@ -158,6 +187,7 @@ impl OutputDocumentRenderer {
                 _ => node.block_version,
             },
             text_width,
+            markdown_spacing,
         };
         let mut rendered = self.cache.get_or_render(&node.block_id, key, |ctx| {
             #[cfg(test)]
@@ -215,7 +245,14 @@ impl OutputDocumentRenderer {
             .insert(node.block_id.clone(), (gkey, block.clone()));
         out.push(block);
         for child in &node.children {
-            self.render_node(child, outer_width, depth + 1, animation_frame, out);
+            self.render_node(
+                child,
+                outer_width,
+                depth + 1,
+                animation_frame,
+                markdown_spacing,
+                out,
+            );
         }
     }
 

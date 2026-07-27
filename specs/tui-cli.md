@@ -171,3 +171,10 @@ SubAgentRun.role_name_for_log / model_name_for_log
 
 - 当前：`Started` 携带 role/model，`Message` / `ToolCalls` 被 `format_agent_progress` 压扁成字符串。
 - 未来：`Message` / `ToolCalls` **SHOULD** 保持结构化传递，TUI 展开嵌套显示（类似 Claude Code 的 SubAgent 折叠块）。
+
+## 3.12.6. Markdown 间距策略
+
+- Markdown 空白处理 **MUST** 由 `ui.markdown_spacing` 选择全局 `normal` / `compact` 模式，并允许 `ui.markdown_spacing_overrides` 对 `paragraph`、`heading`、`list`、`quote`、`table`、`code` 做单元素级覆盖。
+- `normal` **MUST** 保持既有渲染行为；`compact` **MUST** 仅消除块级 Markdown 之间的外部空行，**NEVER** 删除 fenced code block 内部空行。
+- 配置快照中的间距策略 **MUST** 经过 runtime → SDK → TUI adapter → model → renderer 全链路传播；reload 后 **MUST** 使现有输出立即重渲染。
+- `OutputBlockCacheKey` 与 gutter 缓存键 **MUST** 包含间距策略指纹，**NEVER** 通过清空整个 cache 隐式保证正确性。

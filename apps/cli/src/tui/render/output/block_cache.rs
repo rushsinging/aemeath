@@ -9,6 +9,7 @@ use std::collections::HashMap;
 pub struct CacheKey {
     pub version: u64,
     pub text_width: u16,
+    pub markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
 }
 
 struct CachedBlock {
@@ -36,6 +37,7 @@ impl BlockCache {
         }
         let ctx = RenderCtx {
             text_width: key.text_width,
+            markdown_spacing: key.markdown_spacing,
         };
         let rendered = render(&ctx);
         self.map.insert(
@@ -73,14 +75,19 @@ mod tests {
         }
     }
 
+    fn key(version: u64) -> CacheKey {
+        CacheKey {
+            version,
+            text_width: 80,
+            markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+        }
+    }
+
     #[test]
     fn test_cache_hit_when_key_unchanged() {
         let mut cache = BlockCache::default();
         let mut calls = 0;
-        let key = CacheKey {
-            version: 1,
-            text_width: 80,
-        };
+        let key = key(1);
         cache.get_or_render("a", key, |_| {
             calls += 1;
             block("a", 2)
@@ -97,51 +104,42 @@ mod tests {
     fn test_cache_miss_when_version_changes() {
         let mut cache = BlockCache::default();
         let mut calls = 0;
-        cache.get_or_render(
-            "a",
-            CacheKey {
-                version: 1,
-                text_width: 80,
-            },
-            |_| {
-                calls += 1;
-                block("a", 1)
-            },
-        );
-        cache.get_or_render(
-            "a",
-            CacheKey {
-                version: 2,
-                text_width: 80,
-            },
-            |_| {
-                calls += 1;
-                block("a", 1)
-            },
-        );
+        cache.get_or_render("a", key(1), |_| {
+            calls += 1;
+            block("a", 1)
+        });
+        cache.get_or_render("a", key(2), |_| {
+            calls += 1;
+            block("a", 1)
+        });
 
         assert_eq!(calls, 2, "version 变应重渲染");
     }
 
     #[test]
+    fn cache_misses_when_only_markdown_spacing_changes() {
+        let mut cache = BlockCache::default();
+        let mut calls = 0;
+        cache.get_or_render("a", key(1), |_| {
+            calls += 1;
+            block("a", 1)
+        });
+        let mut compact = key(1);
+        compact.markdown_spacing =
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::compact();
+        cache.get_or_render("a", compact, |_| {
+            calls += 1;
+            block("a", 1)
+        });
+
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
     fn test_retain_evicts_absent_blocks() {
         let mut cache = BlockCache::default();
-        cache.get_or_render(
-            "a",
-            CacheKey {
-                version: 1,
-                text_width: 80,
-            },
-            |_| block("a", 1),
-        );
-        cache.get_or_render(
-            "b",
-            CacheKey {
-                version: 1,
-                text_width: 80,
-            },
-            |_| block("b", 1),
-        );
+        cache.get_or_render("a", key(1), |_| block("a", 1));
+        cache.get_or_render("b", key(1), |_| block("b", 1));
         let live_set: std::collections::HashSet<&str> = ["a"].into_iter().collect();
         cache.retain(&live_set);
 

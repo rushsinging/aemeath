@@ -10,6 +10,7 @@
 
 use super::runtime_view::{TuiChatMessage, TuiToolResultImage};
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
+use crate::tui::view_model::markdown_spacing::MarkdownSpacingPolicy;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiTurnContext {
@@ -245,6 +246,7 @@ pub(crate) struct TuiConfigView {
     pub(crate) permission_mode: String,
     pub(crate) markdown: bool,
     pub(crate) verbose: bool,
+    pub(crate) markdown_spacing: MarkdownSpacingPolicy,
     pub(crate) context_size: usize,
     pub(crate) logging_level: String,
 }
@@ -504,6 +506,7 @@ pub(crate) enum TuiRuntimeEvent {
     },
     ConfigReloaded {
         changed_keys: Vec<String>,
+        view: TuiConfigView,
     },
 }
 

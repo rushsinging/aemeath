@@ -230,6 +230,7 @@ impl AgentClientImpl {
             user_context: shell.user_context.clone(),
             context_size: shell.context_size,
             verbose: shell.verbose,
+            config_view: sdk::ConfigView::default(),
             agent_runner: shell.agent_runner.clone(),
             allow_all: shell.allow_all,
             max_tool_concurrency: shell.max_tool_concurrency,

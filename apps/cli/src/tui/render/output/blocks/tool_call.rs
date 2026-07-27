@@ -171,7 +171,7 @@ mod tests {
         let block = render_tool_call(
             "t1",
             &tool(ToolSemanticStatus::Running),
-            &RenderCtx { text_width: 80 },
+            &RenderCtx::for_width(80),
         );
         // header 行的 line base style 应为 TEXT
         assert_eq!(block.lines[0].style.fg, Some(theme::TEXT));
@@ -188,7 +188,7 @@ mod tests {
         let mut view = tool(ToolSemanticStatus::Success);
         view.style = SemanticStyle::Success;
         view.icon = "✓".into();
-        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
+        let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
         // header 行的 line base style 应为 TEXT
         assert_eq!(block.lines[0].style.fg, Some(theme::TEXT));
         assert!(block.lines[0].plain.contains("Search"));
@@ -206,7 +206,7 @@ mod tests {
         view.title = "Grep".into();
         view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
 
-        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
+        let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
 
         // header 含工具名
         assert!(block.lines[0].plain.contains("Search"));
@@ -220,7 +220,7 @@ mod tests {
         view.title = "Grep".into();
         view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
 
-        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
+        let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
 
         assert!(block.lines[0].plain.contains("Search"));
         assert!(
@@ -238,7 +238,7 @@ mod tests {
         view.result_summary = Some("done: 3 matches".into());
         view.args_preview = None;
 
-        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
+        let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
 
         assert_eq!(block.lines.len(), 1, "无 summary 时只应有 header 行");
         assert!(
@@ -262,7 +262,7 @@ mod tests {
         view.title = "mcp__github__create_issue_a_very_long_tool_name".into();
         view.args_preview = Some("{}".into()); // 触发 fallback header 路径
 
-        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 20 });
+        let block = render_tool_call("t1", &view, &RenderCtx::for_width(20));
 
         assert!(!block.lines.is_empty(), "block 至少应有 header 行");
         for (i, line) in block.lines.iter().enumerate() {
@@ -284,7 +284,7 @@ mod tests {
         let long_value = "x".repeat(120);
         view.args_preview = Some(format!(r#"{{"key":"{long_value}"}}"#));
 
-        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 40 });
+        let block = render_tool_call("t1", &view, &RenderCtx::for_width(40));
 
         assert!(
             block.lines.len() >= 2,
@@ -315,7 +315,7 @@ mod tests {
             "子任务正在执行一个非常长的操作描述文本用于测试窄终端下 activity 行的换行行为".into(),
         ];
 
-        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 30 });
+        let block = render_tool_call("t1", &view, &RenderCtx::for_width(30));
 
         for (i, line) in block.lines.iter().enumerate() {
             assert!(
@@ -334,7 +334,7 @@ mod tests {
         view.args_preview = Some(r#"{\"command\":\"seq 1 6\"}"#.into());
         view.activity_lines = vec!["2".into(), "3".into(), "4".into(), "5".into(), "6".into()];
 
-        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
+        let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
         let rendered: Vec<_> = block.lines.iter().map(|line| line.plain.as_str()).collect();
 
         assert!(rendered.contains(&"2"));
@@ -416,7 +416,7 @@ mod tests {
         view.title = "TaskUpdate".into();
         view.args_preview = None;
 
-        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
+        let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
 
         assert!(
             block.lines[0].plain.contains("Task"),

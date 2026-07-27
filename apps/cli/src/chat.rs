@@ -75,6 +75,16 @@ pub(crate) async fn run_chat(args: Args) {
             crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
         app.agent_client = Some(bootstrap.client.clone());
         app.user_agent = bootstrap.user_agent;
+        app.config_view = bootstrap.config_view.clone();
+        app.apply_agent_intent(
+            crate::tui::update::intent::AgentIntent::UiPreferences(
+                crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(
+                    crate::tui::render::output::spacing::MarkdownSpacingPolicy::from(
+                        &bootstrap.config_view,
+                    ),
+                ),
+            ),
+        );
         app.session.memory_config = bootstrap.memory_config;
         app.set_skills(bootstrap.skills_map);
         app.set_commands(bootstrap.command_catalog, bootstrap.command_router);

@@ -1,6 +1,80 @@
 //! UI 配置
 
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+
+const MAX_MARKDOWN_SPACING_LINES: u8 = 8;
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkdownSpacingMode {
+    #[default]
+    Normal,
+    Compact,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct SpacingLines(u8);
+
+impl SpacingLines {
+    pub fn new(value: u8) -> Result<Self, String> {
+        if value <= MAX_MARKDOWN_SPACING_LINES {
+            Ok(Self(value))
+        } else {
+            Err(format!(
+                "Markdown 间距必须在 0..={MAX_MARKDOWN_SPACING_LINES} 之间"
+            ))
+        }
+    }
+
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl Serialize for SpacingLines {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u8(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for SpacingLines {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u8::deserialize(deserializer)?;
+        Self::new(value).map_err(de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ElementSpacingOverride {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<SpacingLines>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<SpacingLines>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MarkdownSpacingOverrides {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paragraph: Option<ElementSpacingOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heading: Option<ElementSpacingOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list: Option<ElementSpacingOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_block: Option<ElementSpacingOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<ElementSpacingOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blockquote: Option<ElementSpacingOverride>,
+}
 
 pub(crate) fn default_true() -> bool {
     true
@@ -102,6 +176,14 @@ pub struct UiConfig {
     #[serde(default = "default_true")]
     pub tui: bool,
 
+    /// Markdown block spacing mode
+    #[serde(default)]
+    pub markdown_spacing: MarkdownSpacingMode,
+
+    /// Per-element Markdown block spacing overrides
+    #[serde(default)]
+    pub markdown_spacing_overrides: MarkdownSpacingOverrides,
+
     /// Task list display configuration
     #[serde(default)]
     pub task_list: TaskListConfig,
@@ -120,8 +202,14 @@ impl Default for UiConfig {
             color: true,
             verbose: false,
             tui: true,
+            markdown_spacing: MarkdownSpacingMode::default(),
+            markdown_spacing_overrides: MarkdownSpacingOverrides::default(),
             task_list: TaskListConfig::default(),
             task_lifecycle: TaskLifecycleConfig::default(),
         }
     }
 }
+
+#[cfg(test)]
+#[path = "ui_tests.rs"]
+mod tests;

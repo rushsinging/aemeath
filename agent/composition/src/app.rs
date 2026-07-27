@@ -21,6 +21,7 @@ pub struct AgentClientBootstrap {
     pub allow_all: bool,
     pub context_size: usize,
     pub thinking: bool,
+    pub config_view: sdk::ConfigView,
     pub memory_config: MemoryConfigView,
     pub skills_map: HashMap<String, SkillView>,
     pub command_catalog: Arc<dyn sdk::CommandCatalogPort>,
@@ -291,6 +292,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         .committed_snapshot()
         .user_agent()
         .to_string();
+    let config_view = runtime::config_snapshot_to_sdk(&config.reader().committed_snapshot());
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await?;
@@ -310,6 +312,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         allow_all: launch.allow_all,
         context_size: launch.context_size,
         thinking,
+        config_view,
         memory_config: launch.memory_config,
         skills_map: launch.skills_map,
         command_catalog: command_wiring.catalog(),

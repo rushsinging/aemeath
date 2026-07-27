@@ -1,6 +1,7 @@
 use super::*;
 use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::RenderedLine;
+use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
 use crate::tui::view_model::output::{
     BlockNode, ModelStreamPlaceholderBlockView, OutputBlockKind, OutputViewModel, TextBlockView,
 };
@@ -68,9 +69,12 @@ fn test_model_stream_placeholder_header_animates_dots() {
     let vm = vm_with_roots(vec![placeholder_node()]);
     let mut renderer = OutputDocumentRenderer::default();
 
-    let doc0 = renderer.render_tree_with_animation_frame(&vm, 80, 0);
-    let doc1 = renderer.render_tree_with_animation_frame(&vm, 80, 4);
-    let doc2 = renderer.render_tree_with_animation_frame(&vm, 80, 8);
+    let doc0 =
+        renderer.render_tree_with_animation_frame(&vm, 80, 0, MarkdownSpacingPolicy::normal());
+    let doc1 =
+        renderer.render_tree_with_animation_frame(&vm, 80, 4, MarkdownSpacingPolicy::normal());
+    let doc2 =
+        renderer.render_tree_with_animation_frame(&vm, 80, 8, MarkdownSpacingPolicy::normal());
 
     assert_eq!(doc0.blocks[0].lines[1].plain, "Thinking.");
     assert_eq!(doc1.blocks[0].lines[1].plain, "Thinking..");
@@ -485,6 +489,41 @@ fn test_render_tree_depth_one_full_width_assistant_does_not_exceed_outer_width()
 }
 
 #[test]
+fn spacing_policy_change_invalidates_content_and_gutted_caches() {
+    let kind = OutputBlockKind::AssistantMessage(TextBlockView {
+        key: "assistant".into(),
+        text: "one\n\ntwo".into(),
+        style: SemanticStyle::Normal,
+    });
+    let vm = OutputViewModel {
+        version: 1,
+        follow_tail_hint: false,
+        roots: vec![BlockNode {
+            block_id: "assistant".into(),
+            block_version: kind.cache_version(),
+            kind,
+            children: vec![],
+        }],
+    };
+    let mut renderer = OutputDocumentRenderer::default();
+
+    let normal = renderer.render_model_document(&vm, 80, 80, 0, MarkdownSpacingPolicy::normal());
+    let after_normal_content = renderer.render_count();
+    let after_normal_gutted = renderer.gutted_render_count();
+    let compact = renderer.render_model_document(&vm, 80, 80, 0, MarkdownSpacingPolicy::compact());
+
+    assert!(compact.total_lines() < normal.total_lines());
+    assert_eq!(renderer.render_count(), after_normal_content + 1);
+    assert_eq!(renderer.gutted_render_count(), after_normal_gutted + 1);
+
+    let after_compact_content = renderer.render_count();
+    let after_compact_gutted = renderer.gutted_render_count();
+    let _ = renderer.render_model_document(&vm, 80, 80, 0, MarkdownSpacingPolicy::compact());
+    assert_eq!(renderer.render_count(), after_compact_content);
+    assert_eq!(renderer.gutted_render_count(), after_compact_gutted);
+}
+
+#[test]
 fn test_gutted_cache_reuses_static_block_across_frames() {
     let kind = OutputBlockKind::AssistantMessage(TextBlockView {
         key: "a".to_string(),
@@ -503,10 +542,22 @@ fn test_gutted_cache_reuses_static_block_across_frames() {
         follow_tail_hint: true,
     };
     let mut r = OutputDocumentRenderer::default();
-    let _ = r.render_model_document(&vm, 80, 80, 0);
+    let _ = r.render_model_document(
+        &vm,
+        80,
+        80,
+        0,
+        crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+    );
     let after_first = r.gutted_render_count();
     // 同一 vm、frame 推进：静态 block 应命中 gutted 缓存，不重算。
-    let _ = r.render_model_document(&vm, 80, 80, 1);
+    let _ = r.render_model_document(
+        &vm,
+        80,
+        80,
+        1,
+        crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+    );
     assert_eq!(
         r.gutted_render_count(),
         after_first,
