@@ -68,7 +68,7 @@ fn execution_observation_state_tracks_start_and_terminal_once() {
     let mut state = RunExecutionState::new();
     assert!(state.started_at().is_none());
 
-    state.mark_started();
+    state.initialize_for_launch(Vec::new(), 0);
     assert!(state.started_at().is_some());
     state.set_terminal(tools::AgentRunTerminal::Cancelled);
     assert_eq!(
@@ -103,10 +103,21 @@ fn pending_interaction_work_has_single_take_owner() {
 
 #[test]
 fn with_turn_count_preserves_bootstrap_turn() {
-    let mut state = RunExecutionState::with_turn_count(4);
+    let mut state = RunExecutionState::new();
+    state.initialize_for_launch(Vec::new(), 4);
 
     assert_eq!(state.turn_count(), 4);
     assert_eq!(state.advance_turn(), 5);
+}
+
+#[test]
+fn launch_initialization_sets_messages_turn_and_start_once() {
+    let mut state = RunExecutionState::new();
+    state.initialize_for_launch(vec![Message::user("hello")], 4);
+
+    assert_eq!(state.messages().len(), 1);
+    assert_eq!(state.turn_count(), 4);
+    assert!(state.elapsed() >= std::time::Duration::ZERO);
 }
 
 #[test]

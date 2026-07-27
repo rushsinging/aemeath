@@ -47,7 +47,7 @@ impl InteractionBindingMode {
 pub enum HookBindingMode {
     /// All hooks active (Main run).
     Full,
-    /// Only start/stop lifecycle hooks (Sub run).
+    /// No Hook capability. Runtime binds a no-op HookPort for this mode.
     BoundaryOnly,
 }
 
@@ -448,6 +448,30 @@ impl RunSpec {
     /// Read-only access to the reasoning binding mode.
     pub fn reasoning_binding(&self) -> ReasoningBindingMode {
         self.reasoning
+    }
+
+    /// Validate every effective capability against another spec used as a
+    /// parent ceiling. This is the preparation-boundary guard for specs that
+    /// were not produced through `derive_sub`.
+    pub fn validate_against(&self, parent: &RunSpec) -> Result<(), RunSpecError> {
+        let within_timeout =
+            parent.timeout.is_zero() || (!self.timeout.is_zero() && self.timeout <= parent.timeout);
+        if self.input.is_within(&parent.input)
+            && self.interaction.is_within(&parent.interaction)
+            && self.events.is_within(&parent.events)
+            && self.context.is_within(&parent.context)
+            && self.workspace.is_within(&parent.workspace)
+            && self.memory.is_within(&parent.memory)
+            && self.tools.is_within(&parent.tools)
+            && within_timeout
+            && self.interaction_kind.is_within(&parent.interaction_kind)
+            && self.hooks.is_within(&parent.hooks)
+            && self.reasoning.is_within(&parent.reasoning)
+        {
+            Ok(())
+        } else {
+            Err(RunSpecError::CapabilityEscalation)
+        }
     }
 
     /// Legacy fixed-profile guard: rejects relaxing any of the six immutable

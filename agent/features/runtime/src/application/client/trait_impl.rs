@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use sdk::{AgentClient, ChatRequest, ChatStream, SdkError};
 
 use super::accessors::AgentClientImpl;
-use crate::application::interaction::InteractionPort;
+use crate::application::session_ingress::InteractionCommand;
 
 #[async_trait]
 impl AgentClient for AgentClientImpl {
@@ -82,7 +82,13 @@ impl AgentClient for AgentClientImpl {
         request_id: &sdk::InteractionRequestId,
         reply: sdk::InteractionReply,
     ) -> sdk::InteractionCommandOutcome {
-        self.inner.shell.interaction_bridge.reply(request_id, reply)
+        self.inner
+            .shell
+            .session_ingress
+            .dispatch_interaction(InteractionCommand::Reply {
+                request_id: request_id.clone(),
+                reply,
+            })
     }
 
     fn cancel_interaction(
@@ -92,8 +98,11 @@ impl AgentClient for AgentClientImpl {
     ) -> sdk::InteractionCommandOutcome {
         self.inner
             .shell
-            .interaction_bridge
-            .cancel(request_id, reason)
+            .session_ingress
+            .dispatch_interaction(InteractionCommand::Cancel {
+                request_id: request_id.clone(),
+                reason,
+            })
     }
 
     async fn chat(&self, input: ChatRequest) -> Result<ChatStream, SdkError> {

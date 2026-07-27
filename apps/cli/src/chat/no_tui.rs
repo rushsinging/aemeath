@@ -121,24 +121,16 @@ async fn run_single_turn(
     } else {
         None
     };
-    let (user_input, input_events) = if let Some(limit) = reflection_limit {
-        let (tx, port) = crate::tui::effect::session::processing::TuiInputEventPort::channel();
-        let _ = tx.send(sdk::ChatInputEvent::QueryReflectionHistory { limit });
-        (None, Some(std::sync::Arc::new(port) as _))
+    let (input_tx, input_port) =
+        crate::tui::effect::session::processing::TuiInputEventPort::channel();
+    if let Some(limit) = reflection_limit {
+        let _ = input_tx.send(sdk::ChatInputEvent::QueryReflectionHistory { limit });
     } else {
-        (
-            Some(sdk::UserInput {
-                text,
-                images: Vec::new(),
-            }),
-            None,
-        )
-    };
+        let _ = input_tx.send(sdk::ChatInputEvent::user_message(text, Vec::new()));
+    }
     let mut stream = client
         .chat(sdk::ChatRequest {
-            user_input,
-            queue_drain: None,
-            input_events,
+            ingress: std::sync::Arc::new(input_port),
         })
         .await?;
     // #636 D1: SIGTERM/SIGHUP 时让 stream 自然结束（runtime 端会 graceful + auto-save）。

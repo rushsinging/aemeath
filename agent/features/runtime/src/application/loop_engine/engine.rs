@@ -4,6 +4,8 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
+use crate::application::run_execution_state::RunExecutionState;
+use crate::application::runtime_context::RuntimeContext;
 use crate::application::stop_hook_coordination::StopHookDecision;
 use crate::application::subagent::ToolCall;
 use crate::domain::agent_run::{
@@ -264,88 +266,53 @@ pub enum LoopEngineError {
 }
 
 #[async_trait]
-pub trait RunLoopPort: Send {
+pub trait InputPort: Send {
     async fn drain_input(
         &mut self,
         expected_epoch: DrainEpoch,
     ) -> Result<DrainOutcome, LoopEngineError>;
-    /// #1272: Drain input while the Run is AwaitingUser. Unlike
-    /// `drain_input`, this must NOT seal the input buffer or advance
-    /// epoch when no user input is available — the buffer must stay
-    /// receptive to future input within the same Run.
-    ///
-    /// The default impl returns an `Adapter` error: an adapter that can
-    /// reach `AwaitingUser` MUST override this to ensure empty input
-    /// returns `NoInput` (not `EmptyAndSealed`) and never seals the buffer.
-    /// Adapters that never enter `AwaitingUser` (e.g. Sub agents with a
-    /// fixed prompt) do not need to override this.
+
+    /// Drain input while the Run is AwaitingUser without sealing the input source.
     async fn await_user_input(
         &mut self,
         expected_epoch: DrainEpoch,
     ) -> Result<DrainOutcome, LoopEngineError> {
         log::debug!(
             target: crate::LOG_TARGET,
-            "RunLoopPort::await_user_input 使用默认实现（epoch {:?}）：\
-             该 adapter 未覆写 await_user_input，无法安全处理 AwaitingUser",
+            "InputPort::await_user_input 使用默认实现（epoch {:?}）：该 adapter 未覆写等待输入能力",
             expected_epoch,
         );
         Err(LoopEngineError::Adapter(format!(
-            "该 adapter 未覆写 await_user_input（epoch {:?}）：\
-             可进入 AwaitingUser 的 adapter 必须实现该方法，\
-             保证空输入时返回 NoInput 而非 seal buffer",
+            "该 adapter 未覆写 await_user_input（epoch {:?}）：可进入 AwaitingUser 的 adapter 必须实现该方法，保证空输入时返回 NoInput 而非 seal buffer",
             expected_epoch,
         )))
     }
-    fn freeze_step(&mut self, _step_id: &sdk::RunStepId, _inputs: &[LoopInput]) {}
-    async fn accept_step_input(
-        &mut self,
-        _step_id: &sdk::RunStepId,
-    ) -> Result<(), LoopEngineError> {
-        Ok(())
-    }
-    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError>;
-    async fn compact(&mut self, cancel: &CancellationToken) -> Result<(), LoopEngineError>;
-    async fn invoke_model(
-        &mut self,
-        cancel: &CancellationToken,
-    ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError>;
-    /// #1248 Task 6: Evaluate the Stop hook and return a typed decision.
-    ///
-    /// Called by the shared Loop when the model returns Complete (no tool
-    /// calls).  The adapter runs the hook (Main/Sub both use the same hook
-    /// port), materializes feedback, and returns a `StopHookDecision`.
-    ///
-    /// Default returns `Proceed` — adapters that do not support stop hooks
-    /// (e.g. test ScriptedPort without hooks) are never blocked.
-    async fn evaluate_stop_hook(
-        &mut self,
-        _turns: usize,
-    ) -> Result<StopHookDecision, LoopEngineError> {
-        Ok(StopHookDecision::Proceed)
-    }
-    async fn finalize_step(&mut self, _step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
-        Ok(())
-    }
-    async fn finalize_cancelled_step(
-        &mut self,
-        _step_id: &sdk::RunStepId,
-    ) -> Result<(), LoopEngineError> {
-        Ok(())
-    }
-    async fn execute_tools(
-        &mut self,
+}
+
+#[async_trait]
+pub trait EventSinkPort: Send {
+    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError>;
+}
+
+#[async_trait]
+pub trait RunControlPort: Send + Sync {
+    fn take_control(&self, run_id: &sdk::RunId) -> Option<crate::domain::agent_run::RunControl>;
+}
+
+#[async_trait]
+pub trait RunLifecyclePort: Send + Sync {
+    fn claim_terminal(&self, run_id: &sdk::RunId) -> bool;
+    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool;
+    fn register_step_scope(
+        &self,
         run_id: &sdk::RunId,
-        step_id: &sdk::RunStepId,
-        calls: &[(ToolCall, ToolGuardDecision)],
-        cancel: &CancellationToken,
-    ) -> Result<ToolStep, LoopEngineError>;
-    async fn on_stuck(&mut self, decision: &StuckDecision) -> Result<(), LoopEngineError>;
-    /// #1248 Task 5: Return the interaction port for this adapter.
-    /// The engine uses this to drive the [`InteractionCoordinator`] through the
-    /// port, never calling `InteractionPort` methods directly.
-    ///
-    /// Default returns [`UnavailableInteractionPort`] — adapters that support
-    /// interaction MUST override this.
+        step_id: sdk::RunStepId,
+        cancel: CancellationToken,
+    );
+}
+
+#[async_trait]
+pub trait InteractionMailboxPort: Send {
     fn interaction_port(&self) -> &dyn crate::application::interaction::InteractionPort {
         static UNAVAILABLE: std::sync::LazyLock<
             crate::application::interaction::UnavailableInteractionPort,
@@ -354,23 +321,12 @@ pub trait RunLoopPort: Send {
         );
         &*UNAVAILABLE
     }
-    /// #1248 Task 7: Return the reasoning port for this adapter.
-    /// Static reasoning level is carried by the adapter's RuntimeContext.
-    /// #1248 Task 5: Publish an interaction request event to the UI layer.
-    /// Default is a no-op — adapters that support UI MUST override this to
-    /// emit `RuntimeStreamEvent::InteractionRequested`.
     async fn publish_interaction(
         &mut self,
         _request: &sdk::InteractionRequest,
     ) -> Result<(), LoopEngineError> {
         Ok(())
     }
-    /// #1248 Task 5: Store a pending interaction with its full metadata and receiver.
-    /// The engine calls this after registering an interaction and publishing it,
-    /// before returning AwaitUser to the caller. The adapter holds the metadata+receiver
-    /// and resolves it via `poll_interaction`.
-    ///
-    /// Default panics — adapters supporting interaction MUST override.
     fn store_interaction(
         &mut self,
         _metadata: crate::application::interaction::InteractionRequestMetadata,
@@ -382,31 +338,13 @@ pub trait RunLoopPort: Send {
             "store_interaction not implemented".to_string(),
         ))
     }
-    /// #1248 Task 5: Poll for a resolved interaction.
-    /// Returns `Some(resolution)` when a previously stored interaction has
-    /// been resolved or closed, with full metadata for the engine to dispatch.
-    ///
-    /// Default returns `None` — adapters without interaction support.
     async fn poll_interaction(
         &mut self,
     ) -> Result<Option<crate::application::interaction::InteractionResolution>, LoopEngineError>
     {
         Ok(None)
     }
-    /// #1248: Store pending interaction work (queue + active step) on the port.
-    /// Called by the engine once per round when multiple interactions are needed.
-    /// The port drains items one at a time via `finish_interaction_work`.
-    ///
-    /// Default is a no-op — adapters without interaction support.
     fn set_pending_interaction_work(&mut self, _work: PendingInteractionWork) {}
-    /// #1248: Adapter seam to finish interaction work — write tool result messages,
-    /// send ToolResult events, execute approved tools, and return the resolved
-    /// call's status plus the remaining queue.
-    ///
-    /// Called by the engine after `complete_reply` validates a user response.
-    /// Must NOT depend on Main-specific message types.
-    ///
-    /// Default returns an error — adapters supporting interaction MUST override.
     async fn finish_interaction_work(
         &mut self,
         _metadata: &crate::application::interaction::InteractionRequestMetadata,
@@ -417,28 +355,107 @@ pub trait RunLoopPort: Send {
             "finish_interaction_work not implemented".to_string(),
         ))
     }
-    /// #1248 Task 5: Whether the current run needs plan approval before proceeding.
-    /// Default returns `false` — adapters that support plan mode MUST override.
+}
+
+#[async_trait]
+pub trait StepPersistencePort: Send {
+    fn freeze_step(
+        &mut self,
+        _run_id: &sdk::RunId,
+        _step_id: &sdk::RunStepId,
+        _inputs: &[LoopInput],
+    ) {
+    }
+    async fn accept_step_input(
+        &mut self,
+        _step_id: &sdk::RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        Ok(())
+    }
+    async fn finalize_step(&mut self, _step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
+        Ok(())
+    }
+    async fn finalize_cancelled_step(
+        &mut self,
+        _step_id: &sdk::RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+pub trait CompactionPort: Send {
+    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError>;
+    async fn compact(&mut self, cancel: &CancellationToken) -> Result<(), LoopEngineError>;
+}
+
+#[async_trait]
+pub trait ModelInvocationPort: Send {
+    async fn invoke_model(
+        &mut self,
+        cancel: &CancellationToken,
+    ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError>;
+}
+
+#[async_trait]
+pub trait StopHookPort: Send {
+    /// Evaluate the Stop hook after a model-complete step.
+    ///
+    /// Default returns `Proceed` so adapters without stop hooks remain
+    /// unblocked.
+    async fn evaluate_stop_hook(
+        &mut self,
+        _turns: usize,
+    ) -> Result<StopHookDecision, LoopEngineError> {
+        Ok(StopHookDecision::Proceed)
+    }
+}
+
+#[async_trait]
+pub trait ToolOrchestrationPort: Send {
+    async fn execute_tools(
+        &mut self,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+        calls: &[(ToolCall, ToolGuardDecision)],
+        cancel: &CancellationToken,
+    ) -> Result<ToolStep, LoopEngineError>;
+}
+
+#[async_trait]
+pub trait StuckHandlingPort: Send {
+    async fn on_stuck(&mut self, decision: &StuckDecision) -> Result<(), LoopEngineError>;
+}
+
+pub trait PlanApprovalPort: Send {
+    /// Whether the current run needs plan approval before proceeding.
+    ///
+    /// Default returns `false`; adapters that support plan mode override it.
     fn needs_plan_approval(&self) -> bool {
         false
     }
-    fn claim_terminal(&self, _run_id: &sdk::RunId) -> bool {
-        true
-    }
-    fn claim_cancellation(&self, _run_id: &sdk::RunId) -> bool {
-        true
-    }
-    fn take_control(&self, _run_id: &sdk::RunId) -> Option<crate::domain::agent_run::RunControl> {
-        None
-    }
-    fn register_step_scope(
-        &self,
-        _run_id: &sdk::RunId,
-        _step_id: sdk::RunStepId,
-        _cancel: CancellationToken,
-    ) {
-    }
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError>;
+}
+
+#[async_trait]
+pub trait ExecutionStatePort: Send {
+    fn execution_state_mut(&mut self) -> &mut RunExecutionState;
+}
+
+pub trait LoopEnginePort:
+    EventSinkPort
+    + RunControlPort
+    + RunLifecyclePort
+    + InteractionMailboxPort
+    + StepPersistencePort
+    + CompactionPort
+    + ModelInvocationPort
+    + StopHookPort
+    + ToolOrchestrationPort
+    + StuckHandlingPort
+    + PlanApprovalPort
+    + ExecutionStatePort
+    + Send
+{
 }
 
 enum Interrupt<T> {
@@ -470,13 +487,41 @@ where
     }
 }
 
+/// Unified production-shaped engine entry.
+///
+/// `Run` owns domain state, `RunExecutionState` owns mutable loop work, and
+/// `RuntimeContext` owns run-scoped capabilities. During P5 the legacy adapter
+/// remains the narrow behavior bridge while its methods are peeled into the
+/// engine and context-owned ports.
+pub async fn execute_prepared_loop<P>(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    context: &RuntimeContext,
+    cancel: &CancellationToken,
+    port: &mut P,
+) -> Result<LoopDirective, LoopEngineError>
+where
+    P: LoopEnginePort + InputPort + EventSinkPort + RunControlPort + RunLifecyclePort,
+{
+    std::mem::swap(execution, port.execution_state_mut());
+    let result = run_loop(run, cancel, port).await;
+    std::mem::swap(execution, port.execution_state_mut());
+
+    // Touch the context-owned event capability at the unified entry so callers
+    // cannot launch an Engine without the frozen per-Run contract. Event
+    // publication remains inside the adapter bridge until the narrow EventSink
+    // port replaces `LoopEnginePort::emit` later in P5.
+    let _event_sink = context.event_sink();
+    result
+}
+
 pub async fn run_loop<P>(
     run: &mut Run,
     cancel: &CancellationToken,
     port: &mut P,
 ) -> Result<LoopDirective, LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort + InputPort + EventSinkPort + RunControlPort + RunLifecyclePort,
 {
     if run.status() == RunStatus::Created {
         run.start_draining()?;
@@ -677,12 +722,13 @@ async fn execute_step<P>(
     terminal_text: &mut Option<String>,
 ) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     let step_id = sdk::RunStepId::new_v7();
     let step_cancel = cancel.child_token();
     port.register_step_scope(run.id(), step_id.clone(), step_cancel.clone());
-    port.freeze_step(&step_id, inputs);
+    port.execution_state_mut().begin_step();
+    port.freeze_step(run.id(), &step_id, inputs);
     if let Err(error) = port.accept_step_input(&step_id).await {
         fail_run(run, port, error.to_string()).await?;
         return Ok(());
@@ -1094,7 +1140,7 @@ async fn handle_suspensions<P>(
     suspended: Vec<SuspendedToolCall>,
 ) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     use crate::application::interaction_coordinator::InteractionCoordinator;
 
@@ -1214,7 +1260,7 @@ async fn handle_tool_approvals<P>(
     calls_needing_approval: Vec<ApprovalRequiredCall>,
 ) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     use crate::application::interaction_coordinator::InteractionCoordinator;
 
@@ -1312,7 +1358,7 @@ async fn handle_interaction_completion<P>(
     resolution: crate::application::interaction::InteractionResolution,
 ) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     use crate::application::interaction::InteractionCompletion;
     use crate::application::interaction::InteractionResolution;
@@ -1399,7 +1445,7 @@ async fn dispatch_continuation<P>(
     reply: &sdk::InteractionReply,
 ) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     use crate::application::interaction::InteractionCompletion;
     use crate::application::interaction_coordinator::InteractionCoordinator;
@@ -1488,7 +1534,7 @@ async fn handle_interaction_outcome<P>(
     outcome: InteractionWorkOutcome,
 ) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     use crate::application::interaction_coordinator::InteractionCoordinator;
 
@@ -1639,7 +1685,7 @@ async fn handle_hard_pause<P>(
     reason: String,
 ) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     use crate::application::interaction_coordinator::InteractionCoordinator;
 
@@ -1699,7 +1745,7 @@ async fn handle_plan_approval<P>(
     plan_text: &str,
 ) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     use crate::application::interaction_coordinator::InteractionCoordinator;
 
@@ -1751,7 +1797,7 @@ async fn record_stuck<P>(
     decision: &StuckDecision,
 ) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     let reason = match decision {
         StuckDecision::SoftBlock { reason }
@@ -1774,7 +1820,7 @@ async fn handle_pending_control<P>(
     port: &mut P,
 ) -> Result<Option<ControlDirective>, LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     let Some(control) = port.take_control(run.id()) else {
         return Ok(None);
@@ -1815,7 +1861,7 @@ async fn finish_cancelled_step<P>(
     step_id: &sdk::RunStepId,
 ) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     match run.request_step_cancellation(step_id) {
         crate::domain::agent_run::RunStepCancellationRequest::Accepted => {}
@@ -1836,7 +1882,7 @@ where
 
 async fn handle_step_control<P>(run: &mut Run, port: &mut P) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     match handle_pending_control(run, port).await? {
         Some(ControlDirective::Continue) => Ok(()),
@@ -1854,7 +1900,7 @@ async fn handle_interrupt<P>(
     port: &mut P,
 ) -> Result<bool, LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     if cancel.is_cancelled() || run.status() == RunStatus::Cancelling {
         cancel_run(run, port).await?;
@@ -1875,7 +1921,7 @@ where
 
 async fn timeout_run<P>(run: &mut Run, port: &mut P) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     fail_run(
         run,
@@ -1894,7 +1940,7 @@ pub(crate) async fn fail_run<P>(
     error: String,
 ) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     if !port.claim_terminal(run.id()) {
         return cancel_run(run, port).await;
@@ -1905,7 +1951,7 @@ where
 
 async fn cancel_run<P>(run: &mut Run, port: &mut P) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort,
 {
     let active_step = run.active_step_id();
     if run.status() != RunStatus::Cancelling {
@@ -1942,7 +1988,7 @@ where
 
 async fn emit_events<P>(run: &mut Run, port: &mut P) -> Result<(), LoopEngineError>
 where
-    P: RunLoopPort,
+    P: LoopEnginePort + EventSinkPort,
 {
     let events = run.drain_events();
     if events.is_empty() {

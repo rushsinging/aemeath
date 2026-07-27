@@ -8,9 +8,207 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
+#[test]
+fn execution_state_is_published_as_narrow_port_and_run_loop_port_is_retired() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("pub trait ExecutionStatePort: Send"));
+    assert!(!source.contains("pub trait RunLoopPort"));
+    assert!(source.contains("execution_state_mut"));
+}
+
+#[test]
+fn production_engine_owns_step_state_reset() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("port.execution_state_mut()"));
+    assert!(source.contains("std::mem::swap(execution, port.execution_state_mut())"));
+
+    let main_source = include_str!("../main_loop/looping/loop_runner.rs");
+    let sub_source = include_str!("../subagent/runner/loop_run.rs");
+    assert!(main_source.contains("crate::application::run_launcher::launch_prepared("));
+    assert!(sub_source.contains("crate::application::run_launcher::launch_prepared("));
+    assert!(!main_source.contains("loop_engine::run_loop("));
+    assert!(!sub_source.contains("loop_engine::run_loop("));
+}
+
+#[test]
+fn production_engine_entry_uses_supplied_execution_and_context() {
+    let source = include_str!("engine.rs");
+    assert!(!source.contains("let _ = (execution, context)"));
+    assert!(source.contains("std::mem::swap(execution, port.execution_state_mut())"));
+    assert!(source.contains("context.event_sink()") || source.contains("context.input()"));
+}
+
 use crate::application::loop_engine::{
     DrainEpoch, DrainOutcome, InternalContinuationKind, LoopInput,
 };
+
+#[test]
+fn plan_approval_is_published_as_narrow_port() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("pub trait PlanApprovalPort: Send"));
+    let run_loop_trait = source
+        .split("pub trait LoopEnginePort")
+        .nth(1)
+        .and_then(|tail| tail.split("enum Interrupt").next())
+        .expect("LoopEnginePort trait block");
+    assert!(
+        !run_loop_trait.contains("needs_plan_approval"),
+        "needs_plan_approval leaked into LoopEnginePort"
+    );
+}
+
+#[test]
+fn stuck_handling_is_published_as_narrow_port() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("pub trait StuckHandlingPort: Send"));
+    let run_loop_trait = source
+        .split("pub trait LoopEnginePort")
+        .nth(1)
+        .and_then(|tail| tail.split("enum Interrupt").next())
+        .expect("LoopEnginePort trait block");
+    assert!(
+        !run_loop_trait.contains("on_stuck"),
+        "on_stuck leaked into LoopEnginePort"
+    );
+}
+
+#[test]
+fn tool_orchestration_is_published_as_narrow_port() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("pub trait ToolOrchestrationPort: Send"));
+    let run_loop_trait = source
+        .split("pub trait LoopEnginePort")
+        .nth(1)
+        .and_then(|tail| tail.split("enum Interrupt").next())
+        .expect("LoopEnginePort trait block");
+    assert!(
+        !run_loop_trait.contains("execute_tools"),
+        "execute_tools leaked into LoopEnginePort"
+    );
+}
+
+#[test]
+fn stop_hook_is_published_as_narrow_port() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("pub trait StopHookPort: Send"));
+    let run_loop_trait = source
+        .split("pub trait LoopEnginePort")
+        .nth(1)
+        .and_then(|tail| tail.split("enum Interrupt").next())
+        .expect("LoopEnginePort trait block");
+    assert!(
+        !run_loop_trait.contains("evaluate_stop_hook"),
+        "evaluate_stop_hook leaked into LoopEnginePort"
+    );
+}
+
+#[test]
+fn compaction_is_published_as_narrow_port() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("pub trait CompactionPort: Send"));
+    let run_loop_trait = source
+        .split("pub trait LoopEnginePort")
+        .nth(1)
+        .and_then(|tail| tail.split("enum Interrupt").next())
+        .expect("LoopEnginePort trait block");
+    for method in ["needs_compaction", "compact"] {
+        assert!(
+            !run_loop_trait.contains(method),
+            "{method} leaked into LoopEnginePort"
+        );
+    }
+}
+
+#[test]
+fn model_invocation_is_published_as_narrow_port() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("pub trait ModelInvocationPort: Send"));
+    let run_loop_trait = source
+        .split("pub trait LoopEnginePort")
+        .nth(1)
+        .and_then(|tail| tail.split("enum Interrupt").next())
+        .expect("LoopEnginePort trait block");
+    assert!(
+        !run_loop_trait.contains("invoke_model"),
+        "invoke_model leaked into LoopEnginePort"
+    );
+}
+
+#[test]
+fn step_persistence_is_published_as_narrow_port() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("pub trait StepPersistencePort: Send"));
+    let run_loop_trait = source
+        .split("pub trait LoopEnginePort")
+        .nth(1)
+        .and_then(|tail| tail.split("enum Interrupt").next())
+        .expect("LoopEnginePort trait block");
+    for method in [
+        "freeze_step",
+        "accept_step_input",
+        "finalize_step",
+        "finalize_cancelled_step",
+    ] {
+        assert!(
+            !run_loop_trait.contains(method),
+            "{method} leaked into LoopEnginePort"
+        );
+    }
+}
+
+#[test]
+fn interaction_mailbox_is_published_as_narrow_port() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("pub trait InteractionMailboxPort: Send"));
+    let run_loop_trait = source
+        .split("pub trait LoopEnginePort")
+        .nth(1)
+        .and_then(|tail| tail.split("enum Interrupt").next())
+        .expect("LoopEnginePort trait block");
+    for method in [
+        "interaction_port",
+        "publish_interaction",
+        "store_interaction",
+        "poll_interaction",
+        "set_pending_interaction_work",
+        "finish_interaction_work",
+    ] {
+        assert!(
+            !run_loop_trait.contains(method),
+            "{method} leaked into LoopEnginePort"
+        );
+    }
+}
+
+#[test]
+fn control_and_lifecycle_are_published_as_narrow_ports() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("pub trait RunControlPort: Send + Sync"));
+    assert!(source.contains("pub trait RunLifecyclePort: Send + Sync"));
+    let run_loop_trait = source
+        .split("pub trait LoopEnginePort")
+        .nth(1)
+        .and_then(|tail| tail.split("enum Interrupt").next())
+        .expect("LoopEnginePort trait block");
+    assert!(!run_loop_trait.contains("claim_terminal"));
+    assert!(!run_loop_trait.contains("claim_cancellation"));
+    assert!(!run_loop_trait.contains("take_control"));
+    assert!(!run_loop_trait.contains("register_step_scope"));
+}
+#[test]
+fn loop_external_boundaries_are_published_as_narrow_ports() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("pub trait InputPort: Send"));
+    assert!(source.contains("pub trait EventSinkPort: Send"));
+    assert!(source.contains("pub trait InteractionMailboxPort: Send"));
+    let run_loop_trait = source
+        .split("pub trait LoopEnginePort")
+        .nth(1)
+        .and_then(|tail| tail.split("enum Interrupt").next())
+        .expect("LoopEnginePort trait block");
+    assert!(!run_loop_trait.contains("drain_input"));
+}
+
 use crate::domain::agent_run::{
     InteractionContinuation, Run, RunControl, RunDomainEvent, RunSpec, RunStatus, ToolCallStatus,
 };
@@ -117,6 +315,7 @@ struct ScriptedPort {
         std::sync::Mutex<VecDeque<crate::application::interaction::InteractionRequestMetadata>>,
     /// #1248: Fake tool execution port for counting/tracking approvals.
     fake_tool_port: Option<Arc<FakeToolExecutionPort>>,
+    execution: crate::application::run_execution_state::RunExecutionState,
 }
 
 impl Default for ScriptedPort {
@@ -164,19 +363,18 @@ impl Default for ScriptedPort {
             pending_work: std::sync::Mutex::new(None),
             stored_metadata: std::sync::Mutex::new(VecDeque::new()),
             fake_tool_port: None,
+            execution: crate::application::run_execution_state::RunExecutionState::new(),
         }
     }
 }
 
 #[async_trait::async_trait]
-impl RunLoopPort for ScriptedPort {
+impl InputPort for ScriptedPort {
     async fn drain_input(
         &mut self,
         expected_epoch: DrainEpoch,
     ) -> Result<DrainOutcome, LoopEngineError> {
         self.calls.push("input");
-        // #1272: validate the engine's expected epoch against the
-        // port's own tracked epoch before consuming any outcome.
         if expected_epoch != self.drain_epoch {
             return Err(LoopEngineError::Adapter(format!(
                 "drain epoch 不匹配：期望 {:?}，实际 {:?}",
@@ -189,22 +387,12 @@ impl RunLoopPort for ScriptedPort {
                 .unwrap_or_else(|| DrainOutcome::EmptyAndSealed {
                     epoch: self.drain_epoch,
                 });
-        // #1272: Only advance epoch for outcomes that consumed input.
-        // NoInput means no input was consumed — epoch stays the same.
-        match &outcome {
-            DrainOutcome::NoInput { .. } => {}
-            _ => {
-                self.drain_epoch = self.drain_epoch.next();
-            }
+        if !matches!(&outcome, DrainOutcome::NoInput { .. }) {
+            self.drain_epoch = self.drain_epoch.next();
         }
         Ok(outcome)
     }
 
-    /// #1272: For ScriptedPort, await_user_input does NOT delegate to
-    /// drain_input because the epoch advancement rules differ:
-    /// - drain_input always advances epoch
-    /// - await_user_input advances for Ready and InternalContinuation
-    ///   but NOT for EmptyAndSealed or NoInput (the engine won't either)
     async fn await_user_input(
         &mut self,
         expected_epoch: DrainEpoch,
@@ -222,17 +410,66 @@ impl RunLoopPort for ScriptedPort {
             .unwrap_or_else(|| DrainOutcome::NoInput {
                 epoch: self.drain_epoch,
             });
-        // #1272: Don't advance epoch for outcomes that the engine won't advance for
-        match &outcome {
-            DrainOutcome::EmptyAndSealed { .. } | DrainOutcome::NoInput { .. } => {}
-            _ => {
-                self.drain_epoch = self.drain_epoch.next();
-            }
+        if !matches!(
+            &outcome,
+            DrainOutcome::EmptyAndSealed { .. } | DrainOutcome::NoInput { .. }
+        ) {
+            self.drain_epoch = self.drain_epoch.next();
         }
         Ok(outcome)
     }
+}
 
-    fn freeze_step(&mut self, step_id: &sdk::RunStepId, _inputs: &[LoopInput]) {
+#[async_trait::async_trait]
+impl EventSinkPort for ScriptedPort {
+    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+        self.calls.push("emit");
+        if self.fail_emit_once {
+            self.fail_emit_once = false;
+            return Err(LoopEngineError::Adapter("emit failed".to_string()));
+        }
+        self.events.extend(events);
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl RunControlPort for ScriptedPort {
+    fn take_control(&self, _run_id: &sdk::RunId) -> Option<RunControl> {
+        self.controls.lock().unwrap().pop_front()
+    }
+}
+
+#[async_trait::async_trait]
+impl RunLifecyclePort for ScriptedPort {
+    fn claim_terminal(&self, _run_id: &sdk::RunId) -> bool {
+        true
+    }
+
+    fn claim_cancellation(&self, _run_id: &sdk::RunId) -> bool {
+        true
+    }
+
+    fn register_step_scope(
+        &self,
+        run_id: &sdk::RunId,
+        step_id: sdk::RunStepId,
+        cancel: CancellationToken,
+    ) {
+        let _ = run_id;
+        *self.registered_step.lock().unwrap() = Some(step_id);
+        *self.step_cancel.lock().unwrap() = Some(cancel);
+    }
+}
+
+#[async_trait::async_trait]
+impl StepPersistencePort for ScriptedPort {
+    fn freeze_step(
+        &mut self,
+        _run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+        _inputs: &[LoopInput],
+    ) {
         self.calls.push("freeze_step");
         self.frozen_steps.push(step_id.clone());
     }
@@ -250,6 +487,24 @@ impl RunLoopPort for ScriptedPort {
         Ok(())
     }
 
+    async fn finalize_step(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
+        self.calls.push("finalize_step");
+        self.finalized_steps.push(step_id.clone());
+        Ok(())
+    }
+
+    async fn finalize_cancelled_step(
+        &mut self,
+        step_id: &sdk::RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        self.calls.push("finalize_cancelled_step");
+        self.cancelled_steps.push(step_id.clone());
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl CompactionPort for ScriptedPort {
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
         self.calls.push("needs_compaction");
         Ok(self.needs_compaction)
@@ -289,7 +544,10 @@ impl RunLoopPort for ScriptedPort {
         }
         Ok(())
     }
+}
 
+#[async_trait::async_trait]
+impl ModelInvocationPort for ScriptedPort {
     async fn invoke_model(
         &mut self,
         cancel: &CancellationToken,
@@ -327,22 +585,13 @@ impl RunLoopPort for ScriptedPort {
             .map(|step| (step, StepTokenUsage::default()))
             .ok_or_else(|| LoopEngineError::Adapter("missing model step".to_string()))
     }
+}
 
-    async fn finalize_step(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
-        self.calls.push("finalize_step");
-        self.finalized_steps.push(step_id.clone());
-        Ok(())
-    }
+#[async_trait::async_trait]
+impl StopHookPort for ScriptedPort {}
 
-    async fn finalize_cancelled_step(
-        &mut self,
-        step_id: &sdk::RunStepId,
-    ) -> Result<(), LoopEngineError> {
-        self.calls.push("finalize_cancelled_step");
-        self.cancelled_steps.push(step_id.clone());
-        Ok(())
-    }
-
+#[async_trait::async_trait]
+impl ToolOrchestrationPort for ScriptedPort {
     async fn execute_tools(
         &mut self,
         _run_id: &sdk::RunId,
@@ -374,16 +623,31 @@ impl RunLoopPort for ScriptedPort {
             .pop_front()
             .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))
     }
+}
 
+#[async_trait::async_trait]
+impl StuckHandlingPort for ScriptedPort {
     async fn on_stuck(&mut self, _decision: &StuckDecision) -> Result<(), LoopEngineError> {
         self.calls.push("stuck");
         Ok(())
     }
+}
 
-    fn take_control(&self, _run_id: &sdk::RunId) -> Option<RunControl> {
-        self.controls.lock().unwrap().pop_front()
+impl PlanApprovalPort for ScriptedPort {}
+
+impl ExecutionStatePort for ScriptedPort {
+    fn execution_state_mut(
+        &mut self,
+    ) -> &mut crate::application::run_execution_state::RunExecutionState {
+        &mut self.execution
     }
+}
 
+#[async_trait::async_trait]
+impl LoopEnginePort for ScriptedPort {}
+
+#[async_trait::async_trait]
+impl InteractionMailboxPort for ScriptedPort {
     fn interaction_port(&self) -> &dyn InteractionPort {
         self.interaction_bridge.as_ref()
     }
@@ -529,26 +793,6 @@ impl RunLoopPort for ScriptedPort {
             status,
             remaining_queue,
         })
-    }
-
-    fn register_step_scope(
-        &self,
-        _run_id: &sdk::RunId,
-        step_id: sdk::RunStepId,
-        cancel: CancellationToken,
-    ) {
-        *self.registered_step.lock().unwrap() = Some(step_id);
-        *self.step_cancel.lock().unwrap() = Some(cancel);
-    }
-
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
-        self.calls.push("emit");
-        if self.fail_emit_once {
-            self.fail_emit_once = false;
-            return Err(LoopEngineError::Adapter("sink failed".to_string()));
-        }
-        self.events.extend(events);
-        Ok(())
     }
 }
 
@@ -1639,10 +1883,11 @@ struct DrainOnlyPort {
     tool_steps: VecDeque<ToolStep>,
     events: Vec<RunDomainEvent>,
     calls: Vec<&'static str>,
+    execution: crate::application::run_execution_state::RunExecutionState,
 }
 
 #[async_trait::async_trait]
-impl RunLoopPort for DrainOnlyPort {
+impl InputPort for DrainOnlyPort {
     async fn drain_input(
         &mut self,
         expected_epoch: DrainEpoch,
@@ -1663,13 +1908,57 @@ impl RunLoopPort for DrainOnlyPort {
         self.drain_epoch = self.drain_epoch.next();
         Ok(outcome)
     }
-    // await_user_input: NOT overridden — uses the default impl.
+}
+
+#[async_trait::async_trait]
+impl EventSinkPort for DrainOnlyPort {
+    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+        self.events.extend(events);
+        Ok(())
+    }
+}
+
+impl InteractionMailboxPort for DrainOnlyPort {}
+
+impl StepPersistencePort for DrainOnlyPort {}
+
+impl RunControlPort for DrainOnlyPort {
+    fn take_control(&self, _run_id: &sdk::RunId) -> Option<RunControl> {
+        None
+    }
+}
+
+impl RunLifecyclePort for DrainOnlyPort {
+    fn claim_terminal(&self, _run_id: &sdk::RunId) -> bool {
+        true
+    }
+
+    fn claim_cancellation(&self, _run_id: &sdk::RunId) -> bool {
+        true
+    }
+
+    fn register_step_scope(
+        &self,
+        _run_id: &sdk::RunId,
+        _step_id: sdk::RunStepId,
+        _cancel: CancellationToken,
+    ) {
+    }
+}
+
+#[async_trait::async_trait]
+impl CompactionPort for DrainOnlyPort {
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
         Ok(false)
     }
+
     async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {
         Ok(())
     }
+}
+
+#[async_trait::async_trait]
+impl ModelInvocationPort for DrainOnlyPort {
     async fn invoke_model(
         &mut self,
         _cancel: &CancellationToken,
@@ -1680,6 +1969,13 @@ impl RunLoopPort for DrainOnlyPort {
             .map(|step| (step, StepTokenUsage::default()))
             .ok_or_else(|| LoopEngineError::Adapter("missing model step".to_string()))
     }
+}
+
+#[async_trait::async_trait]
+impl StopHookPort for DrainOnlyPort {}
+
+#[async_trait::async_trait]
+impl ToolOrchestrationPort for DrainOnlyPort {
     async fn execute_tools(
         &mut self,
         _run_id: &sdk::RunId,
@@ -1692,14 +1988,27 @@ impl RunLoopPort for DrainOnlyPort {
             .pop_front()
             .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))
     }
+}
+
+#[async_trait::async_trait]
+impl StuckHandlingPort for DrainOnlyPort {
     async fn on_stuck(&mut self, _decision: &StuckDecision) -> Result<(), LoopEngineError> {
         Ok(())
     }
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
-        self.events.extend(events);
-        Ok(())
+}
+
+impl PlanApprovalPort for DrainOnlyPort {}
+
+impl ExecutionStatePort for DrainOnlyPort {
+    fn execution_state_mut(
+        &mut self,
+    ) -> &mut crate::application::run_execution_state::RunExecutionState {
+        &mut self.execution
     }
 }
+
+#[async_trait::async_trait]
+impl LoopEnginePort for DrainOnlyPort {}
 
 /// A port that only implements `drain_input` (no `await_user_input` override)
 /// must receive a Chinese Adapter error when the Run enters `AwaitingUser`,
@@ -1732,6 +2041,7 @@ async fn default_await_user_input_returns_error_not_delegating_to_drain() {
         tool_steps: VecDeque::from([ToolStep::AwaitUser]),
         events: Vec::new(),
         calls: Vec::new(),
+        execution: crate::application::run_execution_state::RunExecutionState::new(),
     };
 
     let result = run_loop(&mut run, &cancel, &mut port).await;

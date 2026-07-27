@@ -41,7 +41,7 @@ pub use chat::{
     HookExecutionResultView, HookMessageKindView, HookMessageView, OptionItem,
     ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
     ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep,
-    ToolCallStatusView, ToolResultImage, UserInput, WorkspaceContextView, WorkspaceStackEntryView,
+    ToolCallStatusView, ToolResultImage, WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
 pub use commands::{

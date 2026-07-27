@@ -35,20 +35,19 @@ impl RunExecutionState {
         Self::default()
     }
 
-    pub(crate) fn with_turn_count(turn_count: usize) -> Self {
-        Self {
-            turn_count,
-            ..Self::default()
-        }
-    }
-
-    pub(crate) fn with_messages_and_turn_count(messages: Vec<Message>, turn_count: usize) -> Self {
-        Self {
-            messages,
-            turn_count,
-            committed_message_count: 0,
-            ..Self::default()
-        }
+    pub(crate) fn initialize_for_launch(&mut self, messages: Vec<Message>, turn_count: usize) {
+        debug_assert!(
+            self.started_at.is_none(),
+            "execution state initialized twice"
+        );
+        debug_assert!(
+            self.messages.is_empty(),
+            "execution messages initialized twice"
+        );
+        self.messages = messages;
+        self.turn_count = turn_count;
+        self.committed_message_count = 0;
+        self.started_at = Some(Instant::now());
     }
 
     pub(crate) fn messages(&self) -> &[Message] {
@@ -197,10 +196,6 @@ impl RunExecutionState {
     ) {
         self.context_request = Some(request);
         self.context_window = window;
-    }
-
-    pub(crate) fn mark_started(&mut self) {
-        self.started_at = Some(Instant::now());
     }
 
     pub(crate) fn started_at(&self) -> Option<Instant> {

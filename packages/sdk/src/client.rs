@@ -85,7 +85,7 @@ pub trait AgentClient: Send + Sync + 'static {
 
     /// 发起一次 Chat，返回事件流。
     ///
-    /// TUI 通过 `ChatRequest.input_events` 发送 `ChatInputEvent`，
+    /// TUI 通过 `ChatRequest.ingress` 发送 `ChatInputEvent`，
     /// 通过 `ChatStream`（`ChatEvent` 流）接收结果。
     async fn chat(&self, input: ChatRequest) -> Result<ChatStream, super::SdkError>;
 }

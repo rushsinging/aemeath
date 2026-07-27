@@ -1,10 +1,10 @@
 use super::loop_run::SubAgentRun;
 use super::CliAgentRunner;
-use crate::application::interaction::UnavailableInteractionPort;
-use crate::application::runtime_context::{
-    RunContextBindings, RunInputBufferHandle, RunUsageTracker, RuntimeContext,
-};
+use crate::application::runtime_context::{RunCapabilityBindings, RuntimeContext};
 use crate::application::runtime_context_factory::RuntimeContextFactory;
+use crate::application::runtime_preparation::{
+    ParentRunCapabilities, RunPreparationRequest, SessionState,
+};
 use crate::application::subagent::Agent;
 use crate::application::workspace_access::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::RunSpec;
@@ -39,10 +39,10 @@ pub struct SubRunRequest {
 /// #1385: holds full [`RuntimeWorkspaceAccess`] (not just [`project::WorkspaceViews`]);
 /// all scope/read_access/persist/skill query/hook workspace root come from this
 /// single derived workspace.
-#[derive(Clone)]
 pub struct DerivedSubRun {
-    pub spec: RunSpec,
     pub context: RuntimeContext,
+    pub run: crate::domain::agent_run::Run,
+    pub execution: crate::application::run_execution_state::RunExecutionState,
     /// Full workspace access — used for execution scope, read_access, persist,
     /// skill query factory, and hook workspace root.  Never call
     /// `derive_isolated()` a second time.
@@ -144,10 +144,11 @@ pub fn derive_sub_run(
     parent_spec: &RunSpec,
     parent_context: &RuntimeContext,
     parent_workspace: &RuntimeWorkspaceAccess,
+    parent_run_id: crate::domain::agent_run::RunId,
     request: &SubRunRequest,
     provider_factory: &dyn crate::ports::ProviderFactory,
     skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
-    runtime_context_factory: &RuntimeContextFactory,
+    runtime_context_factory: Arc<RuntimeContextFactory>,
 ) -> Result<DerivedSubRun, crate::application::client::RuntimeContextAssemblyError> {
     use crate::application::client::RuntimeContextAssemblyError;
 
@@ -276,40 +277,64 @@ pub fn derive_sub_run(
             )),
         );
 
-    // 7. #1248 Task 3: Assemble RuntimeContext via factory.
-    // All per-Run ports go into RunContextBindings; the factory handles
-    // capability-semantic decisions (reasoning Inherit → inherited_reasoning,
-    // interaction ParentMediated validation, etc.).
-    // Restricted tool catalog is passed as bindings.tool_catalog override.
-    let cancel = parent_context.cancel().child_scope();
-    let bindings = RunContextBindings {
-        context: skills_context_port,
-        provider: Arc::new(sub_binding.clone()),
-        interaction: Arc::new(UnavailableInteractionPort),
-        memory: Arc::new(memory::NoOpMemory),
-        config: config_snapshot.clone(),
-        cancel,
-        event_sink: {
-            crate::application::main_loop::ChatEventSinkHandle::new(
-                super::loop_run::SubAgentEventSink,
-            )
+    // 7. Prepare the child Run through the same RunPreparer entry used by Main.
+    let bindings = RunCapabilityBindings {
+        model: crate::application::runtime_context::ModelBindings {
+            context: skills_context_port,
+            provider: Arc::new(sub_binding.clone()),
+            interaction: parent_context.interaction(),
+            memory: Arc::new(memory::NoOpMemory),
+            config: config_snapshot.clone(),
+            reasoning: Arc::new(std::sync::Mutex::new(
+                *parent_context
+                    .reasoning_ref()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()),
+            )),
+            tool_catalog: Some(restricted_catalog),
         },
-        usage: RunUsageTracker::new(),
-        input: RunInputBufferHandle::new(),
-        reasoning: Arc::new(std::sync::Mutex::new(
-            *parent_context
-                .reasoning_ref()
-                .lock()
-                .unwrap_or_else(|error| error.into_inner()),
-        )),
-        tool_catalog: Some(restricted_catalog),
+        io: crate::application::runtime_context::IoBindings {
+            event_sink: crate::application::main_loop::ChatEventSinkHandle::new(
+                super::loop_run::SubAgentEventSink,
+            ),
+            input: crate::application::runtime_context::RunInputBufferHandle::new(),
+        },
+        lifecycle: crate::application::runtime_context::LifecycleBindings {
+            cancel: parent_context.cancel().child_scope(),
+            usage: crate::application::runtime_context::RunUsageTracker::new(),
+        },
     };
-
-    let context = runtime_context_factory.assemble(&spec, bindings, Some(parent_context))?;
+    let session = SessionState::new(
+        isolated_session_id.clone(),
+        sub_workspace.views().read().current_workspace_root(),
+        resolved_spec.clone(),
+        config_snapshot.config().clone(),
+    );
+    let preparation_request = RunPreparationRequest::new(
+        spec.clone(),
+        session.snapshot_for_run(),
+        Some(ParentRunCapabilities::new(
+            parent_run_id.clone(),
+            parent_spec.clone(),
+        )),
+    )
+    .map_err(|error| RuntimeContextAssemblyError::SubDerivationFailed {
+        reason: error.to_string(),
+    })?;
+    let preparer = crate::application::run_preparer::RunPreparer::new(runtime_context_factory);
+    let prepared = preparer
+        .prepare(preparation_request, bindings, Some(parent_context))
+        .map_err(|error| RuntimeContextAssemblyError::SubDerivationFailed {
+            reason: error.to_string(),
+        })?;
+    let (run, mut execution, _session, context) = prepared.into_parts();
+    execution.initialize_for_launch(Vec::new(), 0);
+    let context = context.expect("RunPreparer must produce RuntimeContext");
 
     Ok(DerivedSubRun {
-        spec,
         context,
+        run,
+        execution,
         workspace: sub_workspace,
         role_config: role.clone(),
         model_display,
@@ -335,7 +360,6 @@ impl AgentRunner for CliAgentRunner {
         let plan_mode_active = plan_mode.is_plan_mode().unwrap_or(false);
         let guidance = request.guidance;
         let timeout = request.timeout;
-        let parent_run_id = Some(sdk::RunId::from_legacy_or_new(identity.run_id()));
         let role_name = request.role;
         let progress_sink = request_progress.clone();
 
@@ -357,10 +381,11 @@ impl AgentRunner for CliAgentRunner {
             &parent_frame.spec,
             &parent_frame.context,
             &self.workspace,
+            parent_frame.run_id.clone(),
             &sub_request,
             self.factory.as_ref(),
             self.skill_materializer.clone(),
-            self.runtime_context_factory.as_ref(),
+            self.runtime_context_factory.clone(),
         ) {
             Ok(d) => d,
             Err(error) => {
@@ -374,11 +399,7 @@ impl AgentRunner for CliAgentRunner {
         // No `config_reader` snapshot, no `self.tool_catalog`, no second
         // `derive_isolated()`, no separate `self.policy`/`self.tool_context_binding`.
 
-        let run_spec = derived.spec.clone();
-
-        // Runtime cancellation: derived from parent's scope, parent-cancels-child.
         let runtime_token = derived.context.cancel().token().clone();
-
         // Combined cancellation for ToolExecutionPorts: external (tools-layer)
         // OR runtime token cancelling stops executing tools.
         let combined_cancel: Arc<dyn tools::CancellationSignal> =
@@ -414,11 +435,10 @@ impl AgentRunner for CliAgentRunner {
             })
             .unwrap_or_else(|| "subagent".to_string());
 
-        let sub_run_id = sdk::RunId::new_v7();
         let sub_run_context = super::loop_run::sub_run_log_context(
             &logging::capture(),
             &session_id,
-            sub_run_id.as_ref(),
+            derived.run.id().as_ref(),
             &model_name,
             &binding.model.provider,
             &role_name_for_log,
@@ -428,7 +448,7 @@ impl AgentRunner for CliAgentRunner {
             // ── Logging ──
             log::info!(target: crate::LOG_TARGET,
                 "[SubAgent] derived run_spec={} role={} model={} max_tokens={}",
-                run_spec.name, role_name_for_log, model_display, max_tokens
+                derived.run.spec().name, role_name_for_log, model_display, max_tokens
             );
 
             let hook_port = derived.context.hooks();
@@ -483,13 +503,10 @@ impl AgentRunner for CliAgentRunner {
             };
 
             // ── #1385: Catalog from derived.context (NOT from self.tool_catalog) ──
-            let sub_catalog = match derived
-                .context
-                .tool_catalog()
-                .snapshot(
-                    &tools::RegistryScopeName::new("sub-agent"),
-                    &tools::ToolProfileName::new("sub-agent-restricted"),
-                ) {
+            let sub_catalog = match derived.context.tool_catalog().snapshot(
+                &tools::RegistryScopeName::new("sub-agent"),
+                &tools::ToolProfileName::new("sub-agent-restricted"),
+            ) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     return tools::AgentRunTerminal::Failed {
@@ -500,8 +517,9 @@ impl AgentRunner for CliAgentRunner {
             let tool_schemas = sub_catalog.model_schemas();
 
             // ── #1385: Execution scope from derived workspace (the single source) ──
-            let sub_views = derived.workspace.views();            let sub_scope = tools::ExecutionScope::builder(
-                sub_run_id.to_string(),
+            let sub_views = derived.workspace.views();
+            let sub_scope = tools::ExecutionScope::builder(
+                derived.run.id().to_string(),
                 sub_views.read().workspace_id(),
                 sub_views.read().current_workspace_root(),
             )
@@ -518,9 +536,9 @@ impl AgentRunner for CliAgentRunner {
                 tools::ToolExecutionPorts::new(
                     combined_cancel.clone(),
                     derived.workspace.read_access(),
-                    Arc::new(tools::MutexReadSet(Arc::new(
-                        std::sync::Mutex::new(std::collections::HashSet::new()),
-                    ))),
+                    Arc::new(tools::MutexReadSet(Arc::new(std::sync::Mutex::new(
+                        std::collections::HashSet::new(),
+                    )))),
                     plan_mode,
                     derived.context.memory(),
                     guidance,
@@ -557,46 +575,45 @@ impl AgentRunner for CliAgentRunner {
             // ContextCoordinator is constructed on-demand inside SubAgentRun,
             // not stored as a field.
 
-            let messages = vec![Message::user(prompt)];
-            let context_size = derived.context.config_ref().config().resolve_context_size(None, 0);
+            let context_size = derived
+                .context
+                .config_ref()
+                .config()
+                .resolve_context_size(None, 0);
 
             let config_snapshot = derived.context.config_ref().config().clone();
 
-            SubAgentRun {
-                  prompt,
-                  system,
-                  progress_sink,
-                  // #1385 Task 12: runtime_context is owned (not Arc) — derived context
-                  // is already owned by the caller.
-                  runtime_context: derived.context,
-                  max_tokens,
-                workspace_root,
-                tool_schemas,
-                config_snapshot: config_snapshot.clone(),
-                language: config_snapshot.language().to_string(),
-                agent,
-                runtime_cancellation: runtime_token,
-                active_run: self.active_run.clone(),
-                session_id: derived.session_id,
-                run_id: sub_run_id,                parent_run_id,
-                role_name_for_log: role_name_for_log.clone(),
-                model_name_for_log: model_name,
-                resolved_spec: Some(model_display),
-                progress: Box::new(progress),
-                ctx_context_size: context_size,
-                  tool_result_materializer: self.tool_result_materializer.clone(),
-                  run_spec,
-                input_strategy:
-                    crate::application::loop_engine::input_strategy::SubInputStrategy::new(
-                        prompt,
-                    ),
-                plan_mode: plan_mode_active,
-              execution: {
-                  let mut state = crate::application::run_execution_state::RunExecutionState::with_messages_and_turn_count(messages, 0);
-                  state.mark_started();
-                  state
-              },
-          }            .run_loop()
+            super::loop_run::SubAgentLaunch {
+                run: derived.run,
+                adapter: SubAgentRun {
+                    prompt,
+                    system,
+                    progress_sink,
+                    runtime_context: derived.context,
+                    max_tokens,
+                    workspace_root,
+                    tool_schemas,
+                    config_snapshot: config_snapshot.clone(),
+                    language: config_snapshot.language().to_string(),
+                    agent,
+                    runtime_cancellation: runtime_token,
+                    active_run: self.active_run.clone(),
+                    session_id: derived.session_id,
+                    role_name_for_log: role_name_for_log.clone(),
+                    model_name_for_log: model_name,
+                    resolved_spec: Some(model_display),
+                    progress: Box::new(progress),
+                    ctx_context_size: context_size,
+                    tool_result_materializer: self.tool_result_materializer.clone(),
+                    input_strategy:
+                        crate::application::loop_engine::input_strategy::SubInputStrategy::new(
+                            prompt,
+                        ),
+                    plan_mode: plan_mode_active,
+                    execution: derived.execution,
+                },
+            }
+            .run()
             .await
         })
         .await

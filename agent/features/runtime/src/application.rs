@@ -6,6 +6,7 @@ pub(crate) mod active_run;
 pub mod client;
 pub mod context_coordination;
 pub mod cost;
+pub(crate) mod empty_hook;
 pub mod hook_types;
 pub mod interaction;
 pub mod interaction_coordinator;
@@ -19,12 +20,20 @@ pub mod run_execution_state;
 #[cfg(test)]
 mod run_execution_state_tests;
 pub mod run_launcher;
+pub mod run_preparer;
 pub mod runtime_context;
 pub mod runtime_context_factory;
 #[cfg(test)]
 mod runtime_context_factory_tests;
+pub mod runtime_preparation;
+#[cfg(test)]
+mod runtime_preparation_tests;
 pub mod scheduler;
 pub mod service;
+pub mod session_ingress;
+#[cfg(test)]
+#[path = "application/session_ingress_tests.rs"]
+mod session_ingress_tests;
 pub mod startup;
 pub mod stop_hook_coordination;
 pub mod subagent;

@@ -293,11 +293,24 @@ submit(trigger, owned message snapshot)
 
 `RuntimeContext` **MUST** 只持有本 Run 消费的活契约，**NEVER** 持有 Project wiring、composition scope、Session coordinator 或 active resource slot。`RuntimeServices` 持有 Runtime 生命周期稳定的共享 Port 与 Runtime-owned factory contracts；`SessionState` 持有跨 Run 变化的会话事实。Composition 保存供应 BC 的 opaque wiring，并实现 Runtime 定义的 factory/port；Runtime application 决定 snapshot 时机与 `RunSpec` 能力选择。
 
-调用方只提交 `RunPreparationRequest { spec, session, parent }`。统一 `RuntimeContextFactory::prepare` 通过注入的 `ProviderBindingFactory`、`ContextBindingFactory`、`ToolBindingFactory`、`InteractionBindingFactory`、`HookBindingFactory` 与 `WorkspaceBindingFactory` 创建处于 `Idle` 的 `PreparedRun { run, context, execution }`。调用方不得构造具体 Port 后通过 `RunContextBindings`、`RuntimeContextParts` 或同构参数袋手填 Context；输入内容也不得混入装配请求，首次和后续输入统一经 `InputPort` 激活 Run。
+调用方只提交 `RunPreparationRequest { spec, session, parent }`。`RuntimeContextFactory::create` 通过注入的 `ProviderBindingFactory`、`ContextBindingFactory`、`ToolBindingFactory`、`InteractionBindingFactory`、`HookBindingFactory` 与 `WorkspaceBindingFactory` 创建且只创建 `RuntimeContext`；Runtime-owned `RunPreparer::prepare` 协调创建处于 `Idle` 的 `PreparedRun { run, context, execution }`。调用方不得构造具体 Port 后通过 `RunContextBindings`、`RuntimeContextParts` 或同构参数袋手填 Context；输入内容也不得混入装配请求，首次和后续输入统一经 `InputPort` 激活 Run。
 
 ```rust
 // Runtime-owned application contracts.
 trait RuntimeContextFactory: Send + Sync {
+    async fn create(
+        &self,
+        spec: &RunSpec,
+        session: &SessionSnapshot,
+        parent: Option<&ParentRunCapabilities>,
+    ) -> Result<RuntimeContext, RuntimeContextError>;
+}
+
+struct RunPreparer {
+    context_factory: Arc<dyn RuntimeContextFactory>,
+}
+
+impl RunPreparer {
     async fn prepare(
         &self,
         request: RunPreparationRequest,
@@ -321,7 +334,7 @@ struct PreparedRun {
 struct RuntimeAssembly {
     runtime_services: RuntimeServices,
     session_state: SessionState,
-    runtime_context_factory: Arc<dyn RuntimeContextFactory>,
+    run_preparer: RunPreparer,
     workspace_wiring: project::WorkspaceWiring,
     session_wiring: context::SessionWiring,
     task_wiring: task::TaskWiring,
@@ -359,7 +372,7 @@ async fn launch_run(
         session: session.snapshot_for_run()?,
         parent,
     };
-    assembly.factory.prepare(request).await
+    assembly.run_preparer.prepare(request).await
 }
 
 async fn activate_run(
@@ -375,7 +388,7 @@ async fn activate_run(
 }
 ```
 
-`launch_run` 与 `activate_run` 形成唯一调用链：入站 args → typed bootstrap → Session snapshot → RunSpec → `RunPreparationRequest` → factory `prepare` → Idle `PreparedRun`；随后任意来源输入 → `InputPort::submit` → 状态机激活 → Loop Engine。任何调用方直接构造 Provider、Tool、Interaction、Hook、Workspace 或 `RuntimeContext`，都表示绕过 IoC；任何把首次输入塞进装配请求或按 Main/Sub 选择 assembler 的路径，都表示重新引入启动特例。
+`launch_run` 与 `activate_run` 形成唯一调用链：入站 args → typed bootstrap → Session snapshot → RunSpec → `RunPreparationRequest` → `RunPreparer::prepare` → `RuntimeContextFactory::create` → Idle `PreparedRun`；随后任意来源输入 → `InputPort::submit` → 状态机激活 → Loop Engine。任何调用方直接构造 Provider、Tool、Interaction、Hook、Workspace 或 `RuntimeContext`，都表示绕过 IoC；任何把首次输入塞进装配请求或按 Main/Sub 选择 assembler 的路径，都表示重新引入启动特例。
 
 ### 3.1 IoC 合同与验证伪代码
 
@@ -383,7 +396,7 @@ async fn activate_run(
 #[test]
 fn composition_implements_runtime_contract_without_leaking_wiring() {
     let assembly = compose_runtime(test_graph());
-    let prepared = block_on(assembly.factory.prepare(root_request())).unwrap();
+    let prepared = block_on(assembly.run_preparer.prepare(root_request())).unwrap();
     assert!(prepared.context.has_provider());
     assert!(!prepared.context.exposes_composition_wiring());
 }
@@ -407,19 +420,17 @@ fn parent_mediated_interaction_is_child_scoped() {
 }
 
 #[test]
-fn boundary_only_hook_rejects_tool_invocation() {
-    let hooks = prepare_with_hook(HookBindingMode::BoundaryOnly);
-    assert!(matches!(hooks.invoke(HookEvent::PreToolUse),
-        Err(HookError::InvocationNotAllowed)));
-    assert!(hooks.invoke(HookEvent::ChildStarted).is_ok());
+fn sub_hook_is_empty() {
+    let hooks = prepare_sub_run().context.hooks();
+    assert_proceed_without_dispatch(hooks, any_hook_invocation());
 }
 ```
 
-测试伪代码要求每个断言绑定一个 IoC 不变量：Composition 实现契约、Factory 执行能力选择、ParentMediated 隔离 identity、BoundaryOnly 在 adapter 入口过滤；不能只用最终 Loop 测试替代这些相邻契约。
+测试伪代码要求每个断言绑定一个 IoC 不变量：Composition 实现契约、Factory 执行能力选择、ParentMediated 隔离 identity、Sub Hook 绑定独立空实现；不能只用最终 Loop 测试替代这些相邻契约。
 
 Run 准备时，Runtime bootstrap/application 从 `SessionState` 捕获一致的 `SessionSnapshot`；若为派生 Run，只提供受限 `ParentRunCapabilities`。Factory 实现可借助 composition-private wiring 获得 lease、派生 workspace、打开 Context/Memory、构造 Provider/Tool/Hook adapter，但返回给 Runtime 的只有冻结能力。lease 必须由返回 capability 的生命周期守卫持有，调用方不能单独缓存或释放。
 
-`InteractionBindingMode::ParentMediated` 创建独立 child-scoped adapter；`HookBindingMode::BoundaryOnly` 创建只允许边界 invocation 的 adapter。两者都必须在 factory 内完成，不能先返回完整父 Port 再要求调用方自律过滤。
+`InteractionBindingMode::ParentMediated` 创建独立 child-scoped adapter；Sub Hook capability 创建不持底层 HookPort 的 `EmptyHookPort`，所有 invocation 都无副作用返回。两者都必须在 factory 内完成，不能先返回完整父 Port 再要求调用方自律过滤。
 
 `reasoning` 装配 **MUST** 只构造 Workflow-owned requested-level 状态：Adaptive 使用五节点固定默认 effort，Fixed 使用 RunSpec 声明值，Inherit 冻结父 requested value，NoOp 绑定无副作用实现。它 **NEVER** 接收具体 Provider client；每次 invocation 的 model clamp 由 Loop 在 `build_window` 前经 `ProviderPort` 完成。
 

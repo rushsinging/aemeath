@@ -25,7 +25,7 @@ use tokio_util::sync::CancellationToken;
 use super::loop_runner::main_run_port::MainRunPort;
 use super::task_reminder::TaskReminderState;
 use crate::application::context_coordination::ContextCoordinator;
-use crate::application::loop_engine::RunLoopPort;
+use crate::application::loop_engine::CompactionPort;
 use crate::application::main_loop::looping::reflection::{
     maybe_submit_pre_compact_reflection, submit_pre_compact_reflection,
 };
@@ -247,8 +247,8 @@ fn build_compact_test_port<'a>(
         input_events: &harness.input_events,
         system_prompt_text: "system",
         execution: {
-            let mut execution = crate::application::run_execution_state::RunExecutionState::with_messages_and_turn_count(pre_compact_messages.clone(), 1);
-            execution.mark_started();
+            let mut execution = crate::application::run_execution_state::RunExecutionState::new();
+            execution.initialize_for_launch(pre_compact_messages.clone(), 1);
             execution.replace_context_projection(request, window);
             execution
         },

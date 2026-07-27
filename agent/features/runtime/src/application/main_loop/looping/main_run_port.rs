@@ -13,7 +13,7 @@ use crate::application::loop_engine::llm_log::{log_llm_input, log_llm_output_and
 use crate::application::loop_engine::shared::compact_core;
 use crate::application::loop_engine::tool_strategy::{self, ToolStrategy};
 use crate::application::loop_engine::{
-    DrainEpoch, DrainOutcome, LoopEngineError, LoopInput, ModelStep, RunLoopPort,
+    DrainEpoch, DrainOutcome, LoopEngineError, LoopEnginePort, LoopInput, ModelStep,
     ToolGuardDecision, ToolStep,
 };
 use crate::application::main_loop::looping::post_batch::run_post_tool_batch;
@@ -699,7 +699,7 @@ where
 
         // #1248 Task 6: Stop hook evaluation moved to shared Loop via
         // `evaluate_stop_hook` seam.  The adapter simply returns Complete
-        // and the engine triggers the hook through RunLoopPort.
+        // and the engine triggers the hook through LoopEnginePort.
         Ok((
             ModelStep::Complete {
                 text: resp.assistant_message.text_content(),
@@ -950,15 +950,54 @@ where
 }
 
 #[async_trait]
-impl<Q, I> RunLoopPort for MainRunPort<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::InputPort for MainRunPort<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
-    fn freeze_step(&mut self, step_id: &RunStepId, inputs: &[LoopInput]) {
-        // #1272: consume from pending_stop_hook_feedback — drain_input took
-        // from stop_hook_feedback and relayed here so freeze_step can
-        // inject the feedback as a system-prefix message.
+    async fn drain_input(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        self.input_strategy.drain_input(expected_epoch).await
+    }
+
+    async fn await_user_input(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        self.input_strategy.await_user_input(expected_epoch).await
+    }
+}
+
+#[async_trait]
+impl<Q, I> crate::application::loop_engine::EventSinkPort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+        let mut strategy = MainEventStrategy {
+            sink: self.runtime_context.event_sink(),
+            session_id: self.session_id,
+            turn_context: &self.turn_context,
+            task_access: self.task_access(),
+            model: &self.binding().model.model,
+            started_at: self.execution.started_at().unwrap_or_else(Instant::now),
+            turn_count: self.execution.turn_count(),
+            messages_snapshot: self.execution.messages_snapshot(),
+        };
+        strategy.emit(events).await
+    }
+}
+
+#[async_trait]
+impl<Q, I> crate::application::loop_engine::StepPersistencePort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    fn freeze_step(&mut self, _run_id: &sdk::RunId, step_id: &RunStepId, inputs: &[LoopInput]) {
         let feedback = self.input_strategy.pending_stop_hook_feedback.take();
         let has_stop_hook_feedback = feedback.is_some();
         self.execution
@@ -967,8 +1006,6 @@ where
             self.execution
                 .extend_messages(inputs.iter().map(|input| Message::user(input.text.clone())));
         }
-        // #1272 per-turn drain identity: collect (InputId, Message) pairs
-        // for UserMessagesAdopted emission after durable accept succeeds.
         self.execution.replace_adopted_input(
             inputs
                 .iter()
@@ -987,22 +1024,6 @@ where
                 })
                 .collect(),
         );
-        if !self.execution.adopted_input().is_empty() {
-            let input_ids: Vec<_> = self
-                .execution
-                .adopted_input()
-                .iter()
-                .map(|(id, _)| id.as_str().to_string())
-                .collect();
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "[loop_debug] freeze_step run_id={} step_id={} input_ids={:?} count={}",
-                self.run_id,
-                step_id,
-                input_ids,
-                self.execution.adopted_input().len()
-            );
-        }
         self.execution.replace_context_projection(
             self.freeze_request(step_id, self.execution.step_outcome()),
             None,
@@ -1023,34 +1044,12 @@ where
             .append_accepted_input(request, accepted)
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-
-        // #1272 per-turn drain identity: emit UserMessagesAdopted strictly
-        // after durable accept succeeds. The TUI uses this to clear queued
-        // placeholders by input_id and append formal user messages.
         let adopted = self.execution.take_adopted_input();
         if !adopted.is_empty() {
             let queued = self
                 .input_strategy
                 .run_input_buffer
-                .with_lock(|b| b.user_message_snapshot());
-            let input_ids: Vec<_> = adopted
-                .iter()
-                .map(|(id, _)| id.as_str().to_string())
-                .collect();
-            let queued_ids: Vec<_> = queued
-                .iter()
-                .map(|(id, _)| id.as_str().to_string())
-                .collect();
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "[loop_debug] accept_step_input emitting UserMessagesAdopted run_id={} step_id={} adopt_ids={:?} adopt_count={} queued_ids={:?} queued_count={}",
-                self.run_id,
-                step_id,
-                input_ids,
-                adopted.len(),
-                queued_ids,
-                queued.len(),
-            );
+                .with_lock(|buffer| buffer.user_message_snapshot());
             self.runtime_context
                 .event_sink()
                 .send_event(RuntimeStreamEvent::UserMessagesAdopted {
@@ -1062,23 +1061,34 @@ where
         Ok(())
     }
 
-    /// #1272: Delegates to [`MainInputStrategy::drain_input`].
-    async fn drain_input(
-        &mut self,
-        expected_epoch: DrainEpoch,
-    ) -> Result<DrainOutcome, LoopEngineError> {
-        self.input_strategy.drain_input(expected_epoch).await
+    async fn finalize_step(&mut self, step_id: &RunStepId) -> Result<(), LoopEngineError> {
+        let Some(request) = self.execution.context_request() else {
+            return Ok(());
+        };
+        debug_assert_eq!(&request.step_id, step_id);
+        self.persist_step(crate::ports::FinalizeCause::Completed)
+            .await
     }
 
-    /// #1280: Delegates to [`MainInputStrategy::await_user_input`].
-    /// Cancellation / timeout is handled by the engine's `await_interruptible`.
-    async fn await_user_input(
+    async fn finalize_cancelled_step(
         &mut self,
-        expected_epoch: DrainEpoch,
-    ) -> Result<DrainOutcome, LoopEngineError> {
-        self.input_strategy.await_user_input(expected_epoch).await
+        step_id: &RunStepId,
+    ) -> Result<(), LoopEngineError> {
+        let Some(request) = self.execution.context_request() else {
+            return Ok(());
+        };
+        debug_assert_eq!(&request.step_id, step_id);
+        self.persist_step(crate::ports::FinalizeCause::UserCancelledStep)
+            .await
     }
+}
 
+#[async_trait]
+impl<Q, I> crate::application::loop_engine::CompactionPort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
         let (needed, window) =
             crate::application::loop_engine::shared::needs_compaction_with_window(
@@ -1134,16 +1144,29 @@ where
         );
         Ok(())
     }
+}
 
+#[async_trait]
+impl<Q, I> crate::application::loop_engine::ModelInvocationPort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
     async fn invoke_model(
         &mut self,
         _cancel: &CancellationToken,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
         self.invoke_model_impl().await
     }
+}
 
-    /// #1248 Task 6: Shared Loop evaluates Stop hook via this seam.
-    /// Uses the existing `dispatch_hook` to emit HookEvent UI events,
+#[async_trait]
+impl<Q, I> crate::application::loop_engine::StopHookPort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    /// #1248 Task 6: Shared Loop evaluates Stop hook via this seam.    /// Uses the existing `dispatch_hook` to emit HookEvent UI events,
     /// then interprets the returned `RuntimeHookDispatch` as a typed
     /// `StopHookDecision`.
     async fn evaluate_stop_hook(
@@ -1222,28 +1245,14 @@ where
             _ => Ok(StopHookDecision::Proceed),
         }
     }
+}
 
-    async fn finalize_step(&mut self, step_id: &RunStepId) -> Result<(), LoopEngineError> {
-        let Some(request) = self.execution.context_request() else {
-            return Ok(());
-        };
-        debug_assert_eq!(&request.step_id, step_id);
-        self.persist_step(crate::ports::FinalizeCause::Completed)
-            .await
-    }
-
-    async fn finalize_cancelled_step(
-        &mut self,
-        step_id: &RunStepId,
-    ) -> Result<(), LoopEngineError> {
-        let Some(request) = self.execution.context_request() else {
-            return Ok(());
-        };
-        debug_assert_eq!(&request.step_id, step_id);
-        self.persist_step(crate::ports::FinalizeCause::UserCancelledStep)
-            .await
-    }
-
+#[async_trait]
+impl<Q, I> crate::application::loop_engine::ToolOrchestrationPort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
     async fn execute_tools(
         &mut self,
         run_id: &sdk::RunId,
@@ -1254,9 +1263,59 @@ where
         self.execute_tools_impl(run_id, step_id, calls, cancel)
             .await
     }
+}
 
-    // ── #1248 Task 5: Interaction seams ──
+#[async_trait]
+impl<Q, I> crate::application::loop_engine::StuckHandlingPort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    async fn on_stuck(
+        &mut self,
+        decision: &crate::application::loop_engine::StuckDecision,
+    ) -> Result<(), LoopEngineError> {
+        let _ = decision;
+        Ok(())
+    }
+}
 
+impl<Q, I> crate::application::loop_engine::PlanApprovalPort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    fn needs_plan_approval(&self) -> bool {
+        self.plan_mode
+    }
+}
+
+impl<Q, I> crate::application::loop_engine::ExecutionStatePort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    fn execution_state_mut(
+        &mut self,
+    ) -> &mut crate::application::run_execution_state::RunExecutionState {
+        &mut self.execution
+    }
+}
+
+#[async_trait]
+impl<Q, I> LoopEnginePort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+}
+
+#[async_trait]
+impl<Q, I> crate::application::loop_engine::InteractionMailboxPort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
     fn interaction_port(&self) -> &dyn crate::application::interaction::InteractionPort {
         self.runtime_context.interaction_ref().as_ref()
     }
@@ -1528,17 +1587,30 @@ where
             },
         )
     }
+}
 
-    async fn on_stuck(
-        &mut self,
-        decision: &crate::application::loop_engine::StuckDecision,
-    ) -> Result<(), LoopEngineError> {
-        let _ = decision;
-        Ok(())
+impl<Q, I> crate::application::loop_engine::RunControlPort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    fn take_control(&self, run_id: &sdk::RunId) -> Option<crate::domain::agent_run::RunControl> {
+        debug_assert_eq!(run_id, &self.run_id);
+        self.active_run.take_control(run_id)
+    }
+}
+
+impl<Q, I> crate::application::loop_engine::RunLifecyclePort for MainRunPort<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
+        self.active_run.claim_terminal(run_id)
     }
 
-    fn needs_plan_approval(&self) -> bool {
-        self.plan_mode
+    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
+        self.active_run.claim_cancellation(run_id)
     }
 
     fn register_step_scope(
@@ -1550,33 +1622,5 @@ where
         debug_assert_eq!(run_id, &self.run_id);
         self.active_run
             .set_main_active_step(run_id, step_id, cancel);
-    }
-
-    fn take_control(&self, run_id: &sdk::RunId) -> Option<crate::domain::agent_run::RunControl> {
-        debug_assert_eq!(run_id, &self.run_id);
-        self.active_run.take_control(run_id)
-    }
-
-    fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
-        self.active_run.claim_terminal(run_id)
-    }
-
-    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
-        self.active_run.claim_cancellation(run_id)
-    }
-
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
-        // #1385 Task 12: Route through RuntimeContext's event_sink, not self.sink.
-        let mut strategy = MainEventStrategy {
-            sink: self.runtime_context.event_sink(),
-            session_id: self.session_id,
-            turn_context: &self.turn_context,
-            task_access: self.task_access(),
-            model: &self.binding().model.model,
-            started_at: self.execution.started_at().unwrap_or_else(Instant::now),
-            turn_count: self.execution.turn_count(),
-            messages_snapshot: self.execution.messages_snapshot(),
-        };
-        strategy.emit(events).await
     }
 }

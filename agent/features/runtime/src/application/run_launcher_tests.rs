@@ -1,18 +1,19 @@
 use super::*;
 use crate::application::active_run::ActiveRunRegistry;
 use crate::application::loop_engine::{
-    DrainEpoch, DrainOutcome, LoopEngineError, ModelStep, RunLoopPort, StepTokenUsage,
+    DrainEpoch, DrainOutcome, LoopEngineError, LoopEnginePort, ModelStep, StepTokenUsage,
     StuckDecision, ToolGuardDecision, ToolStep,
 };
 use crate::domain::agent_run::{ActiveRunPort, RunDomainEvent, RunId, RunSpec, RunStepId};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-/// Minimal RunLoopPort stub. It either seals immediately or fails while
+/// Minimal LoopEnginePort stub. It either seals immediately or fails while
 /// draining, and records every domain event published by the launcher.
 struct StubPort {
     drain_error: Option<String>,
     events_emitted: Vec<RunDomainEvent>,
+    execution: crate::application::run_execution_state::RunExecutionState,
 }
 
 impl StubPort {
@@ -20,6 +21,7 @@ impl StubPort {
         Self {
             drain_error: None,
             events_emitted: Vec::new(),
+            execution: crate::application::run_execution_state::RunExecutionState::new(),
         }
     }
 
@@ -27,12 +29,13 @@ impl StubPort {
         Self {
             drain_error: Some(error.into()),
             events_emitted: Vec::new(),
+            execution: crate::application::run_execution_state::RunExecutionState::new(),
         }
     }
 }
 
 #[async_trait::async_trait]
-impl RunLoopPort for StubPort {
+impl crate::application::loop_engine::InputPort for StubPort {
     async fn drain_input(
         &mut self,
         _expected_epoch: DrainEpoch,
@@ -44,7 +47,46 @@ impl RunLoopPort for StubPort {
             epoch: DrainEpoch(0),
         })
     }
+}
 
+#[async_trait::async_trait]
+impl crate::application::loop_engine::EventSinkPort for StubPort {
+    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+        self.events_emitted.extend(events);
+        Ok(())
+    }
+}
+
+impl crate::application::loop_engine::InteractionMailboxPort for StubPort {}
+
+impl crate::application::loop_engine::StepPersistencePort for StubPort {}
+
+impl crate::application::loop_engine::RunControlPort for StubPort {
+    fn take_control(&self, _run_id: &RunId) -> Option<crate::domain::agent_run::RunControl> {
+        None
+    }
+}
+
+impl crate::application::loop_engine::RunLifecyclePort for StubPort {
+    fn claim_terminal(&self, _run_id: &RunId) -> bool {
+        true
+    }
+
+    fn claim_cancellation(&self, _run_id: &RunId) -> bool {
+        true
+    }
+
+    fn register_step_scope(
+        &self,
+        _run_id: &RunId,
+        _step_id: RunStepId,
+        _cancel: CancellationToken,
+    ) {
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::application::loop_engine::CompactionPort for StubPort {
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
         Ok(false)
     }
@@ -52,7 +94,10 @@ impl RunLoopPort for StubPort {
     async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {
         Ok(())
     }
+}
 
+#[async_trait::async_trait]
+impl crate::application::loop_engine::ModelInvocationPort for StubPort {
     async fn invoke_model(
         &mut self,
         _cancel: &CancellationToken,
@@ -64,7 +109,12 @@ impl RunLoopPort for StubPort {
             StepTokenUsage::default(),
         ))
     }
+}
 
+impl crate::application::loop_engine::StopHookPort for StubPort {}
+
+#[async_trait::async_trait]
+impl crate::application::loop_engine::ToolOrchestrationPort for StubPort {
     async fn execute_tools(
         &mut self,
         _run_id: &RunId,
@@ -74,29 +124,34 @@ impl RunLoopPort for StubPort {
     ) -> Result<ToolStep, LoopEngineError> {
         Ok(ToolStep::Continue)
     }
+}
 
+#[async_trait::async_trait]
+impl crate::application::loop_engine::StuckHandlingPort for StubPort {
     async fn on_stuck(&mut self, _decision: &StuckDecision) -> Result<(), LoopEngineError> {
         Ok(())
     }
+}
 
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
-        self.events_emitted.extend(events);
-        Ok(())
+impl crate::application::loop_engine::PlanApprovalPort for StubPort {}
+
+impl crate::application::loop_engine::ExecutionStatePort for StubPort {
+    fn execution_state_mut(
+        &mut self,
+    ) -> &mut crate::application::run_execution_state::RunExecutionState {
+        &mut self.execution
     }
 }
+
+#[async_trait::async_trait]
+impl LoopEnginePort for StubPort {}
 
 #[tokio::test]
 async fn launch_creates_run_and_returns_terminal() {
     let registry: Arc<dyn ActiveRunPort> = Arc::new(ActiveRunRegistry::default());
     let mut port = StubPort::completing();
-    let input = RunLaunchInput {
-        run_id: RunId::new_v7(),
-        spec: RunSpec::main(),
-        parent_run_id: None,
-        cancel: CancellationToken::new(),
-    };
-
-    let result = launch(input, registry.clone(), &mut port).await;
+    let run = crate::domain::agent_run::Run::new(RunSpec::main(), None);
+    let result = launch(run, CancellationToken::new(), registry.clone(), &mut port).await;
     assert!(matches!(result, RunLaunchResult::Terminal));
 }
 
@@ -105,14 +160,9 @@ async fn launch_clears_active_run_after_completion() {
     let registry = Arc::new(ActiveRunRegistry::default());
     let run_id = RunId::new_v7();
     let mut port = StubPort::completing();
-    let input = RunLaunchInput {
-        run_id: run_id.clone(),
-        spec: RunSpec::main(),
-        parent_run_id: None,
-        cancel: CancellationToken::new(),
-    };
+    let run = crate::domain::agent_run::Run::with_id(run_id.clone(), RunSpec::main(), None);
 
-    let _ = launch(input, registry.clone(), &mut port).await;
+    let _ = launch(run, CancellationToken::new(), registry.clone(), &mut port).await;
 
     assert!(!registry.claim_terminal(&run_id));
 }
@@ -123,17 +173,8 @@ async fn launch_adapter_error_emits_failed_terminal_and_clears_active_run() {
     let run_id = RunId::new_v7();
     let mut port = StubPort::failing("compact skipped");
 
-    let result = launch(
-        RunLaunchInput {
-            run_id: run_id.clone(),
-            spec: RunSpec::main(),
-            parent_run_id: None,
-            cancel: CancellationToken::new(),
-        },
-        registry.clone(),
-        &mut port,
-    )
-    .await;
+    let run = crate::domain::agent_run::Run::with_id(run_id.clone(), RunSpec::main(), None);
+    let result = launch(run, CancellationToken::new(), registry.clone(), &mut port).await;
 
     assert!(matches!(
         result,

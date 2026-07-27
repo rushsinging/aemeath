@@ -103,6 +103,8 @@ pub enum InteractionPortError {
     /// with `Unavailable` binding mode).  Any `register` call
     /// immediately fails without hanging.
     Unavailable,
+    /// The request belongs to a different Run than this scoped adapter.
+    WrongRun,
     /// The requested `InteractionRequestId` has already been registered
     /// or completed.
     AlreadyRegistered,
@@ -324,6 +326,113 @@ impl InteractionPort for InteractionBridge {
             }
         }
         ids.len()
+    }
+}
+
+/// Child-scoped adapter that routes interaction commands through the parent
+/// capability without sharing the parent's port identity.
+pub struct ParentMediatedInteractionPort {
+    child_run_id: Mutex<Option<RunId>>,
+    parent: std::sync::Arc<dyn InteractionPort>,
+    owned: Mutex<HashSet<InteractionRequestId>>,
+}
+
+impl ParentMediatedInteractionPort {
+    pub fn new(parent: std::sync::Arc<dyn InteractionPort>) -> Self {
+        Self {
+            child_run_id: Mutex::new(None),
+            parent,
+            owned: Mutex::new(HashSet::new()),
+        }
+    }
+
+    fn owns(&self, request_id: &InteractionRequestId) -> bool {
+        self.owned
+            .lock()
+            .expect("parent-mediated interaction ownership poisoned")
+            .contains(request_id)
+    }
+}
+
+impl InteractionPort for ParentMediatedInteractionPort {
+    fn register(
+        &self,
+        request: InteractionRequest,
+    ) -> Result<oneshot::Receiver<InteractionCompletion>, InteractionPortError> {
+        let mut child_run_id = self
+            .child_run_id
+            .lock()
+            .expect("parent-mediated run identity poisoned");
+        match child_run_id.as_ref() {
+            Some(expected) if expected != &request.run_id => {
+                return Err(InteractionPortError::WrongRun);
+            }
+            None => *child_run_id = Some(request.run_id.clone()),
+            _ => {}
+        }
+        let request_id = request.id.clone();
+        let receiver = self.parent.register(request)?;
+        self.owned
+            .lock()
+            .expect("parent-mediated interaction ownership poisoned")
+            .insert(request_id);
+        Ok(receiver)
+    }
+
+    fn contains(&self, request_id: &InteractionRequestId) -> bool {
+        self.owns(request_id) && self.parent.contains(request_id)
+    }
+
+    fn reply(
+        &self,
+        request_id: &InteractionRequestId,
+        reply: InteractionReply,
+    ) -> InteractionCommandOutcome {
+        if !self.owns(request_id) {
+            return InteractionCommandOutcome::NotFound;
+        }
+        let outcome = self.parent.reply(request_id, reply);
+        if !matches!(outcome, InteractionCommandOutcome::InvalidReply(_)) {
+            self.owned
+                .lock()
+                .expect("parent-mediated interaction ownership poisoned")
+                .remove(request_id);
+        }
+        outcome
+    }
+
+    fn cancel(
+        &self,
+        request_id: &InteractionRequestId,
+        reason: InteractionCancelReason,
+    ) -> InteractionCommandOutcome {
+        if !self.owns(request_id) {
+            return InteractionCommandOutcome::NotFound;
+        }
+        let outcome = self.parent.cancel(request_id, reason);
+        self.owned
+            .lock()
+            .expect("parent-mediated interaction ownership poisoned")
+            .remove(request_id);
+        outcome
+    }
+
+    fn drain_run(&self, run_id: &RunId, reason: InteractionCancelReason) -> usize {
+        if self
+            .child_run_id
+            .lock()
+            .expect("parent-mediated run identity poisoned")
+            .as_ref()
+            != Some(run_id)
+        {
+            return 0;
+        }
+        let drained = self.parent.drain_run(run_id, reason);
+        self.owned
+            .lock()
+            .expect("parent-mediated interaction ownership poisoned")
+            .clear();
+        drained
     }
 }
 

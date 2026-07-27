@@ -74,13 +74,10 @@ RUNTIME_PROVIDER_TOOLS_OLD_PATHS = [
 # reaches the registry until the registry port is split.
 LAYER_MIGRATION_EXCEPTIONS = set()
 # guard-registry:migration.runtime.application-accessors-to-adapters
-# guard-registry:migration.runtime.application-from-args-to-adapters
 # guard-registry:migration.runtime.legacy-port-to-application
 RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/runtime/src/application/client/accessors.rs", "adapters"),
-    ("agent/features/runtime/src/application/client/from_args.rs", "adapters"),
-    ("agent/features/runtime/src/ports/legacy.rs", "application"),
-    # #1381: Runtime-owned types (hook_types, workspace_access) moved back to application.
+    ("agent/features/runtime/src/ports/legacy.rs", "application"),    # #1381: Runtime-owned types (hook_types, workspace_access) moved back to application.
     # Remaining adapter refs: tool_runtime (progress/cancellation), input_buffer,
     # tool_suspension_acl, sdk_event_sink, tui_launch — pending composition injection.
     ("agent/features/runtime/src/application/main_loop/looping/agent_calls.rs", "adapters"),

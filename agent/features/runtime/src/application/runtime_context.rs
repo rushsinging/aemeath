@@ -11,7 +11,7 @@
 //!
 //! #1248 Task 3 refactor —— 生命周期拆分：
 //! - [`RuntimeServices`]：跨 Run 稳定共享（tool/policy/reflection/task/hooks + 未来 adapter factories）。
-//! - [`RunContextBindings`]：per-Run 构造输入（context/provider/interaction/memory/reasoning + I/O seams），
+//! - [`RunCapabilityBindings`]：按 model / I/O / lifecycle 分组的 per-Run 构造输入，
 //!   不是 Snapshot（含活契约），装配后不可变。
 //! - [`RuntimeContext`]：装配产物，私有字段 + 只读 accessor。
 
@@ -216,7 +216,7 @@ impl Default for RunInputBufferHandle {
 /// 只持跨 Run 稳定的能力：tool catalog/execution/binding、policy、
 /// reflection history、task、hooks，以及后续 adapter factories。
 /// **不持** per-Run 已绑定的 context/provider/interaction/memory ——
-/// 这些属于 [`RunContextBindings`]。
+/// 这些属于 [`RunCapabilityBindings`]。
 ///
 /// 由 Composition Root 创建一次，通过 [`RuntimeContextFactory`]
 /// 注入每次 Run 装配。所有字段均为 `Arc` 共享，Clone 即浅拷贝。
@@ -238,55 +238,77 @@ pub struct RuntimeServices {
     pub hooks: Arc<dyn HookPort>,
 }
 
-/// per-Run 构造输入——每次 Run 装配时提供的活契约集合。
-///
-/// 不是 Snapshot（Snapshot 暗示静态快照，但此处持有 `Arc<dyn Trait>`
-/// 活契约端口）。由调用方在装配点提供；[`RuntimeContextFactory::assemble`]
-/// 根据 [`RunSpec`] 的 capability-semantic 字段决定是否覆写其中某些端口
-///（如 interaction、reasoning）。
-///
-/// # 生命周期语义
-///
-/// | 字段 | 作用域 | 说明 |
-/// |---|---|---|
-/// | `context` | per-Run | Context BC 出站端口 |
-/// | `provider` | per-Run | Provider 绑定（含 model 冻结属性） |
-/// | `interaction` | per-Run | 交互桥（ask_user / permission gate） |
-/// | `memory` | per-Run | Memory BC 出站端口 |
-/// | `reasoning` | per-Run | Reasoning 端口——factory 按 spec 覆写 |
-/// | `config` | per-Run | Run 级固定配置快照 |
-/// | `cancel` | per-Run | 取消作用域 |
-/// | `event_sink` | per-Run | 事件输出 sink |
-/// | `usage` | per-Run | token 用量追踪 |
-/// | `input` | per-Run | 输入缓冲 handle（推入侧） |
 #[derive(Clone)]
-pub struct RunContextBindings {
-    /// Context Management BC 出站端口。
+pub struct RunCapabilityBindings {
+    pub model: ModelBindings,
+    pub io: IoBindings,
+    pub lifecycle: LifecycleBindings,
+}
+
+#[derive(Clone)]
+pub struct ModelBindings {
     pub context: Arc<dyn ContextPort>,
-    /// Provider 绑定（含 `Arc<dyn ProviderPort>` 与调用冻结属性）。
     pub provider: Arc<ProviderBinding>,
-    /// 交互桥（ask_user / permission gate）。
     pub interaction: Arc<dyn InteractionPort>,
-    /// Memory BC 出站端口。
     pub memory: Arc<dyn MemoryPort>,
-    /// Run 级固定配置快照。
     pub config: RunConfigSnapshot,
-    /// per-Run 取消作用域。
-    pub cancel: RunCancellationScope,
-    /// 事件输出 sink。
-    pub event_sink: ChatEventSinkHandle,
-    /// per-Run token 用量追踪。
-    pub usage: RunUsageTracker,
-    /// per-Run 输入缓冲 handle（推入侧）。
-    pub input: RunInputBufferHandle,
-    /// 静态 reasoning level，随 Run 冻结。
     pub reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
-    /// #1248 Task 3: per-Run tool_catalog override (e.g. restricted catalog for sub-runs).
-    /// When `None`, the factory's session-level catalog is used.
     pub tool_catalog: Option<Arc<dyn ToolCatalogPort>>,
 }
 
-/// 按 RunSpec 装配出的执行资源容器。
+#[derive(Clone)]
+pub struct IoBindings {
+    pub event_sink: ChatEventSinkHandle,
+    pub input: RunInputBufferHandle,
+}
+
+#[derive(Clone)]
+pub struct LifecycleBindings {
+    pub cancel: RunCancellationScope,
+    pub usage: RunUsageTracker,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+pub struct RunContextBindings {
+    pub context: Arc<dyn ContextPort>,
+    pub provider: Arc<ProviderBinding>,
+    pub interaction: Arc<dyn InteractionPort>,
+    pub memory: Arc<dyn MemoryPort>,
+    pub config: RunConfigSnapshot,
+    pub cancel: RunCancellationScope,
+    pub event_sink: ChatEventSinkHandle,
+    pub usage: RunUsageTracker,
+    pub input: RunInputBufferHandle,
+    pub reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
+    pub tool_catalog: Option<Arc<dyn ToolCatalogPort>>,
+}
+
+#[cfg(test)]
+impl From<RunContextBindings> for RunCapabilityBindings {
+    fn from(bindings: RunContextBindings) -> Self {
+        Self {
+            model: ModelBindings {
+                context: bindings.context,
+                provider: bindings.provider,
+                interaction: bindings.interaction,
+                memory: bindings.memory,
+                config: bindings.config,
+                reasoning: bindings.reasoning,
+                tool_catalog: bindings.tool_catalog,
+            },
+            io: IoBindings {
+                event_sink: bindings.event_sink,
+                input: bindings.input,
+            },
+            lifecycle: LifecycleBindings {
+                cancel: bindings.cancel,
+                usage: bindings.usage,
+            },
+        }
+    }
+}
+
 ///
 /// 所有字段私有，仅暴露 accessor——消费方拿不到具体 Port 实现，
 /// 无法绕过端口边界。
@@ -365,27 +387,28 @@ impl RuntimeContext {
     /// 阻止 sibling 模块直接调用此构造函数。
     pub fn new(
         services: RuntimeServices,
-        bindings: RunContextBindings,
+        bindings: impl Into<RunCapabilityBindings>,
         _token: RuntimeContextAssemblyToken,
     ) -> Self {
+        let bindings = bindings.into();
         Self {
-            context: bindings.context,
-            provider: bindings.provider,
+            context: bindings.model.context,
+            provider: bindings.model.provider,
             tool_catalog: services.tool_catalog,
             tool_execution: services.tool_execution,
             tool_context_binding: services.tool_context_binding,
             policy: services.policy,
-            interaction: bindings.interaction,
-            memory: bindings.memory,
+            interaction: bindings.model.interaction,
+            memory: bindings.model.memory,
             reflection_history: services.reflection_history,
             task: services.task,
             hooks: services.hooks,
-            reasoning: bindings.reasoning,
-            config: bindings.config,
-            cancel: bindings.cancel,
-            event_sink: bindings.event_sink,
-            usage: bindings.usage,
-            input: bindings.input,
+            reasoning: bindings.model.reasoning,
+            config: bindings.model.config,
+            cancel: bindings.lifecycle.cancel,
+            event_sink: bindings.io.event_sink,
+            usage: bindings.lifecycle.usage,
+            input: bindings.io.input,
         }
     }
 
@@ -534,6 +557,7 @@ impl RuntimeContext {
 /// fallback.
 #[derive(Clone)]
 pub struct ParentRunFrame {
+    pub run_id: crate::domain::agent_run::RunId,
     pub spec: RunSpec,
     pub context: Arc<RuntimeContext>,
 }

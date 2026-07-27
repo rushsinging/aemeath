@@ -1,4 +1,4 @@
-//! RunLoopPort 共享逻辑——Main 和 Sub 完全一致的方法提取到此。
+//! Loop Engine 共享逻辑——Main 和 Sub 完全一致的方法提取到此。
 
 use super::LoopEngineError;
 use crate::application::context_coordination::ContextCoordinator;

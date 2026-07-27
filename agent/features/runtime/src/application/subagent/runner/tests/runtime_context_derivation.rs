@@ -414,10 +414,11 @@ fn sub_context_derivation_uses_parent_cancel_child_scope() {
         &parent_spec,
         &parent_ctx,
         &workspace,
+        crate::domain::agent_run::RunId::new_v7(),
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
         super::empty_skill_materializer(),
-        &make_test_factory(),
+        Arc::new(make_test_factory()),
     )
     .expect("derive_sub_run should succeed");
 
@@ -435,10 +436,11 @@ fn sub_context_derivation_uses_parent_cancel_child_scope() {
         &parent_spec,
         &parent_ctx,
         &workspace,
+        crate::domain::agent_run::RunId::new_v7(),
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
         super::empty_skill_materializer(),
-        &make_test_factory(),
+        Arc::new(make_test_factory()),
     )
     .expect("derive_sub_run should succeed");
     let child2_cancel = derived2.context.cancel().clone();
@@ -462,10 +464,11 @@ fn sub_context_derivation_restricts_tool_catalog() {
         &parent_spec,
         &parent_ctx,
         &workspace,
+        crate::domain::agent_run::RunId::new_v7(),
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
         super::empty_skill_materializer(),
-        &make_test_factory(),
+        Arc::new(make_test_factory()),
     )
     .expect("derive_sub_run should succeed");
 
@@ -502,10 +505,11 @@ fn sub_context_derivation_disables_memory_by_default() {
         &parent_spec,
         &parent_ctx,
         &workspace,
+        crate::domain::agent_run::RunId::new_v7(),
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
         super::empty_skill_materializer(),
-        &make_test_factory(),
+        Arc::new(make_test_factory()),
     )
     .expect("derive_sub_run should succeed");
 
@@ -532,10 +536,11 @@ fn sub_context_derivation_uses_isolated_context() {
         &parent_spec,
         &parent_ctx,
         &workspace,
+        crate::domain::agent_run::RunId::new_v7(),
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
         super::empty_skill_materializer(),
-        &make_test_factory(),
+        Arc::new(make_test_factory()),
     )
     .expect("derive_sub_run should succeed");
 
@@ -552,9 +557,9 @@ fn sub_context_derivation_uses_isolated_context() {
 fn sub_context_derivation_does_not_widen_policy_or_interaction() {
     // #1248 Task 3: Share the factory between parent and sub so that
     // static ports (policy, etc.) are Arc-identical.
-    let factory = make_test_factory();
+    let factory = Arc::new(make_test_factory());
     let parent_ctx = make_parent_context_with_factory(
-        &factory,
+        factory.as_ref(),
         RunConfigSnapshot::capture(super::test_config_snapshot()),
     );
     let parent_spec = RunSpec::main();
@@ -568,20 +573,20 @@ fn sub_context_derivation_does_not_widen_policy_or_interaction() {
         &parent_spec,
         &parent_ctx,
         &workspace,
+        crate::domain::agent_run::RunId::new_v7(),
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
         super::empty_skill_materializer(),
-        &factory,
+        factory,
     )
     .expect("derive_sub_run should succeed");
 
     // Policy: same Arc as parent (both from the same factory).
     assert!(Arc::ptr_eq(&derived.context.policy(), &parent_ctx.policy()));
 
-    // Interaction: ParentMediated directly reuses the parent's port (same Arc).
-    // The sub-agent's interaction flows through the parent's bridge, preserving
-    // identity, reply, and cancel semantics without a wrapper adapter.
-    assert!(Arc::ptr_eq(
+    // Interaction: ParentMediated uses a child-scoped wrapper rather than
+    // exposing the parent's port identity directly.
+    assert!(!Arc::ptr_eq(
         &derived.context.interaction(),
         &parent_ctx.interaction()
     ));
@@ -599,25 +604,28 @@ fn sub_launcher_uses_derived_spec() {
         timeout: Duration::from_secs(30),
     };
 
+    let parent_run_id = crate::domain::agent_run::RunId::new_v7();
     let derived = super::super::setup::derive_sub_run(
         &parent_spec,
         &parent_ctx,
         &workspace,
+        parent_run_id.clone(),
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
         super::empty_skill_materializer(),
-        &make_test_factory(),
+        Arc::new(make_test_factory()),
     )
     .expect("derive_sub_run should succeed");
 
+    assert_eq!(derived.run.parent_id(), Some(&parent_run_id));
     // The derived spec must be a Sub-kind spec.
-    assert_eq!(derived.spec.kind, RunKind::Sub);
+    assert_eq!(derived.run.spec().kind, RunKind::Sub);
     // The derived spec name contains the role.
-    assert!(derived.spec.name.contains("coder"));
+    assert!(derived.run.spec().name.contains("coder"));
     // The derived spec must not be the same value as RunSpec::main().
-    assert_ne!(derived.spec, RunSpec::main());
+    assert_ne!(derived.run.spec(), &RunSpec::main());
     // The derived spec timeout must match the request.
-    assert_eq!(derived.spec.timeout, Duration::from_secs(30));
+    assert_eq!(derived.run.spec().timeout, Duration::from_secs(30));
 }
 
 // ── Test 7: restricted catalog rejects non-sub-agent scope/profile ──
@@ -636,10 +644,11 @@ fn sub_restricted_catalog_rejects_non_sub_agent_scope() {
         &parent_spec,
         &parent_ctx,
         &workspace,
+        crate::domain::agent_run::RunId::new_v7(),
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
         super::empty_skill_materializer(),
-        &make_test_factory(),
+        Arc::new(make_test_factory()),
     )
     .expect("derive_sub_run should succeed");
 
@@ -722,10 +731,11 @@ fn sub_derivation_only_queries_sub_agent_scope_from_parent_catalog() {
         &parent_spec,
         &parent_ctx,
         &workspace,
+        crate::domain::agent_run::RunId::new_v7(),
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
         super::empty_skill_materializer(),
-        &make_test_factory(),
+        Arc::new(make_test_factory()),
     )
     .expect("derive_sub_run should succeed");
 
@@ -791,10 +801,11 @@ fn sub_derivation_fails_closed_when_parent_catalog_errors() {
         &parent_spec,
         &parent_ctx,
         &workspace,
+        crate::domain::agent_run::RunId::new_v7(),
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
         super::empty_skill_materializer(),
-        &make_test_factory(),
+        Arc::new(make_test_factory()),
     );
 
     match result {

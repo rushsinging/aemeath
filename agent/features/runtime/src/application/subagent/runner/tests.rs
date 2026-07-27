@@ -393,6 +393,13 @@ fn sub_production_path_is_wired_to_run_launcher() {
 }
 
 #[test]
+fn sub_run_adapter_has_no_optional_or_duplicate_run_identity() {
+    let run = include_str!("loop_run.rs");
+    assert!(!run.contains("Option<crate::domain::agent_run::Run>"));
+    assert!(!run.contains("pub run_id:"));
+}
+
+#[test]
 fn sub_logging_path_uses_scopes_and_no_legacy_setters() {
     let setup = include_str!("setup.rs");
     let run = include_str!("loop_run.rs");
@@ -721,6 +728,7 @@ async fn run_agent_rejects_disabled_role_from_frozen_run_config() {
         sub_context_derivation_tests::make_parent_context_with_config(disabled_config_snapshot);
     let _disabled_guard = runner.parent_context.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: crate::domain::agent_run::RunSpec::main(),
             context: Arc::new(disabled_parent_ctx),
         },
@@ -939,6 +947,7 @@ async fn sub_agent_provider_spec_inherits_model_owned_settings() {
     );
     let _config_guard = runner.parent_context.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: crate::domain::agent_run::RunSpec::main(),
             context: Arc::new(parent_ctx),
         },
@@ -1015,6 +1024,7 @@ async fn sub_agent_provider_spec_ignores_legacy_role_reasoning_override() {
     );
     let _config_guard = runner.parent_context.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: crate::domain::agent_run::RunSpec::main(),
             context: Arc::new(parent_ctx),
         },
@@ -1078,6 +1088,7 @@ async fn sub_agent_provider_spec_maps_model_reasoning_to_medium_without_effort()
     );
     let _config_guard = runner.parent_context.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: crate::domain::agent_run::RunSpec::main(),
             context: Arc::new(parent_ctx),
         },
@@ -1141,6 +1152,7 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
     );
     let _catalog_guard = runner.parent_context.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: crate::domain::agent_run::RunSpec::main(),
             context: Arc::new(parent_ctx),
         },
@@ -1608,6 +1620,7 @@ fn test_parent_source() -> (
     let parent_ctx = sub_context_derivation_tests::make_parent_context();
     let guard = source.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: crate::domain::agent_run::RunSpec::main(),
             context: Arc::new(parent_ctx),
         },

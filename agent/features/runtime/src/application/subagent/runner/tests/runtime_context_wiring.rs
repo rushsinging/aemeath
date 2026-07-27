@@ -242,6 +242,7 @@ async fn derived_tool_catalog_is_spied_during_sub_agent_run() {
     let source = crate::application::runtime_context::ParentRunContextSource::new();
     let _guard = source.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: RunSpec::main(),
             context: Arc::new(parent_ctx),
         },
@@ -286,6 +287,7 @@ fn parent_source_guard_only_clears_own_generation() {
     let parent_ctx1 = sub_context_derivation_tests::make_parent_context();
     let guard1 = source.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: RunSpec::main(),
             context: Arc::new(parent_ctx1),
         },
@@ -296,6 +298,7 @@ fn parent_source_guard_only_clears_own_generation() {
     let parent_ctx2 = sub_context_derivation_tests::make_parent_context();
     let guard2 = source.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: RunSpec::main(),
             context: Arc::new(parent_ctx2),
         },
@@ -380,6 +383,7 @@ async fn derived_context_integration_verifies_binding_policy_catalog() {
     let source = crate::application::runtime_context::ParentRunContextSource::new();
     let parent_frame_guard = source.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: RunSpec::main(),
             context: Arc::new(parent_ctx),
         },
@@ -530,6 +534,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     let source = crate::application::runtime_context::ParentRunContextSource::new();
     let parent_frame_guard = source.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: RunSpec::main(),
             context: Arc::new(parent_ctx),
         },
@@ -755,6 +760,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     let source = crate::application::runtime_context::ParentRunContextSource::new();
     let parent_frame_guard = source.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
+            run_id: crate::domain::agent_run::RunId::new_v7(),
             spec: RunSpec::main(),
             context: Arc::new(parent_ctx),
         },

@@ -11,9 +11,10 @@
 use std::sync::Arc;
 
 use crate::application::client::RuntimeContextAssemblyError;
-use crate::application::interaction::UnavailableInteractionPort;
+use crate::application::empty_hook::EmptyHookPort;
+use crate::application::interaction::{ParentMediatedInteractionPort, UnavailableInteractionPort};
 use crate::application::runtime_context::{
-    RunContextBindings, RuntimeContext, RuntimeContextAssemblyToken, RuntimeServices,
+    RunCapabilityBindings, RuntimeContext, RuntimeContextAssemblyToken, RuntimeServices,
 };
 use crate::domain::agent_run::{
     HookBindingMode, InteractionBindingMode, ReasoningBindingMode, RunSpec,
@@ -67,7 +68,7 @@ impl RuntimeContextFactory {
     ///
     /// Used by TUI launch and other callers that need to project service
     /// ports (tool catalog/execution, hooks) without duplicating them
-    /// on [`MainSessionShell`](super::client::MainSessionShell).
+    /// on [`SessionRuntime`](super::client::SessionRuntime).
     pub fn services(&self) -> &RuntimeServices {
         &self.services
     }
@@ -95,9 +96,10 @@ impl RuntimeContextFactory {
     pub fn assemble(
         &self,
         spec: &RunSpec,
-        bindings: RunContextBindings,
+        bindings: impl Into<RunCapabilityBindings>,
         parent: Option<&RuntimeContext>,
     ) -> Result<RuntimeContext, RuntimeContextAssemblyError> {
+        let bindings = bindings.into();
         // ── Validate interaction binding mode ──
         let interaction_mode = self.select_interaction(spec);
         match interaction_mode {
@@ -110,14 +112,10 @@ impl RuntimeContextFactory {
         // Wire interaction port based on RunSpec mode
         let interaction: std::sync::Arc<dyn crate::application::interaction::InteractionPort> =
             match interaction_mode {
-                InteractionBindingMode::Client => bindings.interaction.clone(),
-                InteractionBindingMode::ParentMediated => {
-                    // Parent is guaranteed Some by the validation above.
-                    // ParentMediated reuses the parent's InteractionPort directly —
-                    // the port is already an Arc<dyn InteractionPort>, identity
-                    // and reply/cancel semantics are preserved without a wrapper.
-                    parent.unwrap().interaction()
-                }
+                InteractionBindingMode::Client => bindings.model.interaction.clone(),
+                InteractionBindingMode::ParentMediated => std::sync::Arc::new(
+                    ParentMediatedInteractionPort::new(parent.unwrap().interaction()),
+                ),
                 InteractionBindingMode::Unavailable => {
                     std::sync::Arc::new(UnavailableInteractionPort)
                 }
@@ -133,7 +131,7 @@ impl RuntimeContextFactory {
         }
 
         // #1248 Task 3: Allow per-Run tool_catalog override (e.g. restricted catalog for sub-runs).
-        let services = if let Some(tool_catalog) = bindings.tool_catalog.clone() {
+        let services = if let Some(tool_catalog) = bindings.model.tool_catalog.clone() {
             RuntimeServices {
                 tool_catalog,
                 ..self.services.clone()
@@ -141,11 +139,16 @@ impl RuntimeContextFactory {
         } else {
             self.services.clone()
         };
-
-        let final_bindings = RunContextBindings {
-            interaction,
-            ..bindings
+        let services = match hook_mode {
+            HookBindingMode::Full => services,
+            HookBindingMode::BoundaryOnly => RuntimeServices {
+                hooks: std::sync::Arc::new(EmptyHookPort),
+                ..services
+            },
         };
+
+        let mut final_bindings = bindings;
+        final_bindings.model.interaction = interaction;
 
         Ok(RuntimeContext::new(
             services,
@@ -196,7 +199,7 @@ impl RuntimeContextFactory {
 // ── Test-only helpers ──
 // #1248 Task 3: Tests that need to inject a specific hook port should
 // construct a new RuntimeContextFactory with the desired RuntimeServices
-// rather than mutating MainSessionShell fields directly.
+// rather than mutating SessionRuntime fields directly.
 
 #[cfg(test)]
 impl RuntimeContextFactory {

@@ -52,26 +52,27 @@
 │                 Provider / Context / Tool / Hook / Event     │
 └──────────────────────────────────────────────────────────────┘
 
-RuntimeServices ───────▶ RuntimeContextFactory
-SessionState ──snapshot─▶ RuntimeContextFactory
-RunSpec + ParentCapabilities ─▶ RuntimeContextFactory
+RuntimeServices ───────▶ RuntimeContextFactory ──▶ RuntimeContext
+SessionState ──snapshot─┐
+RunSpec + ParentCapabilities ─┴──▶ RunPreparer
+RuntimeContextFactory ───────────▶ RunPreparer
 
-RuntimeContextFactory
-        │
-        ▼
+RunPreparer
+      │
+      ▼
 PreparedRun = Run + RunExecutionState + RuntimeContext
 ```
 
 架构图只表达运行时的主控制流，不展开每个 Port 的实现细节：
 
 1. `SessionIngress` 是唯一入站边界，先分类再分发；普通输入、命令和 interaction reply 不共享 mailbox。
-2. `RuntimeContextFactory` 位于装配边界，接收 `RuntimeServices`、`SessionSnapshot`、`RunSpec` 和父能力上限，创建一致的 `PreparedRun`。
+2. `RuntimeContextFactory` 位于能力装配边界，只接收 `RuntimeServices`、`SessionSnapshot`、`RunSpec` 和父能力上限，并且只创建 `RuntimeContext`；`RunPreparer` 协调它与 `Run`、`RunExecutionState` 的一致创建，产出 `PreparedRun`。
 3. `Loop Engine` 是执行流程唯一 owner，直接编排 `Run`、`RunExecutionState` 和 `RuntimeContext`。
 4. `RuntimeContext` 向下连接 Provider、Context、Tool、Hook 和 Event 等外部能力；这些能力不能反向决定 Run 状态。
 5. Root/child、交互/后台等差异由 purpose、父子拓扑和 capability mode 表达，Main/Sub 不构成生产类型。
 
 
-**终态装配**：唯一 `RuntimeContextFactory` 是 `RuntimeContext` 的唯一生产构造入口。所有 Run 来源只提交 `RunPreparationRequest`，由 factory 按 `InteractionBindingMode` / `HookBindingMode` / `ReasoningBindingMode` 及父 capability ceiling 产生 `PreparedRun { Run, RuntimeContext, RunExecutionState }`；不存在 `RuntimeContextParts`、`RunContextBindings` 或多路径手工填充。Main/Sub 不是生产类型，差异由 `RunSpec`、父子拓扑和已绑定 capability adapter 表达，Loop Engine 零来源分支。
+**终态装配**：唯一 `RuntimeContextFactory` 是 `RuntimeContext` 的唯一生产构造入口，其产物严格是 `RuntimeContext`。所有 Run 来源只提交 `RunPreparationRequest`，由 `RunPreparer` 调用 factory，并按父 capability ceiling 协调产生 `PreparedRun { Run, RuntimeContext, RunExecutionState }`；不存在 `RuntimeContextParts`、`RunContextBindings` 或多路径手工填充。Main/Sub 不是生产类型，差异由 `RunSpec`、父子拓扑和已绑定 capability adapter 表达，Loop Engine 零来源分支。
 
 ## 2. Run 聚合
 

@@ -54,7 +54,7 @@ pub(crate) fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<Agent
 /// Common interface for event-projection strategies.
 ///
 /// Each adapter constructs its concrete strategy and delegates its
-/// [`RunLoopPort::emit`] implementation through it. Because the two
+/// [`EventSinkPort::emit`] implementation through it. Because the two
 /// strategies have fundamentally different output channels
 /// (sink-based vs progress-based), the trait exists for interface
 /// consistency, not for dynamic dispatch.

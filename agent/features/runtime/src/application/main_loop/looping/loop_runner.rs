@@ -13,9 +13,7 @@ use crate::application::main_loop::looping::{
     ChatEventSink, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
     QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
-use crate::application::runtime_context::{
-    RunCancellationScope, RunContextBindings, RunInputBufferHandle, RunUsageTracker, RuntimeContext,
-};
+use crate::application::runtime_context::RuntimeContext;
 use crate::domain::agent_run::RunSpec;
 
 use super::loop_context::ChatLoopContext;
@@ -33,7 +31,7 @@ where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
-    let session_id_for_scope = ctx.shell.session_id.clone();
+    let session_id_for_scope = ctx.shell.session_snapshot().session_id().to_string();
     let chat_id = ChatId::new_v7();
     logging::within(
         logging::LogContextPatch {
@@ -78,10 +76,11 @@ where
             let config_query_for_switch = shell.config_query.clone();
             let task_access = shell.runtime_context_factory.services().task.clone();
 
-            let binding = shell.current_binding.read().unwrap().clone();
+            let binding = shell.model_state.binding();
             let reasoning = Arc::new(std::sync::Mutex::new(binding.requested_reasoning));
+            let session_snapshot = shell.session_snapshot();
             let mut context_size = shell.context_size;
-            let mut session_id = shell.session_id.clone();
+            let mut session_id = session_snapshot.session_id().to_string();
             let mut messages = initial_messages;
             let mut initial_git_context = (!initial_git_context.is_empty())
                 .then_some(Message::system_generated_user(initial_git_context));
@@ -165,8 +164,13 @@ where
                         Ok((new_binding, result)) => {
                             *reasoning.lock().unwrap_or_else(|error| error.into_inner()) =
                                 new_binding.requested_reasoning;
-                            // #1385: Write to shell.current_binding so the next Run assembler picks it up
-                            *shell.current_binding.write().unwrap() = Arc::new(new_binding);
+                            let committed_config = shell.wiring.committed_config();
+                            shell
+                                .session_state
+                                .write()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .update_provider_binding(&new_binding, committed_config);
+                            shell.model_state.update_binding(Arc::new(new_binding));
                             context_size = result.context_window;
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::ModelSwitched { result })
@@ -286,6 +290,14 @@ where
                     {
                         Ok(projection) => {
                             session_id = projection.session_id.clone();
+                            shell
+                                .session_state
+                                .write()
+                                .unwrap()
+                                .update_session(
+                                    session_id.clone(),
+                                    wiring.committed_config(),
+                                );
                             messages = projection.messages.clone();
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::SessionResumed {
@@ -481,9 +493,12 @@ where
                 let turn_context = RuntimeTurnContext::new(chat_id.clone(), turn_id.clone());
                 sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
                     .await;
-                let mut execution = crate::application::run_execution_state::RunExecutionState::with_messages_and_turn_count(messages.clone(), turn_count);
-                execution.mark_started();
                 cwd = workspace.read().current_workspace_root();
+                shell
+                    .session_state
+                    .write()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .update_workspace(cwd.clone());
 
                 // returns Ready with user input.
 
@@ -513,44 +528,75 @@ where
                         "Runtime Session ID 与 Context 提交状态不一致，采用 Context Session ID"
                     );
                     session_id = bound_session_id;
+                    shell
+                        .session_state
+                        .write()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .update_session(
+                            session_id.clone(),
+                            bound_main_run.config().clone(),
+                        );
                 }
                 let run_config = crate::application::run_config::RunConfigSnapshot::capture(
                     bound_main_run.config().clone(),
                 );
+                let session_snapshot = {
+                    let binding = shell.model_state.binding();
+                    let mut session_state = shell
+                        .session_state
+                        .write()
+                        .unwrap_or_else(|error| error.into_inner());
+                    session_state.update_provider_binding(
+                        binding.as_ref(),
+                        bound_main_run.config().clone(),
+                    );
+                    session_state.snapshot_for_run()
+                };
                 log::debug!(target: crate::LOG_TARGET,
-                    "[config] starting main run with revision={} allow_all={}",
+                    "[config] starting main run with revision={} allow_all={} session_revision={}",
                     run_config.revision().get(),
                     run_config.allow_all(),
+                    session_snapshot.revision(),
                 );
                 let run_memory = bound_main_run.memory_arc();
-                let run_id = sdk::RunId::new_v7();
-
-                // #1248 Task 3: per-run RuntimeContext assembly via factory.
-                // Freezes provider binding, allocates per-Run cancellation scope and
-                // I/O seams. RunContextBindings carries per-Run ports; RuntimeServices
-                // are already in the factory (session-scoped).
                 let spec = RunSpec::main();
-                let binding = shell.current_binding.read().unwrap().clone();
-                let bindings = RunContextBindings {
-                    context: bound_main_run.context(),
-                    provider: binding,
-                    interaction: shell.interaction_bridge.clone(),
-                    memory: run_memory.clone(),
-                    config: run_config.clone(),
-                    cancel: RunCancellationScope::new(),
-                    event_sink: sink_handle.clone(),
-                    usage: RunUsageTracker::new(),
-                    input: RunInputBufferHandle::new(),
-                    reasoning: reasoning.clone(),
-                    tool_catalog: None,
-                };
-                let runtime_context = match shell
-                    .runtime_context_factory
-                    .assemble(&spec, bindings, None)
-                {
-                    Ok(ctx) => ctx,
+                let request = match crate::application::runtime_preparation::RunPreparationRequest::new(
+                    spec.clone(),
+                    session_snapshot,
+                    None,
+                ) {
+                    Ok(request) => request,
                     Err(error) => {
-                        log::error!(target: crate::LOG_TARGET, "main runtime context assembly failed: {error}");
+                        log::error!(target: crate::LOG_TARGET, "main run preparation failed: {error}");
+                        continue;
+                    }
+                };
+                let binding = shell.model_state.binding();
+                let bindings = crate::application::runtime_context::RunCapabilityBindings {
+                    model: crate::application::runtime_context::ModelBindings {
+                        context: bound_main_run.context(),
+                        provider: binding,
+                        interaction: shell.interaction_bridge.clone(),
+                        memory: run_memory.clone(),
+                        config: run_config.clone(),
+                        reasoning: reasoning.clone(),
+                        tool_catalog: None,
+                    },
+                    io: crate::application::runtime_context::IoBindings {
+                        event_sink: sink_handle.clone(),
+                        input: crate::application::runtime_context::RunInputBufferHandle::new(),
+                    },
+                    lifecycle: crate::application::runtime_context::LifecycleBindings {
+                        cancel: crate::application::runtime_context::RunCancellationScope::new(),
+                        usage: crate::application::runtime_context::RunUsageTracker::new(),
+                    },
+                };
+                let run_preparer = crate::application::run_preparer::RunPreparer::new(
+                    shell.runtime_context_factory.clone(),
+                );
+                let prepared_run = match run_preparer.prepare(request, bindings, None) {                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        log::error!(target: crate::LOG_TARGET, "main run preparation failed: {error}");
                         sink.send_event(RuntimeStreamEvent::CommandResultText {
                             text: format!("无法启动 Run：{error}"),
                             is_error: true,
@@ -559,6 +605,12 @@ where
                         continue;
                     }
                 };
+                let (prepared_domain_run, mut execution, _session, context) =
+                    prepared_run.into_parts();
+                execution.initialize_for_launch(messages.clone(), turn_count);
+                let runtime_context = context.expect("RunPreparer must produce RuntimeContext");
+                let run_id = prepared_domain_run.id().clone();
+                let spec = prepared_domain_run.spec().clone();
 
                 let cancel = runtime_context.cancel().token().clone();
                 let cacheable_system_prompt = system_blocks
@@ -634,28 +686,30 @@ where
                 // The guard clears its own generation on drop — no manual clear.
                 let _parent_frame_guard = shell.parent_context_source.install(Arc::new(
                     crate::application::runtime_context::ParentRunFrame {
+                        run_id: run_id.clone(),
                         spec: spec.clone(),
                         context: Arc::new(runtime_context.clone()),
                     },
                 ));
 
-                let launch_result = logging::within(
+                let launch_context = port.runtime_context;
+                let adapter_execution = std::mem::take(&mut port.execution);
+                let (launch_result, execution) = logging::within(
                     logging::LogContextPatch {
                         turn: logging::FieldPatch::Set(turn_count),
                         ..logging::LogContextPatch::default()
                     },
-                    crate::application::run_launcher::launch(
-                        crate::application::run_launcher::RunLaunchInput {
-                            run_id: run_id.clone(),
-                            spec: spec.clone(),
-                            parent_run_id: None,
-                            cancel: cancel.clone(),
-                        },
+                    crate::application::run_launcher::launch_prepared(
+                        prepared_domain_run,
+                        adapter_execution,
+                        launch_context,
+                        cancel.clone(),
                         main_active_run.clone(),
                         &mut port,
                     ),
                 )
                 .await;
+                port.execution = execution;
 
                   // #1385 Task 7: Guard is dropped when the block ends,
                   // clearing only the generation we installed.

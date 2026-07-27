@@ -13,17 +13,29 @@ pub use application::tool_result_materialization::{
 };
 
 pub use application::client::{
-    from_args_with_workspace, resume_session_to_backing, AgentClientImpl, ResumeError,
-    RuntimeBootstrapDependencies, RuntimeCoreDependencies, RuntimeToolAssemblyDependencies,
+    from_args_with_workspace, resume_session_to_backing, AgentClientImpl, InitialProviderAssembly,
+    PromptAssembly, ResumeError, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
+    RuntimeToolAssemblyDependencies, SessionBootstrapAssembly, SkillBootstrapAssembly,
 };
 // #1248 Task 3: RuntimeContextFactory is the narrow crate-root construction
 // entry.  RuntimeServices stays internal; callers construct via
 // RuntimeContextFactory::new(…).
+pub use application::prompt::build::{build_system_prompt_parts, PromptContext};
+pub use application::prompt::prompt_build_ext::build_static_prompt;
+pub use application::runtime_context::ParentRunContextSource;
 pub use application::runtime_context_factory::RuntimeContextFactory;
+pub use application::runtime_preparation::{
+    ParentRunCapabilities, PreparedRun, RunPreparationError, RunPreparationRequest,
+    SessionSnapshot, SessionState,
+};
+pub use application::startup::{
+    build_agent_runner, resolve_concurrency_limits, resolve_model_runtime_settings,
+    AgentRunnerAssembly, ModelRuntimeSettings,
+};
 pub use ports::{ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort};
 pub use sdk::{
     AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ProjectContext,
-    SessionSnapshot, TaskSummary,
+    TaskSummary,
 };
 
 #[cfg(test)]

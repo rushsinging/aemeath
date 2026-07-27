@@ -31,6 +31,8 @@ use crate::domain::agent_run::{InteractionContinuation, Run, RunTransitionError}
 pub enum CoordinationError {
     /// The interaction port is unavailable.
     Unavailable,
+    /// The scoped interaction adapter rejected a different Run identity.
+    RunIdMismatch,
     /// The interaction was already registered (duplicate ID).
     AlreadyRegistered,
     /// The interaction waiter was dropped before resolution.
@@ -45,6 +47,7 @@ impl From<InteractionPortError> for CoordinationError {
     fn from(e: InteractionPortError) -> Self {
         match e {
             InteractionPortError::Unavailable => CoordinationError::Unavailable,
+            InteractionPortError::WrongRun => CoordinationError::RunIdMismatch,
             InteractionPortError::AlreadyRegistered => CoordinationError::AlreadyRegistered,
         }
     }

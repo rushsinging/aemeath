@@ -422,26 +422,90 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         .expect("test hook dispatcher"),
     );
 
+    let provider_factory = composition::provider::provider_factory();
+    let provider_spec = runtime::ProviderBuildSpec {
+        driver: "openai".to_string(),
+        source_key: "local".to_string(),
+        api_style: None,
+        api_key: "test-api-key".to_string(),
+        base_url: Some("http://127.0.0.1:1/v1".to_string()),
+        model: provider::ModelId {
+            provider: "local".to_string(),
+            model: "test-model".to_string(),
+        },
+        max_tokens: 8192,
+        requested_reasoning: provider::ReasoningLevel::Off,
+        context_window: Some(8192),
+        timeout: std::time::Duration::from_secs(30),
+        user_agent: "aemeath-test".to_string(),
+    };
+    let initial_binding = runtime::ProviderFactory::build(provider_factory.as_ref(), provider_spec)
+        .expect("build test provider binding");
+    let initial_provider = runtime::InitialProviderAssembly::new(
+        initial_binding,
+        share::config::models::ResolvedModel {
+            source_key: "local".to_string(),
+            source_config: share::config::models::ProviderModelsConfig::default(),
+            model: share::config::models::ModelEntryConfig {
+                id: "test-model".to_string(),
+                context_window: 8192,
+                max_tokens: 8192,
+                ..Default::default()
+            },
+            driver: "openai".to_string(),
+        },
+        runtime::ModelRuntimeSettings {
+            max_tokens: 8192,
+            reasoning: false,
+            reasoning_effort: None,
+        },
+    );
+
+    struct NoopRunner;
+    #[async_trait::async_trait]
+    impl tools::AgentRunner for NoopRunner {
+        async fn run_agent(&self, _request: tools::AgentRunRequest<'_>) -> tools::AgentRunTerminal {
+            tools::AgentRunTerminal::Completed {
+                result: String::new(),
+            }
+        }
+        async fn complete(
+            &self,
+            _prompt: &str,
+            _system: &str,
+            _cancellation: Arc<dyn tools::CancellationSignal>,
+        ) -> String {
+            String::new()
+        }
+    }
+    let agent_runner = runtime::AgentRunnerAssembly {
+        runner: Arc::new(NoopRunner),
+        parent_context_source: runtime::ParentRunContextSource::new(),
+        max_tool_concurrency: 10,
+        max_agent_concurrency: 4,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+    };
+
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         runtime::RuntimeCoreDependencies::new(
             workspace,
             wiring,
-            composition::provider::provider_factory(),
-            reflection_history.clone(),
-            Arc::new(policy::AllowAllPolicy),
-            task_access.clone(),
+            provider_factory,
             session_management,
             hook_runner.clone(),
         ),
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),
-            tools.execution(),
-            tools.binding(),
             skill_wiring.catalog(),
             skill_wiring.materializer(),
             tool_result_materializer,
             active_run,
         ),
+        initial_provider,
+        runtime::SessionBootstrapAssembly::new(root.clone(), 8192, true, false, None),
+        runtime::PromptAssembly::new(Vec::new(), String::new(), String::new()),
+        runtime::SkillBootstrapAssembly::new(std::collections::HashMap::new()),
+        agent_runner,
         {
             Arc::new(runtime::RuntimeContextFactory::new(
                 tools.catalog_port(),

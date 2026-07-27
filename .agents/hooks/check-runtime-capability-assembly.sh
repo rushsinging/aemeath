@@ -19,6 +19,7 @@ ENGINE = root / "agent/features/runtime/src/application/loop_engine/engine.rs"
 STUCK = root / "agent/features/runtime/src/application/loop_engine/stuck_guard.rs"
 RUN_DOMAIN = root / "agent/features/runtime/src/domain/agent_run/domain.rs"
 INTERACTION = root / "agent/features/runtime/src/application/interaction.rs"
+EMPTY_HOOK = root / "agent/features/runtime/src/application/empty_hook.rs"
 # ── helpers ──
 def strip_comments(text: str) -> str:
     """Remove //  and ///  and //!  line comments (but keep lines that contain code before the //)."""
@@ -128,11 +129,23 @@ if FACTORY.is_file():
     prod = production_text(FACTORY)
     if "ReasoningBindingMode::Fixed" not in prod:
         violations.append("8. Factory must wire retained static ReasoningBindingMode::Fixed")
-# ── 9. Hook BoundaryOnly validation exists ──
+# ── 9. Sub Hook mode uses an empty capability adapter ──
 if FACTORY.is_file():
     prod = production_text(FACTORY)
     if "HookBindingMode::BoundaryOnly" not in prod:
-        violations.append("9. Factory must reference HookBindingMode::BoundaryOnly for validation")
+        violations.append("9. Factory must handle the Sub Hook binding mode")
+    if "EmptyHookPort" not in prod:
+        violations.append("9. Factory must bind Sub Runs to EmptyHookPort")
+    if "BoundaryHookPort" in prod:
+        violations.append("9. Factory must not retain BoundaryHookPort")
+if EMPTY_HOOK.is_file():
+    prod = production_text(EMPTY_HOOK)
+    if "HookOutcome::proceed()" not in prod:
+        violations.append("9. EmptyHookPort must return a no-op proceed outcome")
+    if ".dispatch(" in prod or ".dispatch_at(" in prod:
+        violations.append("9. EmptyHookPort must not delegate to another HookPort")
+else:
+    violations.append("9. EmptyHookPort implementation is missing")
 
 # ── 10. Workflow graph retired ──
 # Reasoning graph ownership is deferred for redesign; no workflow crate or

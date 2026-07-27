@@ -24,10 +24,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             let mut stream = match ctx
                 .agent_client
                 .chat(sdk::ChatRequest {
-                    user_input: None,
-                    // 文本队列已断开（#390 A3）：统一走 input_events 事件通道。
-                    queue_drain: None,
-                    input_events: Some(Arc::new(ctx.input_event_port.clone())),
+                    ingress: Arc::new(ctx.input_event_port.clone()),
                 })
                 .await
             {

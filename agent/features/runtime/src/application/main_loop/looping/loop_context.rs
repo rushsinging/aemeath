@@ -5,7 +5,7 @@
 //!
 //! #1385: ChatLoopContext no longer duplicates service contracts (binding, tools,
 //! policy, hooks, memory, reflection, reasoning, etc.).  All service-level state
-//! lives in [`MainSessionShell`]; per-Run contracts come from [`RuntimeContext`]
+//! lives in [`SessionRuntime`]; per-Run contracts come from [`RuntimeContext`]
 //! assembled via `shell.runtime_context_factory.assemble()`.
 
 use crate::application::main_loop::looping::events::ChatEventSink;
@@ -56,9 +56,9 @@ where
     pub input_events: I,
 
     /// #1385: Session shell — single source for all session-level state.
-    /// Non-Option; tests must construct a real `MainSessionShell` via the
+    /// Non-Option; tests must construct a real `SessionRuntime` via the
     /// test helper or provide a minimal fixture.
-    pub shell: crate::application::client::MainSessionShell,
+    pub shell: crate::application::client::SessionRuntime,
 
     /// 本轮 chat loop 的初始消息（来自 user_input）。Runtime 不再持有/回写
     /// 会话链；历史由 Context backing 提供。

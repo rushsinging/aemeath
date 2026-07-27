@@ -25,9 +25,39 @@ pub struct InputPortPair {
     pub input_events: crate::adapters::input_buffer::RuntimeInputEventDrainPort,
 }
 
-// ─── MainSessionShell — session-level state per §2.2 ───
+#[derive(Clone)]
+pub struct SessionModelState {
+    resolved: Arc<std::sync::RwLock<ResolvedModel>>,
+    binding: Arc<std::sync::RwLock<Arc<crate::ports::ProviderBinding>>>,
+}
 
-/// Session-level shell that holds state live across all runs in a Main session.
+impl SessionModelState {
+    pub(crate) fn new(
+        resolved: ResolvedModel,
+        binding: Arc<crate::ports::ProviderBinding>,
+    ) -> Self {
+        Self {
+            resolved: Arc::new(std::sync::RwLock::new(resolved)),
+            binding: Arc::new(std::sync::RwLock::new(binding)),
+        }
+    }
+
+    pub(crate) fn resolved(&self) -> ResolvedModel {
+        self.resolved.read().unwrap().clone()
+    }
+
+    pub(crate) fn binding(&self) -> Arc<crate::ports::ProviderBinding> {
+        self.binding.read().unwrap().clone()
+    }
+
+    pub(crate) fn update_binding(&self, binding: Arc<crate::ports::ProviderBinding>) {
+        *self.binding.write().unwrap() = binding;
+    }
+}
+
+// ─── SessionRuntime — session-level state per §2.2 ───
+
+/// Session-level runtime container that holds state live across all runs.
 ///
 /// #1385: Separated from per-Run [`RuntimeContext`] so that each Run gets its own
 /// frozen provider binding, cancellation scope, and bound context/memory ports
@@ -41,10 +71,10 @@ pub struct InputPortPair {
 /// - Agent infrastructure (runner, semaphore, materializer, concurrency)
 /// - Parent capability ports (shared Arc, cloned into per-Run RuntimeContext)
 #[derive(Clone)]
-pub struct MainSessionShell {
+pub struct SessionRuntime {
     // ── Session identity & workspace ──
-    pub session_id: String,
-    pub cwd: std::path::PathBuf,
+    pub(crate) session_state:
+        Arc<std::sync::RwLock<crate::application::runtime_preparation::SessionState>>,
     pub workspace: project::WorkspaceViews,
     pub wiring: Arc<context::MainSessionWiring>,
 
@@ -55,10 +85,7 @@ pub struct MainSessionShell {
 
     // ── Model switching ──
     pub(crate) provider_factory: Arc<dyn crate::ports::ProviderFactory>,
-    pub resolved_model: ResolvedModel,
-    /// Switchable provider binding — model switch updates this,
-    /// and the next assembler call freezes the current value.
-    pub(crate) current_binding: Arc<std::sync::RwLock<Arc<crate::ports::ProviderBinding>>>,
+    pub(crate) model_state: SessionModelState,
 
     // ── Concurrency ──
     pub max_tool_concurrency: usize,
@@ -93,6 +120,7 @@ pub struct MainSessionShell {
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub(crate) active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
     pub(crate) interaction_bridge: Arc<crate::application::interaction::InteractionBridge>,
+    pub(crate) session_ingress: Arc<crate::application::session_ingress::SessionIngress>,
 
     // ── Event/Input factories ──
     pub(crate) event_sink_factory: Arc<
@@ -113,6 +141,106 @@ pub struct MainSessionShell {
 
     // ── #1248 Task 3: RuntimeContextFactory (constructed once from static ports) ──
     pub(crate) runtime_context_factory: Arc<RuntimeContextFactory>,
+}
+
+impl SessionRuntime {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        session_state: Arc<
+            std::sync::RwLock<crate::application::runtime_preparation::SessionState>,
+        >,
+        workspace: project::WorkspaceViews,
+        wiring: Arc<context::MainSessionWiring>,
+        config_query: Arc<dyn config::ConfigQuery>,
+        config_writer: Arc<dyn config::ConfigWriter>,
+        session_management: Arc<dyn context::SessionManagementPort>,
+        provider_factory: Arc<dyn crate::ports::ProviderFactory>,
+        model_state: SessionModelState,
+        max_tool_concurrency: usize,
+        max_agent_concurrency: usize,
+        agent_semaphore: Arc<tokio::sync::Semaphore>,
+        system_blocks: Vec<provider::RequestSystemBlock>,
+        system_prompt_text: String,
+        initial_git_context: String,
+        user_context: String,
+        skills_map: HashMap<String, sdk::SkillView>,
+        memory_config: MemoryConfig,
+        context_size: usize,
+        language: String,
+        allow_all: bool,
+        verbose: bool,
+        resume: Option<String>,
+        agent_runner: Arc<dyn AgentRunner>,
+        parent_context_source: ParentRunContextSource,
+        tool_result_materializer: Arc<
+            crate::application::tool_result_materialization::ToolResultMaterializer,
+        >,
+        active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
+        runtime_context_factory: Arc<RuntimeContextFactory>,
+    ) -> Self {
+        let interaction_bridge =
+            Arc::new(crate::application::interaction::InteractionBridge::new());
+        let session_ingress = Arc::new(crate::application::session_ingress::SessionIngress::new(
+            interaction_bridge.clone(),
+        ));
+        Self {
+            session_state,
+            workspace,
+            wiring,
+            config_query,
+            config_writer,
+            session_management,
+            provider_factory,
+            model_state,
+            max_tool_concurrency,
+            max_agent_concurrency,
+            agent_semaphore,
+            system_blocks,
+            system_prompt_text,
+            initial_git_context,
+            user_context,
+            skills_map,
+            memory_config,
+            context_size,
+            language,
+            allow_all,
+            verbose,
+            resume,
+            agent_runner,
+            parent_context_source,
+            tool_result_materializer,
+            active_run,
+            interaction_bridge,
+            session_ingress,
+            event_sink_factory: Arc::new(|tx| {
+                crate::application::main_loop::ChatEventSinkHandle::new(
+                    crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
+                )
+            }),
+            input_port_factory: Arc::new(|queue, events| InputPortPair {
+                queue: crate::adapters::input_buffer::RuntimeQueueDrainPort::new(queue),
+                input_events: crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(
+                    events,
+                ),
+            }),
+            session_reminders: Arc::new(std::sync::RwLock::new(
+                share::memory::SessionReminders::new(),
+            )),
+            runtime_context_factory,
+        }
+    }
+
+    pub(crate) fn update_session_id(&self, session_id: impl Into<String>) {
+        let mut state = self.session_state.write().unwrap();
+        let config = state.snapshot_for_run().config().clone();
+        state.update_session(session_id, config);
+    }
+
+    pub(crate) fn session_snapshot(
+        &self,
+    ) -> crate::application::runtime_preparation::SessionSnapshot {
+        self.session_state.read().unwrap().snapshot_for_run()
+    }
 }
 
 /// Error returned when RuntimeContext assembly fails.
@@ -177,26 +305,30 @@ pub struct AgentClientImpl {
 /// #1385 Task 4-7: `shell` is the single session-level state source.
 /// All fields formerly duplicated here have been removed.
 pub struct RuntimeHandle {
-    pub shell: MainSessionShell,
+    pub shell: SessionRuntime,
 }
 
 // ─── 公共访问器（CLI runtime.rs 需要） ───
 
 impl AgentClientImpl {
-    pub fn session_id(&self) -> &str {
-        &self.inner.shell.session_id
+    pub fn session_id(&self) -> String {
+        self.inner.shell.session_snapshot().session_id().to_string()
     }
 
-    pub fn cwd(&self) -> &std::path::Path {
-        &self.inner.shell.cwd
+    pub fn cwd(&self) -> std::path::PathBuf {
+        self.inner
+            .shell
+            .session_snapshot()
+            .workspace_root()
+            .to_path_buf()
     }
 
-    pub fn resolved_model(&self) -> &ResolvedModel {
-        &self.inner.shell.resolved_model
+    pub fn resolved_model(&self) -> ResolvedModel {
+        self.inner.shell.model_state.resolved()
     }
 
     /// Returns the session shell (session-level state) — #1385.
-    pub fn shell(&self) -> &MainSessionShell {
+    pub fn shell(&self) -> &SessionRuntime {
         &self.inner.shell
     }
 
@@ -211,14 +343,16 @@ impl AgentClientImpl {
     pub fn tui_launch_context(&self) -> crate::adapters::tui_launch::TuiLaunchContext {
         let shell = &self.inner.shell;
         let services = shell.runtime_context_factory.services();
+        let session_snapshot = shell.session_snapshot();
+        let resolved_model = shell.model_state.resolved();
         crate::adapters::tui_launch::TuiLaunchContext {
-            session_id: shell.session_id.clone(),
+            session_id: session_snapshot.session_id().to_string(),
             model_display: super::mapping::model_display(
-                &shell.resolved_model.source_key,
-                &shell.resolved_model.model.name,
-                &shell.resolved_model.model.id,
+                &resolved_model.source_key,
+                &resolved_model.model.name,
+                &resolved_model.model.id,
             ),
-            binding: shell.current_binding.read().unwrap().clone(),
+            binding: shell.model_state.binding(),
             tool_catalog: services.tool_catalog.clone(),
             tool_execution: services.tool_execution.clone(),
             system_blocks: shell.system_blocks.clone(),
@@ -236,7 +370,7 @@ impl AgentClientImpl {
             skills_map: shell.skills_map.clone(),
             hook_runner: services.hooks.clone(),
             session_reminders: Arc::new(std::sync::Mutex::new(tools::SessionReminders::new())),
-            workspace_root: shell.cwd.clone(),
+            workspace_root: session_snapshot.workspace_root().to_path_buf(),
         }
     }
 }

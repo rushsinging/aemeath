@@ -3,7 +3,7 @@
 > 对应 Issue：[#1397](https://github.com/rushsinging/aemeath/issues/1397)
 > 设计基线：[07-runtime-ownership-and-assembly.md](../../design/02-modules/runtime/07-runtime-ownership-and-assembly.md)
 > 前置：[#1382](https://github.com/rushsinging/aemeath/issues/1382)、[#1385](https://github.com/rushsinging/aemeath/issues/1385)、[#1248](https://github.com/rushsinging/aemeath/issues/1248)
-> 计划状态：待用户确认后实施
+> 计划状态：P0-P4 已完成；P5 统一 Loop Engine 输入与交互 mailbox 待实施
 
 ## 1. 目标与实施原则
 
@@ -55,7 +55,7 @@ async fn prepare_run(
     parent: Option<ParentRunCapabilities>,
 ) -> Result<PreparedRun, RunPreparationError> {
     let spec = RunSpec::from_parent(parent.as_ref())?;
-    runtime.factory.prepare(RunPreparationRequest {
+    runtime.preparer.prepare(RunPreparationRequest {
         spec,
         session: runtime.session.snapshot_for_run()?,
         parent,
@@ -70,7 +70,7 @@ async fn submit_input(
     prepared.context.input().submit(input).await
 }
 
-// Factory：校验 ceiling，按 mode 绑定窄 adapter，原子返回 Idle per-Run 对象。
+// RunPreparer：校验 ceiling，委托 Context factory 绑定窄能力，原子返回 Idle per-Run 对象。
 async fn prepare(&self, request: RunPreparationRequest) -> Result<PreparedRun, RunPreparationError> {
     request.spec.validate_against(request.parent.as_ref())?;
     let interaction = self.interaction.bind(request.spec.interaction_mode,
@@ -105,7 +105,7 @@ async fn execute(prepared: PreparedRun) -> Result<AgentRunTerminal, RunExecution
 | `compose_runtime` | P3/P4 | concrete constructor 只在 Composition，factory contracts 可注入 |
 | `snapshot_for_run` | P2/P4 | Session 变化不污染已准备 Run |
 | `RunSpec::from_parent` | P2 | 能力只收缩不扩权，无 Main/Sub 控制分支 |
-| `factory.prepare` | P3 | 单一入口、mode adapter、typed unavailable、无参数袋、产出 Idle Run |
+| `RunPreparer::prepare` | P3 | 单一入口、mode adapter、typed unavailable、无参数袋、产出 Idle Run |
 | `InputPort::submit` | P1/P5 | 首次与后续输入同路径，Idle 状态只由输入激活 |
 | `ParentMediated` / `BoundaryOnly` | P3 | child identity 隔离、Hook invocation 入口过滤 |
 | `PreparedRun` | P1/P3 | Run、Context、Execution 一致创建且无双 owner |
@@ -222,7 +222,7 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 
 **实施**：
 
-1. 将 `RuntimeContextFactory` 的公共生产入口收敛为 `prepare(RunPreparationRequest) -> Result<PreparedRun, RunPreparationError>`；把 `RuntimeContext::new` 保持为 factory 私有可达入口。
+1. 将公共生产准备入口收敛为 `RunPreparer::prepare(RunPreparationRequest) -> Result<PreparedRun, RunPreparationError>`；`RuntimeContextFactory` 只产出 `RuntimeContext`，并把 `RuntimeContext::new` 保持为 factory 私有可达入口。
 2. 把现有 seven explicit port parameters / `RuntimeServices` 组装改为 Composition 注入 Runtime-owned 的窄 binding factories；Runtime 决定 capability mode 和 ceiling，Composition 只实现契约。
 3. 删除 `RuntimeContextParts`、`RunContextBindings` 及同构参数袋；所有 per-Run Input/Event/Usage/Control/Interaction/Hook/Reasoning/Workspace 绑定由 factory 按 request 产生。
 4. 实现三类关键受限 adapter：
@@ -250,7 +250,17 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 
 ### P4：收敛 Composition 与 Runtime bootstrap
 
-**目的**：消除 Runtime 内第二 Composition Root，让 `from_args.rs` 只保留入站 bootstrap 用例。
+**完成证据（已达成部分）**：
+
+- 初始 Provider、Prompt、Skill、AgentRunner、并发和 RuntimeContextFactory 均由 Composition typed assembly 注入。
+- `SessionState`、`SessionModelState` 与 `SessionRuntime` 的静态 / 动态所有权已分离。
+- Runtime bootstrap 通过 `SessionRuntime::new` 构造，生产 `from_args` 不再直接写 SessionRuntime struct literal。
+- `SessionIngress` 已成为 Runtime 的单一输入分类入口；UserMessage 与控制事件先分类，再进入对应的 Run input 或 command 路径。
+- `ChatRequest` 不再携带初始输入、独立 queue drain 和第二输入端口，只持有统一 `ingress`。
+- Runtime/Composition 测试、格式检查、diff 检查与架构守卫均已通过。
+
+P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interaction 定向 seam；P5 继续把分类结果接入统一 Loop Engine 的 InputQueue、CommandScheduler 与 InteractionInbox，并移除剩余兼容路径。
+
 
 **实施**：
 

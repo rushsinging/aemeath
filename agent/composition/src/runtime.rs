@@ -160,26 +160,190 @@ pub(crate) async fn from_args_with_gateways(
         hook_runner.clone(),
     ));
 
+    let snapshot = config.reader().committed_snapshot();
+    let runtime_model = snapshot
+        .resolve_runtime_model(args.model.as_deref(), args.max_tokens)
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+    let resolved_model = runtime_model.resolved_model().clone();
+    let runtime_settings = runtime::resolve_model_runtime_settings(
+        runtime_model.max_tokens(),
+        &resolved_model.model,
+        !args.no_think,
+    );
+    let api_key = (!resolved_model.source_config.api_key.is_empty())
+        .then(|| resolved_model.source_config.api_key.clone())
+        .ok_or_else(|| {
+            sdk::SdkError::Init(
+                "API key not set. Use --api-key, set provider-specific env var, set LLM_API_KEY, or configure in ~/.aemeath/config.json".to_string(),
+            )
+        })?;
+    let provider_spec = runtime::ProviderBuildSpec {
+        driver: resolved_model.driver.clone(),
+        source_key: resolved_model.source_key.clone(),
+        api_style: resolved_model.model.api_style.clone(),
+        api_key,
+        base_url: args.base_url.clone().or_else(|| {
+            (!resolved_model.source_config.base_url.is_empty())
+                .then(|| resolved_model.source_config.base_url.clone())
+        }),
+        model: provider::ModelId {
+            provider: resolved_model.source_key.clone(),
+            model: resolved_model.model.id.clone(),
+        },
+        max_tokens: runtime_model.max_tokens(),
+        requested_reasoning: runtime_settings
+            .reasoning_effort
+            .as_deref()
+            .and_then(provider::ReasoningLevel::parse)
+            .unwrap_or(if runtime_settings.reasoning {
+                provider::ReasoningLevel::Medium
+            } else {
+                provider::ReasoningLevel::Off
+            }),
+        context_window: (resolved_model.model.context_window > 0)
+            .then_some(resolved_model.model.context_window),
+        timeout: std::time::Duration::from_secs(snapshot.api_timeout_secs()),
+        user_agent: snapshot.user_agent().to_string(),
+    };
+    let initial_binding = gateways
+        .provider
+        .build(provider_spec)
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+    let initial_provider =
+        runtime::InitialProviderAssembly::new(initial_binding, resolved_model, runtime_settings);
+
+    context::guidance::init_guidance_dir();
+    let cwd = args
+        .cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let context_size = snapshot.resolve_context_size(
+        Some(args.context_size),
+        initial_provider.resolved_model().model.context_window,
+    );
+    let session_bootstrap = runtime::SessionBootstrapAssembly::new(
+        cwd,
+        context_size,
+        args.allow_all,
+        args.verbose,
+        args.resume.clone(),
+    );
+
+    let prompt_root = std::path::PathBuf::from(&identity.initial_cwd);
+    let prompt_context = runtime::PromptContext::new(
+        &prompt_root,
+        Some(&initial_provider.binding().model.provider),
+        Some(&initial_provider.binding().model.model),
+        snapshot.permission_mode(),
+    );
+    let prompt_parts =
+        runtime::build_system_prompt_parts(&prompt_context, &hook_runner, snapshot.language())
+            .await;
+    let static_prompt = runtime::build_static_prompt(
+        &prompt_root,
+        &initial_provider.binding().model.model,
+        initial_provider.runtime_settings().reasoning,
+        Some(&snapshot),
+        &hook_runner,
+        prompt_parts.clone(),
+    )
+    .await;
+    let prompt = runtime::PromptAssembly::new(
+        vec![provider::RequestSystemBlock::Cacheable(static_prompt)],
+        prompt_parts.initial_git_context,
+        prompt_parts.claude_md,
+    );
+
+    let available_tools = tool_assembly
+        .catalog
+        .snapshot(
+            &tools::RegistryScopeName::new("main"),
+            &tools::ToolProfileName::new("main-full"),
+        )
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))?
+        .tools
+        .iter()
+        .map(|descriptor| descriptor.name.as_str().to_string())
+        .collect();
+    let skill_query = tools::SkillQuery::new(
+        prompt_root.clone(),
+        snapshot.skills().dirs.clone(),
+        available_tools,
+    );
+    let descriptors = skill_catalog.list(skill_query.clone());
+    let materialized = skill_materializer
+        .materialize_available(tools::SkillMaterializationQuery::new(
+            skill_query.project_root,
+            skill_query.extra_dirs,
+            skill_query.available_tools,
+        ))
+        .await
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+    let fragments = materialized
+        .fragments()
+        .iter()
+        .map(|fragment| (fragment.stable_key(), fragment))
+        .collect::<std::collections::HashMap<_, _>>();
+    let skills = runtime::SkillBootstrapAssembly::new(
+        descriptors
+            .into_iter()
+            .filter_map(|descriptor| {
+                let fragment = fragments.get(descriptor.name())?;
+                Some((
+                    descriptor.name().to_string(),
+                    sdk::SkillView {
+                        name: descriptor.name().to_string(),
+                        aliases: descriptor.aliases().to_vec(),
+                        slash_command: descriptor.slash_command().map(str::to_string),
+                        slash_aliases: descriptor.slash_aliases().to_vec(),
+                        description: Some(descriptor.description().to_string()),
+                        content: fragment.content().to_string(),
+                        source: Some(descriptor.source().path.clone()),
+                    },
+                ))
+            })
+            .collect(),
+    );
+
+    let (max_tool_concurrency, max_agent_concurrency) = runtime::resolve_concurrency_limits(
+        args.max_tool_concurrency,
+        args.max_agent_concurrency,
+        &snapshot,
+    );
+    let agent_runner = runtime::build_agent_runner(
+        wiring.config_reader(),
+        gateways.provider.clone(),
+        tool_assembly.active_run.clone(),
+        max_tool_concurrency,
+        Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency)),
+        tool_assembly.tool_result_materializer.clone(),
+        workspace.clone(),
+        skill_materializer.clone(),
+        runtime::ParentRunContextSource::new(),
+        runtime_context_factory.clone(),
+    );
+
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         runtime::RuntimeCoreDependencies::new(
             workspace,
             wiring,
             gateways.provider,
-            reflection_history,
-            gateways.policy,
-            task_wiring.access(),
             session_management,
             hook_runner,
         ),
         runtime::RuntimeToolAssemblyDependencies::new(
             tool_assembly.catalog,
-            tool_assembly.execution,
-            tool_assembly.binding,
             skill_catalog,
             skill_materializer,
             tool_assembly.tool_result_materializer,
             tool_assembly.active_run,
         ),
+        initial_provider,
+        session_bootstrap,
+        prompt,
+        skills,
+        agent_runner,
         runtime_context_factory,
     );
     runtime::from_args_with_workspace(args, dependencies).await

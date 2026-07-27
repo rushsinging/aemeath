@@ -278,14 +278,14 @@ Loop Engine 的顺序是：先请求 `Run` 完成合法状态迁移，再更新 
 
 ## 5. 统一 `RuntimeContextFactory`
 
-`RuntimeContextFactory` 是 Runtime application 定义的应用服务，也是唯一允许构造 `RuntimeContext` 的入口。Composition 注入它所消费的窄 factory/port 实现，但不得拥有 `RunSpec` 的能力决策。
+`RuntimeContextFactory` 是 Runtime application 定义的能力装配服务，也是唯一允许构造 `RuntimeContext` 的入口；它的产物严格是 `RuntimeContext`。Composition 注入它所消费的窄 factory/port 实现，但不得拥有 `RunSpec` 的能力决策。`RunPreparer` 是独立的 Run 准备用例，协调 `Run`、`RunExecutionState` 与 `RuntimeContext` 的一致创建，并产出 `PreparedRun`。
 
 ### 5.0 IoC 端到端伪代码
 
 下面的伪代码描述的是职责和数据流，不是要求照抄的 Rust API。关键约束是：Composition 负责“有哪些实现和 wiring”，Runtime application 负责“本次 Run 需要什么能力”，Factory 负责“把声明转换为受限 capability”；三者不能越界。
 
 ```rust
-// 1. Composition Root：只在 agent/composition 创建具体实现和 opaque wiring。
+// 2. RuntimeContextFactory：只创建已绑定的 RuntimeContext。
 fn compose_runtime(graph: CompositionGraph) -> RuntimeAssembly {
     let wiring = graph.build_opaque_wiring();
     let services = RuntimeServices::new(
@@ -300,10 +300,9 @@ fn compose_runtime(graph: CompositionGraph) -> RuntimeAssembly {
 
     RuntimeAssembly {
         services,
-        factory: Arc::new(factory),
+        context_factory: Arc::new(factory),
         session_wiring: wiring.session,
-    }
-}
+    }}
 
 // 2. Runtime bootstrap：从入站 args 得到 typed request，初始化 SessionState；
 //    不创建 Provider、Tool、Hook、Workspace 或 RuntimeContext。
@@ -315,7 +314,10 @@ async fn bootstrap_runtime(
         assembly.services.session_store(),
         request.session_identity,
     ).await?;
-    Ok(AgentRuntime::new(assembly.factory.clone(), session))
+    Ok(AgentRuntime::new(
+        RunPreparer::new(assembly.context_factory.clone()),
+        session,
+    ))
 }
 
 // 3. Runtime application：创建 Idle Run，只声明能力模式。
@@ -328,7 +330,7 @@ async fn prepare_root_run(
         .with_interaction(InteractionBindingMode::Client)
         .with_hook(HookBindingMode::Full);
 
-    runtime.factory.prepare(RunPreparationRequest {
+    runtime.preparer.prepare(RunPreparationRequest {
         spec,
         session: snapshot,
         parent: None,
@@ -349,7 +351,7 @@ async fn prepare_child_run(
         .with_hook(HookBindingMode::BoundaryOnly)
         .with_capability_ceiling(parent_caps.ceiling());
 
-    runtime.factory.prepare(RunPreparationRequest {
+    runtime.preparer.prepare(RunPreparationRequest {
         spec,
         session: snapshot,
         parent: Some(parent_caps),
@@ -364,7 +366,7 @@ async fn submit_input(
     prepared.context.input().submit(input).await
 }
 
-// 6. Factory：校验声明、选择 adapter，原子地产生 Idle Run 的三件对象。
+// 6. RunPreparer 校验声明并协调三件对象；RuntimeContextFactory 只选择 adapter 并创建 Context。
 async fn prepare(
     &self,
     request: RunPreparationRequest,
@@ -385,13 +387,10 @@ async fn prepare(
     let hooks = match request.spec.hook_mode {
         HookBindingMode::Full =>
             self.services.hooks.bind_full(request.spec.hook_scope).await?,
-        HookBindingMode::BoundaryOnly =>
-            self.services.hooks.bind_boundary_only(parent_ceiling).await?,
-        HookBindingMode::Disabled => self.services.hooks.bind_disabled(),
+        HookBindingMode::BoundaryOnly => self.services.hooks.bind_empty(),        HookBindingMode::Disabled => self.services.hooks.bind_disabled(),
     };
 
-    let context = RuntimeContext::private_new(
-        self.services.provider.bind(&request.spec, &request.session).await?,
+    let context = self.context_factory.create(        self.services.provider.bind(&request.spec, &request.session).await?,
         self.services.context.bind(&request.spec, &request.session).await?,
         self.services.tools.bind_restricted(&request.spec, parent_ceiling).await?,
         interaction,
@@ -416,7 +415,8 @@ async fn execute(prepared: PreparedRun) -> Result<AgentRunTerminal, RunExecution
 - `compose_runtime` 可以选择实现，但不能解析 `RunSpec` 决定能力升降；
 - `prepare_root_run` / `prepare_child_run` 可以声明模式，但不能 `new` 具体 Port 或携带输入内容；
 - `submit_input` 是外部输入进入 Run 的唯一入口，首次输入不具有特殊装配语义；
-- `prepare` 可以按模式创建 capability adapter，但不能执行 Loop、恢复 Session 或持久化 Step；
+- `RunPreparer::prepare` 可以校验声明并协调 `Run`、`RuntimeContext`、`RunExecutionState`，但不能执行 Loop、恢复 Session 或持久化 Step；
+- `RuntimeContextFactory::create` 可以按模式创建 capability adapter，但不能创建 `Run` 或 `RunExecutionState`；
 - `execute` 只能使用 `PreparedRun`，不能重新装配 Context，也不能按 Main/Sub 分支；
 - `RuntimeContext::private_new` 必须只对 factory 可达，失败时不得返回半装配的 `PreparedRun`。
 
@@ -487,10 +487,10 @@ Factory 不负责执行 Loop、恢复 Session、修改 `SessionState`、处理�
 `HookBindingMode` 必须在装配期产生真实 capability adapter：
 
 - `Full`：允许 RunSpec 声明范围内的全部 Hook invocation；
-- `BoundaryOnly`：由 `BoundaryHookPort` 只允许 Run/child start-stop 边界事件；
+- `BoundaryOnly`：历史枚举名仅表达 Sub 的最低能力档；实际装配独立 `EmptyHookPort`，任何 invocation 都直接 `proceed`，不执行或转发到底层 Hook；
 - 若未来存在 `Disabled`：绑定 typed no-op/disabled adapter，而不是 `Option`。
 
-`BoundaryOnly` 不能只校验 parent 存在后复用完整 HookPort。过滤发生在 adapter 调用入口，禁止调用方绕过 adapter 取得底层 HookPort。Hook BC 继续拥有 subscription、脚本执行、重试和 typed directive；Runtime-owned `HookCoordinator` 统一拥有触发时机、Stop 三分支、反馈 materialization 与 Run 状态编排。Main/Sub 不得分别实现 Stop Hook 流程。
+Sub Hook capability 不能通过 parent 存在性校验后复用完整 HookPort，也不能保留 start/stop 特例。Factory 必须装配独立 `EmptyHookPort`；它对 `dispatch` 与 `dispatch_at` 都无条件返回 `HookOutcome::proceed()`，且不持有底层 HookPort。Hook BC 继续拥有 Main Run 的 subscription、脚本执行、重试和 typed directive；Sub 生命周期若需观测，应使用 Runtime event/parent result 通道，而不是 Hook。
 
 ### 5.5 Factory Port 所有权
 
@@ -556,7 +556,7 @@ Runtime application 回答“何时发生什么业务动作”：
 - 接纳统一 `SessionIngress`，分类 `UserMessage` / `Command` / `InteractionCommand`；
 - 根据目标 Run、command scope 与 interaction identity 分发到 InputQueue、CommandScheduler 或 InteractionInbox；
 - 创建 `RunSpec` 与 `RunPreparationRequest`；
-- 在 Run 创建点调用 `RuntimeContextFactory::prepare` 取得 `PreparedRun`；
+- 在 Run 创建点调用 `RunPreparer::prepare` 取得 `PreparedRun`；
 - 驱动 Loop 和领域状态迁移。
 
 ### 7.3 退役 `from_args.rs` 大装配器
@@ -610,14 +610,14 @@ Workspace 不得继续绕过 `RuntimeContext` 旁路进入 Loop adapter。
 | `MainSessionShell` | 删除，动态事实进入 `SessionState`，长生命周期能力进入 `RuntimeServices` |
 | `RuntimeBootstrapDependencies` 及分层参数袋 | 由 Composition 构造有职责的 services/factories，bootstrap 只接 typed request |
 | `RuntimeContextParts` / `RunContextBindings` | 删除；调用方只提交 `RunPreparationRequest` |
-| `assemble_main_runtime_context` / `derive_sub_run` 手填 Context | 统一进入 `RuntimeContextFactory::prepare` |
+| `assemble_main_runtime_context` / `derive_sub_run` 手填 Context | 统一进入 `RunPreparer::prepare`，由 `RuntimeContextFactory` 创建 Context |
 | `RunKind::Main/Sub` | 删除；使用 purpose、父子拓扑和 capability modes |
 | `MainRunPort` / `SubAgentRun` | 删除；执行统一为 `Run + RuntimeContext + RunExecutionState` |
 | fat `RunLoopPort` | 删除；真实外部 seam 拆为窄 Port，流程归 Loop Engine |
 | `MainInputStrategy` / `SubInputStrategy` | 删除；factory 绑定统一 `InputPort` adapter |
 | `MainEventStrategy` / `SubEventStrategy` | 删除；factory 绑定统一 `EventSink` adapter |
 | 直接复用父 `InteractionPort` | 改为 child-scoped `ParentMediatedInteractionPort` |
-| `BoundaryOnly` 仅做存在性校验 | 改为装配 `BoundaryHookPort` 执行能力过滤 |
+| Sub Hook 复用或过滤完整 HookPort | 为 Sub 装配无底层委托的 `EmptyHookPort` |
 | `ChatLoopContext` | 拆为 session command driver、`RunPreparationRequest` 与 `RunExecutionState` |
 | `ParentRunContextSource` | 以 parent capability registry/frame 的真实语义归入 `SessionState` |
 | `DerivedSubRun` | 删除；所有来源统一返回 `PreparedRun` |
@@ -649,7 +649,7 @@ Workspace 不得继续绕过 `RuntimeContext` 旁路进入 Loop adapter。
 - `RuntimeContextParts`、`RunContextBindings`、多套 assembler 和 Runtime 内第二 Composition Root 均退役。
 - fat `RunLoopPort`、Main/Sub Loop adapter 和 Main/Sub strategy 类型均退役；流程只由 Loop Engine 拥有。
 - `ParentMediated` 使用 child-scoped adapter，具备 request ownership、并发隔离和精确 teardown。
-- `BoundaryOnly` 使用真实 Hook capability adapter，禁止访问非边界 Hook invocation。
+- Sub Hook 使用独立 `EmptyHookPort`，禁止执行或转发任何 Hook invocation。
 - `Run` 与 `RunExecutionState` 无重复状态所有权。
 - Workspace、Prompt、Skills、Config 均按本文生命周期边界流动。
 - 每层装配、状态转换、能力不扩权、父子并发隔离和端到端场景都有相邻契约测试。

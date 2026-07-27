@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use crate::application::interaction::{InteractionBridge, InteractionPort};
 use crate::application::run_config::RunConfigSnapshot;
 use crate::application::runtime_context::{
-    ParentRunContextSource, ParentRunFrame, RunCancellationScope, RunContextBindings,
+    ParentRunContextSource, ParentRunFrame, RunCancellationScope, RunCapabilityBindings,
     RunInputBufferHandle, RunUsageTracker, RuntimeContext,
 };
 use crate::application::runtime_context_factory::RuntimeContextFactory;
@@ -216,7 +216,7 @@ fn make_factory() -> RuntimeContextFactory {
     )
 }
 
-fn make_bindings() -> RunContextBindings {
+fn make_bindings() -> RunCapabilityBindings {
     let provider_port: Arc<dyn ProviderPort> = Arc::new(FakeProviderPort);
     let binding = ProviderBinding {
         provider: provider_port.clone(),
@@ -229,27 +229,40 @@ fn make_bindings() -> RunContextBindings {
         context_window: None,
     };
 
-    RunContextBindings {
-        context: Arc::new(FakeContextPort),
-        provider: Arc::new(binding),
-        interaction: Arc::new(InteractionBridge::new()),
-        memory: Arc::new(memory::NoOpMemory),
-        config: RunConfigSnapshot::capture(
-            share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
-                share::config::domain::snapshot::ConfigRevision::new(1),
-                share::config::Config::default(),
+    RunCapabilityBindings {
+        model: crate::application::runtime_context::ModelBindings {
+            context: Arc::new(FakeContextPort),
+            provider: Arc::new(binding),
+            interaction: Arc::new(InteractionBridge::new()),
+            memory: Arc::new(memory::NoOpMemory),
+            config: RunConfigSnapshot::capture(
+                share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
+                    share::config::domain::snapshot::ConfigRevision::new(1),
+                    share::config::Config::default(),
+                ),
             ),
-        ),
-        cancel: RunCancellationScope::new(),
-        event_sink: noop_event_sink(),
-        usage: RunUsageTracker::new(),
-        input: RunInputBufferHandle::new(),
-        reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
-        tool_catalog: None,
+            reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
+            tool_catalog: None,
+        },
+        io: crate::application::runtime_context::IoBindings {
+            event_sink: noop_event_sink(),
+            input: RunInputBufferHandle::new(),
+        },
+        lifecycle: crate::application::runtime_context::LifecycleBindings {
+            cancel: RunCancellationScope::new(),
+            usage: RunUsageTracker::new(),
+        },
     }
 }
 
-// ── L1：资源 identity 测试 ──
+#[test]
+fn runtime_context_production_model_has_no_flat_run_context_bindings() {
+    let source = include_str!("runtime_context.rs");
+    assert!(source.contains("bindings: impl Into<RunCapabilityBindings>"));
+    assert!(!source.contains(
+        "pub fn new(\n        services: RuntimeServices,\n        bindings: RunContextBindings"
+    ));
+}
 
 #[test]
 fn main_runtime_context_preserves_injected_port_identity() {
@@ -288,23 +301,29 @@ fn main_runtime_context_preserves_injected_port_identity() {
         task_arc.clone(),
         hooks_arc.clone(),
     );
-    let bindings = RunContextBindings {
-        context: context_arc.clone(),
-        provider: provider_arc.clone(),
-        interaction: interaction_arc.clone(),
-        memory: memory_arc.clone(),
-        config: RunConfigSnapshot::capture(
-            share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
-                share::config::domain::snapshot::ConfigRevision::new(1),
-                share::config::Config::default(),
+    let bindings = RunCapabilityBindings {
+        model: crate::application::runtime_context::ModelBindings {
+            context: context_arc.clone(),
+            provider: provider_arc.clone(),
+            interaction: interaction_arc.clone(),
+            memory: memory_arc.clone(),
+            config: RunConfigSnapshot::capture(
+                share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
+                    share::config::domain::snapshot::ConfigRevision::new(1),
+                    share::config::Config::default(),
+                ),
             ),
-        ),
-        cancel: RunCancellationScope::new(),
-        event_sink: noop_event_sink(),
-        usage: RunUsageTracker::new(),
-        input: RunInputBufferHandle::new(),
-        reasoning: reasoning_arc.clone(),
-        tool_catalog: None,
+            reasoning: reasoning_arc.clone(),
+            tool_catalog: None,
+        },
+        io: crate::application::runtime_context::IoBindings {
+            event_sink: noop_event_sink(),
+            input: RunInputBufferHandle::new(),
+        },
+        lifecycle: crate::application::runtime_context::LifecycleBindings {
+            cancel: RunCancellationScope::new(),
+            usage: RunUsageTracker::new(),
+        },
     };
 
     let ctx = factory
@@ -444,7 +463,20 @@ fn runtime_context_ports_are_functional_not_just_identity() {
 
 // ── #1385: Poison recovery ──
 
-/// `ParentRunContextSource` must recover from a poisoned lock in `install()`
+#[test]
+fn parent_run_context_source_preserves_run_identity() {
+    let source = ParentRunContextSource::new();
+    let run_id = crate::domain::agent_run::RunId::new_v7();
+    let frame = Arc::new(ParentRunFrame {
+        run_id: run_id.clone(),
+        spec: crate::domain::agent_run::RunSpec::main(),
+        context: Arc::new(make_context()),
+    });
+    let _guard = source.install(frame);
+
+    assert_eq!(source.get().unwrap().run_id, run_id);
+}
+
 /// without panicking, keeping the source available for future use.
 #[test]
 fn parent_run_context_source_install_recovers_from_poison() {
@@ -460,6 +492,7 @@ fn parent_run_context_source_install_recovers_from_poison() {
 
     // After poison, install must still succeed (recover, not panic).
     let frame = Arc::new(ParentRunFrame {
+        run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
         context: Arc::new(make_context()),
     });
@@ -475,6 +508,7 @@ fn parent_run_context_source_get_recovers_from_poison() {
 
     // Pre-populate a frame so get() has something to return.
     let frame = Arc::new(ParentRunFrame {
+        run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
         context: Arc::new(make_context()),
     });
@@ -505,6 +539,7 @@ fn parent_run_context_source_get_recovers_from_poison() {
 fn parent_run_frame_guard_drop_does_not_double_panic_on_poison() {
     let source = ParentRunContextSource::new();
     let frame = Arc::new(ParentRunFrame {
+        run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
         context: Arc::new(make_context()),
     });
@@ -539,6 +574,7 @@ fn parent_run_context_source_install_works_after_poison_recovery() {
 
     // Install a new frame after poison.
     let frame = Arc::new(ParentRunFrame {
+        run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
         context: Arc::new(make_context()),
     });
@@ -789,9 +825,9 @@ fn make_context_with_io_seams() -> (
 
     let factory = make_factory();
     let mut bindings = make_bindings();
-    bindings.event_sink = event_sink.clone();
-    bindings.usage = usage.clone();
-    bindings.input = input.clone();
+    bindings.io.event_sink = event_sink.clone();
+    bindings.lifecycle.usage = usage.clone();
+    bindings.io.input = input.clone();
 
     let ctx = factory
         .assemble(&crate::domain::agent_run::RunSpec::main(), bindings, None)
@@ -1008,7 +1044,7 @@ fn factory_assembled_context_event_sink_is_real_not_noop() {
     // Build a RuntimeContext with this real handle via factory.
     let factory = make_factory();
     let mut bindings = make_bindings();
-    bindings.event_sink = handle;
+    bindings.io.event_sink = handle;
     let ctx = factory
         .assemble(&crate::domain::agent_run::RunSpec::main(), bindings, None)
         .expect("test context assembly");

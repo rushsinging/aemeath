@@ -42,6 +42,88 @@ impl runtime::ports::ProviderFactory for TestProviderFactory {
     }
 }
 
+fn initial_provider_assembly() -> runtime::InitialProviderAssembly {
+    let spec = runtime::ports::ProviderBuildSpec {
+        driver: "test".to_string(),
+        source_key: "test".to_string(),
+        api_style: None,
+        api_key: "test-key".to_string(),
+        base_url: None,
+        model: provider::ModelId {
+            provider: "test".to_string(),
+            model: "test-model".to_string(),
+        },
+        max_tokens: 8192,
+        requested_reasoning: provider::ReasoningLevel::Off,
+        context_window: Some(8192),
+        timeout: std::time::Duration::from_secs(30),
+        user_agent: "aemeath-test".to_string(),
+    };
+    let binding = runtime::ports::ProviderFactory::build(&TestProviderFactory, spec)
+        .expect("build test provider binding");
+    runtime::InitialProviderAssembly::new(
+        binding,
+        share::config::models::ResolvedModel {
+            source_key: "test".to_string(),
+            source_config: share::config::models::ProviderModelsConfig::default(),
+            model: share::config::models::ModelEntryConfig {
+                id: "test-model".to_string(),
+                context_window: 8192,
+                max_tokens: 8192,
+                ..Default::default()
+            },
+            driver: "test".to_string(),
+        },
+        runtime::ModelRuntimeSettings {
+            max_tokens: 8192,
+            reasoning: false,
+            reasoning_effort: None,
+        },
+    )
+}
+
+struct NoopAgentRunner;
+
+#[async_trait::async_trait]
+impl tools::AgentRunner for NoopAgentRunner {
+    async fn run_agent(&self, _request: tools::AgentRunRequest<'_>) -> tools::AgentRunTerminal {
+        tools::AgentRunTerminal::Completed {
+            result: String::new(),
+        }
+    }
+
+    async fn complete(
+        &self,
+        _prompt: &str,
+        _system: &str,
+        _cancellation: Arc<dyn tools::CancellationSignal>,
+    ) -> String {
+        String::new()
+    }
+}
+
+fn test_prompt_assembly() -> runtime::PromptAssembly {
+    runtime::PromptAssembly::new(Vec::new(), String::new(), String::new())
+}
+
+fn test_session_bootstrap_assembly(root: &std::path::Path) -> runtime::SessionBootstrapAssembly {
+    runtime::SessionBootstrapAssembly::new(root.to_path_buf(), 8192, true, false, None)
+}
+
+fn test_skill_bootstrap_assembly() -> runtime::SkillBootstrapAssembly {
+    runtime::SkillBootstrapAssembly::new(std::collections::HashMap::new())
+}
+
+fn test_agent_runner_assembly() -> runtime::AgentRunnerAssembly {
+    runtime::AgentRunnerAssembly {
+        runner: Arc::new(NoopAgentRunner),
+        parent_context_source: runtime::ParentRunContextSource::new(),
+        max_tool_concurrency: 10,
+        max_agent_concurrency: 4,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+    }
+}
+
 struct NoopReflectionHistory;
 
 struct NoopSessionManagement;
@@ -189,21 +271,21 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
             workspace,
             wiring,
             Arc::new(TestProviderFactory),
-            history.clone(),
-            Arc::new(policy::AllowAllPolicy),
-            access.clone(),
             session_management.clone(),
             hook_runner.clone(),
         ),
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),
-            tools.execution(),
-            tools.binding(),
             skill_catalog,
             skill_materializer.clone(),
             tool_result_materializer.clone(),
             active_run.clone(),
         ),
+        initial_provider_assembly(),
+        test_session_bootstrap_assembly(temp.path()),
+        test_prompt_assembly(),
+        test_skill_bootstrap_assembly(),
+        test_agent_runner_assembly(),
         {
             Arc::new(runtime::RuntimeContextFactory::new(
                 tools.catalog_port(),
@@ -217,14 +299,12 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         },
     );
 
-    // ── Arc identity: Core dependencies ──
+    // Core dependencies that also live in RuntimeServices are intentionally
+    // not projected again by RuntimeBootstrapDependencies.
     assert!(Arc::ptr_eq(
         &dependencies.session_management(),
         &session_management
     ));
-    assert!(Arc::ptr_eq(&dependencies.reflection_history(), &history));
-    assert!(Arc::ptr_eq(&dependencies.task_access(), &access));
-    assert!(Arc::ptr_eq(&dependencies.hook_runner(), &hook_runner));
     assert!(
         Arc::ptr_eq(&dependencies.wiring(), &wiring_clone),
         "wiring Arc identity preserved"

@@ -13,6 +13,14 @@ pub fn start_session(resume_session_id: Option<String>) -> String {
     session_id
 }
 
+pub struct AgentRunnerAssembly {
+    pub runner: Arc<dyn tools::AgentRunner>,
+    pub parent_context_source: ParentRunContextSource,
+    pub max_tool_concurrency: usize,
+    pub max_agent_concurrency: usize,
+    pub agent_semaphore: Arc<tokio::sync::Semaphore>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn build_agent_runner(
     config_reader: Arc<dyn config::ConfigReader>,
@@ -29,19 +37,28 @@ pub fn build_agent_runner(
     runtime_context_factory: Arc<
         crate::application::runtime_context_factory::RuntimeContextFactory,
     >,
-) -> Arc<agent_runner::CliAgentRunner> {
-    Arc::new(agent_runner::CliAgentRunner {
+) -> AgentRunnerAssembly {
+    let parent_context_for_runner = parent_context_source.clone();
+    let semaphore_for_runner = agent_semaphore.clone();
+    let runner: Arc<dyn tools::AgentRunner> = Arc::new(agent_runner::CliAgentRunner {
         factory,
         active_run,
         config_reader,
         max_tool_concurrency,
-        agent_semaphore,
+        agent_semaphore: semaphore_for_runner,
         tool_result_materializer,
         workspace: crate::application::workspace_access::RuntimeWorkspaceAccess::new(workspace),
         skill_materializer,
-        parent_context: parent_context_source,
+        parent_context: parent_context_for_runner,
         runtime_context_factory,
-    })
+    });
+    AgentRunnerAssembly {
+        runner,
+        parent_context_source,
+        max_tool_concurrency,
+        max_agent_concurrency: agent_semaphore.available_permits(),
+        agent_semaphore,
+    }
 }
 
 #[cfg(test)]
@@ -177,7 +194,7 @@ mod tests {
         // #1385: runner now only carries fields used by run_agent / complete;
         // policy / hook_runner / tool_catalog / tool_execution / tool_context_binding
         // are all accessed through derived.context at runtime.
-        assert_eq!(runner.max_tool_concurrency, 10);
+        assert!(runner.parent_context_source.get().is_none());
     }
 
     #[test]
