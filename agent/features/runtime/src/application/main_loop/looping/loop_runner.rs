@@ -279,18 +279,32 @@ where
                     continue;
                 }
                 PendingCommand::ResumeSession { id } => {
-                    match crate::application::client::resume_helper::resume_session_to_backing(
-                        &id,
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "resume_lifecycle boundary=runtime_command stage=command_started requested_session_id={} current_session_id={}",
+                        id,
+                        session_id
+                    );
+                    match crate::application::client::resume_helper::resume_session_to_backing(                        &id,
                         &wiring,
                     )
                     .await
                     {
                         Ok(projection) => {
-                            session_id = projection.session_id.clone();
+                            let loaded_session_id = projection.session_id.clone();
+                            let active_message_count = projection.active_messages.len();
+                            let display_step_count = projection.display_steps.len();
+                            session_id = loaded_session_id.clone();
                             messages = projection.active_messages.clone();
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::SessionResumed {
-                                    steps: projection
+                            log::debug!(
+                                target: crate::LOG_TARGET,
+                                "resume_lifecycle boundary=runtime_command stage=session_resumed_emit_started session_id={} active_messages={} display_steps={}",
+                                loaded_session_id,
+                                active_message_count,
+                                display_step_count
+                            );
+                            sink
+                                .send_event(RuntimeStreamEvent::SessionResumed {                                    steps: projection
                                         .display_steps
                                         .into_iter()
                                         .map(|step| super::RuntimeResumedSessionStep {
@@ -307,9 +321,13 @@ where
                                     .unwrap_or(0),
                                 })
                                 .await;
+                            log::debug!(
+                                target: crate::LOG_TARGET,
+                                "resume_lifecycle boundary=runtime_command stage=session_resumed_emit_completed session_id={} returning_to_idle=true",
+                                loaded_session_id
+                            );
                         }
-                        Err(error) => {
-                            use sdk::SessionResumeFailureKind;
+                        Err(error) => {                            use sdk::SessionResumeFailureKind;
                             let kind = match error {
                                 context::SessionManagementError::NotFound(_)
                                 | context::SessionManagementError::ProjectMismatch(_) => {
@@ -324,14 +342,20 @@ where
                                     SessionResumeFailureKind::Io
                                 }
                             };
-                            let _ = sink
+                            let failure_kind = format!("{kind:?}");
+                            sink
                                 .send_event(RuntimeStreamEvent::SessionResumeFailed {
                                     kind,
                                     id: id.clone(),
                                     message: error.to_string(),
                                 })
                                 .await;
-                        }
+                            log::debug!(
+                                target: crate::LOG_TARGET,
+                                "resume_lifecycle boundary=runtime_command stage=session_resume_failed_emit_completed requested_session_id={} kind={} returning_to_idle=true",
+                                id,
+                                failure_kind
+                            );                        }
                     }
                     continue;
                 }

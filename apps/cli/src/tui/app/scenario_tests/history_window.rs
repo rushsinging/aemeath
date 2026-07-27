@@ -105,6 +105,118 @@ fn assert_tool_groups_are_complete(harness: &TuiScenarioHarness) {
 }
 
 #[test]
+fn resumed_history_initial_window_keeps_newest_complete_groups() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    let steps = (0..1_200)
+        .map(|index| TuiResumedSessionStep {
+            run_id: "resume-tail-run".into(),
+            step_id: format!("resume-tail-step-{index}"),
+            messages: vec![TuiChatMessage::assistant_text(format!(
+                "RESUME-TAIL-ANSWER-{index:04}"
+            ))],
+        })
+        .collect();
+
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps,
+        session_id: "resume-tail".into(),
+        created_at: 0,
+    });
+    harness.render();
+
+    let document = harness.app.output_area.document();
+    let plain = document
+        .iter_lines()
+        .map(|line| line.plain.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(plain.contains("RESUME-TAIL-ANSWER-1199"));
+    assert!(!plain.contains("RESUME-TAIL-ANSWER-0000"));
+    assert!(plain.contains("更早的消息已折叠"));
+}
+
+#[test]
+fn resumed_history_initial_window_keeps_real_conclusion_tail_shape() {
+    let mut harness = TuiScenarioHarness::new(229, 60);
+    let old_tool_like_output =
+        std::iter::repeat_n(r#"{"type":"tool_result","content":"OLD-TOOL-JSON"}"#, 1_200)
+            .collect::<Vec<_>>()
+            .join("\n");
+    let steps = vec![
+        TuiResumedSessionStep {
+            run_id: "019f9c58-18a1-7572-bd92-9cd50143736b".into(),
+            step_id: "019f9c5e-61fd-7713-8398-3acf508b8d8b".into(),
+            messages: vec![TuiChatMessage::assistant_text(old_tool_like_output)],
+        },
+        TuiResumedSessionStep {
+            run_id: "019fa25f-088e-7542-b17e-6c59c659ff22".into(),
+            step_id: "019fa25f-088e-7542-b17e-6c6cf52b3781".into(),
+            messages: vec![
+                TuiChatMessage::user_text("结论呢"),
+                TuiChatMessage::assistant_text("#649 还不能关闭，而且剩余工作不少"),
+            ],
+        },
+        TuiResumedSessionStep {
+            run_id: "019fa26c-c3a5-7081-8a08-18c2f67f7a3c".into(),
+            step_id: "019fa26c-c3a5-7081-8a08-18d590c15043".into(),
+            messages: vec![
+                TuiChatMessage::user_text("结论呢"),
+                TuiChatMessage::assistant_text("#649 现在不能关，下一步只做 #1397"),
+            ],
+        },
+        TuiResumedSessionStep {
+            run_id: "019fa29b-ed93-78e2-b933-77a084d4bfa5".into(),
+            step_id: "019fa29b-ed94-7ff1-816d-b66ec87c3ed7".into(),
+            messages: vec![TuiChatMessage::user_text("继续")],
+        },
+    ];
+
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps,
+        session_id: "019f9952-601d-7139-a936-fa5d1f366eb9".into(),
+        created_at: 0,
+    });
+    harness.render();
+
+    let plain = harness
+        .app
+        .output_area
+        .document()
+        .iter_lines()
+        .map(|line| line.plain.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let timeline_texts = harness
+        .app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::UserMessage {
+                text, ..
+            }
+            | crate::tui::model::output_timeline::OutputTimelineItem::AssistantText {
+                text, ..
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(timeline_texts.ends_with(&[
+        "结论呢",
+        "#649 还不能关闭，而且剩余工作不少",
+        "结论呢",
+        "#649 现在不能关，下一步只做 #1397",
+        "继续",
+    ]));
+    assert!(plain.contains("结论呢"));
+    assert!(plain.contains("#649 还不能关闭，而且剩余工作不少"));
+    assert!(plain.contains("#649 现在不能关，下一步只做 #1397"));
+    assert!(plain.contains("继续"));
+}
+
+#[test]
 fn resumed_history_window_never_splits_edit_call_and_diff_result() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     for index in 0..180 {
@@ -147,8 +259,14 @@ fn resumed_history_window_reaches_oldest_history_without_folded_hint() {
     }
 
     assert_eq!(
-        harness.app.view_state.output.history_window_tail_offset, 0,
-        "到达最早历史后窗口起点必须为 0"
+        harness.app.view_state.output.history_window_tail_offset,
+        harness
+            .app
+            .view_state
+            .output
+            .source_total_lines
+            .saturating_sub(harness.app.view_state.output.render_line_limit()),
+        "到达最早历史后窗口尾部偏移必须达到最早可见位置"
     );
     assert!(
         !harness.screen().contains("更早的消息已折叠"),
@@ -163,7 +281,7 @@ fn scrolling_to_top_loads_history_in_five_hundred_line_batches() {
     seed_history(&mut harness, 1_300);
 
     assert_eq!(harness.app.view_state.output.render_line_limit(), 1_000);
-    assert!(!harness
+    assert!(harness
         .app
         .output_area
         .document()
@@ -297,6 +415,62 @@ fn top_request_before_first_resume_render_loads_after_source_is_observed() {
         harness.app.view_state.output.render_line_limit(),
         harness.app.view_state.output.source_total_lines.min(1_500)
     );
+}
+
+#[test]
+fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    let steps = (0..2_000)
+        .map(|index| TuiResumedSessionStep {
+            run_id: "resume-adopted-run".into(),
+            step_id: format!("resume-adopted-step-{index}"),
+            messages: vec![TuiChatMessage::assistant_text(format!(
+                "RESUME-ADOPTED-ANSWER-{index:04}"
+            ))],
+        })
+        .collect();
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps,
+        session_id: "resume-adopted".into(),
+        created_at: 0,
+    });
+    harness.render();
+    for _ in 0..20 {
+        harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
+        harness.render();
+    }
+    assert!(harness.app.view_state.output.history_window_tail_offset > 0);
+    assert!(!harness.app.view_state.output.auto_scroll);
+
+    harness.runtime_event(TuiRuntimeEvent::UserMessagesAdopted {
+        items: vec![TuiChatMessage {
+            role: "user".into(),
+            content: vec![crate::tui::adapter::runtime_view::TuiContentBlock::text(
+                "RESUME-ADOPTED-NEW-USER",
+            )],
+            input_id: Some("resume-adopted-input".into()),
+            source: crate::tui::adapter::runtime_view::TuiMessageSource::User,
+            stop_hook: None,
+        }],
+        queued: vec![],
+    });
+    harness.render();
+
+    assert_eq!(harness.app.view_state.output.history_window_tail_offset, 0);
+    assert!(harness.app.view_state.output.auto_scroll);
+    assert!(harness.screen().contains("RESUME-ADOPTED-NEW-USER"));
+
+    let context = context(9_999);
+    harness.runtime_event(TuiRuntimeEvent::Text {
+        context: context.clone(),
+        text: "RESUME-ADOPTED-NEXT-ASSISTANT".into(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::BlockComplete {
+        context,
+        text: "RESUME-ADOPTED-NEXT-ASSISTANT".into(),
+    });
+    harness.render();
+    assert!(harness.screen().contains("RESUME-ADOPTED-NEXT-ASSISTANT"));
 }
 
 #[test]

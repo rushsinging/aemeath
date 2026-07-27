@@ -12,6 +12,7 @@ pub enum TuiMsg {
     SpinnerTick,
     Ui(UiEvent),
     Runtime(TuiRuntimeEvent),
+    RuntimeBatch(Vec<TuiRuntimeEvent>),
     TerminalKey(KeyEvent),
     TerminalMouse(MouseEvent),
     TerminalResize { width: u16, height: u16 },
