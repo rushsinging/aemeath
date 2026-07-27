@@ -24,6 +24,9 @@ mod model_tests;
 pub mod notice;
 pub mod processing_job;
 pub mod queued_submission;
+#[cfg(test)]
+#[path = "conversation/retained_state_tests.rs"]
+mod retained_state_tests;
 pub mod runtime_state;
 pub mod spinner;
 pub mod status_notice;

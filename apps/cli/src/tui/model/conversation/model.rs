@@ -11,6 +11,21 @@ use crate::tui::app::event::ModelStreamWaitingView;
 use crate::tui::model::output_timeline::{OutputTimelineItem, OutputTimelineModel};
 use std::time::Instant;
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ConversationRetainedStateSnapshot {
+    pub chats: usize,
+    pub turns: usize,
+    pub tool_calls: usize,
+    pub timeline_items: usize,
+    pub agent_progress_entries: usize,
+    pub agent_progress_bytes: usize,
+    pub agent_runs: usize,
+    pub agent_run_steps: usize,
+    pub terminal_agent_runs: usize,
+    pub has_active_interaction: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConversationModel {
     // ── 对话内容 ──
@@ -82,6 +97,48 @@ impl ConversationModel {
     /// 当前内容版本号，供渲染层 memo。
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    #[cfg(test)]
+    pub(crate) fn retained_state_snapshot(&self) -> ConversationRetainedStateSnapshot {
+        use super::interaction::AgentRunPhase;
+
+        let turns = self.chats.iter().map(|chat| chat.turns.len()).sum();
+        let tool_calls = self
+            .chats
+            .iter()
+            .flat_map(|chat| &chat.turns)
+            .map(|turn| turn.tool_calls.len())
+            .sum();
+        let agent_progress_bytes = self
+            .agent_progress
+            .iter()
+            .map(|entry| entry.tool_id.len().saturating_add(entry.message.len()))
+            .sum();
+        let agent_run_steps = self.agent_runs.iter().map(|run| run.steps().len()).sum();
+        let terminal_agent_runs = self
+            .agent_runs
+            .iter()
+            .filter(|run| {
+                matches!(
+                    run.phase(),
+                    AgentRunPhase::Cancelled | AgentRunPhase::Completed | AgentRunPhase::Failed
+                )
+            })
+            .count();
+
+        ConversationRetainedStateSnapshot {
+            chats: self.chats.len(),
+            turns,
+            tool_calls,
+            timeline_items: self.timeline.items().len(),
+            agent_progress_entries: self.agent_progress.len(),
+            agent_progress_bytes,
+            agent_runs: self.agent_runs.len(),
+            agent_run_steps,
+            terminal_agent_runs,
+            has_active_interaction: self.active_interaction.is_some(),
+        }
     }
 
     pub(crate) fn agent_run(&self, run_id: &UiRunId) -> Option<&AgentRunState> {

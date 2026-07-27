@@ -35,6 +35,17 @@ struct RootLayoutEntry {
     line_count: usize,
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct RendererRetainedCacheCapacity {
+    pub block_entries: usize,
+    pub gutted_entries: usize,
+    pub root_layout_entries: usize,
+    pub peak_block_entries: usize,
+    pub peak_gutted_entries: usize,
+    pub peak_root_layout_entries: usize,
+}
+
 #[derive(Default)]
 pub struct OutputDocumentRenderer {
     cache: BlockCache,
@@ -44,6 +55,8 @@ pub struct OutputDocumentRenderer {
     /// 带 gutter 的 block 缓存：key = block_id，value = (GuttedKey, gutted RenderedBlock)。
     /// 命中时直接 clone（lines 为 Rc，廉价）；未命中则走完整 render_self + apply_gutter 路径。
     gutted: HashMap<String, (GuttedKey, RenderedBlock)>,
+    #[cfg(test)]
+    retained_cache_peak: RendererRetainedCacheCapacity,
     #[cfg(test)]
     render_count: std::cell::Cell<usize>,
     /// 统计 gutted 缓存未命中（重新渲染）次数，用于测试断言。
@@ -174,7 +187,21 @@ impl OutputDocumentRenderer {
             gutted_before.saturating_sub(self.gutted.len()),
         );
         #[cfg(test)]
-        crate::tui::render::performance::record_document_render(started.elapsed());
+        {
+            self.retained_cache_peak.peak_block_entries = self
+                .retained_cache_peak
+                .peak_block_entries
+                .max(self.cache.len());
+            self.retained_cache_peak.peak_gutted_entries = self
+                .retained_cache_peak
+                .peak_gutted_entries
+                .max(self.gutted.len());
+            self.retained_cache_peak.peak_root_layout_entries = self
+                .retained_cache_peak
+                .peak_root_layout_entries
+                .max(self.root_layouts.len());
+            crate::tui::render::performance::record_document_render(started.elapsed());
+        }
         document
     }
 
@@ -347,6 +374,16 @@ impl OutputDocumentRenderer {
                 markdown_spacing,
                 out,
             );
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn retained_cache_capacity(&self) -> RendererRetainedCacheCapacity {
+        RendererRetainedCacheCapacity {
+            block_entries: self.cache.len(),
+            gutted_entries: self.gutted.len(),
+            root_layout_entries: self.root_layouts.len(),
+            ..self.retained_cache_peak
         }
     }
 
