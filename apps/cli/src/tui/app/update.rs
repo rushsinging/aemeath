@@ -622,7 +622,6 @@ impl App {
         use std::rc::Rc;
 
         let total = document.total_lines();
-        let skip_lines = total.saturating_sub(line_limit).saturating_sub(tail_offset);
         if total <= line_limit {
             return document;
         }
@@ -634,27 +633,20 @@ impl App {
             groups.push(blocks.by_ref().take(count).collect::<Vec<_>>());
         }
 
-        // source document 顺序是旧 → 新；滑动到更早历史时按完整 root group
-        // 跳过和保留，确保 ToolCall 与其 ToolResult 子块不可分割。
-        let mut skipped = 0usize;
-        let mut start = 0usize;
-        while start < groups.len() {
-            let group_lines = groups[start]
-                .iter()
-                .map(|block| block.lines.len())
-                .sum::<usize>();
-            if skipped.saturating_add(group_lines) > skip_lines {
-                break;
-            }
-            skipped += group_lines;
-            start += 1;
-        }
-
+        // source document 顺序是旧 → 新；必须从最新端反向装满窗口。
+        // 若从旧端按行数定位起点，横跨边界的超大旧 group 会独占预算，
+        // 反而把它之后的最新消息截掉。按完整 root group 反向选择也保证
+        // ToolCall 与其 ToolResult 子块不可分割。
+        let mut skipped_newer = 0usize;
         let mut kept_lines = 0usize;
         let mut kept_groups = Vec::new();
-        for group in groups.into_iter().skip(start) {
+        for group in groups.into_iter().rev() {
             let group_lines = group.iter().map(|block| block.lines.len()).sum::<usize>();
-            if kept_lines > 0 && kept_lines.saturating_add(group_lines) > line_limit {
+            if skipped_newer < tail_offset {
+                skipped_newer = skipped_newer.saturating_add(group_lines);
+                continue;
+            }
+            if !kept_groups.is_empty() && kept_lines.saturating_add(group_lines) > line_limit {
                 break;
             }
             kept_lines = kept_lines.saturating_add(group_lines);
@@ -664,28 +656,32 @@ impl App {
                 break;
             }
         }
+        kept_groups.reverse();
 
-        let folded = skipped;
+        let folded = total
+            .saturating_sub(skipped_newer)
+            .saturating_sub(kept_lines);
         let mut root_group_block_counts = kept_groups.iter().map(Vec::len).collect::<Vec<_>>();
         let mut new_blocks = kept_groups.into_iter().flatten().collect::<Vec<_>>();
 
-        // 顶部插入提示行
-        let hint_line = RenderedLine::with_plain(
-            vec![Span::styled(
+        if folded > 0 {
+            // 顶部插入提示行
+            let hint_line = RenderedLine::with_plain(
+                vec![Span::styled(
+                    format!("─── 更早的消息已折叠（{folded} 行）───"),
+                    Style::default().fg(crate::tui::render::theme::TEXT_DIM),
+                )],
                 format!("─── 更早的消息已折叠（{folded} 行）───"),
-                Style::default().fg(crate::tui::render::theme::TEXT_DIM),
-            )],
-            format!("─── 更早的消息已折叠（{folded} 行）───"),
-        );
-        new_blocks.insert(
-            0,
-            RenderedBlock {
-                block_id: "_folded_hint".into(),
-                lines: Rc::new(vec![hint_line]),
-            },
-        );
-
-        root_group_block_counts.insert(0, 1);
+            );
+            new_blocks.insert(
+                0,
+                RenderedBlock {
+                    block_id: "_folded_hint".into(),
+                    lines: Rc::new(vec![hint_line]),
+                },
+            );
+            root_group_block_counts.insert(0, 1);
+        }
         crate::tui::render::output::rendered::RenderedDocument {
             blocks: new_blocks,
             root_group_block_counts,
