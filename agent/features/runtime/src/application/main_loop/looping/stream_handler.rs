@@ -66,7 +66,9 @@ pub fn should_emit_model_stream_waiting(
 
 pub struct InvocationEventReducer<S: ChatEventSink> {
     handler: RuntimeEventProjector<S>,
-    saw_visible_delta: bool,
+    streamed_text: String,
+    streamed_thinking: String,
+    streamed_tool_ids: std::collections::HashSet<String>,
 }
 
 fn has_actionable_output(output: &[provider::ProviderContentBlock]) -> bool {
@@ -88,7 +90,9 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
     pub fn new(sink: S) -> Self {
         Self {
             handler: RuntimeEventProjector::new(sink),
-            saw_visible_delta: false,
+            streamed_text: String::new(),
+            streamed_thinking: String::new(),
+            streamed_tool_ids: std::collections::HashSet::new(),
         }
     }
 
@@ -99,7 +103,9 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
     ) -> Self {
         Self {
             handler: RuntimeEventProjector::with_tool_identity(sink, tool_identity, context),
-            saw_visible_delta: false,
+            streamed_text: String::new(),
+            streamed_thinking: String::new(),
+            streamed_tool_ids: std::collections::HashSet::new(),
         }
     }
 
@@ -115,11 +121,11 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
             InvocationEvent::Delta(delta) => {
                 match delta {
                     InvocationDelta::Text(text) => {
-                        self.saw_visible_delta = true;
+                        self.streamed_text.push_str(&text);
                         self.handler.on_text(&text)
                     }
                     InvocationDelta::Thinking { thinking, .. } => {
-                        self.saw_visible_delta = true;
+                        self.streamed_thinking.push_str(&thinking);
                         self.handler.on_thinking(&thinking)
                     }
                     InvocationDelta::ToolCallStarted {
@@ -127,7 +133,9 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                         provider_id,
                         name,
                     } => {
-                        self.saw_visible_delta = true;
+                        if let Some(provider_id) = &provider_id {
+                            self.streamed_tool_ids.insert(provider_id.0.clone());
+                        }
                         self.handler.on_tool_use_start(
                             &name,
                             provider_id.as_ref().map(|id| id.0.as_str()),
@@ -139,7 +147,9 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                         provider_id,
                         partial_json,
                     } => {
-                        self.saw_visible_delta = true;
+                        if let Some(provider_id) = &provider_id {
+                            self.streamed_tool_ids.insert(provider_id.0.clone());
+                        }
                         self.handler.on_tool_arguments_delta(
                             index,
                             "",
@@ -157,22 +167,36 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                 if !has_actionable_output(&completion.output) {
                     return Err(empty_completion_error());
                 }
-                if !self.saw_visible_delta {
-                    for block in &completion.output {
-                        match block {
-                            provider::ProviderContentBlock::Text(text) => {
-                                self.handler.on_text(text)
+                for block in &completion.output {
+                    match block {
+                        provider::ProviderContentBlock::Text(text) => {
+                            if let Some(missing) = text.strip_prefix(&self.streamed_text) {
+                                if !missing.is_empty() {
+                                    self.handler.on_text(missing);
+                                }
+                            } else if self.streamed_text.is_empty() {
+                                self.handler.on_text(text);
                             }
-                            provider::ProviderContentBlock::Thinking { thinking, .. } => {
-                                self.handler.on_thinking(thinking)
-                            }
-                            provider::ProviderContentBlock::ToolCall(call) => self
-                                .handler
-                                .on_tool_use_start(&call.name, Some(&call.id.0), 0),
                         }
+                        provider::ProviderContentBlock::Thinking { thinking, .. } => {
+                            if let Some(missing) = thinking.strip_prefix(&self.streamed_thinking) {
+                                if !missing.is_empty() {
+                                    self.handler.on_thinking(missing);
+                                }
+                            } else if self.streamed_thinking.is_empty() {
+                                self.handler.on_thinking(thinking);
+                            }
+                        }
+                        provider::ProviderContentBlock::ToolCall(call)
+                            if !self.streamed_tool_ids.contains(&call.id.0) =>
+                        {
+                            self.handler
+                                .on_tool_use_start(&call.name, Some(&call.id.0), 0);
+                        }
+                        provider::ProviderContentBlock::ToolCall(_) => {}
                     }
-                    self.handler.complete_active_streaming_block();
                 }
+                self.handler.complete_active_streaming_block();
                 let content = completion
                     .output
                     .into_iter()
