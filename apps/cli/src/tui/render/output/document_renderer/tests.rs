@@ -273,58 +273,19 @@ fn test_user_message_blank_lines_receive_fill_style_without_filler_text() {
     assert!(lines[5].spans.is_empty());
 }
 
-fn rb(id: &str, lines: usize) -> RenderedBlock {
-    use crate::tui::render::output::rendered::RenderedLine;
-    use ratatui::text::Span;
-    use std::rc::Rc;
-    RenderedBlock {
-        block_id: id.into(),
-        lines: Rc::new(vec![
-            RenderedLine::new(vec![Span::raw(id.to_string())]);
-            lines
-        ]),
-    }
+#[test]
+fn select_latest_root_start_drops_oldest_group_when_over_max_lines() {
+    assert_eq!(select_latest_root_start(&[2, 2], 3), 1);
 }
 
 #[test]
-fn test_trim_root_groups_drops_oldest_group_when_over_max_lines() {
-    // 每个 root 子树自成一组（单块）；总 4 行，max=3，最新组（2 行）保留，最旧组丢弃。
-    let groups = vec![vec![rb("old", 2)], vec![rb("new", 2)]];
-    let trimmed = trim_root_groups_to_max_lines(groups, 3);
-
-    assert_eq!(trimmed.len(), 1);
-    assert_eq!(trimmed[0][0].block_id, "new");
-    assert_eq!(trimmed[0][0].lines.len(), 2);
+fn select_latest_root_start_never_splits_subtree() {
+    assert_eq!(select_latest_root_start(&[2, 2], 3), 1);
 }
 
 #[test]
-fn test_trim_root_groups_never_splits_subtree() {
-    // 两个 root 子树，各 = parent(1) + child(1) = 2 行，共 4 行；max=3 只容得下最新整组。
-    let old_group = vec![rb("p-old", 1), rb("c-old", 1)];
-    let new_group = vec![rb("p-new", 1), rb("c-new", 1)];
-    let trimmed = trim_root_groups_to_max_lines(vec![old_group, new_group], 3);
-
-    let ids: Vec<&str> = trimmed
-        .iter()
-        .flatten()
-        .map(|b| b.block_id.as_str())
-        .collect();
-    // 最新子树的父与子都在；最旧子树的父与子都不在——子树从不被拆开。
-    assert_eq!(
-        ids,
-        vec!["p-new", "c-new"],
-        "裁剪必须以整棵 root 子树为单位，NEVER 拆分父/子块"
-    );
-}
-
-#[test]
-fn test_trim_root_groups_keeps_newest_even_if_over_max() {
-    // 边界：最新组单独超限也始终保留（与旧 per-block 裁剪一致），避免输出为空。
-    let groups = vec![vec![rb("old", 5)], vec![rb("new", 10)]];
-    let trimmed = trim_root_groups_to_max_lines(groups, 3);
-
-    assert_eq!(trimmed.len(), 1);
-    assert_eq!(trimmed[0][0].block_id, "new");
+fn select_latest_root_start_keeps_newest_even_if_over_max() {
+    assert_eq!(select_latest_root_start(&[5, 10], 3), 1);
 }
 
 #[test]
@@ -352,9 +313,8 @@ fn test_render_tree_retains_only_trimmed_live_blocks() {
 }
 
 #[test]
-fn test_trim_root_groups_zero_max_returns_empty() {
-    let trimmed = trim_root_groups_to_max_lines(vec![vec![rb("a", 1)]], 0);
-    assert!(trimmed.is_empty());
+fn select_latest_root_start_zero_max_returns_empty_window() {
+    assert_eq!(select_latest_root_start(&[1], 0), 1);
 }
 
 #[test]
@@ -564,6 +524,100 @@ fn test_gutted_cache_reuses_static_block_across_frames() {
         after_first,
         "静态 block 跨 frame 应复用 gutted 缓存"
     );
+}
+
+fn static_edit_root(id: &str, lines: usize) -> BlockNode {
+    let old = (0..lines)
+        .map(|index| format!("fn item_{index}() {{ println!(\"old {index}\"); }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut new_lines = old.lines().map(str::to_string).collect::<Vec<_>>();
+    new_lines[lines / 2] = format!("fn item_{}() {{ println!(\"new\"); }}", lines / 2);
+    let result_text = format!("replaced 1 occurrence(s) in src/{id}.rs");
+    let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
+        key: format!("{id}-result"),
+        tool_title: "Edit".into(),
+        args_preview: Some(format!(r#"{{"file_path":"src/{id}.rs"}}"#)),
+        result_text: result_text.clone(),
+        data: Some(serde_json::json!({
+            "old": old,
+            "new": new_lines.join("\n"),
+            "start_line": 1
+        })),
+        style: SemanticStyle::Success,
+    });
+    let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+        key: id.into(),
+        chat_id: None,
+        turn_id: None,
+        tool_call_id: Some(id.into()),
+        title: "Edit".into(),
+        icon: "✓".into(),
+        semantic_status: ToolSemanticStatus::Success,
+        style: SemanticStyle::Success,
+        args_preview: Some(format!(r#"{{"file_path":"src/{id}.rs"}}"#)),
+        activity_lines: Vec::new(),
+        result_summary: Some(result_text),
+        result_payload: None,
+        workspace_root: None,
+        collapsible: false,
+        collapsed: false,
+        agent_meta: None,
+    });
+    BlockNode {
+        block_id: id.into(),
+        block_version: tool_kind.cache_version(),
+        kind: tool_kind,
+        children: vec![BlockNode {
+            block_id: format!("{id}-result"),
+            block_version: result_kind.cache_version(),
+            kind: result_kind,
+            children: Vec::new(),
+        }],
+    }
+}
+
+#[test]
+fn history_over_max_lines_does_not_rehighlight_evicted_static_edits_on_next_frame() {
+    let vm = vm_with_roots(
+        (0..6)
+            .map(|index| static_edit_root(&format!("edit-{index}"), 2_000))
+            .collect(),
+    );
+    let mut renderer = OutputDocumentRenderer::default();
+
+    let (_, cold) = crate::tui::render::performance::capture(|| {
+        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal())
+    });
+    let (_, warm) = crate::tui::render::performance::capture(|| {
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+    });
+
+    assert_eq!(cold.edit_diff_calls, 6);
+    assert_eq!(warm.edit_diff_calls, 0);
+    assert_eq!(warm.diff_build_calls, 0);
+    assert_eq!(warm.syntax_highlight_calls, 0);
+}
+
+#[test]
+fn unrelated_new_root_does_not_rehighlight_windowed_static_edits() {
+    let mut vm = vm_with_roots(
+        (0..6)
+            .map(|index| static_edit_root(&format!("edit-{index}"), 2_000))
+            .collect(),
+    );
+    let mut renderer = OutputDocumentRenderer::default();
+    let _ = renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal());
+
+    vm.version += 1;
+    vm.roots.push(node("unrelated", "无关的新消息", vec![]));
+    let (_, revised) = crate::tui::render::performance::capture(|| {
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+    });
+
+    assert_eq!(revised.edit_diff_calls, 0);
+    assert_eq!(revised.diff_build_calls, 0);
+    assert_eq!(revised.syntax_highlight_calls, 0);
 }
 
 #[test]
