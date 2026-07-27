@@ -58,6 +58,21 @@ impl TuiScenarioHarness {
         self.messages.push_back(TuiMsg::Runtime(event));
         self.drain(32);
     }
+    pub fn sdk_runtime_batch(&mut self, events: impl IntoIterator<Item = sdk::ChatEvent>) {
+        let events = events
+            .into_iter()
+            .filter_map(|event| {
+                match crate::tui::adapter::event_mapping::sdk_event_to_tui_event(event) {
+                    crate::tui::adapter::event_mapping::SdkEventMapping::Runtime(event) => {
+                        Some(event)
+                    }
+                    crate::tui::adapter::event_mapping::SdkEventMapping::Nop => None,
+                }
+            })
+            .collect();
+        self.messages.push_back(TuiMsg::RuntimeBatch(events));
+        self.drain(32);
+    }
     pub fn resize(&mut self, width: u16, height: u16) {
         self.terminal
             .resize(ratatui::layout::Rect::new(0, 0, width, height))
