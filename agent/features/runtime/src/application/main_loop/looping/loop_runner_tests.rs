@@ -193,8 +193,8 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
 }
 
 use crate::application::testing::{
-    advance_until_retry_condition, empty_completion, successful_completion, text_completion_stream,
-    ScriptedInvocationProvider, RETRY_ADVANCE_LIMITS,
+    empty_completion, successful_completion, text_completion_stream, ScriptedInvocationProvider,
+    RETRY_ADVANCE_LIMITS,
 };
 
 use async_trait::async_trait;
@@ -836,12 +836,9 @@ async fn main_partial_stream_failure_retries_without_rollback() {
 
     let ctx = retry_main_context(provider.clone(), sink.clone(), input_events);
     let run = tokio::spawn(process_chat_loop(ctx));
-    advance_until_retry_condition(
-        "successful retry",
-        std::time::Duration::from_secs(11),
-        || provider.calls() == 2,
-    )
-    .await;
+    provider
+        .wait_for_calls(2, std::time::Duration::from_secs(11))
+        .await;
     wait_for_retry_test_condition("completed Main turn", || {
         sink.events()
             .iter()
@@ -890,12 +887,9 @@ async fn main_empty_completion_retries_and_succeeds() {
     let (ctx, wiring) =
         retry_main_context_with_wiring(provider.clone(), sink.clone(), input_events);
     let run = tokio::spawn(process_chat_loop(ctx));
-    advance_until_retry_condition(
-        "successful empty-completion retry",
-        std::time::Duration::from_secs(11),
-        || provider.calls() == 2,
-    )
-    .await;
+    provider
+        .wait_for_calls(2, std::time::Duration::from_secs(11))
+        .await;
     wait_for_retry_test_condition("completed Main turn", || {
         sink.events()
             .iter()
@@ -951,11 +945,9 @@ async fn main_empty_completion_exhaustion_fails_instead_of_completing() {
     let ctx = retry_main_context(provider.clone(), sink.clone(), input_events);
     let run = tokio::spawn(process_chat_loop(ctx));
     for (retry_index, virtual_time_limit) in RETRY_ADVANCE_LIMITS.into_iter().enumerate() {
-        let expected_calls = retry_index + 2;
-        advance_until_retry_condition("next empty completion retry", virtual_time_limit, || {
-            provider.calls() == expected_calls
-        })
-        .await;
+        provider
+            .wait_for_calls(retry_index + 2, virtual_time_limit)
+            .await;
     }
     wait_for_retry_test_condition("exhaustion ApiError", || {
         sink.events()

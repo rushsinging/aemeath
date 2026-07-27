@@ -117,19 +117,45 @@ pub(crate) fn text_completion_stream(
 #[derive(Clone)]
 pub(crate) struct ScriptedInvocationProvider {
     attempts: Arc<Mutex<VecDeque<Vec<InvocationEvent>>>>,
-    calls: Arc<Mutex<usize>>,
+    calls: tokio::sync::watch::Sender<usize>,
 }
 
 impl ScriptedInvocationProvider {
     pub(crate) fn new(attempts: Vec<Vec<InvocationEvent>>) -> Self {
+        let (calls, _) = tokio::sync::watch::channel(0);
         Self {
             attempts: Arc::new(Mutex::new(VecDeque::from(attempts))),
-            calls: Arc::new(Mutex::new(0)),
+            calls,
         }
     }
 
     pub(crate) fn calls(&self) -> usize {
-        *self.calls.lock().unwrap()
+        *self.calls.borrow()
+    }
+
+    pub(crate) async fn wait_for_calls(
+        &self,
+        expected: usize,
+        virtual_time_limit: std::time::Duration,
+    ) {
+        let mut calls = self.calls.subscribe();
+        let reached = tokio::time::timeout(virtual_time_limit, async {
+            loop {
+                if *calls.borrow_and_update() >= expected {
+                    return;
+                }
+                calls
+                    .changed()
+                    .await
+                    .expect("scripted invocation provider call tracker");
+            }
+        })
+        .await;
+        assert!(
+            reached.is_ok(),
+            "timed out waiting for provider call {expected}; observed {}",
+            self.calls()
+        );
     }
 }
 
@@ -143,7 +169,12 @@ impl provider::test_harness::LlmProvider for ScriptedInvocationProvider {
         _tool_schemas: &[serde_json::Value],
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<InvocationStream, ProviderError> {
-        *self.calls.lock().unwrap() += 1;
+        let next_call = self
+            .calls
+            .borrow()
+            .checked_add(1)
+            .expect("provider call count");
+        self.calls.send_replace(next_call);
         let events = self
             .attempts
             .lock()
@@ -192,32 +223,6 @@ pub(crate) const RETRY_ADVANCE_LIMITS: [std::time::Duration; 10] = [
     std::time::Duration::from_secs(121),
     std::time::Duration::from_secs(121),
 ];
-
-pub(crate) async fn advance_until_retry_condition(
-    description: &str,
-    virtual_time_limit: std::time::Duration,
-    condition: impl Fn() -> bool,
-) {
-    let tick = std::time::Duration::from_millis(100);
-    let max_ticks = virtual_time_limit.as_millis().div_ceil(tick.as_millis());
-    for _ in 0..max_ticks {
-        if condition() {
-            return;
-        }
-        // Let the task under test register its retry timer before advancing
-        // virtual time.  Advancing first can move the clock past the
-        // invocation that creates the timer, making the timer's deadline
-        // relative to a later instant and causing a false timeout under
-        // heavily instrumented test runs.
-        tokio::task::yield_now().await;
-        if condition() {
-            return;
-        }
-        tokio::time::advance(tick).await;
-    }
-    tokio::task::yield_now().await;
-    assert!(condition(), "timed out waiting for {description}");
-}
 
 // ─── Test ProviderPort helpers (#907) ────────────────────────────
 
