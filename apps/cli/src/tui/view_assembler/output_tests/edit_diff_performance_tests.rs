@@ -1,6 +1,8 @@
 use super::super::OutputViewAssembler;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
-use crate::tui::model::conversation::intent::{StartChat, ToolCallUpdate, ToolResult};
+use crate::tui::model::conversation::intent::{
+    AppendSystemMessage, StartChat, ToolCallUpdate, ToolResult,
+};
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
@@ -133,6 +135,41 @@ fn edit_cold_work_scales_and_spinner_warm_render_reuses_static_diff() {
 }
 
 #[test]
+fn revision_update_after_history_trim_rebuilds_evicted_static_edit_diff() {
+    let mut conversation = edit_conversation(6, 2_000);
+    let mut renderer = OutputDocumentRenderer::default();
+    let first_vm = OutputViewAssembler::assemble_from_conversation(
+        &conversation,
+        conversation.revision(),
+        None,
+    );
+    let (_, cold) = capture(|| {
+        renderer.render_model_document(&first_vm, 100, 100, 0, MarkdownSpacingPolicy::normal())
+    });
+
+    conversation.apply(AppendSystemMessage {
+        text: "与既有 Edit 内容无关的新消息".to_string(),
+    });
+    let next_vm = OutputViewAssembler::assemble_from_conversation(
+        &conversation,
+        conversation.revision(),
+        None,
+    );
+    let (_, revised) = capture(|| {
+        renderer.render_model_document(&next_vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+    });
+
+    assert!(cold.block_cache_retain_evictions > 0);
+    assert!(cold.gutted_cache_retain_evictions > 0);
+    assert!(
+        revised.block_cache_absent_misses > 0,
+        "被历史裁剪淘汰的静态 Edit block 会在下一次 revision render 时以 absent miss 重建"
+    );
+    assert!(revised.edit_diff_calls > 0);
+    assert!(revised.syntax_highlight_calls > 0);
+}
+
+#[test]
 #[ignore = "性能基线；手动运行：cargo test -p cli --release edit_diff_release_workload -- --ignored --nocapture"]
 #[allow(clippy::print_stdout)]
 fn edit_diff_release_workload() {
@@ -188,7 +225,8 @@ fn edit_diff_release_workload() {
         let (cold_p50, cold_p95) = percentiles_ns(&cold_ns).unwrap();
         let (warm_p50, warm_p95) = percentiles_ns(&warm_ns).unwrap();
         println!(
-            "edits={edit_count:>2} lines_per_diff={lines_per_diff:>4} total_source_lines={:>5} | assemble_p50/p95={:.2}/{:.2}ms cold_p50/p95={:.2}/{:.2}ms warm_p50/p95={:.3}/{:.3}ms | diff_calls={} diff_output_lines={} highlighter_creations={} highlight_calls={} highlight_bytes={} block_miss={} gutted_miss={}",            edit_count * lines_per_diff,
+            "edits={edit_count:>2} lines_per_diff={lines_per_diff:>4} total_source_lines={:>5} | assemble_p50/p95={:.2}/{:.2}ms cold_p50/p95={:.2}/{:.2}ms warm_p50/p95={:.3}/{:.3}ms | diff_calls={} diff_output_lines={} highlighter_creations={} highlight_calls={} highlight_bytes={} block_miss={} block_absent={} block_version={} block_width={} block_spacing={} block_evicted={} gutted_miss={} gutted_absent={} gutted_version={} gutted_width={} gutted_depth={} gutted_spacing={} gutted_marker={} gutted_evicted={}",
+            edit_count * lines_per_diff,
             assemble_p50 as f64 / 1_000_000.0,
             assemble_p95 as f64 / 1_000_000.0,
             cold_p50 as f64 / 1_000_000.0,
@@ -198,9 +236,22 @@ fn edit_diff_release_workload() {
             representative.edit_diff_calls,
             representative.diff_build_output_lines,
             representative.syntax_highlighter_creations,
-            representative.syntax_highlight_calls,            representative.syntax_highlight_input_bytes,
+            representative.syntax_highlight_calls,
+            representative.syntax_highlight_input_bytes,
             representative.block_cache_misses,
+            representative.block_cache_absent_misses,
+            representative.block_cache_version_misses,
+            representative.block_cache_width_misses,
+            representative.block_cache_spacing_misses,
+            representative.block_cache_retain_evictions,
             representative.gutted_cache_misses,
+            representative.gutted_cache_absent_misses,
+            representative.gutted_cache_version_misses,
+            representative.gutted_cache_width_misses,
+            representative.gutted_cache_depth_misses,
+            representative.gutted_cache_spacing_misses,
+            representative.gutted_cache_marker_misses,
+            representative.gutted_cache_retain_evictions,
         );
     }
 }

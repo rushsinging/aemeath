@@ -16,8 +16,20 @@ pub(crate) struct RenderPerformanceSnapshot {
     pub syntax_highlight_input_bytes: u64,
     pub block_cache_hits: u64,
     pub block_cache_misses: u64,
+    pub block_cache_absent_misses: u64,
+    pub block_cache_version_misses: u64,
+    pub block_cache_width_misses: u64,
+    pub block_cache_spacing_misses: u64,
+    pub block_cache_retain_evictions: u64,
     pub gutted_cache_hits: u64,
     pub gutted_cache_misses: u64,
+    pub gutted_cache_absent_misses: u64,
+    pub gutted_cache_version_misses: u64,
+    pub gutted_cache_width_misses: u64,
+    pub gutted_cache_depth_misses: u64,
+    pub gutted_cache_spacing_misses: u64,
+    pub gutted_cache_marker_misses: u64,
+    pub gutted_cache_retain_evictions: u64,
 }
 
 thread_local! {
@@ -133,12 +145,68 @@ pub(crate) fn record_block_cache_miss() {
     update(|snapshot| snapshot.block_cache_misses += 1);
 }
 
+pub(crate) fn record_block_cache_absent_miss() {
+    update(|snapshot| snapshot.block_cache_absent_misses += 1);
+}
+
+pub(crate) fn record_block_cache_version_miss() {
+    update(|snapshot| snapshot.block_cache_version_misses += 1);
+}
+
+pub(crate) fn record_block_cache_width_miss() {
+    update(|snapshot| snapshot.block_cache_width_misses += 1);
+}
+
+pub(crate) fn record_block_cache_spacing_miss() {
+    update(|snapshot| snapshot.block_cache_spacing_misses += 1);
+}
+
+pub(crate) fn record_block_cache_retain_evictions(count: usize) {
+    update(|snapshot| {
+        snapshot.block_cache_retain_evictions = snapshot
+            .block_cache_retain_evictions
+            .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
+    });
+}
+
 pub(crate) fn record_gutted_cache_hit() {
     update(|snapshot| snapshot.gutted_cache_hits += 1);
 }
 
 pub(crate) fn record_gutted_cache_miss() {
     update(|snapshot| snapshot.gutted_cache_misses += 1);
+}
+
+pub(crate) fn record_gutted_cache_absent_miss() {
+    update(|snapshot| snapshot.gutted_cache_absent_misses += 1);
+}
+
+pub(crate) fn record_gutted_cache_version_miss() {
+    update(|snapshot| snapshot.gutted_cache_version_misses += 1);
+}
+
+pub(crate) fn record_gutted_cache_width_miss() {
+    update(|snapshot| snapshot.gutted_cache_width_misses += 1);
+}
+
+pub(crate) fn record_gutted_cache_depth_miss() {
+    update(|snapshot| snapshot.gutted_cache_depth_misses += 1);
+}
+
+pub(crate) fn record_gutted_cache_spacing_miss() {
+    update(|snapshot| snapshot.gutted_cache_spacing_misses += 1);
+}
+
+pub(crate) fn record_gutted_cache_marker_miss() {
+    update(|snapshot| snapshot.gutted_cache_marker_misses += 1);
+}
+
+pub(crate) fn record_gutted_cache_retain_evictions(count: usize) {
+    update(|snapshot| {
+        snapshot.gutted_cache_retain_evictions = snapshot
+            .gutted_cache_retain_evictions
+            .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
+    });
 }
 
 pub(crate) fn percentiles_ns(samples: &[u64]) -> Option<(u64, u64)> {

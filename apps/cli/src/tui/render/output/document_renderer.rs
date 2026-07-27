@@ -107,7 +107,13 @@ impl OutputDocumentRenderer {
         let live_set: HashSet<&str> = blocks.iter().map(|b| b.block_id.as_str()).collect();
         self.cache.retain(&live_set);
         // gutted 缓存同步清理：移除已不在渲染树中的条目，防止内存泄漏。
+        #[cfg(test)]
+        let gutted_before = self.gutted.len();
         self.gutted.retain(|id, _| live_set.contains(id.as_str()));
+        #[cfg(test)]
+        crate::tui::render::performance::record_gutted_cache_retain_evictions(
+            gutted_before.saturating_sub(self.gutted.len()),
+        );
         #[cfg(test)]
         crate::tui::render::performance::record_document_render(started.elapsed());
         document
@@ -173,6 +179,27 @@ impl OutputDocumentRenderer {
                 }
                 return;
             }
+            #[cfg(test)]
+            {
+                if cached_key.block_version != gkey.block_version {
+                    crate::tui::render::performance::record_gutted_cache_version_miss();
+                }
+                if cached_key.text_width != gkey.text_width {
+                    crate::tui::render::performance::record_gutted_cache_width_miss();
+                }
+                if cached_key.depth != gkey.depth {
+                    crate::tui::render::performance::record_gutted_cache_depth_miss();
+                }
+                if cached_key.markdown_spacing != gkey.markdown_spacing {
+                    crate::tui::render::performance::record_gutted_cache_spacing_miss();
+                }
+                if cached_key.marker_frame != gkey.marker_frame {
+                    crate::tui::render::performance::record_gutted_cache_marker_miss();
+                }
+            }
+        } else {
+            #[cfg(test)]
+            crate::tui::render::performance::record_gutted_cache_absent_miss();
         }
         #[cfg(test)]
         crate::tui::render::performance::record_gutted_cache_miss();

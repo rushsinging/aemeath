@@ -12,8 +12,20 @@ fn capture_when_scope_active_returns_accumulated_snapshot() {
         record_syntax_highlight(11, Duration::from_micros(1));
         record_block_cache_hit();
         record_block_cache_miss();
+        record_block_cache_absent_miss();
+        record_block_cache_version_miss();
+        record_block_cache_width_miss();
+        record_block_cache_spacing_miss();
+        record_block_cache_retain_evictions(2);
         record_gutted_cache_hit();
         record_gutted_cache_miss();
+        record_gutted_cache_absent_miss();
+        record_gutted_cache_version_miss();
+        record_gutted_cache_width_miss();
+        record_gutted_cache_depth_miss();
+        record_gutted_cache_spacing_miss();
+        record_gutted_cache_marker_miss();
+        record_gutted_cache_retain_evictions(3);
         42
     });
 
@@ -30,8 +42,20 @@ fn capture_when_scope_active_returns_accumulated_snapshot() {
     assert_eq!(snapshot.syntax_highlight_ns, 1_000);
     assert_eq!(snapshot.block_cache_hits, 1);
     assert_eq!(snapshot.block_cache_misses, 1);
+    assert_eq!(snapshot.block_cache_absent_misses, 1);
+    assert_eq!(snapshot.block_cache_version_misses, 1);
+    assert_eq!(snapshot.block_cache_width_misses, 1);
+    assert_eq!(snapshot.block_cache_spacing_misses, 1);
+    assert_eq!(snapshot.block_cache_retain_evictions, 2);
     assert_eq!(snapshot.gutted_cache_hits, 1);
     assert_eq!(snapshot.gutted_cache_misses, 1);
+    assert_eq!(snapshot.gutted_cache_absent_misses, 1);
+    assert_eq!(snapshot.gutted_cache_version_misses, 1);
+    assert_eq!(snapshot.gutted_cache_width_misses, 1);
+    assert_eq!(snapshot.gutted_cache_depth_misses, 1);
+    assert_eq!(snapshot.gutted_cache_spacing_misses, 1);
+    assert_eq!(snapshot.gutted_cache_marker_misses, 1);
+    assert_eq!(snapshot.gutted_cache_retain_evictions, 3);
 }
 
 #[test]

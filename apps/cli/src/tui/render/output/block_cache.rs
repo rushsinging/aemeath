@@ -36,6 +36,21 @@ impl BlockCache {
                 crate::tui::render::performance::record_block_cache_hit();
                 return cached.rendered.clone();
             }
+            #[cfg(test)]
+            {
+                if cached.key.version != key.version {
+                    crate::tui::render::performance::record_block_cache_version_miss();
+                }
+                if cached.key.text_width != key.text_width {
+                    crate::tui::render::performance::record_block_cache_width_miss();
+                }
+                if cached.key.markdown_spacing != key.markdown_spacing {
+                    crate::tui::render::performance::record_block_cache_spacing_miss();
+                }
+            }
+        } else {
+            #[cfg(test)]
+            crate::tui::render::performance::record_block_cache_absent_miss();
         }
         #[cfg(test)]
         crate::tui::render::performance::record_block_cache_miss();
@@ -58,7 +73,13 @@ impl BlockCache {
     /// 调用方应先将 live ids 收入 `HashSet<&str>`（O(n) 构建），
     /// 使此处每个条目的成员查询为 O(1)，整体 O(n) 而非 O(n²)。
     pub fn retain(&mut self, live_set: &std::collections::HashSet<&str>) {
+        #[cfg(test)]
+        let before = self.map.len();
         self.map.retain(|id, _| live_set.contains(id.as_str()));
+        #[cfg(test)]
+        crate::tui::render::performance::record_block_cache_retain_evictions(
+            before.saturating_sub(self.map.len()),
+        );
     }
 
     pub fn contains(&self, block_id: &str) -> bool {
