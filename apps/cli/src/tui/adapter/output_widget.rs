@@ -57,7 +57,13 @@ mod tests {
             follow_tail_hint: true,
         };
 
-        let document = renderer.render_model_document(&view_model, 1, 80, 0);
+        let document = renderer.render_model_document(
+            &view_model,
+            1,
+            80,
+            0,
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+        );
         // 每个 root block 前有 1 空行（视觉分隔），故 assistant block = 空行 + 内容 = 2 行。
         assert_eq!(document.total_lines(), 2);
         assert!(document
@@ -68,15 +74,33 @@ mod tests {
     #[test]
     fn test_output_area_render_document_clamps_zero_fallback_width_to_one() {
         let mut renderer = OutputDocumentRenderer::default();
-        let document = renderer.render_model_document(&vm(1), 1, 0, 0);
+        let document = renderer.render_model_document(
+            &vm(1),
+            1,
+            0,
+            0,
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+        );
         assert_eq!(document.total_lines(), 2);
     }
 
     #[test]
     fn test_output_area_render_document_uses_layout_width_when_ready() {
         let mut renderer = OutputDocumentRenderer::default();
-        let _ = renderer.render_model_document(&vm(1), 40, 80, 0);
-        let _ = renderer.render_model_document(&vm(1), 40, 80, 1);
+        let _ = renderer.render_model_document(
+            &vm(1),
+            40,
+            80,
+            0,
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+        );
+        let _ = renderer.render_model_document(
+            &vm(1),
+            40,
+            80,
+            1,
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+        );
         assert_eq!(
             renderer.render_count(),
             1,

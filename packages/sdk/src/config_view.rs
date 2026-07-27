@@ -27,6 +27,38 @@ pub enum PermissionModeView {
     AllowAll,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkdownSpacingModeView {
+    #[default]
+    Normal,
+    Compact,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ElementSpacingView {
+    #[serde(default)]
+    pub before: Option<u8>,
+    #[serde(default)]
+    pub after: Option<u8>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MarkdownSpacingOverridesView {
+    #[serde(default)]
+    pub paragraph: Option<ElementSpacingView>,
+    #[serde(default)]
+    pub heading: Option<ElementSpacingView>,
+    #[serde(default)]
+    pub list: Option<ElementSpacingView>,
+    #[serde(default)]
+    pub code_block: Option<ElementSpacingView>,
+    #[serde(default)]
+    pub table: Option<ElementSpacingView>,
+    #[serde(default)]
+    pub blockquote: Option<ElementSpacingView>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConfigView {
     pub model_name: String,
@@ -35,6 +67,10 @@ pub struct ConfigView {
     pub permission_mode: String,
     pub markdown: bool,
     pub verbose: bool,
+    #[serde(default)]
+    pub markdown_spacing: MarkdownSpacingModeView,
+    #[serde(default)]
+    pub markdown_spacing_overrides: MarkdownSpacingOverridesView,
     pub context_size: usize,
     pub logging_level: String,
 }
@@ -55,6 +91,7 @@ pub struct ConfigUpdateResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigApplicationScopeView {
+    Immediate,
     SessionRestartRequired,
     Run,
 }
@@ -63,6 +100,8 @@ pub enum ConfigApplicationScopeView {
 pub struct ConfigReloadedEvent {
     pub changed_keys: Vec<String>,
     pub scopes: Vec<ConfigApplicationScopeView>,
+    #[serde(default)]
+    pub view: ConfigView,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

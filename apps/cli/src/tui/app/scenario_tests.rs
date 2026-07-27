@@ -8,6 +8,7 @@ mod history_window;
 mod input;
 mod interaction;
 mod links;
+mod markdown_spacing;
 mod p1;
 mod resume_sdk_delivery;
 mod snapshot;

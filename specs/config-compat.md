@@ -139,6 +139,7 @@ TUI **NEVER** 直接读 config/env。config 变更通过事件流推送给 TUI�
 
 | 作用域 | 字段 / 资源 | 生效规则 |
 |---|---|---|
+| Immediate | `ui.markdown_spacing`、`ui.markdown_spacing_overrides` | 已提交快照随 reload event 立即投影到当前 TUI，并触发输出重渲染。 |
 | Session restart-required | `ui.tui`、日志 sink/目录/rotation、skills 目录、storage 路径 | 活跃 session 不重建；Runtime 标记 pending revision 并经 SDK/TUI 提示，成功 resume 后清除。 |
 | Run | provider/model/API key/base URL/timeout、reasoning、context size、permissions（含 `allow_all`）、hooks、roles、并发、tool-result policy、memory 注入和 language | 每个新 Main Run / 新 Subagent Run 捕获一次；已运行 Run 不变化。 |
 | Run Step | 不单独 reload Config；仅消费所属 Run 的 frozen snapshot | 每个 invocation 可更新 messages/tool schemas/task reminder/token budget，但 `ConfigSnapshot` revision 不变。 |

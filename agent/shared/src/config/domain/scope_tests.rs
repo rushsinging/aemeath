@@ -1,5 +1,8 @@
 use super::{classify_application_scopes, ConfigApplicationScope};
 use crate::config::hooks::{HookEntry, HookEvent};
+use crate::config::ui::{
+    ElementSpacingOverride, MarkdownSpacingMode, MarkdownSpacingOverrides, SpacingLines,
+};
 use crate::config::{Config, PermissionModeConfig};
 
 fn changed(mut change: impl FnMut(&mut Config)) -> Vec<ConfigApplicationScope> {
@@ -52,6 +55,26 @@ fn user_agent_change_is_run_scoped() {
 #[test]
 fn unchanged_config_has_no_application_scope() {
     assert!(classify_application_scopes(&Config::default(), &Config::default()).is_empty());
+}
+
+#[test]
+fn markdown_spacing_changes_are_immediate_without_misclassifying_other_ui_fields() {
+    let mode_scopes = changed(|config| config.ui.markdown_spacing = MarkdownSpacingMode::Compact);
+    assert_eq!(mode_scopes, vec![ConfigApplicationScope::Immediate]);
+
+    let override_scopes = changed(|config| {
+        config.ui.markdown_spacing_overrides = MarkdownSpacingOverrides {
+            heading: Some(ElementSpacingOverride {
+                before: Some(SpacingLines::new(1).unwrap()),
+                after: None,
+            }),
+            ..Default::default()
+        };
+    });
+    assert_eq!(override_scopes, vec![ConfigApplicationScope::Immediate]);
+
+    let unrelated_ui_scopes = changed(|config| config.ui.progress = false);
+    assert!(unrelated_ui_scopes.is_empty());
 }
 
 #[test]

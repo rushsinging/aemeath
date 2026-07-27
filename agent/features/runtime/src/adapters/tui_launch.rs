@@ -26,6 +26,7 @@ pub struct TuiLaunchContext {
     pub user_context: String,
     pub context_size: usize,
     pub verbose: bool,
+    pub config_view: sdk::ConfigView,
     pub agent_runner: Arc<dyn AgentRunner>,
     pub allow_all: bool,
     pub max_tool_concurrency: usize,

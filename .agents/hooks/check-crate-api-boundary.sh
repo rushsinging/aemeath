@@ -179,6 +179,7 @@ ROOT_ACCESS_ALLOW = {
         "ToolResultMaterializer", "ToolResultMaterializationPolicy", "ActiveRunRegistry",
         "AtomicBlobToolResultStore",
         "UsageSink",
+        "config_snapshot_to_sdk",
         "from_args_with_workspace",
     },
       "policy": {

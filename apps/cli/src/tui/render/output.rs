@@ -8,6 +8,7 @@ pub mod markdown;
 pub mod primitives;
 pub mod rendered;
 pub mod selection_overlay;
+pub mod spacing;
 pub mod status_line;
 pub mod tool_display;
 

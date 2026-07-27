@@ -8,4 +8,5 @@ pub mod output_timeline;
 pub mod root;
 pub mod runtime;
 pub mod runtime_presentation;
+pub mod ui_preferences;
 pub mod workspace_provider;

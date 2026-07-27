@@ -123,6 +123,38 @@ fn runtime_presentation_intent_updates_model_and_marks_status_dirty() {
 }
 
 #[test]
+fn markdown_spacing_preference_marks_output_dirty_once_and_equal_policy_is_noop() {
+    let mut model = TuiModel::default();
+    let compact = crate::tui::render::output::spacing::MarkdownSpacingPolicy::compact();
+
+    let changed = reduce_intent(
+        &mut model,
+        AgentIntent::UiPreferences(
+            crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(compact),
+        ),
+    );
+    assert_eq!(model.ui_preferences.markdown_spacing(), compact);
+    assert!(changed.dirty.output);
+    assert_eq!(
+        changed
+            .effects
+            .iter()
+            .filter(|effect| matches!(effect, Effect::RequestRender))
+            .count(),
+        1
+    );
+
+    let unchanged = reduce_intent(
+        &mut model,
+        AgentIntent::UiPreferences(
+            crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(compact),
+        ),
+    );
+    assert!(!unchanged.dirty.output);
+    assert!(unchanged.effects.is_empty());
+}
+
+#[test]
 fn workspace_snapshot_intent_marks_output_and_status_dirty() {
     let mut model = TuiModel::default();
 

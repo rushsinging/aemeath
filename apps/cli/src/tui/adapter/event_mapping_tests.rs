@@ -80,6 +80,27 @@ fn ask_user_batch_is_retired_and_mapped_to_nop() {
 }
 
 #[test]
+fn config_reload_maps_spacing_policy_into_tui_owned_event() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ConfigReloaded {
+        event: sdk::ConfigReloadedEvent {
+            changed_keys: vec!["ui.markdown_spacing".to_string()],
+            scopes: vec![sdk::ConfigApplicationScopeView::Immediate],
+            view: sdk::ConfigView {
+                markdown_spacing: sdk::MarkdownSpacingModeView::Compact,
+                ..Default::default()
+            },
+        },
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ConfigReloaded { view, .. })
+            if view.markdown_spacing.mode()
+                == crate::tui::render::output::spacing::MarkdownSpacingMode::Compact
+    ));
+}
+
+#[test]
 fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
     let expected_chat_id = sdk::ids::ChatId::new("chat-retry");
     let expected_turn_id = sdk::ids::ChatTurnId::new("turn-retry");

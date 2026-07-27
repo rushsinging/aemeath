@@ -303,6 +303,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         },
         ChatEvent::ConfigReloaded { event } => TuiRuntimeEvent::ConfigReloaded {
             changed_keys: event.changed_keys,
+            view: config_view(event.view),
         },
         ChatEvent::SessionReset => TuiRuntimeEvent::SessionReset,
         ChatEvent::UserMessagesWithdrawn { texts } => {
@@ -657,6 +658,8 @@ fn config_cause(value: sdk::ConfigChangeCause) -> TuiConfigChangeCause {
     }
 }
 fn config_view(value: sdk::ConfigView) -> TuiConfigView {
+    let markdown_spacing =
+        crate::tui::view_model::markdown_spacing::MarkdownSpacingPolicy::from(&value);
     TuiConfigView {
         model_name: value.model_name,
         provider: value.provider,
@@ -664,6 +667,7 @@ fn config_view(value: sdk::ConfigView) -> TuiConfigView {
         permission_mode: value.permission_mode,
         markdown: value.markdown,
         verbose: value.verbose,
+        markdown_spacing,
         context_size: value.context_size,
         logging_level: value.logging_level,
     }

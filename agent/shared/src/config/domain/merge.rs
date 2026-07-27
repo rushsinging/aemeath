@@ -17,7 +17,10 @@ use crate::config::{
     skills::SkillsConfig,
     storage::StorageConfig,
     tools::{AgentRoleConfig, AgentsConfig, ToolResultConfig, ToolsConfig},
-    ui::{TaskLifecycleConfig, TaskListConfig, UiConfig},
+    ui::{
+        ElementSpacingOverride, MarkdownSpacingMode, MarkdownSpacingOverrides, TaskLifecycleConfig,
+        TaskListConfig, UiConfig,
+    },
     Config, GuidanceConfig, GuidanceReloadPolicy,
 };
 use std::{collections::HashMap, path::PathBuf};
@@ -171,6 +174,7 @@ pub struct AgentsConfigPatch {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct UiConfigPatch {
     #[serde(default)]
     pub markdown: Option<bool>,
@@ -185,9 +189,39 @@ pub struct UiConfigPatch {
     #[serde(default)]
     pub tui: Option<bool>,
     #[serde(default)]
+    pub markdown_spacing: Option<MarkdownSpacingMode>,
+    #[serde(default)]
+    pub markdown_spacing_overrides: Option<MarkdownSpacingOverridesPatch>,
+    #[serde(default)]
     pub task_list: Option<TaskListConfigPatch>,
     #[serde(default)]
     pub task_lifecycle: Option<TaskLifecycleConfigPatch>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ElementSpacingOverridePatch {
+    #[serde(default)]
+    pub before: Option<crate::config::ui::SpacingLines>,
+    #[serde(default)]
+    pub after: Option<crate::config::ui::SpacingLines>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MarkdownSpacingOverridesPatch {
+    #[serde(default)]
+    pub paragraph: Option<ElementSpacingOverridePatch>,
+    #[serde(default)]
+    pub heading: Option<ElementSpacingOverridePatch>,
+    #[serde(default)]
+    pub list: Option<ElementSpacingOverridePatch>,
+    #[serde(default)]
+    pub code_block: Option<ElementSpacingOverridePatch>,
+    #[serde(default)]
+    pub table: Option<ElementSpacingOverridePatch>,
+    #[serde(default)]
+    pub blockquote: Option<ElementSpacingOverridePatch>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -524,11 +558,55 @@ pub(crate) fn apply_ui_patch(mut base: UiConfig, patch: UiConfigPatch) -> UiConf
     if let Some(v) = patch.tui {
         base.tui = v;
     }
+    if let Some(v) = patch.markdown_spacing {
+        base.markdown_spacing = v;
+    }
+    if let Some(v) = patch.markdown_spacing_overrides {
+        base.markdown_spacing_overrides =
+            apply_markdown_spacing_overrides_patch(base.markdown_spacing_overrides, v);
+    }
     if let Some(v) = patch.task_list {
         base.task_list = apply_task_list_patch(base.task_list, v);
     }
     if let Some(v) = patch.task_lifecycle {
         base.task_lifecycle = apply_task_lifecycle_patch(base.task_lifecycle, v);
+    }
+    base
+}
+
+fn apply_markdown_spacing_overrides_patch(
+    mut base: MarkdownSpacingOverrides,
+    patch: MarkdownSpacingOverridesPatch,
+) -> MarkdownSpacingOverrides {
+    macro_rules! apply_element {
+        ($field:ident) => {
+            if let Some(value) = patch.$field {
+                base.$field = Some(apply_element_spacing_patch(
+                    base.$field.unwrap_or_default(),
+                    value,
+                ));
+            }
+        };
+    }
+
+    apply_element!(paragraph);
+    apply_element!(heading);
+    apply_element!(list);
+    apply_element!(code_block);
+    apply_element!(table);
+    apply_element!(blockquote);
+    base
+}
+
+fn apply_element_spacing_patch(
+    mut base: ElementSpacingOverride,
+    patch: ElementSpacingOverridePatch,
+) -> ElementSpacingOverride {
+    if let Some(value) = patch.before {
+        base.before = Some(value);
+    }
+    if let Some(value) = patch.after {
+        base.after = Some(value);
     }
     base
 }
@@ -773,6 +851,7 @@ impl PriorityChain {
 mod tests {
     use super::*;
     use crate::config::domain::snapshot::ConfigSnapshot;
+    use crate::config::ui::MarkdownSpacingMode;
 
     #[test]
     fn test_config_patch_snake_case_concurrency_reaches_snapshot() {
@@ -834,5 +913,45 @@ mod tests {
         assert_eq!(policy.threshold_chars(), 9_000);
         assert_eq!(policy.preview_head_chars(), 2_000);
         assert_eq!(policy.preview_tail_chars(), 500);
+    }
+
+    #[test]
+    fn markdown_spacing_patch_merges_element_edges_sparsely() {
+        let global: ConfigPatch = serde_json::from_str(
+            r#"{
+                "ui": {
+                    "markdown_spacing": "compact",
+                    "markdown_spacing_overrides": {
+                        "heading": { "before": 1, "after": 2 },
+                        "paragraph": { "after": 1 }
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        let local: ConfigPatch = serde_json::from_str(
+            r#"{
+                "ui": {
+                    "markdown_spacing_overrides": {
+                        "heading": { "after": 0 }
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut chain = PriorityChain::new();
+        chain.push(global);
+        chain.push(local);
+        let snapshot = ConfigSnapshot::new(chain.merge(Config::default()));
+        let overrides = snapshot.markdown_spacing_overrides();
+
+        assert_eq!(
+            snapshot.markdown_spacing_mode(),
+            MarkdownSpacingMode::Compact
+        );
+        assert_eq!(overrides.heading.unwrap().before.unwrap().get(), 1);
+        assert_eq!(overrides.heading.unwrap().after.unwrap().get(), 0);
+        assert_eq!(overrides.paragraph.unwrap().after.unwrap().get(), 1);
     }
 }

@@ -346,6 +346,17 @@ impl App {
             TuiRuntimeEvent::SessionReset => {
                 return UpdateResult::one(Effect::ResetRuntimeState);
             }
+            TuiRuntimeEvent::ConfigChanged { view, .. }
+            | TuiRuntimeEvent::ConfigReloaded { view, .. } => {
+                self.config_view.markdown_spacing = match view.markdown_spacing.mode() {
+                    crate::tui::render::output::spacing::MarkdownSpacingMode::Normal => {
+                        sdk::MarkdownSpacingModeView::Normal
+                    }
+                    crate::tui::render::output::spacing::MarkdownSpacingMode::Compact => {
+                        sdk::MarkdownSpacingModeView::Compact
+                    }
+                };
+            }
             TuiRuntimeEvent::SessionResumed {
                 steps,
                 session_id,
@@ -554,6 +565,7 @@ impl App {
                 width,
                 self.output_area.term_width,
                 self.view_state.animation.spinner_frame,
+                self.model.ui_preferences.markdown_spacing(),
             )
         }));
         // 无论渲染成败都把 view_model 放回 cache，保留 memo。

@@ -34,6 +34,7 @@ pub struct AgentEventMapping {
     pub diagnostic: Vec<DiagnosticIntent>,
     pub session: Vec<SessionIntent>,
     pub workspace: Vec<WorkspaceIntent>,
+    pub ui_preferences: Vec<crate::tui::model::ui_preferences::UiPreferencesIntent>,
 }
 
 #[cfg(test)]
@@ -674,12 +675,27 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 }),
             ),
         },
-        TuiRuntimeEvent::ConfigChanged { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::ConfigReloaded { changed_keys } => conversation(
-            ConversationIntent::AppendSystemMessage(AppendSystemMessage {
-                text: format!("[config reloaded] changed: {}", changed_keys.join(", ")),
-            }),
-        ),
+        TuiRuntimeEvent::ConfigChanged { view, .. } => AgentEventMapping {
+            ui_preferences: vec![
+                crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(
+                    view.markdown_spacing,
+                ),
+            ],
+            ..Default::default()
+        },
+        TuiRuntimeEvent::ConfigReloaded { changed_keys, view } => {
+            let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
+                AppendSystemMessage {
+                    text: format!("[config reloaded] changed: {}", changed_keys.join(", ")),
+                },
+            ));
+            mapping.ui_preferences.push(
+                crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(
+                    view.markdown_spacing,
+                ),
+            );
+            mapping
+        }
         TuiRuntimeEvent::ModelSwitched { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::ThinkingChanged { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::ContextEstimated { .. } => AgentEventMapping::default(),

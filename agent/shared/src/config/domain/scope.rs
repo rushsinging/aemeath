@@ -7,6 +7,8 @@ use super::config::Config;
 /// 配置变更可被应用的最早安全边界。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConfigApplicationScope {
+    /// 当前 session 可立即应用，无需等待新的 Run。
+    Immediate,
     /// 当前 session 的基础设施必须重建后才能应用。
     SessionRestartRequired,
     /// 下一次 Main Run 或新建 Subagent Run 可以应用。
@@ -16,6 +18,7 @@ pub enum ConfigApplicationScope {
 impl ConfigApplicationScope {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Immediate => "immediate",
             Self::SessionRestartRequired => "session_restart_required",
             Self::Run => "run",
         }
@@ -26,6 +29,9 @@ impl ConfigApplicationScope {
 pub fn classify_application_scopes(before: &Config, after: &Config) -> Vec<ConfigApplicationScope> {
     let mut scopes = Vec::new();
 
+    if immediate_changed(before, after) {
+        scopes.push(ConfigApplicationScope::Immediate);
+    }
     if session_restart_required_changed(before, after) {
         scopes.push(ConfigApplicationScope::SessionRestartRequired);
     }
@@ -34,6 +40,14 @@ pub fn classify_application_scopes(before: &Config, after: &Config) -> Vec<Confi
     }
 
     scopes
+}
+
+fn immediate_changed(before: &Config, after: &Config) -> bool {
+    value_changed(&before.ui.markdown_spacing, &after.ui.markdown_spacing)
+        || value_changed(
+            &before.ui.markdown_spacing_overrides,
+            &after.ui.markdown_spacing_overrides,
+        )
 }
 
 fn session_restart_required_changed(before: &Config, after: &Config) -> bool {

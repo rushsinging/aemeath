@@ -25,6 +25,16 @@ use ratatui::text::Span;
 #[derive(Clone, Copy, Debug)]
 pub struct RenderCtx {
     pub text_width: u16,
+    pub markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
+}
+
+impl RenderCtx {
+    pub const fn for_width(text_width: u16) -> Self {
+        Self {
+            text_width,
+            markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+        }
+    }
 }
 
 /// 行内 link 的位置与 URL，用于 Cmd+Click 打开。

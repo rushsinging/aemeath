@@ -23,27 +23,10 @@ pub fn markdown(text: &str, base_style: Style, width: u16) -> Vec<RenderedLine> 
     if text.is_empty() {
         return inline_lines("", base_style, width);
     }
-    // 紧凑模式：跳过连续空行，只在段落边界保留第一个空行作为视觉间距。
-    // 首尾空行也跳过——减少不必要的大面积留白。
-    let mut prev_blank = true; // 跳过开头空行
+    // 单块内部逐行渲染；块间空白由 fenced orchestration 统一负责。
     text.lines()
-        .filter(|line| {
-            let blank = line.trim().is_empty();
-            let keep = !blank || !prev_blank;
-            prev_blank = blank;
-            keep
-        })
         .flat_map(|line| render_line(line, base_style, width))
         .collect()
-}
-
-/// fence 外紧凑模式：跳过连续空行（只在段落边界保留一个）。
-/// fence 内的代码块空行原样保留。
-pub(crate) fn should_skip_blank_outside_fence(line: &str, prev_blank: &mut bool) -> bool {
-    let blank = line.trim().is_empty();
-    let skip = blank && *prev_blank;
-    *prev_blank = blank;
-    skip
 }
 
 /// 渲染单行：先识别块级前缀（引用 / 列表），剥离后正文走 inline，再把

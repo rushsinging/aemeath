@@ -52,7 +52,8 @@ pub use commands::{
 };
 pub use config_view::{
     ConfigApplicationScopeView, ConfigChangeCause, ConfigChangedEvent, ConfigField,
-    ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, PermissionModeView,
+    ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, ElementSpacingView,
+    MarkdownSpacingModeView, MarkdownSpacingOverridesView, PermissionModeView,
 };
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;

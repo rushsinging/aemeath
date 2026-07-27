@@ -233,6 +233,7 @@ pub enum RuntimeStreamEvent {
     /// 配置/指令/guidance 文件变更通知。
     ConfigReloaded {
         changed_keys: Vec<String>,
+        view: sdk::ConfigView,
     },
 
     /// Compact 进度通知。`current`/`total` 为 map-reduce chunk 计数（单次摘要时为 None）。

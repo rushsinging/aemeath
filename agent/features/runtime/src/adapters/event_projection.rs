@@ -435,10 +435,14 @@ pub(crate) fn project_stream_event(
             workspace_root,
             workspace: crate::application::client::workspace_context_to_sdk(workspace),
         },
-        crate::application::main_loop::RuntimeStreamEvent::ConfigReloaded { changed_keys } => {
+        crate::application::main_loop::RuntimeStreamEvent::ConfigReloaded {
+            changed_keys,
+            view,
+        } => {
             let scopes = changed_keys
                 .iter()
                 .filter_map(|key| match key.as_str() {
+                    "config:scope:immediate" => Some(sdk::ConfigApplicationScopeView::Immediate),
                     "config:scope:session_restart_required" => {
                         Some(sdk::ConfigApplicationScopeView::SessionRestartRequired)
                     }
@@ -450,6 +454,7 @@ pub(crate) fn project_stream_event(
                 event: sdk::ConfigReloadedEvent {
                     changed_keys,
                     scopes,
+                    view,
                 },
             }
         }

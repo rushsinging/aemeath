@@ -1,11 +1,12 @@
 use sdk::{
-    ConfigField, ConfigUpdateResult, ConfigView, MemoryConfigView, ReflectionConfigView,
-    SessionSummary,
+    ConfigField, ConfigUpdateResult, ConfigView, ElementSpacingView, MarkdownSpacingModeView,
+    MarkdownSpacingOverridesView, MemoryConfigView, ReflectionConfigView, SessionSummary,
 };
 
-pub(crate) fn config_snapshot_to_sdk(
+pub fn config_snapshot_to_sdk(
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
 ) -> ConfigView {
+    let overrides = snapshot.markdown_spacing_overrides();
     ConfigView {
         model_name: snapshot.model_name().to_string(),
         provider: snapshot.provider().map(str::to_string),
@@ -18,8 +19,27 @@ pub(crate) fn config_snapshot_to_sdk(
         .to_string(),
         markdown: snapshot.markdown(),
         verbose: snapshot.verbose(),
+        markdown_spacing: match snapshot.markdown_spacing_mode() {
+            share::config::MarkdownSpacingMode::Normal => MarkdownSpacingModeView::Normal,
+            share::config::MarkdownSpacingMode::Compact => MarkdownSpacingModeView::Compact,
+        },
+        markdown_spacing_overrides: MarkdownSpacingOverridesView {
+            paragraph: overrides.paragraph.map(element_spacing_to_sdk),
+            heading: overrides.heading.map(element_spacing_to_sdk),
+            list: overrides.list.map(element_spacing_to_sdk),
+            code_block: overrides.code_block.map(element_spacing_to_sdk),
+            table: overrides.table.map(element_spacing_to_sdk),
+            blockquote: overrides.blockquote.map(element_spacing_to_sdk),
+        },
         context_size: snapshot.context_size(),
         logging_level: snapshot.logging_level().to_string(),
+    }
+}
+
+fn element_spacing_to_sdk(value: share::config::ElementSpacingOverride) -> ElementSpacingView {
+    ElementSpacingView {
+        before: value.before.map(share::config::SpacingLines::get),
+        after: value.after.map(share::config::SpacingLines::get),
     }
 }
 
@@ -165,6 +185,12 @@ mod tests {
         config.permissions.mode = share::config::PermissionModeConfig::AllowAll;
         config.ui.markdown = false;
         config.ui.verbose = true;
+        config.ui.markdown_spacing = share::config::MarkdownSpacingMode::Compact;
+        config.ui.markdown_spacing_overrides.heading =
+            Some(share::config::ElementSpacingOverride {
+                before: Some(share::config::SpacingLines::new(1).unwrap()),
+                after: Some(share::config::SpacingLines::new(2).unwrap()),
+            });
         config.model.context_size = 42_000;
         config.logging.level = "debug".into();
 
@@ -178,6 +204,14 @@ mod tests {
         assert_eq!(view.permission_mode, "allow_all");
         assert!(!view.markdown);
         assert!(view.verbose);
+        assert_eq!(view.markdown_spacing, sdk::MarkdownSpacingModeView::Compact);
+        assert_eq!(
+            view.markdown_spacing_overrides.heading,
+            Some(sdk::ElementSpacingView {
+                before: Some(1),
+                after: Some(2),
+            })
+        );
         assert_eq!(view.context_size, 42_000);
         assert_eq!(view.logging_level, "debug");
     }
