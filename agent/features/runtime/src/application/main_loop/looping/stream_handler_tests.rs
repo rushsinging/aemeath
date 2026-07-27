@@ -187,6 +187,64 @@ fn reducer_projects_block_transitions_without_callback_contract() {
 }
 
 #[test]
+fn reducer_projects_terminal_text_when_only_thinking_was_streamed() {
+    let sink = RecordingSink::default();
+    let mut reducer = InvocationEventReducer::new(sink.clone());
+    reducer
+        .apply(InvocationEvent::Delta(InvocationDelta::Thinking {
+            thinking: "thought".into(),
+            signature: None,
+        }))
+        .unwrap();
+    reducer
+        .apply(completion(vec![
+            ProviderContentBlock::Thinking {
+                thinking: "thought".into(),
+                signature: None,
+            },
+            ProviderContentBlock::Text("final answer".into()),
+        ]))
+        .unwrap();
+
+    let events = sink.0.lock().unwrap();
+    assert!(events.iter().any(
+        |event| matches!(event, RuntimeStreamEvent::Text { text, .. } if text == "final answer")
+    ));
+    assert!(matches!(
+        events.last(),
+        Some(RuntimeStreamEvent::BlockComplete { .. })
+    ));
+}
+
+#[test]
+fn reducer_projects_terminal_text_when_only_tool_events_were_streamed() {
+    let sink = RecordingSink::default();
+    let mut reducer = InvocationEventReducer::new(sink.clone());
+    reducer
+        .apply(InvocationEvent::Delta(InvocationDelta::ToolCallStarted {
+            index: 0,
+            provider_id: Some(ProviderToolCallId("provider-read".into())),
+            name: "Read".into(),
+        }))
+        .unwrap();
+    reducer
+        .apply(completion(vec![
+            ProviderContentBlock::Text("final answer".into()),
+            ProviderContentBlock::ToolCall(ProviderToolCall {
+                id: ProviderToolCallId("provider-read".into()),
+                name: "Read".into(),
+                arguments: serde_json::json!({}),
+            }),
+        ]))
+        .unwrap();
+
+    let events = sink.0.lock().unwrap();
+    assert!(events.iter().any(
+        |event| matches!(event, RuntimeStreamEvent::Text { text, .. } if text == "final answer")
+    ));
+}
+
+#[test]
 fn reducer_closes_active_block_for_synthetic_raw_eof_failure() {
     let sink = RecordingSink::default();
     let mut reducer = InvocationEventReducer::new(sink.clone());

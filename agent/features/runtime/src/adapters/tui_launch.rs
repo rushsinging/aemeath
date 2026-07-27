@@ -15,6 +15,7 @@ use crate::ports::ProviderBinding;
 /// TUI 启动所需的过渡上下文。
 pub struct TuiLaunchContext {
     pub session_id: String,
+    pub startup_resume: Option<sdk::SessionResumeView>,
     pub model_display: String,
     pub binding: Arc<ProviderBinding>,
     pub tool_catalog: Arc<dyn ToolCatalogPort>,
@@ -25,6 +26,7 @@ pub struct TuiLaunchContext {
     pub user_context: String,
     pub context_size: usize,
     pub verbose: bool,
+    pub config_view: sdk::ConfigView,
     pub agent_runner: Arc<dyn AgentRunner>,
     pub allow_all: bool,
     pub max_tool_concurrency: usize,

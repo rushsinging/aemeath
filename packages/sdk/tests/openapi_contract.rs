@@ -14,6 +14,9 @@ fn wire_components_document_exposes_only_pure_wire_contracts() {
     assert!(schemas.contains_key("InteractionRequest"));
     assert!(schemas.contains_key("ConfigUpdate"));
     assert!(schemas.contains_key("ConfigView"));
+    assert!(schemas.contains_key("MarkdownSpacingModeView"));
+    assert!(schemas.contains_key("ElementSpacingView"));
+    assert!(schemas.contains_key("MarkdownSpacingOverridesView"));
     assert!(schemas.contains_key("ProjectContext"));
     assert!(schemas.contains_key("ModelSummary"));
     assert!(schemas.contains_key("ReflectionHistoryView"));

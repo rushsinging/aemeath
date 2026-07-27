@@ -1,5 +1,9 @@
 use sdk::CharIdx;
 
+const INITIAL_RENDER_LINES: usize = 1_000;
+const HISTORY_LOAD_BATCH_LINES: usize = 500;
+const MAX_RENDER_LINES: usize = 3_000;
+
 /// 选区锚点：`(逻辑行, plain CharIdx)`（#63 坐标系）。
 ///
 /// 与 widget `render::output_area::OutputArea.selection_start/end` 同型，
@@ -17,8 +21,14 @@ pub struct OutputViewState {
     pub last_visible_height: usize,
     pub last_document_total_lines: usize,
     pub version: u64,
-    /// 是否已展开全部消息（懒加载：scroll_to_top 时设为 true，跳过 MAX_RENDER_LINES 裁剪）。
-    pub expanded: bool,
+    /// 当前允许渲染的历史行预算；达到顶部后按固定批次增长。
+    pub(crate) render_line_limit: usize,
+    /// 最近一次完整源文档的行数，用于判断是否还有更早历史并补偿流式增长。
+    pub(crate) source_total_lines: usize,
+    /// 源文档尚未首次构建时收到的顶部加载请求；观察到完整源后兑现一个批次。
+    pub(crate) pending_load_older: bool,
+    /// 已向更早历史移动的窗口尾部行数（窗口达到上限后的滑动偏移）。
+    pub(crate) history_window_tail_offset: usize,
 }
 
 impl Default for OutputViewState {
@@ -35,7 +45,10 @@ impl Default for OutputViewState {
             last_visible_height: 0,
             last_document_total_lines: 0,
             version: 0,
-            expanded: false,
+            render_line_limit: INITIAL_RENDER_LINES,
+            source_total_lines: 0,
+            pending_load_older: false,
+            history_window_tail_offset: 0,
         }
     }
 }
@@ -65,33 +78,112 @@ impl OutputViewState {
         }
     }
 
-    /// 滚动到底部：offset 归零并恢复 auto_scroll。
+    /// 滚动到底部：offset 归零、恢复 auto_scroll，并恢复默认历史窗口预算。
     pub fn scroll_to_bottom(&mut self) {
         self.scroll_offset = 0;
         self.auto_scroll = true;
+        self.render_line_limit = INITIAL_RENDER_LINES;
+        self.pending_load_older = false;
+        self.history_window_tail_offset = 0;
     }
 
-    /// 滚动到顶部：等价于向上滚动 `total_lines` 行（钳制后落在 max_offset）。
-    /// 同时展开懒加载（设置 expanded=true），下次 refresh 时跳过 MAX_RENDER_LINES 裁剪。
-    pub fn scroll_to_top(&mut self, total_lines: usize) {
-        self.expanded = true;
+    /// 滚动到当前已渲染文档顶部，并在仍有更早历史时请求一个批次。
+    pub fn scroll_to_top(&mut self, total_lines: usize) -> bool {
         self.scroll_up(total_lines, total_lines);
+        self.request_load_older_at_top()
     }
 
-    /// 到顶时展开懒加载（设置 expanded=true）。返回 true 表示本次触发了展开，
-    /// 调用方据此 mark_output_dirty 触发 document 重建。
-    /// 用于 scroll_up 后检查是否已到顶（含滚轮、PageUp、Shift+Up 等所有向上滚动路径）。
-    pub fn try_expand_at_top(&mut self, total_lines: usize) -> bool {
-        if self.expanded {
+    /// 到达当前已渲染文档顶部时请求一个更早历史批次。
+    pub fn try_load_older_at_top(&mut self, total_lines: usize) -> bool {
+        let max_offset = total_lines.saturating_sub(self.last_visible_height);
+        self.scroll_offset >= max_offset && self.request_load_older_at_top()
+    }
+
+    pub fn request_load_older_at_top(&mut self) -> bool {
+        if self.source_total_lines == 0 {
+            self.pending_load_older = true;
+            crate::tui::log_debug!(
+                "tui.history.request_older deferred source_total_lines=0 limit={} offset={} pending_load_older=true",
+                self.render_line_limit,
+                self.scroll_offset
+            );
             return false;
         }
-        let max_offset = total_lines.saturating_sub(self.last_visible_height);
-        if self.scroll_offset >= max_offset {
-            self.expanded = true;
-            true
+        let expanded = if self.render_line_limit < MAX_RENDER_LINES {
+            self.load_older_batch()
         } else {
-            false
+            let before = self.history_window_tail_offset;
+            let max_tail_offset = self
+                .source_total_lines
+                .saturating_sub(self.render_line_limit);
+            self.history_window_tail_offset = self
+                .history_window_tail_offset
+                .saturating_add(HISTORY_LOAD_BATCH_LINES)
+                .min(max_tail_offset);
+            self.history_window_tail_offset > before
+        };
+        if expanded {
+            crate::tui::log_debug!(
+                "tui.history.request_older source_total_lines={} expanded=true limit={} offset={} pending_load_older={}",
+                self.source_total_lines,
+                self.render_line_limit,
+                self.scroll_offset,
+                self.pending_load_older
+            );
+        } else {
+            crate::tui::log_trace!(
+                "tui.history.request_older source_total_lines={} expanded=false limit={} offset={} pending_load_older={}",
+                self.source_total_lines,
+                self.render_line_limit,
+                self.scroll_offset,
+                self.pending_load_older
+            );
         }
+        expanded
+    }
+
+    pub fn render_line_limit(&self) -> usize {
+        self.render_line_limit
+    }
+
+    /// 在裁剪前观察完整源文档。用户已离开底部时，流式新增行同步扩大预算，
+    /// 使已渲染窗口只在顶部增加历史批次、在底部增加实时输出，两者都可由 offset 补偿固定视口。
+    pub fn observe_source_document(&mut self, source_total_lines: usize) {
+        let growth = source_total_lines.saturating_sub(self.source_total_lines);
+        if !self.auto_scroll && growth > 0 {
+            self.render_line_limit = self
+                .render_line_limit
+                .saturating_add(growth)
+                .min(MAX_RENDER_LINES);
+        }
+        self.source_total_lines = source_total_lines;
+        self.render_line_limit = self
+            .render_line_limit
+            .min(source_total_lines.max(INITIAL_RENDER_LINES));
+        if self.pending_load_older {
+            self.pending_load_older = false;
+            let expanded = self.load_older_batch();
+            crate::tui::log_debug!(
+                "tui.history.observe_source fulfilled_pending=true source_total_lines={} growth={} expanded={} limit={}",
+                source_total_lines,
+                growth,
+                expanded,
+                self.render_line_limit
+            );
+        }
+    }
+
+    fn load_older_batch(&mut self) -> bool {
+        let next_limit = self
+            .render_line_limit
+            .saturating_add(HISTORY_LOAD_BATCH_LINES)
+            .min(self.source_total_lines)
+            .min(MAX_RENDER_LINES);
+        if next_limit <= self.render_line_limit {
+            return false;
+        }
+        self.render_line_limit = next_limit;
+        true
     }
 
     /// 同步 document 指标并维护滚动真相。

@@ -95,7 +95,7 @@ mod tests {
             elapsed_secs: 10,
             phase: "preparing_tool_arguments".into(),
         };
-        let block = render_model_stream_placeholder("p", &view, &RenderCtx { text_width: 80 }, 8);
+        let block = render_model_stream_placeholder("p", &view, &RenderCtx::for_width(80), 8);
 
         assert_eq!(block.lines[0].plain, "Thinking...");
         assert_eq!(block.lines[1].plain, "Model is preparing tool arguments...");

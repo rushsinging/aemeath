@@ -30,7 +30,7 @@ class RenderIssueProgressTests(unittest.TestCase):
         rendered = MODULE.render_tree(743, issues)
 
         self.assertIn("⬜ #875(#649) 模型调用", rendered)
-        self.assertIn("← #873✅, #903⬜", rendered)
+        self.assertIn("← #873(#649)✅, #903(#852)⬜", rendered)
 
     def test_collect_issues_uses_ten_concurrent_workers(self):
         active = 0

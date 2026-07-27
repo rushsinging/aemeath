@@ -29,7 +29,10 @@ pub use permissions::{PermissionConfig, PermissionModeConfig};
 pub use skills::SkillsConfig;
 pub use storage::StorageConfig;
 pub use tools::{AgentRoleConfig, AgentsConfig, ToolResultConfig, ToolsConfig};
-pub use ui::{TaskLifecycleConfig, TaskListConfig, UiConfig};
+pub use ui::{
+    ElementSpacingOverride, MarkdownSpacingMode, MarkdownSpacingOverrides, SpacingLines,
+    TaskLifecycleConfig, TaskListConfig, UiConfig,
+};
 pub use update::UpdateConfig;
 
 #[cfg(test)]

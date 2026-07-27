@@ -13,6 +13,7 @@ use crate::config::models::{
     RuntimeModelRequest, RuntimeModelResolutionError, RuntimeModelResolver,
 };
 use crate::config::permissions::PermissionModeConfig;
+use crate::config::ui::{MarkdownSpacingMode, MarkdownSpacingOverrides};
 use crate::config::{
     AgentsConfig, Config, HooksConfig, MemoryConfig, SkillsConfig, ToolResultConfig,
 };
@@ -251,6 +252,14 @@ impl ConfigSnapshot {
 
     pub fn tui(&self) -> bool {
         self.inner.ui.tui
+    }
+
+    pub fn markdown_spacing_mode(&self) -> MarkdownSpacingMode {
+        self.inner.ui.markdown_spacing
+    }
+
+    pub fn markdown_spacing_overrides(&self) -> MarkdownSpacingOverrides {
+        self.inner.ui.markdown_spacing_overrides
     }
 
     // ── Memory ───────────────────────────────────────────────

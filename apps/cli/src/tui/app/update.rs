@@ -30,6 +30,28 @@ use crate::tui::view_assembler::output::OutputViewAssembler;
 use crate::tui::view_model::LiveStatusViewModel;
 use tokio::sync::mpsc;
 
+fn markdown_spacing_overrides_to_sdk(
+    overrides: crate::tui::render::output::spacing::MarkdownSpacingOverrides,
+) -> sdk::MarkdownSpacingOverridesView {
+    fn element(
+        value: Option<crate::tui::render::output::spacing::ElementSpacing>,
+    ) -> Option<sdk::ElementSpacingView> {
+        value.map(|spacing| sdk::ElementSpacingView {
+            before: spacing.before,
+            after: spacing.after,
+        })
+    }
+
+    sdk::MarkdownSpacingOverridesView {
+        paragraph: element(overrides.paragraph),
+        heading: element(overrides.heading),
+        list: element(overrides.list),
+        code_block: element(overrides.code_block),
+        table: element(overrides.table),
+        blockquote: element(overrides.blockquote),
+    }
+}
+
 fn ui_event_name(event: &UiEvent) -> &'static str {
     match event {
         UiEvent::Text { .. } => "Text",
@@ -120,6 +142,33 @@ impl UpdateResult {
             pending_slash: None,
         }
     }
+
+    fn append(&mut self, mut other: Self) {
+        self.effects.append(&mut other.effects);
+        debug_assert!(
+            other.spawn_effect.is_none(),
+            "runtime events must not emit spawn effects"
+        );
+        debug_assert!(
+            other.pending_slash.is_none(),
+            "runtime events must not emit slash continuations"
+        );
+    }
+
+    fn dedupe_render_requests(&mut self) {
+        let mut saw_render_request = false;
+        self.effects.retain(|effect| {
+            if !matches!(effect, Effect::RequestRender) {
+                return true;
+            }
+            if saw_render_request {
+                false
+            } else {
+                saw_render_request = true;
+                true
+            }
+        });
+    }
 }
 
 impl App {
@@ -134,14 +183,28 @@ impl App {
         match msg {
             TuiMsg::Ui(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::Runtime(ev) => self.update_runtime_event(ev),
+            TuiMsg::RuntimeBatch(events) => {
+                let mut batch_result = UpdateResult::none();
+                for event in events {
+                    batch_result.append(self.update_runtime_event(event));
+                }
+                batch_result.dedupe_render_requests();
+                batch_result
+            }
             TuiMsg::AgentEvent(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::Key(key) => self.update_key(key, spawn_refs),
             TuiMsg::Mouse(mouse) => {
-                let expanded_before = self.view_state.output.expanded;
+                let history_window_before = (
+                    self.view_state.output.render_line_limit(),
+                    self.view_state.output.history_window_tail_offset,
+                );
                 let effects = self.handle_mouse_event(mouse, self.layout.output_area_rect);
-                // 懒加载：滚轮到顶触发 expand（在 mouse_handler 内设置 expanded=true），
-                // 需 mark_output_dirty 触发 document 重建跳过 MAX_RENDER_LINES 裁剪。
-                if !expanded_before && self.view_state.output.expanded {
+                // 懒加载：预算增长或 3000 行窗口向更早历史滑动时都必须重建文档。
+                let history_window_after = (
+                    self.view_state.output.render_line_limit(),
+                    self.view_state.output.history_window_tail_offset,
+                );
+                if history_window_after != history_window_before {
                     self.mark_output_dirty();
                 }
                 UpdateResult {
@@ -222,9 +285,16 @@ impl App {
             }
             TuiMsg::TerminalKey(key) => self.update_key(key, spawn_refs),
             TuiMsg::TerminalMouse(mouse) => {
-                let expanded_before = self.view_state.output.expanded;
+                let history_window_before = (
+                    self.view_state.output.render_line_limit(),
+                    self.view_state.output.history_window_tail_offset,
+                );
                 let effects = self.handle_mouse_event(mouse, self.layout.output_area_rect);
-                if !expanded_before && self.view_state.output.expanded {
+                let history_window_after = (
+                    self.view_state.output.render_line_limit(),
+                    self.view_state.output.history_window_tail_offset,
+                );
+                if history_window_after != history_window_before {
                     self.mark_output_dirty();
                 }
                 UpdateResult {
@@ -244,6 +314,22 @@ impl App {
     }
 
     fn update_runtime_event(&mut self, event: TuiRuntimeEvent) -> UpdateResult {
+        let diagnostic_kind = match &event {
+            TuiRuntimeEvent::Text { .. } => Some("Text"),
+            TuiRuntimeEvent::BlockComplete { .. } => Some("BlockComplete"),
+            TuiRuntimeEvent::UserMessagesAdopted { .. } => Some("UserMessagesAdopted"),
+            TuiRuntimeEvent::Done { .. } => Some("Done"),
+            _ => None,
+        };
+        if let Some(kind) = diagnostic_kind {
+            crate::tui::log_trace!(
+                "event_delivery boundary=tui_channel_to_reducer kind={} outcome=received timeline_items={} queued={} revision={}",
+                kind,
+                self.model.conversation.timeline.items().len(),
+                self.model.conversation.queued_submissions.len(),
+                self.model.conversation.revision()
+            );
+        }
         // UserMessagesAdopted 需要在 mapper/reducer 之外执行清占位 + 用户回显，
         // 因为这些副作用依赖 App 级方法且不产生 Intent。
         match &event {
@@ -254,6 +340,11 @@ impl App {
                     }
                     self.append_user_echo(item.text_content());
                 }
+                // 用户消息已经成为已提交的会话尾部内容。即使 resume 后用户先向上
+                // 浏览过历史，也必须把视图恢复到最新窗口，否则新消息只进入 model，
+                // 仍会被旧的 history_window_tail_offset 裁掉。
+                self.view_state.output.scroll_to_bottom();
+                self.mark_output_dirty();
             }
             TuiRuntimeEvent::TurnStarted { .. } => {
                 self.spinner_phase(SpinnerPhase::Thinking);
@@ -277,12 +368,38 @@ impl App {
             TuiRuntimeEvent::SessionReset => {
                 return UpdateResult::one(Effect::ResetRuntimeState);
             }
+            TuiRuntimeEvent::ConfigChanged { view, .. }
+            | TuiRuntimeEvent::ConfigReloaded { view, .. } => {
+                self.config_view.markdown_spacing = match view.markdown_spacing.mode() {
+                    crate::tui::render::output::spacing::MarkdownSpacingMode::Normal => {
+                        sdk::MarkdownSpacingModeView::Normal
+                    }
+                    crate::tui::render::output::spacing::MarkdownSpacingMode::Compact => {
+                        sdk::MarkdownSpacingModeView::Compact
+                    }
+                };
+                self.config_view.markdown_spacing_overrides =
+                    markdown_spacing_overrides_to_sdk(view.markdown_spacing.overrides());
+            }
             TuiRuntimeEvent::SessionResumed {
                 steps,
                 session_id,
                 created_at,
             } => {
+                crate::tui::log_debug!(
+                    "resume_lifecycle boundary=tui_runtime stage=session_resumed_received session_id={} steps={} messages={}",
+                    session_id,
+                    steps.len(),
+                    steps.iter().map(|step| step.messages.len()).sum::<usize>()
+                );
                 self.resume_session_messages(session_id, steps.clone(), created_at.to_string());
+                crate::tui::log_debug!(
+                    "resume_lifecycle boundary=tui_runtime stage=session_resumed_applied session_id={} timeline_items={} chats={} revision={}",
+                    session_id,
+                    self.model.conversation.timeline.items().len(),
+                    self.model.conversation.chats.len(),
+                    self.model.conversation.revision()
+                );
                 return UpdateResult {
                     effects: Vec::new(),
                     spawn_effect: None,
@@ -338,7 +455,27 @@ impl App {
             _ => {}
         }
         let mapping = map_runtime_event(&event);
+        if let Some(kind) = diagnostic_kind {
+            crate::tui::log_trace!(
+                "event_delivery boundary=tui_mapper kind={} outcome=mapped conversation_intents={} diagnostic_intents={} session_intents={}",
+                kind,
+                mapping.conversation.len(),
+                mapping.diagnostic.len(),
+                mapping.session.len()
+            );
+        }
         let model_result = reduce_agent_event(&mut self.model, mapping);
+        if let Some(kind) = diagnostic_kind {
+            crate::tui::log_trace!(
+                "event_delivery boundary=tui_reducer kind={} outcome=reduced timeline_items={} queued={} revision={} dirty_output={} effects={}",
+                kind,
+                self.model.conversation.timeline.items().len(),
+                self.model.conversation.queued_submissions.len(),
+                self.model.conversation.revision(),
+                model_result.dirty.output,
+                model_result.effects.len()
+            );
+        }
         crate::tui::update::dirty::merge_dirty(&mut self.view_state.dirty, model_result.dirty);
         UpdateResult {
             effects: model_result.effects,
@@ -452,6 +589,7 @@ impl App {
                 width,
                 self.output_area.term_width,
                 self.view_state.animation.spinner_frame,
+                self.model.ui_preferences.markdown_spacing(),
             )
         }));
         // 无论渲染成败都把 view_model 放回 cache，保留 memo。
@@ -474,11 +612,23 @@ impl App {
                 return;
             }
         };
-        let document = if self.view_state.output.expanded {
-            document
-        } else {
-            Self::trim_document_to_max_lines(document)
-        };
+        self.view_state
+            .output
+            .observe_source_document(document.total_lines());
+        crate::tui::log_trace!(
+            "tui.output.history_metrics source_lines={} render_limit={} before_lines={} scroll_offset={} auto_scroll={} pending_load_older={}",
+            self.view_state.output.source_total_lines,
+            self.view_state.output.render_line_limit(),
+            before_lines,
+            self.view_state.output.scroll_offset,
+            self.view_state.output.auto_scroll,
+            self.view_state.output.pending_load_older
+        );
+        let document = Self::trim_document_to_line_limit(
+            document,
+            self.view_state.output.render_line_limit(),
+            self.view_state.output.history_window_tail_offset,
+        );
         let after_lines = document.total_lines();
         crate::tui::log_trace!(
             "tui.output.refresh_document revision={} width={} term_width={} spinner_frame={} roots={} timeline_items={} chats={} before_lines={} after_lines={} rebuilt={}",
@@ -496,12 +646,11 @@ impl App {
         self.output_area.replace_document(document);
     }
 
-    /// 最大渲染行数。超过此值的旧消息被裁剪，滚到顶部时懒加载展开。
-    const MAX_RENDER_LINES: usize = 1000;
-
-    /// 裁剪文档到最大行数，保留最新的行。如果裁剪了，顶部插入提示行。
-    fn trim_document_to_max_lines(
+    /// 裁剪文档到当前历史窗口行预算，保留最新的完整 block。
+    fn trim_document_to_line_limit(
         document: crate::tui::render::output::rendered::RenderedDocument,
+        line_limit: usize,
+        tail_offset: usize,
     ) -> crate::tui::render::output::rendered::RenderedDocument {
         use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
         use ratatui::style::Style;
@@ -509,47 +658,70 @@ impl App {
         use std::rc::Rc;
 
         let total = document.total_lines();
-        if total <= Self::MAX_RENDER_LINES {
+        if total <= line_limit {
             return document;
         }
 
-        let mut kept = Self::MAX_RENDER_LINES;
-        let folded = total - kept;
+        let group_counts = document.root_group_block_counts();
+        let mut groups = Vec::with_capacity(group_counts.len());
+        let mut blocks = document.blocks.into_iter();
+        for count in group_counts {
+            groups.push(blocks.by_ref().take(count).collect::<Vec<_>>());
+        }
 
-        // 从后向前按 block 边界保留：一旦某 block 无法完整放入剩余预算，跳过整个 block
-        // （不截断 block 内部，保证消息完整性）。继续向前找更小的 block 填满预算。
-        let mut new_blocks: Vec<RenderedBlock> = Vec::new();
-        for block in document.blocks.into_iter().rev() {
-            if kept == 0 {
-                break;
-            }
-            let block_len = block.lines.len();
-            if block_len > kept {
-                // 该 block 放不下剩余预算，跳过（不截断）
+        // source document 顺序是旧 → 新；必须从最新端反向装满窗口。
+        // 若从旧端按行数定位起点，横跨边界的超大旧 group 会独占预算，
+        // 反而把它之后的最新消息截掉。按完整 root group 反向选择也保证
+        // ToolCall 与其 ToolResult 子块不可分割。
+        let mut skipped_newer = 0usize;
+        let mut kept_lines = 0usize;
+        let mut kept_groups = Vec::new();
+        for group in groups.into_iter().rev() {
+            let group_lines = group.iter().map(|block| block.lines.len()).sum::<usize>();
+            if skipped_newer < tail_offset {
+                skipped_newer = skipped_newer.saturating_add(group_lines);
                 continue;
             }
-            new_blocks.push(block);
-            kept -= block_len;
+            if !kept_groups.is_empty() && kept_lines.saturating_add(group_lines) > line_limit {
+                break;
+            }
+            kept_lines = kept_lines.saturating_add(group_lines);
+            kept_groups.push(group);
+            if kept_lines > line_limit {
+                // 单个 root group 超过窗口时保持完整，允许窗口略超预算。
+                break;
+            }
         }
-        new_blocks.reverse();
+        kept_groups.reverse();
 
-        // 顶部插入提示行
-        let hint_line = RenderedLine::with_plain(
-            vec![Span::styled(
+        let folded = total
+            .saturating_sub(skipped_newer)
+            .saturating_sub(kept_lines);
+        let mut root_group_block_counts = kept_groups.iter().map(Vec::len).collect::<Vec<_>>();
+        let mut new_blocks = kept_groups.into_iter().flatten().collect::<Vec<_>>();
+
+        if folded > 0 {
+            // 顶部插入提示行
+            let hint_line = RenderedLine::with_plain(
+                vec![Span::styled(
+                    format!("─── 更早的消息已折叠（{folded} 行）───"),
+                    Style::default().fg(crate::tui::render::theme::TEXT_DIM),
+                )],
                 format!("─── 更早的消息已折叠（{folded} 行）───"),
-                Style::default().fg(crate::tui::render::theme::TEXT_DIM),
-            )],
-            format!("─── 更早的消息已折叠（{folded} 行）───"),
-        );
-        new_blocks.insert(
-            0,
-            RenderedBlock {
-                block_id: "_folded_hint".into(),
-                lines: Rc::new(vec![hint_line]),
-            },
-        );
-
-        crate::tui::render::output::rendered::RenderedDocument { blocks: new_blocks }
+            );
+            new_blocks.insert(
+                0,
+                RenderedBlock {
+                    block_id: "_folded_hint".into(),
+                    lines: Rc::new(vec![hint_line]),
+                },
+            );
+            root_group_block_counts.insert(0, 1);
+        }
+        crate::tui::render::output::rendered::RenderedDocument {
+            blocks: new_blocks,
+            root_group_block_counts,
+        }
     }
     pub(crate) fn flush_dirty_view_models(&mut self) {
         if self.view_state.dirty.output {

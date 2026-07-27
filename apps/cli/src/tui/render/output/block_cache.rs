@@ -9,6 +9,7 @@ use std::collections::HashMap;
 pub struct CacheKey {
     pub version: u64,
     pub text_width: u16,
+    pub markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
 }
 
 struct CachedBlock {
@@ -31,11 +32,31 @@ impl BlockCache {
     ) -> RenderedBlock {
         if let Some(cached) = self.map.get(block_id) {
             if cached.key == key {
+                #[cfg(test)]
+                crate::tui::render::performance::record_block_cache_hit();
                 return cached.rendered.clone();
             }
+            #[cfg(test)]
+            {
+                if cached.key.version != key.version {
+                    crate::tui::render::performance::record_block_cache_version_miss();
+                }
+                if cached.key.text_width != key.text_width {
+                    crate::tui::render::performance::record_block_cache_width_miss();
+                }
+                if cached.key.markdown_spacing != key.markdown_spacing {
+                    crate::tui::render::performance::record_block_cache_spacing_miss();
+                }
+            }
+        } else {
+            #[cfg(test)]
+            crate::tui::render::performance::record_block_cache_absent_miss();
         }
+        #[cfg(test)]
+        crate::tui::render::performance::record_block_cache_miss();
         let ctx = RenderCtx {
             text_width: key.text_width,
+            markdown_spacing: key.markdown_spacing,
         };
         let rendered = render(&ctx);
         self.map.insert(
@@ -52,7 +73,13 @@ impl BlockCache {
     /// 调用方应先将 live ids 收入 `HashSet<&str>`（O(n) 构建），
     /// 使此处每个条目的成员查询为 O(1)，整体 O(n) 而非 O(n²)。
     pub fn retain(&mut self, live_set: &std::collections::HashSet<&str>) {
+        #[cfg(test)]
+        let before = self.map.len();
         self.map.retain(|id, _| live_set.contains(id.as_str()));
+        #[cfg(test)]
+        crate::tui::render::performance::record_block_cache_retain_evictions(
+            before.saturating_sub(self.map.len()),
+        );
     }
 
     pub fn contains(&self, block_id: &str) -> bool {
@@ -73,14 +100,19 @@ mod tests {
         }
     }
 
+    fn key(version: u64) -> CacheKey {
+        CacheKey {
+            version,
+            text_width: 80,
+            markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+        }
+    }
+
     #[test]
     fn test_cache_hit_when_key_unchanged() {
         let mut cache = BlockCache::default();
         let mut calls = 0;
-        let key = CacheKey {
-            version: 1,
-            text_width: 80,
-        };
+        let key = key(1);
         cache.get_or_render("a", key, |_| {
             calls += 1;
             block("a", 2)
@@ -97,51 +129,42 @@ mod tests {
     fn test_cache_miss_when_version_changes() {
         let mut cache = BlockCache::default();
         let mut calls = 0;
-        cache.get_or_render(
-            "a",
-            CacheKey {
-                version: 1,
-                text_width: 80,
-            },
-            |_| {
-                calls += 1;
-                block("a", 1)
-            },
-        );
-        cache.get_or_render(
-            "a",
-            CacheKey {
-                version: 2,
-                text_width: 80,
-            },
-            |_| {
-                calls += 1;
-                block("a", 1)
-            },
-        );
+        cache.get_or_render("a", key(1), |_| {
+            calls += 1;
+            block("a", 1)
+        });
+        cache.get_or_render("a", key(2), |_| {
+            calls += 1;
+            block("a", 1)
+        });
 
         assert_eq!(calls, 2, "version 变应重渲染");
     }
 
     #[test]
+    fn cache_misses_when_only_markdown_spacing_changes() {
+        let mut cache = BlockCache::default();
+        let mut calls = 0;
+        cache.get_or_render("a", key(1), |_| {
+            calls += 1;
+            block("a", 1)
+        });
+        let mut compact = key(1);
+        compact.markdown_spacing =
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::compact();
+        cache.get_or_render("a", compact, |_| {
+            calls += 1;
+            block("a", 1)
+        });
+
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
     fn test_retain_evicts_absent_blocks() {
         let mut cache = BlockCache::default();
-        cache.get_or_render(
-            "a",
-            CacheKey {
-                version: 1,
-                text_width: 80,
-            },
-            |_| block("a", 1),
-        );
-        cache.get_or_render(
-            "b",
-            CacheKey {
-                version: 1,
-                text_width: 80,
-            },
-            |_| block("b", 1),
-        );
+        cache.get_or_render("a", key(1), |_| block("a", 1));
+        cache.get_or_render("b", key(1), |_| block("b", 1));
         let live_set: std::collections::HashSet<&str> = ["a"].into_iter().collect();
         cache.retain(&live_set);
 

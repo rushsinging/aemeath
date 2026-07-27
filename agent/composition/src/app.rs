@@ -15,11 +15,13 @@ pub type AgentClientHandle = Arc<dyn AgentClient>;
 pub struct AgentClientBootstrap {
     pub client: AgentClientHandle,
     pub session_id: String,
+    pub startup_resume: Option<sdk::SessionResumeView>,
     pub cwd: PathBuf,
     pub model_display: String,
     pub allow_all: bool,
     pub context_size: usize,
     pub thinking: bool,
+    pub config_view: sdk::ConfigView,
     pub memory_config: MemoryConfigView,
     pub skills_map: HashMap<String, SkillView>,
     pub command_catalog: Arc<dyn sdk::CommandCatalogPort>,
@@ -290,6 +292,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         .committed_snapshot()
         .user_agent()
         .to_string();
+    let config_view = runtime::config_snapshot_to_sdk(&config.reader().committed_snapshot());
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await?;
@@ -303,11 +306,13 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     Ok(AgentClientBootstrap {
         client,
         session_id: launch.session_id,
+        startup_resume: launch.startup_resume,
         cwd,
         model_display: launch.model_display,
         allow_all: launch.allow_all,
         context_size: launch.context_size,
         thinking,
+        config_view,
         memory_config: launch.memory_config,
         skills_map: launch.skills_map,
         command_catalog: command_wiring.catalog(),

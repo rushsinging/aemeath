@@ -30,6 +30,7 @@ fn app_with_link() -> App {
                 }],
             )]),
         }],
+        root_group_block_counts: Vec::new(),
     });
     app.output_area.screen_line_map = vec![(0, sdk::CharIdx::new(0), sdk::CharIdx::new(4))];
     app

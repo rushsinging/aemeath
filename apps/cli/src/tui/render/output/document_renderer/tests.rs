@@ -1,8 +1,10 @@
 use super::*;
 use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::RenderedLine;
+use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
 use crate::tui::view_model::output::{
     BlockNode, ModelStreamPlaceholderBlockView, OutputBlockKind, OutputViewModel, TextBlockView,
+    ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
 };
 use crate::tui::view_model::style::SemanticStyle;
 
@@ -68,9 +70,12 @@ fn test_model_stream_placeholder_header_animates_dots() {
     let vm = vm_with_roots(vec![placeholder_node()]);
     let mut renderer = OutputDocumentRenderer::default();
 
-    let doc0 = renderer.render_tree_with_animation_frame(&vm, 80, 0);
-    let doc1 = renderer.render_tree_with_animation_frame(&vm, 80, 4);
-    let doc2 = renderer.render_tree_with_animation_frame(&vm, 80, 8);
+    let doc0 =
+        renderer.render_tree_with_animation_frame(&vm, 80, 0, MarkdownSpacingPolicy::normal());
+    let doc1 =
+        renderer.render_tree_with_animation_frame(&vm, 80, 4, MarkdownSpacingPolicy::normal());
+    let doc2 =
+        renderer.render_tree_with_animation_frame(&vm, 80, 8, MarkdownSpacingPolicy::normal());
 
     assert_eq!(doc0.blocks[0].lines[1].plain, "Thinking.");
     assert_eq!(doc1.blocks[0].lines[1].plain, "Thinking..");
@@ -268,54 +273,19 @@ fn test_user_message_blank_lines_receive_fill_style_without_filler_text() {
     assert!(lines[5].spans.is_empty());
 }
 
-fn rb(id: &str, lines: usize) -> RenderedBlock {
-    use crate::tui::render::output::rendered::RenderedLine;
-    use ratatui::text::Span;
-    use std::rc::Rc;
-    RenderedBlock {
-        block_id: id.into(),
-        lines: Rc::new(vec![
-            RenderedLine::new(vec![Span::raw(id.to_string())]);
-            lines
-        ]),
-    }
+#[test]
+fn select_latest_root_start_drops_oldest_group_when_over_max_lines() {
+    assert_eq!(select_latest_root_start(&[2, 2], 3), 1);
 }
 
 #[test]
-fn test_trim_root_groups_drops_oldest_group_when_over_max_lines() {
-    // 每个 root 子树自成一组（单块）；总 4 行，max=3，最新组（2 行）保留，最旧组丢弃。
-    let groups = vec![vec![rb("old", 2)], vec![rb("new", 2)]];
-    let trimmed = trim_root_groups_to_max_lines(groups, 3);
-
-    assert_eq!(trimmed.len(), 1);
-    assert_eq!(trimmed[0].block_id, "new");
-    assert_eq!(trimmed[0].lines.len(), 2);
+fn select_latest_root_start_never_splits_subtree() {
+    assert_eq!(select_latest_root_start(&[2, 2], 3), 1);
 }
 
 #[test]
-fn test_trim_root_groups_never_splits_subtree() {
-    // 两个 root 子树，各 = parent(1) + child(1) = 2 行，共 4 行；max=3 只容得下最新整组。
-    let old_group = vec![rb("p-old", 1), rb("c-old", 1)];
-    let new_group = vec![rb("p-new", 1), rb("c-new", 1)];
-    let trimmed = trim_root_groups_to_max_lines(vec![old_group, new_group], 3);
-
-    let ids: Vec<&str> = trimmed.iter().map(|b| b.block_id.as_str()).collect();
-    // 最新子树的父与子都在；最旧子树的父与子都不在——子树从不被拆开。
-    assert_eq!(
-        ids,
-        vec!["p-new", "c-new"],
-        "裁剪必须以整棵 root 子树为单位，NEVER 拆分父/子块"
-    );
-}
-
-#[test]
-fn test_trim_root_groups_keeps_newest_even_if_over_max() {
-    // 边界：最新组单独超限也始终保留（与旧 per-block 裁剪一致），避免输出为空。
-    let groups = vec![vec![rb("old", 5)], vec![rb("new", 10)]];
-    let trimmed = trim_root_groups_to_max_lines(groups, 3);
-
-    assert_eq!(trimmed.len(), 1);
-    assert_eq!(trimmed[0].block_id, "new");
+fn select_latest_root_start_keeps_newest_even_if_over_max() {
+    assert_eq!(select_latest_root_start(&[5, 10], 3), 1);
 }
 
 #[test]
@@ -343,9 +313,8 @@ fn test_render_tree_retains_only_trimmed_live_blocks() {
 }
 
 #[test]
-fn test_trim_root_groups_zero_max_returns_empty() {
-    let trimmed = trim_root_groups_to_max_lines(vec![vec![rb("a", 1)]], 0);
-    assert!(trimmed.is_empty());
+fn select_latest_root_start_zero_max_returns_empty_window() {
+    assert_eq!(select_latest_root_start(&[1], 0), 1);
 }
 
 #[test]
@@ -481,6 +450,41 @@ fn test_render_tree_depth_one_full_width_assistant_does_not_exceed_outer_width()
 }
 
 #[test]
+fn spacing_policy_change_invalidates_content_and_gutted_caches() {
+    let kind = OutputBlockKind::AssistantMessage(TextBlockView {
+        key: "assistant".into(),
+        text: "one\n\ntwo".into(),
+        style: SemanticStyle::Normal,
+    });
+    let vm = OutputViewModel {
+        version: 1,
+        follow_tail_hint: false,
+        roots: vec![BlockNode {
+            block_id: "assistant".into(),
+            block_version: kind.cache_version(),
+            kind,
+            children: vec![],
+        }],
+    };
+    let mut renderer = OutputDocumentRenderer::default();
+
+    let normal = renderer.render_model_document(&vm, 80, 80, 0, MarkdownSpacingPolicy::normal());
+    let after_normal_content = renderer.render_count();
+    let after_normal_gutted = renderer.gutted_render_count();
+    let compact = renderer.render_model_document(&vm, 80, 80, 0, MarkdownSpacingPolicy::compact());
+
+    assert!(compact.total_lines() < normal.total_lines());
+    assert_eq!(renderer.render_count(), after_normal_content + 1);
+    assert_eq!(renderer.gutted_render_count(), after_normal_gutted + 1);
+
+    let after_compact_content = renderer.render_count();
+    let after_compact_gutted = renderer.gutted_render_count();
+    let _ = renderer.render_model_document(&vm, 80, 80, 0, MarkdownSpacingPolicy::compact());
+    assert_eq!(renderer.render_count(), after_compact_content);
+    assert_eq!(renderer.gutted_render_count(), after_compact_gutted);
+}
+
+#[test]
 fn test_gutted_cache_reuses_static_block_across_frames() {
     let kind = OutputBlockKind::AssistantMessage(TextBlockView {
         key: "a".to_string(),
@@ -499,15 +503,194 @@ fn test_gutted_cache_reuses_static_block_across_frames() {
         follow_tail_hint: true,
     };
     let mut r = OutputDocumentRenderer::default();
-    let _ = r.render_model_document(&vm, 80, 80, 0);
+    let _ = r.render_model_document(
+        &vm,
+        80,
+        80,
+        0,
+        crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+    );
     let after_first = r.gutted_render_count();
     // 同一 vm、frame 推进：静态 block 应命中 gutted 缓存，不重算。
-    let _ = r.render_model_document(&vm, 80, 80, 1);
+    let _ = r.render_model_document(
+        &vm,
+        80,
+        80,
+        1,
+        crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+    );
     assert_eq!(
         r.gutted_render_count(),
         after_first,
         "静态 block 跨 frame 应复用 gutted 缓存"
     );
+}
+
+fn static_edit_root(id: &str, lines: usize) -> BlockNode {
+    let old = (0..lines)
+        .map(|index| format!("fn item_{index}() {{ println!(\"old {index}\"); }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut new_lines = old.lines().map(str::to_string).collect::<Vec<_>>();
+    new_lines[lines / 2] = format!("fn item_{}() {{ println!(\"new\"); }}", lines / 2);
+    let result_text = format!("replaced 1 occurrence(s) in src/{id}.rs");
+    let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
+        key: format!("{id}-result"),
+        tool_title: "Edit".into(),
+        args_preview: Some(format!(r#"{{"file_path":"src/{id}.rs"}}"#)),
+        result_text: result_text.clone(),
+        data: Some(serde_json::json!({
+            "old": old,
+            "new": new_lines.join("\n"),
+            "start_line": 1
+        })),
+        style: SemanticStyle::Success,
+    });
+    let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+        key: id.into(),
+        chat_id: None,
+        turn_id: None,
+        tool_call_id: Some(id.into()),
+        title: "Edit".into(),
+        icon: "✓".into(),
+        semantic_status: ToolSemanticStatus::Success,
+        style: SemanticStyle::Success,
+        args_preview: Some(format!(r#"{{"file_path":"src/{id}.rs"}}"#)),
+        activity_lines: Vec::new(),
+        result_summary: Some(result_text),
+        result_payload: None,
+        workspace_root: None,
+        collapsible: false,
+        collapsed: false,
+        agent_meta: None,
+    });
+    BlockNode {
+        block_id: id.into(),
+        block_version: tool_kind.cache_version(),
+        kind: tool_kind,
+        children: vec![BlockNode {
+            block_id: format!("{id}-result"),
+            block_version: result_kind.cache_version(),
+            kind: result_kind,
+            children: Vec::new(),
+        }],
+    }
+}
+
+#[test]
+fn history_over_max_lines_does_not_rehighlight_evicted_static_edits_on_next_frame() {
+    let vm = vm_with_roots(
+        (0..6)
+            .map(|index| static_edit_root(&format!("edit-{index}"), 2_000))
+            .collect(),
+    );
+    let mut renderer = OutputDocumentRenderer::default();
+
+    let (_, cold) = crate::tui::render::performance::capture(|| {
+        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal())
+    });
+    let (_, warm) = crate::tui::render::performance::capture(|| {
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+    });
+
+    assert_eq!(cold.edit_diff_calls, 6);
+    assert_eq!(warm.edit_diff_calls, 0);
+    assert_eq!(warm.diff_build_calls, 0);
+    assert_eq!(warm.syntax_highlight_calls, 0);
+}
+
+#[test]
+fn unrelated_new_root_does_not_rehighlight_windowed_static_edits() {
+    let mut vm = vm_with_roots(
+        (0..6)
+            .map(|index| static_edit_root(&format!("edit-{index}"), 2_000))
+            .collect(),
+    );
+    let mut renderer = OutputDocumentRenderer::default();
+    let _ = renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal());
+
+    vm.version += 1;
+    vm.roots.push(node("unrelated", "无关的新消息", vec![]));
+    let (_, revised) = crate::tui::render::performance::capture(|| {
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+    });
+
+    assert_eq!(revised.edit_diff_calls, 0);
+    assert_eq!(revised.diff_build_calls, 0);
+    assert_eq!(revised.syntax_highlight_calls, 0);
+}
+
+#[test]
+fn static_edit_diff_reuses_render_and_highlight_across_spinner_frames() {
+    let old = (0..80)
+        .map(|index| format!("fn item_{index}() {{ println!(\"old {index}\"); }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut new_lines = old.lines().map(str::to_string).collect::<Vec<_>>();
+    new_lines[40] = "fn item_40() { println!(\"new 40\"); }".to_string();
+    let new = new_lines.join("\n");
+    let result_text = "replaced 1 occurrence(s) in src/lib.rs".to_string();
+    let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
+        key: "edit-result".into(),
+        tool_title: "Edit".into(),
+        args_preview: Some(r#"{"file_path":"src/lib.rs"}"#.into()),
+        result_text: result_text.clone(),
+        data: Some(serde_json::json!({ "old": old, "new": new, "start_line": 1 })),
+        style: SemanticStyle::Success,
+    });
+    let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+        key: "edit".into(),
+        chat_id: None,
+        turn_id: None,
+        tool_call_id: Some("edit".into()),
+        title: "Edit".into(),
+        icon: "✓".into(),
+        semantic_status: ToolSemanticStatus::Success,
+        style: SemanticStyle::Success,
+        args_preview: Some(r#"{"file_path":"src/lib.rs"}"#.into()),
+        activity_lines: Vec::new(),
+        result_summary: Some(result_text),
+        result_payload: None,
+        workspace_root: None,
+        collapsible: false,
+        collapsed: false,
+        agent_meta: None,
+    });
+    let vm = vm_with_roots(vec![BlockNode {
+        block_id: "edit".into(),
+        block_version: tool_kind.cache_version(),
+        kind: tool_kind,
+        children: vec![BlockNode {
+            block_id: "edit-result".into(),
+            block_version: result_kind.cache_version(),
+            kind: result_kind,
+            children: Vec::new(),
+        }],
+    }]);
+    let mut renderer = OutputDocumentRenderer::default();
+
+    let (_, cold) = crate::tui::render::performance::capture(|| {
+        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal())
+    });
+    let (_, warm) = crate::tui::render::performance::capture(|| {
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+    });
+
+    assert_eq!(cold.edit_diff_calls, 1);
+    assert_eq!(cold.diff_build_calls, 1);
+    assert!(cold.syntax_highlight_calls > 0);
+    assert_eq!(cold.block_cache_misses, 2);
+    assert_eq!(cold.gutted_cache_misses, 2);
+    assert_eq!(warm.edit_diff_calls, 0);
+    assert_eq!(warm.diff_build_calls, 0);
+    assert_eq!(warm.syntax_highlight_calls, 0);
+    assert_eq!(
+        warm.block_cache_hits, 0,
+        "gutted cache 命中应短路内层 block cache"
+    );
+    assert_eq!(warm.block_cache_misses, 0);
+    assert_eq!(warm.gutted_cache_hits, 2);
+    assert_eq!(warm.gutted_cache_misses, 0);
 }
 
 #[test]

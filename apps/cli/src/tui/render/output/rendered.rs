@@ -25,6 +25,16 @@ use ratatui::text::Span;
 #[derive(Clone, Copy, Debug)]
 pub struct RenderCtx {
     pub text_width: u16,
+    pub markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
+}
+
+impl RenderCtx {
+    pub const fn for_width(text_width: u16) -> Self {
+        Self {
+            text_width,
+            markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+        }
+    }
 }
 
 /// 行内 link 的位置与 URL，用于 Cmd+Click 打开。
@@ -159,15 +169,41 @@ impl RenderedBlock {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RenderedDocument {
     pub blocks: Vec<RenderedBlock>,
+    /// 每个 root group 的 block 数；为空时兼容旧构造方式，每个 block 视为独立 group。
+    pub root_group_block_counts: Vec<usize>,
 }
 
 impl RenderedDocument {
+    pub fn new(blocks: Vec<RenderedBlock>) -> Self {
+        Self {
+            blocks,
+            root_group_block_counts: Vec::new(),
+        }
+    }
+
+    pub fn with_root_groups(groups: Vec<Vec<RenderedBlock>>) -> Self {
+        let root_group_block_counts = groups.iter().map(Vec::len).collect();
+        let blocks = groups.into_iter().flatten().collect();
+        Self {
+            blocks,
+            root_group_block_counts,
+        }
+    }
+
     pub fn total_lines(&self) -> usize {
         self.blocks.iter().map(|block| block.lines.len()).sum()
     }
 
     pub fn iter_lines(&self) -> impl Iterator<Item = &RenderedLine> {
         self.blocks.iter().flat_map(|block| block.lines.iter())
+    }
+
+    pub fn root_group_block_counts(&self) -> Vec<usize> {
+        if self.root_group_block_counts.is_empty() {
+            vec![1; self.blocks.len()]
+        } else {
+            self.root_group_block_counts.clone()
+        }
     }
 }
 
@@ -227,6 +263,7 @@ mod tests {
                     lines: Rc::new(vec![RenderedLine::default()]),
                 },
             ],
+            root_group_block_counts: Vec::new(),
         };
 
         assert_eq!(doc.total_lines(), 3);

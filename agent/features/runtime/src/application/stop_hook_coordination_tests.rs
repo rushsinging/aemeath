@@ -165,13 +165,10 @@ async fn long_feedback_materializes_real_readable_file_for_sub_and_main() {
     assert_ne!(path, "[pending — adapter will resolve]");
     assert!(std::path::Path::new(path).is_file());
     assert!(feedback.llm_text.contains(path));
-    assert_eq!(
-        tokio::fs::read_to_string(path)
-            .await
-            .unwrap()
-            .contains(&stdout),
-        true
-    );
+    assert!(tokio::fs::read_to_string(path)
+        .await
+        .unwrap()
+        .contains(&stdout));
 
     let _ = tokio::fs::remove_file(path).await;
     let _ = tokio::fs::remove_dir_all(

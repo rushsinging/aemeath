@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use sdk::{ChatId, ChatTurnId, RunId, RunStepId};
@@ -22,10 +22,10 @@ use share::config::Config;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
-use super::loop_runner::main_run_port::MainRunPort;
+use super::loop_runner::main_run_port::{MainRunPort, StepMessageOwnership};
 use super::task_reminder::TaskReminderState;
 use crate::application::context_coordination::ContextCoordinator;
-use crate::application::loop_engine::CompactionPort;
+use crate::application::loop_engine::RunLoopPort;
 use crate::application::main_loop::looping::reflection::{
     maybe_submit_pre_compact_reflection, submit_pre_compact_reflection,
 };
@@ -246,12 +246,10 @@ fn build_compact_test_port<'a>(
         queue: &harness.queue,
         input_events: &harness.input_events,
         system_prompt_text: "system",
-        execution: {
-            let mut execution = crate::application::run_execution_state::RunExecutionState::new();
-            execution.initialize_for_launch(pre_compact_messages.clone(), 1);
-            execution.replace_context_projection(request, window);
-            execution
-        },
+        context_request: Some(request),
+        context_window: window,
+        step_messages: StepMessageOwnership::new(pre_compact_messages.clone()),
+        messages: pre_compact_messages,
         context_size: 128_000,
         workspace: &harness.workspace,
         session_id: "pre-compact-test",
@@ -275,13 +273,19 @@ fn build_compact_test_port<'a>(
             pending_tool_results: false,
             run_id: RunId::new("run"),
         },
+        per_turn_adopted: Vec::new(),
         run_id: RunId::new("run"),
         active_run: harness.active_run.as_ref(),
+        turn_count: 1,
         turn_context: RuntimeTurnContext::new(ChatId::new_v7(), ChatTurnId::new_v7()),
         // #1385 Task 12: last_total_tokens eliminated.
         task_reminder_state: &mut harness.task_reminder_state,
         tool_identity: &harness.tool_identity,
+        started_at: Instant::now(),
         plan_mode: false,
+        interaction_receivers: Vec::new(),
+        resolved_interactions: Vec::new(),
+        pending_work: None,
     }
 }
 

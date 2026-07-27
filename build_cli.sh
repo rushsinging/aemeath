@@ -8,15 +8,8 @@ echo "[hook-env] AEMEATH_PROJECT_DIR=${AEMEATH_PROJECT_DIR:-<unset>}"
 echo "[hook-env] CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-<unset>}"
 echo "[hook-env] PWD=$PWD"
 
-# 仅在主仓库（main 工作区）构建并安装：worktree 中跳过 build/install，
-# 避免把未合并分支的二进制装成全局工具污染日常使用的 ~/.local/bin/aemeath。
-# 用 git 原生检测 linked worktree（absolute-git-dir ≠ git-common-dir）。
-abs_git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"
-abs_common_dir="$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd || true)"
-if [[ -n "$abs_git_dir" && -n "$abs_common_dir" && "$abs_git_dir" != "$abs_common_dir" ]]; then
-    echo ">>> 在 git worktree 中，跳过 build/install（仅在 main 主工作区构建）"
-    exit 0
-fi
+# 构建并安装当前工作区版本。main 与 linked worktree 均允许执行，
+# 避免构建脚本因工作区形态而静默跳过。
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 BIN_NAME="aemeath"

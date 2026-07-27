@@ -31,15 +31,20 @@ where
     let refresh = config_reader.refresh_if_sources_changed().await;
     match &refresh {
         ConfigRefreshOutcome::Unchanged => {}
-        ConfigRefreshOutcome::Reloaded { scopes, .. } => {
+        ConfigRefreshOutcome::Reloaded {
+            scopes, snapshot, ..
+        } => {
             let mut changed_keys = vec!["config:reloaded".to_string()];
             changed_keys.extend(
                 scopes
                     .iter()
                     .map(|scope| format!("config:scope:{}", scope.as_str())),
             );
-            sink.send_event(RuntimeStreamEvent::ConfigReloaded { changed_keys })
-                .await;
+            sink.send_event(RuntimeStreamEvent::ConfigReloaded {
+                changed_keys,
+                view: crate::application::client::config_snapshot_to_sdk(snapshot),
+            })
+            .await;
             if scopes.contains(
                 &share::config::domain::scope::ConfigApplicationScope::SessionRestartRequired,
             ) {
@@ -71,6 +76,9 @@ where
         // 通过 sink 发送 ConfigReloaded 事件通知客户端
         sink.send_event(RuntimeStreamEvent::ConfigReloaded {
             changed_keys: config_diff.changed_keys.clone(),
+            view: crate::application::client::config_snapshot_to_sdk(
+                &config_reader.committed_snapshot(),
+            ),
         })
         .await;
 

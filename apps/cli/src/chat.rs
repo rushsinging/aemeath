@@ -9,8 +9,10 @@ pub(crate) async fn build_client_from_cli_args(
     composition::app::build_agent_client(args).await
 }
 
-fn initial_tui_resume_id(args: &Args) -> Option<String> {
-    args.resume.clone()
+fn initial_tui_resume_projection(
+    bootstrap: &composition::app::AgentClientBootstrap,
+) -> Option<&sdk::SessionResumeView> {
+    bootstrap.startup_resume.as_ref()
 }
 
 fn should_emit_cli_frontend_started_log() -> bool {
@@ -24,7 +26,6 @@ fn should_emit_quiet_cli_diagnostic_log(quiet: bool) -> bool {
 /// 主聊天逻辑 — 瘦身入口（CLI 通过 composition 装配 runtime）。
 pub(crate) async fn run_chat(args: Args) {
     let quiet = args.quiet;
-    let initial_resume_id: Option<String> = initial_tui_resume_id(&args);
     let bootstrap = composition::app::build_agent_bootstrap(args.into())
         .await
         .unwrap_or_else(|e| {
@@ -69,10 +70,21 @@ pub(crate) async fn run_chat(args: Args) {
             return;
         }
 
+        let startup_resume = initial_tui_resume_projection(&bootstrap).cloned();
         let mut app =
             crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
         app.agent_client = Some(bootstrap.client.clone());
         app.user_agent = bootstrap.user_agent;
+        app.config_view = bootstrap.config_view.clone();
+        app.apply_agent_intent(
+            crate::tui::update::intent::AgentIntent::UiPreferences(
+                crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(
+                    crate::tui::render::output::spacing::MarkdownSpacingPolicy::from(
+                        &bootstrap.config_view,
+                    ),
+                ),
+            ),
+        );
         app.session.memory_config = bootstrap.memory_config;
         app.set_skills(bootstrap.skills_map);
         app.set_commands(bootstrap.command_catalog, bootstrap.command_router);
@@ -97,12 +109,24 @@ pub(crate) async fn run_chat(args: Args) {
                 ),
             ),
         );
-        app.run(bootstrap.client, initial_resume_id)
-            .await
-            .unwrap_or_else(|e| {
-                crate::tui::log_error!("TUI error: {e}");
-                std::process::exit(1);
-            });
+        if let Some(resume) = startup_resume {
+            crate::tui::log_debug!(
+                "resume_lifecycle boundary=cli_to_tui stage=startup_projection_received session_id={} steps={} messages={}",
+                resume.session_id,
+                resume.steps.len(),
+                resume.steps.iter().map(|step| step.messages.len()).sum::<usize>()
+            );
+            app.resume_startup_projection(resume);
+        } else {
+            crate::tui::log_debug!(
+                "resume_lifecycle boundary=cli_to_tui stage=startup_projection_absent session_id={}",
+                app.session.session_id()
+            );
+        }
+        app.run(bootstrap.client).await.unwrap_or_else(|e| {
+            crate::tui::log_error!("TUI error: {e}");
+            std::process::exit(1);
+        });
         println!("aemeath --resume {}", session_id);
     })
     .await;
@@ -111,29 +135,6 @@ pub(crate) async fn run_chat(args: Args) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_initial_tui_resume_id_uses_cli_resume() {
-        let args = Args {
-            api_key: None,
-            base_url: None,
-            model: None,
-            cwd: None,
-            max_tokens: None,
-            verbose: false,
-            quiet: false,
-            no_markdown: false,
-            context_size: 128_000,
-            resume: Some("session-67".to_string()),
-            allow_all: false,
-            max_tool_concurrency: None,
-            max_agent_concurrency: None,
-            no_think: false,
-            max_reasoning: None,
-        };
-
-        assert_eq!(initial_tui_resume_id(&args).as_deref(), Some("session-67"));
-    }
 
     #[test]
     fn test_should_emit_cli_frontend_started_log() {

@@ -3,7 +3,7 @@
 use crate::adapters::{
     agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep,
     memory_tool, plan_mode, task_create, task_get, task_list, task_list_complete, task_list_create,
-    task_stop, task_update, tool_search, web_fetch, web_search, worktree,
+    task_lists, task_stop, task_update, tool_search, web_fetch, web_search, worktree,
 };
 use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::published_language::ToolCapabilities as Caps;
@@ -151,10 +151,18 @@ pub(crate) fn register_named_scope(
         }
     );
     builtin!(
-        "TaskList",
+        "TaskListGet",
         Caps::TaskRead,
         [true, false],
         task_list::TaskListTool {
+            access: task_access.clone()
+        }
+    );
+    builtin!(
+        "TaskLists",
+        Caps::TaskRead,
+        [true, false],
+        task_lists::TaskListsTool {
             access: task_access.clone()
         }
     );
@@ -305,7 +313,8 @@ mod tests {
         "Agent",
         "TaskCreate",
         "TaskUpdate",
-        "TaskList",
+        "TaskListGet",
+        "TaskLists",
         "TaskListCreate",
         "TaskListComplete",
         "TaskGet",
@@ -348,7 +357,7 @@ mod tests {
     #[test]
     fn side_effect_capability_characterization_matches_builtin_behavior() {
         let main_scope = assembled_scope(BuiltinRegistryScope::Main);
-        for name in ["TaskGet", "TaskList"] {
+        for name in ["TaskGet", "TaskListGet", "TaskLists"] {
             let spec = main_scope
                 .get(&crate::domain::published_language::ToolName::new(name))
                 .unwrap();

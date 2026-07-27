@@ -1,3 +1,4 @@
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
 use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiTurnContext};
 
 use super::super::testing::TuiScenarioHarness;
@@ -7,6 +8,52 @@ fn ctx() -> TuiTurnContext {
         chat_id: "chat-p0".to_string(),
         turn_id: "turn-p0".to_string(),
     }
+}
+
+#[test]
+fn terminal_text_after_thinking_matches_resume_projection() {
+    let terminal_text = "Final answer survives the terminal event.";
+
+    let mut live = TuiScenarioHarness::new(100, 30);
+    live.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
+    live.runtime_event(TuiRuntimeEvent::Thinking {
+        context: ctx(),
+        text: "Inspecting the repository".into(),
+    });
+    live.runtime_event(TuiRuntimeEvent::BlockComplete {
+        context: ctx(),
+        text: String::new(),
+    });
+    live.runtime_event(TuiRuntimeEvent::Text {
+        context: ctx(),
+        text: terminal_text.into(),
+    });
+    live.runtime_event(TuiRuntimeEvent::BlockComplete {
+        context: ctx(),
+        text: String::new(),
+    });
+    live.runtime_event(TuiRuntimeEvent::Done {
+        context: ctx(),
+        duration_ms: None,
+    });
+    live.render();
+
+    let mut resumed = TuiScenarioHarness::new(100, 30);
+    resumed.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps: vec![TuiResumedSessionStep {
+            run_id: "chat-p0".into(),
+            step_id: "turn-p0".into(),
+            messages: vec![TuiChatMessage::assistant_text(terminal_text)],
+        }],
+        session_id: "session-p0".into(),
+        created_at: 0,
+    });
+    resumed.render();
+
+    assert!(live.screen().contains(terminal_text));
+    assert!(resumed.screen().contains(terminal_text));
+    assert_eq!(live.screen().matches(terminal_text).count(), 1);
+    assert_eq!(resumed.screen().matches(terminal_text).count(), 1);
 }
 
 #[test]

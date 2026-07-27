@@ -526,3 +526,56 @@ fn format_reflection_history_renders_optional_metadata_as_absent() {
     assert!(rendered.contains("error=none"));
     assert!(rendered.contains("tokens(in/out)=n/a"));
 }
+
+#[test]
+fn runtime_batch_applies_all_events_before_the_next_render() {
+    let mut app = test_app();
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let spawn_refs = make_spawn_refs();
+    let context = crate::tui::adapter::tui_runtime_event::TuiTurnContext {
+        chat_id: "batch-chat".to_string(),
+        turn_id: "batch-turn".to_string(),
+    };
+
+    let result = app.update(
+        TuiMsg::RuntimeBatch(vec![
+            TuiRuntimeEvent::Text {
+                context: context.clone(),
+                text: "first ".to_string(),
+            },
+            TuiRuntimeEvent::Text {
+                context: context.clone(),
+                text: "second".to_string(),
+            },
+            TuiRuntimeEvent::BlockComplete {
+                context,
+                text: "first second".to_string(),
+            },
+        ]),
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    let assistant = app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .find_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::AssistantText {
+                text, ..
+            } => Some(text.as_str()),
+            _ => None,
+        });
+    assert_eq!(assistant, Some("first second"));
+    assert!(app.view_state.dirty.output);
+    assert_eq!(
+        result
+            .effects
+            .iter()
+            .filter(|effect| matches!(effect, Effect::RequestRender))
+            .count(),
+        1
+    );
+}

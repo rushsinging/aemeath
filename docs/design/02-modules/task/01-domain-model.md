@@ -199,6 +199,8 @@ BatchStatus = Active | Paused | Archived
 
 Batch **没有** `description` 字段。新建只接收 typed `BatchCreateSpec { summary }`；Tool 层若同时有 subject / summary，**MUST** 在 ACL 中归一化成一个非空 summary，**NEVER** 把未存储的 description 参数发布到 Task OHS。
 
+Batch 历史查询通过 Task-owned `TaskBatchSnapshot` 发布。该只读投影以稳定 `BatchId` 标识 active / paused / archived Batch，携带 summary、生命周期元数据、batch-local live Task 统计与稳定排序任务。`TaskList` 默认查询 `current_batch`，也可按显式 Batch ID 查询历史；历史发现使用同一投影集合。消费方 **NEVER** 用全局 Store 统计代替 Batch 统计，也 **NEVER** 通过删除 archived Task 修正显示。
+
 ### 4.5 Lifecycle 检测函数
 
 三个纯函数，输入 Task 与 Batch 快照，输出检测结果：
@@ -276,6 +278,7 @@ UUIDv7 不属于 v0.1.0 Target。未来若改变标识格式，**MUST** 以独�
 | 2026-07-14 | 固定 v0.1.0 的单 Session 单调数字 ID，移除未排期的 UUIDv7 Current → Future 混写 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 分离 Task-owned wire codec 与 typed prepare，并持久化 next_task_id / next_batch_id 防止恢复后 ID 复用 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 固化 typed/fallible create 与 Batch pause/resume/archive-by-id 迁移，使 Paused 可达并移除未持久化 description 参数 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-26 | 固化 Batch-scoped 查询、历史发现与局部统计语义；Archived 历史保留且不得混入 current Batch 摘要 | [#1415](https://github.com/rushsinging/aemeath/issues/1415) |
 | 2026-07-16 | 校验 #885 领域内核实现：强类型 ID、私有实体、typed create、严格局部状态机、事件、聚合骨架与 typed lifecycle 对齐；DAG、端口、snapshot/restore、ACL 与 legacy 退役仍按 #886–#891 承接 | [#885](https://github.com/rushsinging/aemeath/issues/885) |
 | 2026-07-16 | 从 Task 实体移除 `owner`：Agent 分配属于 Runtime-owned 执行绑定，legacy Tool/Storage 字段由 #889/#891 迁移退役 | [#885](https://github.com/rushsinging/aemeath/issues/885) |
 | 2026-07-16 | 增加 Task-owned `started_at` / `completed_at` 执行时间事实，锁定首次开始、重入保留与 Pending 直接完成语义；snapshot/codec 由 #888/#890 承接 | [#885](https://github.com/rushsinging/aemeath/issues/885) |

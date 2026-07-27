@@ -21,7 +21,7 @@ pub fn task_create(lang: &str) -> &'static str {
 - 开始工作前标记为 in_progress
 - 完成后标记为 completed——系统会显示哪些任务已解除阻塞
 
-用 TaskList 发现无未解决依赖的待处理任务。
+用 TaskListGet 发现无未解决依赖的待处理任务。
 为可并行执行的独立任务启动 Agent。"#
         }
         _ => {
@@ -49,7 +49,7 @@ After creating tasks, use TaskUpdate to:
 - Mark as in_progress before starting work
 - Mark as completed when done — the system will show which tasks are unblocked
 
-Use TaskList to discover pending tasks with no unresolved dependencies.
+Use TaskListGet to discover pending tasks with no unresolved dependencies.
 Launch Agent for independent tasks that can run in parallel."#
         }
     }
@@ -63,7 +63,7 @@ pub fn task_get(lang: &str) -> &'static str {
     }
 }
 
-/// TaskList description。
+/// TaskListGet description。
 pub fn task_list(lang: &str) -> &'static str {
     match lang {
         "zh" => {
@@ -110,7 +110,7 @@ pub fn task_update(lang: &str) -> &'static str {
 状态工作流：pending → in_progress → completed。用 'deleted' 删除。
 标记任务为 completed 时，系统会显示哪些下游任务已解除阻塞、可执行。据此决定下一步处理什么。
 
-完成任务后，检查解除阻塞列表或调用 TaskList 查找下一个可用任务。"#
+完成任务后，检查解除阻塞列表或调用 TaskListGet 查找下一个可用任务。"#
         }
         _ => {
             r#"Update a **single** field on a task. Each call changes exactly one field. Value is always a string.
@@ -127,8 +127,15 @@ Status workflow: pending → in_progress → completed. Use 'deleted' to remove.
 When you mark a task as completed, the system will show which downstream tasks
 are now unblocked and ready to execute. Use this to decide what to work on next.
 
-After completing a task, check the unblocked list or call TaskList to find the next available task."#
+After completing a task, check the unblocked list or call TaskListGet to find the next available task."#
         }
+    }
+}
+
+pub fn task_lists(lang: &str) -> &'static str {
+    match lang {
+        "zh" => "列出当前及历史任务列表，可按 active / paused / archived 状态过滤。使用返回的 ID 调用 TaskListGet 查询具体列表。",
+        _ => "List current and historical task lists, optionally filtered by active, paused, or archived status. Use a returned ID with TaskListGet to inspect that list.",
     }
 }
 
@@ -159,6 +166,7 @@ mod tests {
         assert_eq!(task_create("fr"), task_create("en"));
         assert!(task_get("zh").contains("按 ID 检索任务"));
         assert!(task_list("zh").contains("列出所有任务"));
+        assert!(task_lists("zh").contains("历史任务列表"));
         assert!(task_stop("zh").contains("停止"));
         for text in [task_update("zh"), task_update("en")] {
             assert!(text.contains("status:"));

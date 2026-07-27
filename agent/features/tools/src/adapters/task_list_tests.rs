@@ -62,9 +62,51 @@ async fn task_list_uses_current_batch_sequences_for_ids_and_dependencies() {
         .await;
 
     assert!(!result.is_error, "{}", result.text);
-    let tasks = serde_json::to_value(result.data.unwrap()).unwrap()["tasks"].clone();
+    let data = serde_json::to_value(result.data.unwrap()).unwrap();
+    let tasks = data["tasks"].clone();
     assert_eq!(tasks.as_array().unwrap().len(), 2);
     assert_eq!(tasks[0]["id"], "1");
     assert_eq!(tasks[1]["id"], "2");
     assert_eq!(tasks[1]["blocked_by"], serde_json::json!(["1"]));
+    assert_eq!(data["task_list"]["id"], "2");
+    assert_eq!(data["stats"]["total"], 2);
+    assert!(result.text.contains("Task list #2: 当前请求"));
+    assert!(result
+        .text
+        .contains("2 tasks (2 pending, 0 in_progress, 0 completed)"));
+    assert!(result.text.contains("1. pending — 前置"));
+    assert!(result.text.contains("2. pending — 后续 (blocked by #1)"));
+}
+
+#[tokio::test]
+async fn task_list_queries_archived_batch_by_id() {
+    let access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
+    access
+        .create_batch(
+            task::BatchCreateSpec::try_new("历史请求".into()).unwrap(),
+            1,
+        )
+        .unwrap();
+    access
+        .create_task(
+            task::TaskCreateSpec::try_new(
+                "历史任务".into(),
+                String::new(),
+                None,
+                task::TaskPriority::Normal,
+            )
+            .unwrap(),
+            2,
+        )
+        .unwrap();
+    access.archive_batch(task::BatchId::new(1)).unwrap();
+
+    let result = TaskListTool { access }
+        .call(serde_json::json!({"task_list_id": "1"}), &test_ctx())
+        .await;
+
+    assert!(!result.is_error, "{}", result.text);
+    let data = serde_json::to_value(result.data.unwrap()).unwrap();
+    assert_eq!(data["task_list"]["status"], "archived");
+    assert_eq!(data["tasks"][0]["subject"], "历史任务");
 }

@@ -21,7 +21,7 @@ pub mod session;
 pub mod session_lock;
 
 /// 会话恢复失败分类（#636 D2）。顶层 re-export 方便 runtime / CLI 直接引用。
-pub use chat_event::SessionResumeFailureKind;
+pub use chat_event::{SessionResumeFailureKind, SessionResumeView};
 pub mod tool_input;
 pub mod tool_result;
 pub mod tui;
@@ -52,7 +52,8 @@ pub use commands::{
 };
 pub use config_view::{
     ConfigApplicationScopeView, ConfigChangeCause, ConfigChangedEvent, ConfigField,
-    ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, PermissionModeView,
+    ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, ElementSpacingView,
+    MarkdownSpacingModeView, MarkdownSpacingOverridesView, PermissionModeView,
 };
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;

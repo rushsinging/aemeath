@@ -274,6 +274,34 @@ impl CanonicalSession {
         }
     }
 
+    pub fn all_persisted_steps(&self) -> Vec<(RunStepCursor, Vec<Message>)> {
+        self.run_slices
+            .iter()
+            .flat_map(|slice| {
+                slice.steps.iter().map(|step| {
+                    let messages = step
+                        .accepted_input
+                        .iter()
+                        .flat_map(|input| input.messages.iter())
+                        .chain(
+                            step.outcome
+                                .iter()
+                                .flat_map(|outcome| outcome.messages.iter()),
+                        )
+                        .cloned()
+                        .collect();
+                    (
+                        RunStepCursor {
+                            run_id: slice.run_id.clone(),
+                            step_id: step.step_id.clone(),
+                        },
+                        messages,
+                    )
+                })
+            })
+            .collect()
+    }
+
     pub fn flattened_steps_from_marker(&self) -> Vec<(RunStepCursor, Vec<Message>)> {
         let start_at = self
             .compact

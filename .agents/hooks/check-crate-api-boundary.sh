@@ -177,6 +177,7 @@ ROOT_ACCESS_ALLOW = {
         "ProviderPort",
         "InitialProviderAssembly", "SessionBootstrapAssembly", "PromptAssembly", "SkillBootstrapAssembly", "ModelRuntimeSettings", "resolve_model_runtime_settings",        "PromptContext", "build_system_prompt_parts", "build_static_prompt",        "AgentRunnerAssembly", "ParentRunContextSource", "build_agent_runner", "resolve_concurrency_limits",        "RuntimeBootstrapDependencies", "RuntimeToolAssemblyDependencies",        "ToolResultMaterializer", "ToolResultMaterializationPolicy", "ActiveRunRegistry",        "AtomicBlobToolResultStore",
         "UsageSink",
+        "config_snapshot_to_sdk",
         "from_args_with_workspace",
     },
       "policy": {

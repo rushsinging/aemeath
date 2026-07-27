@@ -72,12 +72,10 @@ impl OutputArea {
         let lines: Vec<RenderedLine> = (0..count)
             .map(|i| RenderedLine::new(vec![Span::raw(format!("line {i}"))]))
             .collect();
-        self.document = RenderedDocument {
-            blocks: vec![RenderedBlock {
-                block_id: "test".into(),
-                lines: Rc::new(lines),
-            }],
-        };
+        self.document = RenderedDocument::new(vec![RenderedBlock {
+            block_id: "test".into(),
+            lines: Rc::new(lines),
+        }]);
     }
 }
 
@@ -91,12 +89,10 @@ mod tests {
     #[test]
     fn test_output_area_replace_document_replaces_content() {
         let mut area = OutputArea::new();
-        let document = RenderedDocument {
-            blocks: vec![RenderedBlock {
-                block_id: "a".into(),
-                lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("x")])]),
-            }],
-        };
+        let document = RenderedDocument::new(vec![RenderedBlock {
+            block_id: "a".into(),
+            lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("x")])]),
+        }]);
         area.replace_document(document);
 
         assert_eq!(area.document().total_lines(), 1);

@@ -94,6 +94,7 @@
 - **expiry**：每次执行通过 GitHub CLI 核验所有 migration exception 的 tracking Issue 仍为 OPEN；查询失败或 Issue 已关闭均 fail-closed。
 - **报告**：`cargo run -p xtask -- guard-registry report . <output>` 按 stable id 确定性输出 classification、module、guard、scope kind 与 lifecycle 维度，用于模块开发前/完成后预算复核。
 - **Current 基线复核**：Storage 的 Target policy 不计债务；#883 已删除 `STORAGE_TRANSITIONAL_MODULES` 及其唯一 migration exception，Storage migration debt 为 `0`。Composition 仅有合法唯一装配 policy；Workflow、Audit、Project 未发现 migration exception，与人工基线一致。
+- **Runtime 根 façade**：`config_snapshot_to_sdk` 是 Composition 将 committed `ConfigSnapshot` 投影为 SDK `ConfigView` 的已登记窄入口；跨 feature 消费 **MUST** 仅调用该 crate-root re-export，**NEVER** 穿透 `application::client::mapping`。
 - **边界**：本守卫只治理例外和 policy 元数据，NEVER 替代 #1022 的 capability-first 正式边界，也不退役 legacy COLA Guard。
 - **故意违规证据**：缺 owner、重复 id、stale path、超预算、未登记 `grep -v` 均被定向元守卫阻断；恢复后元守卫及总编排 clean pass。
 

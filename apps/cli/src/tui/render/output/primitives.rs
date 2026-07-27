@@ -1,3 +1,4 @@
+mod blocks;
 mod convert;
 pub mod diff;
 pub mod fenced;
