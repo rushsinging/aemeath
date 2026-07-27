@@ -9,6 +9,8 @@ pub mod memory_injection;
 pub mod prompt;
 mod prompt_source;
 pub(crate) mod session_legacy_workspace;
+#[cfg(any(test, feature = "dev"))]
+mod session_lifecycle;
 mod session_resume;
 mod skill_prompt_source;
 
@@ -24,6 +26,11 @@ pub use memory_injection::{
 };
 pub use prompt_source::BaselinePromptSource;
 pub use session_legacy_workspace::{decode as decode_session, LegacySessionDecoder};
+#[cfg(any(test, feature = "dev"))]
+pub use session_lifecycle::{
+    capture as capture_session_lifecycle, SessionGenerationTransition, SessionLifecycleSnapshot,
+    SessionStructureSnapshot,
+};
 pub use skill_prompt_source::{skill_prompt_budget, SkillPromptSource, WorkspaceSkillQueryFactory};
 
 pub fn isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextPort> {

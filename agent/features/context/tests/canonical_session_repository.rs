@@ -232,6 +232,222 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
     ));
 }
 
+#[cfg(feature = "dev")]
+fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalSession {
+    let tool_result =
+        Message::tool_results(vec![("tool-1".to_string(), "payload".to_string(), false)]);
+    CanonicalSession {
+        id: session_id.to_string(),
+        chats: vec![],
+        created_at: "2026-01-01T00:00:00Z".to_string(),
+        updated_at: "2026-01-01T00:00:00Z".to_string(),
+        metadata: Default::default(),
+        tasks: SnapshotState::Missing,
+        workspace: SnapshotState::Captured(workspace()),
+        revision,
+        compact: None,
+        run_slices: vec![CommittedRunSlice::new(
+            "run",
+            vec![CommittedRunStep {
+                step_id: "step".to_string(),
+                accepted_input: Some(AcceptedInputProjection::new(
+                    vec![Message::user("accepted")],
+                    "input",
+                    revision,
+                )),
+                outcome: Some(
+                    context::domain::session::FinalizedOutcomeProjection::compatibility(vec![
+                        tool_result,
+                    ]),
+                ),
+            }],
+        )],
+        committed_steps: vec![context::domain::session::CommittedStep {
+            run_id: "run".to_string(),
+            step_id: "step".to_string(),
+            fingerprint: "outcome".to_string(),
+            committed_revision: revision,
+        }],
+    }
+}
+
+#[cfg(feature = "dev")]
+#[tokio::test]
+async fn lifecycle_capture_reports_structure_and_releases_replaced_generation() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("lifecycle-session");
+    let (repository, holder) =
+        repository_with_session(writer, session_with_tool_result(&session_id, 1));
+
+    let mut appended = append("next");
+    appended.session_id = session_id;
+    appended.expected_revision = SessionRevision::new(1);
+    appended.run_id = RunId::new("run-2");
+    appended.step_id = RunStepId::new("step-2");
+
+    let (result, lifecycle) =
+        context::adapters::capture_session_lifecycle(repository.append_finalized(&appended)).await;
+    result.unwrap();
+
+    assert_eq!(lifecycle.transitions.len(), 1);
+    let transition = &lifecycle.transitions[0];
+    assert_eq!(transition.before.revision, 1);
+    assert_eq!(transition.before.run_slices, 1);
+    assert_eq!(transition.before.steps, 1);
+    assert_eq!(transition.before.accepted_messages, 1);
+    assert_eq!(transition.before.outcome_messages, 1);
+    assert_eq!(transition.before.tool_result_blocks, 1);
+    assert_eq!(transition.before.tool_result_content_bytes, 9);
+    assert_eq!(transition.before.committed_steps, 1);
+    assert_eq!(transition.after.revision, 2);
+    assert_eq!(transition.after.run_slices, 2);
+    assert_eq!(transition.after.steps, 2);
+    assert_eq!(transition.after.outcome_messages, 2);
+    assert_eq!(transition.after.committed_steps, 2);
+    assert!(transition.replaced_generation.upgrade().is_none());
+    assert_eq!(holder.read().unwrap().revision, 2);
+}
+
+#[cfg(feature = "dev")]
+#[tokio::test]
+async fn lifecycle_weak_probe_stays_live_until_external_arc_is_dropped() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer);
+    let external = holder.read().unwrap().clone();
+
+    let (result, lifecycle) =
+        context::adapters::capture_session_lifecycle(repository.append_finalized(&append("same")))
+            .await;
+    result.unwrap();
+
+    let replaced = lifecycle.transitions[0].replaced_generation.clone();
+    assert!(replaced.upgrade().is_some());
+    drop(external);
+    assert!(replaced.upgrade().is_none());
+}
+
+#[cfg(feature = "dev")]
+#[tokio::test]
+async fn snapshot_does_not_publish_a_new_session_generation() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer);
+    let committed = holder.read().unwrap().clone();
+
+    let (snapshot, lifecycle) = context::adapters::capture_session_lifecycle(
+        repository.snapshot(&SessionId::new("session")),
+    )
+    .await;
+    snapshot.unwrap();
+
+    assert!(lifecycle.transitions.is_empty());
+    assert!(Arc::ptr_eq(&committed, &holder.read().unwrap()));
+}
+
+#[cfg(feature = "dev")]
+#[tokio::test]
+async fn clear_reports_zero_persisted_structure_and_releases_old_generation() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("clear-lifecycle-session");
+    let (repository, _) = repository_with_session(writer, session_with_tool_result(&session_id, 3));
+
+    let (result, lifecycle) =
+        context::adapters::capture_session_lifecycle(repository.clear(&session_id)).await;
+    result.unwrap();
+
+    let transition = &lifecycle.transitions[0];
+    assert_eq!(transition.after.revision, 4);
+    assert_eq!(transition.after.run_slices, 0);
+    assert_eq!(transition.after.steps, 0);
+    assert_eq!(transition.after.accepted_messages, 0);
+    assert_eq!(transition.after.outcome_messages, 0);
+    assert_eq!(transition.after.tool_result_blocks, 0);
+    assert_eq!(transition.after.tool_result_content_bytes, 0);
+    assert_eq!(transition.after.committed_steps, 0);
+    assert!(transition.replaced_generation.upgrade().is_none());
+}
+
+#[cfg(feature = "dev")]
+#[tokio::test]
+async fn compaction_changes_visibility_without_dropping_persisted_structure() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("compact-lifecycle-session");
+    let (repository, _) = repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
+
+    let request = compact_request(session_id);
+    let (result, lifecycle) = context::adapters::capture_session_lifecycle(
+        repository.commit_compaction(&CompactRequest {
+            run_id: request.run_id.clone(),
+            source_revision: SessionRevision::new(0),
+            source: request,
+            trigger: CompactTrigger::Automatic,
+        }),
+    )
+    .await;
+    result.unwrap();
+
+    let transition = &lifecycle.transitions[0];
+    assert_eq!(transition.before.run_slices, 10);
+    assert_eq!(transition.after.run_slices, 10);
+    assert_eq!(transition.before.steps, 10);
+    assert_eq!(transition.after.steps, 10);
+    assert_eq!(transition.before.outcome_messages, 10);
+    assert_eq!(transition.after.outcome_messages, 10);
+    assert!(transition.replaced_generation.upgrade().is_none());
+}
+
+#[cfg(feature = "dev")]
+#[tokio::test]
+async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
+    for step_count in [100usize, 500, 1_000] {
+        let writer = Arc::new(RecordingWriter::default());
+        let session_id = SessionId::new(format!("lifecycle-{step_count}"));
+        let run_slices = (0..step_count)
+            .map(|index| {
+                CommittedRunSlice::new(
+                    format!("run-{index}"),
+                    vec![CommittedRunStep::compatibility_outcome_only(
+                        format!("step-{index}"),
+                        vec![Message::user(format!("message-{index}"))],
+                    )],
+                )
+            })
+            .collect();
+        let session = CanonicalSession {
+            id: session_id.to_string(),
+            chats: vec![],
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            metadata: Default::default(),
+            tasks: SnapshotState::Missing,
+            workspace: SnapshotState::Captured(workspace()),
+            revision: step_count as u64,
+            compact: None,
+            run_slices,
+            committed_steps: vec![],
+        };
+        let (repository, _) = repository_with_session(writer, session);
+        let mut appended = append("tail");
+        appended.session_id = session_id;
+        appended.expected_revision = SessionRevision::new(step_count as u64);
+        appended.run_id = RunId::new("tail-run");
+        appended.step_id = RunStepId::new("tail-step");
+
+        let (result, lifecycle) =
+            context::adapters::capture_session_lifecycle(repository.append_finalized(&appended))
+                .await;
+        result.unwrap();
+
+        let transition = &lifecycle.transitions[0];
+        assert_eq!(transition.before.run_slices, step_count);
+        assert_eq!(transition.before.steps, step_count);
+        assert_eq!(transition.before.outcome_messages, step_count);
+        assert_eq!(transition.after.run_slices, step_count + 1);
+        assert_eq!(transition.after.steps, step_count + 1);
+        assert_eq!(transition.after.outcome_messages, step_count + 1);
+        assert!(transition.replaced_generation.upgrade().is_none());
+    }
+}
+
 #[tokio::test]
 async fn accepted_input_persists_before_publish() {
     let writer = Arc::new(RecordingWriter::default());
