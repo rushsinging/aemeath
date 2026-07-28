@@ -2,6 +2,46 @@ use super::{BufferDrain, RunInputBuffer};
 use crate::application::loop_engine::DrainEpoch;
 use sdk::ChatInputEvent;
 
+#[test]
+fn skill_request_is_user_input_and_withdraw_returns_raw_slash() {
+    let mut buf = RunInputBuffer::new();
+    let id = sdk::InputId::new_v7();
+    let event = ChatInputEvent::SkillRequest(sdk::SkillRequest {
+        input_id: id.clone(),
+        skill: "release".to_string(),
+        arguments: "v1.2.3".to_string(),
+        raw_input: "/release v1.2.3".to_string(),
+    });
+    buf.push(event.clone());
+    assert_eq!(buf.pending_user_count(), 1);
+    assert_eq!(buf.withdraw_all_user_texts(), vec!["/release v1.2.3"]);
+
+    buf.push(event);
+    match buf.drain_or_seal(DrainEpoch(0)) {
+        BufferDrain::Ready { batch, .. } => {
+            assert_eq!(batch[0].input_id.as_ref(), Some(&id));
+            assert!(batch[0].text.contains("Call the Skill tool first"));
+        }
+        other => panic!("expected ready Skill request, got {other:?}"),
+    }
+}
+
+#[test]
+fn late_skill_request_is_rejected_after_seal() {
+    let mut buf = RunInputBuffer::new();
+    assert!(matches!(
+        buf.drain_or_seal(DrainEpoch(0)),
+        BufferDrain::EmptyAndSealed { .. }
+    ));
+    let event = ChatInputEvent::SkillRequest(sdk::SkillRequest {
+        input_id: sdk::InputId::new_v7(),
+        skill: "release".to_string(),
+        arguments: String::new(),
+        raw_input: "/release".to_string(),
+    });
+    assert!(buf.push_or_reject(event).is_some());
+}
+
 fn um(text: &str) -> ChatInputEvent {
     ChatInputEvent::UserMessage {
         id: sdk::InputId::new(uuid::Uuid::now_v7().to_string()),

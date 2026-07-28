@@ -166,7 +166,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let tools = tools::composition::TestCatalogExecutionFactory::empty();
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
-    let skill_materializer = skill_wiring.materializer();
+    let skill_loader = skill_wiring.loader();
     let tool_result_materializer = Arc::new(runtime::ToolResultMaterializer::new(
         Arc::new(runtime::AtomicBlobToolResultStore::new(
             Arc::new(storage::FileSystemBlobAdapter::new(temp.path()).unwrap()),
@@ -200,7 +200,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
             tools.execution(),
             tools.binding(),
             skill_catalog,
-            skill_materializer.clone(),
+            skill_loader.clone(),
             tool_result_materializer.clone(),
             active_run.clone(),
         ),
@@ -231,10 +231,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     );
 
     // ── Arc identity: Tool assembly dependencies ──
-    assert!(Arc::ptr_eq(
-        &dependencies.skill_materializer(),
-        &skill_materializer
-    ));
+    assert!(Arc::ptr_eq(&dependencies.skill_loader(), &skill_loader));
     assert!(Arc::ptr_eq(
         &dependencies.tool_result_materializer(),
         &tool_result_materializer

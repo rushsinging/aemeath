@@ -2,8 +2,9 @@
 
 use crate::adapters::{
     agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep,
-    memory_tool, plan_mode, task_create, task_get, task_list, task_list_complete, task_list_create,
-    task_lists, task_stop, task_update, tool_search, web_fetch, web_search, worktree,
+    memory_tool, plan_mode, skill_tool, task_create, task_get, task_list, task_list_complete,
+    task_list_create, task_lists, task_stop, task_update, tool_search, web_fetch, web_search,
+    worktree,
 };
 use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::published_language::ToolCapabilities as Caps;
@@ -61,6 +62,7 @@ pub(crate) fn register_named_scope(
     task_access: Arc<dyn TaskAccess>,
     memory_source: Arc<dyn MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
+    skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
     selected_scope: BuiltinRegistryScope,
 ) -> RegistryScope {
     let mut scope = RegistryScopeBuilder::new(selected_scope.name());
@@ -207,6 +209,12 @@ pub(crate) fn register_named_scope(
         }
     );
     builtin!(
+        "Skill",
+        Caps::ReadWorkspace,
+        [true, true],
+        skill_tool::SkillTool::new(skill_loader)
+    );
+    builtin!(
         "AskUserQuestion",
         Caps::UserInteraction,
         [true, false],
@@ -287,7 +295,14 @@ mod tests {
             .expect("workspace wiring")
             .into_views()
             .control();
-        register_named_scope(&registry, task_access, test_memory_source(), control, scope)
+        register_named_scope(
+            &registry,
+            task_access,
+            test_memory_source(),
+            control,
+            crate::composition::wire_skills().loader(),
+            scope,
+        )
     }
 
     fn names_for(scope: BuiltinRegistryScope) -> BTreeSet<String> {
@@ -327,6 +342,7 @@ mod tests {
         "ExitPlanMode",
         "EnterWorktree",
         "ExitWorktree",
+        "Skill",
     ];
     const SUB_AGENT: &[&str] = &[
         "Bash",
@@ -340,7 +356,9 @@ mod tests {
         "Memory",
         "Brief",
         "ToolSearch",
+        "Skill",
     ];
+
     #[test]
     fn production_profiles_are_main_baseline_or_restricted_children() {
         let main = ToolProfile::baseline(Caps::all());

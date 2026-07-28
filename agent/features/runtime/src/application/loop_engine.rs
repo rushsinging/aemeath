@@ -15,7 +15,9 @@ pub use engine::{
     PendingInteractionItem, PendingInteractionWork, RunLoopPort, StepTokenUsage, SuspendedQuestion,
     SuspendedToolCall, ToolGuardDecision, ToolStep,
 };
-pub use input::{split_input_events, RuntimeControl, RuntimeInputBatch, UserRunInput};
+pub use input::{
+    format_skill_request, split_input_events, RuntimeControl, RuntimeInputBatch, UserRunInput,
+};
 pub use stuck_guard::{StuckDecision, StuckGuard};
 
 #[cfg(test)]

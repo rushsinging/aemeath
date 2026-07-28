@@ -51,9 +51,8 @@ fn tui_and_no_tui_preserve_prompt_injection_and_invalid_name_results() {
             aliases: Vec::new(),
             slash_command: Some("review".to_string()),
             slash_aliases: vec!["cr".to_string()],
-            description: Some("Review".to_string()),
-            content: "review content".to_string(),
-            source: None,
+            description: "Review".to_string(),
+            argument_hint: None,
         },
     )]);
     let wiring = composition::tools::wire_commands_with_skills(&skills).unwrap();
@@ -64,7 +63,7 @@ fn tui_and_no_tui_preserve_prompt_injection_and_invalid_name_results() {
     assert_eq!(tui, no_tui);
     assert!(matches!(
         tui,
-        Ok(sdk::CommandRoute::PromptInjection(command))
+        Ok(sdk::CommandRoute::SkillRequest(command))
             if command.command.as_str() == "review" && command.arguments.as_slice() == ["staged"]
     ));
 

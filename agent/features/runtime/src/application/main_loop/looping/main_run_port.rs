@@ -489,6 +489,7 @@ where
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory: &Arc<dyn memory::MemoryPort>,
         language: &str,
+        skill_extra_dirs: &[std::path::PathBuf],
         user_agent: &str,
         workspace: &project::WorkspaceViews,
         cancel: &CancellationToken,
@@ -505,6 +506,11 @@ where
                 &tools::ToolProfileName::new("main-full"),
             )
             .unwrap_or_else(|_| tools::ToolCatalogSnapshot::new("main", "main-full", Vec::new()));
+        let available_tools = catalog
+            .tools
+            .iter()
+            .map(|descriptor| descriptor.name.as_str().to_string())
+            .collect();
         Agent {
             catalog,
             execution: tool_execution.clone(),
@@ -528,6 +534,10 @@ where
                         language: language.to_string(),
                     }),
                 )
+                .with_skill_query(tools::SkillQuerySnapshot {
+                    extra_dirs: skill_extra_dirs.to_vec(),
+                    available_tools,
+                })
                 .with_user_agent(user_agent)
                 .with_memory_context(
                     Some(session_id.to_string()),
@@ -793,6 +803,7 @@ where
             self.agent_runner,
             self.memory(),
             self.language,
+            &self.run_config().config().skills().dirs,
             self.run_config().config().user_agent(),
             self.workspace,
             &self.cancel_token(),

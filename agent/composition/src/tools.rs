@@ -18,12 +18,12 @@ pub fn wire_commands_with_skills(
         let descriptor = match ::tools::CommandDescriptor::new(
             slash_command,
             &aliases,
-            skill.description.as_deref().unwrap_or("Skill prompt"),
-            ::tools::CommandMechanism::PromptInjection,
+            skill.description.as_str(),
+            ::tools::CommandMechanism::SkillRequest,
             ::tools::CommandTarget::ContextManagement,
             ::tools::CommandArgumentSchema::OptionalText,
         ) {
-            Ok(descriptor) => descriptor,
+            Ok(descriptor) => descriptor.with_target_identity(skill.name.clone()),
             Err(::tools::CommandParseError::InvalidName { name }) => {
                 log::warn!(target: crate::LOG_TARGET,
                     "skip invalid Skill Slash projection: skill={} slash_command={name}",

@@ -56,6 +56,15 @@ pub struct ChatInput {
     pub image_paths: Vec<String>,
 }
 
+/// TUI 请求 Runtime 将一次 Skill 调用意图交给 LLM。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillRequest {
+    pub input_id: crate::InputId,
+    pub skill: String,
+    pub arguments: String,
+    pub raw_input: String,
+}
+
 /// Chat 运行期间追加到 runtime 的输入事件。
 #[derive(Debug, Clone)]
 pub enum ChatInputEvent {
@@ -70,8 +79,11 @@ pub enum ChatInputEvent {
         text: String,
         images: Vec<crate::ChatInputImage>,
     },
+    SkillRequest(SkillRequest),
     /// 忙碌期间输入的 slash/control command，永不作为 user message 发给 LLM。
-    ControlCommand { raw: String },
+    ControlCommand {
+        raw: String,
+    },
     /// 整段会话重置：清空 messages + pending 输入，通知 TUI。
     ///
     /// 由 `/clear` 触发（idle 立即执行 / busy 排队等当前回合自然结束回 idle gate 后执行），
@@ -90,27 +102,41 @@ pub enum ChatInputEvent {
     /// 由 `/model` 触发，走 runtime 事件流（#567）。`selection` 是用户输入的
     /// `Provider/Model` 字符串，由 runtime 侧 `resolve_model_selection` 解析。
     /// 结果通过 `ModelSwitched` 事件回传 TUI。
-    SwitchModel { selection: String },
+    SwitchModel {
+        selection: String,
+    },
     /// 用户请求切换 reasoning 模式：idle 时立即执行，busy 时排队等回合结束后执行。
     ///
     /// 由 `/think` 触发，走 runtime 事件流（#497）。`desired = None` 表示 toggle。
     /// runtime idle 分支更新会话级 reasoning 状态，后续调用通过不可变 InvocationScope 读取；
     /// 结果通过 `ThinkingChanged` 事件回传 TUI。
-    SetThinking { desired: Option<bool> },
+    SetThinking {
+        desired: Option<bool>,
+    },
     /// 初始化项目。由 `/init` 触发。
     /// force = true 时强制重新初始化
-    InitProject { force: bool },
+    InitProject {
+        force: bool,
+    },
     /// 管理会话。由 `/session` 触发。
     /// args: "" / "list" / "new" / "rename <id> <name>" / "delete <id>" / "export <id>" / "import <file>"
-    ManageSession { args: String },
+    ManageSession {
+        args: String,
+    },
     /// 管理记忆。由 `/memory` 触发（非 remind 子命令）。
     /// args: "" / "list" / "add ..." / "delete ..." / "pin ..." / "search ..." / "compact" / "stats"
-    ManageMemory { args: String },
+    ManageMemory {
+        args: String,
+    },
     /// 恢复指定会话。由 `/resume <id>` 触发。
     /// 需要走 idle gate（替换 loop messages）。
-    ResumeSession { id: String },
+    ResumeSession {
+        id: String,
+    },
     /// 查询最近的 reflection 历史。由 `/reflect [limit]` 触发；不运行或应用 reflection。
-    QueryReflectionHistory { limit: usize },
+    QueryReflectionHistory {
+        limit: usize,
+    },
     /// 查询可用模型列表。由 TUI 启动时或 `/model` 触发。
     ListModels,
     /// 查询提醒列表。由 `/reminders` 触发。
@@ -170,6 +196,26 @@ pub struct ChatRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skill_request_preserves_identity_and_raw_arguments() {
+        let input_id = crate::InputId::new_v7();
+        let event = ChatInputEvent::SkillRequest(SkillRequest {
+            input_id: input_id.clone(),
+            skill: "release".to_string(),
+            arguments: "v1.2.3 --dry-run".to_string(),
+            raw_input: "/release v1.2.3 --dry-run".to_string(),
+        });
+        match event {
+            ChatInputEvent::SkillRequest(request) => {
+                assert_eq!(request.input_id, input_id);
+                assert_eq!(request.skill, "release");
+                assert_eq!(request.arguments, "v1.2.3 --dry-run");
+                assert_eq!(request.raw_input, "/release v1.2.3 --dry-run");
+            }
+            other => panic!("expected SkillRequest, got {other:?}"),
+        }
+    }
 
     #[test]
     fn test_chat_request_carries_user_input() {

@@ -14,13 +14,7 @@ impl super::super::App {
         let skills: Vec<(String, String, Vec<String>)> = self
             .skills
             .values()
-            .map(|s| {
-                (
-                    s.name.clone(),
-                    s.description.clone().unwrap_or_default(),
-                    s.aliases.clone(),
-                )
-            })
+            .map(|s| (s.name.clone(), s.description.clone(), s.aliases.clone()))
             .collect();
 
         let commands = self

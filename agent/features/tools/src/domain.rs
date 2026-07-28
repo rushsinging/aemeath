@@ -18,6 +18,7 @@ pub mod scope_profile;
 pub mod shell_safety;
 pub mod skill_pl;
 pub mod skill_ports;
+pub mod skill_tool;
 pub mod suspension;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -36,7 +37,7 @@ pub use agent_port::{AgentDispatch, AgentRunRequest, AgentRunTerminal, AgentRunn
 pub use command_pl::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCompletion,
     CommandDescriptor, CommandMechanism, CommandName, CommandParseError, CommandRoute,
-    CommandTarget, ParsedArguments, PromptCommand, SlashInput, SnapshotQueryCommand,
+    CommandTarget, ParsedArguments, SkillRequestCommand, SlashInput, SnapshotQueryCommand,
     SnapshotQueryTarget,
 };
 pub use command_ports::{CommandCatalogPort, CommandRouterPort};
@@ -59,10 +60,11 @@ pub use resources::CatalogQuery;
 pub use scope_profile::{ProfileExpansionError, ToolProfile};
 // Dynamic Skill Published Language + Catalog/Load ports (Issue #1438).
 pub use skill_pl::{
-    LoadedSkill, SkillDescriptor, SkillError, SkillLoadQuery, SkillQuery, SkillSource,
-    SkillSourceKind,
+    LoadedSkill, SkillCatalogSnapshot, SkillDescriptor, SkillError, SkillLoadQuery, SkillQuery,
+    SkillSlashRoute, SkillSource, SkillSourceKind,
 };
 pub use skill_ports::{SkillCatalogPort, SkillLoadPort};
+pub use skill_tool::SkillQuerySnapshot;
 pub use suspension::{ToolSuspension, UserInteractionSpec, UserOption, UserQuestion};
 pub use tool::{Tool, ToolListProvider, TypedTool, TypedToolAdapter, TypedToolResult};
 pub use tool_types::{

@@ -18,7 +18,7 @@ pub struct RuntimeToolAssemblyDependencies {
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
     tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,
-    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    skill_loader: Arc<dyn tools::SkillLoadPort>,
     tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
@@ -30,7 +30,7 @@ impl RuntimeToolAssemblyDependencies {
         tool_execution: Arc<dyn tools::ToolExecutionPort>,
         tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
         skill_catalog: Arc<dyn tools::SkillCatalogPort>,
-        skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+        skill_loader: Arc<dyn tools::SkillLoadPort>,
         tool_result_materializer: Arc<
             crate::application::tool_result_materialization::ToolResultMaterializer,
         >,
@@ -41,7 +41,7 @@ impl RuntimeToolAssemblyDependencies {
             tool_execution,
             tool_context_binding,
             skill_catalog,
-            skill_materializer,
+            skill_loader,
             tool_result_materializer,
             active_run,
         }
@@ -107,7 +107,7 @@ pub struct RuntimeBootstrapDependencies {
     #[allow(dead_code)]
     tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,
-    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    skill_loader: Arc<dyn tools::SkillLoadPort>,
     tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
@@ -139,7 +139,7 @@ impl RuntimeBootstrapDependencies {
             tool_execution,
             tool_context_binding,
             skill_catalog,
-            skill_materializer,
+            skill_loader,
             tool_result_materializer,
             active_run,
         } = tool_assembly;
@@ -156,7 +156,7 @@ impl RuntimeBootstrapDependencies {
             tool_execution,
             tool_context_binding,
             skill_catalog,
-            skill_materializer,
+            skill_loader,
             tool_result_materializer,
             active_run,
             runtime_context_factory,
@@ -197,8 +197,8 @@ impl RuntimeBootstrapDependencies {
         self.skill_catalog.clone()
     }
 
-    pub fn skill_materializer(&self) -> Arc<dyn tools::SkillMaterializationPort> {
-        self.skill_materializer.clone()
+    pub fn skill_loader(&self) -> Arc<dyn tools::SkillLoadPort> {
+        self.skill_loader.clone()
     }
 
     pub fn tool_result_materializer(
@@ -230,7 +230,7 @@ pub async fn from_args_with_workspace(
         hook_runner,
         tool_catalog,
         skill_catalog,
-        skill_materializer,
+        skill_loader: _,
         tool_result_materializer,
         active_run,
         runtime_context_factory,
@@ -391,36 +391,21 @@ pub async fn from_args_with_workspace(
         .collect();
     let skill_query =
         tools::SkillQuery::new(cwd.clone(), snapshot.skills().dirs.clone(), available_tools);
-    let descriptors = skill_catalog.list(skill_query.clone());
-    let materialized = skill_materializer
-        .materialize_available(tools::SkillMaterializationQuery::new(
-            skill_query.project_root,
-            skill_query.extra_dirs,
-            skill_query.available_tools,
-        ))
-        .await
-        .map_err(|error| SdkError::Init(error.to_string()))?;
-    let fragments = materialized
-        .fragments()
-        .iter()
-        .map(|fragment| (fragment.stable_key(), fragment))
-        .collect::<std::collections::HashMap<_, _>>();
+    let descriptors = skill_catalog.list(skill_query);
     let skills_map = descriptors
         .into_iter()
-        .filter_map(|descriptor| {
-            let fragment = fragments.get(descriptor.name())?;
-            Some((
+        .map(|descriptor| {
+            (
                 descriptor.name().to_string(),
                 sdk::SkillView {
                     name: descriptor.name().to_string(),
                     aliases: descriptor.aliases().to_vec(),
                     slash_command: descriptor.slash_command().map(str::to_string),
                     slash_aliases: descriptor.slash_aliases().to_vec(),
-                    description: Some(descriptor.description().to_string()),
-                    content: fragment.content().to_string(),
-                    source: Some(descriptor.source().path.clone()),
+                    description: descriptor.description().to_string(),
+                    argument_hint: descriptor.argument_hint().map(str::to_string),
                 },
-            ))
+            )
         })
         .collect::<std::collections::HashMap<String, sdk::SkillView>>();
     // #1327 承接 MCP Ready lifecycle / Catalog 同步；#1294 不保留 MCP manager 或
@@ -466,7 +451,7 @@ pub async fn from_args_with_workspace(
         agent_semaphore.clone(),
         tool_result_materializer.clone(),
         workspace.clone(),
-        skill_materializer.clone(),
+        skill_catalog.clone(),
         parent_context_source.clone(),
         runtime_context_factory.clone(),
     );
@@ -1148,7 +1133,7 @@ mod tests {
                 tools.execution(),
                 tools.binding(),
                 skill_wiring.catalog(),
-                skill_wiring.materializer(),
+                skill_wiring.loader(),
                 tool_result_materializer,
                 active_run,
             ),

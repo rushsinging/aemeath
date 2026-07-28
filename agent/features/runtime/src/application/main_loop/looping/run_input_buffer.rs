@@ -109,7 +109,12 @@ impl RunInputBuffer {
     /// always accepted even on a sealed buffer (control commands must still be
     /// drained back to the session).
     pub(crate) fn push_or_reject(&mut self, event: ChatInputEvent) -> Option<ChatInputEvent> {
-        if self.sealed && matches!(event, ChatInputEvent::UserMessage { .. }) {
+        if self.sealed
+            && matches!(
+                event,
+                ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_)
+            )
+        {
             return Some(event);
         }
         self.events.push_back(event);
@@ -141,7 +146,12 @@ impl RunInputBuffer {
     pub(crate) fn pending_user_count(&self) -> usize {
         self.events
             .iter()
-            .filter(|e| matches!(e, ChatInputEvent::UserMessage { .. }))
+            .filter(|e| {
+                matches!(
+                    e,
+                    ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_)
+                )
+            })
             .count()
     }
 
@@ -165,6 +175,13 @@ impl RunInputBuffer {
                         text,
                         input_id: Some(id),
                         images,
+                    });
+                }
+                ChatInputEvent::SkillRequest(request) => {
+                    inputs.push(LoopInput {
+                        text: crate::application::loop_engine::format_skill_request(&request, "en"),
+                        input_id: Some(request.input_id),
+                        images: Vec::new(),
                     });
                 }
                 other => retained.push_back(other),
@@ -313,6 +330,7 @@ impl RunInputBuffer {
         while let Some(event) = self.events.pop_front() {
             match event {
                 ChatInputEvent::UserMessage { text, .. } => texts.push(text),
+                ChatInputEvent::SkillRequest(request) => texts.push(request.raw_input),
                 other => retained.push_back(other),
             }
         }

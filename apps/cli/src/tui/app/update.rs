@@ -54,6 +54,7 @@ fn markdown_spacing_overrides_to_sdk(
 
 fn ui_event_name(event: &UiEvent) -> &'static str {
     match event {
+        UiEvent::SkillsUpdated(_) => "SkillsUpdated",
         UiEvent::Text { .. } => "Text",
         UiEvent::Thinking { .. } => "Thinking",
         UiEvent::BlockComplete { .. } => "BlockComplete",

@@ -43,13 +43,6 @@ impl App {
         self.command_router = Some(router);
     }
 
-    /// Find a skill by its name or alias
-    pub(crate) fn find_skill_by_alias(&self, alias: &str) -> Option<&sdk::SkillView> {
-        self.skills
-            .values()
-            .find(|s| s.name == alias || s.aliases.iter().any(|a| a == alias))
-    }
-
     /// Update task status display in output area. Also runs lifecycle checks.
     ///
     /// 单一真相：task 行真相归 `RuntimeModel.task_status.lines`，经 `UpdateTaskLines`

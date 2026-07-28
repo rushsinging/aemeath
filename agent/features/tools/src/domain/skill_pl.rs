@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 pub use super::skill_ports::{SkillCatalogPort, SkillLoadPort};
@@ -96,6 +96,71 @@ impl SkillDescriptor {
     pub fn argument_hint(&self) -> Option<&str> {
         self.argument_hint.as_deref()
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillSlashRoute {
+    pub skill: String,
+    pub slash_command: String,
+    pub aliases: Vec<String>,
+    pub argument_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillCatalogSnapshot {
+    pub revision: String,
+    pub skills: Vec<SkillDescriptor>,
+    pub slash_routes: Vec<SkillSlashRoute>,
+}
+
+impl SkillCatalogSnapshot {
+    pub fn from_descriptors(descriptors: Vec<SkillDescriptor>) -> Self {
+        let mut by_name = BTreeMap::new();
+        for descriptor in descriptors {
+            by_name.entry(descriptor.name.clone()).or_insert(descriptor);
+        }
+        let skills: Vec<_> = by_name.into_values().collect();
+        let slash_routes = skills
+            .iter()
+            .filter_map(|skill| {
+                Some(SkillSlashRoute {
+                    skill: skill.name.clone(),
+                    slash_command: skill.slash_command.clone()?,
+                    aliases: skill.slash_aliases.clone(),
+                    argument_hint: skill.argument_hint.clone(),
+                })
+            })
+            .collect();
+        let revision = metadata_revision(&skills);
+        Self {
+            revision,
+            skills,
+            slash_routes,
+        }
+    }
+}
+
+fn metadata_revision(skills: &[SkillDescriptor]) -> String {
+    let mut hasher = Sha256::new();
+    for skill in skills {
+        for value in std::iter::once(skill.name.as_str())
+            .chain(std::iter::once(skill.description.as_str()))
+            .chain(skill.aliases.iter().map(String::as_str))
+            .chain(skill.slash_command.iter().map(String::as_str))
+            .chain(skill.slash_aliases.iter().map(String::as_str))
+            .chain(skill.argument_hint.iter().map(String::as_str))
+        {
+            hasher.update(value.as_bytes());
+            hasher.update(b"\x1f");
+        }
+        hasher.update(b"\xff");
+    }
+    hasher
+        .finalize()
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[derive(Debug, Clone, Default)]

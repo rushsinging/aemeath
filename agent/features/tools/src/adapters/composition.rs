@@ -94,6 +94,7 @@ pub fn wire_builtin_catalog_execution(
     task_access: Arc<dyn task::TaskAccess>,
     memory_source: Arc<dyn crate::domain::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
+    skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
 ) -> Result<CatalogExecutionWiring, ToolBackingError> {
     let registry = Arc::new(ToolRegistry::new());
     let main_profile = ToolProfile::baseline(ToolCapabilities::all());
@@ -105,6 +106,7 @@ pub fn wire_builtin_catalog_execution(
             task_access.clone(),
             memory_source.clone(),
             workspace_control.clone(),
+            skill_loader.clone(),
             scope_kind,
         );
         let profile = profile_for(scope_kind, &main_profile);

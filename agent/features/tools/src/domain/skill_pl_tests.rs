@@ -5,6 +5,29 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 #[test]
+fn metadata_snapshot_revision_ignores_source_and_tracks_metadata() {
+    fn descriptor(description: &str, source: &str) -> SkillDescriptor {
+        SkillDescriptor::new(
+            "release",
+            description,
+            SkillSource::file(SkillSourceKind::ProjectAgents, source),
+            vec!["ship".to_string()],
+            Some("release".to_string()),
+            vec!["rel".to_string()],
+            Some("[version]".to_string()),
+        )
+    }
+    let first = SkillCatalogSnapshot::from_descriptors(vec![descriptor("release", "/a")]);
+    let source_only = SkillCatalogSnapshot::from_descriptors(vec![descriptor("release", "/b")]);
+    assert_eq!(first.revision, source_only.revision);
+    assert_eq!(first.slash_routes[0].skill, "release");
+    assert_eq!(first.slash_routes[0].aliases, ["rel"]);
+
+    let changed = SkillCatalogSnapshot::from_descriptors(vec![descriptor("changed", "/a")]);
+    assert_ne!(first.revision, changed.revision);
+}
+
+#[test]
 fn descriptor_contains_metadata_but_no_body() {
     let descriptor = SkillDescriptor::new(
         "review",

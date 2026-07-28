@@ -36,12 +36,12 @@ impl super::App {
             }
         };
         let command = match &route {
-            sdk::CommandRoute::PromptInjection(command) => command.command.as_str(),
+            sdk::CommandRoute::SkillRequest(command) => command.command.as_str(),
             sdk::CommandRoute::SnapshotQuery { command, .. } => command.command.as_str(),
             sdk::CommandRoute::ApplicationControl { command, .. } => command.command.as_str(),
         };
         let arguments = match &route {
-            sdk::CommandRoute::PromptInjection(command) => command.arguments.as_slice(),
+            sdk::CommandRoute::SkillRequest(command) => command.arguments.as_slice(),
             sdk::CommandRoute::SnapshotQuery { command, .. } => command.arguments.as_slice(),
             sdk::CommandRoute::ApplicationControl { command, .. } => command.arguments.as_slice(),
         };
@@ -53,17 +53,18 @@ impl super::App {
         }
 
         match command {
-            command if matches!(route, sdk::CommandRoute::PromptInjection(_)) => {
-                let Some(skill) = self.find_skill_by_alias(command) else {
-                    self.append_error_notice(format!("Prompt command unavailable: /{command}"));
-                    return None;
+            _command if matches!(route, sdk::CommandRoute::SkillRequest(_)) => {
+                let sdk::CommandRoute::SkillRequest(request) = route else {
+                    unreachable!("matched SkillRequest route")
                 };
-                let mut content = skill.content.clone();
-                if !args.is_empty() {
-                    content = format!("{content}\n\nArguments: {args}");
-                }
-                self.append_system_notice(format!("[skill: {}]", skill.name));
-                return Some(content);
+                self.chat
+                    .push_input_event(sdk::ChatInputEvent::SkillRequest(sdk::SkillRequest {
+                        input_id: sdk::InputId::new_v7(),
+                        skill: request.skill,
+                        arguments: args,
+                        raw_input: input.to_string(),
+                    }));
+                return None;
             }
             "exit" => self.layout.request_exit(),
             "clear" => {

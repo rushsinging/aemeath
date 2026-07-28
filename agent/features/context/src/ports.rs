@@ -75,14 +75,9 @@ pub struct PromptMaterialization {
 }
 
 /// Context-owned 查询工厂：为每次 `materialize(request)` 从 request/config
-/// 与 live Project `WorkspaceRead` 快照构造 `tools::SkillMaterializationQuery`，
-/// 从而不捕获启动 cwd（worktree 切换后仍读取当前 workspace root）。
-///
-/// 生产实现持有 `Arc<dyn WorkspaceRead>`，每次调用读取
-/// `current_workspace_root()`；测试可注入确定性 fake。
+/// 与 live Project `WorkspaceRead` 快照构造 `tools::SkillQuery`。
 pub trait SkillQueryFactory: Send + Sync {
-    /// 由 request/config 与注入的 workspace 快照推导物化查询。
-    fn materialize_query(&self, request: &ContextRequest) -> tools::SkillMaterializationQuery;
+    fn query(&self, request: &ContextRequest) -> tools::SkillQuery;
 }
 
 #[async_trait]

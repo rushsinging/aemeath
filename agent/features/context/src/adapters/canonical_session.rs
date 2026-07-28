@@ -53,10 +53,8 @@ impl CanonicalSessionWriter for NoOpCanonicalSessionWriter {
 
 pub struct ProductionMainContextFactory {
     writer: Arc<dyn CanonicalSessionWriter>,
-    /// 可选注入的 Skill supplier port 与 Context-owned query factory。
-    /// 注入后 `build` 组装 `SkillPromptSource`；否则退回 `BaselinePromptSource`。
-    /// Composition 后续注入真实 `FilesystemSkillAdapter` + `WorkspaceSkillQueryFactory`。
-    skill_supplier: Option<Arc<dyn tools::SkillMaterializationPort>>,
+    /// 可选注入的 Skill metadata catalog 与 Context-owned query factory。
+    skill_catalog: Option<Arc<dyn tools::SkillCatalogPort>>,
     query_factory: Option<Arc<dyn crate::ports::SkillQueryFactory>>,
 }
 
@@ -64,19 +62,18 @@ impl ProductionMainContextFactory {
     pub fn new(writer: Arc<dyn CanonicalSessionWriter>) -> Self {
         Self {
             writer,
-            skill_supplier: None,
+            skill_catalog: None,
             query_factory: None,
         }
     }
 
-    /// 注入 Skill supplier port 与 Context-owned query factory，使 `build`
-    /// 组装 `SkillPromptSource`（Issue #912）。
-    pub fn with_skill_supplier(
+    /// 注入 Skill metadata catalog 与 Context-owned query factory。
+    pub fn with_skill_catalog(
         mut self,
-        supplier: Arc<dyn tools::SkillMaterializationPort>,
+        catalog: Arc<dyn tools::SkillCatalogPort>,
         query_factory: Arc<dyn crate::ports::SkillQueryFactory>,
     ) -> Self {
-        self.skill_supplier = Some(supplier);
+        self.skill_catalog = Some(catalog);
         self.query_factory = Some(query_factory);
         self
     }
@@ -92,10 +89,10 @@ impl MainContextFactory for ProductionMainContextFactory {
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort> {
         let prompt: Arc<dyn crate::ports::ContextPromptSource> =
-            match (&self.skill_supplier, &self.query_factory) {
-                (Some(supplier), Some(factory)) => {
+            match (&self.skill_catalog, &self.query_factory) {
+                (Some(catalog), Some(factory)) => {
                     Arc::new(crate::adapters::SkillPromptSource::new(
-                        Arc::clone(supplier),
+                        Arc::clone(catalog),
                         Arc::clone(factory),
                     ))
                 }

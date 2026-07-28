@@ -32,7 +32,7 @@ impl CommandName {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandMechanism {
-    PromptInjection,
+    SkillRequest,
     SnapshotQuery,
     ApplicationControl,
 }
@@ -91,6 +91,7 @@ pub struct CommandDescriptor {
     pub description: String,
     pub mechanism: CommandMechanism,
     pub target: CommandTarget,
+    pub target_identity: Option<String>,
     pub argument_schema: CommandArgumentSchema,
 }
 
@@ -112,8 +113,14 @@ impl CommandDescriptor {
             description: description.to_string(),
             mechanism,
             target,
+            target_identity: None,
             argument_schema,
         })
+    }
+
+    pub fn with_target_identity(mut self, identity: impl Into<String>) -> Self {
+        self.target_identity = Some(identity.into());
+        self
     }
 }
 
@@ -155,7 +162,8 @@ impl ParsedArguments {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PromptCommand {
+pub struct SkillRequestCommand {
+    pub skill: String,
     pub command: CommandName,
     pub arguments: ParsedArguments,
 }
@@ -174,7 +182,7 @@ pub struct ApplicationControlCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandRoute {
-    PromptInjection(PromptCommand),
+    SkillRequest(SkillRequestCommand),
     SnapshotQuery {
         target: SnapshotQueryTarget,
         command: SnapshotQueryCommand,

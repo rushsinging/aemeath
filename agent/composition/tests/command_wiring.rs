@@ -21,9 +21,8 @@ fn eligible_skill_exposes_only_explicit_slash_name_and_aliases() {
             aliases: vec!["code-review".to_string()],
             slash_command: Some("review".to_string()),
             slash_aliases: vec!["cr".to_string()],
-            description: Some("Review changes".to_string()),
-            content: "skill content".to_string(),
-            source: Some("/skills/review/SKILL.md".to_string()),
+            description: "Review changes".to_string(),
+            argument_hint: None,
         },
     )]);
 
@@ -32,12 +31,15 @@ fn eligible_skill_exposes_only_explicit_slash_name_and_aliases() {
 
     assert!(matches!(
         wiring.router().resolve(sdk::SlashInput::new("/review")),
-        Ok(sdk::CommandRoute::PromptInjection(_))
+        Ok(sdk::CommandRoute::SkillRequest(_))
     ));
-    assert!(matches!(
-        wiring.router().resolve(sdk::SlashInput::new("/cr")),
-        Ok(sdk::CommandRoute::PromptInjection(_))
-    ));
+    match wiring.router().resolve(sdk::SlashInput::new("/cr staged")) {
+        Ok(sdk::CommandRoute::SkillRequest(command)) => {
+            assert_eq!(command.skill, "review");
+            assert_eq!(command.arguments.join(), "staged");
+        }
+        other => panic!("expected canonical SkillRequest, got {other:?}"),
+    }
     assert!(matches!(
         wiring
             .router()
@@ -55,9 +57,8 @@ fn malformed_slash_projection_does_not_block_command_catalog_bootstrap() {
             aliases: Vec::new(),
             slash_command: Some("bad:slash".to_string()),
             slash_aliases: Vec::new(),
-            description: Some("External skill".to_string()),
-            content: "skill content".to_string(),
-            source: Some("/skills/external/SKILL.md".to_string()),
+            description: "External skill".to_string(),
+            argument_hint: None,
         },
     )]);
 
@@ -79,9 +80,8 @@ fn namespaced_skill_remains_available_without_becoming_a_slash_command() {
             aliases: vec!["writing-plans".to_string()],
             slash_command: None,
             slash_aliases: Vec::new(),
-            description: Some("Plan implementation work".to_string()),
-            content: "skill content".to_string(),
-            source: Some("/skills/superpowers/writing-plans/SKILL.md".to_string()),
+            description: "Plan implementation work".to_string(),
+            argument_hint: None,
         },
     )]);
 
@@ -117,9 +117,8 @@ fn empty_skill_map_matches_builtin_wiring_and_builtin_conflicts_fail_closed() {
             aliases: Vec::new(),
             slash_command: Some("help".to_string()),
             slash_aliases: vec!["quit".to_string()],
-            description: Some("conflict".to_string()),
-            content: "content".to_string(),
-            source: None,
+            description: "conflict".to_string(),
+            argument_hint: None,
         },
     )]);
     assert!(matches!(

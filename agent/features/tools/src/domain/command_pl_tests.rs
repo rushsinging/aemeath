@@ -28,7 +28,7 @@ fn descriptor_normalizes_aliases_and_rejects_invalid_alias() {
         "Review",
         &["/CR"],
         "Review",
-        CommandMechanism::PromptInjection,
+        CommandMechanism::SkillRequest,
         CommandTarget::ContextManagement,
         CommandArgumentSchema::OptionalText,
     )
@@ -41,7 +41,7 @@ fn descriptor_normalizes_aliases_and_rejects_invalid_alias() {
             "review",
             &["bad:alias"],
             "Review",
-            CommandMechanism::PromptInjection,
+            CommandMechanism::SkillRequest,
             CommandTarget::ContextManagement,
             CommandArgumentSchema::OptionalText,
         ),
