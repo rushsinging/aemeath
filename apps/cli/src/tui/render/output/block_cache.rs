@@ -82,6 +82,11 @@ impl BlockCache {
         );
     }
 
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.map.len()
+    }
+
     pub fn contains(&self, block_id: &str) -> bool {
         self.map.contains_key(block_id)
     }
