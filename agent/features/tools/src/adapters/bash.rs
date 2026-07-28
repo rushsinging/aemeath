@@ -96,16 +96,18 @@ impl TypedTool for BashTool {
         );
         let script =
             format!("{command}\nstatus=$?\nprintf '\\n{CWD_MARKER}%s\\n' \"$PWD\"\nexit $status");
-        let mut child = match Command::new("bash")
+        let mut command_process = Command::new("bash");
+        command_process
             .arg("-c")
             .arg(&script)
             .current_dir(&path_base)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-        {
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        command_process.process_group(0);
+        let mut child = match command_process.spawn() {
             Ok(c) => c,
             Err(e) => return TypedToolResult::error(format!("failed to execute: {e}")),
         };
@@ -125,7 +127,7 @@ impl TypedTool for BashTool {
         let wait_result: Result<std::process::ExitStatus, std::io::Error> = tokio::select! {
             biased;
             _ = cancellation.cancelled() => {
-                let _ = child.kill().await;
+                terminate_process_tree(&mut child).await;
                 stdout_handle.abort();
                 stderr_handle.abort();
                 return TypedToolResult::error("[interrupted by user]");
@@ -140,7 +142,7 @@ impl TypedTool for BashTool {
                     // reader tasks so we don't hang awaiting pipes
                     // that will never reach EOF on their own.
                     Err(_) => {
-                        let _ = child.kill().await;
+                        terminate_process_tree(&mut child).await;
                         let _ = child.wait().await;
                         stdout_handle.abort();
                         stderr_handle.abort();
@@ -274,4 +276,28 @@ impl TypedTool for BashTool {
             }
         }
     }
+}
+
+async fn terminate_process_tree(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id() {
+        let _ = Command::new("kill")
+            .arg("-TERM")
+            .arg(format!("-{pid}"))
+            .status()
+            .await;
+        if tokio::time::timeout(Duration::from_millis(200), child.wait())
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        let _ = Command::new("kill")
+            .arg("-KILL")
+            .arg(format!("-{pid}"))
+            .status()
+            .await;
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
 }
