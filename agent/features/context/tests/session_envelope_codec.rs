@@ -288,6 +288,29 @@ fn explicit_empty_snapshot_is_distinct_from_missing() {
 }
 
 #[test]
+fn v3_session_upgrades_with_empty_tool_receipt_ledgers() {
+    let mut value = serde_json::to_value(
+        serde_json::from_slice::<serde_json::Value>(
+            &SessionCodec::encode(&CanonicalSession::fixture("v3-upgrade")).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    value["schema_version"] = serde_json::json!(3);
+    let bytes = serde_json::to_vec(&value).unwrap();
+
+    let decoded = decode_session(&bytes).unwrap();
+
+    assert!(decoded.upgraded_from_legacy);
+    assert!(decoded
+        .session
+        .run_slices
+        .iter()
+        .flat_map(|slice| &slice.steps)
+        .all(|step| step.tool_receipts.is_empty()));
+}
+
+#[test]
 fn future_version_is_rejected_without_losing_original_bytes() {
     let bytes = serde_json::to_vec(&json!({
         "schema_version": CURRENT_SESSION_SCHEMA_VERSION + 1,

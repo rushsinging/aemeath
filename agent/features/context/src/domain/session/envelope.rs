@@ -8,7 +8,7 @@ use crate::domain::{FinalizeCause, StepReceipt, ToolCallReceipt, ToolReceiptMuta
 
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
 
-pub const CURRENT_SESSION_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SESSION_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", content = "value", rename_all = "snake_case")]
@@ -719,6 +719,14 @@ impl SessionCodec {
                 Ok(DecodedSession {
                     session: envelope.session,
                     upgraded_from_legacy: false,
+                })
+            }
+            Some(3) => {
+                let envelope: VersionedEnvelope = serde_json::from_value(value)
+                    .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))?;
+                Ok(DecodedSession {
+                    session: envelope.session,
+                    upgraded_from_legacy: true,
                 })
             }
             Some(2) => {
