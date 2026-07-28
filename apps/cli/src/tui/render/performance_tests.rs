@@ -4,6 +4,11 @@ use std::time::Duration;
 #[test]
 fn capture_when_scope_active_returns_accumulated_snapshot() {
     let (_value, snapshot) = capture(|| {
+        record_assemble(9, 7, Duration::from_micros(13));
+        record_viewport_render(100, 20, Duration::from_micros(17));
+        record_terminal_draw(Duration::from_micros(19));
+        record_terminal_diff(23, Duration::from_micros(11));
+        record_backend_flush(Duration::from_micros(5));
         record_document_render(Duration::from_micros(7));
         record_document_render(Duration::from_micros(5));
         record_edit_diff(Duration::from_micros(3));
@@ -29,6 +34,21 @@ fn capture_when_scope_active_returns_accumulated_snapshot() {
         42
     });
 
+    assert_eq!(snapshot.assemble_calls, 1);
+    assert_eq!(snapshot.assemble_ns, 13_000);
+    assert_eq!(snapshot.assemble_source_items, 9);
+    assert_eq!(snapshot.assemble_output_roots, 7);
+    assert_eq!(snapshot.viewport_render_calls, 1);
+    assert_eq!(snapshot.viewport_render_ns, 17_000);
+    assert_eq!(snapshot.viewport_source_lines, 100);
+    assert_eq!(snapshot.viewport_visible_lines, 20);
+    assert_eq!(snapshot.terminal_draw_calls, 1);
+    assert_eq!(snapshot.terminal_draw_ns, 19_000);
+    assert_eq!(snapshot.terminal_diff_calls, 1);
+    assert_eq!(snapshot.terminal_diff_ns, 11_000);
+    assert_eq!(snapshot.terminal_diff_cells, 23);
+    assert_eq!(snapshot.backend_flush_calls, 1);
+    assert_eq!(snapshot.backend_flush_ns, 5_000);
     assert_eq!(snapshot.document_render_calls, 2);
     assert_eq!(snapshot.document_render_ns, 12_000);
     assert_eq!(snapshot.edit_diff_calls, 1);

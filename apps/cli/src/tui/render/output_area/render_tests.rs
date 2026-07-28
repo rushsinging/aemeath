@@ -4,6 +4,7 @@ use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, Rend
 use crate::tui::render::output::status_line::live_status_spinner_fixture;
 use crate::tui::render::output_area::selection::output_selection_view_for_test;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
+use crate::tui::render::performance::capture;
 use crate::tui::render::theme;
 use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::OutputViewState;
@@ -13,6 +14,26 @@ use std::rc::Rc;
 
 fn no_live_status() -> LiveStatusViewModel {
     LiveStatusViewModel::default()
+}
+
+#[test]
+fn render_records_source_and_visible_document_lines() {
+    let mut output = OutputArea::new();
+    output.set_plain_document_lines(100);
+    let rect = Rect::new(0, 0, 80, 20);
+    let view = OutputViewState {
+        last_visible_height: 20,
+        ..Default::default()
+    };
+    let mut buffer = Buffer::empty(rect);
+
+    let (_, metrics) = capture(|| {
+        output.render(rect, &mut buffer, &view, &no_live_status());
+    });
+
+    assert_eq!(metrics.viewport_render_calls, 1);
+    assert_eq!(metrics.viewport_source_lines, 100);
+    assert_eq!(metrics.viewport_visible_lines, 20);
 }
 
 #[test]
