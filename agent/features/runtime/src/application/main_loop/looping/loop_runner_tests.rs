@@ -312,7 +312,8 @@ fn test_shell() -> crate::application::client::MainSessionShell {
         system_prompt_text: String::new(),
         initial_git_context: String::new(),
         user_context: String::new(),
-        skills_map: std::collections::HashMap::new(),
+        skill_catalog: ::tools::composition::wire_skills().catalog(),
+        initial_skill_snapshot: ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new()),
         memory_config: share::config::MemoryConfig::default(),
         context_size: 200_000,
         language: "en".to_string(),
@@ -379,6 +380,77 @@ impl crate::ports::SessionQueryPort for FakeSessionQuery {
 
 fn test_session_query_port() -> Arc<dyn crate::ports::SessionQueryPort> {
     Arc::new(FakeSessionQuery)
+}
+
+#[derive(Clone)]
+struct MutableSkillCatalog {
+    descriptors: Arc<Mutex<Vec<::tools::SkillDescriptor>>>,
+}
+
+impl ::tools::SkillCatalogPort for MutableSkillCatalog {
+    fn list(&self, _query: ::tools::SkillQuery) -> Vec<::tools::SkillDescriptor> {
+        self.descriptors.lock().unwrap().clone()
+    }
+}
+
+fn skill_descriptor(name: &str) -> ::tools::SkillDescriptor {
+    ::tools::SkillDescriptor::new(
+        name,
+        format!("{name} description"),
+        ::tools::SkillSource::builtin(format!("test://{name}")),
+        Vec::new(),
+        Some(name.to_string()),
+        Vec::new(),
+        None,
+    )
+}
+
+#[derive(Clone, Default)]
+struct SkillSnapshotSink {
+    snapshots: Arc<Mutex<Vec<::tools::SkillCatalogSnapshot>>>,
+}
+
+impl ChatEventSink for SkillSnapshotSink {
+    fn send_event<'a>(
+        &'a self,
+        event: RuntimeStreamEvent,
+    ) -> crate::application::main_loop::looping::EventFuture<'a> {
+        self.try_send_event(event);
+        Box::pin(async {})
+    }
+
+    fn try_send_event(&self, event: RuntimeStreamEvent) {
+        if let RuntimeStreamEvent::SkillsUpdated { snapshot } = event {
+            self.snapshots.lock().unwrap().push(snapshot);
+        }
+    }
+}
+
+#[tokio::test]
+async fn skill_refresh_emits_only_changed_revisions_and_withdraws_removed_routes() {
+    let descriptors = Arc::new(Mutex::new(vec![skill_descriptor("archify")]));
+    let catalog = MutableSkillCatalog {
+        descriptors: descriptors.clone(),
+    };
+    let sink = SkillSnapshotSink::default();
+    let query = ::tools::SkillQuery::new("/project".into(), Vec::new(), Default::default());
+    let mut revision = String::new();
+
+    super::loop_phases::refresh_skill_catalog(&mut revision, &catalog, query.clone(), &sink).await;
+    super::loop_phases::refresh_skill_catalog(&mut revision, &catalog, query.clone(), &sink).await;
+    descriptors.lock().unwrap().clear();
+    super::loop_phases::refresh_skill_catalog(&mut revision, &catalog, query, &sink).await;
+
+    let snapshots = sink.snapshots.lock().unwrap();
+    assert_eq!(
+        snapshots.len(),
+        2,
+        "unchanged revision must not be re-emitted"
+    );
+    assert_eq!(snapshots[0].slash_routes[0].slash_command, "archify");
+    assert!(snapshots[1].skills.is_empty());
+    assert!(snapshots[1].slash_routes.is_empty());
+    assert_ne!(snapshots[0].revision, snapshots[1].revision);
 }
 
 /// #1385: Shorthand for constructing a [`ChatLoopContext`] from a test shell.

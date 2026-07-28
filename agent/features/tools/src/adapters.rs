@@ -7,7 +7,7 @@ mod command_tests;
 #[cfg(test)]
 mod skill_filesystem_tests;
 #[cfg(test)]
-mod skill_not_tool_contract_tests;
+mod skill_tool_contract_tests;
 
 /// business/mod.rs — 业务规则（规则专家）：各 Tool 的领域实现
 pub mod agent_tool;
@@ -44,6 +44,7 @@ pub mod read_mcp_resource;
 // 构建的未用告警。端口与 PL 类型已在 domain.rs / lib.rs 正式 re-export。
 #[allow(dead_code)]
 pub mod skill_filesystem;
+pub mod skill_tool;
 pub mod task_block_by;
 pub mod task_create;
 pub mod task_get;

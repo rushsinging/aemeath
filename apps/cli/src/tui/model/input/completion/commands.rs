@@ -6,7 +6,6 @@ use super::types::{Suggestion, SuggestionType};
 /// commands 从 CommandRegistry 动态获取，不再硬编码
 pub fn generate_command_suggestions(
     partial: &str,
-    skills: &[(String, String, Vec<String>)],
     commands: &[(String, String, Vec<String>)],
 ) -> Vec<Suggestion> {
     let partial_lower = partial.to_lowercase();
@@ -21,7 +20,7 @@ pub fn generate_command_suggestions(
     let mut results = Vec::new();
 
     if search_term.is_empty() {
-        // 返回所有命令及其别名 + 所有技能
+        // Command Catalog 是 Slash 补全唯一来源；保持 Catalog 的确定性顺序。
         for (name, desc, aliases) in commands {
             results.push(Suggestion {
                 _id: format!("cmd-{}", name),
@@ -37,14 +36,6 @@ pub fn generate_command_suggestions(
                     suggestion_type: SuggestionType::Command,
                 });
             }
-        }
-        for (name, desc, _aliases) in skills {
-            results.push(Suggestion {
-                _id: format!("skill-{}", name),
-                display_text: format!("/{}", name),
-                _description: Some(desc.clone()),
-                suggestion_type: SuggestionType::Command,
-            });
         }
         return results;
     }
@@ -62,26 +53,6 @@ pub fn generate_command_suggestions(
         } else if let Some(alias) = matched_alias {
             results.push(Suggestion {
                 _id: format!("cmd-{}-{}", name, alias),
-                display_text: format!("/{}", alias),
-                _description: Some(desc.clone()),
-                suggestion_type: SuggestionType::Command,
-            });
-        }
-    }
-
-    // 按名称或别名筛选技能
-    for (name, desc, aliases) in skills {
-        let matched_alias = aliases.iter().find(|a| a.starts_with(search_term));
-        if name.starts_with(search_term) {
-            results.push(Suggestion {
-                _id: format!("skill-{}", name),
-                display_text: format!("/{}", name),
-                _description: Some(desc.clone()),
-                suggestion_type: SuggestionType::Command,
-            });
-        } else if let Some(alias) = matched_alias {
-            results.push(Suggestion {
-                _id: format!("skill-{}-{}", name, alias),
                 display_text: format!("/{}", alias),
                 _description: Some(desc.clone()),
                 suggestion_type: SuggestionType::Command,

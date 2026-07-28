@@ -11,19 +11,7 @@ impl super::super::App {
         // #567：模型列表走事件流（ListModels），缓存尚未接入。暂传空列表。
         let models: Vec<(String, String)> = Vec::new();
 
-        let skills: Vec<(String, String, Vec<String>)> = self
-            .skills
-            .values()
-            .map(|s| {
-                (
-                    s.name.clone(),
-                    s.description.clone().unwrap_or_default(),
-                    s.aliases.clone(),
-                )
-            })
-            .collect();
-
-        let commands = self
+        let mut commands = self
             .command_catalog
             .as_deref()
             .map(|catalog| {
@@ -41,16 +29,30 @@ impl super::super::App {
                                 .collect(),
                         )
                     })
-                    .collect()
+                    .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        commands.extend(
+            self.skill_completion_catalog
+                .entries
+                .iter()
+                .filter_map(|skill| {
+                    Some((
+                        skill.slash_command.clone()?,
+                        match &skill.argument_hint {
+                            Some(hint) => format!("{} {hint}", skill.description),
+                            None => skill.description.clone(),
+                        },
+                        skill.slash_aliases.clone(),
+                    ))
+                }),
+        );
 
         let ctx = SuggestionContext {
             input,
             cursor_offset,
             cwd: self.session.cwd.clone(),
             models,
-            skills,
             commands,
             sessions: Vec::new(),
         };

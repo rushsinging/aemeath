@@ -139,6 +139,7 @@ async fn wire_runtime_tool_assembly_produces_working_catalog_execution_binding()
         task_wiring.access(),
         memory_source,
         workspace.control(),
+        tools::composition::wire_skills().loader(),
         &snapshot,
         env_temp.path(),
     )
@@ -223,6 +224,7 @@ async fn production_catalog_has_both_main_and_sub_agent_scopes() {
         task_wiring.access(),
         noop_memory_source(),
         workspace.control(),
+        tools::composition::wire_skills().loader(),
     )
     .expect("wire_builtin_catalog_execution");
 

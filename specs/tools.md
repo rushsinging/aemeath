@@ -11,8 +11,8 @@
 - #911 已把生产 Runtime 切到 Catalog / Execution 双端口：Runtime 不再取得 `ToolRegistry` 或 `Tool` 实例。两端由 `agent/features/tools/src/adapters/composition.rs` 的窄 factory 基于同一个私有 `ToolBacking` 装配；具体 backing、registry 与 adapter 不从 crate root 暴露。
 - Catalog 按 Scope/Profile 投影 schema；Execution 在调用时复验 Tool 存在性、Scope/Profile 授权并执行。schema 校验实现唯一归 Tools：`agent/features/tools/src/domain/schema_validator.rs`；Runtime 的 `application/agent/input_validation.rs` 仅保留兼容 re-export / phase peel，不得复制规则。
 - `RegistryScope` / `ToolProfile` 与“只收缩”规则：`agent/features/tools/src/domain/scope_profile.rs`。Main 是 `all()` baseline；Sub 必须由 Main 经 `derive_restricted` 构造。内置工具名称、required capabilities、Scope 成员关系与 factory 的单一规格在 `agent/features/tools/src/adapters/registry.rs`。
-- `ToolRegistry` 当前仍是 Tools adapter 内部 backing；#912 已让正式 Main/Sub Catalog 与 Execution 不再发布或执行 Skill，并以 Skill-owned Catalog/Materialization 双端口接入 Context。`legacy-no-agent`、历史 `register_all_tools*`、内部 Profile/Registry 与 `SkillTool` 文件的最终物理退役仍属于 #914。
-- Skill Published Language 与端口位于 `agent/features/tools/src/domain/{skill_pl,skill_ports}.rs`；filesystem adapter 每次按 query 的 project/config/tool snapshot 物化，返回确定性内容 revision。Context 直接复用唯一 `PromptFragment`，不读取 Skill 文件。
+- `ToolRegistry` 是 Tools adapter 内部 backing；唯一稳定 `Skill` Tool 同时注册到 Main/Sub Catalog，并在调用时经 `SkillLoadPort` 按 identity 加载正文。
+- Skill Published Language 与端口位于 `agent/features/tools/src/domain/{skill_pl,skill_ports}.rs`；`SkillCatalogPort` 仅返回 metadata，`SkillLoadPort` 调用时读取单个正文。Context/TUI 禁止持有正文。
 
 ## 3.11.2. ExecutionScope、资源与 suspension
 
@@ -21,7 +21,7 @@
 - `WorkspaceViews` 必须在 Runtime adapter 转换；Runtime 自持 `WorkspacePersist`、并发 semaphore、timeout、Policy/Hook 与等待机制，Tools domain 禁止 Tokio channel/token/semaphore。Memory 能力直接使用正式 `MemoryPort`，不得恢复 legacy compatibility bridge。
 - AskUser adapter 只解析并返回纯值 `ToolSuspension::UserInteraction`：`agent/features/tools/src/domain/suspension.rs`、`agent/features/tools/src/adapters/ask_user.rs`。request id、waiter、continuation、await/resume 与取消归 Runtime；#911 只完成 typed suspension 边界及生产映射，不代表 #877/#878 的完整 Interaction 状态机完成。
 - Command Published Language 与端口位于 `agent/features/tools/src/domain/{command_pl,command_ports}.rs`；唯一生产 adapter 位于 `adapters/command.rs`，由 `tools::composition::wire_commands` 装配。SDK 只 re-export，CLI/TUI/no-TUI **NEVER** 定义第二份 Descriptor、Catalog 或 parser。
-- #912/#913 的 Skill materialization 与 Command Catalog/Router 边界已切线；#914 继续承接旧 Registry/Profile/SkillTool 物理退役。
+- #1438 已将 Skill 切换为 metadata Catalog + call-time Load，并通过唯一稳定动态 Skill Tool 执行；Command Router 只发布 typed SkillRequest。
 
 - `TaskUpdate` 只发布普通单字段更新（status / subject / description / priority）；任务依赖由独立 `TaskBlockBy { id, block_by_ids }` 发布，`block_by_ids` 表示完整替换后的集合，空列表清空依赖。
 - `TaskBlockBy` adapter **MUST** 委托 Task-owned 原子集合替换命令；**NEVER** 在 Tool 层逐条 add/remove 形成部分成功。目标、重复 ID、当前 Batch 成员关系与 DAG 无环性必须在提交前验证，失败不得改变 Task revision 或任一依赖边。

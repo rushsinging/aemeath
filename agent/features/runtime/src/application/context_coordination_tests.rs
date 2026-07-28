@@ -41,7 +41,7 @@ impl ContextPort for RecordingPort {
                 cacheable: true,
                 cache_break: true,
             }],
-            messages: request.pending_messages.clone(),
+            messages: request.pending_messages.clone().into(),
             invocation_reminder: None,
             tool_schemas: request.tool_schemas.clone(),
             token_estimation: TokenBudget {

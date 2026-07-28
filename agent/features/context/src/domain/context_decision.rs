@@ -1,11 +1,10 @@
 use crate::domain::{
-    CompactionDecision, ContextMessage, ContextRequest, DecisionReason, SystemBlock, TokenBudget,
-    Urgency,
+    CompactionDecision, ContextRequest, DecisionReason, SystemBlock, TokenBudget, Urgency,
 };
 
 pub(crate) fn token_budget(
     request: &ContextRequest,
-    messages: &[ContextMessage],
+    messages: &crate::domain::ContextMessages,
     system_blocks: &[SystemBlock],
     invocation_reminder: Option<&str>,
 ) -> TokenBudget {
@@ -13,7 +12,10 @@ pub(crate) fn token_budget(
         .iter()
         .map(|block| crate::domain::estimate_tokens(&block.content))
         .sum();
-    let message_tokens = crate::domain::estimate_messages_tokens(messages)
+    let message_tokens = messages
+        .iter()
+        .map(crate::domain::estimate_message_tokens)
+        .sum::<usize>()
         + invocation_reminder
             .map(crate::domain::estimate_tokens)
             .unwrap_or_default();
@@ -43,7 +45,7 @@ pub(crate) fn token_budget(
 /// `threshold = effective * 0.8`
 pub(crate) fn calculate(
     request: &ContextRequest,
-    messages: &[ContextMessage],
+    messages: &crate::domain::ContextMessages,
     system_blocks: &[SystemBlock],
     invocation_reminder: Option<&str>,
 ) -> CompactionDecision {
