@@ -142,13 +142,23 @@ impl ToolCallReceipt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolReceiptMutation {
     pub identity: ToolCallIdentity,
+    pub input_preview: Option<String>,
     pub next: ToolCallState,
 }
 
 impl ToolReceiptMutation {
+    pub fn pending(identity: ToolCallIdentity, input_preview: impl Into<String>) -> Self {
+        Self {
+            identity,
+            input_preview: Some(input_preview.into()),
+            next: ToolCallState::Pending,
+        }
+    }
+
     pub fn running(identity: ToolCallIdentity) -> Self {
         Self {
             identity,
+            input_preview: None,
             next: ToolCallState::Running,
         }
     }
@@ -156,6 +166,7 @@ impl ToolReceiptMutation {
     pub fn terminal(identity: ToolCallIdentity, terminal: ToolTerminalReceipt) -> Self {
         Self {
             identity,
+            input_preview: None,
             next: ToolCallState::Terminal(terminal),
         }
     }
@@ -169,6 +180,10 @@ pub struct ToolReceiptMutationReceipt {
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum ToolReceiptMutationError {
+    #[error("Tool receipt 对应 Session 不存在：{0}")]
+    SessionNotFound(SessionId),
+    #[error("Tool receipt 持久化失败：{0}")]
+    Storage(String),
     #[error("Tool receipt identity 不匹配")]
     IdentityMismatch,
     #[error("Tool receipt 状态转换非法")]

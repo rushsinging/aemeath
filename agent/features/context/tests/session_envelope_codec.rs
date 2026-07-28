@@ -125,6 +125,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
                 fingerprint: "outcome-fingerprint".to_string(),
                 committed_revision: 2,
             }),
+            tool_receipts: Vec::new(),
         }],
     )];
     session.revision = 2;

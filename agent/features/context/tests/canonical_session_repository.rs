@@ -10,7 +10,7 @@ use context::domain::{
     AcceptedInputAppend, AcceptedInputError, CompactRequest, CompactTrigger, ContentFingerprint,
     ContextAppend, ContextAppendError, ContextRequest, ContextRequestId, FinalizeCause, Language,
     ManualCompactRequest, RunStepId, SessionId, SessionRevision, SystemPromptSpec,
-    TaskReminderSnapshot,
+    TaskReminderSnapshot, ToolCallIdentity, ToolCallState, ToolReceiptMutation,
 };
 use context::ports::SessionRepository;
 use project::{PreparedWorkspaceRestore, WorkspacePersist, WorkspaceRestoreError};
@@ -100,6 +100,19 @@ fn append(fingerprint: &str) -> ContextAppend {
         receipts: vec![],
         api_input_tokens: None,
         fingerprint: ContentFingerprint::new(fingerprint),
+    }
+}
+
+fn tool_identity() -> ToolCallIdentity {
+    ToolCallIdentity {
+        session_id: SessionId::new("session"),
+        run_id: RunId::new("run"),
+        step_id: RunStepId::new("step"),
+        runtime_call_id: "call-1".to_string(),
+        provider_call_id: Some("provider-1".to_string()),
+        tool_name: "Glob".to_string(),
+        call_index: 0,
+        agent: false,
     }
 }
 
@@ -609,6 +622,47 @@ async fn append_persists_candidate_before_publishing_revision() {
         holder.read().unwrap().tasks,
         SnapshotState::Captured(_)
     ));
+}
+
+#[tokio::test]
+async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer.clone());
+    let mutation =
+        ToolReceiptMutation::pending(tool_identity(), "{\"pattern\":\"**/archify.mjs\"}");
+
+    let first = repository
+        .advance_tool_receipt(mutation.clone())
+        .await
+        .unwrap();
+    let second = repository.advance_tool_receipt(mutation).await.unwrap();
+
+    assert!(first.changed);
+    assert!(!second.changed);
+    assert_eq!(holder.read().unwrap().revision, 1);
+    assert_eq!(writer.saved.lock().unwrap().len(), 1);
+    assert_eq!(
+        holder.read().unwrap().run_slices[0].steps[0].tool_receipts[0].state,
+        ToolCallState::Pending
+    );
+}
+
+#[tokio::test]
+async fn advance_tool_receipt_write_failure_does_not_publish_candidate() {
+    let writer = Arc::new(RecordingWriter {
+        saved: Mutex::new(vec![]),
+        fail: true,
+    });
+    let (repository, holder) = repository(writer);
+
+    assert!(matches!(
+        repository
+            .advance_tool_receipt(ToolReceiptMutation::pending(tool_identity(), "safe preview"))
+            .await,
+        Err(context::domain::ToolReceiptMutationError::Storage(message)) if message == "disk full"
+    ));
+    assert_eq!(holder.read().unwrap().revision, 0);
+    assert!(holder.read().unwrap().run_slices.is_empty());
 }
 
 #[tokio::test]

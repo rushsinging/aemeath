@@ -4,7 +4,7 @@ use share::message::Message;
 use std::path::PathBuf;
 use task::TaskSnapshot;
 
-use crate::domain::{FinalizeCause, StepReceipt};
+use crate::domain::{FinalizeCause, StepReceipt, ToolCallReceipt, ToolReceiptMutation};
 
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
 
@@ -102,6 +102,8 @@ pub struct CommittedRunStep {
     pub accepted_input: Option<AcceptedInputProjection>,
     #[serde(default)]
     pub outcome: Option<FinalizedOutcomeProjection>,
+    #[serde(default)]
+    pub tool_receipts: Vec<ToolCallReceipt>,
 }
 
 impl CommittedRunStep {
@@ -113,6 +115,7 @@ impl CommittedRunStep {
             step_id: step_id.into(),
             accepted_input: Some(accepted_input),
             outcome: None,
+            tool_receipts: Vec::new(),
         }
     }
 
@@ -121,6 +124,7 @@ impl CommittedRunStep {
             step_id: step_id.into(),
             accepted_input: None,
             outcome: Some(outcome),
+            tool_receipts: Vec::new(),
         }
     }
 
@@ -189,6 +193,66 @@ impl PartialEq for CanonicalSession {
 impl Eq for CanonicalSession {}
 
 impl CanonicalSession {
+    pub fn tool_receipt(&self, mutation: &ToolReceiptMutation) -> Option<&ToolCallReceipt> {
+        self.run_slices
+            .iter()
+            .find(|slice| slice.run_id == mutation.identity.run_id.as_ref())?
+            .steps
+            .iter()
+            .find(|step| step.step_id == mutation.identity.step_id.as_str())?
+            .tool_receipts
+            .iter()
+            .find(|receipt| receipt.identity == mutation.identity)
+    }
+
+    pub fn advance_tool_receipt(
+        &mut self,
+        mutation: ToolReceiptMutation,
+    ) -> Result<bool, crate::domain::ToolReceiptMutationError> {
+        let run_id = mutation.identity.run_id.to_string();
+        let step_id = mutation.identity.step_id.as_str().to_string();
+        let slice_index = self
+            .run_slices
+            .iter()
+            .position(|slice| slice.run_id == run_id)
+            .unwrap_or_else(|| {
+                self.run_slices
+                    .push(CommittedRunSlice::new(run_id.clone(), Vec::new()));
+                self.run_slices.len() - 1
+            });
+        let step_index = self.run_slices[slice_index]
+            .steps
+            .iter()
+            .position(|step| step.step_id == step_id)
+            .unwrap_or_else(|| {
+                self.run_slices[slice_index].steps.push(CommittedRunStep {
+                    step_id: step_id.clone(),
+                    accepted_input: None,
+                    outcome: None,
+                    tool_receipts: Vec::new(),
+                });
+                self.run_slices[slice_index].steps.len() - 1
+            });
+        let receipts = &mut self.run_slices[slice_index].steps[step_index].tool_receipts;
+        if let Some(receipt_index) = receipts
+            .iter()
+            .position(|receipt| receipt.identity == mutation.identity)
+        {
+            let advanced = receipts[receipt_index].clone().advance(mutation)?;
+            if advanced.changed {
+                receipts[receipt_index] = advanced.receipt;
+            }
+            return Ok(advanced.changed);
+        }
+        let input_preview = mutation.input_preview.clone().unwrap_or_default();
+        let mut receipt = ToolCallReceipt::pending(mutation.identity.clone(), input_preview);
+        if mutation.next != crate::domain::ToolCallState::Pending {
+            receipt = receipt.advance(mutation)?.receipt;
+        }
+        receipts.push(receipt);
+        Ok(true)
+    }
+
     pub fn append_accepted_input(
         &mut self,
         run_id: &str,
@@ -451,6 +515,7 @@ impl From<V2CanonicalSession> for CanonicalSession {
                                 outcome: step
                                     .outcome
                                     .map(FinalizedOutcomeProjection::compatibility),
+                                tool_receipts: Vec::new(),
                             })
                             .collect(),
                     )
