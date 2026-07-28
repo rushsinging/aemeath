@@ -183,7 +183,14 @@ impl SessionRepository for CanonicalSessionRepository {
         if session.id != session_id.as_str() {
             return Err(format!("Session 不存在：{session_id}"));
         }
-        let messages = session.structured_messages();
+        let messages = crate::domain::ContextMessages::from_committed_steps(
+            session
+                .visible_message_steps()
+                .into_iter()
+                .map(|messages| messages.as_arc())
+                .collect(),
+            Vec::new(),
+        );
         Ok(SessionSnapshot {
             revision: SessionRevision::new(session.revision),
             messages,
@@ -291,7 +298,7 @@ impl SessionRepository for CanonicalSessionRepository {
             append.step_id.as_str(),
             FinalizedOutcomeProjection {
                 finalize_cause: append.finalize_cause,
-                messages: append.messages.clone(),
+                messages: append.messages.clone().into(),
                 receipts: append.receipts.clone(),
                 api_input_tokens: append.api_input_tokens,
                 fingerprint: append.fingerprint.as_str().to_string(),

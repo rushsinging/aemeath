@@ -49,8 +49,9 @@ impl ContextApplicationService {
         );
         #[cfg(test)]
         let messages_started = std::time::Instant::now();
-        let mut messages = snapshot.messages;
-        messages.extend(request.pending_messages.clone());
+        let messages = snapshot
+            .messages
+            .with_pending(request.pending_messages.clone());
         #[cfg(test)]
         let messages_assembly_duration = messages_started.elapsed();
 
@@ -154,7 +155,7 @@ impl ContextApplicationService {
 }
 
 #[cfg(test)]
-fn context_message_tool_result_metrics(messages: &[share::message::Message]) -> (usize, u64) {
+fn context_message_tool_result_metrics(messages: &crate::domain::ContextMessages) -> (usize, u64) {
     messages
         .iter()
         .flat_map(|message| message.content.iter())

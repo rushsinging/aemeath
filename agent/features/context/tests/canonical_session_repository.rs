@@ -563,6 +563,28 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
 }
 
 #[tokio::test]
+async fn snapshot_shares_committed_step_message_backing() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("session");
+    let session = ten_step_session(&session_id, vec![], 10);
+    let original_ptr = session.run_slices[0].steps[0]
+        .outcome
+        .as_ref()
+        .unwrap()
+        .messages
+        .as_ptr();
+    let (repository, _) = repository_with_session(writer, session);
+
+    let snapshot = repository.snapshot(&session_id).await.unwrap();
+
+    assert_eq!(snapshot.messages.len(), 10);
+    assert_eq!(
+        snapshot.messages.first().map(|message| message as *const _),
+        Some(original_ptr)
+    );
+}
+
+#[tokio::test]
 async fn snapshot_reads_structured_projection_not_legacy_chats() {
     let writer = Arc::new(RecordingWriter::default());
     let mut legacy = ChatSegment::normal(None);

@@ -560,7 +560,7 @@ where
             .clone()
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
         self.task_reminder_state
-            .update_from_messages(self.turn_count as u64, &window.messages);
+            .update_from_messages(self.turn_count as u64, window.messages.iter());
         let ctx =
             crate::application::loop_engine::llm_strategy::extract_invocation_context(&window);
         log_llm_input(
@@ -1202,7 +1202,7 @@ where
             .context_window
             .as_ref()
             .map(|window| {
-                context::compact::messages_selected_for_precompact_memory(&window.messages)
+                context::compact::messages_selected_for_precompact_memory(&window.messages.to_vec())
             })
             .unwrap_or_default();
         let source_revision = self

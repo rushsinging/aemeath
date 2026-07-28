@@ -14,12 +14,14 @@ pub use token_budget::{
     estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens,
 };
 
+use serde::ser::SerializeSeq;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use provider::{ModelToolSchema, ReasoningLevel};
 use sdk::RunId;
 pub use sdk::{RunStepId, SessionId};
-use serde::{Deserialize, Serialize};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::AgentRoleConfig;
 pub use share::message::Message as ContextMessage;
@@ -125,12 +127,113 @@ pub struct TokenBudget {
     pub total_tokens: usize,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ContextMessages {
+    committed_steps: Arc<[Arc<[ContextMessage]>]>,
+    pending: Arc<[ContextMessage]>,
+    len: usize,
+}
+
+impl ContextMessages {
+    pub fn from_pending(messages: Vec<ContextMessage>) -> Self {
+        let len = messages.len();
+        Self {
+            committed_steps: Arc::from([]),
+            pending: messages.into(),
+            len,
+        }
+    }
+
+    pub fn from_committed_steps(
+        committed_steps: Vec<Arc<[ContextMessage]>>,
+        pending: Vec<ContextMessage>,
+    ) -> Self {
+        let len = committed_steps
+            .iter()
+            .map(|messages| messages.len())
+            .sum::<usize>()
+            .saturating_add(pending.len());
+        Self {
+            committed_steps: committed_steps.into(),
+            pending: pending.into(),
+            len,
+        }
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn with_pending(&self, pending: Vec<ContextMessage>) -> Self {
+        let mut committed_steps = self.committed_steps.to_vec();
+        if !self.pending.is_empty() {
+            committed_steps.push(Arc::clone(&self.pending));
+        }
+        Self::from_committed_steps(committed_steps, pending)
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &ContextMessage> {
+        self.committed_steps
+            .iter()
+            .flat_map(|messages| messages.iter())
+            .chain(self.pending.iter())
+    }
+
+    pub fn get(&self, index: usize) -> Option<&ContextMessage> {
+        self.iter().nth(index)
+    }
+
+    pub fn first(&self) -> Option<&ContextMessage> {
+        self.iter().next()
+    }
+
+    pub fn last(&self) -> Option<&ContextMessage> {
+        self.iter().next_back()
+    }
+
+    pub fn to_vec(&self) -> Vec<ContextMessage> {
+        self.iter().cloned().collect()
+    }
+}
+
+impl Serialize for ContextMessages {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.len()))?;
+        for message in self.iter() {
+            sequence.serialize_element(message)?;
+        }
+        sequence.end()
+    }
+}
+
+impl std::ops::Index<usize> for ContextMessages {
+    type Output = ContextMessage;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index)
+            .expect("Context message index out of bounds")
+    }
+}
+
+impl From<Vec<ContextMessage>> for ContextMessages {
+    fn from(messages: Vec<ContextMessage>) -> Self {
+        Self::from_pending(messages)
+    }
+}
+
 /// Context window 及同一冻结输入上计算的压缩决策。
 #[derive(Debug, Clone)]
 pub struct ContextWindow {
     pub backing_revision: SessionRevision,
     pub system_blocks: Vec<SystemBlock>,
-    pub messages: Vec<ContextMessage>,
+    pub messages: ContextMessages,
     pub tool_schemas: Vec<ModelToolSchema>,
     pub token_estimation: TokenBudget,
     pub compaction_decision: CompactionDecision,

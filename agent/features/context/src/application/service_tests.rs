@@ -29,7 +29,7 @@ impl SessionRepository for BaselineSession {
     async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
         Ok(SessionSnapshot {
             revision: self.revision,
-            messages: self.messages.clone(),
+            messages: self.messages.clone().into(),
             active_summary: Some("summary".into()),
         })
     }

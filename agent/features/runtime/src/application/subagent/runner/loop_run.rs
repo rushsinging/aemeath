@@ -77,8 +77,10 @@ impl crate::application::main_loop::looping::ChatEventSink for SubAgentEventSink
     fn try_send_event(&self, _event: crate::application::main_loop::looping::RuntimeStreamEvent) {}
 }
 
-pub(super) fn messages_for_llm(messages: &[Message]) -> Vec<Message> {
-    messages.iter().map(Message::to_llm_view).collect()
+pub(super) fn messages_for_llm<'a>(
+    messages: impl IntoIterator<Item = &'a Message>,
+) -> Vec<Message> {
+    messages.into_iter().map(Message::to_llm_view).collect()
 }
 
 pub(super) struct CancellationPropagationGuard(tokio::task::JoinHandle<()>);
@@ -411,7 +413,7 @@ impl<'a> SubAgentRun<'a> {
                 };
                 let messages_for_api = window
                     .as_ref()
-                    .map(|window| messages_for_llm(&window.messages))
+                    .map(|window| messages_for_llm(window.messages.iter()))
                     .unwrap_or_else(|| messages_for_llm(&self.messages));
                 let (effective_blocks, raw_tool_schemas) = match &window {
                     Some(w) => {
