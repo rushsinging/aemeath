@@ -590,10 +590,10 @@ logging::UnifiedLogger::log_user_input(serde_json::json!({
 
 ---
 
-## Task 13: 更新 specs/rust-coding.md
+## Task 13: 更新 specs/3.2-rust-coding.md
 
 **Files:**
-- Modify: `specs/rust-coding.md`
+- Modify: `specs/3.2-rust-coding.md`
 
 ### Step 1: 替换日志规范章节（第 41-47 行）
 

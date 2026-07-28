@@ -19,7 +19,7 @@
 //! - query 提供的 `extra_dirs`（最低，按顺序扫描）
 //! - 内置 `commit` Skill（最低）
 //!
-//! 设计约束（见 Issue #912 / `specs/tools.md`）：
+//! 设计约束（见 Issue #912 / `specs/3.5-tools.md`）：
 //!
 //! - 同名 Skill 按上述优先级「先到先得」去重；
 //! - 输出按 stable key 稳定排序；

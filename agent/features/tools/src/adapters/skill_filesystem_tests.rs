@@ -30,7 +30,7 @@ use crate::domain::skill_pl::{
 
 // ── helpers ────────────────────────────────────────────────────────────
 
-/// Unique temp roots per test — required by `specs/rust-coding.md` 确定性.
+/// Unique temp roots per test — required by `specs/3.2-rust-coding.md` 确定性.
 static STAMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn unique_stamp(tag: &str) -> String {
     let n = STAMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

@@ -3,7 +3,7 @@
 ## 前置
 
 - 当前 worktree：`feature/77-diff-removed-plain-red`。
-- 已加载适用规范：`specs/bug-feature-tracking.md`、`specs/rust-coding.md`、`specs/tui-cli.md`。
+- 已加载适用规范：`specs/3.13-bug-feature-tracking.md`、`specs/3.2-rust-coding.md`、`specs/3.3-tui-cli.md`。
 - 设计采用备选方案 2：新增 deleted/removed 专用 helper。
 
 ## 步骤

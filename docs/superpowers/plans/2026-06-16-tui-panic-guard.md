@@ -26,7 +26,7 @@
 | `apps/cli/src/tui/render/input/paste_handler.rs` | 修改 | 两处 clipboard/image spawn 接入 `spawn_guarded` |
 | `apps/cli/src/tui/app/update/ask_user_key.rs` | 修改 | line 117-119 越界 / unwrap 防御 |
 
-**测试策略**（依据 `specs/rust-coding.md`：纯逻辑函数最高优先级；UI 渲染 / 入口 / I/O 可豁免）：
+**测试策略**（依据 `specs/3.2-rust-coding.md`：纯逻辑函数最高优先级；UI 渲染 / 入口 / I/O 可豁免）：
 - `payload_message`、`restore_terminal_best_effort` 的转义序列常量 → 纯逻辑，必测。
 - `TerminalGuard::enter`/`Drop`、`run()`：真实终端 I/O，无 tty 环境 `enable_raw_mode` 必失败 → 豁免，靠编译 + clippy + 手工验证。
 - `spawn_guarded`：tokio 并发，写 `#[tokio::test]` 验证正常 future 完成 + panic future 不传播。

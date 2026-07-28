@@ -107,7 +107,7 @@ Hook BC 在 `HookOutcome.messages` 中逐条保留 JSON `additional_context` / `
 迁移期 legacy `HookRunner` 的 `emit_json_hook_context`、PostToolBatch、PreCompact / PostCompact 发送点仍保留到 #926 原子切换，避免在 #925 同时重写旧 Loop 驱动。目标契约如下：
 
 1. **MUST** Hook 面向展示层的输出使用**独立事件类型**，携带来源归因（hook 名、触发的 HookEvent），**NEVER** 复用 `RuntimeStreamEvent::SystemMessage`
-2. **MUST** 归因字段结构化透传至 TUI，**NEVER** 中途压扁成字符串（对齐 `specs/tui-cli.md` 对 `AgentProgressEvent` 的同类约定）
+2. **MUST** 归因字段结构化透传至 TUI，**NEVER** 中途压扁成字符串（对齐 `specs/3.3-tui-cli.md` 对 `AgentProgressEvent` 的同类约定）
 3. **MUST** 保持「runtime 允许发空、展示层负责不渲染」的既有契约（见 [tui/03-event-flow-and-acl.md §3.5](../tui/03-event-flow-and-acl.md#35-空-payload-守卫)）——独立 message type 不改变判空责任的归属，只让展示层能按来源区分处理
 4. Hook BC 仍**只返回结构化输出**，事件封装由 runtime 侧完成，**NEVER** 由 Hook BC 直接构造 TUI 事件
 

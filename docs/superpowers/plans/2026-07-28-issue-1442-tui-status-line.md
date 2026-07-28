@@ -105,7 +105,7 @@ ConfigChanged / ConfigReloaded 处理时完整更新 `App.config_view`；spacing
 - 修改 `apps/cli/src/tui/adapter/event_mapping_tests.rs`：ConfigView.permission_mode 三态 ACL 字段完整性。
 - 修改 `apps/cli/src/tui/app/scenario_tests/startup.rs` 或新增 status line 场景：三态启动展示、busy 展示。
 - 修改/新增 `apps/cli/src/tui/app/scenario_tests/config.rs`（若当前模块无合适文件）：ConfigChanged / ConfigReloaded 后 policy 立即更新。
-- 测试组织遵守 `specs/rust-coding.md` 与 `docs/design/03-engineering/04-testing-and-coverage.md`；大型测试外置，不批量迁移无关历史测试。
+- 测试组织遵守 `specs/3.2-rust-coding.md` 与 `docs/design/03-engineering/04-testing-and-coverage.md`；大型测试外置，不批量迁移无关历史测试。
 
 ## 实施任务
 

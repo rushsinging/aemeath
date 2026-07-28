@@ -1,7 +1,7 @@
 //! Tests for the independent Skill Published Language (`skill_pl`).
 //!
 //! These tests pin the DTO shape and the content-derived revision contract
-//! before the adapter is wired. See `specs/tools.md` (Issue #912) and
+//! before the adapter is wired. See `specs/3.5-tools.md` (Issue #912) and
 //! `docs/design/02-modules/tools/02-ports-and-lifecycle.md` §6.
 
 use super::skill_pl::*;

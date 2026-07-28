@@ -361,7 +361,7 @@ Run / RunStep 状态迁移
 - 能力字段使用 `*_mode`、`*_route`、`*_scope` 等后缀，避免把模式值命名成对象；
 - 可由数据表达的差异不得固化进生产类型名。
 
-全仓命名原则应在根 `AGENTS.md` 登记，Rust 细则归 `specs/rust-coding.md`；本文只记录 Runtime 模型中的具体应用。
+全仓命名原则应在根 `AGENTS.md` 登记，Rust 细则归 `specs/3.2-rust-coding.md`；本文只记录 Runtime 模型中的具体应用。
 
 ## 11. 验收条件
 

@@ -2,7 +2,7 @@
 
 > 层级：03-engineering（工程守则）
 > 状态：Target（测试组织规范已落地，覆盖率/生产可达性/场景实现待后续 Issue）｜Milestone：v0.1.0｜对应 Issue：[#677](https://github.com/rushsinging/aemeath/issues/677)、[#1006](https://github.com/rushsinging/aemeath/issues/1006)、[#1013](https://github.com/rushsinging/aemeath/issues/1013)
-> 本文定义 workspace 统一测试分层、目录组织、fixture/替身、覆盖率、生产可达性与 CI 门禁。Rust 代码变更的可执行约束以 [`specs/rust-coding.md`](../../../specs/rust-coding.md) 为准。
+> 本文定义 workspace 统一测试分层、目录组织、fixture/替身、覆盖率、生产可达性与 CI 门禁。Rust 代码变更的可执行约束以 [`specs/3.2-rust-coding.md`](../../../specs/3.2-rust-coding.md) 为准。
 
 ## 1. 目标与非目标
 
@@ -490,7 +490,7 @@ TUI completion 的 idle/busy 回归应作为首个真实场景验收：Esc 在�
 
 ### 11.1 #1013 已对齐范围
 
-`specs/rust-coding.md` 已承接本文的测试组织约束：
+`specs/3.2-rust-coding.md` 已承接本文的测试组织约束：
 
 - L0-L5 测试层级及“最低充分层级 + 跨层相邻证据”；
 - 按纯函数、状态机、Application Service、Adapter、序列化、TUI widget/场景选择覆盖证据；

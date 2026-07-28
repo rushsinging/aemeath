@@ -223,7 +223,7 @@ is_user_turn_boundary(msg) =
 **改动范围**：
 - 清理所有 `TODO(#680)` 残留注释
 - 确认 `docs/design/01-outline.md` §会话历史单一真相 现状描述已更新
-- 更新 `specs/runtime.md` 和 `specs/storage.md`（新增约束：runtime 持有 ChatChain 聚合、TUI 不持有消息镜像）
+- 更新 `specs/3.4-runtime.md` 和 `specs/3.10-storage.md`（新增约束：runtime 持有 ChatChain 聚合、TUI 不持有消息镜像）
 - 运行 `cargo clippy`，修复所有新增 warning
 - 检查 `docs/design/02-architecture-guards.md` 白名单是否需要更新
 - 端到端验收：microcompact 在真实多轮对话中按 segment 保护生效
