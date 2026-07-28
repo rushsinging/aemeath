@@ -1055,18 +1055,25 @@ impl RunLoopPort for SubAgentRun<'_> {
                         current.as_ref().and_then(|ci| ci.approval_call.clone())
                     {
                         let call = &approval_call.call;
-                        let mut input = call.input.clone();
-                        tools::strip_runtime_meta(&mut input);
-                        let invocation = tools::ToolInvocation::new(
-                            call.name.as_str(),
-                            input,
-                            self.agent.ctx.scope().clone(),
-                        )
-                        .with_authorization(approval_call.authorization);
+                        let approval_step_id = self
+                            .context_request
+                            .as_ref()
+                            .map(|request| request.step_id.clone())
+                            .unwrap_or_else(sdk::RunStepId::new_v7);
                         let domain = self
                             .agent
-                            .execution
-                            .execute(invocation, self.agent.ctx.cancellation().as_ref())
+                            .execute_domain_with_ctx(
+                                &crate::application::subagent::ToolCall {
+                                    id: call.id.clone(),
+                                    provider_id: call.provider_id.clone(),
+                                    name: call.name.clone(),
+                                    index: call.index,
+                                    input: call.input.clone(),
+                                },
+                                &self.agent.ctx,
+                                approval_call.authorization,
+                                &approval_step_id,
+                            )
                             .await;
                         let outcome = crate::application::subagent::legacy_outcome(domain);
                         let execution = ToolExecution::from_parts(

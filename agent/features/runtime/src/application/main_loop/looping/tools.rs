@@ -33,7 +33,7 @@ pub(crate) async fn execute_tool_round<S>(
     context: &RuntimeTurnContext,
     tool_calls: &[ToolCall],
     tool_catalog: &Arc<dyn ToolCatalogPort>,
-    tool_execution: &Arc<dyn ToolExecutionPort>,
+    _tool_execution: &Arc<dyn ToolExecutionPort>,
     policy: &dyn policy::PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
@@ -151,7 +151,7 @@ where
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,
-        tool_execution,
+        agent,
         &agent.ctx,
         &agent.agent_semaphore,
         &agent.workspace_persist,
