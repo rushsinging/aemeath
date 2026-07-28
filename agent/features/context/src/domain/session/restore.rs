@@ -1,8 +1,10 @@
 //! Canonical Session 恢复投影。
 
+use super::envelope::RestoreStepProjection;
 use super::message_integrity::{check_message_integrity, deep_clean_messages, sanitize_messages};
 use crate::domain::session::CanonicalSession;
-use share::message::Message;
+use crate::domain::{ToolCallReceipt, ToolCallState};
+use share::message::{ContentBlock, Message, Role};
 
 #[derive(Debug, Clone)]
 pub struct SessionRestoreStep {
@@ -23,8 +25,8 @@ pub struct SessionRestore {
 impl SessionRestore {
     pub fn from_canonical(session: &CanonicalSession) -> Self {
         let (active_steps, active_trimmed, active_repaired) =
-            clean_steps(session.flattened_steps_from_marker());
-        let (display_steps, _, _) = clean_steps(session.all_persisted_steps());
+            clean_steps(session.restore_steps_from_marker());
+        let (display_steps, _, _) = clean_steps(session.all_restore_steps());
         let active_messages = active_steps
             .iter()
             .flat_map(|step| step.messages.iter().cloned())
@@ -39,28 +41,93 @@ impl SessionRestore {
     }
 }
 
-fn clean_steps(
-    raw_steps: Vec<(super::RunStepCursor, Vec<Message>)>,
-) -> (Vec<SessionRestoreStep>, usize, usize) {
+fn clean_steps(raw_steps: Vec<RestoreStepProjection>) -> (Vec<SessionRestoreStep>, usize, usize) {
     let mut steps = Vec::with_capacity(raw_steps.len());
     let mut trimmed = 0;
     let mut repaired = 0;
-    for (cursor, mut step_messages) in raw_steps {
-        let before = step_messages.len();
-        sanitize_messages(&mut step_messages);
-        trimmed += before.saturating_sub(step_messages.len());
-        if check_message_integrity(&step_messages).has_issues() {
-            repaired += deep_clean_messages(&mut step_messages);
+    for RestoreStepProjection {
+        cursor,
+        mut messages,
+        tool_receipts,
+    } in raw_steps
+    {
+        project_unfinished_tool_results(&mut messages, &tool_receipts);
+        let before = messages.len();
+        sanitize_messages(&mut messages);
+        trimmed += before.saturating_sub(messages.len());
+        if check_message_integrity(&messages).has_issues() {
+            repaired += deep_clean_messages(&mut messages);
         }
-        if !step_messages.is_empty() {
+        if !messages.is_empty() {
             steps.push(SessionRestoreStep {
                 run_id: cursor.run_id,
                 step_id: cursor.step_id,
-                messages: step_messages,
+                messages,
             });
         }
     }
     (steps, trimmed, repaired)
+}
+
+fn project_unfinished_tool_results(messages: &mut Vec<Message>, receipts: &[ToolCallReceipt]) {
+    let unresolved: Vec<&ToolCallReceipt> = receipts
+        .iter()
+        .filter(|receipt| {
+            matches!(
+                receipt.state,
+                ToolCallState::Pending | ToolCallState::Running
+            )
+        })
+        .filter(|receipt| {
+            let call_id = provider_call_id(receipt);
+            messages
+                .iter()
+                .any(|message| message.tool_use_ids().into_iter().any(|id| id == call_id))
+                && !messages.iter().any(|message| {
+                    message
+                        .tool_result_ids()
+                        .into_iter()
+                        .any(|id| id == call_id)
+                })
+        })
+        .collect();
+    if unresolved.is_empty() {
+        return;
+    }
+
+    let blocks = unresolved
+        .into_iter()
+        .map(|receipt| {
+            let call_id = provider_call_id(receipt).to_string();
+            ContentBlock::ToolResult {
+                tool_use_id: call_id.clone(),
+                content: serde_json::json!({
+                    "status": "error",
+                    "outcome": "CancellationUnconfirmed",
+                    "message": "tool execution was interrupted; cleanup could not be confirmed",
+                    "unfinished_call_ids": [call_id],
+                    "possible_side_effects": ["tool may still have observable side effects"]
+                }),
+                is_error: true,
+                text: Some(
+                    "Tool execution was interrupted; cleanup could not be confirmed.".to_string(),
+                ),
+            }
+        })
+        .collect();
+    messages.push(Message {
+        role: Role::User,
+        content: blocks,
+        metadata: None,
+    });
+}
+
+fn provider_call_id(receipt: &ToolCallReceipt) -> &str {
+    receipt
+        .identity
+        .provider_call_id
+        .as_deref()
+        .unwrap_or(&receipt.identity.runtime_call_id)
 }
 
 #[cfg(test)]

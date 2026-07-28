@@ -149,6 +149,26 @@ impl CommittedRunSlice {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct RestoreStepProjection {
+    pub cursor: RunStepCursor,
+    pub messages: Vec<Message>,
+    pub tool_receipts: Vec<ToolCallReceipt>,
+}
+
+fn step_messages(step: &CommittedRunStep) -> Vec<Message> {
+    step.accepted_input
+        .iter()
+        .flat_map(|input| input.messages.iter())
+        .chain(
+            step.outcome
+                .iter()
+                .flat_map(|outcome| outcome.messages.iter()),
+        )
+        .cloned()
+        .collect()
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CanonicalSession {
     pub id: String,
@@ -355,35 +375,23 @@ impl CanonicalSession {
         }
     }
 
-    pub fn all_persisted_steps(&self) -> Vec<(RunStepCursor, Vec<Message>)> {
+    pub(crate) fn all_restore_steps(&self) -> Vec<RestoreStepProjection> {
         self.run_slices
             .iter()
             .flat_map(|slice| {
-                slice.steps.iter().map(|step| {
-                    let messages = step
-                        .accepted_input
-                        .iter()
-                        .flat_map(|input| input.messages.iter())
-                        .chain(
-                            step.outcome
-                                .iter()
-                                .flat_map(|outcome| outcome.messages.iter()),
-                        )
-                        .cloned()
-                        .collect();
-                    (
-                        RunStepCursor {
-                            run_id: slice.run_id.clone(),
-                            step_id: step.step_id.clone(),
-                        },
-                        messages,
-                    )
+                slice.steps.iter().map(|step| RestoreStepProjection {
+                    cursor: RunStepCursor {
+                        run_id: slice.run_id.clone(),
+                        step_id: step.step_id.clone(),
+                    },
+                    messages: step_messages(step),
+                    tool_receipts: step.tool_receipts.clone(),
                 })
             })
             .collect()
     }
 
-    pub fn flattened_steps_from_marker(&self) -> Vec<(RunStepCursor, Vec<Message>)> {
+    pub(crate) fn restore_steps_from_marker(&self) -> Vec<RestoreStepProjection> {
         let start_at = self
             .compact
             .as_ref()
@@ -400,28 +408,32 @@ impl CanonicalSession {
                     visible = true;
                 }
                 if visible {
-                    let messages = step
-                        .accepted_input
-                        .iter()
-                        .flat_map(|input| input.messages.iter())
-                        .chain(
-                            step.outcome
-                                .iter()
-                                .flat_map(|outcome| outcome.messages.iter()),
-                        )
-                        .cloned()
-                        .collect();
-                    steps.push((
-                        RunStepCursor {
+                    steps.push(RestoreStepProjection {
+                        cursor: RunStepCursor {
                             run_id: slice.run_id.clone(),
                             step_id: step.step_id.clone(),
                         },
-                        messages,
-                    ));
+                        messages: step_messages(step),
+                        tool_receipts: step.tool_receipts.clone(),
+                    });
                 }
             }
         }
         steps
+    }
+
+    pub fn all_persisted_steps(&self) -> Vec<(RunStepCursor, Vec<Message>)> {
+        self.all_restore_steps()
+            .into_iter()
+            .map(|step| (step.cursor, step.messages))
+            .collect()
+    }
+
+    pub fn flattened_steps_from_marker(&self) -> Vec<(RunStepCursor, Vec<Message>)> {
+        self.restore_steps_from_marker()
+            .into_iter()
+            .map(|step| (step.cursor, step.messages))
+            .collect()
     }
 
     pub fn structured_messages(&self) -> Vec<Message> {

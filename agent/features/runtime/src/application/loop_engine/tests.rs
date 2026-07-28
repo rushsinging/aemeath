@@ -81,6 +81,8 @@ struct ScriptedPort {
     cancel_when_compact_starts: bool,
     cancel_when_model_starts: bool,
     cancel_when_tools_starts: bool,
+    settle_tools_after_cancel: bool,
+    tools_settled_after_cancel: bool,
     terminate_when_compact_starts: bool,
     step_cancel: std::sync::Arc<std::sync::Mutex<Option<CancellationToken>>>,
     calls: Vec<&'static str>,
@@ -149,6 +151,8 @@ impl Default for ScriptedPort {
             cancel_when_compact_starts: false,
             cancel_when_model_starts: false,
             cancel_when_tools_starts: false,
+            settle_tools_after_cancel: false,
+            tools_settled_after_cancel: false,
             terminate_when_compact_starts: false,
             step_cancel: Default::default(),
             calls: Default::default(),
@@ -417,11 +421,22 @@ impl RunLoopPort for ScriptedPort {
                     deadline: sdk::ControlDeadline::from_unix_millis(1_725_000_000_123),
                 });
             cancel.cancel();
-            return Err(LoopEngineError::Cancelled);
+            if self.settle_tools_after_cancel {
+                tokio::task::yield_now().await;
+                self.tools_settled_after_cancel = true;
+            } else {
+                return Err(LoopEngineError::Cancelled);
+            }
         }
-        self.tool_steps
+        let step = self
+            .tool_steps
             .pop_front()
-            .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))
+            .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))?;
+        if cancel.is_cancelled() {
+            Err(LoopEngineError::Cancelled)
+        } else {
+            Ok(step)
+        }
     }
 
     async fn on_stuck(&mut self, _decision: &StuckDecision) -> Result<(), LoopEngineError> {
@@ -1892,6 +1907,37 @@ async fn cancel_step_during_tools_finalizes_then_returns_to_drain() {
         .events
         .iter()
         .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+}
+
+#[tokio::test]
+async fn cancel_step_during_tools_waits_for_tool_settlement_before_finalizing() {
+    let mut run = new_run(Duration::ZERO);
+    let root = CancellationToken::new();
+    let mut port = ScriptedPort {
+        cancel_when_tools_starts: true,
+        settle_tools_after_cancel: true,
+        model_steps: VecDeque::from([ModelStep::Tools {
+            text: "calling".to_string(),
+            calls: vec![call("Bash", json!({"command": "sleep 180"}))],
+        }]),
+        tool_steps: VecDeque::from([ToolStep::Continue]),
+        ..Default::default()
+    };
+
+    run_loop(&mut run, &root, &mut port).await.unwrap();
+
+    assert!(
+        port.tools_settled_after_cancel,
+        "Tool phase 必须在 Step finalize 前完成取消收敛"
+    );
+    let tools_index = port.calls.iter().position(|call| *call == "tools").unwrap();
+    let finalize_index = port
+        .calls
+        .iter()
+        .position(|call| *call == "finalize_cancelled_step")
+        .unwrap();
+    assert!(tools_index < finalize_index);
+    assert_eq!(port.cancelled_steps, port.frozen_steps);
 }
 
 #[tokio::test]

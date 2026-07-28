@@ -21,11 +21,11 @@ aemeath 是**人在环的交互式 CLI**，不是无人值守 workflow。崩溃�
 | **Task 快照 / Workspace 上下文** | 内嵌 Session | 随 Session 落盘（跨 BC 快照组装，见 `../context-management/01-session.md`）|
 | **Run 聚合 / RunStatus 状态机** | 仅内存 | 崩溃即丢，从头开始 |
 | **RunStep 中间状态 / ToolCall 执行 future** | 仅内存 | 不恢复 future、不自动重放；已接受 ToolCall 的 identity 与执行事实另以 Context-owned durable receipt ledger 保存 |
-| **已接受 ToolCall receipt ledger** | Session 内嵌事实 | 保存 Pending/Running/terminal receipt；当前只投影 terminal receipt，遗留进行态保持可诊断且不构成可恢复 Run 状态机 |
+| **已接受 ToolCall receipt ledger** | Session 内嵌事实 | 保存 Pending/Running/terminal receipt；terminal receipt 进入稳定 Step projection，遗留进行态仅在有对应孤立 `tool_use` 时只读投影为 provider-safe `CancellationUnconfirmed`，不恢复或重放 Run 状态机 |
 | **RuntimeContext（活资源）** | 仅运行时装配 | 崩溃后重新装配 |
 | **StuckGuard 计数** | 仅内存 | 重置 |
 
-**关键**：落盘的是**对话历史数据**以及已接受 ToolCall 的 durable receipt 事实（由 Context Management 拥有），**不是** Run 的执行状态机。Receipt 只用于保留调用 identity 与已知状态；不恢复 future、不自动重放。当前恢复只把 terminal receipt 投影进 finalized outcome；Pending/Running receipt 原样保留供诊断，尚不会自动转为 provider-safe `CancellationUnconfirmed` result。这与“单状态机内存态”完全自洽——持久化的是数据事实，不是状态机。
+**关键**：落盘的是**对话历史数据**以及已接受 ToolCall 的 durable receipt 事实（由 Context Management 拥有），**不是** Run 的执行状态机。Receipt 只用于保留调用 identity 与已知状态；不恢复 future、不自动重放。恢复把 terminal receipt 投影进 finalized outcome；对于 Pending/Running receipt，只有同时存在对应孤立 `tool_use` 时才补充 `is_error=true` 的 provider-safe `CancellationUnconfirmed` ToolResult，且只修改本次读取投影，不回写 ledger。没有对应消息的 receipt 仍仅供诊断。这与“单状态机内存态”完全自洽——持久化的是数据事实，不是状态机。
 
 ## 3. 崩溃恢复流程
 
@@ -44,7 +44,7 @@ Loop Engine 从头跑：LLM 基于「已落盘对话历史 + 真实当前文件�
 
 - **不重放**未完成的 Run Step / ToolCall future
 - **不恢复** AwaitingUser 暂停点或任何可执行 future
-- **保留**已接受 ToolCall 的 durable receipt；terminal receipt 可进入稳定 Step projection，Pending/Running receipt 当前只保留为可诊断事实。后续 Target 才负责将崩溃遗留进行态显式收敛为带可能副作用的 `CancellationUnconfirmed` provider-safe result
+- **保留**已接受 ToolCall 的 durable receipt；terminal receipt 进入稳定 Step projection，Pending/Running receipt 若对应已提交孤立 `tool_use`，恢复时显式投影为带 unfinished identity 与可能副作用的 `CancellationUnconfirmed` provider-safe result；否则仅保留为可诊断事实
 
 ## 4. 副作用一致性（崩溃后不保证 exactly-once）
 
