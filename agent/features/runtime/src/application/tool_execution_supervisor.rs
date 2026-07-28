@@ -64,6 +64,7 @@ impl ToolExecutionSupervisor {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn with_grace(mut self, grace: Duration) -> Self {
         self.grace = grace;
         self

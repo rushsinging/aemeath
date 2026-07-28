@@ -197,10 +197,17 @@ impl SessionRepository for InMemorySessionRepository {
         }
         let actual = SessionRevision::new(state.revision);
         if actual != append.expected_revision {
-            return Err(ContextAppendError::RevisionConflict {
-                expected: append.expected_revision,
-                actual,
-            });
+            let receipt_only_advances = state.accepted_steps.contains_key(&key)
+                || state.tool_receipts.values().any(|receipt| {
+                    receipt.identity.run_id == append.run_id
+                        && receipt.identity.step_id == append.step_id
+                });
+            if !receipt_only_advances {
+                return Err(ContextAppendError::RevisionConflict {
+                    expected: append.expected_revision,
+                    actual,
+                });
+            }
         }
         state.messages.extend(append.messages.clone());
         state.revision += 1;

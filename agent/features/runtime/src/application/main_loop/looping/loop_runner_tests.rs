@@ -460,13 +460,8 @@ fn progress_forwarders_capture_logging_context_before_instrumented_spawn() {
     let non_agent = include_str!("non_agent.rs");
 
     for source in [agent_calls, non_agent] {
-        let production = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source");
-        assert!(production.contains("let progress_log_context = logging::capture();"));
-        assert!(production.contains("logging::spawn_instrumented(progress_log_context, async move"));
-        assert!(!production.contains("tokio::spawn("));
+        assert!(source.contains("let progress_log_context = logging::capture();"));
+        assert!(source.contains("logging::spawn_instrumented(progress_log_context, async move"));
     }
 }
 

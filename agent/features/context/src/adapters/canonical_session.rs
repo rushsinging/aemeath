@@ -329,10 +329,23 @@ impl SessionRepository for CanonicalSessionRepository {
         }
         let actual = SessionRevision::new(current.revision);
         if actual != append.expected_revision {
-            return Err(ContextAppendError::RevisionConflict {
-                expected: append.expected_revision,
-                actual,
-            });
+            let receipt_only_advances = current
+                .run_slices
+                .iter()
+                .find(|slice| slice.run_id == append.run_id.as_ref())
+                .and_then(|slice| {
+                    slice
+                        .steps
+                        .iter()
+                        .find(|step| step.step_id == append.step_id.as_str())
+                })
+                .is_some_and(|step| step.outcome.is_none());
+            if !receipt_only_advances {
+                return Err(ContextAppendError::RevisionConflict {
+                    expected: append.expected_revision,
+                    actual,
+                });
+            }
         }
 
         let mut candidate = (*current).clone();

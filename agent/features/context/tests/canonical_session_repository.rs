@@ -273,6 +273,7 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
                         tool_result,
                     ]),
                 ),
+                tool_receipts: Vec::new(),
             }],
         )],
         committed_steps: vec![context::domain::session::CommittedStep {
