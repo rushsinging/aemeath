@@ -31,7 +31,7 @@ pub struct TaskUpdateInput {
     /// The ID of the task to update
     #[serde(alias = "taskId")]
     pub task_id: String,
-    /// Field to update. One of: status, subject, description, priority
+    /// Field to update. One of: status, subject, description, priority. Use TaskBlockBy to replace task dependencies.
     pub key: String,
     /// New value for the field (always a string)
     pub value: serde_json::Value,
@@ -56,5 +56,7 @@ mod tests {
         assert!(!value_description.contains("blocked_by_id"));
         assert!(key_description.contains("status"));
         assert!(key_description.contains("description"));
+        assert!(key_description.contains("TaskBlockBy"));
+        assert!(key_description.contains("dependencies"));
     }
 }
