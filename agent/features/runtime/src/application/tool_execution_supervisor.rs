@@ -1,18 +1,35 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use async_trait::async_trait;
 use context::domain::{
     CleanupConfirmation as ReceiptCleanupConfirmation, ToolCallIdentity, ToolReceiptMutation,
     ToolTerminalReceipt,
 };
 use tokio_util::sync::CancellationToken;
 use tools::{
-    CancellationDeclaration, CleanupConfirmation, ToolCatalogSnapshot,
+    CancellationDeclaration, CancellationSignal, CleanupConfirmation, ToolCatalogSnapshot,
     ToolExecutionOutcome as PublishedToolOutcome, ToolExecutionPort, ToolInvocation,
 };
 
-use crate::adapters::tool_runtime;
 use crate::application::context_coordination::ContextCoordinator;
+
+struct SupervisorCancellation(CancellationToken);
+
+#[async_trait]
+impl CancellationSignal for SupervisorCancellation {
+    fn is_cancelled(&self) -> bool {
+        self.0.is_cancelled()
+    }
+
+    async fn cancelled(&self) {
+        self.0.cancelled().await;
+    }
+
+    fn child_signal(&self) -> Arc<dyn CancellationSignal> {
+        Arc::new(Self(self.0.child_token()))
+    }
+}
 
 const DEFAULT_GRACE: Duration = Duration::from_millis(250);
 
@@ -78,7 +95,7 @@ impl ToolExecutionSupervisor {
             Some(SystemTime::now() + Duration::from_secs(descriptor.timeout_secs)),
         );
         let child = call.cancellation.child_token();
-        let signal = tool_runtime::cancellation(child.clone());
+        let signal: Arc<dyn CancellationSignal> = Arc::new(SupervisorCancellation(child.clone()));
         let future = self.execution.execute(call.invocation, signal.as_ref());
         tokio::pin!(future);
 

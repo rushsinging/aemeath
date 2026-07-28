@@ -63,7 +63,7 @@ PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW
 TOOLS_DOMAIN_FACADE = {
     "AgentDispatch", "AgentProgressEvent", "AgentProgressKind", "AgentRunRequest",
     "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "AuthorizationContext",
-    "CancellationDeclaration",
+    "CancellationDeclaration", "CleanupConfirmation",
     "CancellationSignal", "CatalogQuery", "ConcurrencyDeclaration", "ExecutionScope",
     "ExecutionScopeBuilder", "FixedGuidance", "FixedPlanMode", "Guidance", "ImageData",
     "InputSafetyDeclaration", "InvocationSource", "MemoryPortSource", "MutexReadSet",
@@ -81,7 +81,8 @@ TOOLS_DOMAIN_FACADE = {
     "ToolErrorKind", "ToolExecutionContext", "ToolExecutionContextBindingGuard",
     "ToolExecutionContextBindingPort", "ToolExecutionOutcome", "ToolExecutionPort",
     "ToolExecutionPorts", "ToolInvocation", "ToolListProvider", "ToolName", "ToolOutcome",
-    "ToolProfile", "ToolProfileName", "ToolResult", "ToolSuspension", "TypedTool",
+    "ToolProfile", "ToolProfileName", "ToolResult", "ToolSuspension", "ToolTerminalDetails",
+    "TypedTool",
     "TypedToolAdapter", "TypedToolResult", "UserInteractionSpec", "UserOption", "UserQuestion",
     "WorkspaceReadAccess",
 }
