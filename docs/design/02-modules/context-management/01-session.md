@@ -102,7 +102,9 @@ Session 采用两阶段 per-RunStep 持久化：`freeze_step` 已绑定的 user 
 - Sub Run 的执行状态与完整消息链；父 Agent Tool 只保存 child terminal receipt 形成的稳定 Tool result，**NEVER** 把 Sub 私有对话链注入父 Session；
 - Stop Hook Block 后当前已完成 assistant / Tool outcome 仍按正常 finalized schema 落盘；只有 feedback 驱动的下一 Step pending input 不属于当前 outcome。
 
-已接受 ToolCall 的 `ToolCallReceipt` **MAY** 以 Context-owned durable ledger 进入 Session。该 ledger 保存调用 identity、输入安全摘要、Pending/Running/terminal 执行事实、possible side effects 与 unfinished call IDs；它不是 PendingArgs/Running future，也不恢复或重放 Runtime。恢复时只生成 provider-safe 的 terminal 投影，未确认停止统一标记 `CancellationUnconfirmed`，不得伪造成功。
+已接受 ToolCall 的 `ToolCallReceipt` 以 Context-owned durable ledger 进入 Session。当前 wire schema 为 v4：每个 `CommittedRunStep` 可携带 `tool_receipts`；v3 reader 将缺失 ledger 升级为空集合，新 writer 只写 v4，未知 future version 继续 fail-closed。每条 receipt 保存 Session/Run/Step/call identity、provider call identity（若有）、Tool 名称、原始调用序号、Agent 标记、输入安全摘要，以及 `Pending | Running | Terminal` 状态。
+
+转换只允许 `Pending → Running → Terminal` 或 `Pending → Terminal`；同状态/同终态重试幂等，terminal 回退或冲突覆盖返回 typed error。mutation 与 accepted-input/finalized-outcome 共用 CanonicalSession mutation gate和 AtomicBlob generation：先 durable save，再 publish live generation；写失败不污染已发布状态。该 ledger 不是 PendingArgs/Running future，也不恢复或重放 Runtime。当前只有 Terminal receipt 会按原调用序号投影为 `StepReceipt`；崩溃后遗留的 Pending/Running receipt 保持可诊断但不会被伪造成 terminal result。将其显式收敛为 `CancellationUnconfirmed` provider-safe result 属于后续恢复 Target。
 ### 6.3 并发 Tool 混合结果
 同一 RunStep 的 Tool Call **MAY** 并发执行，但普通完成路径的收集与提交 **MUST NOT** fail-fast。Runtime 必须等待每个调用收敛为稳定 outcome，再按原 ToolCall 顺序构造单个 `ContextAppend`：
 - 一个调用失败 **NEVER** 丢弃、回滚或覆盖同批其他调用已经成功的结果；
@@ -112,7 +114,7 @@ Session 采用两阶段 per-RunStep 持久化：`freeze_step` 已绑定的 user 
 - L1 budget reduction 或大结果外置 **MAY** 改变成功结果的内联表示，但 **NEVER** 把成功事实变成缺失；外置时 Session 必须保存稳定引用与足够的摘要/metadata，供后续读取与判断；
 - 只有 Context 自身的 revision conflict、内容冲突或 durable write 失败才使整个 `append_and_persist` 失败；单个 Tool 的业务 Failure 不属于 Session commit failure。
 控制路径复用相同顺序与“成功事实不可丢”不变量，但不无限等待：`CancelRunStep` 最长 10s，`TerminateRun` 最长 5s，嵌套 Agent 共用控制请求创建的同一绝对 deadline。deadline 内成功返回的 Tool/Agent 结果 **MUST** 保留；未确认停止的调用由 finalizer 补齐 `CancellationUnconfirmed` receipt，而不是删除整个 batch。父 Step 取消对 Agent Tool 传播 child `TerminateRun`；父 Session 只保存 child terminal receipt 形成的 Tool result，不保存 child 完整消息链，也不为摘要额外调用 LLM。
-如果进程在 finalized projection 完成原子提交前崩溃，该 Step 的 assistant/tool terminal outcome 尚未提交，但此前已 durable 接受的 `ToolCallReceipt` ledger 仍属于可恢复 Session 事实。系统仍不持久化 Run 状态机或可执行 future；恢复只把 Pending/Running receipt 投影为明确的 `CancellationUnconfirmed` terminal result，不自动重放，也不承诺 exactly-once。
+如果进程在 finalized projection 完成原子提交前崩溃，该 Step 的 assistant/tool terminal outcome 尚未提交，但此前已 durable 接受的 `ToolCallReceipt` ledger 仍属于可恢复 Session 事实。系统仍不持久化 Run 状态机或可执行 future；恢复会保留 Pending/Running receipt 供诊断，但当前不会自动重放、自动终态化或投影为 provider tool result，也不承诺 exactly-once。后续恢复 Target 必须将这类 receipt 显式收敛为 `CancellationUnconfirmed`，并保留 possible side effects，**NEVER** 伪造成功。
 ### 6.4 提交与恢复语义
 - 相同 `(run_id, step_id)` 与相同 fingerprint 的重试 **MUST** 幂等返回原 committed receipt；
 - 相同幂等键但内容不同 **MUST** 返回 typed conflict，**NEVER** 覆盖已提交结果；

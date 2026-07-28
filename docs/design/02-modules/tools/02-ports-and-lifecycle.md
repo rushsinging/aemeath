@@ -147,12 +147,12 @@ trait CancellationSignal: Send + Sync {
 
 职责边界：
 
-- Runtime 决定 timeout/effective deadline、超时后策略及父子 Run 传播；统一入口是 ToolExecutionSupervisor；
-- deadline 到期时 Runtime 发出 cancellation，并在前台有界收敛；不得把 drop future 当作底层停止确认；
-- Tool 协作停止子进程、网络请求或 MCP 调用，并返回 cleanup confirmation；无法确认时由 Runtime 映射为 `CancellationUnconfirmed`；
+- Runtime 决定 timeout/effective deadline、超时后策略及父子 Run 传播；当前 Main/Sub 普通 Tool、Agent Tool、AskUser 首次调用与 approval continuation 都由 `ToolExecutionSupervisor` 监督；
+- supervisor 以 ExecutionScope、Run 与 descriptor timeout 中最早的 absolute deadline 为准；deadline 到期或用户取消时发送 child cancellation。当前 cooperative Tool 获得 250ms grace，只有执行 future 在 grace 内返回才确认 cleanup 并记录 `TimedOut`/`Cancelled`；其余情况记录 `CancellationUnconfirmed` 与 possible side effects；
+- Tool 协作停止子进程、blocking worker、网络请求或 child Run，并通过真实返回让 Runtime 判断 cleanup；**NEVER** 把 future drop 本身当作底层停止确认；
 - ToolDescriptor 声明协作取消能力；cancellation 不承载 timeout 或重试配置。
 
-对无法协作取消且可能继续产生副作用的 Tool，Runtime 必须依据 Descriptor 限制并发并向用户明确风险。
+当前 adapter 基线：Glob 在 blocking pool 中运行并逐项检查 cancellation；Bash 在内部 timeout 或 cancellation 时终止进程组；Agent 向 child Run 传播 cancellation 与自身 wall-clock timeout。Read/Grep 等短同步文件调用当前依赖统一 supervisor 的前台 hard deadline，但执行 future 被 drop 后不等同于底层 OS 工作已中止；MCP remote cancellation confirmation 尚未成为独立协议。因此这些路径只有获得实际 cleanup confirmation 才能声称 `TimedOut`/`Cancelled`，否则必须保持 `CancellationUnconfirmed`。
 
 ## 5. Catalog Snapshot 与变化通知
 

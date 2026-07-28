@@ -98,9 +98,11 @@ enum InteractionCommandOutcome {
 
 ### ToolExecutionSupervisor：唯一执行监督入口（#1440）
 
-Main、Sub、Agent、MCP、AskUser suspension 与 approval continuation 的已接受 Tool 调用 **MUST** 经同一 Runtime-owned `ToolExecutionSupervisor`。Supervisor 取 descriptor、ExecutionScope、Run 与调用方约束中的最早 absolute deadline，在 durable Pending/Running receipt 成功后才推进执行和 UI 生命周期；deadline 或用户取消后触发 child cancellation，并只在 adapter/child/remote 明确确认 cleanup 后记录 `TimedOut`/`Cancelled`。无法确认时必须记录 `CancellationUnconfirmed`、possible side effects 与 unfinished identity，禁止把 future drop 伪装成已停止。
+当前生产基线中，Main/Sub 的普通 Tool、Agent Tool 与 approval continuation 最终都经 Runtime-owned `ToolExecutionSupervisor` 调用 `ToolExecutionPort`；`AskUser` 首次调用也经 supervisor，返回的 `Suspended` 由 Runtime-owned interaction continuation 继续收敛。Supervisor 从 `ExecutionScope.deadline`、Run deadline 与 `now + ToolDescriptor.timeout_secs` 选择最早 deadline，并按 `Pending → Running → terminal` 顺序调用 Context receipt mutation；Pending/Running durable 写成功后才执行 Tool。
 
-`ToolExecutionPort` 仍只负责单次 Tools 调用正确性；Policy、Hook、审批、并发、deadline、grace、重入保护和 receipt mutation 都留在 Runtime/Context 边界。Supervisor 作为 RuntimeContext 的活契约由 `RuntimeContextFactory` 统一装配，**NEVER** 恢复 Main/Sub 两套构造或把 Context session backing 放进 Runtime。
+到达 deadline 或收到用户取消时，Supervisor 取消 child signal。声明 `Cooperative` 的 Tool 最多获得当前 250ms grace 让执行 future 返回；按时返回才确认 cleanup 并记录 `TimedOut`/`Cancelled`，否则记录 `CancellationUnconfirmed` 与 possible side effects。声明 `NonCooperative` 的 Tool 不因 future 被 drop 而伪报停止，直接进入未确认终态。当前 supervisor 在 Main/Sub 共享的 Agent 执行对象及普通 Tool 执行入口中按共享 Catalog、ExecutionPort、ContextCoordinator 构造；后续若将其提升为 `RuntimeContextFactory` 单点装配，必须保持这些依赖来自同一 Run snapshot。
+
+`ToolExecutionPort` 仍只负责单次 Tools 调用正确性；Policy、Hook、审批、并发、effective deadline、grace 和 receipt mutation 留在 Runtime/Context 边界。当前尚未实现 `CancellationUnconfirmed` 调用的跨 Step 同名重入门禁，也尚未把 MCP remote cancellation confirmation 建模为独立协议；这两项仍是 Target，**NEVER** 在文档或 UI 中声称未确认底层工作已经停止。
 
 ### Main/Sub RunLoop adapter 策略边界（#1382）
 
