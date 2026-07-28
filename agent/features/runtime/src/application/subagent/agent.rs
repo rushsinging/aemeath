@@ -1,3 +1,5 @@
+use crate::application::context_coordination::ContextCoordinator;
+use crate::application::tool_execution_supervisor::{SupervisedToolCall, ToolExecutionSupervisor};
 use share::message::{ContentBlock, Message};
 use std::sync::Arc;
 use tools::{
@@ -45,6 +47,8 @@ pub struct Agent {
     pub max_tool_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub workspace_persist: Arc<dyn project::WorkspacePersist>,
+    pub(crate) context: Option<ContextCoordinator>,
+    pub(crate) session_id: context::domain::SessionId,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
 }
 
@@ -98,6 +102,10 @@ impl Agent {
             catalog: ports.catalog(),
             execution: ports.execution(),
             workspace_persist: crate::application::testing::workspace_persist(&ctx),
+            context: Some(ContextCoordinator::new(
+                context::adapters::isolated_context("test-session"),
+            )),
+            session_id: context::domain::SessionId::new("test-session"),
             ctx,
             max_tool_concurrency,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -148,30 +156,42 @@ impl Agent {
                 ToolOutcome::error("tool execution cancelled by user"),
             );
         }
-        let Some(descriptor) = self.catalog.find(&tools::ToolName::new(&call.name)) else {
+        let Some(context) = self.context.clone() else {
             return ToolExecution::new(
                 call,
-                ToolOutcome::error(format!("unknown tool: {}", call.name)),
+                ToolOutcome::error("tool receipt context unavailable"),
             );
         };
         let mut input = call.input.clone();
         tools::strip_runtime_meta(&mut input);
         let invocation = ToolInvocation::new(call.name.as_str(), input, ctx.scope().clone())
             .with_authorization(authorization);
-        let cancellation = ctx.cancellation();
-        let domain = tokio::select! {
-            _ = cancellation.cancelled() => ToolExecutionOutcome::cancelled("tool execution cancelled by user"),
-            result = tokio::time::timeout(
-                std::time::Duration::from_secs(descriptor.timeout_secs),
-                self.execution.execute(invocation, cancellation.as_ref()),
-            ) => match result {
-                Ok(outcome) => outcome,
-                Err(_) => ToolExecutionOutcome::failure(
-                    tools::ToolErrorKind::Internal,
-                    format!("tool.call execution timed out: tool={}, timeout_secs={}", call.name, descriptor.timeout_secs),
-                ),
-            }
-        };
+        let supervisor = ToolExecutionSupervisor::new(
+            Arc::clone(&self.execution),
+            self.catalog.clone(),
+            context,
+        );
+        let domain = supervisor
+            .execute(SupervisedToolCall {
+                identity: context::domain::ToolCallIdentity {
+                    session_id: self.session_id.clone(),
+                    run_id: sdk::RunId::from_legacy_or_new(ctx.scope().run_id()),
+                    step_id: sdk::RunStepId::from_legacy_or_new(ctx.scope().run_id()),
+                    runtime_call_id: call.id.to_string(),
+                    provider_call_id: Some(call.provider_id.clone()),
+                    tool_name: call.name.clone(),
+                    call_index: call.index,
+                    agent: call.name == "Agent",
+                },
+                invocation,
+                input_preview: safe_input_preview(&call.input),
+                run_deadline: ctx.scope().deadline(),
+                cancellation: cancellation_token(ctx.cancellation()),
+            })
+            .await
+            .unwrap_or_else(|error| {
+                ToolExecutionOutcome::failure(tools::ToolErrorKind::Internal, error.to_string())
+            });
         ToolExecution::new(call, legacy_outcome(domain))
     }
 
@@ -232,6 +252,33 @@ impl Agent {
     pub async fn execute_tools_filtered(&self, calls: &[&ToolCall]) -> Vec<ToolExecution> {
         let owned = calls.iter().map(|call| (*call).clone()).collect::<Vec<_>>();
         self.execute_tools(&owned).await
+    }
+}
+
+fn cancellation_token(
+    signal: Arc<dyn tools::CancellationSignal>,
+) -> tokio_util::sync::CancellationToken {
+    let token = tokio_util::sync::CancellationToken::new();
+    if signal.is_cancelled() {
+        token.cancel();
+        return token;
+    }
+    let propagated = token.clone();
+    logging::spawn_instrumented(logging::capture(), async move {
+        signal.cancelled().await;
+        propagated.cancel();
+    });
+    token
+}
+
+fn safe_input_preview(input: &serde_json::Value) -> String {
+    let serialized = input.to_string();
+    let char_count = serialized.chars().count();
+    if char_count <= 200 {
+        serialized
+    } else {
+        let prefix: String = serialized.chars().take(200).collect();
+        format!("{prefix}… ({char_count} chars)")
     }
 }
 

@@ -497,6 +497,7 @@ where
         max_tool_concurrency: usize,
         agent_semaphore: &Arc<tokio::sync::Semaphore>,
         session_id: &str,
+        context_port: Arc<dyn context::ports::ContextPort>,
         run_id: &sdk::RunId,
     ) -> Agent {
         let catalog = tool_catalog
@@ -508,6 +509,8 @@ where
         Agent {
             catalog,
             execution: tool_execution.clone(),
+            context: Some(ContextCoordinator::new(context_port)),
+            session_id: context::domain::SessionId::new(session_id),
             ctx: tools::ToolExecutionContext::new(
                 tools::ExecutionScope::builder(
                     run_id.to_string(),
@@ -801,6 +804,7 @@ where
             self.max_tool_concurrency,
             self.agent_semaphore,
             self.session_id,
+            self.runtime_context.context(),
             &self.run_id,
         );
         let _binding = tools::ToolExecutionContextBindingGuard::bind(
