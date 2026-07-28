@@ -1,5 +1,7 @@
 use super::*;
-use crate::tui::adapter::agent_event::sanitize::TOOL_STREAM_PREVIEW_LIMIT;
+use crate::tui::adapter::agent_event::sanitize::{
+    TOOL_RESULT_PREVIEW_LIMIT, TOOL_STREAM_PREVIEW_LIMIT,
+};
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiMessageSource, TuiStopHookFeedback};
 use crate::tui::adapter::tui_runtime_event::{
     TuiHookEvent, TuiHookMessage, TuiHookMessageKind, TuiHookStatus, TuiRuntimeEvent,
@@ -111,6 +113,34 @@ fn test_map_agent_event_runtime_observations_do_not_emit_bind_runtime_turn() {
         let mapping = map_agent_event(event);
         assert_no_runtime_bind_prelude(&mapping);
     }
+}
+
+#[test]
+fn unknown_tool_result_content_is_bounded_before_entering_model() {
+    let oversized = "界".repeat(TOOL_RESULT_PREVIEW_LIMIT);
+    assert!(oversized.len() > TOOL_RESULT_PREVIEW_LIMIT);
+    let mapping = map_agent_event(&UiEvent::ToolResult {
+        context: ctx(),
+        id: sdk::ids::ToolCallId::new("tool-oversized"),
+        provider_id: "provider-oversized".to_string(),
+        tool_name: "UnknownTool".to_string(),
+        output: oversized.clone(),
+        content: serde_json::json!({ "unexpected": oversized }),
+        is_error: false,
+        images: vec![],
+    });
+
+    let Some(ConversationIntent::ToolResult(ToolResult {
+        output, content, ..
+    })) = first_observation(&mapping)
+    else {
+        panic!("expected tool result intent");
+    };
+    assert!(output.len() <= TOOL_RESULT_PREVIEW_LIMIT + 256);
+    assert!(output.contains("omitted"));
+    let encoded_content = content.to_string();
+    assert!(encoded_content.len() <= TOOL_RESULT_PREVIEW_LIMIT + 256);
+    assert!(encoded_content.contains("omitted"));
 }
 
 #[test]
