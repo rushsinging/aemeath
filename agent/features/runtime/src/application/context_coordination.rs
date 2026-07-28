@@ -26,6 +26,7 @@ use crate::ports::{
     ContextPort, ContextPortError, ContextRequest, ContextWindow, FinalizeCause,
     ManualCompactRequest, SessionId, SessionRevision, StepReceipt,
 };
+use context::domain::{ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt};
 use sdk::RunStepId;
 use sha2::{Digest, Sha256};
 use share::message::Message;
@@ -119,6 +120,13 @@ impl ContextCoordinator {
                 fingerprint,
             })
             .await
+    }
+
+    pub(crate) async fn advance_tool_receipt(
+        &self,
+        mutation: ToolReceiptMutation,
+    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        self.port.advance_tool_receipt(mutation).await
     }
 
     #[allow(clippy::too_many_arguments)]

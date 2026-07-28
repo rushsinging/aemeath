@@ -231,6 +231,7 @@ pub enum ToolOutcomeKind {
     Cancelled,
     TimedOut,
     CancellationUnconfirmed,
+    Suspended,
 }
 
 /// finalized Step 中可确定重放的 Tool/Agent receipt。

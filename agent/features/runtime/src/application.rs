@@ -29,5 +29,8 @@ pub mod subagent;
 pub(crate) mod testing;
 pub(crate) mod token_usage;
 pub mod tool_coordination;
+pub mod tool_execution_supervisor;
+#[cfg(test)]
+mod tool_execution_supervisor_tests;
 pub mod tool_result_materialization;
 pub mod workspace_access;
