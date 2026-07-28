@@ -597,7 +597,7 @@ where
                 let model = self.binding().model.clone();
                 let max_tokens = self.binding().max_tokens;
                 let request_tool_schemas = window.tool_schemas.clone();
-                let messages_for_api = ctx.messages_for_api.clone();
+                let messages_for_api = Arc::clone(&ctx.messages_for_api);
                 let system_blocks = ctx.system_blocks.clone();
                 let committed_delta = {
                     use crate::application::loop_engine::llm_strategy::LlmStrategy;

@@ -12,6 +12,7 @@
 //!   adapter-specific Retry/Cancelled via trait hooks)
 
 use async_trait::async_trait;
+use std::sync::Arc;
 use std::time::Duration;
 
 use provider::RequestSystemBlock;
@@ -51,7 +52,7 @@ pub(crate) trait LlmStrategy {
 /// Output of [`extract_invocation_context`] — the three API invocation primitives
 /// derived from a [`ContextWindow`].
 pub(crate) struct InvocationContext {
-    pub messages_for_api: Vec<Message>,
+    pub messages_for_api: Arc<[Message]>,
     pub tool_schemas: Vec<serde_json::Value>,
     pub system_blocks: Vec<RequestSystemBlock>,
 }
@@ -65,7 +66,7 @@ pub(crate) fn extract_invocation_context(window: &ContextWindow) -> InvocationCo
         .messages
         .iter()
         .map(Message::to_llm_view)
-        .collect::<Vec<_>>();
+        .collect::<Arc<[_]>>();
     let tool_schemas = window
         .tool_schemas
         .iter()
