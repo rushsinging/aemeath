@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use std::time::Duration;
 
 use provider::RequestSystemBlock;
-use share::message::Message;
+use share::message::{ContentBlock, Message, MessageSource, Role};
 
 use crate::application::loop_engine::{LoopEngineError, StepTokenUsage};
 use crate::application::main_loop::looping::InvocationResponse;
@@ -61,11 +61,14 @@ pub(crate) struct InvocationContext {
 ///
 /// This logic is character-identical between Main and Sub.
 pub(crate) fn extract_invocation_context(window: &ContextWindow) -> InvocationContext {
-    let messages_for_api = window
+    let mut messages_for_api = window
         .messages
         .iter()
         .map(Message::to_llm_view)
         .collect::<Vec<_>>();
+    if let Some(reminder) = window.invocation_reminder.as_ref() {
+        append_reminder_to_last_user_message(&mut messages_for_api, reminder.as_str());
+    }
     let tool_schemas = window
         .tool_schemas
         .iter()
@@ -89,6 +92,43 @@ pub(crate) fn extract_invocation_context(window: &ContextWindow) -> InvocationCo
         system_blocks,
     }
 }
+
+fn append_reminder_to_last_user_message(messages: &mut [Message], reminder: &str) {
+    let Some(message) = messages
+        .iter_mut()
+        .rev()
+        .find(|message| message.role == Role::User && message.source() == MessageSource::User)
+    else {
+        return;
+    };
+
+    let separator = if message
+        .content
+        .iter()
+        .any(|block| matches!(block, ContentBlock::Text { text } if !text.is_empty()))
+    {
+        "\n\n"
+    } else {
+        ""
+    };
+    if let Some(ContentBlock::Text { text }) = message
+        .content
+        .iter_mut()
+        .rev()
+        .find(|block| matches!(block, ContentBlock::Text { .. }))
+    {
+        text.push_str(separator);
+        text.push_str(reminder);
+    } else {
+        message.content.push(ContentBlock::Text {
+            text: reminder.to_string(),
+        });
+    }
+}
+
+#[cfg(test)]
+#[path = "llm_strategy_tests.rs"]
+mod tests;
 
 /// Construct a [`StepTokenUsage`] from an [`InvocationResponse`] and token-estimation fields.
 ///

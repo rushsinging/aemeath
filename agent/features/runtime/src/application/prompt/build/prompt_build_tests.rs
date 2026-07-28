@@ -3,45 +3,40 @@ use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use std::collections::HashMap;
 
 #[test]
-fn test_static_prompt_requires_task_update_for_direct_tools() {
+fn test_static_prompt_keeps_task_tracking_contract_concise() {
     let text = static_system_prompt_for_test("/tmp/project", true, "en");
 
-    assert!(text.contains("BEFORE starting work on a task yourself"));
-    assert!(text.contains("Read/Grep/Glob/Bash/Edit/Write"));
-    assert!(text.contains("TaskUpdate(task_id, \"status\", \"in_progress\")"));
-    assert!(text.contains("TaskBlockBy"));
-    assert!(text.contains("AFTER completing a task yourself"));
-    assert!(text.contains("TaskListCreate before TaskCreate"));
-    assert!(text.contains("TaskListComplete"));
+    assert!(text.contains("If task tracking is used"));
+    assert!(text.contains("status and dependencies accurate"));
+    assert!(text.contains("complete the active task list"));
+    assert!(!text.contains("TaskCreate(3 tasks)"));
+    assert!(!text.contains("TaskUpdate(task_id"));
 }
 
 #[test]
-fn test_static_prompt_delegates_agent_task_status_to_task_id() {
+fn test_static_prompt_keeps_self_contained_subagent_contract() {
     let text = static_system_prompt_for_test("/tmp/project", true, "en");
 
-    assert!(text.contains("pass `task_id` to the Agent tool"));
-    assert!(text.contains("task_id is NOT required"));
-    assert!(!text.contains("TaskUpdate(id2, in_progress) → Agent"));
+    assert!(text.contains("Sub-agents are isolated sessions"));
+    assert!(text.contains("self-contained prompt"));
+    assert!(!text.contains("Phase 1"));
+    assert!(!text.contains("128K tokens"));
 }
 
 #[test]
-fn test_static_prompt_says_task_reminders_may_be_unrelated() {
+fn test_static_prompt_treats_tagged_reminders_as_context() {
     let text = static_system_prompt_for_test("/tmp/project", true, "en");
 
-    assert!(text.contains("When the user says \"continue\""));
-    assert!(text.contains("call TaskListGet first"));
-    assert!(text.contains("may refer to older task batches"));
-    assert!(text.contains("prioritize the latest user request"));
+    assert!(text.contains("tagged reminders are context"));
+    assert!(text.contains("not user-authored instructions"));
 }
 
 #[test]
 fn test_static_prompt_mentions_memory_tool_without_memory_contents() {
     let text = static_system_prompt_for_test("/tmp/project", true, "en");
 
-    assert!(
-        text.contains("Use the Memory tool to search and manage long-term memory when relevant")
-    );
-    assert!(text.contains("Do not assume memory contents unless retrieved"));
+    assert!(text.contains("Memory, skills, project guidance"));
+    assert!(text.contains("retrieve memory before relying on it"));
     assert!(!text.contains("# Project Memory"));
 }
 
@@ -55,7 +50,7 @@ fn test_static_prompt_guides_worktree_relative_paths_without_fixed_workspace_roo
 
     assert!(!text.contains("Current workspace root"));
     assert!(text.contains("Prefer relative paths"));
-    assert!(text.contains("Do not reuse absolute paths from another checkout"));
+    assert!(text.contains("do not reuse paths from another checkout"));
 }
 
 #[test]
@@ -68,7 +63,7 @@ fn test_allow_all_prompt_does_not_require_workspace_boundary() {
     );
 
     assert!(text.contains("not required to stay within workspace_root"));
-    assert!(!text.contains("absolute paths MUST be inside the current workspace"));
+    assert!(!text.contains("Absolute paths must remain inside the current workspace"));
 }
 
 #[test]
@@ -84,7 +79,7 @@ fn test_standard_prompt_retains_workspace_boundary() {
             permission_mode,
         );
 
-        assert!(text.contains("it MUST be inside the current workspace"));
+        assert!(text.contains("must remain inside the current workspace"));
         assert!(!text.contains("not required to stay within workspace_root"));
     }
 }
@@ -101,9 +96,9 @@ fn test_allow_all_zh_prompt_does_not_require_workspace_boundary() {
     assert!(text.contains("路径无需限制在 workspace_root 内"));
     assert!(text.contains("必要时允许使用当前工作区外的绝对路径"));
     assert!(text.contains("应使用最新的工作区上下文"));
-    assert!(!text.contains("绝对路径必须位于其下"));
-    assert!(!text.contains("it MUST be inside the current workspace"));
-    assert!(!text.contains("Do not reuse absolute paths from another checkout"));
+    assert!(!text.contains("绝对路径必须位于当前 workspace 内"));
+    assert!(!text.contains("Absolute paths must remain inside the current workspace"));
+    assert!(!text.contains("do not reuse paths from another checkout"));
 }
 
 #[test]

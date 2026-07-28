@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
     CompactRequest, CompactionDecision, ContextAppend, ContextAppendError, ContextPortError,
-    ContextRequest, ContextWindow, ManualCompactRequest, SessionId, SystemBlock,
+    ContextRequest, ContextWindow, InvocationReminder, ManualCompactRequest, SessionId,
+    SystemBlock,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
@@ -89,27 +90,8 @@ impl ContextApplicationService {
             last_cacheable.cache_break = true;
         }
         blocks.extend(prompt.uncached);
-        if request.task_reminder.has_unfinished() {
-            let id = request.task_reminder.task_list_id.as_deref().unwrap_or("?");
-            let summary = request.task_reminder.summary.as_deref().unwrap_or("未命名");
-            let reminder = if request.language.as_str() == "zh" {
-                format!(
-                    "当前 task list #{id}「{summary}」仍有 {} pending、{} in_progress。若与最新用户请求相关，调用 TaskListGet 查看详情；否则优先处理最新请求。",
-                    request.task_reminder.pending, request.task_reminder.in_progress
-                )
-            } else {
-                format!(
-                    "Current task list #{id} \"{summary}\" has {} pending and {} in_progress tasks. If it is relevant to the latest user request, call TaskListGet for details; otherwise prioritize the latest request.",
-                    request.task_reminder.pending, request.task_reminder.in_progress
-                )
-            };
-            blocks.push(SystemBlock {
-                kind: "task_reminder".into(),
-                content: reminder,
-                cacheable: false,
-                cache_break: false,
-            });
-        }
+        let invocation_reminder =
+            InvocationReminder::from_task_snapshot(&request.task_reminder, &request.language);
 
         #[cfg(test)]
         {
@@ -128,9 +110,18 @@ impl ContextApplicationService {
         }
         #[cfg(test)]
         let decision_started = std::time::Instant::now();
-        let token_estimation =
-            crate::domain::context_decision::token_budget(request, &messages, &blocks);
-        let decision = crate::domain::context_decision::calculate(request, &messages, &blocks);
+        let token_estimation = crate::domain::context_decision::token_budget(
+            request,
+            &messages,
+            &blocks,
+            invocation_reminder.as_ref().map(InvocationReminder::as_str),
+        );
+        let decision = crate::domain::context_decision::calculate(
+            request,
+            &messages,
+            &blocks,
+            invocation_reminder.as_ref().map(InvocationReminder::as_str),
+        );
         #[cfg(test)]
         crate::application::performance::record_decision(
             token_estimation.total_tokens,
@@ -143,6 +134,7 @@ impl ContextApplicationService {
             backing_revision: snapshot.revision,
             system_blocks: blocks,
             messages,
+            invocation_reminder,
             tool_schemas: request.tool_schemas.clone(),
             token_estimation,
             compaction_decision: decision,

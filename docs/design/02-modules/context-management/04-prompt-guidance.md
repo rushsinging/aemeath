@@ -81,7 +81,7 @@ struct GuidanceDocument {
 }
 ```
 
-`ContextPort::build_window` **MUST** 等待 base system prompt、model guidance、user guidance 与 Skill 物化完成后才能产生窗口；任一供应失败都返回 typed error，**NEVER** 静默使用部分 prompt。文件 adapter **MAY** 按 mtime 缓存，但对 PromptPipeline 只暴露内容与单调 `revision`；这使同一管线无需同步 / 异步两套实现。Memory、active summary 与 Task reminder 不是 Prompt 素材：它们由 `build_window` 在 PromptPipeline 返回后编排，**NEVER** 伪装成 `PromptRequest` 字段。Git 首次快照由 Runtime session bootstrap 以普通系统生成消息投递，不通过 PromptPipeline。
+`ContextPort::build_window` **MUST** 等待 base system prompt、model guidance、user guidance 与 Skill 物化完成后才能产生窗口；任一供应失败都返回 typed error，**NEVER** 静默使用部分 prompt。文件 adapter **MAY** 按 mtime 缓存，但对 PromptPipeline 只暴露内容与单调 `revision`；这使同一管线无需同步 / 异步两套实现。Memory 与 active summary 不是 Prompt 素材：它们由 `build_window` 在 PromptPipeline 返回后编排。Task reminder 同样不是 Prompt 素材或 SystemBlock；Context 从 `TaskReminderSnapshot` 生成 typed invocation-only decoration，Runtime 仅在 Provider 消息副本上投影。Git 首次快照由 Runtime session bootstrap 以普通系统生成消息投递，不通过 PromptPipeline。
 
 ## 3. 系统提示组装管线
 
@@ -101,9 +101,9 @@ PromptPipeline 只输出稳定的 cacheable prefix；Context Window assembler �
 │ 8. active_summary（Context assembler 注入）     │
 └─────────────────────────────────────────────────┘
   ↓ cache_control 断点（仅 Anthropic wire adapter 消费）
-┌─ ordinary_context ──────────────────────────────┐
+┌─ ordinary_messages ─────────────────────────────┐
 │ 9. initial_git_context（仅 session 首个 Run）   │
-│10. task_reminder（ContextRequest 纯值投影）      │
+│10. task reminder（仅 Provider user 消息副本）   │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -123,7 +123,7 @@ PromptPipeline 只输出稳定的 cacheable prefix；Context Window assembler �
 | memory_context | 中（reflection 写入时变） | Context assembler 的 entry fingerprint | 是（非 PromptRequest） |
 | active_summary | 低（compact 时才变） | Context assembler 的 summary hash | 是（非 PromptRequest） |
 | initial_git_context | session 启动时一次 | 普通用户消息；后续由工具按需获取 | 否 |
-| task_reminder | 每轮可能变 | ContextRequest value fingerprint | 否（非 PromptRequest） |
+| task reminder | 每轮可能变 | Provider invocation 中最后一条真实 user message 的副本 | 否（不属于 SystemBlock） |
 | 日期 / 工作区 / commit guidance | 每轮可能变 | **不注入 LLM** | 不适用 |
 
 > **关键**：user_guidance、skills、memory 不是“动态所以不 cache”，而是“变化频率低，不变时 cache，变化时 miss 重算”。Memory / summary 的最终分段由 Context assembler 完成，不因此扩张 PromptRequest。
@@ -141,7 +141,8 @@ let mut blocks = parts.cacheable;
 blocks.extend(memory);
 blocks.extend(summary);
 mark_cache_breakpoint(&mut blocks);       // 唯一 breakpoint
-blocks.extend(render_task_reminder(&context_request.task_reminder));
+let invocation_reminder = render_task_reminder(&context_request.task_reminder);
+// Runtime 从 canonical messages 构造 Provider 副本后再投影 invocation_reminder。
 ```
 
 - Provider ACL 只为 Anthropic Messages API 将该逻辑 breakpoint 映射为 `cache_control`；OpenAI Chat Completions、Responses、OpenAI-compatible 与 Ollama **NEVER** 接收该私有字段。
@@ -450,14 +451,14 @@ User guidance 归入 `cacheable_prefix`——变化频率低（用户偶尔编�
 | memory 变化 | 中（reflection 写入时变） | Context-owned cacheable extension | entry fingerprint |
 | active_summary 变化 | 低（compact 时才变） | Context-owned cacheable extension | summary hash |
 | initial_git_context | session 启动时一次 | 普通系统生成消息；后续由工具按需获取 | 否 |
-| task_reminder | 每轮可能变 | Context-owned ordinary extension | request value fingerprint |
+| task reminder | 每轮可能变 | Provider user-message 副本 | request value fingerprint |
 | 日期 / 工作区 / commit guidance | 每轮可能变 | **不注入 LLM** | 不适用 |
 
 ### 9.2 缓存策略
 
 - **Prompt parts**：PromptPipeline 只负责 RunSpec system prompt / execution discipline / guidance / skills / roles / date / git 的物化与 fingerprint，**NEVER** 缓存完整 Context Window。
 - **Context-owned cacheable extension**：Memory 与 active summary 由 Context assembler 插在 Prompt cacheable parts 之后，并把 entry fingerprint / summary hash 纳入最终 window fingerprint；变化时 miss 一次，之后恢复命中。
-- **Context-owned uncached extension**：Task reminder 位于 breakpoint 之后；它与 current date / git context 的变化不影响 prefix 命中。
+- **Invocation-only decoration**：Task reminder 不属于 SystemBlock。Context 生成带 `<task-reminder>` 标签的 typed decoration；Runtime 每次从 canonical 原文构造 Provider 消息副本，将其追加到最后一条真实 user message。无真实 user message 时不伪造，retry/工具续轮不会重复追加。
 
 ### 9.3 模型切换时的缓存失效
 
@@ -467,7 +468,7 @@ User guidance 归入 `cacheable_prefix`——变化频率低（用户偶尔编�
 
 ### 已对齐
 
-- Context `SystemBlock` 用 `cacheable` 表达低频稳定性、用唯一 `cache_break` 表达 Provider cache marker 的逻辑位置；`ContextApplicationService` 将 memory 与 active summary 追加到 prefix 后，标记最后一个实际 block，**NEVER** 发送空 sentinel。
+- Context `SystemBlock` 用 `cacheable` 表达低频稳定性、用唯一 `cache_break` 表达 Provider cache marker 的逻辑位置；`ContextApplicationService` 将 memory 与 active summary 追加到 prefix 后，标记最后一个实际 block，**NEVER** 发送空 sentinel。Task reminder 不创建 SystemBlock，仅生成 invocation-only user-message decoration。
 - Runtime Main/Sub 只将 `cache_break` 映射为 `RequestSystemBlock::Cacheable`；Composition 的 Anthropic adapter 才把该变体编码为 `cache_control: {"type":"ephemeral"}`。
 - OpenAI Chat Completions、Responses、OpenAI-compatible 与 Ollama 仅编码 system / instructions 正文，**NEVER** 接收 Anthropic 私有 cache-control。
 - 日期、工作区变化与 commit guidance 已从 ContextRequest 和 LLM 上下文删除。Git 快照在 session bootstrap 采集一次，以 `SystemGenerated` 普通消息进入首个 Main Run，不进入可持久化用户输入；后续状态通过工具按需读取。
@@ -499,4 +500,5 @@ User guidance 归入 `cacheable_prefix`——变化频率低（用户偶尔编�
 | 2026-07-12 | 初稿：prompt 组装契约、guidance 解析、skill 物化、安全扫描、cache 稳定性 | #786 |
 | 2026-07-14 | 收敛为 Context-private async PromptPipeline；只为 Guidance I/O 保留 Context-owned seam，Skill 经 supplier OHS 物化；Git 数据由 Project snapshot 经 ACL 注入；统一 user guidance 首选 / fallback、顺序与 canonical 去重 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | RunSpec system prompt 纳入唯一管线；直接消费 Skill-owned PromptFragment PL；冻结 Prompt→Memory 物化与最终 block 顺序 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-28 | 精简核心静态 Prompt；修正 Runtime 重复嵌入 execution discipline；Task reminder 迁出 SystemBlock，仅装饰 Provider user message 副本，canonical session / SDK / TUI / JSON 保持用户原文。 | [#1448](https://github.com/rushsinging/aemeath/issues/1448) |
 | 2026-07-21 | `SystemBlock` 区分低频 `cacheable` 分类与唯一 `cache_break`；Context 在 memory / summary 后将断点标在最后一个实际 prefix 块，Runtime Main/Sub 只映射该断点为 Provider cache marker；Git 仅在 session 启动时作为普通系统生成消息采集一次，日期、工作区变化与 commit guidance 不注入 LLM。 | [#829](https://github.com/rushsinging/aemeath/issues/829) |
