@@ -5,7 +5,7 @@ use serde_json::{Map, Value};
 //  Helpers — tool output sanitization (inlined from tool_flow_projector)
 // ════════════════════════════════════════════════════════════════════
 
-const TOOL_TEXT_PREVIEW_LIMIT: usize = 16 * 1024;
+pub(super) const TOOL_RESULT_PREVIEW_LIMIT: usize = 16 * 1024;
 pub(super) const TOOL_STREAM_PREVIEW_LIMIT: usize = 512;
 const TOOL_LARGE_FIELD_PREVIEW_LIMIT: usize = 256;
 
@@ -37,9 +37,14 @@ pub(super) fn sanitize_tool_output(tool_name: &str, output: &str) -> String {
 }
 
 pub(super) fn sanitize_tool_result_content(tool_name: &str, content: Value) -> Value {
-    match content {
+    let sanitized = match content {
         Value::Object(object) => sanitize_tool_value(tool_name, Value::Object(object)),
         value => truncate_json_value(value, tool_name, "content"),
+    };
+    if sanitized.to_string().len() <= TOOL_RESULT_PREVIEW_LIMIT {
+        sanitized
+    } else {
+        truncate_json_value(sanitized, tool_name, "content")
     }
 }
 
@@ -86,13 +91,13 @@ fn truncate_json_value(value: Value, tool_name: &str, field: &str) -> Value {
     let text = value.to_string();
     Value::String(truncate_tool_text(
         &text,
-        TOOL_TEXT_PREVIEW_LIMIT,
+        TOOL_RESULT_PREVIEW_LIMIT,
         Some(&format!("{tool_name}.{field}")),
     ))
 }
 
 fn truncate_large_tool_text(text: &str, context: Option<&str>) -> String {
-    truncate_tool_text(text, TOOL_TEXT_PREVIEW_LIMIT, context)
+    truncate_tool_text(text, TOOL_RESULT_PREVIEW_LIMIT, context)
 }
 
 fn truncate_tool_text(text: &str, limit: usize, context: Option<&str>) -> String {

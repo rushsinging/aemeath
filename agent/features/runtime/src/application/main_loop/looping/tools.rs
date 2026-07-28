@@ -355,14 +355,18 @@ pub(crate) async fn send_tool_result<S>(
 ) where
     S: ChatEventSink,
 {
+    let preview = crate::application::tool_result_materialization::ToolResultDisplayPreview::new(
+        &execution.outcome.text,
+        &execution.outcome.data,
+    );
     let _ = sink
         .send_event(RuntimeStreamEvent::ToolResult {
             context: context.clone(),
             id: execution.call_id.clone(),
             provider_id: execution.provider_id.clone(),
             tool_name: execution.tool_name.clone(),
-            output: execution.outcome.text.clone(),
-            content: execution.outcome.data.clone(),
+            output: preview.output().to_string(),
+            content: preview.content().clone(),
             is_error: execution.outcome.is_error,
             images: execution.outcome.images.clone(),
         })
@@ -402,7 +406,7 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
 
 #[cfg(test)]
 mod tests {
-    use super::{execute_tool_round, tool_results_for_api};
+    use super::{execute_tool_round, send_tool_result, tool_results_for_api};
     use crate::application::loop_engine::ToolGuardDecision;
     use crate::application::main_loop::looping::{
         ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext,
@@ -619,6 +623,41 @@ mod tests {
                 (calls[1].id.to_string(), "Result".to_string()),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn oversized_tool_result_event_uses_bounded_display_payload() {
+        const DISPLAY_LIMIT: usize = 16 * 1024;
+        let oversized = "界".repeat(DISPLAY_LIMIT);
+        assert!(oversized.len() > DISPLAY_LIMIT);
+        let execution = ToolExecution::from_parts(
+            ToolCallId::new_v7(),
+            "provider-oversized".to_string(),
+            "UnknownTool".to_string(),
+            ToolOutcome::new(
+                oversized.clone(),
+                serde_json::json!({ "unexpected": oversized }),
+                Vec::new(),
+            ),
+        );
+        let sink = RecordingSink::default();
+        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+
+        send_tool_result(&sink, &context, &execution).await;
+
+        let events = sink.events.lock().unwrap();
+        let [RuntimeStreamEvent::ToolResult {
+            output, content, ..
+        }] = events.as_slice()
+        else {
+            panic!("expected one tool result event");
+        };
+        assert!(output.len() <= DISPLAY_LIMIT + 256);
+        assert!(output.contains("truncated"));
+        assert!(output.contains(&format!("{} bytes", execution.outcome.text.len())));
+        let encoded_content = content.to_string();
+        assert!(encoded_content.len() <= DISPLAY_LIMIT + 256);
+        assert!(encoded_content.contains("truncated"));
     }
 
     #[tokio::test]

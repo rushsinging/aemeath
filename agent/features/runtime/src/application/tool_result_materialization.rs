@@ -11,6 +11,68 @@ use crate::ports::{ToolResultBlobError, ToolResultBlobRef};
 use share::message::Message;
 use tools::ImageData;
 
+pub(crate) const TOOL_RESULT_DISPLAY_LIMIT_BYTES: usize = 16 * 1024;
+const TOOL_RESULT_DISPLAY_METADATA_ALLOWANCE_BYTES: usize = 256;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ToolResultDisplayPreview {
+    output: String,
+    content: serde_json::Value,
+}
+
+impl ToolResultDisplayPreview {
+    pub(crate) fn new(output: &str, content: &serde_json::Value) -> Self {
+        Self {
+            output: bounded_display_text(output, "tool result"),
+            content: bounded_display_content(content),
+        }
+    }
+
+    pub(crate) fn output(&self) -> &str {
+        &self.output
+    }
+
+    pub(crate) fn content(&self) -> &serde_json::Value {
+        &self.content
+    }
+}
+
+fn bounded_display_content(content: &serde_json::Value) -> serde_json::Value {
+    let encoded = content.to_string();
+    if encoded.len() <= TOOL_RESULT_DISPLAY_LIMIT_BYTES {
+        return content.clone();
+    }
+    serde_json::json!({
+        "preview": bounded_display_text(&encoded, "structured tool result"),
+        "truncated": true,
+        "original_bytes": encoded.len(),
+    })
+}
+
+fn bounded_display_text(text: &str, label: &str) -> String {
+    if text.len() <= TOOL_RESULT_DISPLAY_LIMIT_BYTES {
+        return text.to_string();
+    }
+    let prefix = utf8_prefix(text, TOOL_RESULT_DISPLAY_LIMIT_BYTES);
+    let suffix = format!(
+        "\n... [truncated {label}; original size: {} bytes]",
+        text.len()
+    );
+    debug_assert!(suffix.len() <= TOOL_RESULT_DISPLAY_METADATA_ALLOWANCE_BYTES);
+    format!("{prefix}{suffix}")
+}
+
+fn utf8_prefix(text: &str, limit: usize) -> &str {
+    if text.len() <= limit {
+        return text;
+    }
+    let mut end = limit;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ToolResultMaterializationPolicy {
     threshold_chars: usize,
