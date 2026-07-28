@@ -69,7 +69,7 @@ Scope/Profile 变化后必须重新构建或拉取 Snapshot；无论 Snapshot �
 
 ### 2.1 Runtime Tool Coordination
 
-Runtime 拥有业务编排：
+Runtime 拥有业务编排；`ToolInvocation` 只携 Tools-owned 身份、参数和 execution scope，**NEVER** 携带 Runtime callback、progress reporter、channel、factory 或 binding handle：
 
 1. 从模型响应建立 Run 内 ToolCall 实体；
 2. 调用 PolicyPort；
@@ -94,7 +94,7 @@ Tool BC 只拥有局部调用正确性：
 - 协作取消；
 - ToolOutcome 标准化。
 
-- Runtime 拥有进度、计划、Policy、Hook、人工审批、timeout、跨 Tool 并发和重试；这些机制不得下沉进 ToolExecutionPort，否则会吞并 Runtime 与其他 BC 的职责。进度/计划资源从现有 Tools Context 收回 Runtime 的物理迁移由 #879 承接。
+- Runtime 拥有进度、计划、Policy、Hook、人工审批、timeout、跨 Tool 并发和重试；这些机制不得下沉进 ToolExecutionPort，否则会吞并 Runtime 与其他 BC 的职责。Tool 如需报告进度，只消费 RuntimeContextFactory 按 Run 绑定的窄 `ProgressSink` 能力；不得经 `ToolInvocation` 反向注入回调，也不得从具体 `Context` 类型取 reporter。进度/计划资源从现有 Tools Context 收回 Runtime 的物理迁移由 #879 承接。
 
 ## 3. ExecutionScope 与资源端口
 

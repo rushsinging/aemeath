@@ -127,7 +127,23 @@ impl TypedTool for BashTool {
         let wait_result: Result<std::process::ExitStatus, std::io::Error> = tokio::select! {
             biased;
             _ = cancellation.cancelled() => {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "bash observed cancellation: command={:?} pid={:?} path_base={:?} elapsed_ms={}",
+                    command,
+                    child_pid,
+                    path_base,
+                    start.elapsed().as_millis()
+                );
                 terminate_process_tree(&mut child).await;
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "bash cancellation cleanup completed: command={:?} pid={:?} path_base={:?} elapsed_ms={}",
+                    command,
+                    child_pid,
+                    path_base,
+                    start.elapsed().as_millis()
+                );
                 stdout_handle.abort();
                 stderr_handle.abort();
                 return TypedToolResult::error("[interrupted by user]");
@@ -279,25 +295,49 @@ impl TypedTool for BashTool {
 }
 
 async fn terminate_process_tree(child: &mut tokio::process::Child) {
+    let child_pid = child.id();
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "bash process cleanup started: pid={child_pid:?}"
+    );
     #[cfg(unix)]
     if let Some(pid) = child.id() {
-        let _ = Command::new("kill")
+        let term_status = Command::new("kill")
             .arg("-TERM")
             .arg(format!("-{pid}"))
             .status()
             .await;
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "bash process group SIGTERM sent: pid={} status={term_status:?}",
+            pid
+        );
         if tokio::time::timeout(Duration::from_millis(200), child.wait())
             .await
             .is_ok()
         {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "bash process cleanup confirmed after SIGTERM: pid={}",
+                pid
+            );
             return;
         }
-        let _ = Command::new("kill")
+        let kill_status = Command::new("kill")
             .arg("-KILL")
             .arg(format!("-{pid}"))
             .status()
             .await;
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "bash process group SIGKILL sent: pid={} status={kill_status:?}",
+            pid
+        );
     }
-    let _ = child.kill().await;
-    let _ = child.wait().await;
+    let child_kill = child.kill().await;
+    let child_wait = child.wait().await;
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "bash process cleanup terminal: pid={child_pid:?} child_kill={child_kill:?} child_wait={child_wait:?}"
+    );
 }

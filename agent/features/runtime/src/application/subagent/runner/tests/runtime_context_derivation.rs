@@ -107,18 +107,10 @@ impl tools::ToolExecutionPort for FakeToolExec {
     async fn execute(
         &self,
         _invocation: tools::ToolInvocation,
-        _cancellation: &dyn tools::CancellationSignal,
+        _context: &tools::ToolExecutionContext,
     ) -> tools::ToolExecutionOutcome {
         tools::ToolExecutionOutcome::success_text("fake")
     }
-}
-
-pub(super) struct FakeToolCtxBind;
-impl tools::ToolExecutionContextBindingPort for FakeToolCtxBind {
-    fn bind(&self, _context: tools::ToolExecutionContext) -> Result<(), String> {
-        Ok(())
-    }
-    fn unbind(&self, _run_id: &str) {}
 }
 
 pub(super) struct FakePolicyPort;
@@ -160,7 +152,7 @@ impl hook::HookPort for FakeHookPort {
     async fn dispatch(
         &self,
         _invocation: hook::HookInvocation,
-        _cancellation: &tokio_util::sync::CancellationToken,
+        _cancellation: &dyn hook::CancellationSignal,
     ) -> hook::HookOutcome {
         hook::HookOutcome::proceed()
     }
@@ -187,7 +179,6 @@ fn noop_event_sink() -> crate::application::main_loop::ChatEventSinkHandle {
 fn assemble_parent_context(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     config: RunConfigSnapshot,
 ) -> RuntimeContext {
     let provider_port: Arc<dyn ProviderPort> = Arc::new(FakeProvPort);
@@ -205,7 +196,6 @@ fn assemble_parent_context(
     let factory = RuntimeContextFactory::new(
         tool_catalog,
         tool_execution,
-        tool_context_binding,
         Arc::new(FakePolicyPort),
         Arc::new(FakeReflHist),
         test_task_access(),
@@ -234,28 +224,17 @@ fn assemble_parent_context(
 pub(super) fn make_parent_context_with_catalog(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
 ) -> RuntimeContext {
     let config_snapshot =
         crate::application::run_config::RunConfigSnapshot::capture(super::test_config_snapshot());
-    assemble_parent_context(
-        tool_catalog,
-        tool_execution,
-        tool_context_binding,
-        config_snapshot,
-    )
+    assemble_parent_context(tool_catalog, tool_execution, config_snapshot)
 }
 
 pub(super) fn make_parent_context_with_config(
     config_snapshot: share::config::domain::snapshot::ConfigSnapshot,
 ) -> RuntimeContext {
     let run_config = crate::application::run_config::RunConfigSnapshot::capture(config_snapshot);
-    assemble_parent_context(
-        Arc::new(FakeToolCat),
-        Arc::new(FakeToolExec),
-        Arc::new(FakeToolCtxBind),
-        run_config,
-    )
+    assemble_parent_context(Arc::new(FakeToolCat), Arc::new(FakeToolExec), run_config)
 }
 
 pub(super) fn make_parent_context() -> RuntimeContext {
@@ -337,7 +316,6 @@ pub(super) fn make_parent_context() -> RuntimeContext {
     assemble_parent_context(
         Arc::new(FakeToolCat),
         Arc::new(FakeToolExec),
-        Arc::new(FakeToolCtxBind),
         config_snapshot,
     )
 }
@@ -354,7 +332,6 @@ fn make_test_factory() -> RuntimeContextFactory {
     RuntimeContextFactory::new(
         Arc::new(FakeToolCat),
         Arc::new(FakeToolExec),
-        Arc::new(FakeToolCtxBind),
         Arc::new(FakePolicyPort),
         Arc::new(FakeReflHist),
         test_task_access(),
@@ -706,11 +683,7 @@ fn sub_derivation_only_queries_sub_agent_scope_from_parent_catalog() {
         calls: calls.clone(),
     });
 
-    let parent_ctx = make_parent_context_with_catalog(
-        recording_catalog,
-        Arc::new(FakeToolExec),
-        Arc::new(FakeToolCtxBind),
-    );
+    let parent_ctx = make_parent_context_with_catalog(recording_catalog, Arc::new(FakeToolExec));
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
@@ -775,11 +748,7 @@ impl ToolCatalogPort for FailingToolCatalog {
 #[test]
 fn sub_derivation_fails_closed_when_parent_catalog_errors() {
     let failing_catalog: Arc<dyn ToolCatalogPort> = Arc::new(FailingToolCatalog);
-    let parent_ctx = make_parent_context_with_catalog(
-        failing_catalog,
-        Arc::new(FakeToolExec),
-        Arc::new(FakeToolCtxBind),
-    );
+    let parent_ctx = make_parent_context_with_catalog(failing_catalog, Arc::new(FakeToolExec));
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {

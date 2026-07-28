@@ -267,12 +267,24 @@ impl App {
     }
 
     fn cancel_current_run(&mut self) {
+        let processing_handle_present = self.chat.processing_handle.is_some();
+        crate::tui::log_debug!(
+            "cancel_current_run effect started: processing_handle_present={} is_processing={} is_cancelling={}",
+            processing_handle_present,
+            self.chat.is_processing,
+            self.chat.is_cancelling
+        );
         let outcome = self
             .chat
             .processing_handle
             .as_ref()
             .map(|handle| handle.cancel_current_run())
             .unwrap_or(sdk::CancelCurrentRunOutcome::NoActiveRun);
+        crate::tui::log_debug!(
+            "cancel_current_run effect completed: processing_handle_present={} outcome={:?}",
+            processing_handle_present,
+            outcome
+        );
         if matches!(
             outcome,
             sdk::CancelCurrentRunOutcome::Accepted

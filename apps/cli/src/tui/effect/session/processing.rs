@@ -234,10 +234,6 @@ mod tests {
 
         #[async_trait]
         impl sdk::AgentClient for RecordingCancelClient {
-            fn cancel_run(&self, _run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
-                unreachable!("TUI must not address cancellation by run id")
-            }
-
             fn cancel_current_run(
                 &self,
                 _deadline: sdk::ControlDeadline,
@@ -250,15 +246,6 @@ mod tests {
                 } else {
                     sdk::CancelCurrentRunOutcome::AlreadyCancelling
                 }
-            }
-
-            fn cancel_run_step(
-                &self,
-                _run_id: &sdk::RunId,
-                _step_id: Option<&sdk::RunStepId>,
-                _deadline: sdk::ControlDeadline,
-            ) -> sdk::CancelRunStepOutcome {
-                unreachable!("TUI must not address step cancellation by run id")
             }
 
             async fn chat(
@@ -338,19 +325,6 @@ mod tests {
 
     #[async_trait]
     impl sdk::AgentClient for ContextCapturingAgentClient {
-        fn cancel_run(&self, _run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
-            sdk::CancelRunOutcome::NotFound
-        }
-
-        fn cancel_run_step(
-            &self,
-            _run_id: &sdk::RunId,
-            _step_id: Option<&sdk::RunStepId>,
-            _deadline: sdk::ControlDeadline,
-        ) -> sdk::CancelRunStepOutcome {
-            sdk::CancelRunStepOutcome::NotFound
-        }
-
         async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
             if let Some(tx) = self.observed.lock().unwrap().take() {
                 let _ = tx.send(composition::delivery_logging::capture());
@@ -398,19 +372,6 @@ mod tests {
 
     #[async_trait]
     impl sdk::AgentClient for DoneOnlyAgentClient {
-        fn cancel_run(&self, _run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
-            sdk::CancelRunOutcome::NotFound
-        }
-
-        fn cancel_run_step(
-            &self,
-            _run_id: &sdk::RunId,
-            _step_id: Option<&sdk::RunStepId>,
-            _deadline: sdk::ControlDeadline,
-        ) -> sdk::CancelRunStepOutcome {
-            sdk::CancelRunStepOutcome::NotFound
-        }
-
         async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             tx.send(sdk::ChatEvent::Done {

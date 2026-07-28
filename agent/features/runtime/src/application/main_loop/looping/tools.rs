@@ -414,7 +414,6 @@ mod tests {
     use serde_json::Value;
     use share::message::ContentBlock;
     use std::sync::{Arc, Mutex};
-    use tokio_util::sync::CancellationToken;
     use tools::ToolOutcome;
     use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
@@ -426,7 +425,7 @@ mod tests {
         async fn dispatch(
             &self,
             _invocation: HookInvocation,
-            _cancellation: &CancellationToken,
+            _cancellation: &dyn hook::CancellationSignal,
         ) -> HookOutcome {
             HookOutcome::proceed()
         }

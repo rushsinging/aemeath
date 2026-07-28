@@ -77,7 +77,7 @@ where
                 shell.active_run.clone();
             let provider_factory = shell.provider_factory.clone();
             let config_query_for_switch = shell.config_query.clone();
-            let task_access = shell.runtime_context_factory.services().task.clone();
+            let task_access = shell.runtime_context_factory.task();
 
             let binding = shell.current_binding.read().unwrap().clone();
             let reasoning = Arc::new(std::sync::Mutex::new(binding.requested_reasoning));
@@ -312,6 +312,7 @@ where
                                             step_id: step.step_id,
                                             messages: step.messages,
                                             finalize_cause: step.finalize_cause,
+                                            duration_ms: step.duration_ms,
                                         })
                                         .collect(),
                                     session_id: projection.session_id,

@@ -307,7 +307,6 @@ struct CompactHarness {
     workspace: project::WorkspaceViews,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     session_reminders: Arc<std::sync::Mutex<::tools::SessionReminders>>,
     active_run: Arc<crate::application::active_run::ActiveRunRegistry>,
@@ -353,8 +352,6 @@ impl CompactHarness {
         let tool_catalog =
             ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port();
         let tool_execution = ::tools::composition::TestCatalogExecutionFactory::empty().execution();
-        let tool_context_binding =
-            ::tools::composition::TestCatalogExecutionFactory::empty().binding();
         let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
         let session_reminders = Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new()));
         let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
@@ -370,7 +367,6 @@ impl CompactHarness {
             let factory = RuntimeContextFactory::new(
                 tool_catalog.clone(),
                 tool_execution.clone(),
-                tool_context_binding.clone(),
                 Arc::new(policy::AllowAllPolicy),
                 reflection_history.clone(),
                 task_access.clone(),
@@ -425,7 +421,6 @@ impl CompactHarness {
             workspace,
             tool_catalog,
             tool_execution,
-            tool_context_binding,
             read_files,
             session_reminders,
             active_run,

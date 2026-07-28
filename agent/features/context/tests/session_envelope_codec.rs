@@ -115,6 +115,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
             )),
             outcome: Some(FinalizedOutcomeProjection {
                 finalize_cause: FinalizeCause::UserCancelledStep,
+                duration_ms: Some(7_325_000),
                 messages: vec![Message::user("partial assistant")],
                 receipts: vec![StepReceipt::agent(
                     "agent-call",
@@ -136,6 +137,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
         .as_ref()
         .unwrap();
     assert_eq!(outcome.finalize_cause, FinalizeCause::UserCancelledStep);
+    assert_eq!(outcome.duration_ms, Some(7_325_000));
     assert_eq!(outcome.messages[0].text_content(), "partial assistant");
     assert_eq!(
         outcome.receipts[0].outcome(),

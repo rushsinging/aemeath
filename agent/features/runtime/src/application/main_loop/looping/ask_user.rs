@@ -172,7 +172,7 @@ mod tests {
         async fn dispatch(
             &self,
             _invocation: HookInvocation,
-            _cancellation: &tokio_util::sync::CancellationToken,
+            _cancellation: &dyn hook::CancellationSignal,
         ) -> hook::HookOutcome {
             hook::HookOutcome::proceed()
         }

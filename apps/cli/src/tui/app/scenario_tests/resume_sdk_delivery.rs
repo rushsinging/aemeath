@@ -24,6 +24,7 @@ fn sdk_events_after_resumed_history_are_batched_reduced_and_rendered_at_tail() {
                     )),
                 ],
                 finalize_cause: None,
+                duration_ms: None,
             },
         )
         .collect();

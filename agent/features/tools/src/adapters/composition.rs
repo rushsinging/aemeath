@@ -8,13 +8,13 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::adapters::{
     catalog::{CatalogAdapter, ToolBacking, ToolBackingError},
-    execution::{BoundExecutionContexts, ExecutionAdapter},
+    execution::ExecutionAdapter,
     registry::{profile_for, register_named_scope, BuiltinRegistryScope},
     tool_registry::ToolRegistry,
 };
 use crate::domain::{
     scope_profile::RegistryScope, RegistryScopeName, ToolCapabilities, ToolCatalogPort,
-    ToolExecutionContext, ToolExecutionPort, ToolProfile, ToolProfileName, TypedTool,
+    ToolExecutionPort, ToolProfile, ToolProfileName, TypedTool,
 };
 
 #[cfg(feature = "test-harness")]
@@ -25,8 +25,6 @@ pub struct CatalogExecutionWiring {
     catalog: Arc<dyn ToolCatalogPort>,
     execution: Arc<dyn ToolExecutionPort>,
     backing: ToolBacking,
-    contexts: Arc<BoundExecutionContexts>,
-    binding: Arc<dyn crate::domain::ToolExecutionContextBindingPort>,
 }
 
 impl CatalogExecutionWiring {
@@ -36,18 +34,6 @@ impl CatalogExecutionWiring {
 
     pub fn execution(&self) -> Arc<dyn ToolExecutionPort> {
         self.execution.clone()
-    }
-
-    pub fn binding(&self) -> Arc<dyn crate::domain::ToolExecutionContextBindingPort> {
-        self.binding.clone()
-    }
-
-    pub fn bind(&self, context: ToolExecutionContext) -> Result<(), String> {
-        self.contexts.bind(context)
-    }
-
-    pub fn unbind(&self, run_id: &str) {
-        self.contexts.unbind(run_id);
     }
 
     pub async fn sync_mcp_source(
@@ -76,17 +62,12 @@ pub(crate) fn wire_catalog_execution(
     profiles: HashMap<ToolProfileName, ToolProfile>,
 ) -> Result<CatalogExecutionWiring, ToolBackingError> {
     let backing = ToolBacking::try_new(registry, scopes, profiles)?;
-    let contexts = Arc::new(BoundExecutionContexts::new());
     let catalog: Arc<dyn ToolCatalogPort> = Arc::new(CatalogAdapter::new(backing.clone()));
-    let execution: Arc<dyn ToolExecutionPort> =
-        Arc::new(ExecutionAdapter::new(backing.clone(), contexts.clone()));
-    let binding: Arc<dyn crate::domain::ToolExecutionContextBindingPort> = contexts.clone();
+    let execution: Arc<dyn ToolExecutionPort> = Arc::new(ExecutionAdapter::new(backing.clone()));
     Ok(CatalogExecutionWiring {
         catalog,
         execution,
         backing,
-        contexts,
-        binding,
     })
 }
 

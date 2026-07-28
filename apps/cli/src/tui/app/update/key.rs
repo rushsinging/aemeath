@@ -109,6 +109,12 @@ impl App {
                     self.chat.is_cancelling,
                 ) {
                     CtrlCAction::RequestCancel => {
+                        crate::tui::log_debug!(
+                            "cancel_current_run key accepted: key=ctrl_c is_processing={} is_cancelling={} processing_handle_present={}",
+                            self.chat.is_processing,
+                            self.chat.is_cancelling,
+                            self.chat.processing_handle.is_some()
+                        );
                         self.layout.mark_ctrlc_now();
                         return UpdateResult::one(Effect::CancelCurrentRun);
                     }
@@ -154,6 +160,12 @@ impl App {
                 });
             }
             (KeyModifiers::NONE, KeyCode::Esc) if self.chat.is_processing => {
+                crate::tui::log_debug!(
+                    "cancel_current_run key accepted: key=esc is_processing={} is_cancelling={} processing_handle_present={}",
+                    self.chat.is_processing,
+                    self.chat.is_cancelling,
+                    self.chat.processing_handle.is_some()
+                );
                 return UpdateResult::one(Effect::CancelCurrentRun);
             }
             (_, KeyCode::Enter) if self.chat.is_processing => {

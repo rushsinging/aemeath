@@ -90,6 +90,31 @@ fn tool_execution_context_exposes_scope_and_read_only_workspace_port() {
 }
 
 #[test]
+fn tool_execution_context_can_replace_invocation_cancellation_without_changing_scope() {
+    struct Cancelled;
+    #[async_trait::async_trait]
+    impl CancellationSignal for Cancelled {
+        fn is_cancelled(&self) -> bool {
+            true
+        }
+        async fn cancelled(&self) {}
+        fn child_signal(&self) -> std::sync::Arc<dyn CancellationSignal> {
+            std::sync::Arc::new(Self)
+        }
+    }
+
+    let original = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        PathBuf::from("/workspace"),
+    )
+    .build();
+    let replaced = original.with_cancellation(std::sync::Arc::new(Cancelled));
+
+    assert_eq!(replaced.scope(), original.scope());
+    assert!(replaced.cancellation().is_cancelled());
+    assert!(!original.cancellation().is_cancelled());
+}
+
+#[test]
 fn tool_execution_context_read_set_records_evidence_through_port() {
     let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(PathBuf::from(
         "/workspace",

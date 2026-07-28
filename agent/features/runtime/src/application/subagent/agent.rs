@@ -179,6 +179,7 @@ impl Agent {
                     agent: call.name == "Agent",
                 },
                 invocation,
+                context: ctx.clone(),
                 input_preview: safe_input_preview(&call.input),
                 run_deadline: ctx.scope().deadline(),
                 cancellation: cancellation_token(ctx.cancellation()),
@@ -222,6 +223,16 @@ impl Agent {
         calls: &[crate::application::tool_coordination::PreparedToolCall],
         step_id: &sdk::RunStepId,
     ) -> Vec<ToolExecution> {
+        self.execute_prepared_tools_with_ctx(calls, step_id, &self.ctx)
+            .await
+    }
+
+    pub(crate) async fn execute_prepared_tools_with_ctx(
+        &self,
+        calls: &[crate::application::tool_coordination::PreparedToolCall],
+        step_id: &sdk::RunStepId,
+        context: &ToolExecutionContext,
+    ) -> Vec<ToolExecution> {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_tool_concurrency));
         let sequential = Arc::new(tokio::sync::Mutex::new(()));
         let futures = calls.iter().enumerate().map(|(position, prepared)| {
@@ -234,14 +245,14 @@ impl Agent {
                     let _permit = semaphore.acquire().await.expect("tool semaphore closed");
                     (
                         position,
-                        self.execute_call(call, &self.ctx, authorization, step_id)
+                        self.execute_call(call, context, authorization, step_id)
                             .await,
                     )
                 } else {
                     let _serial = sequential.lock().await;
                     (
                         position,
-                        self.execute_call(call, &self.ctx, authorization, step_id)
+                        self.execute_call(call, context, authorization, step_id)
                             .await,
                     )
                 }

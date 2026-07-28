@@ -84,6 +84,7 @@ pub struct RuntimeResumedSessionStep {
     pub step_id: String,
     pub messages: Vec<Message>,
     pub finalize_cause: Option<context::domain::FinalizeCause>,
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -206,6 +207,7 @@ pub enum RuntimeStreamEvent {
     },
     Cancelled {
         context: RuntimeTurnContext,
+        duration: std::time::Duration,
     },
     LiveTps(f64),
     TurnChanged(usize),

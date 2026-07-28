@@ -106,6 +106,7 @@ fn test_map_agent_event_runtime_observations_do_not_emit_bind_runtime_turn() {
         },
         UiEvent::Cancelled {
             context: context.clone(),
+            duration: std::time::Duration::ZERO,
         },
     ];
 

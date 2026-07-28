@@ -55,9 +55,8 @@ impl tools::ToolExecutionPort for FakeToolExecutionPort {
     async fn execute(
         &self,
         invocation: tools::ToolInvocation,
-        cancellation: &dyn tools::CancellationSignal,
+        _context: &tools::ToolExecutionContext,
     ) -> tools::ToolExecutionOutcome {
-        let _ = cancellation;
         self.execute_count
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         self.recorded_invocations.lock().unwrap().push(invocation);
@@ -550,25 +549,21 @@ impl RunLoopPort for ScriptedPort {
                                     let call = &approval_call.call;
                                     let mut input = call.input.clone();
                                     tools::strip_runtime_meta(&mut input);
-                                    let scope = tools::ExecutionScope::builder(
-                                        "test-run".to_string(),
-                                        project::WorkspaceId::from("test-ws".to_string()),
-                                        std::path::PathBuf::from("/tmp"),
-                                    )
-                                    .build();
+                                    let context =
+                                        crate::application::testing::test_tool_execution_context(
+                                            std::path::PathBuf::from("/tmp"),
+                                            CancellationToken::new(),
+                                        );
                                     let invocation = tools::ToolInvocation::new(
                                         call.name.as_str(),
                                         input,
-                                        scope,
+                                        context.scope().clone(),
                                     )
                                     .with_authorization(approval_call.authorization);
-                                    let signal = crate::adapters::tool_runtime::cancellation(
-                                        CancellationToken::new(),
-                                    );
                                     let _ = tools::ToolExecutionPort::execute(
                                         fake.as_ref(),
                                         invocation,
-                                        signal.as_ref(),
+                                        &context,
                                     )
                                     .await;
                                 }
@@ -1907,6 +1902,111 @@ async fn cancel_step_during_tools_finalizes_then_returns_to_drain() {
         .events
         .iter()
         .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+}
+
+#[tokio::test]
+async fn cancel_step_during_tools_projects_user_cancelled_turn_instead_of_completed_turn() {
+    let mut run = new_run(Duration::ZERO);
+    let root = CancellationToken::new();
+    let mut port = ScriptedPort {
+        cancel_when_tools_starts: true,
+        model_steps: VecDeque::from([ModelStep::Tools {
+            text: "calling".to_string(),
+            calls: vec![call("Bash", json!({"command": "sleep 180"}))],
+        }]),
+        tool_steps: VecDeque::from([ToolStep::Continue]),
+        ..Default::default()
+    };
+
+    run_loop(&mut run, &root, &mut port).await.unwrap();
+
+    assert_eq!(run.status(), RunStatus::Completed);
+    let events = &port.events;
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        RunDomainEvent::Completed {
+            user_cancelled_step: true,
+            ..
+        }
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        RunDomainEvent::Completed {
+            user_cancelled_step: false,
+            ..
+        }
+    )));
+}
+
+#[tokio::test]
+async fn main_event_strategy_projects_cancelled_step_completion_as_cancelled_terminal_only() {
+    use crate::application::loop_engine::event_strategy::{EventStrategy, MainEventStrategy};
+    use crate::application::main_loop::looping::{
+        ChatEventSink, ChatEventSinkHandle, RuntimeStreamEvent, RuntimeTurnContext,
+    };
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Sink {
+        terminal_events: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl ChatEventSink for Sink {
+        fn send_event<'a>(
+            &'a self,
+            event: RuntimeStreamEvent,
+        ) -> crate::application::main_loop::looping::EventFuture<'a> {
+            Box::pin(async move {
+                match event {
+                    RuntimeStreamEvent::Cancelled { .. } => {
+                        self.terminal_events.lock().unwrap().push("Cancelled")
+                    }
+                    RuntimeStreamEvent::DoneWithDuration { .. } => self
+                        .terminal_events
+                        .lock()
+                        .unwrap()
+                        .push("DoneWithDuration"),
+                    _ => {}
+                }
+            })
+        }
+
+        fn try_send_event(&self, _event: RuntimeStreamEvent) {}
+    }
+
+    let sink = Sink::default();
+    let task_access = crate::application::testing::test_task_access();
+    let mut strategy = MainEventStrategy {
+        sink: ChatEventSinkHandle::new(sink.clone()),
+        session_id: "session",
+        turn_context: &RuntimeTurnContext::new(
+            sdk::ChatId::new("chat"),
+            sdk::ChatTurnId::new("turn"),
+        ),
+        task_access: &task_access,
+        model: "test-model",
+        started_at: std::time::Instant::now(),
+        turn_count: 1,
+        messages_snapshot: Vec::new(),
+    };
+
+    strategy
+        .emit(vec![RunDomainEvent::Completed {
+            run_id: sdk::RunId::new("run"),
+            parent_run_id: None,
+            result: String::new(),
+            user_cancelled_step: true,
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sink.terminal_events.lock().unwrap().as_slice(),
+        ["Cancelled"]
+    );
 }
 
 #[tokio::test]

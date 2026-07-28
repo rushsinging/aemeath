@@ -21,7 +21,6 @@ impl tools::MemoryPortSource for WiringMemoryPortSource {
 struct RuntimeToolAssembly {
     catalog: Arc<dyn tools::ToolCatalogPort>,
     execution: Arc<dyn tools::ToolExecutionPort>,
-    binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     tool_result_materializer: Arc<runtime::ToolResultMaterializer>,
     active_run: Arc<runtime::ActiveRunRegistry>,
 }
@@ -51,7 +50,6 @@ fn wire_runtime_tool_assembly(
     Ok(RuntimeToolAssembly {
         catalog: tools.catalog(),
         execution: tools.execution(),
-        binding: tools.binding(),
         tool_result_materializer: Arc::new(runtime::ToolResultMaterializer::new(
             blobs,
             runtime::ToolResultMaterializationPolicy::new(
@@ -153,7 +151,6 @@ pub(crate) async fn from_args_with_gateways(
     let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
         tool_assembly.catalog.clone(),
         tool_assembly.execution.clone(),
-        tool_assembly.binding.clone(),
         gateways.policy.clone(),
         reflection_history.clone(),
         task_wiring.access(),
@@ -174,7 +171,6 @@ pub(crate) async fn from_args_with_gateways(
         runtime::RuntimeToolAssemblyDependencies::new(
             tool_assembly.catalog,
             tool_assembly.execution,
-            tool_assembly.binding,
             skill_catalog,
             skill_materializer,
             tool_assembly.tool_result_materializer,

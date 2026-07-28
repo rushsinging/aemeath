@@ -45,6 +45,7 @@ fn terminal_text_after_thinking_matches_resume_projection() {
             step_id: "turn-p0".into(),
             messages: vec![TuiChatMessage::assistant_text(terminal_text)],
             finalize_cause: None,
+            duration_ms: None,
         }],
         session_id: "session-p0".into(),
         created_at: 0,
@@ -55,6 +56,93 @@ fn terminal_text_after_thinking_matches_resume_projection() {
     assert!(resumed.screen().contains(terminal_text));
     assert_eq!(live.screen().matches(terminal_text).count(), 1);
     assert_eq!(resumed.screen().matches(terminal_text).count(), 1);
+}
+
+#[test]
+fn live_completed_turn_renders_terminal_notice() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
+    harness.runtime_event(TuiRuntimeEvent::Text {
+        context: ctx(),
+        text: "The result is ready.".into(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::BlockComplete {
+        context: ctx(),
+        text: "The result is ready.".into(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::Done {
+        context: ctx(),
+        duration_ms: Some(125_000),
+    });
+    harness.render();
+
+    let screen = harness.screen();
+    assert!(screen.contains("The result is ready."));
+    assert!(
+        screen.contains("for 2m 5s"),
+        "实时正常完成必须显示终态耗时提示，实际屏幕：\n{screen}"
+    );
+    harness.assert_idle();
+}
+
+#[test]
+fn live_cancelled_turn_renders_terminal_notice() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
+    harness.runtime_event(TuiRuntimeEvent::Cancelled {
+        context: ctx(),
+        duration_ms: 125_000,
+    });
+    harness.render();
+
+    let screen = harness.screen();
+    assert!(
+        screen.contains("✻ Cancelled, ran 2m 5s"),
+        "实时取消必须显示统一终态提示，实际屏幕：\n{screen}"
+    );
+    harness.assert_idle();
+}
+
+#[test]
+fn authoritative_cancelled_terminal_never_renders_completed_verb() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
+    harness.runtime_event(TuiRuntimeEvent::Cancelled {
+        context: ctx(),
+        duration_ms: 6_000,
+    });
+    harness.render();
+
+    let screen = harness.screen();
+    assert!(screen.contains("✻ Cancelled, ran 6s"));
+    for verb in [
+        "Sautéed",
+        "Baked",
+        "Grilled",
+        "Simmered",
+        "Roasted",
+        "Brewed",
+        "Toasted",
+        "Stewed",
+        "Marinated",
+        "Charred",
+        "Poached",
+        "Steamed",
+        "Smoked",
+        "Brûléed",
+        "Flambéed",
+        "Fermented",
+        "Pickled",
+        "Cured",
+        "Seared",
+        "Blanched",
+    ] {
+        assert!(
+            !screen.contains(verb),
+            "权威取消终态不得渲染正常完成动词 {verb}，实际屏幕：\n{screen}"
+        );
+    }
+    harness.assert_idle();
 }
 
 #[test]

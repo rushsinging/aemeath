@@ -38,7 +38,17 @@ impl ProcessingHandle {
                 .map(|duration| duration.as_millis() as u64 + 10_000)
                 .unwrap_or(0),
         );
-        self.agent_client.cancel_current_run(deadline)
+        crate::tui::log_debug!(
+            "processing handle forwarding cancel_current_run: join_finished={} deadline_unix_ms={}",
+            self.join.is_finished(),
+            deadline.unix_millis()
+        );
+        let outcome = self.agent_client.cancel_current_run(deadline);
+        crate::tui::log_debug!(
+            "processing handle received cancel_current_run outcome: outcome={:?}",
+            outcome
+        );
+        outcome
     }
 
     pub(crate) fn abort(&self) {

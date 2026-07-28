@@ -367,6 +367,7 @@ pub struct ContextAppend {
     pub step_id: RunStepId,
     pub source_request_id: ContextRequestId,
     pub finalize_cause: FinalizeCause,
+    pub duration_ms: Option<u64>,
     pub messages: Vec<ContextMessage>,
     pub receipts: Vec<StepReceipt>,
     pub api_input_tokens: Option<u64>,

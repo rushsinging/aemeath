@@ -115,6 +115,7 @@ fn resumed_history_initial_window_keeps_newest_complete_groups() {
                 "RESUME-TAIL-ANSWER-{index:04}"
             ))],
             finalize_cause: None,
+            duration_ms: None,
         })
         .collect();
 
@@ -149,6 +150,7 @@ fn resumed_history_initial_window_keeps_real_conclusion_tail_shape() {
             step_id: "019f9c5e-61fd-7713-8398-3acf508b8d8b".into(),
             messages: vec![TuiChatMessage::assistant_text(old_tool_like_output)],
             finalize_cause: None,
+            duration_ms: None,
         },
         TuiResumedSessionStep {
             run_id: "019fa25f-088e-7542-b17e-6c59c659ff22".into(),
@@ -158,6 +160,7 @@ fn resumed_history_initial_window_keeps_real_conclusion_tail_shape() {
                 TuiChatMessage::assistant_text("#649 还不能关闭，而且剩余工作不少"),
             ],
             finalize_cause: None,
+            duration_ms: None,
         },
         TuiResumedSessionStep {
             run_id: "019fa26c-c3a5-7081-8a08-18c2f67f7a3c".into(),
@@ -167,12 +170,14 @@ fn resumed_history_initial_window_keeps_real_conclusion_tail_shape() {
                 TuiChatMessage::assistant_text("#649 现在不能关，下一步只做 #1397"),
             ],
             finalize_cause: None,
+            duration_ms: None,
         },
         TuiResumedSessionStep {
             run_id: "019fa29b-ed93-78e2-b933-77a084d4bfa5".into(),
             step_id: "019fa29b-ed94-7ff1-816d-b66ec87c3ed7".into(),
             messages: vec![TuiChatMessage::user_text("继续")],
             finalize_cause: None,
+            duration_ms: None,
         },
     ];
 
@@ -249,6 +254,7 @@ fn resumed_history_window_reaches_oldest_history_without_folded_hint() {
                 "OLDEST-QUESTION-{index:04}"
             ))],
             finalize_cause: None,
+            duration_ms: None,
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
@@ -314,6 +320,7 @@ fn resumed_large_history_loads_after_first_render_and_continues_in_batches() {
                 TuiChatMessage::assistant_text(format!("RESUME-ANSWER-{index:04}")),
             ],
             finalize_cause: None,
+            duration_ms: None,
         })
         .collect();
 
@@ -347,6 +354,7 @@ fn resumed_history_window_can_continue_loading_older_blocks_after_cap() {
                 TuiChatMessage::assistant_text(format!("SLIDING-ANSWER-{index:04}")),
             ],
             finalize_cause: None,
+            duration_ms: None,
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
@@ -379,6 +387,7 @@ fn resumed_history_window_stops_at_three_thousand_lines() {
                 TuiChatMessage::assistant_text(format!("CAPPED-ANSWER-{index:04}")),
             ],
             finalize_cause: None,
+            duration_ms: None,
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
@@ -410,6 +419,7 @@ fn top_request_before_first_resume_render_loads_after_source_is_observed() {
                 "RESUME-EARLY-{index:04}"
             ))],
             finalize_cause: None,
+            duration_ms: None,
         })
         .collect();
 
@@ -438,6 +448,7 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
                 "RESUME-ADOPTED-ANSWER-{index:04}"
             ))],
             finalize_cause: None,
+            duration_ms: None,
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {

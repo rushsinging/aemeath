@@ -363,6 +363,7 @@ impl SessionRepository for CanonicalSessionRepository {
             append.step_id.as_str(),
             FinalizedOutcomeProjection {
                 finalize_cause: append.finalize_cause,
+                duration_ms: append.duration_ms,
                 messages: append.messages.clone(),
                 receipts: append.receipts.clone(),
                 api_input_tokens: append.api_input_tokens,

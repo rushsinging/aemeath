@@ -78,16 +78,14 @@ fn assembled() -> (
     (wiring, workspace_read)
 }
 
-/// Build a bound execution context + matching invocation for the given
-/// registry scope / profile pair. The run id is unique per call so the same
-/// wiring can bind more than one context.
-fn bound_invocation(
-    wiring: &crate::composition::CatalogExecutionWiring,
+/// Build an invocation context + matching invocation for the given
+/// registry scope / profile pair.
+fn invocation_and_context(
     read: &Arc<dyn project::WorkspaceRead>,
     run_id: &str,
     scope: &str,
     profile: &str,
-) -> ToolInvocation {
+) -> (ToolInvocation, ToolExecutionContext) {
     let execution_scope =
         ExecutionScope::builder(run_id, read.workspace_id(), read.current_workspace_root())
             .registry_scope(RegistryScopeName::new(scope))
@@ -107,9 +105,8 @@ fn bound_invocation(
             }),
         ),
     );
-    wiring.bind(context).expect("bind context");
-
-    ToolInvocation::new("Skill", json!({"skill": "commit"}), execution_scope)
+    let invocation = ToolInvocation::new("Skill", json!({"skill": "commit"}), execution_scope);
+    (invocation, context)
 }
 
 fn assert_unavailable(outcome: ExecutionOutcome) {
@@ -137,17 +134,9 @@ async fn skill_is_not_a_tool_in_catalog_or_execution_for_main() {
     );
 
     // Bound execution context: invoking Skill must be ToolUnavailable.
-    let invocation = bound_invocation(
-        &wiring,
-        &read,
-        "skill-is-not-tool-main",
-        "main",
-        "main-full",
-    );
-    let outcome = wiring
-        .execution()
-        .execute(invocation, &NeverCancelled)
-        .await;
+    let (invocation, context) =
+        invocation_and_context(&read, "skill-is-not-tool-main", "main", "main-full");
+    let outcome = wiring.execution().execute(invocation, &context).await;
     assert_unavailable(outcome);
 }
 
@@ -169,16 +158,12 @@ async fn skill_is_not_a_tool_in_catalog_or_execution_for_sub_agent() {
     );
 
     // Bound execution context: invoking Skill must be ToolUnavailable.
-    let invocation = bound_invocation(
-        &wiring,
+    let (invocation, context) = invocation_and_context(
         &read,
         "skill-is-not-tool-sub",
         "sub-agent",
         "sub-agent-restricted",
     );
-    let outcome = wiring
-        .execution()
-        .execute(invocation, &NeverCancelled)
-        .await;
+    let outcome = wiring.execution().execute(invocation, &context).await;
     assert_unavailable(outcome);
 }

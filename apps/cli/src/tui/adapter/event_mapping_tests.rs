@@ -9,6 +9,7 @@ fn session_resume_keeps_context_run_step_boundaries() {
             step_id: "step-1".into(),
             messages: vec![sdk::ChatMessage::user_text("hello")],
             finalize_cause: Some(sdk::ResumedStepFinalizeCause::UserCancelledStep),
+            duration_ms: Some(125_000),
         }],
         session_id: "session-1".into(),
         created_at: 0,
@@ -21,7 +22,27 @@ fn session_resume_keeps_context_run_step_boundaries() {
                 && steps[0].run_id == "run-1"
                 && steps[0].step_id == "step-1"
                 && steps[0].finalize_cause == Some(super::super::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep)
+                && steps[0].duration_ms == Some(125_000)
                 && steps[0].messages[0].text_content() == "hello"
+    ));
+}
+
+#[test]
+fn authoritative_cancelled_terminal_maps_without_run_or_step_correlation() {
+    let chat_id = sdk::ChatId::new("chat-cancelled");
+    let turn_id = sdk::ChatTurnId::new("turn-cancelled");
+
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::Cancelled {
+        context: sdk::ChatEventContext::new(chat_id.clone(), turn_id.clone()),
+        duration_ms: 6_000,
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::Cancelled {
+            context,
+            duration_ms: 6_000,
+        }) if context.chat_id == chat_id.as_str() && context.turn_id == turn_id.as_str()
     ));
 }
 

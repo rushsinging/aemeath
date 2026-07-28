@@ -16,7 +16,6 @@ use super::{AgentClientImpl, RuntimeHandle};
 pub struct RuntimeToolAssemblyDependencies {
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
     tool_result_materializer:
@@ -28,7 +27,6 @@ impl RuntimeToolAssemblyDependencies {
     pub fn new(
         tool_catalog: Arc<dyn tools::ToolCatalogPort>,
         tool_execution: Arc<dyn tools::ToolExecutionPort>,
-        tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
         skill_catalog: Arc<dyn tools::SkillCatalogPort>,
         skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
         tool_result_materializer: Arc<
@@ -39,7 +37,6 @@ impl RuntimeToolAssemblyDependencies {
         Self {
             tool_catalog,
             tool_execution,
-            tool_context_binding,
             skill_catalog,
             skill_materializer,
             tool_result_materializer,
@@ -104,8 +101,6 @@ pub struct RuntimeBootstrapDependencies {
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     #[allow(dead_code)]
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    #[allow(dead_code)]
-    tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
     tool_result_materializer:
@@ -137,7 +132,6 @@ impl RuntimeBootstrapDependencies {
         let RuntimeToolAssemblyDependencies {
             tool_catalog,
             tool_execution,
-            tool_context_binding,
             skill_catalog,
             skill_materializer,
             tool_result_materializer,
@@ -154,7 +148,6 @@ impl RuntimeBootstrapDependencies {
             hook_runner,
             tool_catalog,
             tool_execution,
-            tool_context_binding,
             skill_catalog,
             skill_materializer,
             tool_result_materializer,
@@ -296,6 +289,7 @@ pub async fn from_args_with_workspace(
                                     sdk::ResumedStepFinalizeCause::RunTerminated
                                 }
                             }),
+                            duration_ms: step.duration_ms,
                         })
                         .collect(),
                     session_id: projection.session_id,
@@ -718,7 +712,7 @@ mod tests {
         async fn dispatch(
             &self,
             _invocation: HookInvocation,
-            _cancellation: &tokio_util::sync::CancellationToken,
+            _cancellation: &dyn hook::CancellationSignal,
         ) -> HookOutcome {
             HookOutcome::proceed()
         }
@@ -762,8 +756,6 @@ mod tests {
         let tools_factory = tools::composition::TestCatalogExecutionFactory::empty();
         let tool_catalog: Arc<dyn tools::ToolCatalogPort> = tools_factory.catalog_port();
         let tool_execution: Arc<dyn tools::ToolExecutionPort> = tools_factory.execution();
-        let tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort> =
-            tools_factory.binding();
         let reflection_history: Arc<dyn ReflectionHistoryStore> = Arc::new(FakeReflectionHistory);
         let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
         let hook_runner: Arc<dyn HookPort> = Arc::new(FakeHook);
@@ -801,7 +793,6 @@ mod tests {
             crate::application::runtime_context_factory::RuntimeContextFactory::new(
                 tool_catalog.clone(),
                 tool_execution.clone(),
-                tool_context_binding.clone(),
                 policy.clone(),
                 reflection_history.clone(),
                 task_access.clone(),
@@ -1157,7 +1148,6 @@ mod tests {
             RuntimeToolAssemblyDependencies::new(
                 tools.catalog_port(),
                 tools.execution(),
-                tools.binding(),
                 skill_wiring.catalog(),
                 skill_wiring.materializer(),
                 tool_result_materializer,
@@ -1168,7 +1158,6 @@ mod tests {
                     crate::application::runtime_context_factory::RuntimeContextFactory::new(
                         tools.catalog_port(),
                         tools.execution(),
-                        tools.binding(),
                         policy,
                         Arc::new(TestReflectionHistory),
                         task_wiring.access(),
@@ -1183,7 +1172,7 @@ mod tests {
 
         assert!(
             Arc::ptr_eq(
-                &client.inner.shell.runtime_context_factory.services().hooks,
+                &client.inner.shell.runtime_context_factory.hooks(),
                 &hook_runner
             ),
             "Main Run 必须保留 Composition 注入的同一 HookRunner 实例"

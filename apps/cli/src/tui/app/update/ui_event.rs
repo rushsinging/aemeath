@@ -61,8 +61,6 @@ impl App {
                 self.chat.stop_processing();
             }
             UiEvent::Cancelled { .. } => {
-                // 取消提示改为注入 ConversationModel 的 System notice，经 document 渲染。
-                self.append_system_notice("已取消");
                 crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::Cancelled → spinner_stop");
                 self.spinner_stop();
                 self.chat.stop_processing();

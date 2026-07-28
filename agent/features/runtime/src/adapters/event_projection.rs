@@ -98,6 +98,7 @@ pub fn project_domain_event(event: RunDomainEvent) -> ChatEvent {
             run_id,
             parent_run_id,
             result,
+            ..
         } => ChatEvent::RunCompleted {
             run_id,
             parent_run_id,
@@ -396,9 +397,10 @@ pub(crate) fn project_stream_event(
         crate::application::main_loop::RuntimeStreamEvent::RunCancelled { run_id } => {
             ChatEvent::RunCancelled { run_id }
         }
-        crate::application::main_loop::RuntimeStreamEvent::Cancelled { context } => {
+        crate::application::main_loop::RuntimeStreamEvent::Cancelled { context, duration } => {
             ChatEvent::Cancelled {
                 context: turn_context_to_sdk(context),
+                duration_ms: duration.as_millis() as u64,
             }
         }
         crate::application::main_loop::RuntimeStreamEvent::LiveTps(tps) => ChatEvent::LiveTps(tps),
@@ -513,6 +515,7 @@ pub(crate) fn project_stream_event(
                             sdk::ResumedStepFinalizeCause::RunTerminated
                         }
                     }),
+                    duration_ms: step.duration_ms,
                 })
                 .collect(),
             session_id,

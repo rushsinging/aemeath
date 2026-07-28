@@ -25,6 +25,8 @@ pub struct ResumedSessionStep {
     pub messages: Vec<ChatMessage>,
     #[serde(default)]
     pub finalize_cause: Option<ResumedStepFinalizeCause>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
 }
 
 /// 启动 `--resume` 已完成一次 backing 恢复后交给前端的历史投影。
@@ -323,6 +325,8 @@ pub enum ChatEvent {
     /// Chat 被取消（兼容旧 TUI 投影）。
     Cancelled {
         context: ChatEventContext,
+        /// 取消前该回合已经运行的耗时。
+        duration_ms: u64,
     },
     /// 实时 TPS。
     LiveTps(f64),

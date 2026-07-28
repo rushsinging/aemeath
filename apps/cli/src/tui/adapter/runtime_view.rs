@@ -69,6 +69,7 @@ pub(crate) struct TuiResumedSessionStep {
     pub(crate) step_id: String,
     pub(crate) messages: Vec<TuiChatMessage>,
     pub(crate) finalize_cause: Option<TuiResumedStepFinalizeCause>,
+    pub(crate) duration_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

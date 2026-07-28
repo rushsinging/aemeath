@@ -200,7 +200,7 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::RunCancelled { run_id } => {
             crate::tui::log_trace!("{} run_cancelled run_id={}", stage, run_id)
         }
-        sdk::ChatEvent::Cancelled { context } => crate::tui::log_trace!(
+        sdk::ChatEvent::Cancelled { context, .. } => crate::tui::log_trace!(
             "{} cancelled chat_id={} turn_id={}",
             stage,
             context.chat_id,

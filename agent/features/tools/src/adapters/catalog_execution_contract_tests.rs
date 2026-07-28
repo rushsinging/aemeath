@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use super::{
     catalog::{CatalogAdapter, ToolBacking},
-    execution::{BoundExecutionContexts, ExecutionAdapter},
+    execution::ExecutionAdapter,
     tool_registry::ToolRegistry,
 };
 use crate::domain::published_language::ToolOutcome as ExecutionOutcome;
@@ -32,7 +32,8 @@ struct ContractPorts {
     execution: Arc<dyn ToolExecutionPort>,
     backing: ToolBacking,
     registry: Arc<ToolRegistry>,
-    contexts: Arc<BoundExecutionContexts>,
+    context: ToolExecutionContext,
+    restricted_context: ToolExecutionContext,
     scope: ExecutionScope,
     calls: Arc<AtomicUsize>,
 }
@@ -79,19 +80,16 @@ fn adapter_factory() -> FactoryFuture {
             ToolProfile::baseline(ToolCapabilities::empty()),
         );
         let backing = ToolBacking::try_new(registry.clone(), scopes, profiles).unwrap();
-        let contexts = Arc::new(BoundExecutionContexts::new());
         let context = context_for_profile("full");
+        let restricted_context = context_for_run_and_profile("restricted-run", "read-only");
         let scope = context.scope().clone();
-        contexts.bind(context).expect("bind context");
-        contexts
-            .bind(context_for_run_and_profile("restricted-run", "read-only"))
-            .expect("bind restricted context");
         ContractPorts {
             catalog: Arc::new(CatalogAdapter::new(backing.clone())),
-            execution: Arc::new(ExecutionAdapter::new(backing.clone(), contexts.clone())),
+            execution: Arc::new(ExecutionAdapter::new(backing.clone())),
             backing,
             registry,
-            contexts,
+            context,
+            restricted_context,
             scope,
             calls,
         }
@@ -131,7 +129,7 @@ async fn dynamic_mcp_style_tool_enters_main_catalog_and_receives_invocation_auth
         .execute(
             invocation(&ports.scope, "mcp__demo__read", json!({"value":"ok"}))
                 .with_authorization(crate::AuthorizationContext::ALLOW_ALL),
-            &ManualCancellation::default(),
+            &ports.context,
         )
         .await;
 
@@ -154,7 +152,7 @@ async fn dynamic_mcp_style_tool_enters_main_catalog_and_receives_invocation_auth
             .execution
             .execute(
                 invocation(&ports.scope, "mcp__demo__read", json!({"value":"again"})),
-                &ManualCancellation::default(),
+                &ports.context,
             )
             .await,
     );
@@ -215,7 +213,7 @@ async fn run_contract(factory: ContractFactory) {
                 json!({"value":"restricted"}),
                 "read-only",
             ),
-            &ManualCancellation::default(),
+            &ports.restricted_context,
         )
         .await
         .is_success());
@@ -229,7 +227,7 @@ async fn run_contract(factory: ContractFactory) {
                 json!({}),
                 "read-only",
             ),
-            &ManualCancellation::default(),
+            &ports.restricted_context,
         )
         .await;
     assert!(matches!(
@@ -238,12 +236,11 @@ async fn run_contract(factory: ContractFactory) {
             if failure.kind == crate::domain::published_language::ToolErrorKind::Unauthorized
     ));
 
-    let cancellation = ManualCancellation::default();
     let outcome = ports
         .execution
         .execute(
             invocation(&ports.scope, "unknown", json!({})),
-            &cancellation,
+            &ports.context,
         )
         .await;
     assert_unavailable(outcome);
@@ -269,17 +266,18 @@ async fn run_contract(factory: ContractFactory) {
             .execution
             .execute(
                 invocation(&ports.scope, "Dynamic", json!({"value":"x"})),
-                &cancellation,
+                &ports.context,
             )
             .await,
     );
     assert_eq!(dynamic_calls.load(Ordering::SeqCst), 0);
 
+    let none_context = context_for_profile("none");
     let outcome = ports
         .execution
         .execute(
             invocation_with_profile(&ports.scope, "Counting", json!({"value":"x"}), "none"),
-            &cancellation,
+            &none_context,
         )
         .await;
     assert!(
@@ -291,7 +289,7 @@ async fn run_contract(factory: ContractFactory) {
         .execution
         .execute(
             invocation(&ports.scope, "Counting", json!({})),
-            &cancellation,
+            &ports.context,
         )
         .await;
     assert!(
@@ -303,7 +301,7 @@ async fn run_contract(factory: ContractFactory) {
         .execution
         .execute(
             invocation(&ports.scope, "Counting", json!({"value":"ok"})),
-            &cancellation,
+            &ports.context,
         )
         .await;
     assert!(matches!(
@@ -320,7 +318,7 @@ async fn run_contract(factory: ContractFactory) {
         .execution
         .execute(
             invocation(&ports.scope, "Suspend", json!({})),
-            &cancellation,
+            &ports.context,
         )
         .await;
     assert!(matches!(
@@ -336,7 +334,7 @@ async fn run_contract(factory: ContractFactory) {
             .execution
             .execute(
                 invocation(&ports.scope, "Counting", json!({"value":"again"})),
-                &cancellation,
+                &ports.context,
             )
             .await,
     );
@@ -348,12 +346,12 @@ async fn run_contract(factory: ContractFactory) {
         .is_none());
     assert_eq!(ports.calls.load(Ordering::SeqCst), 2);
 
-    ports.contexts.unbind(ports.scope.run_id());
+    let mismatched_context = context_for_run_and_profile("other-run", "full");
     let resource_missing = ports
         .execution
         .execute(
             invocation(&ports.scope, "Suspend", json!({})),
-            &cancellation,
+            &mismatched_context,
         )
         .await;
     assert!(matches!(
@@ -366,10 +364,14 @@ async fn run_contract(factory: ContractFactory) {
     ));
     assert_eq!(ports.calls.load(Ordering::SeqCst), 2);
 
-    let cancelled = ManualCancellation::cancelled();
+    let cancelled_context =
+        context_for_profile_with_cancellation("full", Arc::new(ManualCancellation::cancelled()));
     assert!(ports
         .execution
-        .execute(invocation(&ports.scope, "Suspend", json!({})), &cancelled)
+        .execute(
+            invocation(&ports.scope, "Suspend", json!({})),
+            &cancelled_context,
+        )
         .await
         .is_cancelled());
 }
@@ -562,10 +564,29 @@ impl WorkspaceRead for FakeWorkspace {
 }
 
 fn context_for_profile(profile: &str) -> ToolExecutionContext {
-    context_for_run_and_profile("contract-run", profile)
+    context_for_profile_with_cancellation(profile, Arc::new(ManualCancellation::default()))
+}
+
+fn context_for_profile_with_cancellation(
+    profile: &str,
+    cancellation: Arc<dyn CancellationSignal>,
+) -> ToolExecutionContext {
+    context_for_run_profile_and_cancellation("contract-run", profile, cancellation)
 }
 
 fn context_for_run_and_profile(run_id: &str, profile: &str) -> ToolExecutionContext {
+    context_for_run_profile_and_cancellation(
+        run_id,
+        profile,
+        Arc::new(ManualCancellation::default()),
+    )
+}
+
+fn context_for_run_profile_and_cancellation(
+    run_id: &str,
+    profile: &str,
+    cancellation: Arc<dyn CancellationSignal>,
+) -> ToolExecutionContext {
     let workspace = Arc::new(FakeWorkspace::new());
     let scope = ExecutionScope::builder(
         run_id,
@@ -575,7 +596,7 @@ fn context_for_run_and_profile(run_id: &str, profile: &str) -> ToolExecutionCont
     .profile(ToolProfileName::new(profile))
     .build();
     let ports = ToolExecutionPorts::new(
-        Arc::new(ManualCancellation::default()),
+        cancellation,
         WorkspaceReadAccess::new(workspace),
         Arc::new(MutexReadSet(Arc::new(std::sync::Mutex::new(
             Default::default(),

@@ -12,6 +12,7 @@ pub struct SessionRestoreStep {
     pub step_id: String,
     pub messages: Vec<Message>,
     pub finalize_cause: Option<crate::domain::FinalizeCause>,
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,9 +52,14 @@ fn clean_steps(raw_steps: Vec<RestoreStepProjection>) -> (Vec<SessionRestoreStep
         mut messages,
         tool_receipts,
         finalize_cause,
+        duration_ms,
     } in raw_steps
     {
+        let had_unfinished_receipts = has_unfinished_receipts(&tool_receipts);
         project_unfinished_tool_results(&mut messages, &tool_receipts);
+        let finalize_cause = finalize_cause.or_else(|| {
+            had_unfinished_receipts.then_some(crate::domain::FinalizeCause::RunTerminated)
+        });
         let before = messages.len();
         sanitize_messages(&mut messages);
         trimmed += before.saturating_sub(messages.len());
@@ -66,10 +72,20 @@ fn clean_steps(raw_steps: Vec<RestoreStepProjection>) -> (Vec<SessionRestoreStep
                 step_id: cursor.step_id,
                 messages,
                 finalize_cause,
+                duration_ms,
             });
         }
     }
     (steps, trimmed, repaired)
+}
+
+fn has_unfinished_receipts(receipts: &[ToolCallReceipt]) -> bool {
+    receipts.iter().any(|receipt| {
+        matches!(
+            receipt.state,
+            ToolCallState::Pending | ToolCallState::Running
+        )
+    })
 }
 
 fn project_unfinished_tool_results(messages: &mut Vec<Message>, receipts: &[ToolCallReceipt]) {
@@ -83,19 +99,38 @@ fn project_unfinished_tool_results(messages: &mut Vec<Message>, receipts: &[Tool
         })
         .filter(|receipt| {
             let call_id = provider_call_id(receipt);
-            messages
-                .iter()
-                .any(|message| message.tool_use_ids().into_iter().any(|id| id == call_id))
-                && !messages.iter().any(|message| {
-                    message
-                        .tool_result_ids()
-                        .into_iter()
-                        .any(|id| id == call_id)
-                })
+            !messages.iter().any(|message| {
+                message
+                    .tool_result_ids()
+                    .into_iter()
+                    .any(|id| id == call_id)
+            })
         })
         .collect();
     if unresolved.is_empty() {
         return;
+    }
+
+    let missing_tool_uses: Vec<ContentBlock> = unresolved
+        .iter()
+        .filter(|receipt| {
+            let call_id = provider_call_id(receipt);
+            !messages
+                .iter()
+                .any(|message| message.tool_use_ids().into_iter().any(|id| id == call_id))
+        })
+        .map(|receipt| ContentBlock::ToolUse {
+            id: provider_call_id(receipt).to_string(),
+            name: receipt.identity.tool_name.clone(),
+            input: restored_tool_input(receipt),
+        })
+        .collect();
+    if !missing_tool_uses.is_empty() {
+        messages.push(Message {
+            role: Role::Assistant,
+            content: missing_tool_uses,
+            metadata: None,
+        });
     }
 
     let blocks = unresolved
@@ -123,6 +158,13 @@ fn project_unfinished_tool_results(messages: &mut Vec<Message>, receipts: &[Tool
         content: blocks,
         metadata: None,
     });
+}
+
+fn restored_tool_input(receipt: &ToolCallReceipt) -> serde_json::Value {
+    serde_json::from_str(&receipt.input_preview)
+        .ok()
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}))
 }
 
 fn provider_call_id(receipt: &ToolCallReceipt) -> &str {

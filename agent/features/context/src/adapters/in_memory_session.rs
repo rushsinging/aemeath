@@ -216,6 +216,7 @@ impl SessionRepository for InMemorySessionRepository {
             key,
             FinalizedOutcomeProjection {
                 finalize_cause: append.finalize_cause,
+                duration_ms: append.duration_ms,
                 messages: append.messages.clone(),
                 receipts: append.receipts.clone(),
                 api_input_tokens: append.api_input_tokens,

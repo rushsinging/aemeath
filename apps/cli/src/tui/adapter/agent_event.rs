@@ -239,7 +239,7 @@ where
         },
         UiEvent::Done { context }
         | UiEvent::DoneWithDuration { context, .. }
-        | UiEvent::Cancelled { context } => {
+        | UiEvent::Cancelled { context, .. } => {
             conversation(ConversationIntent::CompleteChat(CompleteChat {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
@@ -563,12 +563,42 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 queued: queued.clone(),
             }),
         ),
-        TuiRuntimeEvent::Done { context, .. } | TuiRuntimeEvent::Cancelled { context } => {
-            conversation(ConversationIntent::CompleteChat(CompleteChat {
-                chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
-            }))
-        }
+        TuiRuntimeEvent::Done {
+            context,
+            duration_ms,
+        } => AgentEventMapping {
+            conversation: vec![
+                ConversationIntent::CompleteChat(CompleteChat {
+                    chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
+                        &context.turn_id,
+                    ),
+                }),
+                ConversationIntent::TerminalNotice(TerminalNotice {
+                    cause: crate::tui::model::conversation::terminal::TerminalCause::Completed,
+                    duration: duration_ms.map(std::time::Duration::from_millis),
+                }),
+            ],
+            ..AgentEventMapping::default()
+        },
+        TuiRuntimeEvent::Cancelled {
+            context,
+            duration_ms,
+        } => AgentEventMapping {
+            conversation: vec![
+                ConversationIntent::CompleteChat(CompleteChat {
+                    chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
+                        &context.turn_id,
+                    ),
+                }),
+                ConversationIntent::TerminalNotice(TerminalNotice {
+                    cause: crate::tui::model::conversation::terminal::TerminalCause::UserCancelled,
+                    duration: Some(std::time::Duration::from_millis(*duration_ms)),
+                }),
+            ],
+            ..AgentEventMapping::default()
+        },
         TuiRuntimeEvent::GraphPhaseChanged { node, .. } => {
             conversation(ConversationIntent::SetGraphPhase(SetGraphPhase(
                 (node != "idle").then(|| node.clone()),

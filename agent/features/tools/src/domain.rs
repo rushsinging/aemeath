@@ -48,10 +48,7 @@ pub use context::{
     ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
 pub use memory_source::MemoryPortSource;
-pub use ports::{
-    ToolCatalogPort, ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort,
-    ToolExecutionPort,
-};
+pub use ports::{ToolCatalogPort, ToolExecutionPort};
 pub use published_language::{
     CancellationDeclaration, CleanupConfirmation, ConcurrencyDeclaration, InputSafetyDeclaration,
     RegistryScopeName, ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogSnapshot,

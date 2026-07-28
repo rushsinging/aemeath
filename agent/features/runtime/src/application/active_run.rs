@@ -51,6 +51,7 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        let previous_main_run_id = guard.current_main_run_id.clone();
         guard.runs.insert(
             run_id.clone(),
             ActiveRun {
@@ -62,7 +63,14 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
                 control_delivered: false,
             },
         );
-        guard.current_main_run_id = Some(run_id);
+        guard.current_main_run_id = Some(run_id.clone());
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "active run main activated: run_id={} previous_main_run_id={:?} active_run_count={}",
+            run_id,
+            previous_main_run_id,
+            guard.runs.len()
+        );
     }
 
     fn set_main_active_step(
@@ -76,10 +84,27 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         if let Some(active) = guard.runs.get_mut(run_id) {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "active run main step set: run_id={} step_id={} root_cancelled={} step_cancelled={}",
+                run_id,
+                step_id,
+                active.cancel.is_cancelled(),
+                cancel.is_cancelled()
+            );
             active.main_step = Some(MainStepScope {
                 id: step_id,
                 cancel,
             });
+        } else {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "active run main step ignored: run_id={} step_id={} reason=run_not_found current_main_run_id={:?} active_run_count={}",
+                run_id,
+                step_id,
+                guard.current_main_run_id,
+                guard.runs.len()
+            );
         }
     }
 
@@ -122,10 +147,19 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        guard.runs.remove(run_id);
-        if guard.current_main_run_id.as_ref() == Some(run_id) {
+        let removed = guard.runs.remove(run_id).is_some();
+        let cleared_current_main = guard.current_main_run_id.as_ref() == Some(run_id);
+        if cleared_current_main {
             guard.current_main_run_id = None;
         }
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "active run cleared: run_id={} removed={} cleared_current_main={} remaining_run_count={}",
+            run_id,
+            removed,
+            cleared_current_main,
+            guard.runs.len()
+        );
     }
 }
 
@@ -139,35 +173,68 @@ impl ActiveRunRegistry {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let Some(run_id) = guard.current_main_run_id.clone() else {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "cancel current main rejected: outcome=NoActiveRun active_run_count={} deadline_unix_ms={}",
+                guard.runs.len(),
+                deadline.unix_millis()
+            );
             return sdk::CancelCurrentRunOutcome::NoActiveRun;
         };
         let Some(active) = guard.runs.get_mut(&run_id) else {
             guard.current_main_run_id = None;
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "cancel current main rejected: run_id={} outcome=NoActiveRun reason=registry_entry_missing deadline_unix_ms={}",
+                run_id,
+                deadline.unix_millis()
+            );
             return sdk::CancelCurrentRunOutcome::NoActiveRun;
         };
-        if active.terminal {
-            return sdk::CancelCurrentRunOutcome::RunTerminal;
-        }
-        if matches!(
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "cancel current main evaluating: run_id={} step_id={:?} terminal={} cancelling={} control={:?} root_cancelled={} step_cancelled={} deadline_unix_ms={}",
+            run_id,
+            active.main_step.as_ref().map(|step| &step.id),
+            active.terminal,
+            active.cancelling,
+            active.control,
+            active.cancel.is_cancelled(),
+            active.main_step.as_ref().is_some_and(|step| step.cancel.is_cancelled()),
+            deadline.unix_millis()
+        );
+        let outcome = if active.terminal {
+            sdk::CancelCurrentRunOutcome::RunTerminal
+        } else if matches!(
             active.control,
             Some(crate::domain::agent_run::RunControl::Terminate { .. })
         ) {
-            return sdk::CancelCurrentRunOutcome::RunTerminating;
-        }
-        if active.control.is_some() || active.cancelling {
-            return sdk::CancelCurrentRunOutcome::AlreadyCancelling;
-        }
-        let Some(current_step) = active.main_step.as_ref() else {
+            sdk::CancelCurrentRunOutcome::RunTerminating
+        } else if active.control.is_some() || active.cancelling {
+            sdk::CancelCurrentRunOutcome::AlreadyCancelling
+        } else if let Some(current_step) = active.main_step.as_ref() {
+            let step_id = current_step.id.clone();
+            current_step.cancel.cancel();
+            active.control =
+                Some(crate::domain::agent_run::RunControl::CancelStep { step_id, deadline });
+            active.control_delivered = false;
+            sdk::CancelCurrentRunOutcome::Accepted
+        } else {
             active.cancelling = true;
             active.cancel.cancel();
-            return sdk::CancelCurrentRunOutcome::Accepted;
+            sdk::CancelCurrentRunOutcome::Accepted
         };
-        let step_id = current_step.id.clone();
-        current_step.cancel.cancel();
-        active.control =
-            Some(crate::domain::agent_run::RunControl::CancelStep { step_id, deadline });
-        active.control_delivered = false;
-        sdk::CancelCurrentRunOutcome::Accepted
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "cancel current main completed: run_id={} step_id={:?} outcome={:?} root_cancelled={} step_cancelled={} control={:?}",
+            run_id,
+            active.main_step.as_ref().map(|step| &step.id),
+            outcome,
+            active.cancel.is_cancelled(),
+            active.main_step.as_ref().is_some_and(|step| step.cancel.is_cancelled()),
+            active.control
+        );
+        outcome
     }
 
     pub fn cancel_step(

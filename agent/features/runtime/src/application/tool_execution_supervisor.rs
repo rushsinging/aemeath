@@ -1,35 +1,17 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use async_trait::async_trait;
 use context::domain::{
     CleanupConfirmation as ReceiptCleanupConfirmation, ToolCallIdentity, ToolReceiptMutation,
     ToolTerminalReceipt,
 };
 use tokio_util::sync::CancellationToken;
 use tools::{
-    CancellationDeclaration, CancellationSignal, CleanupConfirmation, ToolCatalogSnapshot,
+    CancellationDeclaration, CleanupConfirmation, ToolCatalogSnapshot, ToolExecutionContext,
     ToolExecutionOutcome as PublishedToolOutcome, ToolExecutionPort, ToolInvocation,
 };
 
 use crate::application::context_coordination::ContextCoordinator;
-
-struct SupervisorCancellation(CancellationToken);
-
-#[async_trait]
-impl CancellationSignal for SupervisorCancellation {
-    fn is_cancelled(&self) -> bool {
-        self.0.is_cancelled()
-    }
-
-    async fn cancelled(&self) {
-        self.0.cancelled().await;
-    }
-
-    fn child_signal(&self) -> Arc<dyn CancellationSignal> {
-        Arc::new(Self(self.0.child_token()))
-    }
-}
 
 const DEFAULT_GRACE: Duration = Duration::from_millis(250);
 
@@ -44,6 +26,7 @@ pub(crate) struct ToolExecutionSupervisor {
 pub(crate) struct SupervisedToolCall {
     pub identity: ToolCallIdentity,
     pub invocation: ToolInvocation,
+    pub context: ToolExecutionContext,
     pub input_preview: String,
     pub run_deadline: Option<SystemTime>,
     pub cancellation: CancellationToken,
@@ -115,9 +98,17 @@ impl ToolExecutionSupervisor {
             call.run_deadline,
             Some(SystemTime::now() + Duration::from_secs(descriptor.timeout_secs)),
         );
-        let child = call.cancellation.child_token();
-        let signal: Arc<dyn CancellationSignal> = Arc::new(SupervisorCancellation(child.clone()));
-        let future = self.execution.execute(call.invocation, signal.as_ref());
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "tool execution awaiting terminal: run_id={} step_id={} call_id={} tool={} caller_cancelled={} effective_deadline={:?}",
+            call.identity.run_id,
+            call.identity.step_id,
+            call.identity.runtime_call_id,
+            call.identity.tool_name,
+            call.cancellation.is_cancelled(),
+            effective_deadline
+        );
+        let future = self.execution.execute(call.invocation, &call.context);
         tokio::pin!(future);
 
         let outcome = match effective_deadline {
@@ -128,11 +119,27 @@ impl ToolExecutionSupervisor {
                 tokio::select! {
                     result = &mut future => result,
                     _ = call.cancellation.cancelled() => {
-                        child.cancel();
+                        log::debug!(
+                            target: crate::LOG_TARGET,
+                            "tool supervisor observed caller cancellation: run_id={} step_id={} call_id={} tool={} elapsed_ms={}",
+                            call.identity.run_id,
+                            call.identity.step_id,
+                            call.identity.runtime_call_id,
+                            call.identity.tool_name,
+                            started.elapsed().as_millis()
+                        );
                         cancellation_outcome(descriptor.cancellation, &mut future, self.grace, false).await
                     }
                     _ = tokio::time::sleep(wait) => {
-                        child.cancel();
+                        log::debug!(
+                            target: crate::LOG_TARGET,
+                            "tool supervisor observed deadline: run_id={} step_id={} call_id={} tool={} elapsed_ms={}",
+                            call.identity.run_id,
+                            call.identity.step_id,
+                            call.identity.runtime_call_id,
+                            call.identity.tool_name,
+                            started.elapsed().as_millis()
+                        );
                         cancellation_outcome(descriptor.cancellation, &mut future, self.grace, true).await
                     }
                 }
@@ -140,7 +147,15 @@ impl ToolExecutionSupervisor {
             None => tokio::select! {
                 result = &mut future => result,
                 _ = call.cancellation.cancelled() => {
-                    child.cancel();
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "tool supervisor observed caller cancellation: run_id={} step_id={} call_id={} tool={} elapsed_ms={}",
+                        call.identity.run_id,
+                        call.identity.step_id,
+                        call.identity.runtime_call_id,
+                        call.identity.tool_name,
+                        started.elapsed().as_millis()
+                    );
                     cancellation_outcome(descriptor.cancellation, &mut future, self.grace, false).await
                 }
             },

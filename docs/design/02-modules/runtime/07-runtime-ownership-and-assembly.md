@@ -80,7 +80,8 @@ Run 的差异分成两个正交维度：
 `RuntimeServices` 只持 Agent Runtime 生命周期内稳定的 Port、Factory 和基础设施：
 
 - Provider、Context、Memory、Reasoning 的 factory 或绑定服务；
-- Tool catalog、execution 与 execution-context binding；
+- Tool catalog、execution，以及从 Run snapshot 绑定的 execution context；
+- Tool progress/event sink 的 factory 或 binding service；
 - Policy、Hook、Task、Reflection、Session management；
 - Config query/writer；
 - Skill catalog/materializer；
@@ -142,6 +143,7 @@ Run 创建时捕获窄的 session snapshot。Factory 不长期借用动态 `Sess
 - bound Context、Provider、Tool、Policy、Hook、Memory、Task、Reasoning、Interaction 与 Reflection capability；
 - `RunConfigSnapshot` 和 provider/model binding；
 - cancellation、event sink、usage、input 等 per-Run 基础设施实例；
+- 当前 Run 冻结后的 Tool execution context 与 progress sink；
 - 按 `workspace_mode` 绑定后的窄 Workspace capability。
 
 它不持有 Factory、Config reader/writer、Session management、session query、model switch、reminders、messages、context window、turn count 或 terminal state。
@@ -191,9 +193,10 @@ Loop Engine 的顺序是：先请求 `Run` 完成合法状态迁移，再更新 
 2. 接收或捕获窄的 session snapshot；
 3. 从 `RuntimeServices` 取得 factory 与父能力；
 4. 按能力模式选择 shared、isolated、restricted 或 disabled adapter；
-5. 创建 cancellation、input、event、usage 等 per-Run 实例；
-6. 校验派生 Run 不超过父 capability ceiling；
-7. 返回完整且冻结的 `RuntimeContext`。
+5. 创建 cancellation、input、event、usage 与 Tool progress sink 等 per-Run 实例；
+6. 由 factory 直接绑定当前 Run 的 Tool execution context；禁止 Loop 或 Agent 持有 `ToolExecutionContextBinding` 后按调用再次装配；
+7. 校验派生 Run 不超过父 capability ceiling；
+8. 返回完整且冻结的 `RuntimeContext`。
 
 它不负责执行 Loop、恢复 Session、修改 `SessionState`、保存消息、处理模型响应或创建 `RunExecutionState`。
 
@@ -285,7 +288,67 @@ Workspace 不得继续绕过 `RuntimeContext` 旁路进入 Loop adapter。
 | `DerivedSubRun` | 改为通用 prepared/launch result，或由统一 launcher 输入替代 |
 | `RuntimeWorkspaceAccess` 旁路 | 收入 factory 的 workspace capability binding |
 
-## 9. 命名约束
+## 9. 事件语言与用户可见终态
+
+Runtime 的领域状态、生命周期观测和用户可见终态是三个不同层次，禁止消费方跨层拼装语义：
+
+```text
+Run / RunStep 状态迁移
+  → RunDomainEvent（领域事实）
+  → Runtime Event Strategy（汇总与投影）
+  → RuntimeStreamEvent（Runtime 出站）
+  → SDK ChatEvent（公开传输）
+  → TUI RuntimeEvent（无状态渲染）
+```
+
+强制约束：
+
+1. `Run` 是 Run/RunStep 终态原因的唯一真相源；TUI **MUST NOT** 根据 `run_id + step_id` 关联多个生命周期事件来猜测最终提示。
+2. Runtime Event Strategy 必须把完整领域事件序列汇总为一个权威的用户可见终态；SDK/TUI 只透传和渲染该语义。
+3. `RunStepCancelled` 是生命周期观测事件，不是要求 TUI 缓存的控制信号。
+4. Step 被用户取消后，Run 可以为了完成 drain/seal 在领域状态上进入 `Completed`；该 `Completed` 事件必须携带 `user_cancelled_step=true`，Runtime 对外投影为 `Cancelled`，不得投影为 `DoneWithDuration`。
+5. 实时路径与 Resume 路径必须等价：实时使用 Runtime 汇总后的取消终态，Resume 使用持久化 `FinalizeCause::UserCancelledStep`，最终都渲染 `✻ Cancelled, ran <duration>`。
+6. 一个 turn 只能发布一个用户可见终态。正常完成、用户取消、失败/终止互斥，不得先发取消再发正常完成。
+
+### 9.1 `RunDomainEvent` 全量职责
+
+| Event | 作用 | 是否用户可见终态 |
+|---|---|---|
+| `Transitioned` | 记录 Run 状态迁移及原因，供审计/诊断 | 否 |
+| `Started` | Run 已启动 | 否 |
+| `StepStarted` | 新 RunStep 已激活 | 否 |
+| `StepCompleted` | RunStep 正常完成 | 否 |
+| `StepCancellationRequested` | Step 取消请求已受理 | 否 |
+| `StepFinalizationStarted` | Step 开始持久化与 Tool 收敛 | 否 |
+| `StepCancelled` | Step 取消收口完成，`confirmed` 区分确认/未确认 | 否；仅生命周期观测 |
+| `DrainingInput` | Run 等待或排空后续输入 | 否 |
+| `TerminationRequested` | Run 终止请求已受理 | 否 |
+| `Terminated` | Run 因退出、信号或父 Step 取消而终止 | 是，由 Runtime 投影 |
+| `CancellationRequested` | 整个 Run 取消请求已受理 | 否 |
+| `AwaitingUser` | Run 等待结构化用户交互 | 否 |
+| `Resumed` | 用户交互完成，Run 恢复 | 否 |
+| `StuckDetected` | StuckGuard 发现阻塞 | 否；投影诊断消息 |
+| `Completed` | Run drain/seal 完成；`user_cancelled_step` 保留本轮终态原因 | 是，由 Runtime 根据原因投影 |
+| `Failed` | Run 失败 | 是，由 Runtime 投影错误终态 |
+| `Cancelled` | 整个 Run 取消收口完成 | 是，由 Runtime 投影取消终态 |
+
+### 9.2 Runtime / SDK / TUI 事件职责
+
+| 层 | Event | 作用 |
+|---|---|---|
+| Runtime 出站 | `DoneWithDuration` | 权威正常完成终态，包含 turn context 与耗时 |
+| Runtime 出站 | `Cancelled` | 权威用户取消终态，包含 turn context 与耗时；既覆盖整 Run 取消，也覆盖 Step 取消后 drain/seal |
+| Runtime 出站 | `RunStarted` / `RunCancelling` / `RunCancelled` | Run 生命周期观测与控制 ACK；不得用于 TUI 推导 terminal notice |
+| Runtime 出站 | 领域事件投影 | `RunStep*`、drain、interaction、termination 等结构化观测 |
+| SDK | `DoneWithDurationMs` | `DoneWithDuration` 的毫秒传输形式 |
+| SDK | `Cancelled` | Runtime 权威取消终态的公开传输形式 |
+| SDK | `RunStepCancelled` 等 | 生命周期 Published Language，保留 identity 给调试或其他客户端，不要求 TUI 关联 |
+| SDK | `SessionResumed` | Context 持久化历史投影；每个 Step 带 `finalize_cause` 与 `duration_ms` |
+| TUI | `TuiRuntimeEvent::Done` | 仅渲染正常完成提示并结束 processing |
+| TUI | `TuiRuntimeEvent::Cancelled` | 仅渲染取消提示并结束 processing |
+| TUI | `TuiRuntimeEvent::Run/RunStep` | 可选生命周期投影，不拥有终态语义，不改变 terminal cause |
+
+## 10. 命名约束
 
 目标类型名必须表达领域角色、所有权和生命周期：
 
@@ -300,12 +363,14 @@ Workspace 不得继续绕过 `RuntimeContext` 旁路进入 Loop adapter。
 
 全仓命名原则应在根 `AGENTS.md` 登记，Rust 细则归 `specs/rust-coding.md`；本文只记录 Runtime 模型中的具体应用。
 
-## 10. 验收条件
+## 11. 验收条件
 
 - 生产类型、Factory 和 Loop Engine 不含 Main/Sub 分类或行为分支。
 - `RuntimeServices` 与 `SessionState` 无字段类别交叉。
 - `RuntimeContext` 只能由统一 factory 构造，且创建后能力不可替换。
+- Tool execution context 与 progress sink 只在 factory 按 Run 绑定；`ToolInvocation` 不反向携带 Runtime callback，Loop 不保留 binding factory。
 - `RuntimeContextParts`、多套 assembler 和 Runtime 内第二 Composition Root 均退役。
 - `Run` 与 `RunExecutionState` 无重复状态所有权。
 - Workspace、Prompt、Skills、Config 均按本文生命周期边界流动。
+- Step 取消后 Run 即使 drain/seal 为 `Completed`，Runtime 也只发布一个 `Cancelled` 用户可见终态；TUI 不缓存或关联 Run/Step identity 来推导提示。
 - 每层装配、状态转换、能力不扩权和端到端场景都有相邻契约测试。

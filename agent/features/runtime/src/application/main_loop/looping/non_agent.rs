@@ -374,8 +374,9 @@ where
     let exec_results = if is_bash {
         // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
         let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-        let streaming_ctx =
-            tool_ctx.with_progress(Some(crate::adapters::tool_runtime::progress(prog_tx)));
+        let streaming_ctx = tool_ctx.with_progress(Some(
+            crate::application::runtime_context::tool_progress_sink(prog_tx),
+        ));
         let call_id = effective_call.id.clone();
         let stream_sink = sink.clone();
         let stream_context = context.clone();

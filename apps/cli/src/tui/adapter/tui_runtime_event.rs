@@ -429,6 +429,7 @@ pub(crate) enum TuiRuntimeEvent {
     },
     Cancelled {
         context: TuiTurnContext,
+        duration_ms: u64,
     },
     LiveTps(f64),
     TurnChanged(usize),

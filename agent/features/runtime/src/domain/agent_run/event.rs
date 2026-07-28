@@ -79,6 +79,9 @@ pub enum RunDomainEvent {
         run_id: RunId,
         parent_run_id: Option<RunId>,
         result: String,
+        /// 用户取消了本 Run 的某个 Step；Run 仅因完成 drain/seal 而进入 Completed。
+        /// 消费方必须据此投影用户可见的取消终态，而不是正常完成。
+        user_cancelled_step: bool,
     },
     Failed {
         run_id: RunId,

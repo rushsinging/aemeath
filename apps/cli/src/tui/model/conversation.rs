@@ -35,6 +35,7 @@ pub mod stream;
 pub mod streaming_preview;
 pub mod system_reminder;
 pub mod task_status;
+pub mod terminal;
 pub mod text_stream;
 pub mod tool_call;
 mod tool_flow;

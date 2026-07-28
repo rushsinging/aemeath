@@ -8,7 +8,7 @@ use crate::domain::{FinalizeCause, StepReceipt, ToolCallReceipt, ToolReceiptMuta
 
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
 
-pub const CURRENT_SESSION_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SESSION_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", content = "value", rename_all = "snake_case")]
@@ -75,6 +75,8 @@ pub struct ActiveCompactMarker {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FinalizedOutcomeProjection {
     pub finalize_cause: FinalizeCause,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
     pub messages: Vec<Message>,
     pub receipts: Vec<StepReceipt>,
     pub api_input_tokens: Option<u64>,
@@ -86,6 +88,7 @@ impl FinalizedOutcomeProjection {
     pub fn compatibility(messages: Vec<Message>) -> Self {
         Self {
             finalize_cause: FinalizeCause::Completed,
+            duration_ms: None,
             messages,
             receipts: Vec::new(),
             api_input_tokens: None,
@@ -155,6 +158,7 @@ pub(crate) struct RestoreStepProjection {
     pub messages: Vec<Message>,
     pub tool_receipts: Vec<ToolCallReceipt>,
     pub finalize_cause: Option<FinalizeCause>,
+    pub duration_ms: Option<u64>,
 }
 
 fn step_messages(step: &CommittedRunStep) -> Vec<Message> {
@@ -388,6 +392,10 @@ impl CanonicalSession {
                     messages: step_messages(step),
                     tool_receipts: step.tool_receipts.clone(),
                     finalize_cause: step.outcome.as_ref().map(|outcome| outcome.finalize_cause),
+                    duration_ms: step
+                        .outcome
+                        .as_ref()
+                        .and_then(|outcome| outcome.duration_ms),
                 })
             })
             .collect()
@@ -418,6 +426,10 @@ impl CanonicalSession {
                         messages: step_messages(step),
                         tool_receipts: step.tool_receipts.clone(),
                         finalize_cause: step.outcome.as_ref().map(|outcome| outcome.finalize_cause),
+                        duration_ms: step
+                            .outcome
+                            .as_ref()
+                            .and_then(|outcome| outcome.duration_ms),
                     });
                 }
             }
@@ -753,7 +765,7 @@ impl SessionCodec {
                     upgraded_from_legacy: false,
                 })
             }
-            Some(3) => {
+            Some(4) | Some(3) => {
                 let envelope: VersionedEnvelope = serde_json::from_value(value)
                     .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))?;
                 Ok(DecodedSession {

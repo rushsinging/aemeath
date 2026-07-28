@@ -17,4 +17,4 @@ pub use domain::{
     HookFailurePolicy, HookInvocation, HookMatcher, HookOutcome, HookPoint, HookPointMetadata,
     HookReason, HookSubscription, ProtocolViolation, SubscriptionError,
 };
-pub use ports::{HookDispatchContext, HookPort};
+pub use ports::{CancellationSignal, HookDispatchContext, HookPort};

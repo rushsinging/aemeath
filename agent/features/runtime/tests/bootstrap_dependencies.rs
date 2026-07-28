@@ -198,7 +198,6 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),
             tools.execution(),
-            tools.binding(),
             skill_catalog,
             skill_materializer.clone(),
             tool_result_materializer.clone(),
@@ -208,7 +207,6 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
             Arc::new(runtime::RuntimeContextFactory::new(
                 tools.catalog_port(),
                 tools.execution(),
-                tools.binding(),
                 Arc::new(policy::AllowAllPolicy),
                 history.clone(),
                 access.clone(),

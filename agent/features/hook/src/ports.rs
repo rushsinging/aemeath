@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use tokio_util::sync::CancellationToken;
 
 use crate::domain::{HookInvocation, HookOutcome};
 
@@ -43,6 +42,24 @@ impl HookDispatchContext {
     }
 }
 
+/// Hook domain 所需的最小协作取消能力。
+#[async_trait]
+pub trait CancellationSignal: Send + Sync {
+    fn is_cancelled(&self) -> bool;
+    async fn cancelled(&self);
+}
+
+#[async_trait]
+impl CancellationSignal for tokio_util::sync::CancellationToken {
+    fn is_cancelled(&self) -> bool {
+        tokio_util::sync::CancellationToken::is_cancelled(self)
+    }
+
+    async fn cancelled(&self) {
+        tokio_util::sync::CancellationToken::cancelled(self).await;
+    }
+}
+
 /// Hook BC 的出站端口。
 ///
 /// 协议固定：
@@ -56,7 +73,7 @@ pub trait HookPort: Send + Sync {
     async fn dispatch(
         &self,
         invocation: HookInvocation,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> HookOutcome;
 
     /// 使用当前工作区上下文分发 Hook。
@@ -67,7 +84,7 @@ pub trait HookPort: Send + Sync {
         &self,
         invocation: HookInvocation,
         _context: HookDispatchContext,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         self.dispatch(invocation, cancellation).await
     }

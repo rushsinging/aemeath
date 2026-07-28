@@ -28,6 +28,7 @@ impl App {
                     sdk::ResumedStepFinalizeCause::UserCancelledStep => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep,
                     sdk::ResumedStepFinalizeCause::RunTerminated => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated,
                 }),
+                duration_ms: step.duration_ms,
             })
             .collect();
         self.resume_session_messages(&resume.session_id, steps, resume.created_at.to_string());
@@ -132,6 +133,7 @@ mod tests {
                 step_id: "step-1".to_string(),
                 messages: vec![sdk::ChatMessage::assistant_text("P5 progress is preserved")],
                 finalize_cause: None,
+                duration_ms: None,
             }],
             session_id: "session-resumed".to_string(),
             created_at: 42,
@@ -209,6 +211,7 @@ mod tests {
                     TuiChatMessage::assistant_text("历史回答"),
                 ],
                 finalize_cause: None,
+                duration_ms: None,
             }],
             "2026-01-01T00:00:00Z".to_string(),
         );

@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
-use tokio_util::sync::CancellationToken;
+
+use crate::ports::CancellationSignal;
 
 pub(crate) const DEFAULT_OUTPUT_LIMIT: usize = 8 * 1024;
 const TERMINATION_GRACE: Duration = Duration::from_millis(250);
@@ -73,7 +74,7 @@ impl ProcessDriver {
     pub(crate) async fn execute(
         &self,
         request: ProcessRequest,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> Result<ProcessOutput, ProcessFailure> {
         use std::os::unix::process::CommandExt;
 
@@ -194,7 +195,7 @@ impl ProcessDriver {
     pub(crate) async fn execute(
         &self,
         _request: ProcessRequest,
-        _cancellation: &CancellationToken,
+        _cancellation: &dyn CancellationSignal,
     ) -> Result<ProcessOutput, ProcessFailure> {
         Err(ProcessFailure::new(
             ProcessFailureKind::Unsupported,

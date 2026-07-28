@@ -249,7 +249,7 @@ where
     );
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-    let prog_adapter = crate::adapters::tool_runtime::progress(prog_tx);
+    let prog_adapter = crate::application::runtime_context::tool_progress_sink(prog_tx);
     *ag_ctx = ag_ctx.with_progress(Some(prog_adapter.clone()));
     let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
@@ -337,7 +337,7 @@ mod tests {
         async fn dispatch(
             &self,
             _invocation: HookInvocation,
-            _cancellation: &CancellationToken,
+            _cancellation: &dyn hook::CancellationSignal,
         ) -> hook::HookOutcome {
             hook::HookOutcome::proceed()
         }

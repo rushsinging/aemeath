@@ -32,6 +32,16 @@ mod boundary_tests {
     use std::path::Path;
 
     #[test]
+    fn runtime_context_factory_does_not_expose_service_bag() {
+        let source = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src/application/runtime_context_factory.rs"),
+        )
+        .expect("read RuntimeContextFactory source");
+        assert!(!source.contains("pub fn services("));
+    }
+
+    #[test]
     fn runtime_source_does_not_name_task_persistence_or_legacy_projection() {
         fn assert_tree(path: &Path) {
             for entry in std::fs::read_dir(path).expect("read Runtime source tree") {

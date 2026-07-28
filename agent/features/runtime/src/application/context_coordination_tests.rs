@@ -271,6 +271,7 @@ async fn finalized_step_appends_once_with_original_message_order() {
             RunStepId::new("step"),
             SessionRevision::new(1),
             FinalizeCause::Completed,
+            None,
             messages.clone(),
             vec![],
             None,
@@ -317,6 +318,7 @@ async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
             RunStepId::new("final-step"),
             SessionRevision::new(7),
             FinalizeCause::UserCancelledStep,
+            Some(7_325_000),
             messages.clone(),
             receipts.clone(),
             Some(4_096),
@@ -332,6 +334,7 @@ async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
     assert_eq!(append.source_request_id, frozen.request_id);
     assert_eq!(append.expected_revision, SessionRevision::new(7));
     assert_eq!(append.finalize_cause, FinalizeCause::UserCancelledStep);
+    assert_eq!(append.duration_ms, Some(7_325_000));
     assert_eq!(
         serde_json::to_value(&append.messages).unwrap(),
         serde_json::to_value(&messages).unwrap()
@@ -360,6 +363,7 @@ async fn fingerprint_is_stable_and_sensitive_to_finalized_facts() {
                 RunStepId::new("step"),
                 SessionRevision::new(1),
                 cause,
+                None,
                 messages,
                 receipts,
                 api_input_tokens,
@@ -474,6 +478,7 @@ async fn append_conflict_is_returned_without_hidden_retry() {
                 RunStepId::new("step"),
                 SessionRevision::new(1),
                 FinalizeCause::Completed,
+                None,
                 vec![Message::user("fact")],
                 vec![],
                 None,

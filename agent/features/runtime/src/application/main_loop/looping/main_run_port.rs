@@ -287,10 +287,6 @@ where
         self.runtime_context.tool_execution_ref()
     }
     #[inline]
-    fn tool_context_binding(&self) -> &Arc<dyn tools::ToolExecutionContextBindingPort> {
-        self.runtime_context.tool_context_binding_ref()
-    }
-    #[inline]
     fn policy(&self) -> &dyn policy::PolicyPort {
         self.runtime_context.policy_ref().as_ref()
     }
@@ -442,6 +438,7 @@ where
                 request.step_id.clone(),
                 window.backing_revision,
                 cause,
+                Some(self.started_at.elapsed().as_millis() as u64),
                 messages,
                 vec![],
                 self.runtime_context.usage().get(),
@@ -519,7 +516,7 @@ where
                 )
                 .build(),
                 tools::ToolExecutionPorts::new(
-                    crate::adapters::tool_runtime::cancellation(cancel.clone()),
+                    crate::application::runtime_context::tool_cancellation_signal(cancel.clone()),
                     crate::application::workspace_access::RuntimeWorkspaceAccess::new(
                         workspace.clone(),
                     )
@@ -798,7 +795,7 @@ where
             self.language,
             self.run_config().config().user_agent(),
             self.workspace,
-            &self.cancel_token(),
+            cancel,
             self.read_files,
             self.session_reminders,
             self.max_tool_concurrency,
@@ -807,11 +804,6 @@ where
             self.runtime_context.context(),
             &self.run_id,
         );
-        let _binding = tools::ToolExecutionContextBindingGuard::bind(
-            (*self.tool_context_binding()).clone(),
-            agent.ctx.clone(),
-        )
-        .map_err(LoopEngineError::Adapter)?;
         let sink = self.runtime_context.event_sink();
         let round_result = execute_tool_round(
             &self.turn_context,
@@ -1549,7 +1541,9 @@ where
                             )
                             .build(),
                             tools::ToolExecutionPorts::new(
-                                crate::adapters::tool_runtime::cancellation(self.cancel_token()),
+                                crate::application::runtime_context::tool_cancellation_signal(
+                                    self.cancel_token(),
+                                ),
                                 crate::application::workspace_access::RuntimeWorkspaceAccess::new(
                                     self.workspace.clone(),
                                 )

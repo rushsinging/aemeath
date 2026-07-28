@@ -297,6 +297,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
         step_id: RunStepId::new("production-step"),
         source_request_id: ContextRequestId::new("production-request"),
         finalize_cause: FinalizeCause::Completed,
+        duration_ms: None,
         messages: vec![Message::user("production durable fact")],
         receipts: vec![],
         api_input_tokens: Some(34),

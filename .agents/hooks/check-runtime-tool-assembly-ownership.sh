@@ -30,7 +30,7 @@ else:
     for pattern, message in forbidden:
         if re.search(pattern, production):
             violations.append(f"agent/features/runtime/src/application/client/from_args.rs: {message}")
-    for field in ["tool_catalog", "tool_execution", "tool_context_binding", "skill_catalog", "skill_materializer", "tool_result_materializer", "active_run"]:
+    for field in ["tool_catalog", "tool_execution", "skill_catalog", "skill_materializer", "tool_result_materializer", "active_run"]:
         if not re.search(rf"\b{field}\b", production):
             violations.append(f"agent/features/runtime/src/application/client/from_args.rs: Runtime dependencies must carry injected {field}")
 
@@ -40,7 +40,7 @@ else:
     source = composition.read_text()
     for pattern in [r"fn wire_runtime_tool_assembly\s*\(", r"wire_builtin_catalog_execution\s*\(", r"wire_skills\s*\(", r"AtomicBlobToolResultStore::new\s*\(", r"ActiveRunRegistry::default\s*\("]:
         if not re.search(pattern, source):
-            violations.append("agent/composition/src/runtime.rs: Composition must assemble every Runtime Tool/Skill/Tool Result/active-run dependency")
+            violations.append("agent/composition/src/runtime.rs: Composition must assemble every stable Runtime Tool/Skill/Tool Result/active-run dependency")
             break
 
 if violations:

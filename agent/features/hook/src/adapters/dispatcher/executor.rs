@@ -13,9 +13,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio_util::sync::CancellationToken;
 
 use crate::domain::subscription::HookCommand;
+use crate::ports::CancellationSignal;
 
 use crate::adapters::process::{
     ProcessDriver, ProcessFailure, ProcessFailureKind, ProcessRequest, DEFAULT_OUTPUT_LIMIT,
@@ -84,7 +84,7 @@ pub(crate) trait Executor: Send + Sync {
         cwd: &std::path::Path,
         env: &HashMap<String, String>,
         timeout: Duration,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> Result<RawExecution, ExecutionFault>;
 }
 
@@ -123,7 +123,7 @@ impl Executor for ProcessDriverExecutor {
         cwd: &std::path::Path,
         env: &HashMap<String, String>,
         timeout: Duration,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> Result<RawExecution, ExecutionFault> {
         let stdin_bytes = serde_json::to_vec(stdin).unwrap_or_default();
         let request = ProcessRequest {

@@ -1,5 +1,5 @@
 mod ask_user_key;
-mod done;
+pub(crate) mod done;
 mod enter;
 mod key;
 mod key_nav;

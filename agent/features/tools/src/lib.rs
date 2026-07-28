@@ -36,11 +36,10 @@ pub use domain::{
     SkillMaterializationSnapshot, SkillQuery, SkillSource, SkillSourceKind, SlashInput,
     SnapshotQueryCommand, SnapshotQueryTarget, Tool, ToolCapabilities, ToolCapability,
     ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind,
-    ToolExecutionContext, ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort,
-    ToolExecutionOutcome, ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider,
-    ToolName, ToolOutcome, ToolProfile, ToolProfileName, ToolResult, ToolSuspension,
-    ToolTerminalDetails, TypedTool, TypedToolAdapter, TypedToolResult, UserInteractionSpec,
-    UserOption, UserQuestion, WorkspaceReadAccess,
+    ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort, ToolExecutionPorts,
+    ToolInvocation, ToolListProvider, ToolName, ToolOutcome, ToolProfile, ToolProfileName,
+    ToolResult, ToolSuspension, ToolTerminalDetails, TypedTool, TypedToolAdapter, TypedToolResult,
+    UserInteractionSpec, UserOption, UserQuestion, WorkspaceReadAccess,
 };
 
 // Schema validator (moved from runtime).
