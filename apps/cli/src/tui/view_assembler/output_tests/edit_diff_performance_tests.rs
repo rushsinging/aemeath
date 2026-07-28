@@ -5,7 +5,7 @@ use crate::tui::model::conversation::intent::{
 };
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
-use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
+use crate::tui::render::output::document_renderer::{OutputDocumentRenderer, OutputRenderWindow};
 use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
 use crate::tui::render::performance::{capture, percentiles_ns, RenderPerformanceSnapshot};
 use crate::tui::view_model::OutputBlockKind;
@@ -144,9 +144,17 @@ fn revision_update_after_history_trim_reuses_windowed_static_edit_layout() {
         None,
     );
     let (_, cold) = capture(|| {
-        renderer.render_model_document(&first_vm, 100, 100, 0, MarkdownSpacingPolicy::normal())
+        renderer.render_tree_with_window(
+            &first_vm,
+            100,
+            0,
+            MarkdownSpacingPolicy::normal(),
+            OutputRenderWindow {
+                line_limit: 10_000,
+                tail_offset: 0,
+            },
+        )
     });
-
     conversation.apply(AppendSystemMessage {
         text: "与既有 Edit 内容无关的新消息".to_string(),
     });
@@ -156,11 +164,25 @@ fn revision_update_after_history_trim_reuses_windowed_static_edit_layout() {
         None,
     );
     let (_, revised) = capture(|| {
-        renderer.render_model_document(&next_vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+        renderer.render_tree_with_window(
+            &next_vm,
+            100,
+            1,
+            MarkdownSpacingPolicy::normal(),
+            OutputRenderWindow {
+                line_limit: 10_000,
+                tail_offset: 0,
+            },
+        )
     });
-
-    assert!(cold.block_cache_retain_evictions > 0);
-    assert!(cold.gutted_cache_retain_evictions > 0);
+    assert_eq!(
+        cold.block_cache_retain_evictions, 0,
+        "窗口裁剪不再逐出语义上仍存活的 block cache"
+    );
+    assert_eq!(
+        cold.gutted_cache_retain_evictions, 0,
+        "窗口裁剪不再逐出语义上仍存活的 gutted cache"
+    );
     assert_eq!(revised.edit_diff_calls, 0);
     assert_eq!(revised.diff_build_calls, 0);
     assert_eq!(revised.syntax_highlight_calls, 0);
@@ -222,7 +244,7 @@ fn edit_diff_release_workload() {
         let (cold_p50, cold_p95) = percentiles_ns(&cold_ns).unwrap();
         let (warm_p50, warm_p95) = percentiles_ns(&warm_ns).unwrap();
         println!(
-            "edits={edit_count:>2} lines_per_diff={lines_per_diff:>4} total_source_lines={:>5} | assemble_p50/p95={:.2}/{:.2}ms cold_p50/p95={:.2}/{:.2}ms warm_p50/p95={:.3}/{:.3}ms | diff_calls={} diff_output_lines={} highlighter_creations={} highlight_calls={} highlight_bytes={} block_miss={} block_absent={} block_version={} block_width={} block_spacing={} block_evicted={} gutted_miss={} gutted_absent={} gutted_version={} gutted_width={} gutted_depth={} gutted_spacing={} gutted_marker={} gutted_evicted={}",
+            "edits={edit_count:>2} lines_per_diff={lines_per_diff:>4} total_source_lines={:>5} | assemble_p50/p95={:.2}/{:.2}ms cold_p50/p95={:.2}/{:.2}ms warm_p50/p95={:.3}/{:.3}ms | diff_calls={} diff_output_lines={} highlighter_creations={} highlight_calls={} highlight_bytes={} block_miss={} block_absent={} block_version={} block_width={} block_spacing={} block_evicted={} gutted_miss={} gutted_absent={} gutted_version={} gutted_width={} gutted_depth={} gutted_spacing={} gutted_evicted={}",
             edit_count * lines_per_diff,
             assemble_p50 as f64 / 1_000_000.0,
             assemble_p95 as f64 / 1_000_000.0,
@@ -247,8 +269,6 @@ fn edit_diff_release_workload() {
             representative.gutted_cache_width_misses,
             representative.gutted_cache_depth_misses,
             representative.gutted_cache_spacing_misses,
-            representative.gutted_cache_marker_misses,
-            representative.gutted_cache_retain_evictions,
-        );
+            representative.gutted_cache_retain_evictions,        );
     }
 }

@@ -43,7 +43,6 @@ pub(crate) struct RenderPerformanceSnapshot {
     pub gutted_cache_width_misses: u64,
     pub gutted_cache_depth_misses: u64,
     pub gutted_cache_spacing_misses: u64,
-    pub gutted_cache_marker_misses: u64,
     pub gutted_cache_retain_evictions: u64,
 }
 
@@ -272,10 +271,6 @@ pub(crate) fn record_gutted_cache_depth_miss() {
 
 pub(crate) fn record_gutted_cache_spacing_miss() {
     update(|snapshot| snapshot.gutted_cache_spacing_misses += 1);
-}
-
-pub(crate) fn record_gutted_cache_marker_miss() {
-    update(|snapshot| snapshot.gutted_cache_marker_misses += 1);
 }
 
 pub(crate) fn record_gutted_cache_retain_evictions(count: usize) {

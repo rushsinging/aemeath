@@ -151,9 +151,28 @@ pub(crate) fn live_status_spinner_fixture(
     phase_elapsed_secs: u64,
     phase_text: Option<&str>,
 ) -> LiveStatusViewModel {
+    live_status_spinner_fixture_fields(verb, 0, elapsed_secs, phase_elapsed_secs, phase_text)
+}
+
+#[cfg(test)]
+pub(crate) fn live_status_spinner_fixture_with_frame(
+    verb: &str,
+    frame: u64,
+) -> LiveStatusViewModel {
+    live_status_spinner_fixture_fields(verb, frame, 0, 0, None)
+}
+
+#[cfg(test)]
+fn live_status_spinner_fixture_fields(
+    verb: &str,
+    frame: u64,
+    elapsed_secs: u64,
+    phase_elapsed_secs: u64,
+    phase_text: Option<&str>,
+) -> LiveStatusViewModel {
     LiveStatusViewModel {
         spinner: Some(SpinnerLineView {
-            frame: 0,
+            frame,
             verb: verb.to_string(),
             elapsed_secs,
             phase_elapsed_secs,

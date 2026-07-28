@@ -2,7 +2,7 @@
 //! marker 按 kind/status 决定；运行态工具 marker 可随动画帧闪烁，仅首行画，后续行等宽空白。
 
 use crate::tui::render::display::safe_text::str_display_width;
-use crate::tui::render::output::rendered::RenderedLine;
+use crate::tui::render::output::rendered::{LineAnimation, RenderedLine};
 use crate::tui::render::theme;
 use crate::tui::view_model::output::{HookNoticeSemanticKind, OutputBlockKind, ToolSemanticStatus};
 use ratatui::style::Style;
@@ -184,6 +184,16 @@ pub fn apply_gutter_with_frame(
             gutted.gutter_cols = gutter_cols;
             gutted.fill_style = line.fill_style;
             gutted.links = line.links;
+            gutted.animation = if i == 0
+                && matches!(
+                    kind,
+                    OutputBlockKind::ToolCall(tool)
+                        if tool.semantic_status == ToolSemanticStatus::Running
+                ) {
+                Some(LineAnimation::RunningToolMarker)
+            } else {
+                line.animation
+            };
             gutted
         })
         .collect()

@@ -66,20 +66,20 @@ fn placeholder_node() -> BlockNode {
 }
 
 #[test]
-fn test_model_stream_placeholder_header_animates_dots() {
+fn model_stream_placeholder_document_is_static_across_animation_frames() {
     let vm = vm_with_roots(vec![placeholder_node()]);
     let mut renderer = OutputDocumentRenderer::default();
 
     let doc0 =
         renderer.render_tree_with_animation_frame(&vm, 80, 0, MarkdownSpacingPolicy::normal());
+    let render_count = renderer.render_count();
+    let gutted_render_count = renderer.gutted_render_count();
     let doc1 =
         renderer.render_tree_with_animation_frame(&vm, 80, 4, MarkdownSpacingPolicy::normal());
-    let doc2 =
-        renderer.render_tree_with_animation_frame(&vm, 80, 8, MarkdownSpacingPolicy::normal());
 
-    assert_eq!(doc0.blocks[0].lines[1].plain, "Thinking.");
-    assert_eq!(doc1.blocks[0].lines[1].plain, "Thinking..");
-    assert_eq!(doc2.blocks[0].lines[1].plain, "Thinking...");
+    assert_eq!(doc0, doc1, "动画帧不得固化进历史文档");
+    assert_eq!(renderer.render_count(), render_count);
+    assert_eq!(renderer.gutted_render_count(), gutted_render_count);
 }
 
 #[test]
@@ -274,47 +274,182 @@ fn test_user_message_blank_lines_receive_fill_style_without_filler_text() {
 }
 
 #[test]
-fn select_latest_root_start_drops_oldest_group_when_over_max_lines() {
-    assert_eq!(select_latest_root_start(&[2, 2], 3), 1);
+fn render_window_drops_oldest_group_when_over_line_limit() {
+    let selected = select_root_window(
+        &[2, 2],
+        OutputRenderWindow {
+            line_limit: 3,
+            tail_offset: 0,
+        },
+    );
+
+    assert_eq!(selected.root_range, 1..2);
+    assert_eq!(selected.source_total_lines, 4);
+    assert_eq!(selected.folded_earlier_lines, 2);
 }
 
 #[test]
-fn select_latest_root_start_never_splits_subtree() {
-    assert_eq!(select_latest_root_start(&[2, 2], 3), 1);
+fn render_window_never_splits_subtree() {
+    let selected = select_root_window(
+        &[2, 5, 2],
+        OutputRenderWindow {
+            line_limit: 3,
+            tail_offset: 2,
+        },
+    );
+
+    assert_eq!(selected.root_range, 1..2);
+    assert_eq!(selected.folded_earlier_lines, 2);
 }
 
 #[test]
-fn select_latest_root_start_keeps_newest_even_if_over_max() {
-    assert_eq!(select_latest_root_start(&[5, 10], 3), 1);
+fn render_window_keeps_single_root_even_if_over_line_limit() {
+    let selected = select_root_window(
+        &[5, 10],
+        OutputRenderWindow {
+            line_limit: 3,
+            tail_offset: 0,
+        },
+    );
+
+    assert_eq!(selected.root_range, 1..2);
 }
 
 #[test]
-fn test_render_tree_retains_only_trimmed_live_blocks() {
+fn render_window_tail_offset_selects_older_roots() {
+    let selected = select_root_window(
+        &[2, 2, 2, 2],
+        OutputRenderWindow {
+            line_limit: 4,
+            tail_offset: 2,
+        },
+    );
+
+    assert_eq!(selected.root_range, 1..3);
+    assert_eq!(selected.folded_earlier_lines, 2);
+}
+
+#[test]
+fn render_window_at_oldest_history_has_no_folded_earlier_lines() {
+    let selected = select_root_window(
+        &[2, 2, 2, 2],
+        OutputRenderWindow {
+            line_limit: 4,
+            tail_offset: 4,
+        },
+    );
+
+    assert_eq!(selected.root_range, 0..2);
+    assert_eq!(selected.folded_earlier_lines, 0);
+}
+
+#[test]
+fn render_window_only_materializes_requested_blocks_but_keeps_recent_cache_entries() {
     let mut renderer = OutputDocumentRenderer::default();
     let roots = (0..6)
         .map(|idx| node(&format!("root-{idx}"), &"x\n".repeat(2_000), vec![]))
         .collect();
     let vm = vm_with_roots(roots);
 
-    let doc = renderer.render_tree(&vm, 80);
+    let rendered = renderer.render_tree_with_window(
+        &vm,
+        80,
+        0,
+        MarkdownSpacingPolicy::normal(),
+        OutputRenderWindow {
+            line_limit: 3_000,
+            tail_offset: 0,
+        },
+    );
 
     assert!(
-        doc.total_lines() <= MAX_LINES,
-        "渲染文档应被裁剪到 MAX_LINES 以内"
+        rendered.document.total_lines() <= 3_001,
+        "渲染文档只包含请求窗口和至多一行折叠提示"
     );
+    assert_eq!(rendered.source_total_lines, 12_012);
+    assert!(rendered.folded_earlier_lines > 0);
     assert!(
-        !renderer.cache.contains("root-0"),
-        "已被 MAX_LINES 裁剪掉的旧 block 不应继续留在缓存中"
+        renderer.cache.contains("root-0"),
+        "测量过的窗口外 block 在容量内应保留，供历史窗口往返复用"
     );
     assert!(
         renderer.cache.contains("root-5"),
-        "最新保留 block 应继续留在缓存中"
+        "请求窗口内最新 block 应继续留在 rendered cache"
     );
 }
 
 #[test]
-fn select_latest_root_start_zero_max_returns_empty_window() {
-    assert_eq!(select_latest_root_start(&[1], 0), 1);
+fn render_window_keeps_recent_blocks_cached_across_window_round_trip() {
+    let roots = (0..4)
+        .map(|idx| node(&format!("root-{idx}"), &format!("line-{idx}"), vec![]))
+        .collect();
+    let vm = vm_with_roots(roots);
+    let mut renderer = OutputDocumentRenderer::with_render_cache_capacity(4);
+    let newest = OutputRenderWindow {
+        line_limit: 2,
+        tail_offset: 0,
+    };
+    let older = OutputRenderWindow {
+        line_limit: 2,
+        tail_offset: 2,
+    };
+
+    renderer.render_tree_with_window(&vm, 80, 0, MarkdownSpacingPolicy::normal(), newest);
+    renderer.render_tree_with_window(&vm, 80, 0, MarkdownSpacingPolicy::normal(), older);
+    let before_return = renderer.render_count();
+    let gutted_before_return = renderer.gutted_render_count();
+    renderer.render_tree_with_window(&vm, 80, 0, MarkdownSpacingPolicy::normal(), newest);
+
+    assert_eq!(
+        renderer.render_count(),
+        before_return,
+        "容量内窗口往返不应重新执行 block 内容渲染"
+    );
+    assert_eq!(
+        renderer.gutted_render_count(),
+        gutted_before_return,
+        "容量内窗口往返不应重新组合 gutter"
+    );
+}
+
+#[test]
+fn rendered_caches_never_exceed_configured_capacity_across_windows() {
+    let roots = (0..8)
+        .map(|idx| node(&format!("root-{idx}"), &format!("line-{idx}"), vec![]))
+        .collect();
+    let vm = vm_with_roots(roots);
+    let mut renderer = OutputDocumentRenderer::with_render_cache_capacity(3);
+
+    for tail_offset in [0, 2, 4, 6, 0] {
+        renderer.render_tree_with_window(
+            &vm,
+            80,
+            0,
+            MarkdownSpacingPolicy::normal(),
+            OutputRenderWindow {
+                line_limit: 2,
+                tail_offset,
+            },
+        );
+        let retained = renderer.retained_cache_capacity();
+        assert!(retained.block_entries <= 3);
+        assert!(retained.gutted_entries <= 3);
+    }
+}
+
+#[test]
+fn render_window_zero_limit_returns_empty_window() {
+    let selected = select_root_window(
+        &[1],
+        OutputRenderWindow {
+            line_limit: 0,
+            tail_offset: 0,
+        },
+    );
+
+    assert_eq!(selected.root_range, 1..1);
+    assert_eq!(selected.source_total_lines, 1);
+    assert_eq!(selected.folded_earlier_lines, 1);
 }
 
 #[test]

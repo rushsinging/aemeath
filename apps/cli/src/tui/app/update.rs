@@ -264,14 +264,10 @@ impl App {
                 {
                     self.mark_output_dirty();
                 }
-                // 仅在处理中（有运行中 block 的 gutter 动画需要重绘）时才标脏 output。
-                // idle/完成态标脏会导致每 90ms 全量重建整会话 → 大会话伪卡死（live-lock）。
-                // #536: 可见性由 chat_active 驱动。
-                if self.model.conversation.runtime.spinner.chat_active {
-                    self.mark_output_dirty();
-                }
-                crate::tui::log_trace!(
-                    "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} phase={:?} verb={} dirty_output={}",
+                // 动画只在 viewport 绘制阶段按当前 frame 解析；不要标脏 output，
+                // 否则每 90ms 都会扫描完整 roots 并重建历史文档。
+                let request_render = self.model.conversation.runtime.spinner.chat_active;
+                crate::tui::log_trace!(                    "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} phase={:?} verb={} dirty_output={}",
                     before_frame,
                     self.view_state.animation.spinner_frame,
                     before_version,
@@ -282,7 +278,11 @@ impl App {
                     self.view_state.spinner.verb,
                     self.view_state.dirty.output
                 );
-                UpdateResult::none()
+                if request_render {
+                    UpdateResult::one(Effect::RequestRender)
+                } else {
+                    UpdateResult::none()
+                }
             }
             TuiMsg::TerminalKey(key) => self.update_key(key, spawn_refs),
             TuiMsg::TerminalMouse(mouse) => {
@@ -596,13 +596,18 @@ impl App {
         // 文档构建（含各 block 的字符串处理）放在 draw 之外，draw 循环的 catch_unwind
         // 只保护「把已构建文档画进 buffer」，无法兜住这里的 panic。对称地在构建侧兜底：
         // 一旦构建 panic（已落 panic.log），保留旧文档并提示用户，避免崩溃与糊屏。
+        let requested_window = crate::tui::render::output::document_renderer::OutputRenderWindow {
+            line_limit: self.view_state.output.render_line_limit(),
+            tail_offset: self.view_state.output.history_window_tail_offset,
+        };
         let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.output_document_renderer.render_model_document(
+            self.output_document_renderer.render_model_window(
                 &view_model,
                 width,
                 self.output_area.term_width,
                 self.view_state.animation.spinner_frame,
                 self.model.ui_preferences.markdown_spacing(),
+                requested_window,
             )
         }));
         // 无论渲染成败都把 view_model 放回 cache，保留 memo。
@@ -612,7 +617,19 @@ impl App {
             view_model,
         });
         let document = match render_result {
-            Ok(document) => document,
+            Ok(result) => {
+                let source_total_lines = result.source_total_lines;
+                self.view_state
+                    .output
+                    .observe_source_document(source_total_lines);
+                if self.view_state.output.render_line_limit() != requested_window.line_limit
+                    || self.view_state.output.history_window_tail_offset
+                        != requested_window.tail_offset
+                {
+                    self.mark_output_dirty();
+                }
+                result.document
+            }
             Err(_) => {
                 crate::tui::log_warn!(
                     "tui.output.refresh_document panicked; keeping previous document"
@@ -625,30 +642,20 @@ impl App {
                 return;
             }
         };
-        self.view_state
-            .output
-            .observe_source_document(document.total_lines());
         crate::tui::log_trace!(
             "tui.output.history_metrics source_lines={} render_limit={} before_lines={} scroll_offset={} auto_scroll={} pending_load_older={}",
             self.view_state.output.source_total_lines,
-            self.view_state.output.render_line_limit(),
-            before_lines,
+            self.view_state.output.render_line_limit(),            before_lines,
             self.view_state.output.scroll_offset,
             self.view_state.output.auto_scroll,
             self.view_state.output.pending_load_older
-        );
-        let document = Self::trim_document_to_line_limit(
-            document,
-            self.view_state.output.render_line_limit(),
-            self.view_state.output.history_window_tail_offset,
         );
         let after_lines = document.total_lines();
         crate::tui::log_trace!(
             "tui.output.refresh_document revision={} width={} term_width={} spinner_frame={} roots={} timeline_items={} chats={} before_lines={} after_lines={} rebuilt={}",
             revision,
             width,
-            self.output_area.term_width,
-            self.view_state.animation.spinner_frame,
+            self.output_area.term_width,            self.view_state.animation.spinner_frame,
             root_count,
             self.model.conversation.timeline.items().len(),
             self.model.conversation.chats.len(),
@@ -659,83 +666,6 @@ impl App {
         self.output_area.replace_document(document);
     }
 
-    /// 裁剪文档到当前历史窗口行预算，保留最新的完整 block。
-    fn trim_document_to_line_limit(
-        document: crate::tui::render::output::rendered::RenderedDocument,
-        line_limit: usize,
-        tail_offset: usize,
-    ) -> crate::tui::render::output::rendered::RenderedDocument {
-        use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
-        use ratatui::style::Style;
-        use ratatui::text::Span;
-        use std::rc::Rc;
-
-        let total = document.total_lines();
-        if total <= line_limit {
-            return document;
-        }
-
-        let group_counts = document.root_group_block_counts();
-        let mut groups = Vec::with_capacity(group_counts.len());
-        let mut blocks = document.blocks.into_iter();
-        for count in group_counts {
-            groups.push(blocks.by_ref().take(count).collect::<Vec<_>>());
-        }
-
-        // source document 顺序是旧 → 新；必须从最新端反向装满窗口。
-        // 若从旧端按行数定位起点，横跨边界的超大旧 group 会独占预算，
-        // 反而把它之后的最新消息截掉。按完整 root group 反向选择也保证
-        // ToolCall 与其 ToolResult 子块不可分割。
-        let mut skipped_newer = 0usize;
-        let mut kept_lines = 0usize;
-        let mut kept_groups = Vec::new();
-        for group in groups.into_iter().rev() {
-            let group_lines = group.iter().map(|block| block.lines.len()).sum::<usize>();
-            if skipped_newer < tail_offset {
-                skipped_newer = skipped_newer.saturating_add(group_lines);
-                continue;
-            }
-            if !kept_groups.is_empty() && kept_lines.saturating_add(group_lines) > line_limit {
-                break;
-            }
-            kept_lines = kept_lines.saturating_add(group_lines);
-            kept_groups.push(group);
-            if kept_lines > line_limit {
-                // 单个 root group 超过窗口时保持完整，允许窗口略超预算。
-                break;
-            }
-        }
-        kept_groups.reverse();
-
-        let folded = total
-            .saturating_sub(skipped_newer)
-            .saturating_sub(kept_lines);
-        let mut root_group_block_counts = kept_groups.iter().map(Vec::len).collect::<Vec<_>>();
-        let mut new_blocks = kept_groups.into_iter().flatten().collect::<Vec<_>>();
-
-        if folded > 0 {
-            // 顶部插入提示行
-            let hint_line = RenderedLine::with_plain(
-                vec![Span::styled(
-                    format!("─── 更早的消息已折叠（{folded} 行）───"),
-                    Style::default().fg(crate::tui::render::theme::TEXT_DIM),
-                )],
-                format!("─── 更早的消息已折叠（{folded} 行）───"),
-            );
-            new_blocks.insert(
-                0,
-                RenderedBlock {
-                    block_id: "_folded_hint".into(),
-                    lines: Rc::new(vec![hint_line]),
-                },
-            );
-            root_group_block_counts.insert(0, 1);
-        }
-        crate::tui::render::output::rendered::RenderedDocument {
-            blocks: new_blocks,
-            root_group_block_counts,
-        }
-    }
     pub(crate) fn flush_dirty_view_models(&mut self) {
         if self.view_state.dirty.output {
             self.refresh_output_document_from_model();

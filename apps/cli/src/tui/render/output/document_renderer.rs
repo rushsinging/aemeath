@@ -1,25 +1,60 @@
 //! 输出文档渲染器：遍历 ViewModel.blocks，经 block 级缓存产出 RenderedDocument。
 
-use crate::tui::render::output::block_cache::{BlockCache, CacheKey};
+use crate::tui::render::output::block_cache::{
+    BlockCache, CacheKey, DEFAULT_RENDER_CACHE_CAPACITY,
+};
+use crate::tui::render::output::bounded_lru::BoundedLruMap;
 use crate::tui::render::output::gutter;
 use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
-use crate::tui::render::output_area::types::MAX_LINES;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::{BlockNode, OutputViewModel};
 use ratatui::style::Style;
+use ratatui::text::Span;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::ops::Range;
+use std::rc::Rc;
+
+/// 输出文档渲染请求。窗口从完整语义树的最新端按完整 root group 选择。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OutputRenderWindow {
+    pub line_limit: usize,
+    pub tail_offset: usize,
+}
+
+impl OutputRenderWindow {
+    /// 不限制 root 选择，供不需要历史窗口的独立 renderer 调用方使用。
+    const fn all() -> Self {
+        Self {
+            line_limit: usize::MAX,
+            tail_offset: 0,
+        }
+    }
+}
+
+/// 单次窗口渲染结果。`source_total_lines` 来自全部 root 布局索引，
+/// `document` 只持请求窗口内的 rendered blocks。
+pub struct OutputRenderResult {
+    pub document: RenderedDocument,
+    pub source_total_lines: usize,
+    pub folded_earlier_lines: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SelectedRootWindow {
+    root_range: Range<usize>,
+    source_total_lines: usize,
+    folded_earlier_lines: usize,
+}
 
 /// gutted 缓存的 key：唯一决定 gutted block 内容（含 gutter）的所有参数。
-/// 静态 block 的 `marker_frame` 为 `None`；运行中 ToolCall 每次闪烁周期推进时失效。
+/// 动画帧只在 viewport 绘制阶段消费，不参与历史文档缓存。
 #[derive(PartialEq, Eq, Clone)]
 struct GuttedKey {
     block_version: u64,
     text_width: u16,
     depth: usize,
     markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
-    /// 仅运行中 ToolCall 有值（= animation_frame / BLINK_DIVISOR），其他 block 为 None。
-    marker_frame: Option<u64>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -46,15 +81,14 @@ pub(crate) struct RendererRetainedCacheCapacity {
     pub peak_root_layout_entries: usize,
 }
 
-#[derive(Default)]
 pub struct OutputDocumentRenderer {
     cache: BlockCache,
     /// root 子树的轻量布局索引。只保留 key 与总行数，不持有 rendered lines。
-    /// 用于在执行 Markdown/diff/syntax render 前选择 `MAX_LINES` 窗口。
+    /// 用于在执行 Markdown/diff/syntax render 前选择请求的历史窗口。
     root_layouts: HashMap<String, RootLayoutEntry>,
     /// 带 gutter 的 block 缓存：key = block_id，value = (GuttedKey, gutted RenderedBlock)。
     /// 命中时直接 clone（lines 为 Rc，廉价）；未命中则走完整 render_self + apply_gutter 路径。
-    gutted: HashMap<String, (GuttedKey, RenderedBlock)>,
+    gutted: BoundedLruMap<String, (GuttedKey, RenderedBlock)>,
     #[cfg(test)]
     retained_cache_peak: RendererRetainedCacheCapacity,
     #[cfg(test)]
@@ -64,7 +98,28 @@ pub struct OutputDocumentRenderer {
     gutted_render_count: std::cell::Cell<usize>,
 }
 
+impl Default for OutputDocumentRenderer {
+    fn default() -> Self {
+        Self::with_render_cache_capacity(DEFAULT_RENDER_CACHE_CAPACITY)
+    }
+}
+
 impl OutputDocumentRenderer {
+    fn with_render_cache_capacity(capacity: usize) -> Self {
+        Self {
+            cache: BlockCache::with_capacity(capacity),
+            root_layouts: HashMap::new(),
+            gutted: BoundedLruMap::with_capacity(capacity),
+            #[cfg(test)]
+            retained_cache_peak: RendererRetainedCacheCapacity::default(),
+            #[cfg(test)]
+            render_count: std::cell::Cell::new(0),
+            #[cfg(test)]
+            gutted_render_count: std::cell::Cell::new(0),
+        }
+    }
+
+    #[cfg(test)]
     pub fn render_model_document(
         &mut self,
         view_model: &OutputViewModel,
@@ -73,16 +128,37 @@ impl OutputDocumentRenderer {
         animation_frame: u64,
         markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
     ) -> RenderedDocument {
+        self.render_model_window(
+            view_model,
+            outer_width,
+            fallback_width,
+            animation_frame,
+            markdown_spacing,
+            OutputRenderWindow::all(),
+        )
+        .document
+    }
+
+    pub fn render_model_window(
+        &mut self,
+        view_model: &OutputViewModel,
+        outer_width: u16,
+        fallback_width: usize,
+        animation_frame: u64,
+        markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
+        window: OutputRenderWindow,
+    ) -> OutputRenderResult {
         let render_width = if outer_width > 1 {
             outer_width
         } else {
             u16::try_from(fallback_width.max(1)).unwrap_or(u16::MAX)
         };
-        self.render_tree_with_animation_frame(
+        self.render_tree_with_window(
             view_model,
             render_width,
             animation_frame,
             markdown_spacing,
+            window,
         )
     }
 
@@ -92,20 +168,24 @@ impl OutputDocumentRenderer {
     /// **`outer_width` 语义**：output_document_width = content_area.width（不含 gutter），
     /// 由调用方（`App::output_document_width()`）传入。block 内部 wrap 用的 `text_width`
     /// 由 `render_node` 按 depth 扣除 gutter 派生。
+    #[cfg(test)]
     pub fn render_tree(
         &mut self,
         view_model: &OutputViewModel,
         outer_width: u16,
     ) -> RenderedDocument {
-        self.render_tree_with_animation_frame(
+        self.render_tree_with_window(
             view_model,
             outer_width,
             0,
             crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+            OutputRenderWindow::all(),
         )
+        .document
     }
 
-    /// 带动画帧的 render_tree；动画只进入缓存外 gutter，不参与 block 内容缓存。
+    /// 测试和独立 renderer 调用使用的无窗口兼容入口。
+    #[cfg(test)]
     pub fn render_tree_with_animation_frame(
         &mut self,
         view_model: &OutputViewModel,
@@ -113,6 +193,24 @@ impl OutputDocumentRenderer {
         animation_frame: u64,
         markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
     ) -> RenderedDocument {
+        self.render_tree_with_window(
+            view_model,
+            outer_width,
+            animation_frame,
+            markdown_spacing,
+            OutputRenderWindow::all(),
+        )
+        .document
+    }
+
+    pub fn render_tree_with_window(
+        &mut self,
+        view_model: &OutputViewModel,
+        outer_width: u16,
+        animation_frame: u64,
+        markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
+        window: OutputRenderWindow,
+    ) -> OutputRenderResult {
         #[cfg(test)]
         let started = std::time::Instant::now();
         // 先用 root 轻量布局索引解析每棵子树的行数。索引命中只扫描 BlockNode
@@ -155,9 +253,9 @@ impl OutputDocumentRenderer {
             root_line_counts.push(line_count);
         }
 
-        let selected_start = select_latest_root_start(&root_line_counts, MAX_LINES);
-        let mut groups = Vec::with_capacity(view_model.roots.len().saturating_sub(selected_start));
-        for root in &view_model.roots[selected_start..] {
+        let selected = select_root_window(&root_line_counts, window);
+        let mut groups = Vec::with_capacity(selected.root_range.len());
+        for root in &view_model.roots[selected.root_range.clone()] {
             if let Some(group) = measured_groups.remove(&root.block_id) {
                 groups.push(group);
             } else {
@@ -173,19 +271,20 @@ impl OutputDocumentRenderer {
                 groups.push(group);
             }
         }
-        let document = RenderedDocument::with_root_groups(groups);
-        let blocks = &document.blocks;
-        // O(n) 构建 HashSet，使后续两处 retain 各降为 O(n) 而非 O(n²)。
-        let live_set: HashSet<&str> = blocks.iter().map(|b| b.block_id.as_str()).collect();
-        self.cache.retain(&live_set);
-        // gutted 缓存同步清理：移除已不在渲染树中的条目，防止内存泄漏。
+        let mut document = RenderedDocument::with_root_groups(groups);
+        if selected.folded_earlier_lines > 0 {
+            prepend_folded_history_hint(&mut document, selected.folded_earlier_lines);
+            document.rebuild_line_index();
+        }
+        let semantic_block_ids = collect_semantic_block_ids(&view_model.roots);
+        self.cache.retain(&semantic_block_ids);
+        let gutted_evictions = self
+            .gutted
+            .retain(|id, _| semantic_block_ids.contains(id.as_str()));
         #[cfg(test)]
-        let gutted_before = self.gutted.len();
-        self.gutted.retain(|id, _| live_set.contains(id.as_str()));
-        #[cfg(test)]
-        crate::tui::render::performance::record_gutted_cache_retain_evictions(
-            gutted_before.saturating_sub(self.gutted.len()),
-        );
+        crate::tui::render::performance::record_gutted_cache_retain_evictions(gutted_evictions);
+        #[cfg(not(test))]
+        let _ = gutted_evictions;
         #[cfg(test)]
         {
             self.retained_cache_peak.peak_block_entries = self
@@ -202,7 +301,11 @@ impl OutputDocumentRenderer {
                 .max(self.root_layouts.len());
             crate::tui::render::performance::record_document_render(started.elapsed());
         }
-        document
+        OutputRenderResult {
+            document,
+            source_total_lines: selected.source_total_lines,
+            folded_earlier_lines: selected.folded_earlier_lines,
+        }
     }
 
     fn render_node(
@@ -223,30 +326,14 @@ impl OutputDocumentRenderer {
             depth
         };
         let text_width = gutter::effective_block_width(outer_width, effective_depth);
+        let _ = animation_frame;
 
-        // 计算 gutted 缓存 key：运行中 ToolCall 的 marker_frame 随动画帧推进而变化，
-        // 导致每次闪烁周期自动失效；其他 block 的 marker_frame 为 None，跨帧稳定命中。
-        let marker_frame = match &node.kind {
-            crate::tui::view_model::output::OutputBlockKind::ToolCall(t)
-                if t.semantic_status
-                    == crate::tui::view_model::output::ToolSemanticStatus::Running =>
-            {
-                Some(animation_frame / gutter::TOOL_MARKER_BLINK_DIVISOR)
-            }
-            crate::tui::view_model::output::OutputBlockKind::ModelStreamPlaceholder(_) => Some(
-                animation_frame
-                    / crate::tui::render::output::blocks::thinking_placeholder::THINKING_DOT_FRAME_DIVISOR,
-            ),
-            _ => None,
-        };
         let gkey = GuttedKey {
             block_version: node.block_version,
             text_width,
             depth,
             markdown_spacing,
-            marker_frame,
         };
-
         // gutted 缓存命中：key 完全一致时直接复用（lines 为 Rc，clone 廉价）。
         if let Some((cached_key, cached_block)) = self.gutted.get(&node.block_id) {
             if *cached_key == gkey {
@@ -279,9 +366,6 @@ impl OutputDocumentRenderer {
                 if cached_key.markdown_spacing != gkey.markdown_spacing {
                     crate::tui::render::performance::record_gutted_cache_spacing_miss();
                 }
-                if cached_key.marker_frame != gkey.marker_frame {
-                    crate::tui::render::performance::record_gutted_cache_marker_miss();
-                }
             }
         } else {
             #[cfg(test)]
@@ -296,34 +380,14 @@ impl OutputDocumentRenderer {
             .set(self.gutted_render_count.get() + 1);
 
         let key = CacheKey {
-            version: match marker_frame {
-                Some(frame)
-                    if matches!(
-                        node.kind,
-                        crate::tui::view_model::output::OutputBlockKind::ModelStreamPlaceholder(_)
-                    ) =>
-                {
-                    node.block_version ^ frame
-                }
-                _ => node.block_version,
-            },
+            version: node.block_version,
             text_width,
             markdown_spacing,
         };
         let mut rendered = self.cache.get_or_render(&node.block_id, key, |ctx| {
             #[cfg(test)]
             self.render_count.set(self.render_count.get() + 1);
-            match &node.kind {
-                crate::tui::view_model::output::OutputBlockKind::ModelStreamPlaceholder(
-                    placeholder,
-                ) => crate::tui::render::output::blocks::thinking_placeholder::render_model_stream_placeholder(
-                    &node.block_id,
-                    placeholder,
-                    ctx,
-                    animation_frame,
-                ),
-                kind => kind.component().render_self(&node.block_id, ctx),
-            }
+            node.kind.component().render_self(&node.block_id, ctx)
         });
         if matches!(
             node.kind,
@@ -338,11 +402,10 @@ impl OutputDocumentRenderer {
             // 极窄屏：完全跳过 gutter
             (*rendered.lines).clone()
         } else {
-            crate::tui::render::output::gutter::apply_gutter_with_frame(
+            crate::tui::render::output::gutter::apply_gutter(
                 &node.kind,
                 effective_depth,
                 (*rendered.lines).clone(),
-                animation_frame,
             )
         };
         let mut gutted = gutted;
@@ -399,14 +462,29 @@ impl OutputDocumentRenderer {
     }
 }
 
+fn collect_semantic_block_ids(roots: &[BlockNode]) -> HashSet<&str> {
+    fn collect<'a>(node: &'a BlockNode, ids: &mut HashSet<&'a str>) {
+        ids.insert(node.block_id.as_str());
+        for child in &node.children {
+            collect(child, ids);
+        }
+    }
+
+    let mut ids = HashSet::new();
+    for root in roots {
+        collect(root, &mut ids);
+    }
+    ids
+}
+
 fn root_layout_key(
     root: &BlockNode,
     outer_width: u16,
-    animation_frame: u64,
+    _animation_frame: u64,
     markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
 ) -> RootLayoutKey {
     let mut hasher = DefaultHasher::new();
-    hash_node_layout(root, animation_frame, &mut hasher);
+    hash_node_layout(root, &mut hasher);
     RootLayoutKey {
         fingerprint: hasher.finish(),
         outer_width,
@@ -414,45 +492,77 @@ fn root_layout_key(
     }
 }
 
-fn hash_node_layout(node: &BlockNode, animation_frame: u64, hasher: &mut DefaultHasher) {
+fn hash_node_layout(node: &BlockNode, hasher: &mut DefaultHasher) {
     node.block_id.hash(hasher);
     node.block_version.hash(hasher);
     node.children.len().hash(hasher);
-    match &node.kind {
-        crate::tui::view_model::output::OutputBlockKind::ToolCall(tool)
-            if tool.semantic_status
-                == crate::tui::view_model::output::ToolSemanticStatus::Running =>
-        {
-            (animation_frame / gutter::TOOL_MARKER_BLINK_DIVISOR).hash(hasher);
-        }
-        crate::tui::view_model::output::OutputBlockKind::ModelStreamPlaceholder(_) => {
-            (animation_frame
-                / crate::tui::render::output::blocks::thinking_placeholder::THINKING_DOT_FRAME_DIVISOR)
-                .hash(hasher);
-        }
-        _ => {}
-    }
     for child in &node.children {
-        hash_node_layout(child, animation_frame, hasher);
+        hash_node_layout(child, hasher);
     }
 }
 
-/// 根据已知 root group 行数从最新端选择窗口起点。
-/// 最新 root 即使单独超过预算也完整保留，避免输出为空或拆断 parent/child。
-fn select_latest_root_start(root_line_counts: &[usize], max_lines: usize) -> usize {
-    if max_lines == 0 || root_line_counts.is_empty() {
-        return root_line_counts.len();
+/// 根据已知 root group 行数，从最新端跳过 `tail_offset` 覆盖的完整 root，
+/// 再向旧端选择 `line_limit` 覆盖的完整 root。边界 root 永不拆分。
+fn select_root_window(
+    root_line_counts: &[usize],
+    window: OutputRenderWindow,
+) -> SelectedRootWindow {
+    let source_total_lines = root_line_counts
+        .iter()
+        .fold(0usize, |total, lines| total.saturating_add(*lines));
+    if window.line_limit == 0 || root_line_counts.is_empty() {
+        return SelectedRootWindow {
+            root_range: root_line_counts.len()..root_line_counts.len(),
+            source_total_lines,
+            folded_earlier_lines: source_total_lines,
+        };
     }
-    let mut start = root_line_counts.len();
-    let mut used = 0usize;
-    for (index, line_count) in root_line_counts.iter().enumerate().rev() {
-        if used > 0 && used.saturating_add(*line_count) > max_lines {
+
+    let mut end = root_line_counts.len();
+    let mut skipped_newer_lines = 0usize;
+    while end > 0 && skipped_newer_lines < window.tail_offset {
+        end -= 1;
+        skipped_newer_lines = skipped_newer_lines.saturating_add(root_line_counts[end]);
+    }
+
+    let mut start = end;
+    let mut selected_lines = 0usize;
+    while start > 0 {
+        let candidate_lines = root_line_counts[start - 1];
+        if selected_lines > 0 && selected_lines.saturating_add(candidate_lines) > window.line_limit
+        {
             break;
         }
-        start = index;
-        used = used.saturating_add(*line_count);
+        start -= 1;
+        selected_lines = selected_lines.saturating_add(candidate_lines);
+        if selected_lines > window.line_limit {
+            break;
+        }
     }
-    start
+
+    SelectedRootWindow {
+        root_range: start..end,
+        source_total_lines,
+        folded_earlier_lines: root_line_counts[..start]
+            .iter()
+            .fold(0usize, |total, lines| total.saturating_add(*lines)),
+    }
+}
+
+fn prepend_folded_history_hint(document: &mut RenderedDocument, folded_lines: usize) {
+    let text = format!("─── 更早的消息已折叠（{folded_lines} 行）───");
+    let hint = RenderedBlock {
+        block_id: "_folded_hint".into(),
+        lines: Rc::new(vec![RenderedLine::with_plain(
+            vec![Span::styled(
+                text.clone(),
+                Style::default().fg(crate::tui::render::theme::TEXT_DIM),
+            )],
+            text,
+        )]),
+    };
+    document.blocks.insert(0, hint);
+    document.root_group_block_counts.insert(0, 1);
 }
 
 fn wrap_user_message_card_lines(lines: &mut Vec<RenderedLine>) {

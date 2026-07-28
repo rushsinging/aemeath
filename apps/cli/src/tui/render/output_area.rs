@@ -30,6 +30,8 @@ pub struct OutputArea {
     pub todo_subject_cache: std::collections::HashMap<String, String>,
     /// 新输出渲染管线产物（spans + plain）。
     pub document: RenderedDocument,
+    #[cfg(test)]
+    last_document_line_visits: usize,
 }
 
 impl Default for OutputArea {
@@ -51,15 +53,23 @@ impl OutputArea {
             rendered_line_content: HashMap::new(),
             todo_subject_cache: std::collections::HashMap::new(),
             document: RenderedDocument::default(),
+            #[cfg(test)]
+            last_document_line_visits: 0,
         }
     }
 
-    pub(crate) fn replace_document(&mut self, document: RenderedDocument) {
+    pub(crate) fn replace_document(&mut self, mut document: RenderedDocument) {
+        document.rebuild_line_index();
         self.document = document;
     }
 
     pub fn document(&self) -> &RenderedDocument {
         &self.document
+    }
+
+    #[cfg(test)]
+    pub(crate) fn last_document_line_visits(&self) -> usize {
+        self.last_document_line_visits
     }
 
     /// 测试辅助：以 `count` 行纯文本填充 document（单 block）。

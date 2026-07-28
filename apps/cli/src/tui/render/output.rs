@@ -1,6 +1,7 @@
 pub mod block_cache;
 pub mod block_component;
 pub mod blocks;
+pub(crate) mod bounded_lru;
 pub mod diff;
 pub mod document_renderer;
 pub mod gutter;

@@ -1,4 +1,4 @@
-use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
+use crate::tui::render::output::rendered::{LineAnimation, RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::theme;
 use crate::tui::view_model::output::ModelStreamPlaceholderBlockView;
 use ratatui::style::{Modifier, Style};
@@ -12,18 +12,19 @@ pub fn render_model_stream_placeholder(
     block_id: &str,
     view: &ModelStreamPlaceholderBlockView,
     ctx: &RenderCtx,
-    animation_frame: u64,
+    _animation_frame: u64,
 ) -> RenderedBlock {
-    let dots = animated_thinking_dots(animation_frame);
-    let header = format!("Thinking{dots}");
+    let header = "Thinking.".to_string();
     let body = placeholder_body_for_phase(&view.phase);
     let style = Style::default().fg(theme::THINKING);
     let muted_style = Style::default().fg(theme::TEXT_MUTED);
 
-    let mut lines = vec![RenderedLine::new(vec![Span::styled(
+    let mut header_line = RenderedLine::new(vec![Span::styled(
         header,
         style.add_modifier(Modifier::ITALIC),
-    )])];
+    )]);
+    header_line.animation = Some(LineAnimation::ThinkingDots);
+    let mut lines = vec![header_line];
     lines.extend(
         wrap_placeholder_body(body, ctx.text_width)
             .into_iter()
@@ -97,7 +98,7 @@ mod tests {
         };
         let block = render_model_stream_placeholder("p", &view, &RenderCtx::for_width(80), 8);
 
-        assert_eq!(block.lines[0].plain, "Thinking...");
+        assert_eq!(block.lines[0].plain, "Thinking.");
         assert_eq!(block.lines[1].plain, "Model is preparing tool arguments...");
     }
 
