@@ -8,7 +8,7 @@ fn window(messages: Vec<Message>, reminder: bool) -> ContextWindow {
     ContextWindow {
         backing_revision: SessionRevision::new(1),
         system_blocks: vec![],
-        messages,
+        messages: messages.into(),
         invocation_reminder: reminder.then(|| {
             crate::ports::InvocationReminder::from_task_snapshot(
                 &crate::ports::TaskReminderSnapshot {
