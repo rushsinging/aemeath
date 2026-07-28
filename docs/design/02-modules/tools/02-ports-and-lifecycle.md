@@ -186,7 +186,9 @@ trait SkillLoadPort: Send + Sync {
 }
 ```
 
-`SkillCatalogPort` 只发布廉价 descriptor。Composition 对稳定排序后的 name、description、identity aliases、slash command/aliases 与 argument hint 计算确定性 revision，形成 `SkillCatalogSnapshot { revision, skills, slash_routes }`；正文、source path 与内容 revision **NEVER** 参与 metadata revision。同一快照原子派生 route 和补全，合法空目录发布空快照，刷新失败则保留 last-known-good。
+`SkillCatalogPort` 只发布廉价 descriptor。Composition 对稳定排序后的 name、description、identity aliases、slash command/aliases 与 argument hint 计算确定性 revision，形成 `SkillCatalogSnapshot { revision, skills, slash_routes }`；正文、source path 与内容 revision **NEVER** 参与 metadata revision。同一快照原子派生 route 和补全。
+
+启动装配必须以当前 workspace root、已提交 `ConfigSnapshot` 的 Skill dirs 和 Main Tool Catalog snapshot 构造首个全量快照，并随 `TuiLaunchContext` 交给客户端，保证首个 Run 前 Slash 路由与补全已经可用。Runtime 在每个新 Main Run 绑定前以 live workspace root、最新已提交配置和当前 Main Tool Catalog 重建同一查询；revision 未变化时不发布事件并保留当前状态，变化时通过 `SkillsUpdated` 发布完整快照。合法空目录必须发布空快照以原子撤销旧 route/completion；完整 `skills_map` 或独立 route 列表不得成为第二份长期真相。
 
 `SkillLoadPort` 每次调用重新执行当前 workspace 下的发现、优先级、解析与能力过滤，只返回一个 `LoadedSkill`。它不缓存启动期正文，也不生成全量正文快照。所属 Run 的 extra dirs/tool names 保持冻结，workspace root 在调用时经 ToolExecutionContext 的 live `WorkspaceRead` 取得。
 
@@ -332,7 +334,7 @@ Deny: agent/features/** production code and apps/**
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-28 | #1438 以按 identity 的 SkillLoadPort 替代全文 Materialization；唯一 Skill Tool 经 ToolExecutionPort 执行，SkillRequest 与同 revision route/completion 快照分流 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
+| 2026-07-28 | #1438 以按 identity 的 SkillLoadPort 替代全文 Materialization；唯一 Skill Tool 经 ToolExecutionPort 执行，SkillRequest 与同 revision route/completion 快照分流；启动快照与每个 Main Run 前的版本化刷新接通 Runtime/SDK/TUI，并退役 `skills_map` 双轨 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) / [#1446](https://github.com/rushsinging/aemeath/pull/1446) |
 | 2026-07-12 | 初稿：双 Tool 端口、ExecutionScope、取消、Skill/Command 协作与 MCP 生命周期 | #787 |
 | 2026-07-21 | #914 删除 legacy-no-agent、历史 Registry gateway 与 SkillTool；现有 Tools Context 的 progress/plan adapter 物理收口明确由 #879 承接 | [#914](https://github.com/rushsinging/aemeath/issues/914) |
 | 2026-07-20 | 明确 Skill stable identity / identity aliases 与显式 Slash name / slash aliases 分离；package namespace Skill 默认不投影为 Slash Command，外部 Skill 元数据不得阻断 Command Catalog bootstrap | #1302 |
