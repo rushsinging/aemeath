@@ -57,13 +57,12 @@ pub use published_language::{
 };
 pub use resources::CatalogQuery;
 pub use scope_profile::{ProfileExpansionError, ToolProfile};
-// 独立 Skill Published Language + 双端口（Issue #912）。
+// Dynamic Skill Published Language + Catalog/Load ports (Issue #1438).
 pub use skill_pl::{
-    CacheHint, PromptFragment, SkillDescriptor, SkillError, SkillMaterializationQuery,
-    SkillMaterializationRevision, SkillMaterializationSnapshot, SkillQuery, SkillSource,
+    LoadedSkill, SkillDescriptor, SkillError, SkillLoadQuery, SkillQuery, SkillSource,
     SkillSourceKind,
 };
-pub use skill_ports::{SkillCatalogPort, SkillMaterializationPort};
+pub use skill_ports::{SkillCatalogPort, SkillLoadPort};
 pub use suspension::{ToolSuspension, UserInteractionSpec, UserOption, UserQuestion};
 pub use tool::{Tool, ToolListProvider, TypedTool, TypedToolAdapter, TypedToolResult};
 pub use tool_types::{

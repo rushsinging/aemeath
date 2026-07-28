@@ -1,39 +1,12 @@
-//! Filesystem Skill adapter（Issue #912）。
+//! Filesystem Skill adapter（Issue #1438）。
 //!
-//! 同时实现 [`SkillCatalogPort`] 与 [`SkillMaterializationPort`]，从文件
-//! 系统发现并物化 Skill。
+//! 同时实现 [`SkillCatalogPort`] 与 [`SkillLoadPort`]：Catalog 只返回元数据，
+//! Load 在调用时按 identity 重新发现并读取单个 Skill 正文。
 //!
-//! # 发现根目录（每次调用从 query 快照推导）
-//!
-//! adapter **不**捕获 project roots——project `.claude/skills`、
-//! `.agents/skills` 与 `extra_dirs` 都由每次 `list` /
-//! `materialize_available` 收到的 query 快照（[`SkillQuery`] /
-//! [`SkillMaterializationQuery`]）推导。构造器只接受全局根目录
-//! （`~/.agents/skills`），并提供生产默认（[`FilesystemSkillAdapter::default`]）。
-//!
-//! 优先级（高 → 低）：
-//!
-//! - 项目级 `{project_root}/.claude/skills`（最高优先级）
-//! - 项目级 `{project_root}/.agents/skills`
-//! - 全局 `~/.agents/skills`（构造器注入）
-//! - query 提供的 `extra_dirs`（最低，按顺序扫描）
-//! - 内置 `commit` Skill（最低）
-//!
-//! 设计约束（见 Issue #912 / `specs/tools.md`）：
-//!
-//! - 同名 Skill 按上述优先级「先到先得」去重；
-//! - 输出按 stable key 稳定排序；
-//! - revision 是确定性内容 revision（见
-//!   [`SkillMaterializationRevision::from_fragments`]）；
-//! - **无进程级全局单槽缓存**——每次调用重新读取文件系统，因此新增 /
-//!   修改文件在下一次调用立即可见；
-//! - frontmatter 可声明 `requires_tools` / `fallback_for`，adapter 依据
-//!   query 的 `available_tools` 与完整 Skill 名集合过滤；
-//! - `materialize_available` 对**已扫描文件**的读取 / 解析失败返回第一个
-//!   typed [`SkillError`]（不静默跳过）；**不存在目录正常为空**（非错误）。
-//!
-//! Skill 不是 Tool：本 adapter 不经 `ToolExecutionPort`，仅产出值类型
-//! `PromptFragment` 供 Context Management 消费。
+//! adapter 不捕获 project root，也不缓存 Skill 正文。每次调用都从 query 的
+//! project root、extra dirs 与 available tools 重建可见集合；同名 Skill 按
+//! project `.claude` → project `.agents` → global → extra → builtin 优先级去重。
+//! 目录不存在正常为空；真实入口读取或解析失败保持 typed [`SkillError`]。
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
@@ -42,19 +15,16 @@ use async_trait::async_trait;
 use serde::Deserialize;
 
 use crate::domain::skill_pl::{
-    CacheHint, PromptFragment, SkillCatalogPort, SkillDescriptor, SkillError,
-    SkillMaterializationPort, SkillMaterializationQuery, SkillMaterializationRevision,
-    SkillMaterializationSnapshot, SkillQuery, SkillSource, SkillSourceKind,
+    LoadedSkill, SkillCatalogPort, SkillDescriptor, SkillError, SkillLoadPort, SkillLoadQuery,
+    SkillQuery, SkillSource, SkillSourceKind,
 };
 
 // ── adapter ────────────────────────────────────────────────────────────
 
 /// 文件系统 Skill adapter。
 ///
-/// 无状态、无全局缓存：每次 [`SkillCatalogPort::list`] /
-/// [`SkillMaterializationPort::materialize_available`] 都从对应 query 快照
-/// 推导 project `.claude/skills`、`.agents/skills` 与 `extra_dirs`，并重新
-/// 读取文件系统。构造器只持有全局根目录（`~/.agents/skills`）。
+/// 无状态、无全局缓存；list/load 都从 query 快照重新发现文件。
+/// 构造器只持有全局 `~/.agents/skills` 根目录。
 pub struct FilesystemSkillAdapter {
     /// 全局 `~/.agents/skills`（构造器注入，生产默认见 [`Self::default`]）。
     global: PathBuf,
@@ -69,17 +39,10 @@ impl FilesystemSkillAdapter {
         Self { global }
     }
 
-    /// 物化单个 Skill 文件为 [`PromptFragment`]。
-    ///
-    /// 用于把 typed 读取 / 解析错误作为 *值* 暴露给调用方与测试。读取失败
-    /// 返回 [`SkillError::ReadFailed`]；frontmatter 缺失 / 未闭合 / YAML
-    /// 非法返回 [`SkillError::ParseFailed`]。
-    pub async fn materialize_one(
-        path: &Path,
-        kind: SkillSourceKind,
-    ) -> Result<PromptFragment, SkillError> {
+    /// 加载一个显式路径的 Skill，用于 typed I/O 契约测试。
+    pub async fn load_one(path: &Path, kind: SkillSourceKind) -> Result<LoadedSkill, SkillError> {
         let raw = parse_skill_file(path, kind)?;
-        Ok(raw.into_fragment())
+        Ok(raw.into_loaded())
     }
 
     /// 按优先级顺序发现所有 Skill（含内置 commit），返回带 typed 错误的
@@ -120,8 +83,7 @@ impl FilesystemSkillAdapter {
     /// fallback_for）、并按 stable key 排序。
     ///
     /// `strict` 控制对已扫描文件读取 / 解析错误的处理：
-    /// - `true`：遇到第一个 typed 错误立即返回 `Err`（用于
-    ///   `materialize_available`，不静默跳过）；
+    /// `strict=true` 用于 load：真实入口错误必须返回，不得静默跳过；
     /// - `false`：记录 warn 日志并跳过该文件（用于 `list`，catalog 端口
     ///   签名无法返回 Err）。
     fn collect_available(
@@ -173,9 +135,7 @@ impl Default for FilesystemSkillAdapter {
 
 impl SkillCatalogPort for FilesystemSkillAdapter {
     fn list(&self, query: SkillQuery) -> Vec<SkillDescriptor> {
-        // catalog 端口签名无法返回 typed Err：此处采用 best-effort（lenient），
-        // 记录并跳过单个文件的读取 / 解析错误。需要严格错误传播的调用方应
-        // 使用 SkillMaterializationPort::materialize_available。
+        // catalog 采用 best-effort；调用时严格错误由 SkillLoadPort::load 返回。
         self.collect_available(&query, false)
             .unwrap_or_default()
             .into_iter()
@@ -185,25 +145,20 @@ impl SkillCatalogPort for FilesystemSkillAdapter {
 }
 
 #[async_trait]
-impl SkillMaterializationPort for FilesystemSkillAdapter {
-    async fn materialize_available(
-        &self,
-        query: SkillMaterializationQuery,
-    ) -> Result<SkillMaterializationSnapshot, SkillError> {
-        // 把物化查询投影为 catalog 查询形状，复用发现 / 去重 / 过滤逻辑。
-        let catalog_query = SkillQuery {
-            project_root: query.project_root.clone(),
-            extra_dirs: query.extra_dirs.clone(),
-            available_tools: query.available_tools.clone(),
-        };
-        // strict=true：已扫描文件的读取 / 解析错误返回第一个 typed Err，
-        // 不静默跳过。
-        let raws = self.collect_available(&catalog_query, true)?;
-        let fragments: Vec<PromptFragment> =
-            raws.into_iter().map(|raw| raw.into_fragment()).collect();
-        // fragments 已按 stable_key 排序；revision 是确定性内容 revision。
-        let revision = SkillMaterializationRevision::from_fragments(&fragments);
-        Ok(SkillMaterializationSnapshot::new(fragments, revision))
+impl SkillLoadPort for FilesystemSkillAdapter {
+    async fn load(&self, query: SkillLoadQuery) -> Result<LoadedSkill, SkillError> {
+        let identity = query.identity().to_string();
+        let raws = self.collect_available(&query.catalog_query(), true)?;
+        raws.into_iter()
+            .find(|raw| {
+                raw.name.eq_ignore_ascii_case(&identity)
+                    || raw
+                        .aliases
+                        .iter()
+                        .any(|alias| alias.eq_ignore_ascii_case(&identity))
+            })
+            .map(RawSkill::into_loaded)
+            .ok_or_else(|| SkillError::not_found(identity))
     }
 }
 
@@ -220,6 +175,8 @@ struct RawSkill {
     slash_command: Option<String>,
     /// 仅当 Slash 投影存在时随之公开的合法别名。
     slash_aliases: Vec<String>,
+    /// 面向用户/模型的可选参数提示，不定义业务 schema。
+    argument_hint: Option<String>,
     source: SkillSource,
     content: String,
     /// frontmatter `requires_tools`：非空时要求所列工具全部出现在
@@ -239,11 +196,12 @@ impl RawSkill {
             self.aliases,
             self.slash_command,
             self.slash_aliases,
+            self.argument_hint,
         )
     }
 
-    fn into_fragment(self) -> PromptFragment {
-        PromptFragment::new(self.name, self.content, self.source, CacheHint::Stable)
+    fn into_loaded(self) -> LoadedSkill {
+        LoadedSkill::from_content(self.name, self.content, self.source)
     }
 
     /// 依据 `available_tools` 与完整 Skill 名集合判断本 Skill 是否可见。
@@ -283,6 +241,9 @@ struct Frontmatter {
     /// `slash_command` 的用户可输入别名，不与 identity aliases 混用。
     #[serde(default)]
     slash_aliases: Vec<String>,
+    /// 可选参数提示；只进入 metadata，不参与 Skill Tool input schema。
+    #[serde(default, rename = "argument-hint", alias = "argument_hint")]
+    argument_hint: Option<String>,
     /// 所需工具名；任一缺失则该 Skill 不可见。
     #[serde(default)]
     requires_tools: Vec<String>,
@@ -487,6 +448,7 @@ fn parse_skill_file(path: &Path, kind: SkillSourceKind) -> Result<RawSkill, Skil
     Ok(RawSkill {
         slash_command: fm.slash_command.or_else(|| Some(name.clone())),
         slash_aliases: fm.slash_aliases,
+        argument_hint: fm.argument_hint,
         name,
         description: fm.description,
         aliases,
@@ -530,6 +492,7 @@ fn builtin_commit_skill() -> RawSkill {
         aliases: vec!["git-commit".to_string()],
         slash_command: Some("commit".to_string()),
         slash_aliases: vec!["git-commit".to_string()],
+        argument_hint: None,
         source: SkillSource::builtin(BUILTIN_COMMIT_URI),
         content: builtin_commit_body().to_string(),
         requires_tools: Vec::new(),
