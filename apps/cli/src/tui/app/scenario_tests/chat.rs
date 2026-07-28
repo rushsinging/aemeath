@@ -128,6 +128,44 @@ fn tool_lifecycle_binds_result_to_call_and_renders_stable_states() {
     harness.assert_idle();
 }
 
+#[test]
+fn oversized_unknown_tool_result_renders_truncation_notice() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    let id = "unknown-large-1".to_string();
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+        context: ctx(),
+        id: id.clone(),
+        provider_id: Some("provider-unknown-large-1".into()),
+        name: "UnknownTool".into(),
+        index: 0,
+    });
+    harness.runtime_event(TuiRuntimeEvent::ToolResult {
+        context: ctx(),
+        id,
+        provider_id: "provider-unknown-large-1".into(),
+        tool_name: "UnknownTool".into(),
+        output: format!(
+            "visible preview\n... [truncated tool result; original size: {} bytes]",
+            2_500_000_000usize
+        ),
+        content: serde_json::json!({
+            "preview": "visible preview",
+            "truncated": true,
+            "original_bytes": 2_500_000_000usize,
+        }),
+        is_error: false,
+        images: vec![],
+    });
+
+    harness.render();
+
+    let screen = harness.screen();
+    assert!(screen.contains("UnknownTool"));
+    assert!(screen.contains("truncated tool result"));
+    assert!(screen.contains("2500000000 bytes"));
+    harness.assert_idle();
+}
+
 /// #1106 回归：runtime 允许发空 SystemMessage（hook 的 additional_context /
 /// system_message 只判 Option 不判空串），TUI 必须不渲染——否则每条空消息
 /// 各吃掉 2 行（空内容 + depth0 前置空行），在输出区堆出大片空行。
