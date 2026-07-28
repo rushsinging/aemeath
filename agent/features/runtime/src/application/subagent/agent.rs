@@ -80,13 +80,10 @@ async fn call_tool_with_timeout(
             images: Vec::new(),
         });
     }
-    let timeout = tool.timeout_secs();
     let cancellation = ctx.cancellation();
     tokio::select! {
         _ = cancellation.cancelled() => Err(tool_call_cancelled_message(name)),
-        result = tokio::time::timeout(std::time::Duration::from_secs(timeout), tool.call(input, ctx)) => {
-            result.map_err(|_| format!("tool.call execution timed out: tool={name}, timeout_secs={timeout}"))
-        }
+        result = tool.call(input, ctx) => Ok(result),
     }
 }
 

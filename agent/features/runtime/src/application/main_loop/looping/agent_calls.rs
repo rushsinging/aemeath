@@ -46,7 +46,6 @@ where
             let authorization = prepared.authorization;
             let sink = sink.clone();
             let hook_port = hook_port.clone();
-            let agent = agent;
             let agent_semaphore = agent_semaphore.clone();
             let workspace_persist = workspace_persist.clone();
             let mut ag_ctx = agent_ctx.clone();

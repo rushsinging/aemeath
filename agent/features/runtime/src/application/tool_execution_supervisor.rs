@@ -186,17 +186,17 @@ async fn cancellation_outcome<F>(
 where
     F: std::future::Future<Output = PublishedToolOutcome>,
 {
-    if declaration == CancellationDeclaration::Cooperative {
-        if tokio::time::timeout(grace, future).await.is_ok() {
-            return if timed_out {
-                PublishedToolOutcome::timed_out(
-                    "tool reached effective deadline",
-                    CleanupConfirmation::Confirmed,
-                )
-            } else {
-                PublishedToolOutcome::cancelled("tool cancelled by caller")
-            };
-        }
+    if declaration == CancellationDeclaration::Cooperative
+        && tokio::time::timeout(grace, future).await.is_ok()
+    {
+        return if timed_out {
+            PublishedToolOutcome::timed_out(
+                "tool reached effective deadline",
+                CleanupConfirmation::Confirmed,
+            )
+        } else {
+            PublishedToolOutcome::cancelled("tool cancelled by caller")
+        };
     }
     PublishedToolOutcome::cancellation_unconfirmed(
         if timed_out {
