@@ -136,6 +136,111 @@ fn add_dependency_rejects_deleted_endpoints_atomically() {
 }
 
 #[test]
+fn replace_dependencies_updates_the_complete_set_in_one_commit() {
+    let (mut state, ids) = state_with_tasks(4);
+    state.add_dependency(ids[0], ids[1], 10).unwrap();
+    let revision_before = state.revision();
+
+    let result = state
+        .replace_dependencies(ids[0], vec![ids[2], ids[3]], 11)
+        .unwrap();
+
+    assert_eq!(result.value.blocked_by(), &[ids[2], ids[3]]);
+    assert_eq!(state.tasks()[&ids[0]].blocked_by(), &[ids[2], ids[3]]);
+    assert!(!state.tasks()[&ids[1]].blocks().contains(&ids[0]));
+    assert!(state.tasks()[&ids[2]].blocks().contains(&ids[0]));
+    assert!(state.tasks()[&ids[3]].blocks().contains(&ids[0]));
+    assert_eq!(
+        result.revision(),
+        Some(TaskRevision::new(revision_before.get() + 1))
+    );
+    assert_eq!(
+        state.revision(),
+        TaskRevision::new(revision_before.get() + 1)
+    );
+    assert_eq!(
+        result.events,
+        vec![
+            TaskEvent::TaskDependencyRemoved {
+                task_id: ids[0],
+                blocked_by_id: ids[1],
+            },
+            TaskEvent::TaskDependencyAdded {
+                task_id: ids[0],
+                blocked_by_id: ids[2],
+            },
+            TaskEvent::TaskDependencyAdded {
+                task_id: ids[0],
+                blocked_by_id: ids[3],
+            },
+        ]
+    );
+}
+
+#[test]
+fn replace_dependencies_empty_list_clears_and_same_set_is_noop() {
+    let (mut state, ids) = state_with_tasks(3);
+    state
+        .replace_dependencies(ids[0], vec![ids[1], ids[2]], 10)
+        .unwrap();
+
+    let before_noop = state.clone();
+    let noop = state
+        .replace_dependencies(ids[0], vec![ids[2], ids[1]], 11)
+        .unwrap();
+    assert_eq!(state, before_noop);
+    assert_eq!(noop.revision(), None);
+    assert!(noop.events.is_empty());
+
+    let cleared = state.replace_dependencies(ids[0], Vec::new(), 12).unwrap();
+    assert!(cleared.value.blocked_by().is_empty());
+    assert!(state.tasks()[&ids[1]].blocks().is_empty());
+    assert!(state.tasks()[&ids[2]].blocks().is_empty());
+}
+
+#[test]
+fn replace_dependencies_rejects_invalid_sets_atomically() {
+    let (mut state, ids) = state_with_tasks(3);
+
+    for dependencies in [vec![ids[1], ids[1]], vec![TaskId::new(99)], vec![ids[0]]] {
+        let before = state.clone();
+        assert!(state
+            .replace_dependencies(ids[0], dependencies, 10)
+            .is_err());
+        assert_eq!(state, before);
+    }
+
+    state.add_dependency(ids[1], ids[2], 11).unwrap();
+    state.add_dependency(ids[2], ids[0], 12).unwrap();
+    let before_cycle = state.clone();
+    assert!(matches!(
+        state.replace_dependencies(ids[0], vec![ids[1]], 13),
+        Err(TaskCommandError::DependencyCycle { .. })
+    ));
+    assert_eq!(state, before_cycle);
+}
+
+#[test]
+fn replace_dependencies_rejects_cross_batch_set_atomically() {
+    let (mut state, ids) = state_with_tasks(1);
+    let first = ids[0];
+    state.pause_batch(BatchId::new(1)).unwrap();
+    state.create_batch(batch_spec("第二批"), 10).unwrap();
+    let second = state
+        .create_task(task_spec("第二批任务"), 11)
+        .unwrap()
+        .value
+        .id();
+    let before = state.clone();
+
+    assert!(matches!(
+        state.replace_dependencies(second, vec![first], 12),
+        Err(TaskCommandError::CrossBatchDependency { .. })
+    ));
+    assert_eq!(state, before);
+}
+
+#[test]
 fn remove_dependency_updates_both_directions_and_absent_edge_is_idempotent() {
     let (mut state, ids) = state_with_tasks(2);
     state.add_dependency(ids[0], ids[1], 10).unwrap();

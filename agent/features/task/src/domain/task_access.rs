@@ -67,6 +67,12 @@ pub trait TaskAccess: Send + Sync {
         blocked_by_id: TaskId,
         updated_at: u64,
     ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    fn replace_dependencies(
+        &self,
+        task_id: TaskId,
+        blocked_by_ids: Vec<TaskId>,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
     fn remove_dependency(
         &self,
         task_id: TaskId,
