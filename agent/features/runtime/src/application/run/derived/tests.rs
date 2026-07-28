@@ -391,7 +391,7 @@ fn sub_production_path_is_wired_to_run_launcher() {
     let run = include_str!("loop_run.rs");
     assert!(
         run.contains("run::launcher::launch_prepared"),
-        "SubRunCapabilities::run_loop must call RunLauncher::launch_prepared"
+        "DerivedLoopCapabilityAdapter::run_loop must call RunLauncher::launch_prepared"
     );
 }
 
@@ -1194,7 +1194,7 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
     assert!(captured.tool_names.iter().any(|name| name == "Read"));
 }
 
-// issue #646：SubRunCapabilities emit Started 事件测试
+// issue #646：DerivedLoopCapabilityAdapter emit Started 事件测试
 #[tokio::test]
 async fn test_started_event_emitted_with_role_and_model() {
     use tokio::sync::mpsc;

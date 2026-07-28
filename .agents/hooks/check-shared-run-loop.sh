@@ -10,10 +10,13 @@ MAIN="agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs"
 SUB="agent/features/runtime/src/application/run/derived/loop_run.rs"
 LAUNCHER="agent/features/runtime/src/application/run/launcher.rs"
 MAIN_PORT="agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs"
+STEP_PERSISTENCE="agent/features/runtime/src/application/loop_engine/step_persistence.rs"
+INTERACTION_COORDINATOR="agent/features/runtime/src/application/interaction/coordinator.rs"
+STOP_HOOK_COORDINATOR="agent/features/runtime/src/application/hook/stop_coordination.rs"
 CONTEXT_COORDINATION="agent/features/runtime/src/application/context/coordination.rs"
 OLD_FSM="agent/features/runtime/src/application/loop_engine/chat/state.rs"
 
-for path in "$ENGINE" "$MAIN" "$MAIN_PORT" "$SUB" "$LAUNCHER" "$CONTEXT_COORDINATION"; do
+for path in "$ENGINE" "$MAIN" "$MAIN_PORT" "$SUB" "$LAUNCHER" "$STEP_PERSISTENCE" "$INTERACTION_COORDINATOR" "$STOP_HOOK_COORDINATOR" "$CONTEXT_COORDINATION"; do
   if [ ! -f "$path" ]; then
     echo "{\"decision\":\"block\",\"reason\":\"共享 Loop Engine 守卫缺少文件：$path\"}"
     exit 2
@@ -31,10 +34,10 @@ if [ -e "$OLD_FSM" ]; then
   exit 2
 fi
 
-engine_defs=$(grep -RInE 'pub[[:space:]]+async[[:space:]]+fn[[:space:]]+run_loop[[:space:]]*<' \
+engine_defs=$(grep -RInE 'pub[[:space:]]+async[[:space:]]+fn[[:space:]]+run_loop[[:space:]]*\(' \
   agent/features/runtime/src/application --include='*.rs' --exclude='*_tests.rs' | wc -l | tr -d ' ') # guard-registry:scope.runtime.shared-loop-tests
 if [ "$engine_defs" -ne 1 ]; then
-  echo "{\"decision\":\"block\",\"reason\":\"生产代码必须恰有一个泛型共享 run_loop 定义，当前数量：$engine_defs\"}"
+  echo "{\"decision\":\"block\",\"reason\":\"生产代码必须恰有一个共享 run_loop 定义，当前数量：$engine_defs\"}"
   exit 2
 fi
 
@@ -66,8 +69,35 @@ if grep -RInE 'context::session::|\bChatChain\b|\bChatSegment\b|save_chain|curre
   exit 2
 fi
 
-if ! grep -q 'append_finalized' "$MAIN_PORT" || ! grep -q 'append_finalized' "$SUB"; then
-  echo '{"decision":"block","reason":"Main/Sub execution path 必须各自接入唯一 finalized Step append。"}'
+if ! grep -q 'append_finalized' "$STEP_PERSISTENCE"; then
+  echo '{"decision":"block","reason":"无角色 Step persistence owner 必须接入唯一 finalized Step append。"}'
+  exit 2
+fi
+if grep -q 'append_finalized' "$MAIN_PORT" || grep -q 'append_finalized' "$SUB"; then
+  echo '{"decision":"block","reason":"Main/Sub adapter 禁止各自保留 finalized Step append 算法。"}'
+  exit 2
+fi
+
+if ! grep -q 'struct InteractionCompletionContext' "$INTERACTION_COORDINATOR" ||
+   ! grep -q 'complete_tool_interaction' "$INTERACTION_COORDINATOR"; then
+  echo '{"decision":"block","reason":"Interaction completion 必须由无角色 InteractionCoordinator 统一拥有。"}'
+  exit 2
+fi
+if grep -q 'trait InteractionCompletionPort' "$ENGINE" ||
+   grep -Eiq 'fn interaction_(execution_scope|tool_execution|materializer|session_id|cancellation)\(' "$MAIN_PORT" "$SUB"; then
+  echo '{"decision":"block","reason":"Main/Sub adapter 禁止恢复 Interaction completion fat port 或角色 completion 方法。"}'
+  exit 2
+fi
+
+if ! grep -q 'struct StopHookExecutionContext' "$STOP_HOOK_COORDINATOR" ||
+   ! grep -q 'trait StopHookObserver' "$STOP_HOOK_COORDINATOR" ||
+   ! grep -q 'coordinate_stop_hook' "$STOP_HOOK_COORDINATOR"; then
+  echo '{"decision":"block","reason":"Stop Hook 必须由无角色 stop coordinator 统一执行并应用结果。"}'
+  exit 2
+fi
+if grep -q 'trait StopHookPort' "$ENGINE" ||
+   grep -Eiq 'fn (stop_hook_context|project_stop_hook_outcome)\(' "$MAIN_PORT" "$SUB"; then
+  echo '{"decision":"block","reason":"Main/Sub adapter 禁止恢复 Stop Hook fat port 或角色化执行方法。"}'
   exit 2
 fi
 

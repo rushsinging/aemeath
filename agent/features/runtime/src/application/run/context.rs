@@ -164,7 +164,7 @@ impl Default for RunUsageTracker {
 
 /// Handle to the per-Run input buffer — exposes only the **push side**
 /// of [`RunInputBuffer`]; drain / epoch methods remain on the owning
-/// `MainRunCapabilities` so per-step execution state never leaks into
+/// `ChatLoopCapabilityAdapter` so per-step execution state never leaks into
 /// [`RuntimeContext`].
 ///
 /// The inner [`RunInputBuffer`] is guarded by a `std::sync::Mutex`
@@ -502,7 +502,7 @@ impl RuntimeContext {
         &self.cancel
     }
 
-    // ── Reference accessors (#1385): zero-clone borrow for MainRunCapabilities borrow sites ──
+    // ── Reference accessors (#1385): zero-clone borrow for loop adapter borrow sites ──
 
     /// Provider binding reference.
     pub fn provider_ref(&self) -> &Arc<ProviderBinding> {

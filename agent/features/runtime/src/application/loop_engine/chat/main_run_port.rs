@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
-use crate::application::context::coordination::ContextCoordinator;
 use crate::application::loop_engine::chat::post_batch::run_post_tool_batch;
 use crate::application::loop_engine::chat::reflection::{
     maybe_submit_pre_compact_reflection, should_run_turn_reflection, submit_interval_reflection,
@@ -16,19 +15,15 @@ use crate::application::loop_engine::chat::task_reminder::TaskReminderState;
 use crate::application::loop_engine::chat::{
     ChatEventSink, InputEventDrainPort, QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
-use crate::application::loop_engine::event_strategy::{EventStrategy, MainEventStrategy};
+use crate::application::loop_engine::event_strategy::{ChatStreamEventObserver, RunEventObserver};
 use crate::application::loop_engine::input_strategy::{BufferedInputAdapter, InputStrategy};
-use crate::application::loop_engine::shared::compact_core;
 use crate::application::loop_engine::{
     DrainEpoch, DrainOutcome, LoopEngineError, ModelStep, ToolGuardDecision,
 };
 use crate::application::run::context::RuntimeContext;
 use crate::application::tool::agent::{Agent, ToolCall};
 use crate::domain::agent_run::RunDomainEvent;
-use crate::ports::{
-    ContextRequest, ContextRequestId, Language as ContextLanguage, RunStepId, SessionId,
-    SystemPromptSpec, TaskReminderSnapshot,
-};
+use crate::ports::{ContextRequest, RunStepId, TaskReminderSnapshot};
 
 fn request_context_size(request: Option<&ContextRequest>) -> usize {
     request.map_or(1, |request| request.context_size.max(1))
@@ -132,7 +127,7 @@ pub(crate) fn fixture_two_step_accepted(
 /// `RuntimeContext::event_sink()`.  BufferedInputAdapter now takes a
 /// `ChatEventSinkHandle` directly.
 #[allow(clippy::too_many_arguments)]
-pub(crate) struct MainRunCapabilities<'a, Q, I>
+pub(crate) struct ChatLoopCapabilityAdapter<'a, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -176,7 +171,7 @@ where
     pub(crate) plan_mode: bool,
 }
 
-impl<Q, I> MainRunCapabilities<'_, Q, I>
+impl<Q, I> ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -214,14 +209,6 @@ where
         self.runtime_context.reflection_history_ref()
     }
     #[inline]
-    fn reasoning(&self) -> crate::ports::ReasoningLevel {
-        *self
-            .runtime_context
-            .reasoning_ref()
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-    }
-    #[inline]
     fn run_config(&self) -> &crate::application::run::config::RunConfigSnapshot {
         self.runtime_context.config_ref()
     }
@@ -229,12 +216,6 @@ where
     fn memory_config(&self) -> &share::config::MemoryConfig {
         self.runtime_context.config_ref().config().memory()
     }
-    /// Context coordinator, constructed lazily from RuntimeContext's ContextPort.
-    #[inline]
-    fn context_coordinator(&self) -> ContextCoordinator {
-        ContextCoordinator::new(self.runtime_context.context())
-    }
-
     /// Drain any remaining events from the Run-scoped buffer back to the
     /// session's `pending_input`. Called after `run_loop` returns so that
     /// unconsumed control events are not lost (#1272).
@@ -254,7 +235,7 @@ where
                 sdk::ChatInputEvent::UserMessage { .. } if sealed => {
                     log::warn!(
                         target: crate::LOG_TARGET,
-                        "MainRunCapabilities: sealed buffer contained unconsumed UserMessage; routing to pending_input"
+                        "ChatLoopCapabilityAdapter: sealed buffer contained unconsumed UserMessage; routing to pending_input"
                     );
                     self.input_strategy.pending_input.push(event);
                 }
@@ -263,11 +244,9 @@ where
         }
     }
 
-    fn freeze_request(
+    fn context_request_source(
         &self,
-        step_id: &RunStepId,
-        pending_messages: Vec<Message>,
-    ) -> ContextRequest {
+    ) -> crate::application::loop_engine::context_request::ContextRequestSource<'_> {
         let task_reminder = self.task_access().reminder_snapshot();
         let task_reminder = task_reminder
             .current_batch
@@ -291,34 +270,18 @@ where
             )
             .map(|snapshot| snapshot.model_schemas())
             .unwrap_or_default();
-        let tool_schemas = raw_tool_schemas
-            .iter()
-            .filter_map(|schema| {
-                Some(crate::ports::ModelToolSchema {
-                    name: schema.get("name")?.as_str()?.to_string(),
-                    description: schema.get("description")?.as_str()?.to_string(),
-                    input_schema: schema.get("input_schema")?.clone(),
-                })
-            })
-            .collect::<Vec<_>>();
-        ContextRequest {
-            session_id: SessionId::new(self.session_id),
-            request_id: ContextRequestId::new(uuid::Uuid::now_v7().to_string()),
-            run_id: self.run_id.clone(),
-            step_id: step_id.clone(),
-            pending_messages,
-            system_prompt: SystemPromptSpec::new(self.system_prompt_text),
-            model_id: self.binding().model.model.clone(),
-            effective_reasoning: self.reasoning(),
+        crate::application::loop_engine::context_request::ContextRequestSource {
+            runtime_context: self.runtime_context,
+            session_id: self.session_id,
+            system_prompt: self.system_prompt_text,
+            model_id: &self.binding().model.model,
+            language: self.language,
             task_reminder,
-            language: ContextLanguage::new(self.language),
             agent_roles: std::collections::HashMap::new(),
-            config_snapshot: self.run_config().config().clone(),
+            config: self.run_config(),
             context_size: self.context_size,
             max_output_tokens: self.binding().max_tokens as usize,
-            last_api_total_tokens: self.runtime_context.usage().get(),
-            tool_schemas,
-            tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(&raw_tool_schemas),
+            raw_tool_schemas,
         }
     }
 
@@ -430,13 +393,13 @@ where
 
 // ── Main tool-round observation ──────────────────────────────────────────
 
-struct MainToolRoundObserver {
+struct ChatToolRoundObserver {
     runtime_context: RuntimeContext,
     workspace_root: PathBuf,
 }
 
 #[async_trait]
-impl crate::application::tool::coordination::ToolRoundObserver for MainToolRoundObserver {
+impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRoundObserver {
     async fn results_materialized(
         &mut self,
         execution: &crate::application::run::execution_state::RunExecutionState,
@@ -477,8 +440,8 @@ impl crate::application::tool::coordination::ToolRoundObserver for MainToolRound
 
 // ── Model invocation lifecycle capability ──────────────────────────────
 
-impl<Q, I> crate::application::model::invocation::ModelInvocationContext
-    for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::model::invocation::ModelInvocationSource
+    for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -541,8 +504,8 @@ where
 }
 
 #[async_trait]
-impl<Q, I> crate::application::model::invocation::ModelInvocationLifecycle
-    for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::model::invocation::ModelInvocationObserver
+    for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -658,7 +621,7 @@ where
 }
 
 #[async_trait]
-impl<Q, I> crate::application::loop_engine::InputPort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::InputPort for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -691,7 +654,7 @@ where
 }
 
 #[async_trait]
-impl<Q, I> crate::application::loop_engine::EventSinkPort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::EventSinkPort for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -701,7 +664,7 @@ where
         execution: &mut crate::application::run::execution_state::RunExecutionState,
         events: Vec<RunDomainEvent>,
     ) -> Result<(), LoopEngineError> {
-        let mut strategy = MainEventStrategy {
+        let mut observer = ChatStreamEventObserver {
             sink: self.runtime_context.event_sink(),
             session_id: self.session_id,
             turn_context: &self.turn_context,
@@ -711,12 +674,43 @@ where
             turn_count: execution.turn_count(),
             messages_snapshot: execution.messages_snapshot(),
         };
-        strategy.emit(events).await
+        observer.emit(events).await
     }
 }
 
 #[async_trait]
-impl<Q, I> crate::application::loop_engine::StepPersistencePort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::step_persistence::AcceptedInputObserver
+    for ChatLoopCapabilityAdapter<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    async fn on_accepted_input(
+        &mut self,
+        execution: &mut crate::application::run::execution_state::RunExecutionState,
+    ) -> Result<(), LoopEngineError> {
+        let adopted = execution.take_adopted_input();
+        if adopted.is_empty() {
+            return Ok(());
+        }
+        let queued = self
+            .input_strategy
+            .run_input_buffer
+            .with_lock(|buffer| buffer.user_message_snapshot());
+        self.runtime_context
+            .event_sink()
+            .send_event(RuntimeStreamEvent::UserMessagesAdopted {
+                items: adopted,
+                queued,
+            })
+            .await;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl<Q, I> crate::application::loop_engine::StepPersistencePort
+    for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -731,7 +725,12 @@ where
         _run_id: &sdk::RunId,
         step_id: &RunStepId,
     ) -> Option<ContextRequest> {
-        Some(self.freeze_request(step_id, execution.step_outcome()))
+        Some(
+            crate::application::loop_engine::context_request::ContextRequestCoordinator::new(
+                self.context_request_source(),
+            )
+            .build_request(&self.run_id, step_id, execution.step_outcome()),
+        )
     }
 
     async fn accept_step_input(
@@ -739,116 +738,42 @@ where
         execution: &mut crate::application::run::execution_state::RunExecutionState,
         step_id: &RunStepId,
     ) -> Result<(), LoopEngineError> {
-        let accepted = execution.accepted_input_snapshot();
-        if accepted.is_empty() {
-            return Ok(());
-        }
-        let request = execution
-            .context_request()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
-        debug_assert_eq!(&request.step_id, step_id);
-        self.context_coordinator()
-            .append_accepted_input(request, accepted)
+        let coordinator =
+            crate::application::loop_engine::step_persistence::StepPersistenceCoordinator::from_context(
+                self.runtime_context,
+            );
+        coordinator
+            .accept_step_input(execution, step_id, self)
             .await
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        let adopted = execution.take_adopted_input();
-        if !adopted.is_empty() {
-            let queued = self
-                .input_strategy
-                .run_input_buffer
-                .with_lock(|buffer| buffer.user_message_snapshot());
-            self.runtime_context
-                .event_sink()
-                .send_event(RuntimeStreamEvent::UserMessagesAdopted {
-                    items: adopted,
-                    queued,
-                })
-                .await;
-        }
-        Ok(())
     }
 
     async fn persist_step_commit(
         &mut self,
         commit: &crate::application::loop_engine::StepCommit,
     ) -> Result<(), LoopEngineError> {
-        let (Some(request), Some(expected_revision)) =
-            (commit.request.as_ref(), commit.expected_revision)
-        else {
-            return Ok(());
-        };
-        self.context_coordinator()
-            .append_finalized(
-                request,
-                commit.step_id.clone(),
-                expected_revision,
-                commit.cause,
-                commit.messages.clone(),
-                vec![],
-                self.runtime_context.usage().get(),
-            )
-            .await
-            .map(|_| ())
-            .map_err(|error| LoopEngineError::Adapter(error.to_string()))
+        crate::application::loop_engine::step_persistence::StepPersistenceCoordinator::from_context(
+            self.runtime_context,
+        )
+        .persist_step_commit(commit)
+        .await
     }
 }
 
 #[async_trait]
-impl<Q, I> crate::application::loop_engine::CompactionPort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::compaction::CompactionObserver
+    for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
-    async fn needs_compaction(
+    async fn on_compacted(
         &mut self,
-        execution: &mut crate::application::run::execution_state::RunExecutionState,
-    ) -> Result<bool, LoopEngineError> {
-        let (needed, window) =
-            crate::application::loop_engine::shared::needs_compaction_with_window(
-                execution.context_request(),
-                &self.context_coordinator(),
-            )
-            .await?;
-        *execution.context_window_mut() = Some(window);
-        Ok(needed)
-    }
-
-    async fn compact(
-        &mut self,
-        execution: &mut crate::application::run::execution_state::RunExecutionState,
-        _cancel: &CancellationToken,
+        outcome: &crate::ports::CompactOutcome,
+        discarded_messages: &[share::message::Message],
     ) -> Result<(), LoopEngineError> {
-        // Freeze the pre-compact messages snapshot before invoking the context
-        // adapter. Only the early window that compact will discard feeds the
-        // PreCompact reflection; the recent tail stays in `recent_messages` and
-        // is observable by the next LLM turn without going through Memory.
-        let pre_compact_snapshot: Vec<share::message::Message> = execution
-            .context_window()
-            .map(|window| {
-                context::compact::messages_selected_for_precompact_memory(&window.messages)
-            })
-            .unwrap_or_default();
-        let source_revision = execution
-            .context_window()
-            .map(|window| window.backing_revision)
-            .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
-        let request = execution.context_request().cloned();
-        let outcome = compact_core(
-            request.as_ref(),
-            source_revision,
-            &self.context_coordinator(),
-            &self.runtime_context.usage(),
-            execution.context_window_mut(),
-        )
-        .await?;
-        // Production PreCompact reflection trigger (#1284): only the success
-        // path submits the frozen pre-compact snapshot. Errors and `Skipped`
-        // never enqueue a job. The submission is non-blocking and shares the
-        // session-scoped slot with Interval and Manual triggers; the helper
-        // returns `BusySkipped`/`DisabledSkipped` without blocking the caller.
         let _ = maybe_submit_pre_compact_reflection(
-            &outcome,
-            &pre_compact_snapshot,
+            outcome,
+            discarded_messages,
             self.reflection_tasks,
             self.memory_config(),
             self.binding(),
@@ -862,7 +787,38 @@ where
 }
 
 #[async_trait]
-impl<Q, I> crate::application::loop_engine::ModelInvocationPort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::CompactionPort for ChatLoopCapabilityAdapter<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
+    async fn needs_compaction(
+        &mut self,
+        execution: &mut crate::application::run::execution_state::RunExecutionState,
+    ) -> Result<bool, LoopEngineError> {
+        crate::application::loop_engine::compaction::CompactionCoordinator::from_context(
+            self.runtime_context,
+        )
+        .needs_compaction(execution)
+        .await
+    }
+
+    async fn compact(
+        &mut self,
+        execution: &mut crate::application::run::execution_state::RunExecutionState,
+        _cancel: &CancellationToken,
+    ) -> Result<(), LoopEngineError> {
+        let coordinator =
+            crate::application::loop_engine::compaction::CompactionCoordinator::from_context(
+                self.runtime_context,
+            );
+        coordinator.compact(execution, self).await
+    }
+}
+
+#[async_trait]
+impl<Q, I> crate::application::loop_engine::ModelInvocationPort
+    for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -877,22 +833,23 @@ where
 }
 
 #[async_trait]
-impl<Q, I> crate::application::loop_engine::StopHookPort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::hook::stop_coordination::StopHookObserver
+    for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
-    fn stop_hook_port(&self) -> std::sync::Arc<dyn hook::HookPort> {
-        self.hook_runner().clone()
-    }
-
-    fn stop_hook_context(&self) -> crate::application::hook::stop_coordination::StopHookContext {
-        crate::application::hook::stop_coordination::StopHookContext {
-            turns: 0,
-            workspace_root: self.current_cwd(),
-            session_id: self.session_id.to_string(),
-            language: self.language.to_string(),
-        }
+    fn stop_hook_execution_context(
+        &self,
+    ) -> Option<crate::application::hook::stop_coordination::StopHookExecutionContext> {
+        Some(
+            crate::application::hook::stop_coordination::StopHookExecutionContext::new(
+                self.hook_runner().clone(),
+                self.current_cwd(),
+                self.session_id.to_string(),
+                self.language.to_string(),
+            ),
+        )
     }
 
     async fn begin_stop_hook_status(&mut self) -> Result<(), LoopEngineError> {
@@ -916,7 +873,7 @@ where
         self.input_strategy.stop_hook_feedback = Some(message);
     }
 
-    async fn project_stop_hook_outcome(
+    async fn observe_stop_hook_outcome(
         &mut self,
         execution: &crate::application::run::execution_state::RunExecutionState,
         outcome: &crate::application::hook::stop_coordination::StopHookOutcome,
@@ -940,7 +897,8 @@ where
 }
 
 #[async_trait]
-impl<Q, I> crate::application::loop_engine::ToolOrchestrationPort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::ToolOrchestrationPort
+    for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -979,25 +937,21 @@ where
             materializer: self.tool_result_materializer,
             log_patch: logging::LogContextPatch::default(),
         };
-        let mut observer = MainToolRoundObserver {
-            runtime_context: self.runtime_context.clone(),
-            workspace_root,
-        };
-        crate::application::tool::coordination::orchestrate_tool_round(
+        crate::application::tool::coordination::ToolRoundCoordinator::new(
             context,
-            &mut observer,
-            execution,
-            run_id,
-            step_id,
-            calls,
-            cancel,
+            ChatToolRoundObserver {
+                runtime_context: self.runtime_context.clone(),
+                workspace_root,
+            },
         )
+        .execute(execution, run_id, step_id, calls, cancel)
         .await
     }
 }
 
 #[async_trait]
-impl<Q, I> crate::application::loop_engine::StuckHandlingPort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::StuckHandlingPort
+    for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -1012,7 +966,7 @@ where
     }
 }
 
-impl<Q, I> crate::application::loop_engine::PlanApprovalPort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::PlanApprovalPort for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -1023,7 +977,8 @@ where
 }
 
 #[async_trait]
-impl<Q, I> crate::application::loop_engine::InteractionMailboxPort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::InteractionMailboxPort
+    for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -1055,47 +1010,36 @@ where
     }
 }
 
-impl<Q, I> crate::application::loop_engine::InteractionCompletionPort
-    for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::interaction::coordinator::InteractionCompletionContextProvider
+    for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
-    fn interaction_execution_scope(&self) -> tools::ExecutionScope {
+    fn interaction_completion_context(
+        &self,
+        step_cancel: CancellationToken,
+    ) -> crate::application::interaction::coordinator::InteractionCompletionContext<'_> {
         let workspace = self.workspace.read();
-        tools::ExecutionScope::builder(
+        let execution_scope = tools::ExecutionScope::builder(
             self.run_id.to_string(),
             workspace.workspace_id(),
             workspace.current_workspace_root(),
         )
-        .build()
-    }
-
-    fn interaction_tool_execution(&self) -> &dyn tools::ToolExecutionPort {
-        self.tool_execution().as_ref()
-    }
-
-    fn interaction_materializer(
-        &self,
-    ) -> &crate::application::tool::result_materialization::ToolResultMaterializer {
-        self.tool_result_materializer
-    }
-
-    fn interaction_session_id(&self) -> &str {
-        self.session_id
-    }
-
-    fn interaction_cancellation(
-        &self,
-        step_cancel: CancellationToken,
-    ) -> std::sync::Arc<dyn tools::CancellationSignal> {
-        std::sync::Arc::new(
-            crate::application::run::context::RunCancellationScope::from_token(step_cancel),
+        .build();
+        crate::application::interaction::coordinator::InteractionCompletionContext::new(
+            execution_scope,
+            self.tool_execution().as_ref(),
+            self.tool_result_materializer,
+            self.session_id,
+            std::sync::Arc::new(
+                crate::application::run::context::RunCancellationScope::from_token(step_cancel),
+            ),
         )
     }
 }
 
-impl<Q, I> crate::application::loop_engine::RunControlPort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::RunControlPort for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -1106,17 +1050,29 @@ where
     }
 }
 
-impl<Q, I> crate::application::loop_engine::RunLifecyclePort for MainRunCapabilities<'_, Q, I>
+impl<Q, I> crate::application::loop_engine::RunLifecyclePort for ChatLoopCapabilityAdapter<'_, Q, I>
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
     fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
-        self.active_run.claim_terminal(run_id)
+        crate::application::loop_engine::run_lifecycle::RunLifecycleCoordinator::new(
+            self.active_run,
+            crate::application::loop_engine::run_lifecycle::ActiveStepScopeObserver::new(
+                self.active_run,
+            ),
+        )
+        .claim_terminal(run_id)
     }
 
     fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
-        self.active_run.claim_cancellation(run_id)
+        crate::application::loop_engine::run_lifecycle::RunLifecycleCoordinator::new(
+            self.active_run,
+            crate::application::loop_engine::run_lifecycle::ActiveStepScopeObserver::new(
+                self.active_run,
+            ),
+        )
+        .claim_cancellation(run_id)
     }
 
     fn register_step_scope(
@@ -1126,7 +1082,12 @@ where
         cancel: CancellationToken,
     ) {
         debug_assert_eq!(run_id, &self.run_id);
-        self.active_run
-            .set_main_active_step(run_id, step_id, cancel);
+        crate::application::loop_engine::run_lifecycle::RunLifecycleCoordinator::new(
+            self.active_run,
+            crate::application::loop_engine::run_lifecycle::ActiveStepScopeObserver::new(
+                self.active_run,
+            ),
+        )
+        .register_step_scope(run_id, step_id, cancel);
     }
 }

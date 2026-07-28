@@ -1,31 +1,46 @@
 use crate::application::loop_engine::chat::{
     ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext,
 };
-use crate::application::run::derived::AgentRunOutcome;
+use crate::application::loop_engine::run_finalization::{
+    RunFinalizationObserver, RunFinalizationOutcome,
+};
 use task::TaskAccess;
 
-pub(crate) async fn finish_completed_loop(
-    outcome: &AgentRunOutcome,
-    sink: &crate::application::loop_engine::chat::ChatEventSinkHandle,
-    context: &RuntimeTurnContext,
-    access: &dyn TaskAccess,
-) {
-    let _ = sink
-        .send_event(RuntimeStreamEvent::DoneWithDuration {
-            context: context.clone(),
-            duration: outcome.duration,
-        })
-        .await;
+pub(crate) struct MainRunFinalizationObserver<'a> {
+    pub sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
+    pub context: &'a RuntimeTurnContext,
+    pub access: &'a dyn TaskAccess,
+    pub session_id: &'a str,
+}
 
-    if let Some(batch_id) = access.lifecycle_snapshot(0).all_completed {
-        if let Err(error) = access.archive_batch(batch_id) {
-            log::warn!(target: crate::LOG_TARGET,
-                "[task_list_archive_failed] batch_id={batch_id}, error={error}"
-            );
-        } else {
-            log::info!(target: crate::LOG_TARGET,
-                "[task_list_archived] batch_id={batch_id}, status=archived, reason=all_tasks_completed"
-            );
+#[async_trait::async_trait]
+impl RunFinalizationObserver for MainRunFinalizationObserver<'_> {
+    async fn on_finalized(
+        &mut self,
+        outcome: &RunFinalizationOutcome,
+        _terminal: &tools::AgentRunTerminal,
+    ) {
+        crate::application::loop_engine::run_finalization::log_run_finalization(
+            outcome,
+            self.session_id,
+        );
+        let _ = self
+            .sink
+            .send_event(RuntimeStreamEvent::DoneWithDuration {
+                context: self.context.clone(),
+                duration: outcome.duration,
+            })
+            .await;
+        if let Some(batch_id) = self.access.lifecycle_snapshot(0).all_completed {
+            if let Err(error) = self.access.archive_batch(batch_id) {
+                log::warn!(target: crate::LOG_TARGET,
+                    "[task_list_archive_failed] batch_id={batch_id}, error={error}"
+                );
+            } else {
+                log::info!(target: crate::LOG_TARGET,
+                    "[task_list_archived] batch_id={batch_id}, status=archived, reason=all_tasks_completed"
+                );
+            }
         }
     }
 }

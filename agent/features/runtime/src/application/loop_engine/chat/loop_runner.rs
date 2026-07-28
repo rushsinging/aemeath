@@ -20,7 +20,7 @@ use super::loop_context::ChatLoopContext;
 
 #[path = "main_run_port.rs"]
 pub(crate) mod main_run_port;
-use main_run_port::MainRunCapabilities;
+use main_run_port::ChatLoopCapabilityAdapter;
 
 /// Session actor for Main chat. The session itself only idles, accepts one real user input,
 /// creates one fresh `Run`, drives it to a terminal state through the shared engine, then idles
@@ -596,7 +596,7 @@ where
                     .join("\n\n");
                 let run_ctx_ref: &RuntimeContext = &runtime_context;
 
-                let mut port = MainRunCapabilities {
+                let mut port = ChatLoopCapabilityAdapter {
                     // #1385: per-run service contracts from RuntimeContext (non-Option)
                   runtime_context: run_ctx_ref,
                   queue: &queue,
@@ -650,7 +650,7 @@ where
                   }
                 // #1280: Main Run creation, ActiveRun registration, shared
                 // run_loop and cleanup are all owned by RunLauncher.
-                // await_user_input is handled inside MainRunCapabilities (async park
+                // await_user_input is handled inside ChatLoopCapabilityAdapter (async park
                 // on input_events channel), so run_loop only returns Terminal.
                 let main_active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort> =
                     active_run.clone();

@@ -871,7 +871,7 @@ fn derived_sub_run_has_real_io_seams_not_noop_placeholders() {
 
     let event_sink = parent_ctx.event_sink();
     // Send a probe event through the derived context's event_sink.
-    // SubAgentEventSink is a noop, so this should not panic.
+    // Derived event sink is a noop, so this should not panic.
     use crate::application::loop_engine::chat::ChatEventSink as _;
     event_sink.try_send_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::SystemMessage(

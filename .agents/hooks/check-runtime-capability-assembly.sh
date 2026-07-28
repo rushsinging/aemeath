@@ -227,8 +227,12 @@ if TOOL_COORDINATOR.is_file():
     for retired in ["ToolRoundProjection", "mark_tool_results_pending"]:
         if retired in prod:
             violations.append(f"15. Tool coordinator retains vague boundary '{retired}'")
-    if "pub(crate) async fn orchestrate_tool_round" not in prod:
-        violations.append("15. Tool coordinator must expose the shared round orchestration")
+    if "pub(crate) struct ToolRoundCoordinator" not in prod:
+        violations.append("15. Tool coordinator must expose the shared round owner")
+    if "pub(crate) fn new(context: ToolRoundContext" not in prod:
+        violations.append("15. ToolRoundCoordinator must own explicit context construction")
+    if "pub(crate) async fn execute(" not in prod:
+        violations.append("15. ToolRoundCoordinator must expose the shared round execution")
     if len(re.findall(r'async\s+fn\s+execute_tools_impl\s*<', prod)) != 1:
         violations.append("15. Tool coordinator must own exactly one execute_tools_impl")
 for adapter in TOOL_ADAPTERS:

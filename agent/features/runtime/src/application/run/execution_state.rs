@@ -52,6 +52,7 @@ impl RunExecutionState {
         &self.messages
     }
 
+    #[cfg(test)]
     pub(crate) fn accepted_input(&self) -> &[Message] {
         &self.accepted_input
     }

@@ -17,7 +17,7 @@ use tools::{ToolOutcome, ToolSuspension};
 
 /// Result of a tool execution round.
 /// Suspensions and approvals are returned as typed data — the caller
-/// (MainRunCapabilities or SubRunCapabilities) decides whether to route them through
+/// The active loop capability adapter decides whether to route them through
 /// the interaction coordinator.
 pub(crate) struct ToolRoundResult {
     pub results: Vec<ToolExecution>,

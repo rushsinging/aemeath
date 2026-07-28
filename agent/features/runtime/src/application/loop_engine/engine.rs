@@ -4,9 +4,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
-use crate::application::hook::stop_coordination::{
-    StopHookContext, StopHookDecision, StopHookOutcome,
-};
+use crate::application::hook::stop_coordination::{StopHookDecision, StopHookObserver};
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolCall;
@@ -322,25 +320,9 @@ pub trait RunLifecyclePort: Send + Sync {
 }
 
 #[async_trait]
-pub trait InteractionCompletionPort: Send {
-    fn interaction_execution_scope(&self) -> tools::ExecutionScope;
-
-    fn interaction_tool_execution(&self) -> &dyn tools::ToolExecutionPort;
-
-    fn interaction_materializer(
-        &self,
-    ) -> &crate::application::tool::result_materialization::ToolResultMaterializer;
-
-    fn interaction_session_id(&self) -> &str;
-
-    fn interaction_cancellation(
-        &self,
-        step_cancel: CancellationToken,
-    ) -> std::sync::Arc<dyn tools::CancellationSignal>;
-}
-
-#[async_trait]
-pub trait InteractionMailboxPort: InteractionCompletionPort + Send {
+pub trait InteractionMailboxPort:
+    crate::application::interaction::coordinator::InteractionCompletionContextProvider + Send
+{
     fn interaction_port(&self) -> &dyn crate::application::interaction::port::InteractionPort {
         static UNAVAILABLE: std::sync::LazyLock<
             crate::application::interaction::port::UnavailableInteractionPort,
@@ -386,7 +368,7 @@ fn freeze_step<P>(
     step_id: &sdk::RunStepId,
     inputs: &[LoopInput],
 ) where
-    P: StepPersistencePort,
+    P: StepPersistencePort + ?Sized,
 {
     port.observe_step_frozen(step_id);
     let prefix = port.take_step_input_prefix();
@@ -447,7 +429,7 @@ async fn finalize_step<P>(
     cause: crate::ports::FinalizeCause,
 ) -> Result<(), LoopEngineError>
 where
-    P: StepPersistencePort,
+    P: StepPersistencePort + ?Sized,
 {
     let commit = prepare_step_commit(execution, step_id, cause);
     port.persist_step_commit(&commit).await?;
@@ -504,36 +486,6 @@ pub trait ModelInvocationPort: Send {
 }
 
 #[async_trait]
-pub trait StopHookPort: Send {
-    fn stop_hook_port(&self) -> std::sync::Arc<dyn hook::HookPort> {
-        std::sync::Arc::new(crate::application::hook::empty::EmptyHookPort)
-    }
-
-    fn stop_hook_context(&self) -> StopHookContext {
-        StopHookContext {
-            turns: 0,
-            workspace_root: std::path::PathBuf::new(),
-            session_id: String::new(),
-            language: "en".to_string(),
-        }
-    }
-
-    async fn begin_stop_hook_status(&mut self) -> Result<(), LoopEngineError> {
-        Ok(())
-    }
-
-    fn install_stop_hook_feedback(&mut self, _message: share::message::Message) {}
-
-    async fn project_stop_hook_outcome(
-        &mut self,
-        _execution: &RunExecutionState,
-        _outcome: &StopHookOutcome,
-    ) -> Result<(), LoopEngineError> {
-        Ok(())
-    }
-}
-
-#[async_trait]
 pub trait ToolOrchestrationPort: Send {
     async fn execute_tools(
         &mut self,
@@ -555,12 +507,41 @@ pub trait StuckHandlingPort: Send {
 }
 
 pub trait PlanApprovalPort: Send {
-    /// Whether the current run needs plan approval before proceeding.
-    ///
-    /// Default returns `false`; adapters that support plan mode override it.
     fn needs_plan_approval(&self) -> bool {
         false
     }
+}
+
+pub trait LoopCapabilityAdapter:
+    InputPort
+    + EventSinkPort
+    + RunControlPort
+    + RunLifecyclePort
+    + InteractionMailboxPort
+    + StepPersistencePort
+    + CompactionPort
+    + ModelInvocationPort
+    + StopHookObserver
+    + ToolOrchestrationPort
+    + StuckHandlingPort
+    + PlanApprovalPort
+{
+}
+
+impl<T> LoopCapabilityAdapter for T where
+    T: InputPort
+        + EventSinkPort
+        + RunControlPort
+        + RunLifecyclePort
+        + InteractionMailboxPort
+        + StepPersistencePort
+        + CompactionPort
+        + ModelInvocationPort
+        + StopHookObserver
+        + ToolOrchestrationPort
+        + StuckHandlingPort
+        + PlanApprovalPort
+{
 }
 
 enum Interrupt<T> {
@@ -598,27 +579,13 @@ where
 /// `RuntimeContext` owns run-scoped capabilities. During P5 the legacy adapter
 /// remains the narrow behavior bridge while its methods are peeled into the
 /// engine and context-owned ports.
-pub async fn execute_prepared_loop<P>(
+pub async fn execute_prepared_loop(
     run: &mut Run,
     execution: &mut RunExecutionState,
     context: &RuntimeContext,
     cancel: &CancellationToken,
-    port: &mut P,
-) -> Result<LoopDirective, LoopEngineError>
-where
-    P: InputPort
-        + EventSinkPort
-        + RunControlPort
-        + RunLifecyclePort
-        + InteractionMailboxPort
-        + StepPersistencePort
-        + CompactionPort
-        + ModelInvocationPort
-        + StopHookPort
-        + ToolOrchestrationPort
-        + StuckHandlingPort
-        + PlanApprovalPort,
-{
+    port: &mut dyn LoopCapabilityAdapter,
+) -> Result<LoopDirective, LoopEngineError> {
     let result = run_loop(run, execution, cancel, port).await;
 
     // The frozen RuntimeContext remains mandatory at the unified entry; event
@@ -627,26 +594,12 @@ where
     result
 }
 
-pub async fn run_loop<P>(
+pub async fn run_loop(
     run: &mut Run,
     execution: &mut RunExecutionState,
     cancel: &CancellationToken,
-    port: &mut P,
-) -> Result<LoopDirective, LoopEngineError>
-where
-    P: InputPort
-        + EventSinkPort
-        + RunControlPort
-        + RunLifecyclePort
-        + InteractionMailboxPort
-        + StepPersistencePort
-        + CompactionPort
-        + ModelInvocationPort
-        + StopHookPort
-        + ToolOrchestrationPort
-        + StuckHandlingPort
-        + PlanApprovalPort,
-{
+    port: &mut dyn LoopCapabilityAdapter,
+) -> Result<LoopDirective, LoopEngineError> {
     if run.status() == RunStatus::Created {
         run.start_draining()?;
         emit_events(run, execution, port).await?;
@@ -877,10 +830,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     let step_id = sdk::RunStepId::new_v7();
     let step_cancel = cancel.child_token();
@@ -1039,23 +993,13 @@ where
             // A blocking stop hook with repeated output should continue
             // (feedback may change the model's behavior); text stall
             // detection runs only when the stop hook allows proceeding.
-            let turn_count = run.steps().len(); // turns ≈ steps completed
-            port.begin_stop_hook_status().await?;
-            let mut stop_context = port.stop_hook_context();
-            stop_context.turns = turn_count;
-            let stop_outcome = crate::application::hook::stop_coordination::orchestrate_stop_hook(
-                &port.stop_hook_port(),
-                stop_context,
+            let stop_outcome = crate::application::hook::stop_coordination::coordinate_stop_hook(
+                port,
+                execution,
+                run.steps().len(),
                 &step_cancel,
             )
-            .await;
-            if let Some(message) = stop_outcome.feedback_message.clone() {
-                port.install_stop_hook_feedback(message.clone());
-                execution.record_step_message(message.clone());
-                execution.append_message(message);
-            }
-            port.project_stop_hook_outcome(execution, &stop_outcome)
-                .await?;
+            .await?;
             match stop_outcome.decision {
                 StopHookDecision::Proceed => {
                     // Normal completion — fall through to text stall check.
@@ -1380,10 +1324,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     use crate::application::interaction::coordinator::InteractionCoordinator;
 
@@ -1520,10 +1465,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     use crate::application::interaction::coordinator::InteractionCoordinator;
 
@@ -1638,10 +1584,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     use crate::application::interaction::coordinator::InteractionCoordinator;
     use crate::application::interaction::port::InteractionCompletion;
@@ -1690,15 +1637,16 @@ where
             );
             let _ = InteractionCoordinator::cancel(run, &request_id);
 
-            let signal = port.interaction_cancellation(step_cancel.clone());
-            let outcome = InteractionCoordinator::complete_tool_interaction(
-                port,
-                execution,
-                &metadata,
-                &InteractionCompletion::Cancelled(reason.clone()),
-                signal.as_ref(),
-            )
-            .await?;
+            let outcome = {
+                let context = port.interaction_completion_context(step_cancel.clone());
+                InteractionCoordinator::complete_tool_interaction(
+                    &context,
+                    execution,
+                    &metadata,
+                    &InteractionCompletion::Cancelled(reason.clone()),
+                )
+                .await?
+            };
             handle_interaction_outcome(run, execution, port, step_cancel, outcome).await?;
         }
         InteractionResolution::Closed { .. } => {
@@ -1712,15 +1660,16 @@ where
                 &run_id,
                 sdk::InteractionCancelReason::RunCancelled,
             );
-            let signal = port.interaction_cancellation(step_cancel.clone());
-            let outcome = InteractionCoordinator::complete_tool_interaction(
-                port,
-                execution,
-                &metadata,
-                &InteractionCompletion::Cancelled(sdk::InteractionCancelReason::RunCancelled),
-                signal.as_ref(),
-            )
-            .await?;
+            let outcome = {
+                let context = port.interaction_completion_context(step_cancel.clone());
+                InteractionCoordinator::complete_tool_interaction(
+                    &context,
+                    execution,
+                    &metadata,
+                    &InteractionCompletion::Cancelled(sdk::InteractionCancelReason::RunCancelled),
+                )
+                .await?
+            };
             handle_interaction_outcome(run, execution, port, step_cancel, outcome).await?;
         }
     }
@@ -1748,25 +1697,27 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     use crate::application::interaction::coordinator::InteractionCoordinator;
     use crate::application::interaction::port::InteractionCompletion;
 
     match continuation {
         InteractionContinuation::CompleteToolCall(tool_call_id) => {
-            let signal = port.interaction_cancellation(step_cancel.clone());
-            let outcome = InteractionCoordinator::complete_tool_interaction(
-                port,
-                execution,
-                metadata,
-                &InteractionCompletion::Replied(reply.clone()),
-                signal.as_ref(),
-            )
-            .await?;
+            let outcome = {
+                let context = port.interaction_completion_context(step_cancel.clone());
+                InteractionCoordinator::complete_tool_interaction(
+                    &context,
+                    execution,
+                    metadata,
+                    &InteractionCompletion::Replied(reply.clone()),
+                )
+                .await?
+            };
             handle_interaction_outcome(run, execution, port, step_cancel, outcome).await?;
             // Suppress unused warning
             let _ = tool_call_id;
@@ -1804,26 +1755,30 @@ where
                     target: crate::LOG_TARGET,
                     "[dispatch_continuation] ToolApproval approve for call={tool_call_id}"
                 );
-                let signal = port.interaction_cancellation(step_cancel.clone());
-                let outcome = InteractionCoordinator::complete_tool_interaction(
-                    port,
-                    execution,
-                    metadata,
-                    &InteractionCompletion::Replied(reply.clone()),
-                    signal.as_ref(),
-                )
-                .await?;
+                let outcome = {
+                    let context = port.interaction_completion_context(step_cancel.clone());
+                    InteractionCoordinator::complete_tool_interaction(
+                        &context,
+                        execution,
+                        metadata,
+                        &InteractionCompletion::Replied(reply.clone()),
+                    )
+                    .await?
+                };
                 handle_interaction_outcome(run, execution, port, step_cancel, outcome).await?;
             } else {
-                let signal = port.interaction_cancellation(step_cancel.clone());
-                let outcome = InteractionCoordinator::complete_tool_interaction(
-                    port,
-                    execution,
-                    metadata,
-                    &InteractionCompletion::Cancelled(sdk::InteractionCancelReason::UserCancelled),
-                    signal.as_ref(),
-                )
-                .await?;
+                let outcome = {
+                    let context = port.interaction_completion_context(step_cancel.clone());
+                    InteractionCoordinator::complete_tool_interaction(
+                        &context,
+                        execution,
+                        metadata,
+                        &InteractionCompletion::Cancelled(
+                            sdk::InteractionCancelReason::UserCancelled,
+                        ),
+                    )
+                    .await?
+                };
                 handle_interaction_outcome(run, execution, port, step_cancel, outcome).await?;
             }
         }
@@ -1851,10 +1806,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     use crate::application::interaction::coordinator::InteractionCoordinator;
 
@@ -2033,10 +1989,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     use crate::application::interaction::coordinator::InteractionCoordinator;
 
@@ -2113,10 +2070,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     use crate::application::interaction::coordinator::InteractionCoordinator;
 
@@ -2185,10 +2143,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     let reason = match decision {
         StuckDecision::SoftBlock { reason }
@@ -2220,10 +2179,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     let Some(control) = port.take_control(run.id()) else {
         return Ok(None);
@@ -2279,10 +2239,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     match run.request_step_cancellation(step_id) {
         crate::domain::agent_run::RunStepCancellationRequest::Accepted => {}
@@ -2321,10 +2282,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     match handle_pending_control(run, execution, port).await? {
         Some(ControlDirective::Continue) => Ok(()),
@@ -2351,10 +2313,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     if cancel.is_cancelled() || run.status() == RunStatus::Cancelling {
         cancel_run(run, execution, port).await?;
@@ -2387,10 +2350,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     fail_run(
         run,
@@ -2419,10 +2383,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     if !port.claim_terminal(run.id()) {
         return cancel_run(run, execution, port).await;
@@ -2445,10 +2410,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     let active_step = run.active_step_id();
     if run.status() != RunStatus::Cancelling {
@@ -2503,10 +2469,11 @@ where
         + StepPersistencePort
         + CompactionPort
         + ModelInvocationPort
-        + StopHookPort
+        + StopHookObserver
         + ToolOrchestrationPort
         + StuckHandlingPort
-        + PlanApprovalPort,
+        + PlanApprovalPort
+        + ?Sized,
 {
     let events = run.drain_events();
     if events.is_empty() {

@@ -17,7 +17,7 @@ fn p6_4_production_uses_explicit_tool_round_boundaries() {
     assert!(coordinator.contains("pub(crate) struct ToolRoundContext"));
     assert!(coordinator.contains("pub(crate) trait ToolRoundObserver"));
     assert!(coordinator.contains("pub struct ToolRoundOutcome"));
-    assert!(coordinator.contains("pub(crate) async fn orchestrate_tool_round"));
+    assert!(coordinator.contains("pub(crate) struct ToolRoundCoordinator"));
     assert!(!coordinator.contains("ToolRoundProjection"));
     assert!(!coordinator.contains("mark_tool_results_pending"));
     assert_eq!(
@@ -25,7 +25,7 @@ fn p6_4_production_uses_explicit_tool_round_boundaries() {
         1
     );
     for adapter in [main, sub] {
-        assert!(adapter.contains("orchestrate_tool_round("));
+        assert!(adapter.contains("ToolRoundCoordinator::new("));
         assert!(adapter.contains("ToolRoundContext"));
         assert!(adapter.contains("ToolRoundObserver"));
         assert!(!adapter.contains("ToolRoundProjection"));

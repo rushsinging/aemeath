@@ -4,7 +4,7 @@
 //!
 //! #1272 Per-turn drain-or-seal linearization:
 //! `drain_or_seal` atomically drains user inputs AND seals if empty — a single
-//! synchronous decision point, rather than MainRunCapabilities draining sources then
+//! synchronous decision point, rather than ChatLoopCapabilityAdapter draining sources then
 //! checking emptiness separately. Once sealed, late-arriving `UserMessage`s are
 //! rejected (returned to caller) instead of silently buffered for the next Run.
 
@@ -40,12 +40,12 @@ pub(crate) enum BufferDrain {
     },
 }
 
-/// Owned by `MainRunCapabilities`, scoped to one `Run`. User messages accumulate here from
+/// Owned by `ChatLoopCapabilityAdapter`, scoped to one `Run`. User messages accumulate here from
 /// `input_events`/`recv_next_input` and the legacy `Queue` during Run execution.
 /// Control commands are still forwarded to session `pending_input`.
 ///
 /// # Lifecycle
-/// 1. Created fresh when `MainRunCapabilities` is constructed.
+/// 1. Created fresh when `ChatLoopCapabilityAdapter` is constructed.
 /// 2. `drain_or_seal` returns user messages as `LoopInput`s for the next step,
 ///    or seals the buffer when empty.
 /// 3. `withdraw_all_user_texts` clears unbound user messages (WithdrawAll).
@@ -145,7 +145,7 @@ impl RunInputBuffer {
     /// Drain all `UserMessage` events as `LoopInput`s for the next Run step.
     /// Non-user events remain in the buffer for later return to session idle.
     ///
-    /// Still used by `MainRunCapabilities::drain_input` for the StopHookFeedback and
+    /// Still used by `ChatLoopCapabilityAdapter::drain_input` for the StopHookFeedback and
     /// ToolResults branches, which drain the batch alongside the continuation
     /// BEFORE the seal decision.
     pub(crate) fn drain_user_inputs(&mut self) -> Vec<LoopInput> {

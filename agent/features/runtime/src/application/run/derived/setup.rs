@@ -1,4 +1,4 @@
-use super::loop_run::SubRunCapabilities;
+use super::loop_run::DerivedLoopCapabilityAdapter;
 use super::CliAgentRunner;
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::context_factory::RuntimeContextFactory;
@@ -51,7 +51,7 @@ pub struct PreparedSubRun {
     pub max_tokens: u32,
     /// Requested reasoning level.
     pub reasoning_level: provider::ReasoningLevel,
-    /// Session ID for the isolated context (used as SubRunCapabilities.session_id).
+    /// Session ID for the isolated context (used as DerivedLoopCapabilityAdapter.session_id).
     pub session_id: String,
 }
 
@@ -419,7 +419,7 @@ impl AgentRunner for CliAgentRunner {
             );
 
             // ── #1385: Context port from derived.context (skills-wired) ──
-            // ContextCoordinator is constructed on-demand inside SubRunCapabilities,
+            // ContextCoordinator is constructed on-demand inside DerivedLoopCapabilityAdapter,
             // not stored as a field.
 
             let context_size = derived
@@ -433,7 +433,7 @@ impl AgentRunner for CliAgentRunner {
             super::loop_run::launch_sub_run(
                 derived.run,
                 derived.execution,
-                SubRunCapabilities {
+                DerivedLoopCapabilityAdapter {
                     prompt,
                     system,
                     progress_sink,

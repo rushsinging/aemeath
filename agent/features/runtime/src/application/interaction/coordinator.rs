@@ -24,12 +24,51 @@ use crate::application::interaction::port::{
     InteractionRequestMetadata, InteractionResolution,
 };
 use crate::application::loop_engine::{
-    ApprovalRequiredCall, InteractionCompletionPort, InteractionWorkOutcome, LoopEngineError,
+    ApprovalRequiredCall, InteractionWorkOutcome, LoopEngineError,
 };
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolExecution;
 use crate::domain::agent_run::ToolCallStatus;
 use crate::domain::agent_run::{InteractionContinuation, Run, RunTransitionError};
+
+// ── Coordinator result ──
+
+/// Run-scoped dependencies required to complete one interaction.
+///
+/// Role adapters only construct this narrow context. The coordinator owns all
+/// completion decisions, approved tool execution, and result materialization.
+pub struct InteractionCompletionContext<'a> {
+    execution_scope: tools::ExecutionScope,
+    tool_execution: &'a dyn tools::ToolExecutionPort,
+    materializer: &'a crate::application::tool::result_materialization::ToolResultMaterializer,
+    session_id: &'a str,
+    cancellation: std::sync::Arc<dyn tools::CancellationSignal>,
+}
+
+impl<'a> InteractionCompletionContext<'a> {
+    pub fn new(
+        execution_scope: tools::ExecutionScope,
+        tool_execution: &'a dyn tools::ToolExecutionPort,
+        materializer: &'a crate::application::tool::result_materialization::ToolResultMaterializer,
+        session_id: &'a str,
+        cancellation: std::sync::Arc<dyn tools::CancellationSignal>,
+    ) -> Self {
+        Self {
+            execution_scope,
+            tool_execution,
+            materializer,
+            session_id,
+            cancellation,
+        }
+    }
+}
+
+pub trait InteractionCompletionContextProvider {
+    fn interaction_completion_context(
+        &self,
+        step_cancel: tokio_util::sync::CancellationToken,
+    ) -> InteractionCompletionContext<'_>;
+}
 
 // ── Coordinator result ──
 
@@ -173,12 +212,11 @@ impl InteractionCoordinator {
         execution.store_interaction_receiver(metadata, receiver);
     }
 
-    pub(crate) async fn complete_tool_interaction<P: InteractionCompletionPort + ?Sized>(
-        port: &P,
+    pub(crate) async fn complete_tool_interaction(
+        context: &InteractionCompletionContext<'_>,
         execution: &mut RunExecutionState,
         metadata: &InteractionRequestMetadata,
         completion: &InteractionCompletion,
-        cancellation: &dyn tools::CancellationSignal,
     ) -> Result<InteractionWorkOutcome, LoopEngineError> {
         let work = execution.take_pending_interaction_work();
         let current = work.as_ref().and_then(|work| work.current.clone());
@@ -238,7 +276,7 @@ impl InteractionCoordinator {
                     )),
                 ) => {
                     let approval = current.as_ref().and_then(|item| item.approval_call.clone());
-                    let execution = execute_approved_call(port, id, approval, cancellation).await;
+                    let execution = execute_approved_call(context, id, approval).await;
                     let status = if execution.outcome.is_error {
                         ToolCallStatus::Error
                     } else {
@@ -261,9 +299,9 @@ impl InteractionCoordinator {
             };
         if let Some(result) = tool_execution {
             let message = crate::application::loop_engine::shared::materialize_tool_results(
-                port.interaction_materializer(),
+                context.materializer,
                 vec![result],
-                port.interaction_session_id(),
+                context.session_id,
             )
             .await;
             execution.append_message(message.clone());
@@ -357,11 +395,10 @@ fn suspended_identity(
         .unwrap_or_else(|| (String::new(), "AskUserQuestion".to_string()))
 }
 
-async fn execute_approved_call<P: InteractionCompletionPort + ?Sized>(
-    port: &P,
+async fn execute_approved_call(
+    context: &InteractionCompletionContext<'_>,
     id: &sdk::ToolCallId,
     approval: Option<ApprovalRequiredCall>,
-    cancellation: &dyn tools::CancellationSignal,
 ) -> ToolExecution {
     let Some(approval) = approval else {
         return ToolExecution::from_parts(
@@ -374,15 +411,12 @@ async fn execute_approved_call<P: InteractionCompletionPort + ?Sized>(
     let call = approval.call;
     let mut input = call.input.clone();
     tools::strip_runtime_meta(&mut input);
-    let invocation = tools::ToolInvocation::new(
-        call.name.as_str(),
-        input,
-        port.interaction_execution_scope(),
-    )
-    .with_authorization(approval.authorization);
-    let domain = port
-        .interaction_tool_execution()
-        .execute(invocation, cancellation)
+    let invocation =
+        tools::ToolInvocation::new(call.name.as_str(), input, context.execution_scope.clone())
+            .with_authorization(approval.authorization);
+    let domain = context
+        .tool_execution
+        .execute(invocation, context.cancellation.as_ref())
         .await;
     ToolExecution::from_parts(
         id.clone(),

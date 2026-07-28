@@ -110,7 +110,7 @@ pub(crate) enum RetryStep {
     Cancelled,
 }
 
-pub(crate) trait ModelInvocationContext: Send {
+pub(crate) trait ModelInvocationSource: Send {
     fn runtime_context(&self) -> &RuntimeContext;
     fn role(&self) -> &str;
     fn request_log_context(&self, parent: &logging::LogContext) -> logging::LogContext;
@@ -123,8 +123,29 @@ pub(crate) trait ModelInvocationContext: Send {
     fn extract_tool_calls(&self, response: &InvocationResponse) -> Vec<ToolCall>;
 }
 
+pub(crate) struct ModelInvocationContext<'a, O> {
+    observer: &'a mut O,
+}
+
+impl<'a, O> ModelInvocationContext<'a, O>
+where
+    O: ModelInvocationObserver,
+{
+    pub(crate) fn new(observer: &'a mut O) -> Self {
+        Self { observer }
+    }
+
+    pub(crate) async fn invoke(
+        self,
+        execution: &mut RunExecutionState,
+        cancel: &CancellationToken,
+    ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
+        invoke_model_impl(self.observer, execution, cancel).await
+    }
+}
+
 #[async_trait]
-pub(crate) trait ModelInvocationLifecycle: ModelInvocationContext {
+pub(crate) trait ModelInvocationObserver: ModelInvocationSource {
     async fn on_window(&mut self, _execution: &RunExecutionState) {}
     async fn pump_while_invoking<T: Send>(
         &mut self,
@@ -151,21 +172,23 @@ pub(crate) trait ModelInvocationLifecycle: ModelInvocationContext {
 }
 
 pub(crate) async fn orchestrate_model_invocation(
-    lifecycle: &mut impl ModelInvocationLifecycle,
+    observer: &mut impl ModelInvocationObserver,
     execution: &mut RunExecutionState,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
-    invoke_model_impl(lifecycle, execution, cancel).await
+    ModelInvocationContext::new(observer)
+        .invoke(execution, cancel)
+        .await
 }
 
 async fn invoke_model_impl(
-    lifecycle: &mut impl ModelInvocationLifecycle,
+    observer: &mut impl ModelInvocationObserver,
     execution: &mut RunExecutionState,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
     if execution.context_window().is_none() {
         if let Some(request) = execution.context_request() {
-            let coordinator = ContextCoordinator::new(lifecycle.runtime_context().context());
+            let coordinator = ContextCoordinator::new(observer.runtime_context().context());
             let window = coordinator
                 .build_window(request)
                 .await
@@ -177,18 +200,18 @@ async fn invoke_model_impl(
         .context_window()
         .cloned()
         .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
-    lifecycle.on_window(execution).await;
+    observer.on_window(execution).await;
     let invocation_context = extract_invocation_context(&window);
     crate::application::loop_engine::llm_log::log_llm_input(
         &invocation_context.messages_for_api,
         window.messages.len(),
         &invocation_context.system_blocks,
         &invocation_context.tool_schemas,
-        lifecycle.role(),
+        observer.role(),
     );
 
-    let binding = lifecycle.runtime_context().provider();
-    let reasoning = *lifecycle
+    let binding = observer.runtime_context().provider();
+    let reasoning = *observer
         .runtime_context()
         .reasoning()
         .lock()
@@ -196,8 +219,8 @@ async fn invoke_model_impl(
     let started = Instant::now();
     let mut coordinator = ModelInvocationCoordinator::new();
     let response = loop {
-        let request_context = lifecycle.request_log_context(&logging::capture());
-        let mut reducer = lifecycle.build_reducer();
+        let request_context = observer.request_log_context(&logging::capture());
+        let mut reducer = observer.build_reducer();
         let provider = binding.provider.clone();
         let model = binding.model.clone();
         let max_tokens = binding.max_tokens;
@@ -205,7 +228,7 @@ async fn invoke_model_impl(
         let system = invocation_context.system_blocks.clone();
         let tools = window.tool_schemas.clone();
         let stream_cancel = cancel.clone();
-        let committed_delta = lifecycle.committed_delta();
+        let committed_delta = observer.committed_delta();
         let progress_handle = reducer.progress_handle();
         let invocation = async {
             let mut request = InvocationRequest::new(
@@ -226,7 +249,7 @@ async fn invoke_model_impl(
                 })
                 .await
         };
-        let waiting_event_context = lifecycle.waiting_event_context();
+        let waiting_event_context = observer.waiting_event_context();
         let waiting_started_at = tokio::time::Instant::now();
         let waiting_task = waiting_event_context.map(|(sink, context)| {
             AbortTaskOnDrop(logging::spawn_instrumented(
@@ -254,7 +277,7 @@ async fn invoke_model_impl(
             ))
         });
         let result =
-            logging::instrument(request_context, lifecycle.pump_while_invoking(invocation)).await;
+            logging::instrument(request_context, observer.pump_while_invoking(invocation)).await;
         drop(waiting_task);
         match result {
             Ok((response, _)) => break response,
@@ -267,10 +290,10 @@ async fn invoke_model_impl(
                     .await
                 {
                     RetryStep::Retry { attempt, delay } => {
-                        lifecycle.on_retry(attempt, delay).await;
+                        observer.on_retry(attempt, delay).await;
                     }
                     RetryStep::Cancelled => {
-                        lifecycle.on_retry_cancelled().await;
+                        observer.on_retry_cancelled().await;
                         return Err(LoopEngineError::Cancelled);
                     }
                     RetryStep::Compact => {
@@ -282,31 +305,31 @@ async fn invoke_model_impl(
         }
     };
     let elapsed_secs = started.elapsed().as_secs_f64();
-    lifecycle
+    observer
         .runtime_context()
         .usage()
         .update(crate::application::model::token_usage::normalized_total_tokens(&response.usage));
     let usage = build_step_token_usage(
         &response,
-        lifecycle.context_size(execution) as u64,
+        observer.context_size(execution) as u64,
         window.token_estimation.system_tokens,
         window.token_estimation.tool_schema_tokens,
         window.token_estimation.message_tokens,
     );
     execution.append_message(response.assistant_message.clone());
     execution.record_step_message(response.assistant_message.clone());
-    lifecycle
+    observer
         .on_response(execution, &response, elapsed_secs)
         .await;
-    let calls = lifecycle.extract_tool_calls(&response);
+    let calls = observer.extract_tool_calls(&response);
     crate::application::loop_engine::llm_log::log_llm_output_and_tool_calls(
         binding.model.provider.as_str(),
         &response,
         &calls,
         elapsed_secs,
-        lifecycle.role(),
+        observer.role(),
     );
-    lifecycle
+    observer
         .classify_terminal(execution, &response, calls, usage)
         .await
 }

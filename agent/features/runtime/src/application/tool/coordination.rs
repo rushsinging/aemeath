@@ -38,6 +38,43 @@ pub enum ToolRoundContinuation {
     ToolResults,
 }
 
+pub(crate) struct ToolRoundCoordinator<'a, O> {
+    context: ToolRoundContext<'a>,
+    observer: O,
+}
+
+impl<'a, O> ToolRoundCoordinator<'a, O>
+where
+    O: ToolRoundObserver,
+{
+    pub(crate) fn new(context: ToolRoundContext<'a>, observer: O) -> Self {
+        Self { context, observer }
+    }
+
+    pub(crate) async fn execute(
+        mut self,
+        execution: &mut crate::application::run::execution_state::RunExecutionState,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+        calls: &[(ToolCall, ToolGuardDecision)],
+        cancel: &CancellationToken,
+    ) -> Result<ToolRoundOutcome, crate::application::loop_engine::LoopEngineError> {
+        logging::within(
+            self.context.log_patch.clone(),
+            execute_tools_impl(
+                self.context,
+                &mut self.observer,
+                execution,
+                run_id,
+                step_id,
+                calls,
+                cancel,
+            ),
+        )
+        .await
+    }
+}
+
 #[async_trait]
 pub(crate) trait ToolRoundObserver: Send {
     async fn execution_started(
@@ -67,22 +104,6 @@ pub(crate) trait ToolRoundObserver: Send {
         _cancel: &CancellationToken,
     ) {
     }
-}
-
-pub(crate) async fn orchestrate_tool_round<O: ToolRoundObserver>(
-    context: ToolRoundContext<'_>,
-    observer: &mut O,
-    execution: &mut crate::application::run::execution_state::RunExecutionState,
-    run_id: &sdk::RunId,
-    step_id: &sdk::RunStepId,
-    calls: &[(ToolCall, ToolGuardDecision)],
-    cancel: &CancellationToken,
-) -> Result<ToolRoundOutcome, crate::application::loop_engine::LoopEngineError> {
-    logging::within(
-        context.log_patch.clone(),
-        execute_tools_impl(context, observer, execution, run_id, step_id, calls, cancel),
-    )
-    .await
 }
 
 async fn execute_tools_impl<O: ToolRoundObserver>(

@@ -17,6 +17,9 @@
 use crate::application::hook::outcome_mapper::{
     map_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookReason,
 };
+use crate::application::loop_engine::LoopEngineError;
+use crate::application::run::execution_state::RunExecutionState;
+use async_trait::async_trait;
 use hook::{HookDispatchContext, HookInvocation, HookPoint, HookPort, StopInput};
 use share::message::{Message, StopHookFeedback};
 use std::path::PathBuf;
@@ -61,6 +64,98 @@ pub struct StopHookFeedbackMaterial {
 
 /// Block detail（与 RuntimeHookBlockDetail 语义一致，但作为 StopHookDecision 内嵌类型重新导出）。
 pub use crate::application::hook::outcome_mapper::RuntimeHookBlockDetail;
+
+/// Run-scoped dependencies required to execute one Stop Hook.
+pub struct StopHookExecutionContext {
+    hook_port: Arc<dyn HookPort>,
+    workspace_root: PathBuf,
+    session_id: String,
+    language: String,
+}
+
+impl StopHookExecutionContext {
+    pub fn new(
+        hook_port: Arc<dyn HookPort>,
+        workspace_root: PathBuf,
+        session_id: String,
+        language: String,
+    ) -> Self {
+        Self {
+            hook_port,
+            workspace_root,
+            session_id,
+            language,
+        }
+    }
+}
+
+/// Narrow role seam for Stop Hook UI and continuation differences.
+#[async_trait]
+pub trait StopHookObserver: Send {
+    fn stop_hook_execution_context(&self) -> Option<StopHookExecutionContext> {
+        None
+    }
+
+    async fn begin_stop_hook_status(&mut self) -> Result<(), LoopEngineError> {
+        Ok(())
+    }
+
+    fn install_stop_hook_feedback(&mut self, _message: Message) {}
+
+    async fn observe_stop_hook_outcome(
+        &mut self,
+        _execution: &RunExecutionState,
+        _outcome: &StopHookOutcome,
+    ) -> Result<(), LoopEngineError> {
+        Ok(())
+    }
+}
+
+pub async fn coordinate_stop_hook<O>(
+    observer: &mut O,
+    execution: &mut RunExecutionState,
+    turns: usize,
+    cancellation: &CancellationToken,
+) -> Result<StopHookOutcome, LoopEngineError>
+where
+    O: StopHookObserver + ?Sized,
+{
+    observer.begin_stop_hook_status().await?;
+    let Some(context) = observer.stop_hook_execution_context() else {
+        return Ok(StopHookOutcome {
+            point: HookPoint::Stop,
+            dispatch: RuntimeHookDispatch {
+                directive: RuntimeHookDirective::Continue,
+                executions: Vec::new(),
+                messages: Vec::new(),
+                block_detail: None,
+            },
+            decision: StopHookDecision::Proceed,
+            feedback_message: None,
+        });
+    };
+    let outcome = orchestrate_stop_hook(
+        &context.hook_port,
+        StopHookContext {
+            turns,
+            workspace_root: context.workspace_root,
+            session_id: context.session_id,
+            language: context.language,
+        },
+        cancellation,
+    )
+    .await;
+
+    if let Some(message) = outcome.feedback_message.clone() {
+        observer.install_stop_hook_feedback(message.clone());
+        execution.record_step_message(message.clone());
+        execution.append_message(message);
+    }
+    observer
+        .observe_stop_hook_outcome(execution, &outcome)
+        .await?;
+    Ok(outcome)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StopHookContext {

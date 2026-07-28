@@ -1,7 +1,7 @@
 //! External tests for the production PreCompact reflection trigger (#1284).
 //!
 //! These tests verify that the production automatic compact path
-//! (`MainRunCapabilities::compact`) submits a `ReflectionTaskTrigger::PreCompact` job
+//! (`ChatLoopCapabilityAdapter::compact`) submits a `ReflectionTaskTrigger::PreCompact` job
 //! using the **pre-compact** messages snapshot only when the context port
 //! returns `CompactOutcome::Committed`. Errors and `CompactOutcome::Skipped`
 //! must never enqueue a job. The submission shares the session-scoped
@@ -22,7 +22,7 @@ use share::config::Config;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
-use super::loop_runner::main_run_port::MainRunCapabilities;
+use super::loop_runner::main_run_port::ChatLoopCapabilityAdapter;
 use super::task_reminder::TaskReminderState;
 use crate::application::loop_engine::chat::reflection::{
     maybe_submit_pre_compact_reflection, submit_pre_compact_reflection,
@@ -47,7 +47,7 @@ use crate::ports::{
 /// observe submissions. The unit tests below therefore exercise the
 /// helpers via the production adapter and a real provider whose response
 /// parses as a (empty) reflection output. The integration tests against
-/// `MainRunCapabilities::compact` observe behavior through `adapter.drain()`,
+/// `ChatLoopCapabilityAdapter::compact` observe behavior through `adapter.drain()`,
 /// which joins the spawned task and yields a `ReflectionTaskCompletion`
 /// carrying the trigger regardless of execution status.
 fn production_adapter() -> ReflectionTaskAdapter {
@@ -229,15 +229,15 @@ fn failing_append_reflection_history() -> Arc<dyn memory::api::ReflectionHistory
     Arc::new(FailingAppendHistory)
 }
 
-/// Inline builder for `MainRunCapabilities`. Returns the port together with a
+/// Inline builder for `ChatLoopCapabilityAdapter`. Returns the port together with a
 /// `Keepalive` struct that pins every `Arc`/owned value the port borrows so
 /// the returned references stay valid for the test scope.
 #[allow(clippy::too_many_lines)]
 fn build_compact_test_port<'a>(
     harness: &'a mut CompactHarness,
-) -> MainRunCapabilities<'a, EmptyQueueDrainPort, EmptyInputEventDrainPort> {
+) -> ChatLoopCapabilityAdapter<'a, EmptyQueueDrainPort, EmptyInputEventDrainPort> {
     let event_sink = harness.runtime_context.event_sink();
-    MainRunCapabilities {
+    ChatLoopCapabilityAdapter {
         runtime_context: &harness.runtime_context,
         queue: &harness.queue,
         input_events: &harness.input_events,
@@ -275,7 +275,7 @@ fn build_compact_test_port<'a>(
     }
 }
 
-/// Per-test harness. Holds all owned state that the borrowed `MainRunCapabilities`
+/// Per-test harness. Holds all owned state that the borrowed `ChatLoopCapabilityAdapter`
 /// references. Must outlive the port that `build_compact_test_port` returns.
 struct CompactHarness {
     adapter: ReflectionTaskAdapter,
@@ -631,7 +631,7 @@ async fn submit_pre_compact_reflection_reports_history_failure_and_releases_slot
     let _ = adapter.drain().await;
 }
 
-/// Integration: `MainRunCapabilities::compact` submits a PreCompact job exactly once
+/// Integration: `ChatLoopCapabilityAdapter::compact` submits a PreCompact job exactly once
 /// on `CompactOutcome::Committed`, using the early window the compact will
 /// discard (not the empty recent tail).
 #[tokio::test]
@@ -677,7 +677,7 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
     assert_eq!(harness.stub.compact_calls().len(), 1);
 }
 
-/// Integration: `MainRunCapabilities::compact` treats a Context-owned skip as a
+/// Integration: `ChatLoopCapabilityAdapter::compact` treats a Context-owned skip as a
 /// non-fatal no-op and does not submit a PreCompact reflection.
 #[tokio::test]
 async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
@@ -710,7 +710,7 @@ async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
     assert_eq!(harness.stub.compact_calls().len(), 1);
 }
 
-/// Integration: `MainRunCapabilities::compact` does NOT submit when the context port
+/// Integration: `ChatLoopCapabilityAdapter::compact` does NOT submit when the context port
 /// returns an error from `compact`. The pre-compact snapshot must never be
 /// observed by the reflection job because compact did not commit.
 #[tokio::test]

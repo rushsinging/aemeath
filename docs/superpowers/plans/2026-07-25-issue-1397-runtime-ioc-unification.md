@@ -384,7 +384,7 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
   - 删除记录：从 Tools Published Language 删除 `AgentDispatch::complete`；删除 `CliAgentRunner::complete` 中自行读取 Config、构建 Provider、拼 InvocationRequest、消费 provider stream 的完整旁路；相应移除 `CliAgentRunner.config_reader`、`build_agent_runner` 的冗余 ConfigReader 参数、全部测试替身方法，以及已无消费者的 `test_config_reader.rs`。
   - 契约与验证：新增 source contract 禁止 AgentDispatch completion、Sub direct provider invocation 和 completion-only config state。Tools Agent tests 10、Loop Engine tests 60、Sub runner tests 51 全部通过；Runtime/Tools production 与 all-targets clippy、格式、diff、Shared Run Loop guard 和完整 architecture guards 全部通过；生产搜索确认 Runtime Application 中 provider invocation 仅存在统一 model coordinator，Sub runner 无 InvocationRequest/provider stream 构造。
 
-- [ ] **P6.9 退役 `RunKind`、双 Context Resolver 与双 Capabilities adapter**
+- [x] **P6.9 退役 `RunKind`、双 Context Resolver 与双 Capabilities adapter**
   - [x] **P6.9.1 用能力与 parent ceiling 取代 `RunKind` 生产决策**
     - 先修改 Domain 测试：证明独立 Run 与派生 Run 的能力合法性只由有效 capability 值、是否存在 parent ceiling 及 ceiling 比较决定，不再读取角色枚举。
     - 删除 `RunKind`、公开 `RunSpec.kind` 及 `RunSpec::main/sub` 中的 kind 写入；将 standalone restricted spec 的约束表达为显式 capability policy/ceiling 状态，不得用 `name == "main"`、timeout 或其他旁路重新推断角色。
@@ -400,16 +400,25 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
     - 完成门禁：Factory L1/L2、preparation L3、parent-child L4 场景通过；生产 RuntimeContext 构造只有 Factory 一处；三个 resolver 符号及调用点搜索为空。
     - 完成记录：物理删除 `RuntimeContextResolver`、`MainRunContextResolver`、`SubRunContextResolver`。`RunPreparer` 构造只接收 `Arc<RuntimeContextFactory>`，独立 Run 与 parent-derived Run 都委托 Factory 的同一 `prepare` 入口。Factory 持有 session wiring 与 capability factory bindings，统一冻结 committed session/config、Provider、Context、Memory、Tool Catalog、Interaction、Hook、Reasoning、Workspace、event/input/usage/cancel；`ParentRunCapabilities` 仅增加准备派生 Run 所需的父 Context capability view 与 Workspace capability，不暴露服务集合。派生 workspace 随 `PreparedRun` 原子返回，调用方不再通过 resolver 单槽取回。
     - 验证结果：Factory 34 tests、Preparation 7 tests、派生 Run launcher 契约、Runtime lib 659 tests、Composition MainSessionWiring 5 tests、Runtime bootstrap integration 1 test 全部通过；`cargo check -p runtime`、`cargo check -p composition`、`cargo clippy -p runtime --all-targets -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` 通过；`RunKind`/三个 Context Resolver 生产符号搜索为空，`RuntimeContext::new` 生产调用只有 Factory 一处，Main chat 与派生 Agent 不直接创建 capability bindings；Shared Run Loop 与完整 fast architecture guards 通过。
-  - [ ] **P6.9.3 将公共 Loop 能力实现下沉为无角色 owner**
+  - [x] **P6.9.3 将公共 Loop 能力实现下沉为无角色 owner**
+    - [x] Step persistence：新增 `application/loop_engine/step_persistence.rs::StepPersistenceCoordinator`，统一拥有 accepted input durable append 与 finalized Step append；独立 Run 的 adopted-input 事件通过窄 `AcceptedInputObserver` 投影，派生 Run 使用 NoOp observer。Main/Sub adapter 只保留 ContextRequest 构造与委派，不再各自调用 `append_accepted_input` / `append_finalized`。
+    - [x] Compaction：新增 `application/loop_engine/compaction.rs::CompactionCoordinator`，统一拥有 window 构建、needs-compaction 决策、automatic compact 与 usage/window 失效；独立 Run 的 PreCompact Reflection 通过窄 `CompactionObserver` 提交，派生 Run 使用 NoOp observer。旧 `shared.rs` 中的两个 compact helper 已删除。
+    - [x] Run lifecycle：新增 `application/loop_engine/run_lifecycle.rs::RunLifecycleCoordinator`，统一拥有 terminal/cancellation claim 与 Step scope registration；是否登记 active Step 由窄 `StepScopeObserver` 表达，独立 Run 使用 `ActiveStepScopeObserver`，派生 Run 使用 NoOp observer。
+    - [x] Interaction completion：新增 `InteractionCompletionContext` 与 `InteractionCompletionContextProvider`，统一把 execution scope、Tool Execution、Tool Result Materializer、session identity 与 per-Step cancellation 交给 `InteractionCoordinator`；`InteractionCoordinator` 独占 completion 分支、批准后工具执行与结果物化。删除 `InteractionCompletionPort` 及 Main/Sub 上五组角色方法，adapter 只构造一个窄上下文。
+    - [x] Stop Hook：新增 `StopHookExecutionContext` 与窄 `StopHookObserver`，`coordinate_stop_hook` 统一拥有状态启动、Hook dispatch、typed outcome、feedback 安装及 `RunExecutionState` 消息写入；Engine 只消费 typed decision。删除 `StopHookPort`，Main 仅保留 Hook UI/continuation observer，Sub 仅提供执行上下文；无 Hook 的测试 adapter 使用 observer 默认 Proceed。
+    - [x] ModelInvocation lifecycle 与 ToolRound observer 窄策略收口：模型侧新增无角色 `ModelInvocationContext` owner，将角色能力拆为 `ModelInvocationSource + ModelInvocationObserver`；工具侧新增 `ToolRoundCoordinator` owner，统一拥有 context、observer 与 round 执行生命周期。Main/Sub 只实现输入来源、事件目标和进度差异，不再实现 `ModelInvocationLifecycle` 或声明 Main/Sub 角色命名的 observer。
+    - [x] ContextRequest 与 Run finalization：新增无角色 `ContextRequestCoordinator` / `ContextRequestSource` 与 `RunFinalizationCoordinator` / `RunFinalizationObserver`，统一 ContextRequest 字段装配、派生 Run terminal fallback/分类及 Main/Sub finalization callback 分发；Main/Sub adapter 不再手写 `ContextRequest` literal，角色化 `finalize_sub_agent` 算法已删除。
+    - [x] Event domain 分类与终态输出策略收口。
     - 先按端口比较两套实现，把完全相同或仅消费 `RuntimeContext` / `RunExecutionState` 的 Persistence、Compaction、Stop Hook、Interaction、Control 等实现迁入职责明确的共享 adapter；不得创建重新聚合全部 Port 的 fat trait/struct。
     - ContextRequest 构造、ModelInvocation lifecycle、ToolRound observer、Run finalization 中的差异拆成可组合的窄策略值或 callback，由 `RunSpec`/RuntimeContext 已绑定能力选择；差异名称按输入来源、事件目标或生命周期用途命名。
     - 每迁移一个端口先补或调整 L2 相邻契约，确保独立 Run 与 parent-derived Run 共用该 owner；禁止一次性复制后再清理。
     - 完成门禁：共享端口只有一个生产实现 owner；允许的窄差异均可独立构造和测试，不持有整组 Loop 能力。
-  - [ ] **P6.9.4 删除角色化大 adapter 与辅助类型**
-    - 将 launch 调用点组装为无角色语义的 Loop capability composition，或让 Engine 直接接收职责 adapter；不得保留 `MainRunCapabilities` / `SubRunCapabilities` 的改名版本。
-    - 删除 `MainRunCapabilities`、`SubRunCapabilities`、`MainEventStrategy`、`SubEventStrategy`、`SubAgentEventSink` 及仅为这些类型服务的 wrapper/export/test builder；保留的 `BufferedInputAdapter` / `FixedInputAdapter` 必须只表达真实输入来源差异。
-    - Main chat 与派生 Agent 调用方都只执行 `RunPreparationRequest → RunPreparer → PreparedRun → RunLauncher::launch_prepared`，然后注入窄外部 IO/lifecycle binding；不得重新选择 Model/Tool/Context pipeline。
-    - 完成门禁：上述角色化符号全仓生产搜索为空；Shared Run Loop 场景证明两类 Run 走同一 Factory、capability composition 和 Engine。
+    - 当前进度：P6.9.3 的九个公共 owner 已全部完成（100%）。新增 ContextRequest/Run finalization L2 source contract；ContextRequest 字段装配、terminal fallback/分类、Main done/task archival 与 SubRunStop Hook 均由无角色 coordinator 驱动，角色 adapter 只提供 source/observer。Runtime 668 unit tests 与 18 integration tests、all-targets check/clippy、格式、diff、Shared Run Loop、Runtime Capability Assembly 及完整 fast architecture guards 全部通过；两项 paused-time retry 用例首次全量并发运行超时，定向重跑与第二次全量均通过，未用重跑覆盖首次失败，记录为并发调度分类证据。下一阶段进入 P6.9.4，删除 `MainRunCapabilities` / `SubRunCapabilities` 与角色化 event strategy。
+  - [x] **P6.9.4 删除角色化大 adapter 与辅助类型**
+    - Engine 与 `RunLauncher::launch_prepared` 现在通过 `&mut dyn LoopCapabilityAdapter` 擦除来源具体类型；内部算法仍只依赖各窄 Port，并以 `?Sized` 接受组合对象。Main/Sub 调用方不再让具体泛型类型泄漏到统一入口。
+    - 物理退役 `MainRunCapabilities`、`SubRunCapabilities`、`MainEventStrategy`、`SubEventStrategy`、`SubAgentEventSink`；保留的入口 adapter 改按真实来源命名为 `ChatLoopCapabilityAdapter` 与 `DerivedLoopCapabilityAdapter`，事件差异由 `ChatStreamEventObserver`、`ProgressTerminalObserver`、`RunEventObserver` 等窄 observer 表达。
+    - Main chat 与 parent-derived Agent 均继续执行 `RunPreparationRequest → RunPreparer → PreparedRun → RunLauncher::launch_prepared → execute_prepared_loop`，没有恢复 Model/Tool/Context 分流。
+    - 完成门禁：生产搜索无上述退役角色符号；新增 L2 契约锁定 Engine/Launcher 擦除来源 adapter 类型。Runtime 669 tests 中 667 首轮通过，两项既有 paused-time retry 用例在全量并发运行超时，定向重跑均通过；Loop Engine 59 tests、runtime check/clippy、格式、diff、Shared Run Loop、Runtime Capability Assembly 与完整 fast architecture guards 均通过。
   - 历史记录：原 P6.9 已成功删除 fat `LoopEnginePort`、`MainRunPort`、`SubAgentRun` 等旧符号并统一 Engine 入口，但将其改名为两套 Capabilities 大对象不满足 Issue 的“删除双 adapter”完成定义，故本项重新打开。
 
 - [x] **P6.10 根除测试托活和 dead-code 豁免**

@@ -422,6 +422,7 @@ where
 fn runtime_resume_replaces_the_only_active_session_id() {
     let runner_source = include_str!("loop_runner.rs");
     let port_source = include_str!("main_run_port.rs");
+    let context_request_source = include_str!("../context_request.rs");
 
     // Session identity is initialized from SessionState and resume writes it back.
     assert!(
@@ -433,7 +434,8 @@ fn runtime_resume_replaces_the_only_active_session_id() {
     assert!(runner_source.contains("session_id = prepared_session.session_id().to_string();"));
     assert!(!runner_source.contains("context_session_id"));
     assert!(!port_source.contains("context_session_id"));
-    assert!(port_source.contains("session_id: SessionId::new(self.session_id)"));
+    assert!(port_source.contains("session_id: self.session_id"));
+    assert!(context_request_source.contains("session_id: SessionId::new(self.source.session_id)"));
 }
 
 #[test]
@@ -3990,7 +3992,7 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
     assert_eq!(*call_count.lock().unwrap(), 2, "tool call + final text");
 }
 
-/// #1272: Same MainRunCapabilities construction point, verifies the post-tool
+/// #1272: Same ChatLoopCapabilityAdapter construction point, verifies the post-tool
 /// continuation re-entry does NOT re-emit UserMessagesAdopted for the
 /// original user message.
 #[tokio::test]

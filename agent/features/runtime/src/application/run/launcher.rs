@@ -9,10 +9,7 @@
 //! run_loop 只返回 Terminal。launcher 不需要 AwaitUser re-entry。
 
 use crate::application::loop_engine::{
-    execute_prepared_loop, fail_run, CompactionPort, EventSinkPort, InputPort,
-    InteractionMailboxPort, LoopDirective, LoopEngineError, ModelInvocationPort, PlanApprovalPort,
-    RunControlPort, RunLifecyclePort, StepPersistencePort, StopHookPort, StuckHandlingPort,
-    ToolOrchestrationPort,
+    execute_prepared_loop, fail_run, LoopDirective, LoopEngineError,
 };
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
@@ -30,28 +27,14 @@ pub enum RunLaunchResult {
 }
 
 /// 唯一启动入口，消费 PreparedRun 中创建的领域 Run，不再按 identity 重建。
-pub async fn launch_prepared<P>(
+pub async fn launch_prepared(
     mut run: Run,
     execution: &mut RunExecutionState,
     context: &RuntimeContext,
     cancel: CancellationToken,
     active_run: Arc<dyn ActiveRunPort>,
-    port: &mut P,
-) -> RunLaunchResult
-where
-    P: InputPort
-        + EventSinkPort
-        + RunControlPort
-        + RunLifecyclePort
-        + InteractionMailboxPort
-        + StepPersistencePort
-        + CompactionPort
-        + ModelInvocationPort
-        + StopHookPort
-        + ToolOrchestrationPort
-        + StuckHandlingPort
-        + PlanApprovalPort,
-{
+    port: &mut dyn crate::application::loop_engine::LoopCapabilityAdapter,
+) -> RunLaunchResult {
     let run_id = run.id().clone();
     active_run.activate(run_id.clone(), cancel.clone());
 

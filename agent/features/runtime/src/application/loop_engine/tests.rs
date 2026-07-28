@@ -67,24 +67,68 @@ fn p6_9_engine_has_no_fat_capability_aggregation_trait() {
         "SubAgentRun",
         "SubAgentLaunch",
         "DerivedSubRun",
+        "MainRunCapabilities",
+        "SubRunCapabilities",
+        "MainEventStrategy",
+        "SubEventStrategy",
+        "SubAgentEventSink",
     ] {
         assert!(
             !main.contains(retired) && !sub.contains(retired) && !sub_setup.contains(retired),
             "retired role-shaped execution shell remains: {retired}"
         );
     }
-    assert!(main.contains("struct MainRunCapabilities"));
-    assert!(sub.contains("struct SubRunCapabilities"));
     assert!(sub.contains("async fn launch_sub_run("));
 }
 
 #[test]
-fn stop_hook_is_published_as_narrow_port() {
-    let source = include_str!("engine.rs");
-    assert!(source.contains("pub trait StopHookPort: Send"));
-    assert!(source.contains("fn stop_hook_context(&self) -> StopHookContext"));
-    assert!(source.contains("async fn project_stop_hook_outcome"));
-    assert!(source.contains("orchestrate_stop_hook("));
+fn p6_9_4_engine_entry_erases_source_specific_adapter_types() {
+    let engine = include_str!("engine.rs");
+    let launcher = include_str!("../run/launcher.rs");
+
+    assert!(
+        engine.contains("pub async fn execute_prepared_loop(")
+            && engine.contains("port: &mut dyn LoopCapabilityAdapter,"),
+        "Engine public entry must erase source-specific adapter types"
+    );
+    assert!(
+        launcher.contains("pub async fn launch_prepared(")
+            && launcher
+                .contains("port: &mut dyn crate::application::loop_engine::LoopCapabilityAdapter,"),
+        "Launcher public entry must erase source-specific adapter types"
+    );
+}
+
+#[test]
+fn stop_hook_has_one_application_owner_and_narrow_observer() {
+    let engine = include_str!("engine.rs");
+    let coordinator = include_str!("../hook/stop_coordination.rs");
+    let main = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub = include_str!("../run/derived/loop_run.rs");
+
+    assert!(coordinator.contains("pub struct StopHookExecutionContext"));
+    assert!(coordinator.contains("pub trait StopHookObserver"));
+    assert!(coordinator.contains("pub async fn coordinate_stop_hook"));
+    assert!(coordinator.contains("execution.record_step_message"));
+    assert!(coordinator.contains("execution.append_message"));
+
+    assert!(!engine.contains("pub trait StopHookPort"));
+    for (name, adapter) in [("Main", main), ("Sub", sub)] {
+        assert!(
+            adapter.contains("crate::application::hook::stop_coordination::StopHookObserver"),
+            "{name} must expose only the narrow Stop Hook observer"
+        );
+        for retired in [
+            "impl crate::application::loop_engine::StopHookPort",
+            "fn stop_hook_context",
+            "fn project_stop_hook_outcome",
+        ] {
+            assert!(
+                !adapter.contains(retired),
+                "{name} retains role-specific Stop Hook orchestration seam: {retired}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -152,6 +196,199 @@ fn p6_6_step_transaction_calculation_has_single_engine_owner() {
         assert!(!adapter.contains("execution.commit_all_messages()"));
         assert!(!adapter.contains("execution.commit_step_messages()"));
     }
+}
+
+#[test]
+fn p6_9_3_step_persistence_has_one_role_neutral_owner() {
+    let module = include_str!("step_persistence.rs");
+    let main_adapter = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub_adapter = include_str!("../run/derived/loop_run.rs");
+
+    assert!(module.contains("struct StepPersistenceCoordinator"));
+    assert!(module.contains("trait AcceptedInputObserver"));
+    assert!(module.contains("async fn accept_step_input"));
+    assert!(module.contains("async fn persist_step_commit"));
+
+    for (name, adapter) in [("独立 Run", main_adapter), ("派生 Run", sub_adapter)] {
+        assert!(
+            adapter.contains("StepPersistenceCoordinator::from_context("),
+            "{name} 必须委托同一个 Step persistence owner"
+        );
+        assert!(
+            !adapter.contains(".append_accepted_input("),
+            "{name} 不得保留 accepted input 持久化算法"
+        );
+        assert!(
+            !adapter.contains(".append_finalized("),
+            "{name} 不得保留 finalized Step 持久化算法"
+        );
+    }
+}
+
+#[test]
+fn p6_9_3_compaction_has_one_role_neutral_owner() {
+    let module = include_str!("compaction.rs");
+    let legacy_shared = include_str!("shared.rs");
+    let main_adapter = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub_adapter = include_str!("../run/derived/loop_run.rs");
+
+    assert!(module.contains("struct CompactionCoordinator"));
+    assert!(module.contains("trait CompactionObserver"));
+    assert!(module.contains("async fn needs_compaction"));
+    assert!(module.contains("async fn compact"));
+    assert!(!legacy_shared.contains("needs_compaction_with_window"));
+    assert!(!legacy_shared.contains("compact_core"));
+
+    for (name, adapter) in [("独立 Run", main_adapter), ("派生 Run", sub_adapter)] {
+        assert!(
+            adapter.contains("CompactionCoordinator::from_context("),
+            "{name} 必须委托同一个 Compaction owner"
+        );
+        assert!(
+            !adapter.contains("needs_compaction_with_window("),
+            "{name} 不得保留 window/compact 决策算法"
+        );
+        assert!(
+            !adapter.contains("compact_core("),
+            "{name} 不得保留 compact 执行算法"
+        );
+    }
+}
+
+#[test]
+fn p6_9_3_run_lifecycle_has_one_role_neutral_owner() {
+    let module = include_str!("run_lifecycle.rs");
+    let main_adapter = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub_adapter = include_str!("../run/derived/loop_run.rs");
+
+    assert!(module.contains("struct RunLifecycleCoordinator"));
+    assert!(module.contains("trait StepScopeObserver"));
+    assert!(module.contains("fn claim_terminal"));
+    assert!(module.contains("fn claim_cancellation"));
+    assert!(module.contains("fn register_step_scope"));
+
+    for (name, adapter) in [("独立 Run", main_adapter), ("派生 Run", sub_adapter)] {
+        assert!(
+            adapter.contains("RunLifecycleCoordinator::new("),
+            "{name} 必须委托同一个 Run lifecycle owner"
+        );
+        assert!(
+            !adapter.contains("self.active_run.claim_terminal("),
+            "{name} 不得保留 terminal claim 算法"
+        );
+        assert!(
+            !adapter.contains("self.active_run.claim_cancellation("),
+            "{name} 不得保留 cancellation claim 算法"
+        );
+    }
+}
+
+#[test]
+fn p6_9_3_interaction_completion_has_one_role_neutral_owner() {
+    let coordinator = include_str!("../interaction/coordinator.rs");
+    let engine = include_str!("engine.rs");
+    let main_adapter = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub_adapter = include_str!("../run/derived/loop_run.rs");
+
+    assert!(coordinator.contains("struct InteractionCompletionContext"));
+    assert!(coordinator.contains("fn interaction_completion_context"));
+    assert!(coordinator.contains("async fn complete_tool_interaction"));
+    assert!(
+        !engine.contains("pub trait InteractionCompletionPort"),
+        "Loop Engine 不得保留聚合 Interaction completion 依赖的 fat port"
+    );
+
+    for (name, adapter) in [("独立 Run", main_adapter), ("派生 Run", sub_adapter)] {
+        assert!(
+            adapter.contains("InteractionCompletionContext::new("),
+            "{name} 必须只构造统一的 Interaction completion context"
+        );
+        for retired_method in [
+            "fn interaction_execution_scope(",
+            "fn interaction_tool_execution(",
+            "fn interaction_materializer(",
+            "fn interaction_session_id(",
+            "fn interaction_cancellation(",
+        ] {
+            assert!(
+                !adapter.contains(retired_method),
+                "{name} 不得保留 Interaction completion 角色方法：{retired_method}"
+            );
+        }
+    }
+}
+
+#[test]
+fn p6_9_3_model_and_tool_lifecycles_have_role_neutral_owners() {
+    let model_owner = include_str!("../model/invocation.rs");
+    let tool_owner = include_str!("../tool/coordination.rs");
+    let main_adapter = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub_adapter = include_str!("../run/derived/loop_run.rs");
+
+    assert!(model_owner.contains("struct ModelInvocationCoordinator"));
+    assert!(model_owner.contains("struct ModelInvocationContext"));
+    assert!(model_owner.contains("trait ModelInvocationObserver"));
+    assert!(tool_owner.contains("struct ToolRoundCoordinator"));
+    assert!(tool_owner.contains("trait ToolRoundObserver"));
+
+    for (name, adapter) in [("独立 Run", main_adapter), ("派生 Run", sub_adapter)] {
+        assert!(
+            adapter.contains("ModelInvocationContext::new(")
+                || adapter.contains("orchestrate_model_invocation("),
+            "{name} 必须只构造统一的 Model invocation context"
+        );
+        assert!(
+            adapter.contains("ToolRoundCoordinator::new("),
+            "{name} 必须委托统一的 Tool round owner"
+        );
+        assert!(
+            !adapter
+                .contains("impl crate::application::model::invocation::ModelInvocationLifecycle"),
+            "{name} 不得直接拥有 Model invocation lifecycle"
+        );
+        assert!(
+            !adapter.contains("struct MainToolRoundObserver")
+                && !adapter.contains("struct SubToolRoundObserver"),
+            "{name} 不得声明角色化 Tool round observer"
+        );
+    }
+}
+
+#[test]
+fn p6_9_3_context_request_and_run_finalization_have_role_neutral_owners() {
+    let context_owner = include_str!("context_request.rs");
+    let finalization_owner = include_str!("run_finalization.rs");
+    let main_adapter = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub_adapter = include_str!("../run/derived/loop_run.rs");
+    let sub_finalize = include_str!("../run/derived/finalize.rs");
+
+    assert!(context_owner.contains("struct ContextRequestCoordinator"));
+    assert!(context_owner.contains("struct ContextRequestSource"));
+    assert!(context_owner.contains("fn build_request"));
+    assert!(finalization_owner.contains("struct RunFinalizationCoordinator"));
+    assert!(finalization_owner.contains("trait RunFinalizationObserver"));
+    assert!(finalization_owner.contains("async fn finalize"));
+
+    for (name, adapter) in [("独立 Run", main_adapter), ("派生 Run", sub_adapter)] {
+        assert!(
+            adapter.contains("ContextRequestCoordinator::new("),
+            "{name} 必须委托统一的 ContextRequest owner"
+        );
+        assert!(
+            adapter.contains("RunFinalizationCoordinator::new(")
+                || adapter.contains("ChatStreamEventObserver"),
+            "{name} 必须委托统一的 Run finalization owner"
+        );
+        assert!(
+            !adapter.contains("ContextRequest {"),
+            "{name} 不得手工装配 ContextRequest"
+        );
+    }
+
+    assert!(
+        !sub_finalize.contains("pub(crate) async fn finalize_sub_agent"),
+        "派生 Run 不得保留角色化 finalization 算法"
+    );
 }
 
 use crate::domain::agent_run::{
@@ -541,7 +778,7 @@ impl ModelInvocationPort for ScriptedPort {
 }
 
 #[async_trait::async_trait]
-impl StopHookPort for ScriptedPort {}
+impl crate::application::hook::stop_coordination::StopHookObserver for ScriptedPort {}
 
 #[async_trait::async_trait]
 impl ToolOrchestrationPort for ScriptedPort {
@@ -606,46 +843,40 @@ impl StuckHandlingPort for ScriptedPort {
 
 impl PlanApprovalPort for ScriptedPort {}
 
-#[async_trait::async_trait]
-impl InteractionCompletionPort for ScriptedPort {
-    fn interaction_execution_scope(&self) -> tools::ExecutionScope {
-        tools::ExecutionScope::builder(
-            "test-run".to_string(),
-            project::WorkspaceId::from("test-ws".to_string()),
-            std::path::PathBuf::from("/tmp"),
-        )
-        .build()
-    }
-
-    fn interaction_tool_execution(&self) -> &dyn tools::ToolExecutionPort {
-        self.fake_tool_port
-            .as_deref()
-            .expect("interaction test requires fake tool execution")
-    }
-
-    fn interaction_materializer(
+impl crate::application::interaction::coordinator::InteractionCompletionContextProvider
+    for ScriptedPort
+{
+    fn interaction_completion_context(
         &self,
-    ) -> &crate::application::tool::result_materialization::ToolResultMaterializer {
+        step_cancel: CancellationToken,
+    ) -> crate::application::interaction::coordinator::InteractionCompletionContext<'_> {
         static MATERIALIZER: std::sync::OnceLock<
             std::sync::Arc<
                 crate::application::tool::result_materialization::ToolResultMaterializer,
             >,
         > = std::sync::OnceLock::new();
-        MATERIALIZER
+        let materializer = MATERIALIZER
             .get_or_init(crate::application::tool::test_support::test_tool_result_materializer)
-            .as_ref()
-    }
-
-    fn interaction_session_id(&self) -> &str {
-        "test-session"
-    }
-
-    fn interaction_cancellation(
-        &self,
-        step_cancel: CancellationToken,
-    ) -> std::sync::Arc<dyn tools::CancellationSignal> {
-        std::sync::Arc::new(
-            crate::application::run::context::RunCancellationScope::from_token(step_cancel),
+            .as_ref();
+        static UNUSED_TOOL_EXECUTION: std::sync::LazyLock<FakeToolExecutionPort> =
+            std::sync::LazyLock::new(FakeToolExecutionPort::new);
+        let tool_execution = self.fake_tool_port.as_deref().map_or(
+            &*UNUSED_TOOL_EXECUTION as &dyn tools::ToolExecutionPort,
+            |port| port,
+        );
+        crate::application::interaction::coordinator::InteractionCompletionContext::new(
+            tools::ExecutionScope::builder(
+                "test-run".to_string(),
+                project::WorkspaceId::from("test-ws".to_string()),
+                std::path::PathBuf::from("/tmp"),
+            )
+            .build(),
+            tool_execution,
+            materializer,
+            "test-session",
+            std::sync::Arc::new(
+                crate::application::run::context::RunCancellationScope::from_token(step_cancel),
+            ),
         )
     }
 }
@@ -2003,29 +2234,13 @@ impl EventSinkPort for DrainOnlyPort {
     }
 }
 
-impl InteractionCompletionPort for DrainOnlyPort {
-    fn interaction_execution_scope(&self) -> tools::ExecutionScope {
-        unreachable!("DrainOnlyPort does not complete interactions")
-    }
-
-    fn interaction_tool_execution(&self) -> &dyn tools::ToolExecutionPort {
-        unreachable!("DrainOnlyPort does not complete interactions")
-    }
-
-    fn interaction_materializer(
-        &self,
-    ) -> &crate::application::tool::result_materialization::ToolResultMaterializer {
-        unreachable!("DrainOnlyPort does not complete interactions")
-    }
-
-    fn interaction_session_id(&self) -> &str {
-        "drain-only"
-    }
-
-    fn interaction_cancellation(
+impl crate::application::interaction::coordinator::InteractionCompletionContextProvider
+    for DrainOnlyPort
+{
+    fn interaction_completion_context(
         &self,
         _step_cancel: CancellationToken,
-    ) -> std::sync::Arc<dyn tools::CancellationSignal> {
+    ) -> crate::application::interaction::coordinator::InteractionCompletionContext<'_> {
         unreachable!("DrainOnlyPort does not complete interactions")
     }
 }
@@ -2092,7 +2307,7 @@ impl ModelInvocationPort for DrainOnlyPort {
 }
 
 #[async_trait::async_trait]
-impl StopHookPort for DrainOnlyPort {}
+impl crate::application::hook::stop_coordination::StopHookObserver for DrainOnlyPort {}
 
 #[async_trait::async_trait]
 impl ToolOrchestrationPort for DrainOnlyPort {
