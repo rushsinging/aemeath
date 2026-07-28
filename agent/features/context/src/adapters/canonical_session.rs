@@ -336,6 +336,11 @@ impl SessionRepository for CanonicalSessionRepository {
         }
 
         let mut candidate = (*current).clone();
+        let mut append = append.clone();
+        if append.receipts.is_empty() {
+            append.receipts =
+                current.step_receipts(append.run_id.as_ref(), append.step_id.as_str());
+        }
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
@@ -366,7 +371,7 @@ impl SessionRepository for CanonicalSessionRepository {
         let revision = SessionRevision::new(candidate.revision);
         self.publish_generation(&current, candidate)
             .map_err(ContextAppendError::Storage)?;
-        Ok(Self::receipt(append, revision))
+        Ok(Self::receipt(&append, revision))
     }
 
     async fn commit_compaction(

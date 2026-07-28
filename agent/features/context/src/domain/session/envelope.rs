@@ -193,6 +193,23 @@ impl PartialEq for CanonicalSession {
 impl Eq for CanonicalSession {}
 
 impl CanonicalSession {
+    pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<StepReceipt> {
+        let mut receipts = self
+            .run_slices
+            .iter()
+            .find(|slice| slice.run_id == run_id)
+            .and_then(|slice| slice.steps.iter().find(|step| step.step_id == step_id))
+            .map(|step| {
+                step.tool_receipts
+                    .iter()
+                    .filter_map(ToolCallReceipt::to_step_receipt)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        receipts.sort_by_key(StepReceipt::index);
+        receipts
+    }
+
     pub fn tool_receipt(&self, mutation: &ToolReceiptMutation) -> Option<&ToolCallReceipt> {
         self.run_slices
             .iter()

@@ -79,6 +79,37 @@ pub struct ToolCallReceipt {
 }
 
 impl ToolCallReceipt {
+    pub fn to_step_receipt(&self) -> Option<super::StepReceipt> {
+        let ToolCallState::Terminal(terminal) = &self.state else {
+            return None;
+        };
+        let call_id = self
+            .identity
+            .provider_call_id
+            .as_deref()
+            .unwrap_or(&self.identity.runtime_call_id);
+        let receipt = if self.identity.agent {
+            super::StepReceipt::agent(call_id, self.identity.call_index, terminal.outcome)
+        } else {
+            super::StepReceipt::tool(call_id, self.identity.call_index, terminal.outcome)
+        }
+        .with_summary(terminal.safe_reason.clone());
+        let receipt = terminal
+            .possible_side_effects()
+            .iter()
+            .fold(receipt, |receipt, effect| {
+                receipt.with_possible_side_effect(effect.clone())
+            });
+        Some(
+            terminal
+                .unfinished_call_ids()
+                .iter()
+                .fold(receipt, |receipt, call_id| {
+                    receipt.with_unfinished_call(call_id.clone())
+                }),
+        )
+    }
+
     pub fn pending(identity: ToolCallIdentity, input_preview: impl Into<String>) -> Self {
         Self {
             identity,
