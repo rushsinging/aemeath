@@ -554,10 +554,7 @@ impl App {
             })
             .unwrap_or(true);
         if need_rebuild {
-            #[cfg(test)]
-            {
-                self.assemble_count += 1;
-            }
+            self.assemble_count = self.assemble_count.saturating_add(1);
             let workspace_root = current_workspace_root.as_deref().map(std::path::Path::new);
             let view_model = OutputViewAssembler::assemble_from_conversation(
                 &self.model.conversation,
@@ -604,11 +601,11 @@ impl App {
                 crate::tui::log_warn!(
                     "tui.output.refresh_document panicked; keeping previous document"
                 );
-                self.model
-                    .conversation
-                    .apply(SetStatusNotice(StatusNotice::warning(
+                self.apply_agent_intent(crate::tui::update::intent::AgentIntent::Conversation(
+                    ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
                         "渲染失败，已记录 panic.log",
-                    )));
+                    ))),
+                ));
                 return;
             }
         };

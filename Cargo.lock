@@ -364,6 +364,7 @@ dependencies = [
  "indicatif",
  "insta",
  "inventory",
+ "libc",
  "log",
  "once_cell",
  "portable-pty",

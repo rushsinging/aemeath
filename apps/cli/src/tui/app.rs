@@ -6,12 +6,17 @@ mod runtime;
 pub mod state;
 
 use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
+use crate::tui::frame_diagnostics::{
+    FrameDiagnosticContext, FrameDiagnosticEvent, FrameDiagnosticKind, FrameDiagnostics,
+    FrameTiming,
+};
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::root::TuiModel;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::model::runtime_presentation::RuntimePresentationIntent;
 use crate::tui::model::workspace_provider::WorkspaceIntent;
+use crate::tui::process_memory::{ProcessMemoryBaseline, ProcessMemorySnapshot};
 use crate::tui::render::input::input_area::suggestions::SuggestionViewState;
 use crate::tui::render::input::input_area::InputArea;
 use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
@@ -25,7 +30,11 @@ use ratatui::{
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+const SLOW_FRAME_THRESHOLD: Duration = Duration::from_millis(50);
+const SLOW_FRAME_LOG_COOLDOWN: Duration = Duration::from_secs(5);
+const RSS_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
 #[cfg(test)]
 use event::StatusContextUpdate;
@@ -49,9 +58,15 @@ pub struct App {
     /// memo：缓存上次 assemble 的 (revision, view_model)。revision 不变即复用，
     /// 跳过 `assemble_from_conversation` 的全量遍历+clone（大会话伪卡死根治）。
     pub(crate) output_view_cache: Option<OutputViewCache>,
-    /// 测试探针：assemble 实际执行次数，验证 memo 是否跳过重建。
-    #[cfg(test)]
-    pub(crate) assemble_count: usize,
+    frame_diagnostics: FrameDiagnostics,
+    process_memory: ProcessMemoryBaseline,
+    started_at: Instant,
+    pending_prepare_duration: Duration,
+    pending_flush_duration: Duration,
+    pending_frame_started_at: Option<Instant>,
+    pending_frame_context: Option<FrameDiagnosticContext>,
+    /// 记录本进程实际执行的 assemble 次数，供帧诊断判断本帧是否重建 view model。
+    assemble_count: usize,
     // 纯数据子状态
     pub chat: ChatState,
     pub input: InputState,
@@ -154,7 +169,13 @@ impl App {
             status_bar,
             output_document_renderer: OutputDocumentRenderer::default(),
             output_view_cache: None,
-            #[cfg(test)]
+            frame_diagnostics: FrameDiagnostics::new(SLOW_FRAME_THRESHOLD, SLOW_FRAME_LOG_COOLDOWN),
+            process_memory: ProcessMemoryBaseline::new(RSS_SAMPLE_INTERVAL),
+            started_at: Instant::now(),
+            pending_prepare_duration: Duration::ZERO,
+            pending_flush_duration: Duration::ZERO,
+            pending_frame_started_at: None,
+            pending_frame_context: None,
             assemble_count: 0,
             chat: ChatState::default(),
             input: InputState::default(),
@@ -292,7 +313,89 @@ impl App {
             self.view_state.animation.spinner_frame,
             self.output_area.document().total_lines()
         );
+        self.finish_frame_diagnostics(draw_duration);
         Ok(())
+    }
+
+    fn finish_frame_diagnostics(&mut self, draw_duration: Duration) {
+        let Some(frame_started_at) = self.pending_frame_started_at.take() else {
+            return;
+        };
+        let context = self
+            .pending_frame_context
+            .take()
+            .unwrap_or_else(|| self.frame_diagnostic_context(self.view_state.dirty.output));
+        let now = Instant::now();
+        let timing = FrameTiming {
+            prepare: self.pending_prepare_duration,
+            flush: self.pending_flush_duration,
+            draw: draw_duration,
+            total: now.saturating_duration_since(frame_started_at),
+        };
+        let elapsed = now.saturating_duration_since(self.started_at);
+        let memory = self
+            .process_memory
+            .observe(elapsed, crate::tui::process_memory::current_rss_bytes());
+        if let Some(event) = self
+            .frame_diagnostics
+            .classify(elapsed, timing, context, memory)
+        {
+            self.log_frame_diagnostic(event);
+        }
+    }
+
+    fn frame_diagnostic_context(&self, output_dirty: bool) -> FrameDiagnosticContext {
+        FrameDiagnosticContext {
+            output_dirty,
+            revision: self.model.conversation.revision(),
+            timeline_items: self.model.conversation.timeline.items().len(),
+            output_roots: self
+                .output_view_cache
+                .as_ref()
+                .map_or(0, |cache| cache.view_model.roots.len()),
+            document_lines: self.output_area.document().total_lines(),
+            assemble_calls: 0,
+        }
+    }
+
+    fn assemble_count_for_diagnostics(&self) -> usize {
+        self.assemble_count
+    }
+
+    fn log_frame_diagnostic(&self, event: FrameDiagnosticEvent) {
+        let memory = event.memory.unwrap_or(ProcessMemorySnapshot {
+            current_rss_bytes: 0,
+            peak_rss_bytes: 0,
+            first_rss_bytes: 0,
+            growth_from_first_bytes: 0,
+            growth_from_previous_bytes: 0,
+        });
+        let event_type = match event.kind {
+            FrameDiagnosticKind::FirstFrame => "tui_first_frame",
+            FrameDiagnosticKind::SlowFrame => "tui_slow_frame",
+        };
+        let message = format!(
+            "event_type={event_type} frame_ms={} prepare_ms={} flush_ms={} draw_ms={} output_dirty={} revision={} timeline_items={} output_roots={} document_lines={} assemble_calls={} rss_bytes={} peak_rss_bytes={} first_rss_bytes={} rss_growth_first_bytes={} rss_growth_previous_bytes={}",
+            event.timing.total.as_millis(),
+            event.timing.prepare.as_millis(),
+            event.timing.flush.as_millis(),
+            event.timing.draw.as_millis(),
+            event.context.output_dirty,
+            event.context.revision,
+            event.context.timeline_items,
+            event.context.output_roots,
+            event.context.document_lines,
+            event.context.assemble_calls,
+            memory.current_rss_bytes,
+            memory.peak_rss_bytes,
+            memory.first_rss_bytes,
+            memory.growth_from_first_bytes,
+            memory.growth_from_previous_bytes,
+        );
+        match event.kind {
+            FrameDiagnosticKind::FirstFrame => crate::tui::log_info!("{message}"),
+            FrameDiagnosticKind::SlowFrame => crate::tui::log_warn!("{message}"),
+        }
     }
 }
 

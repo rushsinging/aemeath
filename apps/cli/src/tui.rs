@@ -1,7 +1,9 @@
 pub mod adapter;
 pub mod app;
 pub mod effect;
+mod frame_diagnostics;
 pub mod model;
+mod process_memory;
 pub mod render;
 pub mod text;
 pub mod update;
