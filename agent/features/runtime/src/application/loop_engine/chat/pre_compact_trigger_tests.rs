@@ -648,7 +648,7 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
 
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();
     execution.initialize_for_launch(port_messages, 1);
-    execution.replace_context_projection(request, Some(window));
+    execution.replace_context_state(request, Some(window));
     let mut port = build_compact_test_port(&mut harness);
 
     let cancel = CancellationToken::new();
@@ -687,7 +687,7 @@ async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
 
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();
     execution.initialize_for_launch(vec![Message::user("only")], 1);
-    execution.replace_context_projection(request, Some(window));
+    execution.replace_context_state(request, Some(window));
     let mut port = build_compact_test_port(&mut harness);
 
     let cancel = CancellationToken::new();
@@ -721,7 +721,7 @@ async fn pre_compact_trigger_skips_when_context_compact_call_errors() {
 
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();
     execution.initialize_for_launch(vec![Message::user("only")], 1);
-    execution.replace_context_projection(request, Some(window));
+    execution.replace_context_state(request, Some(window));
     let mut port = build_compact_test_port(&mut harness);
 
     let cancel = CancellationToken::new();

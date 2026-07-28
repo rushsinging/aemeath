@@ -413,10 +413,11 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
   - 路径同步：Runtime 源码、integration tests、架构 Guard、Guard sanity fixtures 与设计文档均切换到真实 owner 路径；旧 `application::main_loop`、`application::subagent` 生产引用及 Guard 旧路径搜索为空。
   - 验证结果：production-only `RUSTFLAGS='-D dead-code -D unused-imports' cargo check -p runtime --lib`、`cargo clippy -p runtime --all-targets -- -D warnings`、Runtime 668 unit + 18 integration tests、格式、diff、目录契约、Guard sanity fixtures 与完整 architecture guards 全部通过。
 
-- [ ] **P6.12 固化防双轨 Guard 并执行最终验证**
-  - 扩展 Shared Run Loop / construction ownership / source guard，禁止 execution swap、调用方 bindings、重复 model/tool/interaction/persistence/hook 实现、角色化执行类型和直接 provider 旁路。
-  - 修正守卫中的迁移前旧路径，确保扫描当前 `application/run/**` 等真实位置；禁止模块级 dead-code 豁免和测试专属生产 API 回归。
-  - 完成门禁：`scripts/setup-dev-env.sh --check`、Runtime/Composition/SDK/CLI 相邻测试、`cargo fmt --check`、production `cargo check` / `cargo clippy`、all-targets clippy、全部架构 Guard 和 pre-push 门禁通过。
+- [x] **P6.12 固化防双轨 Guard 并执行最终验证**
+  - Guard 收敛：Shared Run Loop、Runtime Capability Assembly、crate façade 与禁止 import 规则均扫描当前 owner 路径；Runtime Capability Assembly 新增生产标识命名门禁，禁止 `Projection` / `projection` 宽泛命名，且无路径白名单。
+  - 命名根治：`ModelInvocationProjection` 按职责拆为 `ModelInvocationContext` 与 `ModelInvocationLifecycle`；Session durable/resume 类型改为 `AcceptedInputRecord`、`FinalizedStepRecord`、`SessionResumeView`；SDK/Hook 转换模块改为 `sdk_event_mapper` 与 `outcome_mapper`；context state、waiting event、Stop Hook status 方法均改为职责名。
+  - 规则与设计：根 `AGENTS.md` 和 `specs/rust-coding.md` 固化全仓命名原则；`specs/runtime.md` 只登记 MUST/SHOULD/NEVER 决策；职责拆分、mapper/view/record 词汇和 Guard 设计写入 Runtime design 与 architecture guard 文档。
+  - 验证结果：`cargo check -p runtime -p context -p cli`、`cargo clippy -p runtime -p context -p cli --all-targets -- -D warnings`、Context 全量测试（106 unit + 全部 integration）、Runtime 669 unit tests、`cargo fmt --check`、`git diff --check`、Runtime 定向 Guard 与全部 fast architecture guards 通过；源码与设计旧 Projection 类型/模块名搜索清零。
 
 **依赖顺序**：P6.1 → P6.2 → P6.3 → P6.4 → P6.5 → P6.6 → P6.7 → P6.8 → P6.9 → P6.10 → P6.11 → P6.12。若某项验证失败，保持未勾选并在该项下记录失败证据；不得跳到依赖它的删除或 Guard 项。
 

@@ -419,10 +419,9 @@ impl crate::application::tool::coordination::ToolRoundObserver for SubToolRoundO
     }
 }
 
-// ── Model invocation projection capability ──────────────────────────────
+// ── Model invocation lifecycle capability ──────────────────────────────
 
-#[async_trait]
-impl crate::application::model::invocation::ModelInvocationProjection for SubRunCapabilities<'_> {
+impl crate::application::model::invocation::ModelInvocationContext for SubRunCapabilities<'_> {
     fn runtime_context(&self) -> &RuntimeContext {
         &self.runtime_context
     }
@@ -461,6 +460,16 @@ impl crate::application::model::invocation::ModelInvocationProjection for SubRun
         )
     }
 
+    fn extract_tool_calls(
+        &self,
+        response: &InvocationResponse,
+    ) -> Vec<crate::application::tool::agent::ToolCall> {
+        Agent::extract_tool_calls(&response.assistant_message)
+    }
+}
+
+#[async_trait]
+impl crate::application::model::invocation::ModelInvocationLifecycle for SubRunCapabilities<'_> {
     async fn on_window(
         &mut self,
         execution: &crate::application::run::execution_state::RunExecutionState,
@@ -489,13 +498,6 @@ impl crate::application::model::invocation::ModelInvocationProjection for SubRun
     ) {
         self.progress_api_ok(execution.turn_count(), response);
         self.send_text_progress(execution.turn_count(), response);
-    }
-
-    fn extract_tool_calls(
-        &self,
-        response: &InvocationResponse,
-    ) -> Vec<crate::application::tool::agent::ToolCall> {
-        Agent::extract_tool_calls(&response.assistant_message)
     }
 
     async fn classify_terminal(

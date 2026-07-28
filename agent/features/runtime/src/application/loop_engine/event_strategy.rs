@@ -1,12 +1,12 @@
 //! Event-strategy trait and concrete implementations for Main and Sub adapters.
 //!
-//! The [`EventStrategy`] trait abstracts domain-event projection: the Main
+//! The [`EventStrategy`] trait abstracts domain-event mapping: the Main
 //! adapter projects to [`RuntimeStreamEvent`] and handles finish/reflection,
 //! while the Sub adapter extracts terminal state and reports progress.
 //!
 //! Each adapter holds a concrete strategy and delegates [`emit`] through it.
 //! Because the two strategies have fundamentally different behaviour
-//! (sink-based projection vs progress reporting), the trait exists for
+//! (sink-based mapping vs progress reporting), the trait exists for
 //! interface consistency, not for dynamic dispatch.
 
 use async_trait::async_trait;
@@ -51,7 +51,7 @@ pub(crate) fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<Agent
     }
 }
 
-/// Common interface for event-projection strategies.
+/// Common interface for event mapping strategies.
 ///
 /// Each adapter constructs its concrete strategy and delegates its
 /// [`EventSinkPort::emit`] implementation through it. Because the two

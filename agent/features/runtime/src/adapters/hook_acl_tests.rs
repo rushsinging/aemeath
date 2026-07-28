@@ -19,7 +19,7 @@ use hook::{
 use serde_json::json;
 
 use super::hook_acl::{
-    project_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookDisplayMessageKind,
+    map_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookDisplayMessageKind,
     RuntimeHookExecution, RuntimeHookExecutionStatus, RuntimeHookReason,
 };
 
@@ -78,7 +78,7 @@ fn msg(
 #[test]
 fn continue_directive_projects_with_no_executions() {
     let outcome = HookOutcome::proceed();
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     assert_eq!(dispatch.directive, RuntimeHookDirective::Continue);
     assert!(dispatch.executions.is_empty());
@@ -98,7 +98,7 @@ fn block_exit_code_reason_preserves_code_and_stderr() {
         },
         Vec::new(),
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     match dispatch.directive {
         RuntimeHookDirective::Block {
@@ -122,7 +122,7 @@ fn block_exit_code_reason_with_empty_stderr_preserved() {
         },
         Vec::new(),
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     match dispatch.directive {
         RuntimeHookDirective::Block {
@@ -145,7 +145,7 @@ fn block_json_block_reason_preserves_reason() {
         },
         Vec::new(),
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     match dispatch.directive {
         RuntimeHookDirective::Block {
@@ -165,7 +165,7 @@ fn block_json_continue_false_preserves_stop_reason_some() {
         },
         Vec::new(),
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     match dispatch.directive {
         RuntimeHookDirective::Block {
@@ -183,7 +183,7 @@ fn block_json_continue_false_preserves_stop_reason_none() {
         },
         Vec::new(),
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     match dispatch.directive {
         RuntimeHookDirective::Block {
@@ -203,7 +203,7 @@ fn block_stop_hook_execution_failed_preserves_error() {
         },
         Vec::new(),
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     match dispatch.directive {
         RuntimeHookDirective::Block {
@@ -223,7 +223,7 @@ fn block_policy_block_preserves_error() {
         },
         Vec::new(),
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     match dispatch.directive {
         RuntimeHookDirective::Block {
@@ -238,7 +238,7 @@ fn block_policy_block_preserves_error() {
 #[test]
 fn reason_is_structural_not_flattened_to_debug_string() {
     let mk = |reason: HookReason| {
-        project_hook_outcome(&outcome(HookDirective::Block { reason }, Vec::new())).directive
+        map_hook_outcome(&outcome(HookDirective::Block { reason }, Vec::new())).directive
     };
 
     // JsonBlock.reason = "same" 与 StopHookExecutionFailed.error = "same" 文本相同，
@@ -309,7 +309,7 @@ fn context_directive_preserves_context_string() {
         },
         Vec::new(),
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     match dispatch.directive {
         RuntimeHookDirective::Context { context } => assert_eq!(context, "extra guidance"),
@@ -328,7 +328,7 @@ fn updated_input_directive_preserves_json_value() {
         },
         Vec::new(),
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     match dispatch.directive {
         RuntimeHookDirective::UpdatedInput { input } => assert_eq!(input, value),
@@ -346,7 +346,7 @@ fn context_and_input_directive_preserves_both_fields() {
         },
         Vec::new(),
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     match dispatch.directive {
         RuntimeHookDirective::ContextAndInput { context, input } => {
@@ -372,7 +372,7 @@ fn execution_success_preserves_all_fields() {
             Duration::from_millis(123),
         )],
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     let exec = &dispatch.executions[0];
     assert_eq!(exec.status, RuntimeHookExecutionStatus::Success);
@@ -396,7 +396,7 @@ fn execution_blocked_status_preserved() {
             Duration::from_millis(5),
         )],
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     assert_eq!(
         dispatch.executions[0].status,
@@ -419,7 +419,7 @@ fn execution_failed_preserves_error_message() {
             Duration::from_millis(9),
         )],
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     match &dispatch.executions[0].status {
         RuntimeHookExecutionStatus::ExecutionFailed { error } => {
@@ -446,7 +446,7 @@ fn execution_missing_exit_code_preserved_as_none() {
             Duration::from_secs(1),
         )],
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     assert_eq!(dispatch.executions[0].exit_code, None);
     assert_eq!(dispatch.executions[0].stdout, "partial");
@@ -459,7 +459,7 @@ fn duration_preserved_exactly() {
         HookDirective::Continue,
         vec![exec(HookExecutionStatus::Success, 1, Some(0), "", "", dur)],
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     assert_eq!(dispatch.executions[0].duration, dur);
 }
@@ -480,7 +480,7 @@ fn stdout_and_stderr_preserved_verbatim_without_parsing() {
             Duration::from_micros(42),
         )],
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     assert_eq!(dispatch.executions[0].stdout, raw);
     assert_eq!(dispatch.executions[0].stderr, "stderr line\nsecond line");
@@ -511,7 +511,7 @@ fn multiple_executions_preserved_in_order() {
             ),
         ],
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     assert_eq!(dispatch.executions.len(), 2);
     assert_eq!(dispatch.executions[0].stdout, "first");
@@ -563,7 +563,7 @@ fn retry_trajectory_preserved_with_three_attempts() {
             ),
         ],
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     assert_eq!(dispatch.executions.len(), 3);
     assert!(matches!(
@@ -613,7 +613,7 @@ fn messages_project_both_kinds_with_all_fields_preserved() {
         ],
         block_detail: None,
     };
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     assert_eq!(dispatch.messages.len(), 2);
 
@@ -679,7 +679,7 @@ fn messages_preserve_order_verbatim_no_merge_or_drop() {
         ],
         block_detail: None,
     };
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     // 顺序无损：text 序列与源一致。
     let texts: Vec<&str> = dispatch.messages.iter().map(|m| m.text.as_str()).collect();
@@ -702,7 +702,7 @@ fn messages_preserve_order_verbatim_no_merge_or_drop() {
 #[test]
 fn messages_empty_when_source_has_none() {
     let outcome = outcome(HookDirective::Continue, Vec::new());
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     assert!(dispatch.messages.is_empty());
 }
@@ -710,7 +710,7 @@ fn messages_empty_when_source_has_none() {
 // ─── purity: source untouched; From impl ─────────────────────
 
 #[test]
-fn projection_does_not_mutate_source() {
+fn mapping_does_not_mutate_source() {
     let outcome = outcome(
         HookDirective::Block {
             reason: HookReason::JsonBlock {
@@ -729,7 +729,7 @@ fn projection_does_not_mutate_source() {
     let snapshot_directive = format!("{:?}", outcome.directive);
     let snapshot_exec_stdout = outcome.executions[0].stdout.clone();
 
-    let _ = project_hook_outcome(&outcome);
+    let _ = map_hook_outcome(&outcome);
 
     // 源 HookOutcome 不受投影影响（纯函数）。
     assert_eq!(format!("{:?}", outcome.directive), snapshot_directive);
@@ -738,7 +738,7 @@ fn projection_does_not_mutate_source() {
 }
 
 #[test]
-fn from_impl_delegates_to_project_hook_outcome() {
+fn from_impl_delegates_to_map_hook_outcome() {
     let outcome = outcome(
         HookDirective::Continue,
         vec![exec(
@@ -752,7 +752,7 @@ fn from_impl_delegates_to_project_hook_outcome() {
     );
 
     let via_from: RuntimeHookDispatch = (&outcome).into();
-    let via_fn = project_hook_outcome(&outcome);
+    let via_fn = map_hook_outcome(&outcome);
 
     assert_eq!(via_from, via_fn);
 }
@@ -783,7 +783,7 @@ fn dispatch_round_trips_directive_and_executions_together() {
             ),
         ],
     );
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
 
     assert_eq!(
         dispatch,

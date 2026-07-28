@@ -1,7 +1,7 @@
-//! Hook dispatch helper — typed Runtime projection.
+//! Hook dispatch helper — typed Runtime value mapping.
 
-use crate::application::hook::projection::{
-    project_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookDisplayMessageKind,
+use crate::application::hook::outcome_mapper::{
+    map_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookDisplayMessageKind,
 };
 use crate::application::loop_engine::chat::{
     ChatEventSink, RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookMessage,
@@ -35,13 +35,13 @@ pub(crate) async fn dispatch_hook<S: ChatEventSink>(
     let outcome = hook_port
         .dispatch_at(invocation, HookDispatchContext::new(workspace_root), cancel)
         .await;
-    let dispatch = project_hook_outcome(&outcome);
+    let dispatch = map_hook_outcome(&outcome);
     let status = if matches!(dispatch.directive, RuntimeHookDirective::Block { .. }) {
         RuntimeHookEventStatus::Blocked
     } else if dispatch.executions.iter().any(|execution| {
         matches!(
             execution.status,
-            crate::application::hook::projection::RuntimeHookExecutionStatus::ExecutionFailed { .. }
+            crate::application::hook::outcome_mapper::RuntimeHookExecutionStatus::ExecutionFailed { .. }
         )
     }) {
         RuntimeHookEventStatus::Failed
@@ -93,7 +93,7 @@ pub(crate) async fn project_hook_dispatch<S: ChatEventSink>(
     } else if dispatch.executions.iter().any(|execution| {
         matches!(
             execution.status,
-            crate::application::hook::projection::RuntimeHookExecutionStatus::ExecutionFailed { .. }
+            crate::application::hook::outcome_mapper::RuntimeHookExecutionStatus::ExecutionFailed { .. }
         )
     }) {
         RuntimeHookEventStatus::Failed

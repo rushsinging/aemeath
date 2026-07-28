@@ -239,6 +239,19 @@ for adapter in TOOL_ADAPTERS:
         if retired in prod:
             violations.append(f"15. Role adapter retains tool orchestration '{retired}': {adapter}")
 
+# ── 16. Runtime names describe one responsibility; broad Projection names are forbidden ──
+# A mapper may transform values, but "Projection" must not hide a mixed lifecycle,
+# state owner, module, type, trait, function, method, or local binding.
+for candidate in _glob.glob("agent/features/runtime/src/**/*.rs", recursive=True):
+    p = Path(candidate)
+    if "_test" in p.stem or p.stem == "tests" or "/tests/" in str(p):
+        continue
+    prod = production_text(p)
+    if re.search(r'\b[A-Za-z][A-Za-z0-9_]*Projection[A-Za-z0-9_]*\b', prod):
+        violations.append(f"16. Runtime production type/trait uses broad Projection naming: {p}")
+    if re.search(r'\b(?:projection_[A-Za-z0-9_]+|[A-Za-z0-9_]+_projection)\b', prod):
+        violations.append(f"16. Runtime production identifier uses broad projection naming: {p}")
+
 # ── Report ──
 if violations:
     print(json.dumps({"decision": "block", "reason": "Runtime Capability Assembly guard FAILED:\n" + "\n".join(violations)}, ensure_ascii=False))

@@ -132,7 +132,7 @@ fn turn_count_is_owned_by_execution_state() {
 #[test]
 fn context_projection_is_replaced_as_one_step_snapshot() {
     let mut state = RunExecutionState::new();
-    state.replace_context_projection(context_request("step-1"), None);
+    state.replace_context_state(context_request("step-1"), None);
 
     assert_eq!(
         state.context_request().unwrap().request_id,
@@ -146,7 +146,7 @@ fn context_projection_is_replaced_as_one_step_snapshot() {
         SessionRevision::new(7)
     );
 
-    state.replace_context_projection(context_request("step-2"), None);
+    state.replace_context_state(context_request("step-2"), None);
     assert_eq!(
         state.context_request().unwrap().request_id,
         ContextRequestId::new("request-step-2"),

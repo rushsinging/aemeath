@@ -333,18 +333,18 @@ pub async fn from_args_with_workspace(
         )
         .await
         {
-            Ok(projection) => {
-                log::info!(target: crate::LOG_TARGET, "startup resume: {}", projection.session_id);
+            Ok(resume_view) => {
+                log::info!(target: crate::LOG_TARGET, "startup resume: {}", resume_view.session_id);
                 log::debug!(
                     target: crate::LOG_TARGET,
-                    "resume_lifecycle boundary=startup_projection stage=created session_id={} steps={} messages={}",
-                    projection.session_id,
-                    projection.display_steps.len(),
-                    projection.display_steps.iter().map(|step| step.messages.len()).sum::<usize>(),
+                    "resume_lifecycle boundary=startup_view stage=view_created session_id={} steps={} messages={}",
+                    resume_view.session_id,
+                    resume_view.display_steps.len(),
+                    resume_view.display_steps.iter().map(|step| step.messages.len()).sum::<usize>(),
                 );
-                let session_id = projection.session_id.clone();
+                let session_id = resume_view.session_id.clone();
                 let startup_resume = sdk::SessionResumeView {
-                    steps: projection
+                    steps: resume_view
                         .display_steps
                         .into_iter()
                         .map(|step| sdk::ResumedSessionStep {
@@ -357,8 +357,8 @@ pub async fn from_args_with_workspace(
                                 .collect(),
                         })
                         .collect(),
-                    session_id: projection.session_id,
-                    created_at: chrono::DateTime::parse_from_rfc3339(&projection.created_at)
+                    session_id: resume_view.session_id,
+                    created_at: chrono::DateTime::parse_from_rfc3339(&resume_view.created_at)
                         .map(|dt| dt.timestamp_millis() as u64)
                         .unwrap_or(0),
                 };

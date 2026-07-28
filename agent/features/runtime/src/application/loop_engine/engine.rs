@@ -407,7 +407,7 @@ fn freeze_step<P>(
             .collect(),
     );
     if let Some(request) = port.build_context_request(execution, run_id, step_id) {
-        execution.replace_context_projection(request, None);
+        execution.replace_context_state(request, None);
     }
 }
 
@@ -518,7 +518,7 @@ pub trait StopHookPort: Send {
         }
     }
 
-    async fn begin_stop_hook_projection(&mut self) -> Result<(), LoopEngineError> {
+    async fn begin_stop_hook_status(&mut self) -> Result<(), LoopEngineError> {
         Ok(())
     }
 
@@ -1040,7 +1040,7 @@ where
             // (feedback may change the model's behavior); text stall
             // detection runs only when the stop hook allows proceeding.
             let turn_count = run.steps().len(); // turns ≈ steps completed
-            port.begin_stop_hook_projection().await?;
+            port.begin_stop_hook_status().await?;
             let mut stop_context = port.stop_hook_context();
             stop_context.turns = turn_count;
             let stop_outcome = crate::application::hook::stop_coordination::orchestrate_stop_hook(

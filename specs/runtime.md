@@ -5,6 +5,19 @@
 **次触发**：改暂停 / 恢复 / 重试逻辑；改成本追踪；新增 slash 命令。
 **配套**：Tool Published Language、Catalog/Execution 端口与 MCP 主体在 `tools.md`；provider 调用在 `provider.md`。
 
+## 统一运行链路决策（#1397）
+
+- Main Run 与派生 Run **MUST** 使用同一准备、启动与 Loop Engine 链路。
+- Runtime **NEVER** 按 Main/Sub 角色恢复第二套模型调用、工具编排、交互、Step 收口或 Stop Hook 流程。
+- Run 来源差异 **MUST** 通过窄能力契约表达；**NEVER** 聚合为角色化 fat port。
+- `Run` **MUST** 独占领域生命周期状态，`RunExecutionState` **MUST** 独占执行期工作状态，`RuntimeContext` **MUST** 只持本次 Run 已绑定能力；三者 **NEVER** 复制同一事实。
+- Runtime Context 的生产构造 **MUST** 只有一个入口；调用方 **MUST** 只提交纯值 Run 请求，**NEVER** 手填能力绑定或同构参数包。
+- 模型调用、工具轮次、Interaction、Step transaction 与 Stop Hook **MUST** 分别只有一个 application owner。
+- Runtime application **NEVER** 恢复 Main/Sub 角色目录、平铺兼容转发或无明确所有权的 `common` / `shared` 容器。
+- Runtime 生产代码 **NEVER** 使用模块级或宽泛 item 级 `allow(dead_code)`；测试专属能力 **MUST** 受 `cfg(test)` 或 test-only feature 约束。
+- Runtime 类型、trait、模块、函数、方法与变量 **NEVER** 使用 `Projection` / `projection` 宽泛命名；职责混合的抽象 **MUST** 先拆分，数据转换 **MUST** 按来源、目标或用途命名。
+- 可由依赖方向机械表达的边界 **SHOULD** 使用禁止 import 规则；唯一实现、状态唯一所有权和目录所有权 **MUST** 使用结构守卫验证。
+
 ## 配置应用边界（#1345）
 
 - Runtime **MUST** 在接纳真实用户输入、创建 Main Run 前调用 `ConfigReader::refresh_if_sources_changed()`；同一次 Run 内 **NEVER** 再 refresh。

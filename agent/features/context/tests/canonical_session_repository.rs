@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use async_trait::async_trait;
 use context::adapters::{CanonicalSessionRepository, CanonicalSessionWriter};
 use context::domain::session::{
-    AcceptedInputProjection, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
+    AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
     SnapshotState,
 };
 use context::domain::{
@@ -347,7 +347,7 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
 }
 
 #[tokio::test]
-async fn snapshot_reads_structured_projection_not_legacy_chats() {
+async fn snapshot_reads_structured_view_not_legacy_chats() {
     let writer = Arc::new(RecordingWriter::default());
     let mut legacy = ChatSegment::normal(None);
     legacy.messages = vec![Message::user("legacy-only")];
@@ -366,7 +366,7 @@ async fn snapshot_reads_structured_projection_not_legacy_chats() {
             "run",
             vec![CommittedRunStep::accepted_only(
                 "step",
-                AcceptedInputProjection::new(vec![Message::user("structured-only")], "fp", 0),
+                AcceptedInputRecord::new(vec![Message::user("structured-only")], "fp", 0),
             )],
         )],
         committed_steps: vec![],

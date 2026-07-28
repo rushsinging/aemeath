@@ -1,6 +1,6 @@
 use sdk::{ChangeSet, ChatEvent};
 
-use crate::adapters::event_projection::project_stream_event;
+use crate::adapters::sdk_event_mapper::map_stream_event;
 
 #[derive(Clone)]
 pub struct SdkChatEventSink {
@@ -18,7 +18,7 @@ impl SdkChatEventSink {
         &self,
         event: crate::application::loop_engine::chat::RuntimeStreamEvent,
     ) -> ChatEvent {
-        let projected = project_stream_event(event);
+        let projected = map_stream_event(event);
         if matches!(projected, ChatEvent::WorkingDirectoryChanged { .. }) {
             let previous = *self.change_tx.borrow();
             self.change_tx.send_replace(previous | ChangeSet::PROJECT);
@@ -48,9 +48,7 @@ impl crate::application::loop_engine::chat::ChatEventSink for SdkChatEventSink {
         Box::pin(async move {
             let _ = self
                 .tx
-                .send(crate::adapters::event_projection::project_domain_event(
-                    event,
-                ));
+                .send(crate::adapters::sdk_event_mapper::map_domain_event(event));
         })
     }
 }

@@ -24,12 +24,12 @@ Runtime 当前只有一个完整业务能力：`agent_execution`。它拥有“�
    ProviderPort   ToolCatalogPort +  ContextPort   InteractionPort/PolicyPort
                   ToolExecutionPort
         │            │                     │              │
-        └────────────┴─── event_projection（横切：领域事件 → SDK ChatEvent）
+        └────────────┴─── sdk_event_mapper（横切：领域事件 → SDK ChatEvent）
 ```
 
 ## 2. 物理目录与六边形边界
 
-仓库级 `agent/features/*` 已按业务 Feature / Bounded Context 形成垂直切片。按系统级代码组织判据复核源码后，Runtime 当前只有一个具备完整用例、状态所有权和独立生命周期的业务能力 `agent_execution`；`agent_run`、`loop_engine`、各 coordinator、`agent_client` 与 `event_projection` 都是该能力的内部角色。单能力再包装为 `capabilities/agent_execution/` 只会增加单元素目录，因此 **NEVER** 创建该包装，也 **NEVER** 创建没有真实共享内容的空 `shared/`。
+仓库级 `agent/features/*` 已按业务 Feature / Bounded Context 形成垂直切片。按系统级代码组织判据复核源码后，Runtime 当前只有一个具备完整用例、状态所有权和独立生命周期的业务能力 `agent_execution`；`agent_run`、`loop_engine`、各 coordinator、`agent_client` 与 `sdk_event_mapper` 都是该能力的内部角色。单能力再包装为 `capabilities/agent_execution/` 只会增加单元素目录，因此 **NEVER** 创建该包装，也 **NEVER** 创建没有真实共享内容的空 `shared/`。
 
 `agent_execution` 叶子包含 Run 聚合、状态机和真实外部 seam，故直接在 Runtime crate 根采用轻量 Hexagonal Architecture：
 
@@ -64,7 +64,7 @@ agent/features/runtime/src/
 │   └── usage_sink.rs
 ├── adapters.rs
 └── adapters/
-    ├── sdk_event_projection.rs
+    ├── sdk_sdk_event_mapper.rs
     ├── main_interaction.rs
     └── sub_interaction.rs
 ```
@@ -119,10 +119,10 @@ agent/features/runtime/src/
 - 触发 Run 状态机迁移到 `AwaitingUser`/`AwaitingToolApproval`，且只有匹配 reply 才能恢复原 continuation
 - **NEVER** 让 Tool adapter 直接等待 TUI channel，也不让 `InteractionPort` 自行发布 `RunResumed`
 
-### event_projection（横切）
+### sdk_event_mapper（横切）
 - **职责**：领域事件 → SDK `ChatEvent` 的封闭纯转换；**Main/Sub 路由与命名**（Main→TUI，Sub→父 Run）使用 SDK 发布的 `AgentId` / `RunId` / `RunStepId`
 - 消费：`EventSink`
-- projection **NEVER** 执行 channel send、watch 更新、I/O 或状态 mutation；这些副作用只属于 sink adapter。#874 已收口纯转换与 SDK identity 契约，`AgentId` 的生产接线和旧 AskUser sender 退役由 #878/#943/#944 完成
+- mapper **NEVER** 执行 channel send、watch 更新、I/O 或状态 mutation；这些副作用只属于 sink adapter。#874 已收口纯转换与 SDK identity 契约，`AgentId` 的生产接线和旧 AskUser sender 退役由 #878/#943/#944 完成
 
 ### model_invocation 的 Usage 出口
 - Provider ACL 返回 provider-neutral `RawUsageSnapshot` 后，model_invocation 在逻辑 Invocation 的 retry/fallback 收口点映射为 Runtime `UsageSnapshot`，再使用 SDK 发布的唯一 `SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 构造一条 Audit-owned `UsageRecord`；`RunStepId` 由 Loop Engine 直接从 Run 聚合取得，**NEVER** 经 adapter 伪造或旁路。
@@ -194,6 +194,6 @@ Runtime owns live execution mechanics—including semaphore, cancellation implem
 | 2026-07-11 | 重试收敛为 T0-T1 退避（≤10 次/5 分钟封顶），去掉 T2 降级/T3 故障转移 | #761 |
 | 2026-07-12 | tool_coordination 对齐 Catalog/Execution 双端口及 Runtime/Tool BC 职责分工 | #787 |
 | 2026-07-12 | model_invocation 对齐 ProviderCompletion、RawUsageSnapshot 与可见输出重试门禁 | #788 |
-| 2026-07-12 | Hook 边界补单端口与 3/15 两层重试；Usage 从 event_projection 分离到 model_invocation→UsageSink | #790 |
+| 2026-07-12 | Hook 边界补单端口与 3/15 两层重试；Usage 从 sdk_event_mapper 分离到 model_invocation→UsageSink | #790 |
 | 2026-07-18 | #875 冻结重试口径为首次调用 + 最多 10 次重试（最多 11 attempts），单次退避封顶 60 秒；v0.1.0 不接 Provider resolver effective reasoning 链 | [#875](https://github.com/rushsinging/aemeath/issues/875) |
 | 2026-07-17 | Provider usage 出口改为 ACL 标准化 UsageSnapshot，Runtime 不再解释 provider 原始 token 字段 | compact token reset design |

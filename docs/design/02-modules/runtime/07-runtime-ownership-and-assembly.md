@@ -80,6 +80,21 @@ Composition adapters ──implements──▶ Runtime-owned factory/port contra
 6. `Run` 与 `RunExecutionState` 必须各有唯一状态所有权，不得复制同一事实。
 7. Session Runtime 只有一个 `SessionIngress`；`UserMessage`、`Command` 与 `InteractionCommand` 分类后分别进入 Run InputQueue、CommandScheduler 与 InteractionInbox。
 8. `AwaitingInput` 与 `AwaitingInteraction` 必须分离；普通输入和结构化 interaction reply 不得共享 queue 或恢复路径。
+9. 类型、trait 与模块必须按单一职责命名。`Projection` 不作为架构角色名；跨边界转换使用能说明目标或用途的 mapper/view/record 名称，职责混合的抽象必须先拆分。
+
+### 1.1 命名与职责拆分
+
+`Projection` 只描述“某种派生结果”，无法说明谁拥有状态、转换方向、生命周期或副作用，因此不能作为 Runtime 的结构性命名。目标模型采用以下职责词汇：
+
+- `View`：面向特定消费者的只读值，例如 `SessionResumeView`；
+- `Record`：已经提交或可持久化的事实，例如 `AcceptedInputRecord`、`FinalizedStepRecord`；
+- `Mapper` / `map_*`：无状态、单方向的跨边界值转换，例如 `sdk_event_mapper`、`map_hook_outcome`；
+- `Context`：一次操作所需的只读依赖和输入；
+- `Lifecycle` / `Observer`：操作过程中的异步回调与通知，不拥有主流程。
+
+原先混合状态访问、Reducer 构造、日志上下文、事件等待和生命周期回调的模型调用抽象拆为两个接口：`ModelInvocationContext` 只提供调用所需依赖与纯查询，`ModelInvocationLifecycle` 只提供窗口、重试、响应和终态分类回调。共享 model coordinator 仍独占调用流程，两类接口都不能重新吸收 Provider retry loop 或 Run 状态所有权。
+
+跨边界的 Hook 类型转换由 `outcome_mapper` 负责，Runtime-owned 结果继续使用领域语义名 `RuntimeHookDispatch`、`RuntimeHookExecution` 和 `RuntimeHookDisplayMessage`；SDK 事件转换由 `sdk_event_mapper` 负责。模块名不再使用仅描述技术形态的 `projection`。
 
 ## 2. 去除 Main/Sub 生产类型区别
 
@@ -190,7 +205,7 @@ Run 创建时捕获窄的 session snapshot。Factory 不长期借用动态 `Sess
 - started time/deadline；
 - domain events。
 
-`Run` 不持有消息窗口、Provider/Tool Port、流式进度或 UI terminal projection。
+`Run` 不持有消息窗口、Provider/Tool Port、流式进度或 UI terminal view。
 
 ### 4.3.1 Session ingress、Run mailbox 与输入分类
 
@@ -264,15 +279,15 @@ struct InteractionInbox {
 - Step message ownership；
 - accepted/adopted inputs；
 - ContextRequest / ContextWindow；
-- turn count 与 invocation usage projection；
+- turn count 与 invocation usage snapshot；
 - tool identity 与 continuation 工作数据；
 - stream progress；
-- prompt/request projection；
-- terminal output projection。
+- prompt/request snapshot；
+- terminal output view。
 
 以下事实只属于 `Run`，不得复制到 `RunExecutionState`：status、active Step status、pending interaction、cancellation/termination 状态、domain events。
 
-以下事实只属于 `RunExecutionState`，不得复制到 `Run`：messages、context request/window、token projection、input adoption、stream progress 和 tool execution working data。
+以下事实只属于 `RunExecutionState`，不得复制到 `Run`：messages、context request/window、token snapshot、input adoption、stream progress 和 tool execution working data。
 
 Loop Engine 的顺序是：先请求 `Run` 完成合法状态迁移，再更新 `RunExecutionState`，外部副作用只经 `RuntimeContext`，最终由 `Run` 产生领域事件并由 adapter 投影。
 
@@ -453,7 +468,7 @@ Factory 负责：
 2. 从 `RuntimeServices` 的窄 factories 选择并绑定 Context、Provider、Tool、Policy、Hook、Memory、Task、Reasoning、Interaction、Reflection 和 Workspace capability；
 3. 按模式创建 shared、isolated、restricted、parent-mediated 或 unavailable adapter；
 4. 创建 cancellation、input、event、usage 等 per-Run 实例；
-5. 冻结 `RunConfigSnapshot`、provider/model binding 与 workspace projection；
+5. 冻结 `RunConfigSnapshot`、provider/model binding 与 workspace snapshot；
 6. 创建相互一致的 `Idle Run`、冻结 `RuntimeContext` 与空 `RunExecutionState`，返回 `PreparedRun`；输入随后只经 `InputPort` 激活状态机。
 
 Factory 不负责执行 Loop、恢复 Session、修改 `SessionState`、处理模型响应、持久化 Step 或发布终态事件。
@@ -588,8 +603,8 @@ Workspace 不得继续绕过 `RuntimeContext` 旁路进入 Loop adapter。
 
 - Prompt builder、Skill catalog/materializer 属于 `RuntimeServices`。
 - 当前 source revision 属于 `SessionState`。
-- 本次 Run 可见的 prompt/skill projection 在 Run 创建时冻结。
-- 模型请求实际使用的消息和 prompt projection 属于 `RunExecutionState`。
+- 本次 Run 可见的 prompt/skill snapshot 在 Run 创建时冻结。
+- 模型请求实际使用的消息和 prompt snapshot 属于 `RunExecutionState`。
 
 完整 `skills_map` 不得成为第二份长期真相；SDK/TUI 视图按需投影。
 

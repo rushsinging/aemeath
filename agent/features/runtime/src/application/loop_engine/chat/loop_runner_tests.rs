@@ -108,7 +108,7 @@ fn tool_step_owns_user_assistant_and_tool_result_in_order() {
 }
 
 #[test]
-fn finalized_projection_preserves_complete_turn_order() {
+fn finalized_mapping_preserves_complete_turn_order() {
     let finalized =
         fixture_finalize_messages(vec![Message::user("question")], vec![assistant("final")]);
     assert_eq!(finalized[0].role, share::message::Role::User);
@@ -424,7 +424,7 @@ fn runtime_resume_replaces_the_only_active_session_id() {
     assert!(
         runner_source.contains("let mut session_id = session_snapshot.session_id().to_string();")
     );
-    assert!(runner_source.contains("session_id = projection.session_id.clone();"));
+    assert!(runner_source.contains("session_id = resume_view.session_id.clone();"));
     assert!(runner_source.contains(".update_session("));
     assert!(runner_source.contains("if session_id != prepared_session.session_id()"));
     assert!(runner_source.contains("session_id = prepared_session.session_id().to_string();"));

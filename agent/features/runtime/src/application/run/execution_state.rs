@@ -172,7 +172,7 @@ impl RunExecutionState {
         &mut self.context_window
     }
 
-    pub(crate) fn replace_context_projection(
+    pub(crate) fn replace_context_state(
         &mut self,
         request: ContextRequest,
         window: Option<ContextWindow>,

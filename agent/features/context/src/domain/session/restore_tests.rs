@@ -1,6 +1,6 @@
 use super::*;
 use crate::domain::session::{
-    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
+    AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
     CommittedRunStep, RunStepCursor, SnapshotState,
 };
 use share::message::Message;
@@ -21,11 +21,11 @@ fn two_step_session() -> CanonicalSession {
             vec![
                 CommittedRunStep::accepted_only(
                     "step-1",
-                    AcceptedInputProjection::new(vec![Message::user("first")], "fp-1", 0),
+                    AcceptedInputRecord::new(vec![Message::user("first")], "fp-1", 0),
                 ),
                 CommittedRunStep::accepted_only(
                     "step-2",
-                    AcceptedInputProjection::new(vec![Message::user("second")], "fp-2", 0),
+                    AcceptedInputRecord::new(vec![Message::user("second")], "fp-2", 0),
                 ),
             ],
         )],
@@ -34,7 +34,7 @@ fn two_step_session() -> CanonicalSession {
 }
 
 #[test]
-fn restore_preserves_run_step_boundaries_for_display_projection() {
+fn restore_preserves_run_step_boundaries_for_display_view() {
     let restore = SessionRestore::from_canonical(&two_step_session());
 
     assert_eq!(restore.display_steps.len(), 2);
@@ -73,14 +73,14 @@ fn restore_reads_only_steps_from_active_marker() {
                 "run-1",
                 vec![CommittedRunStep::accepted_only(
                     "step-1",
-                    AcceptedInputProjection::new(vec![Message::user("hidden")], "fp-1", 0),
+                    AcceptedInputRecord::new(vec![Message::user("hidden")], "fp-1", 0),
                 )],
             ),
             CommittedRunSlice::new(
                 "run-2",
                 vec![CommittedRunStep::accepted_only(
                     "step-2",
-                    AcceptedInputProjection::new(vec![Message::user("visible")], "fp-2", 0),
+                    AcceptedInputRecord::new(vec![Message::user("visible")], "fp-2", 0),
                 )],
             ),
         ],

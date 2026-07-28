@@ -140,8 +140,8 @@ where
         )
         .await
     } else {
-        crate::application::hook::projection::RuntimeHookDispatch {
-            directive: crate::application::hook::projection::RuntimeHookDirective::Continue,
+        crate::application::hook::outcome_mapper::RuntimeHookDispatch {
+            directive: crate::application::hook::outcome_mapper::RuntimeHookDirective::Continue,
             executions: Vec::new(),
             messages: Vec::new(),
             block_detail: None,

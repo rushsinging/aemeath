@@ -1,4 +1,4 @@
-//! Runtime-owned projections to the SDK Published Language.
+//! Runtime-owned mappers to the SDK Published Language.
 
 use crate::application::loop_engine::chat::RuntimeTurnContext;
 use crate::application::loop_engine::chat::{
@@ -11,7 +11,7 @@ use sdk::{
     HookMessageView, ToolCallStatusView, ToolResultImage,
 };
 
-pub fn project_domain_event(event: RunDomainEvent) -> ChatEvent {
+pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
     match event {
         RunDomainEvent::Started {
             run_id,
@@ -172,7 +172,7 @@ fn tool_call_status_to_sdk(
     }
 }
 
-pub(crate) fn project_stream_event(
+pub(crate) fn map_stream_event(
     event: crate::application::loop_engine::chat::RuntimeStreamEvent,
 ) -> ChatEvent {
     match event {

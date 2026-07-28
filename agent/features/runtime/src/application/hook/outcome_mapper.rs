@@ -19,11 +19,11 @@
 
 use std::time::Duration;
 
-// ─── Runtime-owned projection types ───────────────────────────
+// ─── Runtime-owned hook outcome types ───────────────────────────
 
 /// Hook dispatch 在 Runtime 侧的纯值投影。
 ///
-/// 由 [`project_hook_outcome`] 产出，是 Runtime 消费 hook 结果的稳定入口。
+/// 由 [`map_hook_outcome`] 产出，是 Runtime 消费 hook 结果的稳定入口。
 /// Runtime 拥有 directive 响应编排（如 Stop 阻断累计次数后合成 RunFailed），
 /// 但那属于 Runtime 的领域逻辑，不在本投影范围内。
 #[derive(Debug, Clone, PartialEq)]
@@ -162,7 +162,7 @@ pub enum RuntimeHookDisplayMessageKind {
 
 /// Hook BC 保留的展示消息（Runtime 投影）。
 ///
-/// 由 [`project_message`] 产出，按源（`hook::HookDisplayMessage`）顺序 1:1 搬运，
+/// 由 [`map_message`] 产出，按源（`hook::HookDisplayMessage`）顺序 1:1 搬运，
 /// 不合并、不丢失来源。六个字段全部投影：point / source / execution_ordinal /
 /// attempt / kind / text。
 ///
@@ -183,27 +183,27 @@ pub struct RuntimeHookDisplayMessage {
     /// 消息文本。
     pub text: String,
 }
-pub fn project_hook_outcome(outcome: &hook::HookOutcome) -> RuntimeHookDispatch {
+pub fn map_hook_outcome(outcome: &hook::HookOutcome) -> RuntimeHookDispatch {
     RuntimeHookDispatch {
-        directive: project_directive(&outcome.directive),
-        executions: outcome.executions.iter().map(project_execution).collect(),
-        messages: outcome.messages.iter().map(project_message).collect(),
+        directive: map_directive(&outcome.directive),
+        executions: outcome.executions.iter().map(map_execution).collect(),
+        messages: outcome.messages.iter().map(map_message).collect(),
         block_detail: outcome
             .block_detail
             .as_ref()
             .map(|detail| RuntimeHookBlockDetail {
                 command: detail.command.clone(),
                 execution_ordinal: detail.execution_ordinal,
-                execution: project_execution(&detail.execution),
+                execution: map_execution(&detail.execution),
             }),
     }
 }
 
-fn project_directive(directive: &hook::HookDirective) -> RuntimeHookDirective {
+fn map_directive(directive: &hook::HookDirective) -> RuntimeHookDirective {
     match directive {
         hook::HookDirective::Continue => RuntimeHookDirective::Continue,
         hook::HookDirective::Block { reason } => RuntimeHookDirective::Block {
-            reason: project_reason(reason),
+            reason: map_reason(reason),
         },
         hook::HookDirective::ContinueWithContext { context } => RuntimeHookDirective::Context {
             context: context.clone(),
@@ -222,7 +222,7 @@ fn project_directive(directive: &hook::HookDirective) -> RuntimeHookDirective {
     }
 }
 
-fn project_reason(reason: &hook::HookReason) -> RuntimeHookReason {
+fn map_reason(reason: &hook::HookReason) -> RuntimeHookReason {
     match reason {
         hook::HookReason::ExitCode { code, stderr } => RuntimeHookReason::ExitCode {
             code: *code,
@@ -247,9 +247,9 @@ fn project_reason(reason: &hook::HookReason) -> RuntimeHookReason {
     }
 }
 
-fn project_execution(execution: &hook::HookExecution) -> RuntimeHookExecution {
+fn map_execution(execution: &hook::HookExecution) -> RuntimeHookExecution {
     RuntimeHookExecution {
-        status: project_execution_status(&execution.status),
+        status: map_execution_status(&execution.status),
         attempts: execution.attempts,
         exit_code: execution.exit_code,
         stdout: execution.stdout.clone(),
@@ -258,7 +258,7 @@ fn project_execution(execution: &hook::HookExecution) -> RuntimeHookExecution {
     }
 }
 
-fn project_execution_status(status: &hook::HookExecutionStatus) -> RuntimeHookExecutionStatus {
+fn map_execution_status(status: &hook::HookExecutionStatus) -> RuntimeHookExecutionStatus {
     match status {
         hook::HookExecutionStatus::Success => RuntimeHookExecutionStatus::Success,
         hook::HookExecutionStatus::Blocked => RuntimeHookExecutionStatus::Blocked,
@@ -270,18 +270,18 @@ fn project_execution_status(status: &hook::HookExecutionStatus) -> RuntimeHookEx
     }
 }
 
-fn project_message(message: &hook::HookDisplayMessage) -> RuntimeHookDisplayMessage {
+fn map_message(message: &hook::HookDisplayMessage) -> RuntimeHookDisplayMessage {
     RuntimeHookDisplayMessage {
         point: message.point,
         source: message.source.clone(),
         execution_ordinal: message.execution_ordinal,
         attempt: message.attempt,
-        kind: project_message_kind(&message.kind),
+        kind: map_message_kind(&message.kind),
         text: message.text.clone(),
     }
 }
 
-fn project_message_kind(kind: &hook::HookDisplayMessageKind) -> RuntimeHookDisplayMessageKind {
+fn map_message_kind(kind: &hook::HookDisplayMessageKind) -> RuntimeHookDisplayMessageKind {
     match kind {
         hook::HookDisplayMessageKind::AdditionalContext => {
             RuntimeHookDisplayMessageKind::AdditionalContext
@@ -292,6 +292,6 @@ fn project_message_kind(kind: &hook::HookDisplayMessageKind) -> RuntimeHookDispl
 
 impl From<&hook::HookOutcome> for RuntimeHookDispatch {
     fn from(outcome: &hook::HookOutcome) -> Self {
-        project_hook_outcome(outcome)
+        map_hook_outcome(outcome)
     }
 }

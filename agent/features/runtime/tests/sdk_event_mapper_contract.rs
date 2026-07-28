@@ -1,14 +1,14 @@
-use runtime::adapters::event_projection::project_domain_event;
+use runtime::adapters::sdk_event_mapper::map_domain_event;
 use runtime::domain::agent_run::RunDomainEvent;
 use sdk::{ChatEvent, ControlDeadline, RunId, RunStepId, RunTerminationReason};
 
 #[test]
-fn step_identity_is_preserved_by_domain_projection() {
+fn step_identity_is_preserved_by_domain_mapping() {
     let run_id = RunId::new_v7();
     let parent_run_id = RunId::new_v7();
     let step_id = RunStepId::new_v7();
 
-    let projected = project_domain_event(RunDomainEvent::StepStarted {
+    let projected = map_domain_event(RunDomainEvent::StepStarted {
         run_id: run_id.clone(),
         parent_run_id: Some(parent_run_id.clone()),
         step_id: step_id.clone(),
@@ -25,11 +25,11 @@ fn step_identity_is_preserved_by_domain_projection() {
 }
 
 #[test]
-fn run_termination_contract_is_preserved_by_domain_projection() {
+fn run_termination_contract_is_preserved_by_domain_mapping() {
     let run_id = RunId::new_v7();
     let deadline = ControlDeadline::from_unix_millis(42);
 
-    let projected = project_domain_event(RunDomainEvent::TerminationRequested {
+    let projected = map_domain_event(RunDomainEvent::TerminationRequested {
         run_id: run_id.clone(),
         parent_run_id: None,
         reason: RunTerminationReason::UserExit,
@@ -48,9 +48,9 @@ fn run_termination_contract_is_preserved_by_domain_projection() {
 }
 
 #[test]
-fn terminal_payload_is_preserved_by_domain_projection() {
+fn terminal_payload_is_preserved_by_domain_mapping() {
     let run_id = RunId::new_v7();
-    let projected = project_domain_event(RunDomainEvent::Failed {
+    let projected = map_domain_event(RunDomainEvent::Failed {
         run_id: run_id.clone(),
         parent_run_id: None,
         error: "provider failed".to_string(),

@@ -1,7 +1,7 @@
 use context::adapters::decode_session;
 use context::domain::session::{
-    AcceptedInputProjection, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
-    FinalizedOutcomeProjection, SessionCodec, SessionCodecError, SnapshotState,
+    AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
+    FinalizedStepRecord, SessionCodec, SessionCodecError, SnapshotState,
     CURRENT_SESSION_SCHEMA_VERSION,
 };
 use context::domain::{FinalizeCause, StepReceipt, ToolOutcomeKind};
@@ -44,14 +44,14 @@ fn legacy_messages_upgrade_to_single_normal_chat() {
 }
 
 #[test]
-fn structured_projection_flattens_steps_once() {
+fn structured_view_flattens_steps_once() {
     let mut session = CanonicalSession::fixture("structured");
     session.run_slices = vec![
         CommittedRunSlice::new(
             "run-a",
             vec![CommittedRunStep::accepted_only(
                 "step-a",
-                AcceptedInputProjection::new(vec![Message::user("accepted-a")], "fp-a", 1),
+                AcceptedInputRecord::new(vec![Message::user("accepted-a")], "fp-a", 1),
             )],
         ),
         CommittedRunSlice::new(
@@ -78,7 +78,7 @@ fn accepted_only_step_round_trips_without_outcome_or_runtime_state() {
         "run",
         vec![CommittedRunStep::accepted_only(
             "step",
-            AcceptedInputProjection::new(vec![Message::user("durable input")], "fp", 1),
+            AcceptedInputRecord::new(vec![Message::user("durable input")], "fp", 1),
         )],
     )];
     session.revision = 1;
@@ -108,12 +108,12 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
         "run",
         vec![CommittedRunStep {
             step_id: "step".to_string(),
-            accepted_input: Some(AcceptedInputProjection::new(
+            accepted_input: Some(AcceptedInputRecord::new(
                 vec![Message::user("accepted")],
                 "input-fingerprint",
                 1,
             )),
-            outcome: Some(FinalizedOutcomeProjection {
+            outcome: Some(FinalizedStepRecord {
                 finalize_cause: FinalizeCause::UserCancelledStep,
                 messages: vec![Message::user("partial assistant")],
                 receipts: vec![StepReceipt::agent(
@@ -155,7 +155,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
 }
 
 #[test]
-fn v2_compatibility_outcome_vector_upgrades_as_single_projection() {
+fn v2_compatibility_outcome_vector_upgrades_as_single_view() {
     let bytes = serde_json::to_vec(&json!({
         "schema_version": 2,
         "id": "v2-bridge",

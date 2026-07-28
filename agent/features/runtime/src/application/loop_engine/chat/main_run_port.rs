@@ -475,10 +475,9 @@ impl crate::application::tool::coordination::ToolRoundObserver for MainToolRound
     }
 }
 
-// ── Model invocation projection capability ──────────────────────────────
+// ── Model invocation lifecycle capability ──────────────────────────────
 
-#[async_trait]
-impl<Q, I> crate::application::model::invocation::ModelInvocationProjection
+impl<Q, I> crate::application::model::invocation::ModelInvocationContext
     for MainRunCapabilities<'_, Q, I>
 where
     Q: QueueDrainPort,
@@ -522,7 +521,7 @@ where
         )
     }
 
-    fn waiting_projection(
+    fn waiting_event_context(
         &self,
     ) -> Option<(
         crate::application::loop_engine::chat::ChatEventSinkHandle,
@@ -531,6 +530,23 @@ where
         Some((self.runtime_context.event_sink(), self.turn_context.clone()))
     }
 
+    fn extract_tool_calls(
+        &self,
+        response: &crate::application::loop_engine::chat::InvocationResponse,
+    ) -> Vec<ToolCall> {
+        Agent::extract_tool_calls_with_ids(&response.assistant_message, |provider_id| {
+            self.tool_identity.runtime_id_for_provider(provider_id)
+        })
+    }
+}
+
+#[async_trait]
+impl<Q, I> crate::application::model::invocation::ModelInvocationLifecycle
+    for MainRunCapabilities<'_, Q, I>
+where
+    Q: QueueDrainPort,
+    I: InputEventDrainPort,
+{
     async fn on_window(
         &mut self,
         execution: &crate::application::run::execution_state::RunExecutionState,
@@ -595,15 +611,6 @@ where
                 messages: execution.messages_snapshot(),
             })
             .await;
-    }
-
-    fn extract_tool_calls(
-        &self,
-        response: &crate::application::loop_engine::chat::InvocationResponse,
-    ) -> Vec<ToolCall> {
-        Agent::extract_tool_calls_with_ids(&response.assistant_message, |provider_id| {
-            self.tool_identity.runtime_id_for_provider(provider_id)
-        })
     }
 
     async fn classify_terminal(
@@ -888,7 +895,7 @@ where
         }
     }
 
-    async fn begin_stop_hook_projection(&mut self) -> Result<(), LoopEngineError> {
+    async fn begin_stop_hook_status(&mut self) -> Result<(), LoopEngineError> {
         use crate::application::loop_engine::chat::{
             RuntimeHookEvent, RuntimeHookEventStatus, RuntimeStreamEvent,
         };

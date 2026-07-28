@@ -209,7 +209,7 @@ pub enum RuntimeStreamEvent {
     LiveTps(f64),
     TurnChanged(usize),
     HookEvent(RuntimeHookEvent),
-    /// 结构化 hook 执行消息（typed projection）。
+    /// 结构化 hook 执行消息（typed value）。
     HookMessage(RuntimeHookMessage),
     AskUserBatch {
         items: Vec<sdk::AskUserQuestionItem>,

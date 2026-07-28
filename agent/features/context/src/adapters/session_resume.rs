@@ -1,10 +1,10 @@
-use crate::domain::session::{SessionManagementError, SessionRestore, SessionResumeProjection};
+use crate::domain::session::{SessionManagementError, SessionRestore, SessionResumeView};
 
 impl crate::application::MainSessionWiring {
     pub async fn resume_session(
         &self,
         session_id: &str,
-    ) -> Result<SessionResumeProjection, SessionManagementError> {
+    ) -> Result<SessionResumeView, SessionManagementError> {
         let project = self.project_identity();
         log::debug!(
             target: crate::LOG_TARGET,
@@ -36,7 +36,7 @@ impl crate::application::MainSessionWiring {
         );
         let committed = self.committed_session();
         let restore = SessionRestore::from_canonical(&committed);
-        Ok(SessionResumeProjection {
+        Ok(SessionResumeView {
             session_id: committed.id.clone(),
             active_messages: restore.active_messages,
             display_steps: restore.display_steps,

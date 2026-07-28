@@ -1,11 +1,11 @@
-use super::event_projection::project_stream_event;
+use super::sdk_event_mapper::map_stream_event;
 use crate::application::loop_engine::chat::{
     RuntimeHookMessage, RuntimeHookMessageKind, RuntimeResumedSessionStep, RuntimeStreamEvent,
     RuntimeTurnContext,
 };
 
 #[test]
-fn session_resume_projection_preserves_context_run_step_boundaries() {
+fn session_resume_mapping_preserves_context_run_step_boundaries() {
     let event = RuntimeStreamEvent::SessionResumed {
         steps: vec![RuntimeResumedSessionStep {
             run_id: "run-1".into(),
@@ -16,7 +16,7 @@ fn session_resume_projection_preserves_context_run_step_boundaries() {
         created_at: 0,
     };
 
-    match project_stream_event(event) {
+    match map_stream_event(event) {
         sdk::ChatEvent::SessionResumed { steps, .. } => {
             assert_eq!(steps[0].run_id, "run-1");
             assert_eq!(steps[0].step_id, "step-1");
@@ -27,7 +27,7 @@ fn session_resume_projection_preserves_context_run_step_boundaries() {
 }
 
 #[test]
-fn tool_call_projection_preserves_canonical_name() {
+fn tool_call_mapping_preserves_canonical_name() {
     let event = RuntimeStreamEvent::ToolCallStart {
         context: RuntimeTurnContext::new(
             sdk::ids::ChatId::new("chat-1"),
@@ -39,14 +39,14 @@ fn tool_call_projection_preserves_canonical_name() {
         index: 0,
     };
 
-    match project_stream_event(event) {
+    match map_stream_event(event) {
         sdk::ChatEvent::ToolCallStart { name, .. } => assert_eq!(name, "Grep"),
         other => panic!("unexpected event: {other:?}"),
     }
 }
 
 #[test]
-fn hook_message_projection_preserves_additional_context_attribution() {
+fn hook_message_mapping_preserves_additional_context_attribution() {
     let event = RuntimeStreamEvent::HookMessage(RuntimeHookMessage {
         point: hook::HookPoint::PreToolUse,
         source: "Bash".to_string(),
@@ -56,7 +56,7 @@ fn hook_message_projection_preserves_additional_context_attribution() {
         text: "extra context".to_string(),
     });
 
-    match project_stream_event(event) {
+    match map_stream_event(event) {
         sdk::ChatEvent::HookMessage(view) => {
             assert_eq!(view.point, "PreToolUse");
             assert_eq!(view.source, "Bash");
@@ -70,7 +70,7 @@ fn hook_message_projection_preserves_additional_context_attribution() {
 }
 
 #[test]
-fn hook_message_projection_preserves_system_message_attempt() {
+fn hook_message_mapping_preserves_system_message_attempt() {
     let event = RuntimeStreamEvent::HookMessage(RuntimeHookMessage {
         point: hook::HookPoint::PostToolUse,
         source: "Bash".to_string(),
@@ -80,7 +80,7 @@ fn hook_message_projection_preserves_system_message_attempt() {
         text: "warning".to_string(),
     });
 
-    match project_stream_event(event) {
+    match map_stream_event(event) {
         sdk::ChatEvent::HookMessage(view) => {
             assert_eq!(view.kind, sdk::HookMessageKindView::SystemMessage);
             assert_eq!(view.execution_ordinal, 2);
@@ -92,7 +92,7 @@ fn hook_message_projection_preserves_system_message_attempt() {
 }
 
 #[test]
-fn config_reload_projection_preserves_immediate_scope_and_committed_view() {
+fn config_reload_mapping_preserves_immediate_scope_and_committed_view() {
     let event = RuntimeStreamEvent::ConfigReloaded {
         changed_keys: vec![
             "config:reloaded".to_string(),
@@ -104,7 +104,7 @@ fn config_reload_projection_preserves_immediate_scope_and_committed_view() {
         },
     };
 
-    match project_stream_event(event) {
+    match map_stream_event(event) {
         sdk::ChatEvent::ConfigReloaded { event } => {
             assert_eq!(
                 event.scopes,
@@ -120,7 +120,7 @@ fn config_reload_projection_preserves_immediate_scope_and_committed_view() {
 }
 
 #[test]
-fn model_invocation_retry_projection_preserves_context_attempt_and_delay() {
+fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
     let context = RuntimeTurnContext::new(
         sdk::ids::ChatId::new("chat-retry"),
         sdk::ids::ChatTurnId::new("turn-retry"),
@@ -133,7 +133,7 @@ fn model_invocation_retry_projection_preserves_context_attempt_and_delay() {
         delay: std::time::Duration::from_millis(10_250),
     };
 
-    match project_stream_event(event) {
+    match map_stream_event(event) {
         sdk::ChatEvent::ModelInvocationRetrying {
             context,
             attempt,

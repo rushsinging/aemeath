@@ -7,7 +7,7 @@
 //! cross-feature direct construction of internal hook types.
 
 use super::*;
-use crate::application::hook::projection::{RuntimeHookExecutionStatus, RuntimeHookReason};
+use crate::application::hook::outcome_mapper::{RuntimeHookExecutionStatus, RuntimeHookReason};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 
 /// Helper: build a dispatcher that always returns Continue.
@@ -43,7 +43,7 @@ fn always_blocking_hook_port() -> Arc<dyn HookPort> {
 }
 
 #[tokio::test]
-async fn continue_decision_preserves_typed_dispatch_for_projection() {
+async fn continue_decision_preserves_typed_dispatch_for_mapping() {
     let port = continue_hook_port();
     let outcome = orchestrate_stop_hook(
         &port,
@@ -141,7 +141,7 @@ fn block_decision_cannot_be_confused_with_execution_failed_by_string() {
 
 #[test]
 fn feedback_material_truncates_long_output() {
-    use crate::application::hook::projection::{RuntimeHookBlockDetail, RuntimeHookExecution};
+    use crate::application::hook::outcome_mapper::{RuntimeHookBlockDetail, RuntimeHookExecution};
 
     let detail = RuntimeHookBlockDetail {
         command: "test".to_string(),
@@ -177,7 +177,7 @@ fn feedback_material_truncates_long_output() {
 
 #[tokio::test]
 async fn long_feedback_materializes_real_readable_file_for_sub_and_main() {
-    use crate::application::hook::projection::{RuntimeHookBlockDetail, RuntimeHookExecution};
+    use crate::application::hook::outcome_mapper::{RuntimeHookBlockDetail, RuntimeHookExecution};
 
     let session_id = format!("stop-hook-test-{}", uuid::Uuid::now_v7());
     let stdout = "x".repeat(INLINE_HOOK_OUTPUT_LIMIT + 1);

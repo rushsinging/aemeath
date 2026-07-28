@@ -288,8 +288,8 @@ where
                     )
                     .await
                     {
-                        Ok(projection) => {
-                            session_id = projection.session_id.clone();
+                        Ok(resume_view) => {
+                            session_id = resume_view.session_id.clone();
                             shell
                                 .session_state
                                 .write()
@@ -298,10 +298,10 @@ where
                                     session_id.clone(),
                                     wiring.committed_config(),
                                 );
-                            messages = projection.active_messages.clone();
+                            messages = resume_view.active_messages.clone();
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::SessionResumed {
-                                    steps: projection
+                                    steps: resume_view
                                         .display_steps
                                         .into_iter()
                                         .map(|step| super::RuntimeResumedSessionStep {
@@ -310,9 +310,9 @@ where
                                             messages: step.messages,
                                         })
                                         .collect(),
-                                    session_id: projection.session_id,
+                                    session_id: resume_view.session_id,
                                     created_at: chrono::DateTime::parse_from_rfc3339(
-                                        &projection.created_at,
+                                        &resume_view.created_at,
                                     )
                                     .map(|dt| dt.timestamp_millis() as u64)
                                     .unwrap_or(0),

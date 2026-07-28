@@ -12,7 +12,7 @@ use super::accessors::AgentClientImpl;
 type Result<T> = std::result::Result<T, SdkError>;
 
 /// Lists persisted Reflection history and maps each record through Memory's
-/// safe-summary projection before crossing the SDK boundary.
+/// safe-summary view before crossing the SDK boundary.
 pub(super) async fn list_reflection_history_impl(
     me: &AgentClientImpl,
     limit: usize,

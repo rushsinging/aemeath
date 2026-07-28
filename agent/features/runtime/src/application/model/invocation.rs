@@ -110,17 +110,21 @@ pub(crate) enum RetryStep {
     Cancelled,
 }
 
-#[async_trait]
-pub(crate) trait ModelInvocationProjection: Send {
+pub(crate) trait ModelInvocationContext: Send {
     fn runtime_context(&self) -> &RuntimeContext;
     fn role(&self) -> &str;
     fn request_log_context(&self, parent: &logging::LogContext) -> logging::LogContext;
     fn context_size(&self, execution: &RunExecutionState) -> usize;
     fn committed_delta(&self) -> bool;
     fn build_reducer(&self) -> InvocationEventReducer<ChatEventSinkHandle>;
-    fn waiting_projection(&self) -> Option<(ChatEventSinkHandle, RuntimeTurnContext)> {
+    fn waiting_event_context(&self) -> Option<(ChatEventSinkHandle, RuntimeTurnContext)> {
         None
     }
+    fn extract_tool_calls(&self, response: &InvocationResponse) -> Vec<ToolCall>;
+}
+
+#[async_trait]
+pub(crate) trait ModelInvocationLifecycle: ModelInvocationContext {
     async fn on_window(&mut self, _execution: &RunExecutionState) {}
     async fn pump_while_invoking<T: Send>(
         &mut self,
@@ -137,7 +141,6 @@ pub(crate) trait ModelInvocationProjection: Send {
         _elapsed_secs: f64,
     ) {
     }
-    fn extract_tool_calls(&self, response: &InvocationResponse) -> Vec<ToolCall>;
     async fn classify_terminal(
         &mut self,
         execution: &mut RunExecutionState,
@@ -148,21 +151,21 @@ pub(crate) trait ModelInvocationProjection: Send {
 }
 
 pub(crate) async fn orchestrate_model_invocation(
-    projection: &mut impl ModelInvocationProjection,
+    lifecycle: &mut impl ModelInvocationLifecycle,
     execution: &mut RunExecutionState,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
-    invoke_model_impl(projection, execution, cancel).await
+    invoke_model_impl(lifecycle, execution, cancel).await
 }
 
 async fn invoke_model_impl(
-    projection: &mut impl ModelInvocationProjection,
+    lifecycle: &mut impl ModelInvocationLifecycle,
     execution: &mut RunExecutionState,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
     if execution.context_window().is_none() {
         if let Some(request) = execution.context_request() {
-            let coordinator = ContextCoordinator::new(projection.runtime_context().context());
+            let coordinator = ContextCoordinator::new(lifecycle.runtime_context().context());
             let window = coordinator
                 .build_window(request)
                 .await
@@ -174,18 +177,18 @@ async fn invoke_model_impl(
         .context_window()
         .cloned()
         .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
-    projection.on_window(execution).await;
+    lifecycle.on_window(execution).await;
     let invocation_context = extract_invocation_context(&window);
     crate::application::loop_engine::llm_log::log_llm_input(
         &invocation_context.messages_for_api,
         window.messages.len(),
         &invocation_context.system_blocks,
         &invocation_context.tool_schemas,
-        projection.role(),
+        lifecycle.role(),
     );
 
-    let binding = projection.runtime_context().provider();
-    let reasoning = *projection
+    let binding = lifecycle.runtime_context().provider();
+    let reasoning = *lifecycle
         .runtime_context()
         .reasoning()
         .lock()
@@ -193,8 +196,8 @@ async fn invoke_model_impl(
     let started = Instant::now();
     let mut coordinator = ModelInvocationCoordinator::new();
     let response = loop {
-        let request_context = projection.request_log_context(&logging::capture());
-        let mut reducer = projection.build_reducer();
+        let request_context = lifecycle.request_log_context(&logging::capture());
+        let mut reducer = lifecycle.build_reducer();
         let provider = binding.provider.clone();
         let model = binding.model.clone();
         let max_tokens = binding.max_tokens;
@@ -202,7 +205,7 @@ async fn invoke_model_impl(
         let system = invocation_context.system_blocks.clone();
         let tools = window.tool_schemas.clone();
         let stream_cancel = cancel.clone();
-        let committed_delta = projection.committed_delta();
+        let committed_delta = lifecycle.committed_delta();
         let progress_handle = reducer.progress_handle();
         let invocation = async {
             let mut request = InvocationRequest::new(
@@ -223,9 +226,9 @@ async fn invoke_model_impl(
                 })
                 .await
         };
-        let waiting_projection = projection.waiting_projection();
+        let waiting_event_context = lifecycle.waiting_event_context();
         let waiting_started_at = tokio::time::Instant::now();
-        let waiting_task = waiting_projection.map(|(sink, context)| {
+        let waiting_task = waiting_event_context.map(|(sink, context)| {
             AbortTaskOnDrop(logging::spawn_instrumented(
                 request_context.clone(),
                 async move {
@@ -251,7 +254,7 @@ async fn invoke_model_impl(
             ))
         });
         let result =
-            logging::instrument(request_context, projection.pump_while_invoking(invocation)).await;
+            logging::instrument(request_context, lifecycle.pump_while_invoking(invocation)).await;
         drop(waiting_task);
         match result {
             Ok((response, _)) => break response,
@@ -264,10 +267,10 @@ async fn invoke_model_impl(
                     .await
                 {
                     RetryStep::Retry { attempt, delay } => {
-                        projection.on_retry(attempt, delay).await;
+                        lifecycle.on_retry(attempt, delay).await;
                     }
                     RetryStep::Cancelled => {
-                        projection.on_retry_cancelled().await;
+                        lifecycle.on_retry_cancelled().await;
                         return Err(LoopEngineError::Cancelled);
                     }
                     RetryStep::Compact => {
@@ -279,31 +282,31 @@ async fn invoke_model_impl(
         }
     };
     let elapsed_secs = started.elapsed().as_secs_f64();
-    projection
+    lifecycle
         .runtime_context()
         .usage()
         .update(crate::application::model::token_usage::normalized_total_tokens(&response.usage));
     let usage = build_step_token_usage(
         &response,
-        projection.context_size(execution) as u64,
+        lifecycle.context_size(execution) as u64,
         window.token_estimation.system_tokens,
         window.token_estimation.tool_schema_tokens,
         window.token_estimation.message_tokens,
     );
     execution.append_message(response.assistant_message.clone());
     execution.record_step_message(response.assistant_message.clone());
-    projection
+    lifecycle
         .on_response(execution, &response, elapsed_secs)
         .await;
-    let calls = projection.extract_tool_calls(&response);
+    let calls = lifecycle.extract_tool_calls(&response);
     crate::application::loop_engine::llm_log::log_llm_output_and_tool_calls(
         binding.model.provider.as_str(),
         &response,
         &calls,
         elapsed_secs,
-        projection.role(),
+        lifecycle.role(),
     );
-    projection
+    lifecycle
         .classify_terminal(execution, &response, calls, usage)
         .await
 }
@@ -345,7 +348,7 @@ impl ModelInvocationCoordinator {
             let event = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => {
-                    // Reducers own stream projection cleanup (for example closing an
+                    // Reducers own stream cleanup (for example closing an
                     // active text/thinking block), so cancellation must pass through
                     // the same terminal failure path before control returns.
                     let error = ProviderError::cancelled();

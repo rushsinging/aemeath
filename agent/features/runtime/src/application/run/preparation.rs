@@ -228,7 +228,7 @@ impl RunPreparationRequest {
 /// Factory 最终准备产物。
 ///
 /// `PreparedRun` 同时持有 Run identity、execution state、session snapshot
-/// 与可选 RuntimeContext，避免通过额外 identity projection 丢失领域状态。
+/// 与可选 RuntimeContext，避免通过额外 identity copy 丢失领域状态。
 pub struct PreparedRun {
     run: Run,
     execution: RunExecutionState,

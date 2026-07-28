@@ -92,7 +92,7 @@ enum InteractionCommandOutcome {
 - `CancelRunStepOutcome::Accepted` 只确认 Step scope 已即时停止调度；完成由 `RunStepCancelled` / `RunDrainingInput` 异步确认。`TerminateRunOutcome::Accepted` 只确认 Run root scope 已触发；完成由 `RunTerminated` 确认。
 - 迁移期旧 `cancel_run` / `CancelRunOutcome` 只允许为当前 TUI 生产兼容保留；#878 原子切换后由 #879 删除，**NEVER** 作为目标 OHS 的第二套语义。
 - interaction reply / cancel 同样是同步、幂等、out-of-band command；它们只完成 Runtime-owned pending request，**NEVER** 经输入队列排队，也 **NEVER** 由 TUI 持有 channel sender。
-- SDK Published Language 的 `RunStepId`、`AgentId`、`InteractionRequestId`、`InteractionReply`、`InteractionCancelReason`、`InteractionCommandOutcome` 与 `ChatEvent::InteractionRequested` **MUST** 可序列化且不含 channel / lock / Runtime handle。#874 已建立这些强类型 identity、纯值 DTO/outcome 与纯 event projection；旧 `AskUserBatch.reply_tx` 只作为 #878 生产切换前的兼容路径存在，**NEVER** 进入新 Interaction PL。当前只要求 local adapter；远端帧、重连与 WSS 行为不在 v0.1.0 冻结。
+- SDK Published Language 的 `RunStepId`、`AgentId`、`InteractionRequestId`、`InteractionReply`、`InteractionCancelReason`、`InteractionCommandOutcome` 与 `ChatEvent::InteractionRequested` **MUST** 可序列化且不含 channel / lock / Runtime handle。#874 已建立这些强类型 identity、纯值 DTO/outcome 与纯 event mapping；旧 `AskUserBatch.reply_tx` 只作为 #878 生产切换前的兼容路径存在，**NEVER** 进入新 Interaction PL。当前只要求 local adapter；远端帧、重连与 WSS 行为不在 v0.1.0 冻结。
 
 ## 2. Runtime 消费的能力契约
 
@@ -103,7 +103,7 @@ Loop Engine 直接编排 `Run + RunExecutionState + RuntimeContext`，不消费�
 Runtime-owned Port 只对应真实外部 seam：
 
 - `InputPort`：SessionIngress 分类后的 Run 输入接纳端口，只接收 `UserMessage`，负责 FIFO、batch drain、epoch、Open/Sealed/Closed 生命周期和 AwaitingInput park；不拥有 Step 或 continuation；
-- `EventSink`：接收领域事件并做外向投影；
+- `EventSink`：接收领域事件；跨 SDK 边界的纯值转换由 `sdk_event_mapper` 完成；
 - `ProviderPort`、`ToolCatalogPort`、`ToolExecutionPort`、`ContextPort`：执行单一外部能力；
 - `InteractionPort`：一次 request/reply transport；reply/cancel 按 `run_id + request_id` 直接完成 pending interaction，**NEVER** 经普通输入队列排队；
 - `CommandScheduler`：接收已分类的 Runtime command，按 ImmediateControl、AtRunBoundary、SessionQuery 三类决定执行时机，不把命令伪装成 UserMessage；
@@ -121,7 +121,7 @@ Runtime-owned Port 只对应真实外部 seam：
 | Policy | `PolicyPort` | 调用前决策；见 [Policy](../policy/README.md) |
 | Memory | `MemoryPort` / `ReflectionPromptPort` / `ReflectionHistoryStore` | 当前项目 Memory、纯 Reflection prompt/parse 与 Memory-owned durable history append/query；见 [Memory ports](../memory/04-ports-and-adapters.md) |
 | Task | `TaskAccess` | 日常 Task 命令 / 查询；`TaskPersist` **NEVER** 进入 Runtime；见 [Task contracts](../task/02-ports-and-published-language.md) |
-| Hook | `HookPort` | 类型化 hook dispatch；Runtime 直接消费 Hook-owned façade，不定义同义 Port/Outcome。`HookOutcome` 经 application adapter 无损投影 directive、结构化 reason、全部 attempts 与 typed display messages；updated input 在 `tool_coordination` 重新经过 frozen Catalog、Tools-owned schema validation 与 Policy；见 [Hook](../hook/README.md) |
+| Hook | `HookPort` | 类型化 hook dispatch；Runtime 直接消费 Hook-owned façade，不定义同义 Port/Outcome。`HookOutcome` 经 application `outcome_mapper` 无损映射 directive、结构化 reason、全部 attempts 与 typed display messages；updated input 在 `tool_coordination` 重新经过 frozen Catalog、Tools-owned schema validation 与 Policy；见 [Hook](../hook/README.md) |
 | Workflow | `ReasoningPort` | effort 调节；见 [Workflow](../workflow/01-reasoning-graph.md) |
 | Config | `ConfigSnapshot` PL | 本 Run 的只读配置快照；见 [Config](../config/01-config-layer.md) |
 
@@ -460,11 +460,11 @@ session wiring 内部可持有唯一 SessionSwitchCoordinator、稳定 backing�
 ## 5. 关键 ACL
 
 1. **Provider 内部**：各家 LLM API → 统一 `InvocationDelta` + 领域 `Message`
-2. **event_projection**：领域 `DomainEvent` → SDK `ChatEvent`（Main/Sub 路由 + agent_id）
+2. **sdk_event_mapper**：领域 `DomainEvent` → SDK `ChatEvent`（Main/Sub 路由 + agent_id）
 3. **Session 快照组装**：Context Management backing implementation 直接经注入的 `TaskPersist` / Project-owned `WorkspacePersist` 收集与恢复；Runtime 只有 `TaskAccess`，且 **NEVER** 中转 Workspace 能力
 4. **Workspace / Session scope 隔离**：Composition 保留 Project 与 Context-owned opaque wiring；Main 在同一 active slot 内跨 Run 复用，Sub 从父 workspace scope 隔离派生；scope / wiring / lease **NEVER** 穿过 Runtime、Tool 或普通 ContextPort 边界
 5. **Interaction ACL**：Tool-owned `UserInteractionSpec` / Policy 决策 → Runtime-owned `InteractionRequest` → adapter SDK DTO；reply 按 request id 回到 Runtime continuation，TUI DTO / channel **NEVER** 进入 Run 聚合或 Tool BC
-6. **Reflection history ACL**：Memory-owned `ReflectionRecord` → Runtime safe-summary projection → SDK `ReflectionHistoryView`；正文、prompt 与 raw response **NEVER** 进入 SDK/TUI 或日志
+6. **Reflection history ACL**：Memory-owned `ReflectionRecord` → Runtime safe-summary view → SDK `ReflectionHistoryView`；正文、prompt 与 raw response **NEVER** 进入 SDK/TUI 或日志
 
 ## 6. 契约治理
 

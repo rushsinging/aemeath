@@ -76,13 +76,15 @@
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
 | 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution/binding、Skill ports、Tool Result materializer 与 ActiveRunRegistry，并把 Execution/binding 注入 `application/run/context_factory.rs` 的 `RuntimeContextFactory`；factory 通过 `RuntimeServices` 单一持有静态能力，Runtime bootstrap 只持 injected factory，不得重复保存 Execution/binding，也禁止恢复 Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
 | 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher 并注入 `RuntimeContextFactory`；Runtime bootstrap 只携带 injected factory，Main/Sub 只消费其中的 HookPort，禁止恢复 HookRunner / dispatcher factory |
-| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 RuntimeContext 唯一生产构造入口，factory-private `create()` 必须返回 typed assembly error；RunKind 不驱动控制流分支；退役符号不存在于生产代码；stop hook 计数由 Run 独占；Interaction/Hook/Reasoning 三能力按 RunSpec 穷举装配；`BoundaryOnly` 必须装配 `BoundaryHookPort`，仅转发 Session/SubRun start-stop 生命周期边界并在 adapter 入口过滤内部 invocation |
+| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 RuntimeContext 唯一生产构造入口；RunKind 不驱动控制流；退役符号不存在；stop hook、Interaction、Hook、Reasoning 与 Main/Sub 统一编排按目标装配；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名 |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
+
+`check-runtime-capability-assembly.sh` 同时承担 Runtime 命名边界：生产源码中的类型、trait、模块、函数、方法与变量不得使用 `Projection` / `projection` 宽泛命名。真正的单向值转换必须使用目标或用途明确的 mapper/view/record 名称；职责混合必须通过类型拆分解决，不能用命名白名单放行。该规则不扫描测试文件，测试中的退役符号断言可继续存在。
 
 ## 0. check-guard-registry.sh
 
@@ -256,8 +258,7 @@
   - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.workflow = {adaptive_reasoning}`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` 是 crate-root 发布的 composition façade（返回 `Arc<dyn api::ReasoningPort>`），graph/node/config 不再作为 crate-root façade。
   - `ROOT_ACCESS_ALLOW.runtime`：Composition 仅可消费登记的 crate-root façade，包括 Client/bootstrap、Provider factory PL、RuntimeContextFactory、Tool Result/ActiveRun，以及 P4 初始模型装配所需的 `InitialProviderAssembly`、`ModelRuntimeSettings`、`resolve_model_runtime_settings`；禁止穿透 `runtime::application`。`UsageSink` 供 #931 bridge，实现细节仍私有。
-  - `ROOT_ACCESS_ALLOW.context`：除既有 `compact/context_port/guidance/session/skill` 外，#871 登记 `MainSessionWiring`、gate/permit、projection participant、production factory/dependencies 与结构化错误；内部 application/adapters 路径仍禁止穿透。
-  - `ROOT_ACCESS_ALLOW.memory`：#900 后生产消费只需 Memory-owned OHS/PL、project key、`DatasetMemoryOpener`、legacy source factory、Reflection history adapter 与稳定错误；concrete active dataset store、project opener 和 `MemoryService` 已收回 crate 内。脚本中的 stale 名称由 #982/#1022 统一收口，本 Issue 不修改 `.agents/hooks/**`。
+  - `ROOT_ACCESS_ALLOW.context`：除既有 `compact/context_port/guidance/session/skill` 外，#871 登记 `MainSessionWiring`、gate/permit、`SessionResumeView`、production factory/dependencies 与结构化错误；内部 application/adapters 路径仍禁止穿透。  - `ROOT_ACCESS_ALLOW.memory`：#900 后生产消费只需 Memory-owned OHS/PL、project key、`DatasetMemoryOpener`、legacy source factory、Reflection history adapter 与稳定错误；concrete active dataset store、project opener 和 `MemoryService` 已收回 crate 内。脚本中的 stale 名称由 #982/#1022 统一收口，本 Issue 不修改 `.agents/hooks/**`。
   - `ROOT_ACCESS_ALLOW.tools`：除最新统一授权与 Tool PL、`MemoryPortSource` 外，#912 登记 Skill-owned `PromptFragment`、Catalog/Materialization ports、query/snapshot/revision/source/cache/error PL；Context 与 Runtime 只能经 crate-root façade 消费，adapter 仍私有。
   - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade加 `FileSystemBlobAdapter` / `FileSystemDatasetAdapter` 供唯一 Composition/Config production factory 装配；业务消费者仍只经 Storage OHS。
   - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities}`

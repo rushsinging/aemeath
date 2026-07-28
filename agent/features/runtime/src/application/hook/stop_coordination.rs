@@ -14,8 +14,8 @@
 //! - **feedback materialization**：Main/Sub 都调用本模块的统一异步函数，
 //!   使用同一语言、预览截断和长输出落盘规则。
 
-use crate::application::hook::projection::{
-    project_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookReason,
+use crate::application::hook::outcome_mapper::{
+    map_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookReason,
 };
 use hook::{HookDispatchContext, HookInvocation, HookPoint, HookPort, StopInput};
 use share::message::{Message, StopHookFeedback};
@@ -44,7 +44,7 @@ pub struct StopHookBlock {
     /// Block detail（触发 Block 的 subscription 与 execution）。
     pub detail: RuntimeHookBlockDetail,
     /// BC 保留的展示消息（按源顺序 1:1 投影，用于 UI 展示）。
-    pub messages: Vec<super::projection::RuntimeHookDisplayMessage>,
+    pub messages: Vec<super::outcome_mapper::RuntimeHookDisplayMessage>,
     /// Feedback materialization 所需材料；adapter 在 seam 实现中完成构造。
     pub feedback: StopHookFeedbackMaterial,
 }
@@ -60,7 +60,7 @@ pub struct StopHookFeedbackMaterial {
 }
 
 /// Block detail（与 RuntimeHookBlockDetail 语义一致，但作为 StopHookDecision 内嵌类型重新导出）。
-pub use crate::application::hook::projection::RuntimeHookBlockDetail;
+pub use crate::application::hook::outcome_mapper::RuntimeHookBlockDetail;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StopHookContext {
@@ -94,7 +94,7 @@ pub async fn orchestrate_stop_hook(
             cancellation,
         )
         .await;
-    let dispatch = project_hook_outcome(&hook_outcome);
+    let dispatch = map_hook_outcome(&hook_outcome);
 
     let (decision, feedback_message) = match &dispatch.directive {
         RuntimeHookDirective::Block { reason } => {

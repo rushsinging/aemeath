@@ -10,6 +10,8 @@
 - **NEVER** 直接读取环境变量——使用配置分层（见 `config-compat.md`）。
 - **NEVER** 硬编码 API key、base URL。
 - **NEVER** 提交没有可追溯测试证据的新增核心逻辑。测试证据 **MUST** 按下方 L0-L5 分层选择，不得用低层测试替代必要的契约、场景或系统验证。
+- **NEVER** 使用 `Projection` / `projection` 宽泛命名 Rust 类型、trait、模块、函数、方法或变量；即使代码执行数据转换，也必须用来源、目标或用途命名。
+- **NEVER** 用单个 struct 或 trait 聚合状态访问、生命周期回调、编排、IO 与多方向转换后再冠以抽象名；职责混合时 **MUST** 拆成边界清晰的类型。
 
 ### 3.2.1.2. MUST
 - **MUST** 错误消息使用中文（`ErrorDisplay`）。
@@ -19,6 +21,7 @@
 - **MUST** TUI 模式下所有应用主日志路由到 `~/.agents/logs/aemeath.log`。
 - **MUST** 新增或修改核心行为时，先确定其测试层级与覆盖证据，并按 TDD 落地；测试可位于同文件、同级 `*_tests.rs`、模块 `tests/`、crate integration test 或场景测试。
 - **MUST** 跨层链路改动为每一层补相邻测试或契约测试，并用场景测试证明最终组合；**NEVER** 只测首尾。
+- **MUST** 类型与模块名称表达一个可独立理解、替换和测试的职责；数据转换名称 **MUST** 指明来源、目标或消费用途，例如 `SdkEventMapper`、`SessionResumeView`、`map_hook_outcome`。
 
 ### 3.2.1.3. SHOULD
 - **SHOULD** 单个生产 `.rs` 文件控制在 400 行以内；测试按职责外置后单独保持可读，一个场景文件 SHOULD 聚焦一个稳定用户旅程。无强制守卫，超限不阻断构建。
@@ -70,6 +73,7 @@ Audit Event / Usage Fact 不属于 DiagnosticRecord，走 Audit 自有 append st
 
 - **MUST** 按 L0-L5 六层模型选择最低充分层级的覆盖证据；层级定义与适用场景见 design doc。
 - **MUST** 跨层链路改动为每一层补相邻测试或契约测试，并用场景测试证明最终组合；**NEVER** 只测首尾。
+- **MUST** 类型与模块名称表达一个可独立理解、替换和测试的职责；数据转换名称 **MUST** 指明来源、目标或消费用途，例如 `SdkEventMapper`、`SessionResumeView`、`map_hook_outcome`。
 - **NEVER** 用 L4/L5 替代 L1-L3 的状态转换、字段完整性或 Adapter 契约测试，也 **NEVER** 用大量 L1 模拟本应由 L3/L4 验证的跨边界组合。
 - **MUST** 使用 `assert!`、`assert_eq!`、`matches!` 或等价断言验证行为，**NEVER** 只打印后人工观察。
 

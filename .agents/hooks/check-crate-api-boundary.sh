@@ -204,7 +204,7 @@ ROOT_ACCESS_ALLOW = {
     "context": {
         "compact", "context_port", "domain", "guidance", "session", "skill",
         "isolated_context", "SessionManagementPort", "SessionListEntry",
-        "SessionManagementError", "SessionMetadataUpdate", "SessionResumeProjection",
+        "SessionManagementError", "SessionMetadataUpdate", "SessionResumeView",
         "ProductionMainContextFactory", "NoOpCanonicalSessionWriter",
         "test_support", "wire_main_session", "BoundMainRun", "MainSessionDependencies",
         "MainSessionError", "MainSessionWiring", "MainSessionWiringBuilder",

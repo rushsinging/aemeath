@@ -108,7 +108,11 @@ async fn run_loop(
 
 Engine 不知道某个 Run 来自 Main、Sub、Reflection 或 Scheduler，也不按来源选择流程。`MainRunPort`、`SubAgentRun`、fat `RunLoopPort`、`MainInputStrategy` / `SubInputStrategy`、`MainEventStrategy` / `SubEventStrategy` 均不属于终态。模型调用、Tool 编排、Stop Hook、Interaction、finalization 和 terminal mutation 必须只有一份 application 流程。
 
-`RunExecutionState` 持有 messages、accepted inputs、context window、tool working data、continuation working data 与 stream projection；`RuntimeContext` 只持绑定好的外部能力；`Run` 只持领域状态。三者不得反向调用 Engine 或复制状态。
+`RunExecutionState` 持有 messages、accepted inputs、context window、tool working data、continuation working data 与 stream progress；`RuntimeContext` 只持绑定好的外部能力；`Run` 只持领域状态。三者不得反向调用 Engine 或复制状态。
+
+模型调用边界按职责拆为两面：`ModelInvocationContext` 提供已绑定的 RuntimeContext、日志上下文、Reducer、等待事件上下文与 ToolCall 提取等调用输入；`ModelInvocationLifecycle` 仅承载窗口就绪、输入泵、重试、响应和终态分类回调。两者共同服务唯一 model coordinator，不能成为可替换整个调用流程的 fat port。
+
+跨边界值转换不使用 `Projection` 作为架构角色名。领域事件到 SDK 的单向转换由 `sdk_event_mapper` 表达；Hook outcome 到 Runtime typed dispatch 的单向转换由 `outcome_mapper` 表达；恢复结果和已提交 Step 数据分别使用 `View` 与 `Record` 命名。
 
 Session 对外只有一个 `SessionIngress`。入口先把纯值消息分类为 `UserMessage`、`Command` 或 `InteractionCommand`，再分别投递到目标 Run 的 `InputQueue`、`CommandScheduler` 或 `InteractionInbox`。Loop 不读取 SDK channel，也不以 poll 顺序猜测消息类别。
 
@@ -132,7 +136,7 @@ Loop 在**每个** `.await` 返回后 **MUST** 检查当前 Step scope 与 Run r
 
 Session 是可回放数据的唯一真相源；"可回放"只承诺已经提交到 Session 的内容，**NEVER** 承诺重建 Runtime 内存态。
 
-- Provider partial、Tool/Agent progress 或结果只有在成为 Session committed content 后，才属于 resume/replay 边界；TUI 的临时流式 projection 本身不是 durable source。
+- Provider partial、Tool/Agent progress 或结果只有在成为 Session committed content 后，才属于 resume/replay 边界；TUI 的临时流式 view 本身不是 durable source。
 - CancelRunStep 收口时，当前 Step 的已确认事实、partial assistant、Tool/Agent deterministic receipts 通过 StepFinalizer 写入 Session；下一 Step 从 Session committed content 与新 drain batch 构建 Context。
 - InputQueue 中尚未被当前 Step 接纳的内容尚未进入 Session，因此 TerminateRun **MAY** 直接丢弃，不持久化、不恢复、不计入 Session 回放；只允许记录不含内容的 count/bytes 诊断。
 - 已经绑定当前 Step 并由 `append_accepted_input` 成功写入 Session 的 user input 不再属于 InputQueue，必须随 Session 回放；该 handoff 发生在 `freeze_step` 后、首次 `build_window` / compact / model 前。handoff 只传 accepted user facts，**NEVER** 混入 system-generated Stop feedback、assistant、Tool result、RunStatus 或进行态。Context 在自己的 mutation gate 内取得提交 revision；后续 outcome 以 window 的 `backing_revision` CAS 补充同一 Step，**NEVER** 重复 user input。
@@ -565,6 +569,6 @@ Run-owned atomic InputQueue 提供 drain、park 与 admission 生命周期：
 | 2026-07-18 | #875 将重试口径明确为首次调用 + 最多 10 次重试（最多 11 attempts），单次退避封顶 60 秒 | [#875](https://github.com/rushsinging/aemeath/issues/875) |
 | 2026-07-15 | 补充 Agent Tool 控制传播：Main CancelRunStep 对 child Run 递归发送 TerminateRun；全树共享父绝对 deadline；StepFinalizer 按 RunSpec 区分 Main deterministic summary+Full receipt 与 Sub None+Safety receipt | [#700](https://github.com/rushsinging/aemeath/issues/700) |
 | 2026-07-19 | #876 落地共享 Loop 的 `freeze_step`/真实 RunStepId、Main/Sub ContextCoordinator、Provider ContextTooLong typed compact 回环、普通完成与当前兼容 cancel 的 finalized append。`TerminateRun → FinalizeCause::RunTerminated` 的生产 control 入口仍由 #879 原子切换承接，本文目标语义不变 | [#876](https://github.com/rushsinging/aemeath/issues/876) / [#879](https://github.com/rushsinging/aemeath/issues/879) |
-| 2026-07-21 | #1278 将 Context durable schema 收口为 `FinalizedOutcomeProjection`，并更正 Stop Hook Block：当前 assistant / Tool outcome 先持久化，feedback 仅进入下一 Step；#1247 继续承接生产控制命令与 deterministic receipt 的完整接线 | #1278 / #1247 |
+| 2026-07-21 | #1278 将 Context durable schema 收口为 `FinalizedStepRecord`，并更正 Stop Hook Block：当前 assistant / Tool outcome 先持久化，feedback 仅进入下一 Step；#1247 继续承接生产控制命令与 deterministic receipt 的完整接线 | #1278 / #1247 |
 | 2026-07-20 | 纠正 Stop Hook 的历史语义：Block 只阻断 Run 终止，已完成 assistant / Tool Step 必须先持久化；feedback 与同次 drain 的用户追问组成下一 Step，控制请求优先于 continuation | #743 |
 | 2026-07-22 | #1272 落地 per-turn drain/admission：`DrainOutcome` 全量（`Ready`/`InternalContinuation(StopHookFeedback,ToolResults)`/`EmptyAndSealed`/`NoInput`），`DrainEpoch` 双向校验，统一 InputQueue 接受 live session、parent-dispatched task 与 scheduler UserMessage；AwaitingInput 同一 Run park，普通输入与 interaction reply mailbox 分离 | [#1272](https://github.com/rushsinging/aemeath/issues/1272) |

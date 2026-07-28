@@ -241,7 +241,7 @@ Provider ACL **MUST** 在 `InvocationResponse` 进入 Runtime 前完成 token �
 11. 一个完成的 RunStep 恰好产生一次 `ContextAppend`；assistant 与全部最终 Tool result 按协议顺序一起提交，**NEVER** 逐 suspension 持久化半成品
 12. `ContextAppend` **MUST** 携带稳定 `RunId + RunStepId`，Context Management **MUST** 保存 Step 与其 messages 的结构关系；`Vec<Message>` 扁平化只允许发生在最终 `ContextWindow → InvocationRequest` 投影，**NEVER** 作为 compact recent-tail 切分输入
 
-## 4. 领域事件（→ Event Projection → SDK ChatEvent）
+## 4. 领域事件（→ SDK Event Mapping → SDK ChatEvent）
 
 `RunStarted · RunDrainingInput · RunAwaitingInput/RunInputResumed · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunInteractionRequested{request_id}/RunInteractionResumed{request_id} · CompactionStarted/Completed · StuckDetected · RunStepCancellationRequested · RunStepFinalizationStarted · RunStepCancelled{confirmed} · RunTerminationRequested{reason,deadline} · RunCompleted/Failed/Terminated{reason}`
 
@@ -249,7 +249,7 @@ Provider ACL **MUST** 在 `InvocationResponse` 进入 Runtime 前完成 token �
 
 > **终态事实与业务返回分离**：目标终态 `RunCompleted { result }` / `RunFailed { error }` / `RunTerminated { reason }` 是 Run 聚合产生并经 `EventSink` 投影的权威领域事件；同时 `run_loop` / `derive_sub_run` 直接返回 typed `AgentRunTerminal`。Main 使用事件通知 TUI；Sub 的父 Run **MUST** 消费 typed return 继续业务编排，**NEVER** 反向订阅 EventSink 或遍历 message 提取结果。事件载荷与 typed return 来自同一次终态 mutation，必须一致。
 
-> Event Projection adapter 按 Main/Sub scope 路由与命名：Main terminal/event stream → TUI；Sub event 仅作父级诊断投影，业务 completion 走 typed `AgentRunTerminal` return（详见 #612）。
+> SDK Event Mapping adapter 按 Main/Sub scope 路由与命名：Main terminal/event stream → TUI；Sub event 仅作父级诊断事件映射，业务 completion 走 typed `AgentRunTerminal` return（详见 #612）。
 
 ## 5. RunSpec —— 声明式规格
 

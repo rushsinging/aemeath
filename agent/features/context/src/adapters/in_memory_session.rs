@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 
-use crate::domain::session::{AcceptedInputProjection, FinalizedOutcomeProjection};
+use crate::domain::session::{AcceptedInputRecord, FinalizedStepRecord};
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
     CompactRequest, CompactSkipReason, ContextAppend, ContextAppendError, ContextMessage,
@@ -16,8 +16,8 @@ struct SessionState {
     revision: u64,
     messages: Vec<ContextMessage>,
     active_summary: Option<String>,
-    accepted_steps: HashMap<(String, String), AcceptedInputProjection>,
-    committed_steps: HashMap<(String, String), FinalizedOutcomeProjection>,
+    accepted_steps: HashMap<(String, String), AcceptedInputRecord>,
+    committed_steps: HashMap<(String, String), FinalizedStepRecord>,
 }
 
 /// #870 的确定性内存 backing；durable Envelope/AtomicBlob 由 #869/#880 替换。
@@ -121,7 +121,7 @@ impl SessionRepository for InMemorySessionRepository {
         let committed_revision = SessionRevision::new(state.revision);
         state.accepted_steps.insert(
             key,
-            AcceptedInputProjection::new(
+            AcceptedInputRecord::new(
                 append.messages.clone(),
                 append.fingerprint.as_str(),
                 committed_revision.get(),
@@ -169,7 +169,7 @@ impl SessionRepository for InMemorySessionRepository {
         let committed_revision = SessionRevision::new(state.revision);
         state.committed_steps.insert(
             key,
-            FinalizedOutcomeProjection {
+            FinalizedStepRecord {
                 finalize_cause: append.finalize_cause,
                 messages: append.messages.clone(),
                 receipts: append.receipts.clone(),

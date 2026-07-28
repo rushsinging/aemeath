@@ -1,3 +1,3 @@
 pub(crate) mod empty;
-pub mod projection;
+pub mod outcome_mapper;
 pub mod stop_coordination;
