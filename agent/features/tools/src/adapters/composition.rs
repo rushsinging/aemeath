@@ -94,6 +94,7 @@ pub fn wire_builtin_catalog_execution(
     task_access: Arc<dyn task::TaskAccess>,
     memory_source: Arc<dyn crate::domain::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
+    skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
 ) -> Result<CatalogExecutionWiring, ToolBackingError> {
     let registry = Arc::new(ToolRegistry::new());
     let main_profile = ToolProfile::baseline(ToolCapabilities::all());
@@ -105,6 +106,7 @@ pub fn wire_builtin_catalog_execution(
             task_access.clone(),
             memory_source.clone(),
             workspace_control.clone(),
+            skill_loader.clone(),
             scope_kind,
         );
         let profile = profile_for(scope_kind, &main_profile);
@@ -118,10 +120,10 @@ pub fn wire_builtin_catalog_execution(
     wire_catalog_execution(registry, scopes, profiles)
 }
 
-/// Production Skill Catalog / Materialization wiring over one stateless adapter.
+/// Production Skill Catalog / Load wiring over one stateless adapter.
 pub struct SkillWiring {
     catalog: Arc<dyn crate::domain::SkillCatalogPort>,
-    materializer: Arc<dyn crate::domain::SkillMaterializationPort>,
+    loader: Arc<dyn crate::domain::SkillLoadPort>,
 }
 
 impl SkillWiring {
@@ -129,8 +131,8 @@ impl SkillWiring {
         self.catalog.clone()
     }
 
-    pub fn materializer(&self) -> Arc<dyn crate::domain::SkillMaterializationPort> {
-        self.materializer.clone()
+    pub fn loader(&self) -> Arc<dyn crate::domain::SkillLoadPort> {
+        self.loader.clone()
     }
 }
 
@@ -139,13 +141,8 @@ pub fn wire_skills() -> SkillWiring {
     let adapter = Arc::new(super::skill_filesystem::FilesystemSkillAdapter::default());
     SkillWiring {
         catalog: adapter.clone(),
-        materializer: adapter,
+        loader: adapter,
     }
-}
-
-/// Compatibility factory for callers that only consume materialization.
-pub fn wire_skill_materialization() -> Arc<dyn crate::domain::SkillMaterializationPort> {
-    wire_skills().materializer()
 }
 
 /// Production Command Catalog / Router wiring over one immutable adapter.

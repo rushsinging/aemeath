@@ -89,7 +89,10 @@ where
     /// routed to `pending_input` for the next Run; when accepted,
     /// `UserMessagesQueued` is emitted.
     pub async fn admit_user_message(&mut self, event: ChatInputEvent) {
-        debug_assert!(matches!(event, ChatInputEvent::UserMessage { .. }));
+        debug_assert!(matches!(
+            event,
+            ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_)
+        ));
         let (rejected, queued) = self.run_input_buffer.with_lock(|buf| {
             let rejected = buf.push_or_reject(event);
             let queued = buf.user_message_snapshot();
@@ -99,6 +102,9 @@ where
             Some(rejected) => {
                 let rejected_id = match &rejected {
                     ChatInputEvent::UserMessage { id, .. } => Some(id.as_str().to_string()),
+                    ChatInputEvent::SkillRequest(request) => {
+                        Some(request.input_id.as_str().to_string())
+                    }
                     _ => None,
                 };
                 log::debug!(
@@ -146,7 +152,9 @@ where
         }
         for event in events {
             match event {
-                ChatInputEvent::UserMessage { .. } => self.admit_user_message(event).await,
+                ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_) => {
+                    self.admit_user_message(event).await
+                }
                 ChatInputEvent::WithdrawAll => {
                     let texts = self
                         .run_input_buffer
@@ -375,7 +383,9 @@ where
                     epoch: expected_epoch,
                 })
             }
-            Some(event @ ChatInputEvent::UserMessage { .. }) => {
+            Some(
+                event @ (ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_)),
+            ) => {
                 let outcome = self.run_input_buffer.with_lock(|b| {
                     b.push(event);
                     b.try_drain_unsealed(expected_epoch)

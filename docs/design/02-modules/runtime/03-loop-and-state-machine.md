@@ -103,7 +103,19 @@ Run 终止旁路：任意非终态 ── TerminateRun ──▶ Terminating
 
 策略使用具体类型和泛型静态分发，**NEVER** 用 trait object 组成超集 struct。共享纯流程位于 `loop_engine::{shared,llm_log,llm_strategy,tool_strategy}`；Main 独有的输入交错、reflection、Stop Hook、InteractionBridge、任务快照和 Sub 独有的 max-output-tokens 恢复仍留在各自 adapter。`RunLoopPort` impl 仅保留 engine contract 与薄委托，业务差异不进入 engine。
 
-### 2.1 Step/Run 控制与持久化原则
+### 2.1 Run 前 Skill Catalog 刷新边界
+
+Runtime 启动时接收 Composition 已按当前 workspace、已提交配置和 Main Tool Catalog 构造的 `initial_skill_snapshot`，以其 revision 作为 Session 级 last-known-good。进入每个新 Main Run 前，Loop 必须在 `bind_main_run` 之前重新读取 live workspace root、最新 committed config 中的 Skill dirs 与当前 Main Tool Catalog，构造 `SkillQuery` 并拉取全量 `SkillCatalogSnapshot`：
+
+1. revision 未变化时不发送事件；
+2. revision 变化时发布唯一 `RuntimeStreamEvent::SkillsUpdated { snapshot }`；
+3. 空快照是有效变化，必须向下游撤销旧 Skill route 和 completion；
+4. 刷新只更新后续客户端路由和补全，已绑定 Run/已开始 Step 的 frozen dirs、tool names 与 metadata directory **NEVER** 被反向替换；
+5. Runtime 只编排 metadata snapshot，不读取 `SKILL.md` 正文，也不维护 `skills_map` 或第二套路由真相。
+
+该刷新位于 Run admission 边界，而不是 Tool 调用边界。模型真正调用唯一 `Skill` Tool 时，`SkillLoadPort` 仍结合所属 Run 冻结的 dirs/tool names 与 live workspace root 按 identity 加载正文；刷新与正文加载不得合并。
+
+### 2.2 Step/Run 控制与持久化原则
 
 Loop 在**每个** `.await` 返回后 **MUST** 检查当前 Step scope 与 Run root scope：
 
@@ -119,7 +131,7 @@ Loop 在**每个** `.await` 返回后 **MUST** 检查当前 Step scope 与 Run r
 
 > 控制请求同步生效，收口异步完成。"马上"表示当前 scope 立即停止调度和唤醒在途 future，不表示跳过 Tool/Agent 收口、Step 持久化或 Session flush。
 
-### 2.1 Session 回放边界与 InputBuffer
+### 2.3 Session 回放边界与 InputBuffer
 
 Session 是可回放数据的唯一真相源；"可回放"只承诺已经提交到 Session 的内容，**NEVER** 承诺重建 Runtime 内存态。
 
@@ -129,7 +141,7 @@ Session 是可回放数据的唯一真相源；"可回放"只承诺已经提交�
 - 已经绑定当前 Step 并由 `append_accepted_input` 成功写入 Session 的 user input 不再属于 InputBuffer，必须随 Session 回放；该 handoff 发生在 `freeze_step` 后、首次 `build_window` / compact / model 前。handoff 只传 accepted user facts，**NEVER** 混入 system-generated Stop feedback、assistant、Tool result、RunStatus 或进行态。Context 在自己的 mutation gate 内取得提交 revision；后续 outcome 以 window 的 `backing_revision` CAS 补充同一 Step，**NEVER** 重复 user input。
 - TerminateRun 完成前必须 flush Session 已有 committed content；不要求把未提交 buffer 内容提升为 Session 事实。
 
-### 2.2 Stop Hook 持久化与 continuation 边界
+### 2.4 Stop Hook 持久化与 continuation 边界
 
 Stop Hook 只裁决 Run 能否终止，**NEVER** 否决已完成 assistant / Tool 产出的历史事实。最终 assistant Step 的 `append_and_persist`、Stop 判定与 continuation **MUST** 按以下顺序执行：
 
@@ -145,20 +157,20 @@ Stop Hook 只裁决 Run 能否终止，**NEVER** 否决已完成 assistant / Too
 
 > Session committed content 是唯一历史真相。Stop Block 的语义是“继续同一个 Run”，不是撤销 assistant 已产生的内容；feedback 和用户追问只决定该 Run 的**下一 Step**。
 
-### 2.3 HardPause Continuation
+### 2.5 HardPause Continuation
 
 从 `ExecutingTools` 因 StuckGuard HardPause 进入 `AwaitingUser(ContinueAfterHardPause)` 时，continuation **MUST** 记录当前 step 和 tool phase：
 
 - 若恢复（HardPauseContinue）：回到 `ExecutingTools` 继续未完成的 Tool 调用，**NEVER** 直接跳到 `PreparingContext`；
 - 若取消：为当前 step 的全部未完成 ToolCall 生成 typed Cancelled results，按原顺序提交完整 step（保持 assistant/tool-result 邻接协议），**THEN** 进入 Failed。
 
-### 2.4 领域事件发布不变量
+### 2.6 领域事件发布不变量
 
 `Run` 是生命周期事件的唯一生产者。**每一次** Run 聚合状态 mutation 返回后，调用方都必须在执行下一条业务语句或 `.await` 前立即执行 `run.drain_events()` 并把结果交给 `EventSink`；禁止只在 response 或 loop 末尾批量 drain。该规则覆盖 `RunStarted`、`RunAwaitingUser`、`RunResumed`、`RunCancellationRequested`、step/tool 状态以及全部 terminal 事件。
 
 伪代码用 `mutate_and_publish(run, &ctx.events, |run| ...)` 表示这个原子编排约定：closure 内只做一次聚合 mutation，返回后 helper 立即 drain + emit。interaction coordinator 也必须逐次使用同一 helper，先发布 `RunAwaitingUser` 再 `.await` completion，恢复 continuation 后先发布 `RunResumed` 再继续。epilogue 只执行 `assert_terminal` / `assert_no_pending_events`；**NEVER** 在末尾补造终态或延迟发布事件。
 
-### 2.5 骨架伪代码
+### 2.7 骨架伪代码
 
 ```rust
 async fn run_loop(
@@ -254,7 +266,7 @@ async fn run_loop(
 - AwaitUser 恢复：`NoInput` → `LoopDirective::AwaitUser`，caller 等待用户输入后以同一 epoch 重入，`Ready` 时执行 `UserResumed`；
 - Sub 固定 prompt：epoch 0 `Ready(prompt)` → epoch 1 `EmptyAndSealed`，与 Main 走完全相同的 Loop 路径。
 
-### 2.6 控制协议：请求同步，完成异步
+### 2.8 控制协议：请求同步，完成异步
 
 Runtime 入站命令区分两个 scope，均不经过 InputBuffer：
 
@@ -266,7 +278,7 @@ Runtime 入站命令区分两个 scope，均不经过 InputBuffer：
 
 Step scope 是 Run root scope 的 child；CancelRunStep 不污染下一 Step token，TerminateRun 传播到全部 Step/Tool/SubRun scope。
 
-### 2.7 Agent Tool / Sub Run 控制传播
+### 2.9 Agent Tool / Sub Run 控制传播
 
 Main 当前 Step 接受 `CancelRunStep` 后，对普通 Tool 取消该 Tool operation；对 Agent Tool **MUST** 向关联 child Run 发送 `TerminateRun(ParentStepCancelled)`，**NEVER** 向 child 发送 CancelRunStep 后让它回到 Drain 继续执行。child 再对其嵌套 Agent Tool 递归传播 TerminateRun。
 
@@ -394,6 +406,7 @@ Loop Engine 每轮在门禁点调用 `port.drain_input(epoch)` 或 `port.await_u
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-28 | #1438 增加 Main Run admission 前的 Skill Catalog 刷新边界：以启动快照 revision 为 last-known-good，按 live workspace、committed config 与当前 Tool Catalog 重建，变化时发布 `SkillsUpdated`，且不反向修改已开始 Run/Step | [#1438](https://github.com/rushsinging/aemeath/issues/1438) / [#1446](https://github.com/rushsinging/aemeath/pull/1446) |
 | 2026-07-11 | 初稿：Run 单状态机 + 迁移表、Loop Engine 零分支骨架、单 Run vs Session 多 Run 序列、停止条件 | #761 |
 | 2026-07-11 | 补 InputBuffer 入站端口（Loop 门禁 drain 支撑追问）+ input/result 归属；agent_execution→agent_run | #761 |
 | 2026-07-11 | result 统一经 EventSink + 终态族对称载荷（RunCompleted / RunFailed / RunCancelled）| #761 |

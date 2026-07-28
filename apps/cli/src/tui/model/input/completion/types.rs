@@ -36,9 +36,7 @@ pub struct SuggestionContext {
     pub cwd: PathBuf,
     /// 可用模型列表（provider_name, model_id）
     pub models: Vec<(String, String)>,
-    /// 可用技能列表（name, description, aliases）
-    pub skills: Vec<(String, String, Vec<String>)>,
-    /// 可用命令列表（name, description, aliases）— 从 CommandRegistry 动态获取
+    /// 可用命令列表（name, description, aliases）— Slash 补全唯一来源
     pub commands: Vec<(String, String, Vec<String>)>,
     /// 最近 session 列表（id, summary）— 用于 /resume 补全
     pub sessions: Vec<(String, String)>,

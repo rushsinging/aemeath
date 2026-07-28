@@ -67,9 +67,12 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | **Tool Profile** | 允许的 Tool Capability 集合，回答“能用什么”；只能收缩 Scope，不能扩权。 |
 | **Tool Capability** | Tool 执行所需的安全能力标签，例如读写工作区、执行进程、用户交互或 Agent Dispatch。 |
 | **Tool Outcome** | Tool 调用的领域结果：Success / Failure / Cancelled / Suspended；Suspended 表示完成同一调用前需要 Runtime 协调外部交互，其他结果包含模型可见内容、结构化数据与安全错误分类。 |
-| **Skill** | 可发现、可物化的提示资产；产出 Prompt Fragment，不作为 Tool 执行。 |
-| **Prompt Fragment** | Skill 或 PromptInjection Command 提供给 Context Management 的提示片段 Published Language。 |
-| **Slash Command** | 用户发起的命令；按 PromptInjection / SnapshotQuery / ApplicationControl 三种机制路由。 |
+| **Skill** | 由模型按名称调用、在调用时动态加载正文的特殊 Tool；具体 Skill 以廉价元数据被发现，但不各自注册 Tool schema。 |
+| **Skill Descriptor** | 可发现的 Skill 元数据：稳定 identity、描述、identity/slash aliases 与可选参数提示；**NEVER** 携带正文。 |
+| **Skill Catalog Snapshot** | 按稳定顺序发布的 Skill Descriptor 全量快照及确定性 revision；同一快照同时派生 slash route 与客户端补全。 |
+| **Skill Request** | 用户请求模型使用某个 Skill 的 typed 入站意图；携带 canonical identity 与原始参考参数，不构造 Tool Call。 |
+| **Loaded Skill** | `SkillLoadPort` 在 Skill Tool 调用时按 identity 读取的单个 Skill 正文、来源与内容 revision。 |
+| **Slash Command** | 用户发起的 slash 输入；Skill 入口分类为 SkillRequest，普通 Command 按 SnapshotQuery / ApplicationControl 确定性路由。 |
 | **MCP Tool** | 经 MCP adapter 与 ACL 转换为统一 Tool 语义的外部工具；MCP 不是独立 BC。 |
 
 ## 5. Memory（支撑域）
@@ -120,7 +123,7 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | **领域 Message** | **provider 线格式消息** | 前者是领域内部模型；后者是各家 API 的传输格式。经 Provider 内部 ACL 转换，禁止跨界直用。 |
 | **Reasoning Node** | **Run 状态** | 前者是 effort 调节状态机（Workflow）；后者是执行生命周期状态机（Agent Runtime）。职责不同，不可混淆。 |
 | **Memory Injection** | **Memory Entry** | 前者是"注入动作"（Context Management）；后者是"记忆数据"（Memory）。 |
-| **Tool** | **Skill** | Tool 调用函数并返回 Tool Outcome；Skill 物化 Prompt Fragment，由 Context Management 注入。 |
+| **Tool** | **Skill** | Tool 是模型调用能力的通用协议；Skill 是其中唯一稳定注册、按 identity 动态加载正文的特殊 Tool，具体 Skill 不各自发布 schema。 |
 | **Registry Scope** | **Tool Profile** | Scope 决定本次 Run 装配了什么；Profile 决定其中哪些 capability 被允许。 |
 | **Slash Command** | **Tool Call** | Slash Command 由用户发起并路由应用用例；Tool Call 由模型发起并调用函数。 |
 
@@ -140,6 +143,7 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | 2026-07-11 | 改为纯目标态（移除"当前代码命名 / 迁移说明"列）、文档引用链接化、新增修改历史 | #760 |
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run、Turn→Run Step；补 Main Agent 与 SubAgent 对照 | #760 |
 | 2026-07-11 | Workflow 降为支撑域（第 2 节标题），移除不做的 Workflow Graph 编排术语 | #760 |
+| 2026-07-28 | #1438 将 Skill 重新定义为由 LLM 按需调用的特殊动态 Tool，并增加 metadata snapshot、SkillRequest、SkillLoadPort 与 LoadedSkill 术语 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
 | 2026-07-12 | 新增 Tool/Skill/Command 统一语言，明确 Scope/Profile、Prompt Fragment 与 MCP Tool 边界 | #787 |
 | 2026-07-12 | 将 Run 精确为唯一 Agent 执行生命周期状态机，避免与其他 BC 局部聚合状态机冲突 | #743 / #787 |
 | 2026-07-14 | 新增 Project Identity / Workspace ID，统一 Session resume、Memory 分区与 Tool Scope 的身份语言 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

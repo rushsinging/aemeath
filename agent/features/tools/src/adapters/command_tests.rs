@@ -12,7 +12,9 @@ fn descriptor(
     target: CommandTarget,
     schema: CommandArgumentSchema,
 ) -> CommandDescriptor {
-    CommandDescriptor::new(name, aliases, name, mechanism, target, schema).unwrap()
+    CommandDescriptor::new(name, aliases, name, mechanism, target, schema)
+        .unwrap()
+        .with_target_identity(name)
 }
 
 #[test]
@@ -28,7 +30,7 @@ fn adapter_rejects_duplicate_names_aliases_and_invalid_target_pairs() {
         descriptor(
             "other",
             &["help"],
-            CommandMechanism::PromptInjection,
+            CommandMechanism::SkillRequest,
             CommandTarget::ContextManagement,
             CommandArgumentSchema::OptionalText,
         ),
@@ -57,14 +59,14 @@ fn completion_is_case_insensitive_sorted_and_has_no_duplicate_aliases() {
         descriptor(
             "zoom",
             &["z"],
-            CommandMechanism::PromptInjection,
+            CommandMechanism::SkillRequest,
             CommandTarget::ContextManagement,
             CommandArgumentSchema::OptionalText,
         ),
         descriptor(
             "alpha",
             &["a"],
-            CommandMechanism::PromptInjection,
+            CommandMechanism::SkillRequest,
             CommandTarget::ContextManagement,
             CommandArgumentSchema::OptionalText,
         ),
@@ -109,7 +111,7 @@ fn router_validates_required_and_positive_arguments_and_maps_targets() {
         descriptor(
             "review",
             &[],
-            CommandMechanism::PromptInjection,
+            CommandMechanism::SkillRequest,
             CommandTarget::ContextManagement,
             CommandArgumentSchema::OptionalText,
         ),
@@ -156,7 +158,7 @@ fn router_validates_required_and_positive_arguments_and_maps_targets() {
     ));
     assert!(matches!(
         adapter.resolve(SlashInput::new("/review staged")),
-        Ok(CommandRoute::PromptInjection(command))
+        Ok(CommandRoute::SkillRequest(command))
             if command.command.as_str() == "review" && command.arguments.as_slice() == ["staged"]
     ));
     assert!(matches!(

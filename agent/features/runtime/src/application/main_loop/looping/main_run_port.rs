@@ -489,6 +489,7 @@ where
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory: &Arc<dyn memory::MemoryPort>,
         language: &str,
+        skill_extra_dirs: &[std::path::PathBuf],
         user_agent: &str,
         workspace: &project::WorkspaceViews,
         cancel: &CancellationToken,
@@ -505,6 +506,11 @@ where
                 &tools::ToolProfileName::new("main-full"),
             )
             .unwrap_or_else(|_| tools::ToolCatalogSnapshot::new("main", "main-full", Vec::new()));
+        let available_tools = catalog
+            .tools
+            .iter()
+            .map(|descriptor| descriptor.name.as_str().to_string())
+            .collect();
         Agent {
             catalog,
             execution: tool_execution.clone(),
@@ -528,6 +534,10 @@ where
                         language: language.to_string(),
                     }),
                 )
+                .with_skill_query(tools::SkillQuerySnapshot {
+                    extra_dirs: skill_extra_dirs.to_vec(),
+                    available_tools,
+                })
                 .with_user_agent(user_agent)
                 .with_memory_context(
                     Some(session_id.to_string()),
@@ -793,6 +803,7 @@ where
             self.agent_runner,
             self.memory(),
             self.language,
+            &self.run_config().config().skills().dirs,
             self.run_config().config().user_agent(),
             self.workspace,
             &self.cancel_token(),
@@ -1033,24 +1044,12 @@ where
             self.messages
                 .extend(inputs.iter().map(|input| Message::user(input.text.clone())));
         }
-        // #1272 per-turn drain identity: collect (InputId, Message) pairs
-        // for UserMessagesAdopted emission after durable accept succeeds.
-        self.per_turn_adopted = inputs
-            .iter()
-            .filter_map(|input| {
-                input.input_id.as_ref().map(|id| {
-                    let message = if input.images.is_empty() {
-                        Message::user(input.text.clone())
-                    } else {
-                        super::super::input_gate::user_message_with_images(
-                            input.text.clone(),
-                            input.images.clone(),
-                        )
-                    };
-                    (id.clone(), message)
-                })
-            })
-            .collect();
+        // #1272 per-turn drain identity: receipts are captured by RunInputBuffer while it still
+        // owns the typed ChatInputEvent. This keeps model-only Skill prompts out of TUI JSON.
+        self.per_turn_adopted = self
+            .input_strategy
+            .run_input_buffer
+            .with_lock(|buffer| buffer.take_drained_adopted());
         if !self.per_turn_adopted.is_empty() {
             let input_ids: Vec<_> = self
                 .per_turn_adopted

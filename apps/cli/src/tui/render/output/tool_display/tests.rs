@@ -226,6 +226,20 @@ fn test_format_tool_call_read_long_cjk_path_no_panic() {
     assert!(text.contains("..."), "超长路径应被截断: {text}");
 }
 
+#[test]
+fn skill_has_one_display_registration_and_hides_result() {
+    assert_eq!(super::registry::registration_count("Skill"), 1);
+    let display = super::registry::lookup_display("Skill").expect("Skill display");
+    assert_eq!(
+        display.format_header(
+            &serde_json::json!({"skill": "superpowers:brainstorming"}),
+            None
+        ),
+        "Skill superpowers:brainstorming"
+    );
+    assert_eq!(display.render_policy().result, super::ResultPolicy::Hidden);
+}
+
 // ── 回归 #304 ──────────────────────────────────────────────────
 // 参数未就绪时 header 不应显示 "?" 占位（参数为空时只显示工具名）。
 // 覆盖 task_impls.rs 与 tool_impls.rs 中所有 ? → "" 的修复点。
