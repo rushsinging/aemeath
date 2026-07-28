@@ -254,6 +254,10 @@ pub(crate) fn legacy_outcome(outcome: ToolExecutionOutcome) -> ToolOutcome {
             images: Vec::new(),
         },
         ToolExecutionOutcome::Cancelled(cancelled) => ToolOutcome::error(cancelled.reason),
+        ToolExecutionOutcome::TimedOut(details)
+        | ToolExecutionOutcome::CancellationUnconfirmed(details) => {
+            ToolOutcome::error(details.safe_reason)
+        }
         ToolExecutionOutcome::Suspended(_) => {
             ToolOutcome::error("tool execution suspended at an unsupported ordinary-execution seam")
         }

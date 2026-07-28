@@ -477,6 +477,34 @@ impl ToolCancelled {
     }
 }
 
+/// 底层清理确认状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CleanupConfirmation {
+    Confirmed,
+    Unconfirmed,
+    NotApplicable,
+}
+
+/// timeout / cancellation-unconfirmed 的安全终态详情。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolTerminalDetails {
+    pub safe_reason: String,
+    pub possible_side_effects: Vec<String>,
+    pub unfinished_call_ids: Vec<String>,
+    pub cleanup: CleanupConfirmation,
+}
+
+impl ToolTerminalDetails {
+    pub fn new(safe_reason: impl Into<String>, cleanup: CleanupConfirmation) -> Self {
+        Self {
+            safe_reason: safe_reason.into(),
+            possible_side_effects: Vec::new(),
+            unfinished_call_ids: Vec::new(),
+            cleanup,
+        }
+    }
+}
+
 /// 工具执行结果（领域结果）。
 ///
 /// 不依赖 SDK/TUI View。错误只公开可安全暴露的信息。
@@ -487,6 +515,8 @@ pub enum ToolOutcome {
     Success(ToolSuccess),
     Failure(ToolFailure),
     Cancelled(ToolCancelled),
+    TimedOut(ToolTerminalDetails),
+    CancellationUnconfirmed(ToolTerminalDetails),
     Suspended(ToolSuspension),
 }
 
@@ -501,6 +531,23 @@ impl ToolOutcome {
 
     pub fn cancelled(reason: impl Into<String>) -> Self {
         Self::Cancelled(ToolCancelled::new(reason))
+    }
+
+    pub fn timed_out(safe_reason: impl Into<String>, cleanup: CleanupConfirmation) -> Self {
+        Self::TimedOut(ToolTerminalDetails::new(safe_reason, cleanup))
+    }
+
+    pub fn cancellation_unconfirmed(
+        safe_reason: impl Into<String>,
+        possible_side_effects: Vec<String>,
+        unfinished_call_ids: Vec<String>,
+    ) -> Self {
+        Self::CancellationUnconfirmed(ToolTerminalDetails {
+            safe_reason: safe_reason.into(),
+            possible_side_effects,
+            unfinished_call_ids,
+            cleanup: CleanupConfirmation::Unconfirmed,
+        })
     }
 
     pub fn is_success(&self) -> bool {

@@ -7,11 +7,18 @@ pub(crate) mod context_decision;
 mod context_decision_tests;
 pub mod session;
 pub(crate) mod token_budget;
+pub mod tool_receipt;
+#[cfg(test)]
+mod tool_receipt_tests;
 
 pub use compact::CompactStage;
 pub use token_budget::{
     autocompact_threshold, effective_context_window, estimate_message_tokens,
     estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens,
+};
+pub use tool_receipt::{
+    CleanupConfirmation, ToolCallIdentity, ToolCallReceipt, ToolCallState, ToolReceiptMutation,
+    ToolReceiptMutationError, ToolReceiptMutationReceipt, ToolTerminalReceipt,
 };
 
 use std::collections::HashMap;
@@ -222,6 +229,7 @@ pub enum ToolOutcomeKind {
     Failure,
     Denied,
     Cancelled,
+    TimedOut,
     CancellationUnconfirmed,
 }
 
