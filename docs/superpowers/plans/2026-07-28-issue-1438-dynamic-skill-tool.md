@@ -6,7 +6,7 @@
 
 **Goal:** 将 Skill 恢复为由 LLM 按名称调用、在调用时动态加载正文的特殊 Tool；Runtime 只向 TUI/LLM 发布 Skill 元数据，TUI 只发送统一 Skill 请求事件，Skill 正文不再被启动期复制或 Context 全量预注入。
 
-**Architecture:** Tools BC 保留唯一的 Skill Catalog，并将“全量 PromptFragment 物化”替换为“按 identity 加载单个 Skill”的 `SkillLoadPort`；稳定注册的 `Skill` Tool schema 只有 `skill: string`，调用时结合 live workspace 与 Run 冻结配置/工具集合查询正文。Command Router 只负责把 Skill 的 slash 入口分类成 `SkillRequest`，TUI/no-TUI 发同一个 SDK 事件，Runtime 再把它投影成模型可见的用户意图；LLM 自行调用 `Skill` Tool。普通 Command 继续按 SnapshotQuery/ApplicationControl 确定性执行。
+**Architecture:** Tools BC 保留唯一的 Skill Catalog，并将“全量 PromptFragment 物化”替换为“按 identity 加载单个 Skill”的 `SkillLoadPort`；稳定注册的 `Skill` Tool schema 只有 `skill: string`，调用时结合 live workspace 与 Run 冻结配置/工具集合查询正文。Runtime 在启动、用户输入/新 Run、worktree 切换和 `skills.dirs` 变更边界重新取得版本化 Skill metadata 全量快照；同一快照同时生成 Skill slash routes，并通过 `SkillsUpdated` 事件推送给 TUI 原子替换自动补全目录。Command Router 只负责把 Skill 的 slash 入口分类成 `SkillRequest`，TUI/no-TUI 发同一个 SDK 事件，Runtime 再把它投影成模型可见的用户意图；LLM 自行调用 `Skill` Tool。普通 Command 继续按 SnapshotQuery/ApplicationControl 确定性执行。
 
 **Tech Stack:** Rust、Tokio、serde/serde_yml、Tool Catalog/Execution 双端口、ContextPromptSource、SDK typed events、ratatui/TEA、Cargo tests、shell architecture guards。
 
@@ -20,7 +20,10 @@
 4. **正文调用时加载。** Run Step 目录只冻结元数据；Tool 调用时重新读取 live workspace 下的文件。目录后删除/失效返回 typed failure，不使 Run 崩溃。
 5. **Skill 与 Command 不同。** Skill slash 入口只生成模型请求；`/clear`、`/help`、`/compact` 等 Command 仍由确定性 handler 执行，不进入 LLM，也不调用 `Skill` Tool。
 6. **不增加第二套可见性协议。** Skill 正文使用正常 ToolResult 文本进入 LLM；TUI 通过 `ToolDisplayEntry` 隐藏 Skill result，只显示 `Skill(name)` header。
-7. **根因级切线，不保留兼容双路径。** 删除 TUI 正文副本、Context 全文 Skill block、`PromptInjection` Skill 执行语义及“Skill 不是 Tool”测试/Guard；不以别名或兼容 adapter 留下第二条正文交付路径。
+7. **补全目录使用版本化全量快照。** Runtime 在边界刷新 Skill metadata，以排序后的 name/description/aliases/slash/argument hint 计算 revision；变化时发送 `SkillsUpdated` 完整快照。TUI 原子替换本地 completion catalog，已打开的补全面板立即按当前输入重算。
+8. **补全快照与 Run 快照分离。** TUI metadata 可在边界刷新；已开始 Run/Run Step 的可见 Skill 集合保持冻结。正文修改但 metadata 不变不触发 TUI 更新，Skill Tool 下次调用仍读取最新正文。
+9. **Skill route 与补全同源。** 同一个 metadata snapshot 同时生成 slash routes 和 completion entries；禁止出现 TUI 可补全但 Router 不识别的分裂状态。
+10. **根因级切线，不保留兼容双路径。** 删除 TUI 正文副本、Context 全文 Skill block、`PromptInjection` Skill 执行语义及“Skill 不是 Tool”测试/Guard；不以别名或兼容 adapter 留下第二条正文交付路径。
 
 ## 文件结构
 
@@ -34,13 +37,14 @@
 | `agent/features/tools/src/domain/context.rs` | 为 ToolExecutionContext 增加窄的 per-Run `SkillQuerySnapshot` 值，不加入 ExecutionScope 八字段。 |
 | `agent/features/context/src/adapters/skill_prompt_source.rs` | 从 Skill Catalog 元数据生成受预算约束目录，不读取正文。 |
 | `agent/features/context/src/{ports.rs,adapters.rs}`、`adapters/canonical_session.rs` | 将 prompt supplier 从 materializer 改为 catalog + metadata query factory。 |
-| `packages/sdk/src/{chat.rs,tui.rs}` | 新增统一 `ChatInputEvent::SkillRequest`；`SkillView` 删除正文/source，增加 `argument_hint`。 |
+| `packages/sdk/src/{chat.rs,chat_event.rs,tui.rs}` | 新增统一 `ChatInputEvent::SkillRequest` 和 `ChatEvent::SkillsUpdated`；`SkillView` 删除正文/source，增加 `argument_hint`，以完整 metadata 快照供 TUI 补全。 |
 | `agent/features/tools/src/domain/{command_pl.rs,command_ports.rs}`、`adapters/command.rs` | 将 Skill slash 路由显式分类为 `SkillRequest`，不再借用 PromptInjection。 |
-| `agent/composition/src/tools.rs` | Skill metadata 只投影 slash descriptor/route，不携带正文。 |
+| `agent/composition/src/tools.rs` | 从同一个版本化 Skill metadata snapshot 原子生成 slash routes 与 completion entries，不携带正文。 |
 | `agent/composition/src/runtime.rs` | 一次装配同一个 Skill filesystem backing，并把 Catalog/Load Port 分发给 Context 与 Tool factory。 |
 | `agent/features/runtime/src/application/{runtime_context.rs,runtime_context_factory.rs}` | 将冻结的 Skill 查询值装配进 Main/Sub ToolExecutionContext。 |
-| `agent/features/runtime/src/application/main_loop/looping/{input_gate.rs,run_input_buffer.rs,main_run_port.rs}` | 接纳统一 SkillRequest，保留 InputId/原始参数并投影为模型可见用户消息。 |
+| `agent/features/runtime/src/application/main_loop/looping/{input_gate.rs,run_input_buffer.rs,main_run_port.rs,loop_phases.rs}` | 接纳统一 SkillRequest；在输入/新 Run、worktree 与配置边界刷新 metadata，发送 `SkillsUpdated`。 |
 | `agent/features/runtime/src/application/subagent/runner/{setup.rs,loop_run.rs}` | Sub-agent 同样获得 Skill Tool 与冻结查询快照。 |
+| `apps/cli/src/tui/{model/input,adapter,event_mapping.rs,app}` | TUI-owned `SkillCompletionCatalog` 原子消费 `SkillsUpdated`；补全面板打开时立即重算并校正选中项。 |
 | `apps/cli/src/tui/app/{slash.rs,run_loop.rs,runtime.rs}` | Skill slash 只发送 typed event；移除正文 lookup/拼接/回显。 |
 | `apps/cli/src/chat/no_tui.rs` | no-TUI 使用同一 Router 和 SkillRequest 事件语义。 |
 | `apps/cli/src/tui/render/output/tool_display/tool_impls/skill.rs` | 新增 Skill header，并隐藏 result 正文。 |
@@ -68,6 +72,8 @@
 
 ```text
 SkillDescriptor        可发现的廉价元数据
+SkillCatalogSnapshot   排序后的 metadata 全量快照 + 确定性 revision
+SkillsUpdated          Runtime 向客户端发布的新 metadata 全量快照
 SkillRequest           用户请求 LLM 使用 Skill（name + raw reference arguments）
 SkillLoadPort          调用时按 identity 加载一个 Skill
 LoadedSkill            name + content + source + content revision
@@ -79,7 +85,7 @@ Command                 应用确定性查询/控制；不执行 Skill
 
 - [ ] **Step 3: 更新测试证据矩阵**
 
-在 `04-testing-and-coverage.md` 将旧“materialization 到 Context prompt block”行改为：Tools L2/L3 证明 metadata/load；Context L2/L3 证明 metadata directory；SDK/Runtime/TUI L3/L4 证明 SkillRequest 字段不丢失；Tool 场景证明正文仅在调用后进入模型上下文。
+在 `04-testing-and-coverage.md` 将旧“materialization 到 Context prompt block”行改为：Tools L2/L3 证明 metadata/load；Context L2/L3 证明 metadata directory；SDK/Runtime/TUI L3/L4 证明 SkillRequest 字段不丢失，以及 `SkillsUpdated` 完整快照使 route 与补全原子更新；Tool 场景证明正文仅在调用后进入模型上下文。
 
 - [ ] **Step 4: 文档自检并提交**
 
@@ -508,7 +514,98 @@ git add agent/features/runtime/src/application/loop_engine agent/features/runtim
 git commit -m "feat: admit skill requests into runs"
 ```
 
-## Task 7：TUI/no-TUI 只发送统一事件，不接触正文
+## Task 7：版本化刷新 Skill 目录并通知 TUI 自动补全
+
+**Files:**
+- Modify: `agent/features/tools/src/domain/skill_pl.rs`
+- Modify: `agent/features/tools/src/domain/skill_pl_tests.rs`
+- Modify: `agent/composition/src/tools.rs`
+- Modify: `agent/composition/tests/command_wiring.rs`
+- Modify: `packages/sdk/src/chat_event.rs`
+- Modify: `packages/sdk/src/tui.rs`
+- Modify: `packages/sdk/src/wire.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_phases.rs`
+- Modify: `agent/features/runtime/src/application/main_loop/looping/loop_runner_tests.rs`
+- Modify: `agent/features/runtime/src/application/client/from_args.rs`
+- Modify: `apps/cli/src/tui/adapter/tui_runtime_event.rs`
+- Modify: `apps/cli/src/tui/adapter/event_mapping.rs`
+- Modify: `apps/cli/src/tui/adapter/tui_runtime_event_tests.rs`
+- Modify: `apps/cli/src/tui/model/input.rs`
+- Create: `apps/cli/src/tui/model/input/skill_completion_catalog.rs`
+- Modify: `apps/cli/src/tui/app/slash/suggestions.rs`
+- Modify: `apps/cli/src/tui/app/update.rs`
+- Modify: `apps/cli/src/tui/app/scenario_tests.rs`
+- Create: `apps/cli/src/tui/app/scenario_tests/skill_refresh.rs`
+
+- [ ] **Step 1: 写失败的 metadata snapshot/revision 测试**
+
+定义 `SkillCatalogSnapshot { revision, skills, slash_routes }`。revision 只基于稳定排序后的 `name`、`description`、identity aliases、`slash_command`、`slash_aliases`、`argument_hint` 计算；不得包含正文、source 路径或正文 revision。`slash_routes` 是 Tools-owned Published Language 的纯值投影，保存 slash/aliases → canonical Skill identity，不让 TUI 重写业务 parser。断言增删、重命名、描述/参数提示变化会改变 revision；仅修改 `SKILL.md` 正文且 metadata 不变时 revision 保持不变。
+
+- [ ] **Step 2: 写失败的同源 route/completion 测试**
+
+Composition 从一个 `SkillCatalogSnapshot` 同时构造 completion entries 和 Skill slash routes；Runtime 发布的 `SkillsUpdated` 必须携带同 revision 的 metadata 与纯值 `slash_routes`，TUI 用该 snapshot 原子替换 completion catalog 与 Skill route table。普通确定性 Command Catalog/Router 继续保持启动期稳定，不随 Skill 刷新重建。断言每个可补全 slash 都能被同 revision Skill route table 解析为 canonical Skill identity；删除 Skill 后二者同时消失。不得先替换补全再异步替换 route table，也不得让 TUI 自行从 aliases 重建 Skill 路由。
+
+- [ ] **Step 3: 定义 SDK 全量快照事件**
+
+新增：
+
+```rust
+pub struct SkillsUpdatedEvent {
+    pub revision: String,
+    pub skills: Vec<SkillView>,
+    pub slash_routes: Vec<SkillSlashRouteView>,
+}
+
+pub enum ChatEvent {
+    SkillsUpdated { event: SkillsUpdatedEvent },
+    // existing variants...
+}
+```
+
+`SkillView` 和 `SkillSlashRouteView` 都是无正文纯值；route view 只含 canonical Skill identity、slash name、aliases 和 argument schema。更新 SDK wire/schema 注册和穷尽匹配；不发送 added/removed diff，客户端只按 revision 原子接纳完整快照。
+
+- [ ] **Step 4: 在明确边界刷新并去重事件**
+
+Runtime/Composition 建立 session 级“最后已发布 Skill revision”状态，在以下边界重新执行 `SkillCatalogPort::list`：TUI/session 启动；真实用户输入被接纳、创建下一 Run 前；`EnterWorktree`/`ExitWorktree` 成功并发布新 workspace 后；`skills.dirs` 配置 reload 后。相同 revision 不重复发送。不得引入 filesystem watcher，也不得在一次正在执行的 Run/Run Step 中途替换其冻结目录。
+
+刷新失败采用 last-known-good：保留上一份 route/completion snapshot，发安全诊断事件，不用空目录覆盖；目录合法变为空时则发布空快照。
+
+- [ ] **Step 5: TUI 建立 owned completion catalog**
+
+新增 `SkillCompletionCatalog { revision, entries, slash_routes }`，TUI adapter 将 SDK `SkillsUpdated` 转为纯值 `TuiRuntimeEvent::SkillsUpdated`，reducer 在一次 intent 中原子替换 completion entries 与 Skill route table。TUI 不长期持有 `sdk::SkillView`，不读取 Catalog port，不 watch 文件，也不从 aliases 自行重建 route。`update_suggestions()` 同时消费普通 Command Catalog 与 Skill completion entries，Skill 行展示 slash 名、description 和 `argument_hint`；提交时先用同 revision Skill route table 解析，未命中再交给普通 Command Router。
+
+- [ ] **Step 6: 已打开补全面板立即重算**
+
+收到新快照时保持输入文档和光标不变；若 completion 当前可见，立即用当前 query 重算：原选中 replacement 仍存在则保持选中；否则选第一项；无候选则关闭。若面板未打开，只替换 catalog，不主动弹出。
+
+- [ ] **Step 7: 写刷新 L3/L4 场景测试**
+
+覆盖：启动快照出现 `/release`；运行时新增 Skill 后下一输入边界出现候选且 Router 可解析；删除后候选和 route 同时消失；正文-only 修改不发事件但下次 Skill Tool load 读取新正文；切换 worktree 后候选替换；补全面板打开时输入/光标不变并校正 selection；损坏文件保留 last-known-good 并显示诊断。
+
+- [ ] **Step 8: 运行定向测试并提交**
+
+Run:
+
+```bash
+cargo test -p tools skill_pl -- --nocapture
+cargo test -p composition command_wiring -- --nocapture
+cargo test -p sdk skills_updated -- --nocapture
+cargo test -p runtime skill_refresh -- --nocapture
+cargo test -p cli skill_refresh -- --nocapture
+cargo test -p cli completion -- --nocapture
+```
+
+Expected: PASS；TUI completion 与 Router revision 一致，正文变化不污染 metadata 通知，已开始 Run 的 Skill 目录保持冻结。
+
+Commit:
+
+```bash
+git add agent/features/tools agent/features/runtime agent/composition packages/sdk apps/cli
+
+git commit -m "feat: refresh skill completion catalog"
+```
+
+## Task 8：TUI/no-TUI 只发送统一事件，不接触正文
 
 **Files:**
 - Modify: `agent/features/runtime/src/application/client/from_args.rs`
@@ -555,7 +652,7 @@ Expected: FAIL，当前 TUI 读取 `SkillView.content` 并返回正文。
 
 - [ ] **Step 4: 删除启动期正文复制**
 
-`from_args.rs` 只调用 `skill_catalog.list` 生成 `skills_map`；不得调用 load port，不得建立 fragments map。删除 `SkillView.content/source` 的全部构造与测试 fixture；`find_skill_by_alias` 若不再有补全消费者则删除，补全只消费 Command Catalog。
+`from_args.rs` 只调用 `skill_catalog.list` 生成初始 `SkillCatalogSnapshot`；不得调用 load port，不得建立 fragments map。删除 `SkillView.content/source` 的全部构造与测试 fixture；删除 `find_skill_by_alias`，canonical identity 只由 `SkillCompletionCatalog` 内同 revision 的纯值 Skill route table 返回。后续刷新由 Task 7 的 `SkillsUpdated` 全量快照链路完成；普通 Command Router 不负责动态 Skill route。
 
 - [ ] **Step 5: TUI 直接发送 event effect**
 
@@ -584,7 +681,7 @@ git add agent/features/runtime/src/application/client agent/features/runtime/src
 git commit -m "refactor: send skill requests from cli"
 ```
 
-## Task 8：Skill Tool 展示隐藏正文并完成跨层场景
+## Task 9：Skill Tool 展示隐藏正文并完成跨层场景
 
 **Files:**
 - Create: `apps/cli/src/tui/render/output/tool_display/tool_impls/skill.rs`
@@ -637,7 +734,7 @@ git add apps/cli agent/features/tools/tests agent/features/context/tests
 git commit -m "feat: render dynamic skill calls safely"
 ```
 
-## Task 9：退役旧路径、更新 Guard 与全量验证
+## Task 10：退役旧路径、更新 Guard 与全量验证
 
 **Files:**
 - Modify: `.agents/hooks/check-tool-catalog-execution-boundary.sh`
@@ -677,7 +774,7 @@ Expected: 生产代码零命中；测试/历史 changelog 只保留迁移说明�
 
 - [ ] **Step 4: 更新 specs 与 Guard 文档**
 
-明确：Main/Sub Skill Tool scope、SkillRequest 事件、Run Step metadata 快照、调用时 live load、TUI hidden result、Command 分流、typed deletion failure。更新 Guard registry 时保持 17 个 guard 编排结构和 active policy 一致。
+明确：Main/Sub Skill Tool scope、SkillRequest 事件、Run Step metadata 快照、调用时 live load、`SkillsUpdated` 版本化全量刷新、route/completion 同源原子替换、last-known-good、TUI hidden result、Command 分流、typed deletion failure。更新 Guard registry 时保持 17 个 guard 编排结构和 active policy 一致。
 
 - [ ] **Step 5: 运行格式化、编译、测试和架构门禁**
 
@@ -716,6 +813,9 @@ git commit -m "chore: retire eager skill delivery"
 | 边界 | 必须证明的事实 | 证据层级 |
 |---|---|---|
 | Skill parser → Catalog | metadata 含 name/description/argument hint，不含正文 | L1/L2 |
+| Catalog → SDK/TUI | metadata revision 变化发布完整 `SkillsUpdated`；相同 revision 去重 | L2/L3 |
+| Snapshot → route/completion | 同一 revision 原子生成 slash routes 与补全；不存在分裂窗口 | L3/L4 |
+| TUI completion refresh | 保持输入/光标；可见面板即时重算并校正 selection | L2/L4 |
 | Catalog → Context | Run Step 目录稳定、受预算约束、无正文 | L2/L3 |
 | Slash Router → SDK | Skill 与 Command 分类不同，identity/arguments 不丢失 | L1/L3 |
 | SDK → Runtime gate | idle/busy/sealed/withdraw 保留 InputId 与用户原文 | L2/L3 |
@@ -732,7 +832,7 @@ git commit -m "chore: retire eager skill delivery"
 - 不在本 Issue 支持 `$ARGUMENTS` 模板替换；参数已作为 LLM 参考上下文交付。
 - 不让 TUI 或 Runtime 直接执行 Skill Tool。
 - 不把 Skill 调用改成 Command handler。
-- 不新增 Skill 正文缓存、watch/hot reload 或 MCP remote Skill 协议。
+- 不新增 Skill 正文缓存、filesystem watcher 或 MCP remote Skill 协议；metadata 仅在明确边界重新扫描并以 revision 去重。
 - 不在本 Issue 引入 `allowed-tools` 动态扩权、model override、forked Skill 或 hook 注册；这些需要独立安全设计和用户确认。
 - 不增加 L5 真终端测试；进程内 L4 已覆盖完整 typed 链路。
 
