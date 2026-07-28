@@ -32,7 +32,6 @@ pub async fn build_static_prompt(
     .await;
 
     let mut prompt = prompt_parts.static_part;
-    prompt.push_str(context::guidance::universal_execution_discipline(language));
     append_agent_roles(&mut prompt, config_file, language);
     if !model_guidance.is_empty() {
         prompt.push_str("\n\n");
@@ -77,6 +76,7 @@ mod tests {
     use super::*;
     use share::config::AgentRoleConfig;
     use share::config::Config;
+    use share::i18n::prompt::discipline::universal_execution_discipline;
     use std::collections::HashMap;
 
     /// 构造一个 ConfigSnapshot，其中 `agents.roles` 与 `language` 按参数设置。
@@ -86,6 +86,33 @@ mod tests {
         config.agents.roles = roles;
         config.language = language.to_string();
         ConfigSnapshot::new(config)
+    }
+
+    #[tokio::test]
+    async fn build_static_prompt_does_not_embed_execution_discipline() {
+        let hook_port: Arc<dyn HookPort> = Arc::new(
+            hook::build_dispatcher(
+                &share::config::hooks::HooksConfig::default(),
+                std::collections::HashMap::new(),
+            )
+            .unwrap(),
+        );
+        let prompt = build_static_prompt(
+            std::path::Path::new("/tmp/project"),
+            "fake/model",
+            false,
+            None,
+            &hook_port,
+            crate::application::prompt::build::SystemPromptParts {
+                static_part: "core-system".to_string(),
+                initial_git_context: String::new(),
+                claude_md: String::new(),
+            },
+        )
+        .await;
+
+        assert!(prompt.contains("core-system"));
+        assert!(!prompt.contains(universal_execution_discipline("en")));
     }
 
     // ── append_agent_roles ────────────────────────────────────

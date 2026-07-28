@@ -31,9 +31,9 @@ pub use context_port::{
     CompactRequest, CompactResult, CompactSkipReason, CompactTrigger, CompactionDecision,
     ContentFingerprint, ContextAppend, ContextAppendError, ContextMessage, ContextMessages,
     ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
-    FinalizeCause, Language, ManualCompactRequest, RunStepId, SessionId, SessionRevision,
-    StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, ToolOutcomeKind,
-    Urgency,
+    FinalizeCause, InvocationReminder, Language, ManualCompactRequest, RunStepId, SessionId,
+    SessionRevision, StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget,
+    ToolOutcomeKind, Urgency,
 };
 pub use hook::{HookInvocation, HookOutcome, HookPoint, HookPort};
 pub use policy_port::{

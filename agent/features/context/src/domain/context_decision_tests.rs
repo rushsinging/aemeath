@@ -39,6 +39,7 @@ fn provider_total_is_used_without_projected_delta() {
         &request(Some(700)),
         &vec![Message::user("x".repeat(4_000))].into(),
         &[],
+        None,
     );
 
     assert_eq!(decision.decision_token_count, 700);
@@ -48,7 +49,7 @@ fn provider_total_is_used_without_projected_delta() {
 
 #[test]
 fn provider_total_above_threshold_triggers_compaction() {
-    let decision = context_decision::calculate(&request(Some(900)), &Vec::new().into(), &[]);
+    let decision = context_decision::calculate(&request(Some(900)), &Vec::new().into(), &[], None);
 
     assert!(decision.needed);
     assert_eq!(decision.reason, DecisionReason::ActualProviderUsage);
@@ -60,6 +61,7 @@ fn missing_provider_total_falls_back_to_complete_candidate_estimate() {
         &request(None),
         &vec![Message::user("x".repeat(4_000))].into(),
         &[],
+        None,
     );
 
     assert!(decision.needed);

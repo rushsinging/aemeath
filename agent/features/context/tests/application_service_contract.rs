@@ -16,7 +16,7 @@ use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
-use share::message::Message;
+use share::message::{ContentBlock, Message};
 
 struct FakeSession;
 
@@ -198,9 +198,12 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
             "user_guidance",
             "memory_context",
             "active_summary",
-            "task_reminder",
         ]
     );
+    assert!(window
+        .system_blocks
+        .iter()
+        .all(|block| block.kind != "task_reminder"));
     let cache_breaks: Vec<_> = window
         .system_blocks
         .iter()
@@ -208,15 +211,18 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
         .map(|block| block.kind.as_str())
         .collect();
     assert_eq!(cache_breaks, vec!["active_summary"]);
-    let reminder = window
-        .system_blocks
-        .iter()
-        .find(|block| block.kind == "task_reminder")
-        .expect("structured task reminder");
-    assert!(reminder.content.contains("task list #1"));
-    assert!(reminder.content.contains("测试任务"));
-    assert!(reminder.content.contains("1 pending"));
-    assert!(!reminder.cacheable);
+    assert_eq!(
+        window
+            .invocation_reminder
+            .as_ref()
+            .map(context::domain::InvocationReminder::as_str),
+        Some("<task-reminder>\n当前 task list #1「测试任务」仍有 1 pending、0 in_progress。若与最新用户请求相关，调用 TaskListGet 查看详情；否则优先处理最新请求。\n</task-reminder>")
+    );
+    assert!(matches!(
+        &window.messages[1].content[0],
+        ContentBlock::Text { text } if text == "pending"
+    ));
+    assert!(window.token_estimation.message_tokens > 0);
 }
 
 #[tokio::test]

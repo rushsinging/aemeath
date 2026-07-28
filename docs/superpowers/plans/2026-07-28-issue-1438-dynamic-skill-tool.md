@@ -835,4 +835,3 @@ git commit -m "chore: retire eager skill delivery"
 - 不新增 Skill 正文缓存、filesystem watcher 或 MCP remote Skill 协议；metadata 仅在明确边界重新扫描并以 revision 去重。
 - 不在本 Issue 引入 `allowed-tools` 动态扩权、model override、forked Skill 或 hook 注册；这些需要独立安全设计和用户确认。
 - 不增加 L5 真终端测试；进程内 L4 已覆盖完整 typed 链路。
-

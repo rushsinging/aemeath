@@ -6,6 +6,7 @@ pub(crate) fn token_budget(
     request: &ContextRequest,
     messages: &crate::domain::ContextMessages,
     system_blocks: &[SystemBlock],
+    invocation_reminder: Option<&str>,
 ) -> TokenBudget {
     let system_tokens = system_blocks
         .iter()
@@ -14,7 +15,10 @@ pub(crate) fn token_budget(
     let message_tokens = messages
         .iter()
         .map(crate::domain::estimate_message_tokens)
-        .sum();
+        .sum::<usize>()
+        + invocation_reminder
+            .map(crate::domain::estimate_tokens)
+            .unwrap_or_default();
     let tool_schema_tokens = request.tool_schema_tokens;
     TokenBudget {
         system_tokens,
@@ -43,8 +47,9 @@ pub(crate) fn calculate(
     request: &ContextRequest,
     messages: &crate::domain::ContextMessages,
     system_blocks: &[SystemBlock],
+    invocation_reminder: Option<&str>,
 ) -> CompactionDecision {
-    let budget = token_budget(request, messages, system_blocks);
+    let budget = token_budget(request, messages, system_blocks, invocation_reminder);
 
     let (decision_token_count, reason) = match request.last_api_total_tokens {
         Some(api_total) => (api_total as usize, DecisionReason::ActualProviderUsage),

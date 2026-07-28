@@ -34,6 +34,7 @@
 ## 3.9.3. token budget / 压缩 / 成本
 
 - token 估算由 Context BC 的 `context::api::compact::estimate_tokens` 提供，Runtime 在 `application/{agent,chat}` 编排中消费。
+- Task reminder 由 Context 从冻结快照渲染为 invocation-only decoration；Runtime 仅在 `ContextWindow → InvocationRequest` 共享 seam 中装饰最后一条真实 user message 的副本。**NEVER** 修改 canonical message、SDK/TUI 事件或持久化 JSON，且 reminder token 归入 message budget。
 - **SHOULD** 修改涉及暂停 / 恢复 / 重试逻辑时同步检查 Context token estimation 调用点。
 - 成本追踪与定价：`agent/features/runtime/src/application/cost/pricing.rs`。
 - **SHOULD** 成本追踪逻辑更新时同步更新 `pricing.rs`。
