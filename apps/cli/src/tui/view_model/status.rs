@@ -4,6 +4,7 @@ use super::style::SemanticStyle;
 pub enum StatusNoticeViewKind {
     #[default]
     Normal,
+    Running,
     Success,
     Warning,
 }
@@ -56,14 +57,14 @@ pub struct StatusRuntimeViewModel {
     pub context: StatusContextViewModel,
 }
 
-/// 工作目录上下文视图模型（StatusBar 第二行的 model 派生字段；
-/// permission_mode 为启动期配置，不由本模型承载）。
+/// 工作目录与 policy 上下文视图模型（StatusBar 第二行的唯一派生输入）。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StatusContextViewModel {
     pub path_base: String,
     pub workspace_root: String,
     pub branch: Option<String>,
     pub kind: StatusWorktreeKind,
+    pub permission_mode: String,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

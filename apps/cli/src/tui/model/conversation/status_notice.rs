@@ -2,6 +2,7 @@
 pub enum StatusNoticeKind {
     #[default]
     Normal,
+    Running,
     Success,
     Warning,
 }
@@ -33,6 +34,13 @@ impl StatusNotice {
         }
     }
 
+    pub fn running(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            kind: StatusNoticeKind::Running,
+        }
+    }
+
     pub fn success(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
@@ -49,30 +57,5 @@ impl StatusNotice {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_status_notice_default_is_ready_normal() {
-        let notice = StatusNotice::default();
-
-        assert_eq!(notice.text, "Ready");
-        assert_eq!(notice.kind, StatusNoticeKind::Normal);
-    }
-
-    #[test]
-    fn test_status_notice_success_sets_kind_and_text() {
-        let notice = StatusNotice::success("Copied");
-
-        assert_eq!(notice.text, "Copied");
-        assert_eq!(notice.kind, StatusNoticeKind::Success);
-    }
-
-    #[test]
-    fn test_status_notice_warning_sets_kind_and_text() {
-        let notice = StatusNotice::warning("Interrupted");
-
-        assert_eq!(notice.text, "Interrupted");
-        assert_eq!(notice.kind, StatusNoticeKind::Warning);
-    }
-}
+#[path = "status_notice_tests.rs"]
+mod tests;
