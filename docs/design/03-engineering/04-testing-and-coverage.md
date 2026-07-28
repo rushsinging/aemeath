@@ -721,9 +721,10 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 | builtin Command 真相、公开 router 错误与 Composition skill projection | L3 | `tools/tests/command_contract.rs`、`composition/tests/command_wiring.rs`、`apps/cli/src/command_contract_tests.rs` | 全量 builtin descriptor、公开错误和交付入口共用 router；Skill 与 builtin 的冲突语义在 Composition 层锁定。 |
 | Tool Catalog/Execution Scope/Profile、输出映射和动态成员撤销 | L2-L3 | `tools/src/adapters/catalog_execution_contract_tests.rs` | 覆盖 invocation-time authorization、success content/data/metadata、retryable failure 与 dynamic membership add/remove。 |
 | Tool private backing/adapter 不得由 Runtime 穿透 | L0 | `check-tool-catalog-execution-boundary.sh` 与 `-tests.sh` | Runtime 直引 adapters 或 ToolBacking/具体 adapter 的故意违规均 exit 2。 |
-| Skill PL、query、revision 与 typed error | L1 | `tools/src/domain/skill_pl_tests.rs` | 覆盖 slash aliases、materialization error、query snapshot 与 cache hint。 |
-| Filesystem Skill 来源、优先级、过滤和实际 materialization | L2 | `tools/src/adapters/skill_filesystem_tests.rs` | 覆盖 global/extra content、同名优先级和 primary 缺失时 fallback 可见。 |
-| Skill materialization 到 Context prompt block、slash projection | L3-L4 | `context/tests/skill_prompt_pipeline.rs`、`context/tests/isolated_context_with_skill.rs`、`composition/tests/command_wiring.rs` | Context 只经 `SkillMaterializationPort` 消费；真实 filesystem adapter 的来源/优先级/物化在 Tools owning layer 证明，跨 BC 使用 port fake 证明无 adapter 穿透。 |
+| Skill descriptor、metadata revision、load query/error 与 typed Skill Tool schema | L1-L3 | `tools/src/domain/skill_pl_tests.rs`、`tools/src/adapters/{skill_filesystem_tests,skill_tool_tests}.rs`、`tools/src/adapters/skill_tool_contract_tests.rs` | metadata 不含正文；正文-only 修改不改变 catalog revision；按 identity 调用时加载单个正文，删除/损坏返回 typed failure；Main/Sub catalog 均只注册一个 schema 仅含 `skill` 的 Skill Tool。 |
+| Skill Catalog 到 Context metadata directory | L2-L3 | `context/tests/skill_prompt_pipeline.rs`、`context/tests/isolated_context_with_skill.rs` | Context 只消费 `SkillCatalogPort` descriptor，证明稳定排序、去重、预算、双语 header 与正文 sentinel 永不进入 system block。 |
+| SkillRequest 与 SkillsUpdated 跨 SDK/Runtime/TUI 字段完整性 | L3-L4 | `composition/tests/command_wiring.rs`、SDK wire tests、Runtime input/refresh tests、CLI scenario tests | canonical identity、raw arguments、InputId 不丢失；同 revision metadata + slash routes 由一个全量快照原子替换，补全与 route 不分裂，普通 Command 保持确定性。 |
+| Skill Tool 调用后正文交付与 TUI 隐藏 | L2-L4 | Tool execution contract、Context pipeline、CLI ToolDisplay/skill scenarios | 调用前模型上下文与 TUI 无正文；LLM 调用 Skill Tool 后正文只作为普通 ToolResult 进入后续模型上下文，TUI 只显示 header；删除竞态不使 Run 崩溃。 |
 | 真进程、PTY、网络、平台或发布资产 | L5 | 不适用说明 | Tool/Skill/Command catalog、prompt 与 router 均为进程内能力；不以 L5 替代 L1-L4。 |
 
 覆盖率信号以 `cargo llvm-cov --manifest-path agent/features/tools/Cargo.toml --all-targets --summary-only` 为准；补齐后 Tools regions/functions/lines 为 **62.34% / 67.93% / 65.63%**（审查前为 62.02% / 67.64% / 65.26%），仅作风险信号。完成条件是上述矩阵无未解释空白、适用 Guard/production reachability 与定向测试通过；#879/#947/MCP Ready 仍按各自 owner 跟踪。
@@ -738,6 +739,7 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-28 | #1438 将 Tool/Skill/Command 证据矩阵更新为 metadata/load、Context metadata directory、SkillRequest/SkillsUpdated 字段完整性与调用后正文隐藏交付 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
 | 2026-07-21 | #1060 最终复采并验收：#1299 已由 #1308 合入、#1298 已由 #1303 合入；L0 守卫、workspace tests、默认慢速矩阵（含 PTY）与 coverage 全部通过，#851 / #1060 已满足测试审查完成定义，等待用户确认关闭 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#851](https://github.com/rushsinging/aemeath/issues/851)、[#1299](https://github.com/rushsinging/aemeath/issues/1299)、[#1308](https://github.com/rushsinging/aemeath/pull/1308)、[#1303](https://github.com/rushsinging/aemeath/pull/1303) |
 | 2026-07-20 | #1060 调整慢速矩阵缺陷归属：#1298 移至 #1050，L5 PTY 直接验证保留为通过；#1060 仅由能力内测试缺口 #1299 阻断 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#1050](https://github.com/rushsinging/aemeath/issues/1050)、[#1298](https://github.com/rushsinging/aemeath/issues/1298)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
 | 2026-07-20 | #1060 初次 Memory / Reflection L0–L5 审查经独立复核后修正证据路径：`policy.rs` 无直接单元测试；same-Arc / Sub Disabled 正确证据在 `composition/src/memory.rs`；`for_complete_reflection` 零调用者与 Runtime 覆盖率风险均由 #1299 承接 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |

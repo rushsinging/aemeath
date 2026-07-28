@@ -25,7 +25,7 @@ Context Management 是 Agent Runtime 的"记忆中枢"——管理"喂给 LLM �
 2. **ContextPort OHS**：Context Management 通过 `ContextPort` 向 Runtime 开放六个方法（`build_window` / `needs_compaction` / `compact` / `manual_compact` / `clear_session` / `append_and_persist`）；Runtime 不接触 Session 内部结构。
 3. **Compact 五级管线**：L1 budget reduction 在 tool result 入 ChatChain 前限额；`build_window` 依次做 L2 snip / L3 microcompact / L4 context collapse 读模型变换；L5 auto-compact 才调用 LLM 并持久修改 ChatChain。编号与语义只以 [02-compact.md](02-compact.md) 为准；L5 的持久化增量摘要树、后台调度、恢复与 usage 以 [06-persistent-summary-tree.md](06-persistent-summary-tree.md) 为准。
 4. **Token Budget 单一真相**：所有 token 估算、effective context window 公式、auto-compact 阈值常量收口于此，**NEVER** 散落到 Runtime 或 Provider。
-5. **Prompt 组装内聚于 ContextPort**：系统提示组装是 async `build_window` 的内部步骤，由私有 `PromptPipeline` 完成。文件 Guidance 经 Context-owned `GuidanceSourcePort`，Skill 经供应方 `SkillMaterializationPort`；Prompt policy **NEVER** 直接读文件系统。
+5. **Prompt 组装内聚于 ContextPort**：系统提示组装是 async `build_window` 的内部步骤，由私有 `PromptPipeline` 完成。文件 Guidance 经 Context-owned `GuidanceSourcePort`，Skill 只经供应方 `SkillCatalogPort` 取得 metadata；Prompt policy **NEVER** 读取 Skill 正文或文件系统。
 6. **Memory 检索经供应方 OHS**：Memory BC 独占检索、scoring、ranking 与 semantic retrieval；Context 的 `memory_inject` integration 经 `MemoryPort` 获取已排序条目，只负责 SystemBlock render / placement、token budget 与跨轮去重。
 7. **跨 BC 快照组装**：Session 落盘时内嵌 Task / Project 快照（经端口收集，恢复时分发回去）——边界经端口，不共享内部结构。
 
@@ -64,7 +64,7 @@ agent/features/context/src/
 - `ContextPort` 是 Context-owned 入站 OHS，由 crate façade 发布，定义在 `ports/`；
 - Session 持久化策略在 domain/application 拥有不变量，技术实现经 `AtomicBlobSessionStore` 终止于 Storage OHS；旧 `session_storage.rs` writer 已退役；
 - `GuidanceSourcePort` 定义在 `ports/`，靠近 `application/build_window.rs` 消费策略，实现终止在 `adapters/guidance_source.rs`；
-- `MemoryPort`、`SkillMaterializationPort` 等供应方 OHS 消费签名定义在 `ports/`，integration 代码在 `adapters/`，**NEVER** 复制为 Context 同义 port；
+- `MemoryPort`、`SkillCatalogPort` 等供应方 OHS 消费签名定义在 `ports/`，integration 代码在 `adapters/`，**NEVER** 复制为 Context 同义 port；
 - 只有多个稳定 port 或 adapter 已需要独立导航时才 **MAY** 在层内展开子目录，**NEVER** 为对称预建。
 
 当前 **NEVER** 创建 crate-root `shared/`。现有跨层数据要么属于 `domain` 的 Published Language，要么已有明确 owner（Session、Token Budget、Prompt），要么来自其他 BC 的 Published Language；把它们抽到 `shared/` 会削弱所有权。
@@ -77,10 +77,10 @@ agent/features/context/src/
 |---|---|---|---|
 | `ContextPort` | Context-owned OHS（对外） | Agent Runtime | async `build_window` / `needs_compaction` / `compact` / `manual_compact` / `clear_session` / `append_and_persist` |
 | `GuidanceSourcePort` | Context-owned 出站 seam（私有消费） | PromptPipeline | async 物化 model / user guidance；隔离文件发现、canonical path、mtime cache 与 I/O |
-| `SkillMaterializationPort` | Skill-owned OHS（消费） | PromptPipeline | async 返回已物化 Skill 文档；Context 不读 Skill 文件 |
+| `SkillCatalogPort` | Skill-owned OHS（消费） | PromptPipeline | 返回无正文 SkillDescriptor；Context 渲染 metadata directory，不读 Skill 文件 |
 | `MemoryPort` | Memory-owned OHS（消费） | ContextPort backing implementation | 检索当前 active Memory 供 Context Window 注入 |
 
-> `PromptPipeline` 是私有具体 capability，不是第二个 OHS。只有 Guidance 文件 I/O 形成真实 volatile seam，才定义 `GuidanceSourcePort`；`MemoryPort` / `SkillMaterializationPort` 则由各供应 BC 发布。它们都不会经 `ContextPort` 暴露给 Runtime；Runtime 的 context_coordination 只依赖 `ContextPort`。
+> `PromptPipeline` 是私有具体 capability，不是第二个 OHS。只有 Guidance 文件 I/O 形成真实 volatile seam，才定义 `GuidanceSourcePort`；`MemoryPort` / `SkillCatalogPort` 则由各供应 BC 发布。它们都不会经 `ContextPort` 暴露给 Runtime；Runtime 的 context_coordination 只依赖 `ContextPort`。
 
 ## 5. ContextPort 六方法
 
@@ -88,7 +88,7 @@ Runtime 与 Context Management 的上下文交互经 6 个方法：
 
 | 方法 | 语义 | 内部步骤 |
 |---|---|---|
-| `build_window` | 构建本轮 Context Window | L2-L4 compact 读模型投影 → async Prompt/Skill 物化 → Memory → summary → 唯一 block 顺序；L1 已在 ToolResult 入链前完成 |
+| `build_window` | 构建本轮 Context Window | L2-L4 compact 读模型投影 → async Guidance + Skill metadata directory → Memory → summary → 唯一 block 顺序；L1 已在 ToolResult 入链前完成 |
 | `needs_compaction` | 是否需要压缩 | token budget 计算 → 返回 compaction urgency |
 | `compact` | 执行自动 L5 持久压缩 | 在稳定 Session backing 上按冻结 revision 生成并提交 Compact segment |
 | `manual_compact` | 执行 idle `/compact` | 绕过自动阈值，但仍复用 canonical backing、mutation gate 与 AtomicBlob writer |
@@ -154,6 +154,7 @@ Storage 提供原子写与损坏兜底**机制**，不拥有 Session 数据本�
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-28 | #1438 将 Context 的 Skill 消费收窄为 metadata-only SkillCatalogPort；完整正文只在 Skill Tool 调用后进入模型上下文 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
 | 2026-07-12 | 初稿：Context Management 模块入口、7 条核心决策、ContextPort OHS、四方法、跨 BC 快照组装 | #743 |
 | 2026-07-13 | 补代码落点章节（`agent/features/context` crate + prompt 合并 + 目录映射表） | #762 |
 | 2026-07-14 | 统一启动 / 运行期 resume 的跨 BC prepare-commit 协调与恢复后 Project identity 切换 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

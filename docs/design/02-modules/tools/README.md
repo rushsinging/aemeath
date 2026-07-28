@@ -6,15 +6,15 @@
 
 ## 1. 模块定位
 
-Tool、Skill、Slash Command 共享“向 Agent 暴露可发现能力”的业务语境，但执行机制不同：
+Tool、Skill、Slash Command 共享“向 Agent 暴露可发现能力”的业务语境；Skill 是唯一稳定 Tool 的特殊动态加载协议，用户 slash 则只表达请求或确定性应用命令：
 
 | 能力 | 发起者 | 核心语义 | 主要下游 |
 |---|---|---|---|
 | **Tool** | 模型 | 调用函数或外部能力，返回结构化 ToolOutcome | Agent Runtime |
-| **Skill** | 模型 / 配置 | 将可复用提示资产物化为 PromptFragment | Context Management |
-| **Slash Command** | 用户 | 注入 Prompt、查询 Snapshot 或调用应用命令 | 各目标 BC |
+| **Skill** | 模型 | 通过唯一 `Skill` Tool 按 identity 调用时加载可复用提示正文 | Agent Runtime / Context Management |
+| **Slash Command** | 用户 | 请求模型使用 Skill，或查询 Snapshot / 调用应用命令 | Agent Runtime / 各目标 BC |
 
-三者**不得**统一成 `Capability::execute()`：Tool 是函数调用，Skill 主要是 prompt 注入，Slash Command 可能直接查询或改变应用状态。模块级 facade 只负责命名空间与装配，不承载统一执行语义。
+三者不统一成新的 `Capability::execute()`：普通 Tool 与特殊 Skill Tool 共用正式 Catalog/Execution 协议，但 Skill 另有 metadata/load 端口；Slash Command 仍是用户入站路由，不是 Tool。模块级 facade 只负责命名空间与装配，不承载统一执行语义。
 
 ## 2. 核心决策
 
@@ -25,7 +25,7 @@ Tool、Skill、Slash Command 共享“向 Agent 暴露可发现能力”的业�
 5. **MCP 是 Tool Adapter**：不是独立 BC，也不与 Skill/Command 平级。
 6. **Runtime 拥有调用编排**：Policy、Hook、审批、timeout、并发、重试与结果写入 Run Step 均归 Runtime Tool Coordination。
 7. **Tool BC 守护局部不变量**：存在性、Scope、Profile、schema 与函数调用不能被调用方绕过。
-8. **Context Management 拥有 Context Window**：Skill 与 PromptInjection Command 只提供 PromptFragment，不直接改 System Prompt。
+8. **Context Management 拥有 Context Window**：只消费 Skill metadata directory；正文只在模型调用 Skill Tool 后通过正常 ToolOutcome 进入模型上下文。
 9. **Tool 身份保持最小化**：使用规范化 ToolName；稳定 ID、版本和重命名兼容属于 MCP 动态接线阶段的独立决策。
 
 ## 3. Target 物理目录
@@ -36,8 +36,8 @@ Tool、Skill、Command 与 MCP 的 Target 依赖方向是 Hexagonal + Clean（`d
 src/
 ├── lib.rs                    # 窄 façade
 ├── domain/                   # 领域策略、不变量、Published Language
-├── application/              # Tool execute / Skill materialize / Command route 用例
-├── ports/                    # Catalog / Execution / Materialization / Router 端口
+├── application/              # Tool execute / Skill load / Command route 用例
+├── ports/                    # Catalog / Execution / Skill Load / Router 端口
 └── adapters/
     └── mcp/                  # MCP ACL、transport、协议 DTO 与连接生命周期
 ```
@@ -50,10 +50,10 @@ src/
 |---|---|---|
 | `ToolCatalogPort` | Runtime | 返回当前 Scope/Profile 下的 ToolCatalogSnapshot；Runtime 每次 invocation 冻结一次模型 schema 投影并经 ContextRequest 传给 Context Management |
 | `ToolExecutionPort` | Runtime Tool Coordination | 校验并调用一个 Tool，返回 ToolOutcome |
-| `SkillCatalogPort` | Runtime / Context Management | 发现 SkillDescriptor |
-| `SkillMaterializationPort` | Context Management | async 物化当前可用 Skill，返回 PromptFragment 集合 + revision |
-| `CommandCatalogPort` | CLI / TUI / Server | 发现和补全 Slash Command |
-| `CommandRouterPort` | 交付层 | 路由 PromptInjection、SnapshotQuery、ApplicationControl |
+| `SkillCatalogPort` | Context Management / Runtime refresh coordinator | 发现无正文 SkillDescriptor，形成版本化全量 metadata snapshot |
+| `SkillLoadPort` | 唯一 Skill Tool | 调用时按 identity 加载单个 LoadedSkill |
+| `CommandCatalogPort` | CLI / TUI / Server | 发现和补全稳定的普通 Slash Command |
+| `CommandRouterPort` | 交付层 | 路由 SnapshotQuery、ApplicationControl；动态 SkillRequest 使用同 revision Skill route table |
 
 这些端口可由同一 BC facade 暴露，但不得返回内部 Registry、Tool 实例、MCP client 或 RuntimeContext。
 
@@ -65,7 +65,7 @@ Runtime 通过 `ToolCatalogPort` 获取模型可见 schemas，通过 `ToolExecut
 
 ### Context Management
 
-Context Management 通过 `SkillMaterializationPort` 或 PromptInjection Command 获取 PromptFragment，并独占注入位置、token budget、去重、缓存分段及与 guidance/memory/AGENTS.md 的顺序。
+Context Management 通过 `SkillCatalogPort` 获取无正文 descriptor，只负责 metadata directory 的注入位置、token budget、去重、缓存分段及与 guidance/memory/AGENTS.md 的顺序。完整正文由 LLM 调用唯一 Skill Tool 后，经正常 ToolOutcome 进入下一次模型上下文。
 
 ### Policy / Hook / Audit
 
@@ -109,6 +109,7 @@ MCP transport、JSON-RPC、认证和协议 DTO 是 Tool BC 的 adapter 私有实
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-28 | #1438 将 Skill 恢复为唯一特殊动态 Tool，目录只发 metadata，正文经 SkillLoadPort 调用时加载；SkillRequest 与普通 Command 分流 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
 | 2026-07-12 | 初稿：锁定三类能力边界、Tool 双端口、Scope/Profile 与 MCP 归属 | #787 |
 | 2026-07-16 | #972 v1：曾提议以私有 `capabilities/` 竖切组织 Tool、Skill、Command、MCP；该历史方案已被 v2 取代 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | #972 v2：确立 Hexagonal 默认，Target 改为 `domain ← application ← ports ← adapters`，MCP 归 `adapters/mcp/` | [#972](https://github.com/rushsinging/aemeath/issues/972) |

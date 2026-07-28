@@ -177,32 +177,31 @@ trait SkillCatalogPort: Send + Sync {
 }
 
 #[async_trait]
-trait SkillMaterializationPort: Send + Sync {
-    /// 为一次 Context Window 构建返回已物化、已验证的快照。
-    async fn materialize_available(
+trait SkillLoadPort: Send + Sync {
+    /// Skill Tool 调用时按 identity 读取单个正文。
+    async fn load(
         &self,
-        query: SkillMaterializationQuery,
-    ) -> Result<SkillMaterializationSnapshot, SkillError>;
-}
-
-struct SkillMaterializationSnapshot {
-    fragments: Vec<PromptFragment>,
-    revision: SkillMaterializationRevision,
+        query: SkillLoadQuery,
+    ) -> Result<LoadedSkill, SkillError>;
 }
 ```
 
-Skill Materializer 负责异步读取、解析与验证 Skill，输出带确定性内容 revision 的 PromptFragment 快照。Context Management 接收 Fragment 后决定注入位置、预算、去重、缓存分段和顺序。
+`SkillCatalogPort` 只发布廉价 descriptor。Composition 对稳定排序后的 name、description、identity aliases、slash command/aliases 与 argument hint 计算确定性 revision，形成 `SkillCatalogSnapshot { revision, skills, slash_routes }`；正文、source path 与内容 revision **NEVER** 参与 metadata revision。同一快照原子派生 route 和补全，合法空目录发布空快照，刷新失败则保留 last-known-good。
+
+`SkillLoadPort` 每次调用重新执行当前 workspace 下的发现、优先级、解析与能力过滤，只返回一个 `LoadedSkill`。它不缓存启动期正文，也不生成全量正文快照。所属 Run 的 extra dirs/tool names 保持冻结，workspace root 在调用时经 ToolExecutionContext 的 live `WorkspaceRead` 取得。
 
 文件系统 adapter 的入口契约：
 
-- 标准 Skill 只识别 `<skill-dir>/SKILL.md`；同目录其他 Markdown 是资源，不参与 Catalog、Materialization 或 revision；
+- 标准 Skill 只识别 `<skill-dir>/SKILL.md`；同目录其他 Markdown 是资源，不参与 Catalog、单 Skill Load 或 metadata revision；
 - package 只识别 `<package>/skills/<skill>/SKILL.md`，并应用 package namespace；
 - 子目录同时存在直接 `SKILL.md` 与 `skills/` 时，直接入口优先，`skills/` 按该 Skill 的资源处理；
 - 为兼容历史布局，只有 skills 根目录的直接 `*.md` 可继续作为扁平入口，禁止递归泛化；
 - 扁平兼容面由 Tools filesystem adapter 负责；退役前必须另立迁移 Issue，审计并迁移真实使用方；
 - 真实入口存在但读取、frontmatter 或 YAML 损坏时返回 typed `SkillError`，资源文件不进入 parser。
 
-Skill 不是 Tool，不走 ToolExecutionPort；Context Management 不直接读取 Skill 文件或依赖其 adapter。Skill 的稳定 identity（`SkillDescriptor.name` / `PromptFragment.stable_key`）与用户可输入的 Slash 名称是不同概念：package namespace 只保证 identity 唯一，**NEVER** 自动成为 Slash Command。只有 `SkillDescriptor.slash_command` 显式存在且符合 Command PL 名称规则时，Composition 才将其投影为 PromptInjection `CommandDescriptor`；不暴露 Slash 的 Skill 仍可被 agent 发现与物化，且不得阻断 Command Catalog bootstrap。
+Skill 是 Tool Catalog/Execution 中唯一稳定注册的特殊动态 Tool；具体 Skill 不各自注册 schema。其 input 精确为 `skill: string`，不包含业务参数、正文或 source。Skill Tool 调用时组合 live workspace root 与所属 Run 冻结的 dirs/tool names，经 `SkillLoadPort` 加载；成功正文进入正常 ToolOutcome，NotFound/ReadFailed/ParseFailed 返回 typed failure。
+
+Context Management 只消费 `SkillCatalogPort` 生成 metadata directory，不依赖 loader 或 filesystem adapter。Skill 的稳定 identity 与用户可输入的 Slash 名称是不同概念：package namespace 只保证 identity 唯一，**NEVER** 自动成为 Slash 入口。只有 descriptor 显式声明 slash name 时，`SkillCatalogSnapshot.slash_routes` 才发布 route；Runtime/SDK/TUI 以同 revision 完整快照原子替换 route/completion。用户 slash 输入产生 `SkillRequest`，Runtime 投影给 LLM，但不直接调用 Tool。
 
 ## 7. Slash Command 端口
 
@@ -217,7 +216,7 @@ trait CommandRouterPort: Send + Sync {
 }
 
 enum CommandRoute {
-    PromptInjection(PromptCommand),
+    SkillRequest(SkillRequestCommand),
     SnapshotQuery {
         target: SnapshotQueryTarget,
         command: SnapshotQueryCommand,
@@ -229,9 +228,9 @@ enum CommandRoute {
 }
 ```
 
-Router 只解析并选择机制，不统一执行三类命令，也不把各 BC 的结果折叠成通用基类。`ApplicationShell` 是封闭 target 中唯一的交付应用自身能力标识，仅用于 help、version、doctor、pending images、paste、exit 等不属于目标业务 BC 的命令；它 **NEVER** 包装 Runtime、Context、Memory、Config 等业务查询或状态变更：
+Router 只解析并选择 route，不统一执行三类请求，也不把各 BC 的结果折叠成通用基类。`ApplicationShell` 是封闭 target 中唯一的交付应用自身能力标识，仅用于 help、version、doctor、pending images、paste、exit 等不属于目标业务 BC 的命令；它 **NEVER** 包装 Runtime、Context、Memory、Config 等业务查询或状态变更：
 
-- PromptInjection handler 将 PromptCommand 物化为 PromptFragment，再交给 Context Management；
+- SkillRequest handler 只构造 canonical skill identity + raw reference arguments 的 SDK 入站事件；Runtime 将其投影为模型可见用户意图，LLM 决定是否调用 Skill Tool；
 - SnapshotQueryTarget 是封闭的目标 BC 标识；handler 依 target 调用对应 Query Port，并保留该 BC 的类型化 Published Snapshot；
 - ApplicationControlTarget 是封闭的目标 BC 标识；handler 依 target 调用对应 Application Command Port，并保留该 BC 的类型化 Outcome。
 
@@ -291,7 +290,9 @@ health check、自动重连、tool list changed、resource discovery 与 transpo
 Composition Root 负责：
 
 - 注册 built-in Tool adapter；
-- 根据 ConfigSnapshot 构造 Skill/Command catalog；
+- 根据 ConfigSnapshot 构造 Skill metadata/catalog/load backing 与普通 Command catalog；
+- 从同一个 SkillCatalogSnapshot 原子派生动态 Skill routes 和客户端 completion entries；
+- 将唯一 SkillLoadPort 注入稳定 Skill Tool，并将 SkillCatalogPort 分发给 Context 与刷新协调器；
 - 根据 RunSpec 构造 Registry Scope 和 Tool Profile；
 - 从当前 `CompositionWorkspaceScope` 的 Project wiring 取得 `WorkspaceRead` / `WorkspaceControl` 窄 view，并按 Tool 实例注入；scope / wiring **NEVER** 进入 Tool 类型，且 **NEVER** 预建通用 Workspace wrapper；
 - 为 Scope 注入其他资源端口；
@@ -331,6 +332,7 @@ Deny: agent/features/** production code and apps/**
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-28 | #1438 以按 identity 的 SkillLoadPort 替代全文 Materialization；唯一 Skill Tool 经 ToolExecutionPort 执行，SkillRequest 与同 revision route/completion 快照分流 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
 | 2026-07-12 | 初稿：双 Tool 端口、ExecutionScope、取消、Skill/Command 协作与 MCP 生命周期 | #787 |
 | 2026-07-21 | #914 删除 legacy-no-agent、历史 Registry gateway 与 SkillTool；现有 Tools Context 的 progress/plan adapter 物理收口明确由 #879 承接 | [#914](https://github.com/rushsinging/aemeath/issues/914) |
 | 2026-07-20 | 明确 Skill stable identity / identity aliases 与显式 Slash name / slash aliases 分离；package namespace Skill 默认不投影为 Slash Command，外部 Skill 元数据不得阻断 Command Catalog bootstrap | #1302 |
