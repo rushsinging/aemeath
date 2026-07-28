@@ -394,7 +394,7 @@ where
 
         let results = vec![
             agent
-                .execute_one_with_ctx(&effective_call, &streaming_ctx)
+                .execute_one_with_ctx(&effective_call, &streaming_ctx, step_id)
                 .await,
         ];
 
@@ -415,7 +415,11 @@ where
         results
     } else {
         // Non-Bash tools: execute without progress streaming.
-        vec![agent.execute_one_with_ctx(&effective_call, &tool_ctx).await]
+        vec![
+            agent
+                .execute_one_with_ctx(&effective_call, &tool_ctx, step_id)
+                .await,
+        ]
     };
 
     let workspace = agent.workspace_persist.snapshot();

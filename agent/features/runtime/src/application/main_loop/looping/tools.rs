@@ -108,15 +108,10 @@ where
         .filter(|prepared| prepared.call.name == "AskUserQuestion")
     {
         let call = &prepared.call;
-        let mut input = call.input.clone();
-        tools::strip_runtime_meta(&mut input);
-        let invocation =
-            tools::ToolInvocation::new(call.name.as_str(), input, agent.ctx.scope().clone())
-                .with_authorization(prepared.authorization);
-        match tool_execution
-            .execute(invocation, agent.ctx.cancellation().as_ref())
-            .await
-        {
+        let domain = agent
+            .execute_domain_with_ctx(call, &agent.ctx, prepared.authorization, step_id)
+            .await;
+        match domain {
             tools::ToolExecutionOutcome::Suspended(suspension) => {
                 let questions = match suspension {
                     ToolSuspension::UserInteraction(spec) => spec

@@ -144,22 +144,20 @@ impl Agent {
             .is_some_and(|d| d.is_concurrency_safe())
     }
 
-    async fn execute_call(
+    async fn execute_domain_call(
         &self,
         call: &ToolCall,
         ctx: &ToolExecutionContext,
         authorization: tools::AuthorizationContext,
-    ) -> ToolExecution {
+        step_id: &sdk::RunStepId,
+    ) -> ToolExecutionOutcome {
         if ctx.cancellation().is_cancelled() {
-            return ToolExecution::new(
-                call,
-                ToolOutcome::error("tool execution cancelled by user"),
-            );
+            return ToolExecutionOutcome::cancelled("tool execution cancelled by user");
         }
         let Some(context) = self.context.clone() else {
-            return ToolExecution::new(
-                call,
-                ToolOutcome::error("tool receipt context unavailable"),
+            return ToolExecutionOutcome::failure(
+                tools::ToolErrorKind::Internal,
+                "tool receipt context unavailable",
             );
         };
         let mut input = call.input.clone();
@@ -171,12 +169,12 @@ impl Agent {
             self.catalog.clone(),
             context,
         );
-        let domain = supervisor
+        supervisor
             .execute(SupervisedToolCall {
                 identity: context::domain::ToolCallIdentity {
                     session_id: self.session_id.clone(),
                     run_id: sdk::RunId::from_legacy_or_new(ctx.scope().run_id()),
-                    step_id: sdk::RunStepId::from_legacy_or_new(ctx.scope().run_id()),
+                    step_id: step_id.clone(),
                     runtime_call_id: call.id.to_string(),
                     provider_call_id: Some(call.provider_id.clone()),
                     tool_name: call.name.clone(),
@@ -191,7 +189,19 @@ impl Agent {
             .await
             .unwrap_or_else(|error| {
                 ToolExecutionOutcome::failure(tools::ToolErrorKind::Internal, error.to_string())
-            });
+            })
+    }
+
+    async fn execute_call(
+        &self,
+        call: &ToolCall,
+        ctx: &ToolExecutionContext,
+        authorization: tools::AuthorizationContext,
+        step_id: &sdk::RunStepId,
+    ) -> ToolExecution {
+        let domain = self
+            .execute_domain_call(call, ctx, authorization, step_id)
+            .await;
         ToolExecution::new(call, legacy_outcome(domain))
     }
 
@@ -206,12 +216,14 @@ impl Agent {
                 },
             )
             .collect::<Vec<_>>();
-        self.execute_prepared_tools(&prepared).await
+        self.execute_prepared_tools(&prepared, &sdk::RunStepId::new_v7())
+            .await
     }
 
     pub(crate) async fn execute_prepared_tools(
         &self,
         calls: &[crate::application::tool_coordination::PreparedToolCall],
+        step_id: &sdk::RunStepId,
     ) -> Vec<ToolExecution> {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_tool_concurrency));
         let sequential = Arc::new(tokio::sync::Mutex::new(()));
@@ -225,13 +237,15 @@ impl Agent {
                     let _permit = semaphore.acquire().await.expect("tool semaphore closed");
                     (
                         position,
-                        self.execute_call(call, &self.ctx, authorization).await,
+                        self.execute_call(call, &self.ctx, authorization, step_id)
+                            .await,
                     )
                 } else {
                     let _serial = sequential.lock().await;
                     (
                         position,
-                        self.execute_call(call, &self.ctx, authorization).await,
+                        self.execute_call(call, &self.ctx, authorization, step_id)
+                            .await,
                     )
                 }
             }
@@ -245,8 +259,21 @@ impl Agent {
         &self,
         call: &ToolCall,
         ctx: &ToolExecutionContext,
+        step_id: &sdk::RunStepId,
     ) -> ToolExecution {
-        self.execute_call(call, ctx, ctx.authorization()).await
+        self.execute_call(call, ctx, ctx.authorization(), step_id)
+            .await
+    }
+
+    pub(crate) async fn execute_domain_with_ctx(
+        &self,
+        call: &ToolCall,
+        ctx: &ToolExecutionContext,
+        authorization: tools::AuthorizationContext,
+        step_id: &sdk::RunStepId,
+    ) -> ToolExecutionOutcome {
+        self.execute_domain_call(call, ctx, authorization, step_id)
+            .await
     }
 
     pub async fn execute_tools_filtered(&self, calls: &[&ToolCall]) -> Vec<ToolExecution> {

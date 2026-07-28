@@ -622,7 +622,7 @@ impl<'a> SubAgentRun<'a> {
                     _ = cancellation.cancelled() => {
                         return Err(LoopEngineError::Cancelled);
                     }
-                    executed = self.agent.execute_prepared_tools(&executable) => executed,
+                    executed = self.agent.execute_prepared_tools(&executable, step_id) => executed,
                 };
                 results.append(&mut executed);
                 let results = crate::application::tool_coordination::restore_tool_call_order(
