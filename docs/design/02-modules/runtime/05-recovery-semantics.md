@@ -20,11 +20,12 @@ aemeath 是**人在环的交互式 CLI**，不是无人值守 workflow。崩溃�
 | **Session 对话历史**（ChatChain/ChatSegment）| RunStep 级快照 | 每个 RunStep 结束后落盘一次，供 `/resume` 恢复对话上下文 |
 | **Task 快照 / Workspace 上下文** | 内嵌 Session | 随 Session 落盘（跨 BC 快照组装，见 `../context-management/01-session.md`）|
 | **Run 聚合 / RunStatus 状态机** | 仅内存 | 崩溃即丢，从头开始 |
-| **RunStep 中间状态 / ToolCall 进行态** | 仅内存 | 不做 checkpoint |
+| **RunStep 中间状态 / ToolCall 执行 future** | 仅内存 | 不恢复 future、不自动重放；已接受 ToolCall 的 identity 与执行事实另以 Context-owned durable receipt ledger 保存 |
+| **已接受 ToolCall receipt ledger** | Session 内嵌事实 | 保存 Pending/Running/terminal receipt、未确认副作用与 unfinished identity；不构成可恢复 Run 状态机 |
 | **RuntimeContext（活资源）** | 仅运行时装配 | 崩溃后重新装配 |
 | **StuckGuard 计数** | 仅内存 | 重置 |
 
-**关键**：落盘的是**对话历史数据**（Context Management 的 Session），**不是** Run 的执行状态机。这与"单状态机内存态"完全自洽——持久化的是数据，不是状态机。
+**关键**：落盘的是**对话历史数据**以及已接受 ToolCall 的 durable receipt 事实（由 Context Management 拥有），**不是** Run 的执行状态机。Receipt 只用于保留调用 identity、已知状态和安全恢复投影；不恢复 future、不自动重放。这与“单状态机内存态”完全自洽——持久化的是数据事实，不是状态机。
 
 ## 3. 崩溃恢复流程
 
@@ -41,8 +42,9 @@ Context Management 加载最近 Session 快照（对话历史 + Task/Workspace �
 Loop Engine 从头跑：LLM 基于「已落盘对话历史 + 真实当前文件系统」重新决策
 ```
 
-- **不重放**未完成的 Run Step / ToolCall
-- **不恢复** AwaitingUser 暂停点（崩溃时若在 ask_user，重来时用户重新表达）
+- **不重放**未完成的 Run Step / ToolCall future
+- **不恢复** AwaitingUser 暂停点或任何可执行 future
+- **保留**已接受 ToolCall 的 durable receipt，并在恢复投影中明确表达未确认终止与可能副作用
 
 ## 4. 副作用一致性（崩溃后不保证 exactly-once）
 

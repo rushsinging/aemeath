@@ -60,6 +60,14 @@ O6 只有在 Runtime #874/#878 与 TUI 三个 issue 的退出证据全部附于�
 
 ## 2. Agent Runtime Current → Target
 
+### Issue #1440：Tool 硬 deadline 与 durable receipt
+
+| Current | Target | 责任与退出条件 |
+|---|---|---|
+| Runtime、Bash、Agent/MCP 路径分别解释 timeout；同步 Glob/文件工作可能阻塞 Tokio worker；已接受 ToolCall 只在 finalized Step 后进入 Session，强制 abort 可能丢失 call identity | Runtime 唯一 `ToolExecutionSupervisor` 计算 effective absolute deadline、协调用户取消与 grace，并把 cleanup 未确认诚实映射为 `CancellationUnconfirmed`；Context Management 拥有 durable `ToolCallReceipt` ledger，以同一 CanonicalSession/AtomicBlob 原子推进 `Pending → Running → terminal`。恢复只投影 provider-safe terminal result，不恢复或重放 future | Issue #1440。退出条件：Main/Sub/Agent/MCP/approval 所有生产入口仅经 supervisor；Glob/Read/Grep/Bash/外部调用具备可验证隔离或 cleanup confirmation；receipt mutation、Session schema 兼容、finalization/recovery、forced-abort 场景与生命周期日志测试通过；静态 guard 阻断新直调旁路；Storage 生产机制无须修改，除非 AtomicBlob contract 证明不足 |
+
+实施证据记录在 `docs/superpowers/plans/2026-07-28-issue-1440-tool-hard-timeout-persistence.md`；完成前必须同步 #1440 checklist、测试命令与未完成项的可验证理由。
+
 ### SDK Wire Schema 基线（#674）
 
 `packages/sdk` 保留 Runtime-owned 的进程内 `AgentClient`、`ChatStream`、Tokio channel 与本地 TUI 输入契约；它们不属于可传输 schema。#674 为纯值 Published Language 的 interaction、Run control、UUIDv7 identity、Config / Project / Session / Message / Workspace / Hook 快照与安全 reflection / resume-failure 视图建立 `schemars` 导出与提交产物 `packages/sdk/schema/wire-components.schema.json`。`ChatEvent` 整体、`ChatRequest`、`ChatStream`、bootstrap / update / session-lock、本地 TUI 输入、Tools-owned command DTO 与 Task-owned视图不纳入本产物：前者仍携带 channel / `Duration` 或运行时行为，后者各自有明确所有权或非远端稳定契约。`cargo run -p xtask -- sdk-wire-schema check` 校验产物新鲜度；该文档只含 JSON Schema `$defs`，**NEVER** 定义 OpenAPI `paths`、HTTP/WS endpoint、认证或 Server 传输协议。未来 Server 正式设计完成后，才可将这些 components 组装为 OpenAPI。

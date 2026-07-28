@@ -76,8 +76,8 @@ Runtime 拥有业务编排：
 3. 触发 PreTool Hook；
 4. 必要时请求用户审批；
 5. 按 ToolDescriptor 的 concurrency declaration 编排多个调用；
-6. 建立 cancellation 与 timeout；
-7. 调用 ToolExecutionPort；
+6. 建立 cancellation 与 effective deadline；由 Runtime-owned ToolExecutionSupervisor 统一计算最早 deadline、grace 与终态；
+7. 调用 ToolExecutionPort；Tools 只消费 CancellationSignal 并返回真实的 cleanup/cancellation capability 结果；
 8. 若并发结果包含一个或多个 `ToolOutcome::Suspended`，先收集全部 outcome，再按原始 RunStep 的稳定 ToolCallId / 调用顺序逐个映射为 Runtime-owned interaction request；Run 任一时刻只能有一个 PendingInteraction；
 9. 每个 reply / cancellation 收敛为对应 ToolCall 的最终 outcome 后才处理下一个 suspension；全部调用均终结后，Runtime 按原调用顺序触发 PostTool Hook、发布 Audit/Domain Event；
 10. 处理重试与失败策略；
@@ -147,11 +147,10 @@ trait CancellationSignal: Send + Sync {
 
 职责边界：
 
-- Runtime 决定 timeout 时长、超时后策略及父子 Run 传播；
-- timeout 到期时 Runtime 发出 cancellation，并结束对 Tool future 的等待；
-- Tool 协作停止子进程、网络请求或 MCP 调用；
-- ToolDescriptor 声明是否支持协作取消；
-- cancellation 不承载 timeout 或重试配置。
+- Runtime 决定 timeout/effective deadline、超时后策略及父子 Run 传播；统一入口是 ToolExecutionSupervisor；
+- deadline 到期时 Runtime 发出 cancellation，并在前台有界收敛；不得把 drop future 当作底层停止确认；
+- Tool 协作停止子进程、网络请求或 MCP 调用，并返回 cleanup confirmation；无法确认时由 Runtime 映射为 `CancellationUnconfirmed`；
+- ToolDescriptor 声明协作取消能力；cancellation 不承载 timeout 或重试配置。
 
 对无法协作取消且可能继续产生副作用的 Tool，Runtime 必须依据 Descriptor 限制并发并向用户明确风险。
 

@@ -31,7 +31,7 @@ Storage 是数据 BC 与物理介质之间的机制边界：
 6. **损坏不静默丢弃**：数据 BC 验证主值失败后可机械读取上一代，并显式请求 promote 或 quarantine；不得自动当作空数据继续。
 7. **路径安全覆盖竞态**：除 segment 词法校验外，文件 adapter 必须使用受约束目录句柄、no-follow/create-new 或等价机制，防止 symlink 与 TOCTOU 越出根目录。
 8. **业务策略不下沉**：阈值、preview、retention、级联删除、schema migration、compact/eviction 均留在拥有数据语义的 BC；Config 只提供静态默认值。
-9. **无 Run checkpoint**：Storage 不建设 durable Run、Model Invocation checkpoint 或未完成 ToolCall 自动重放。
+9. **不拥有 Run checkpoint**：Storage 不建设 durable Run、Model Invocation checkpoint 或未完成 ToolCall 自动重放；Context Management 可以使用 AtomicBlob 保存其拥有的 ToolCall receipt ledger。
 10. **多 writer 不丢更新**：dataset read 返回 opaque revision；commit 在同一跨进程锁内比较 expected revision，只有匹配时才进入 prepared。锁只提供串行执行，revision CAS 才证明两个先后获得锁的 writer 不会用陈旧快照覆盖新 generation。
 11. **事务损坏是独立 typed failure**：journal / primary / member digest 无法机械归入完整旧代或新代时返回 `StorageErrorKind::CorruptTransaction`，并携带 quarantine disposition；**NEVER** 降级为普通 `Io`、`NotFound` 或空 dataset。
 

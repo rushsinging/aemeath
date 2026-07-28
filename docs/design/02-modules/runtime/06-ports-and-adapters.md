@@ -96,6 +96,12 @@ enum InteractionCommandOutcome {
 
 ## 2. Runtime 消费的能力契约
 
+### ToolExecutionSupervisor：唯一执行监督入口（#1440）
+
+Main、Sub、Agent、MCP、AskUser suspension 与 approval continuation 的已接受 Tool 调用 **MUST** 经同一 Runtime-owned `ToolExecutionSupervisor`。Supervisor 取 descriptor、ExecutionScope、Run 与调用方约束中的最早 absolute deadline，在 durable Pending/Running receipt 成功后才推进执行和 UI 生命周期；deadline 或用户取消后触发 child cancellation，并只在 adapter/child/remote 明确确认 cleanup 后记录 `TimedOut`/`Cancelled`。无法确认时必须记录 `CancellationUnconfirmed`、possible side effects 与 unfinished identity，禁止把 future drop 伪装成已停止。
+
+`ToolExecutionPort` 仍只负责单次 Tools 调用正确性；Policy、Hook、审批、并发、deadline、grace、重入保护和 receipt mutation 都留在 Runtime/Context 边界。Supervisor 作为 RuntimeContext 的活契约由 `RuntimeContextFactory` 统一装配，**NEVER** 恢复 Main/Sub 两套构造或把 Context session backing 放进 Runtime。
+
 ### Main/Sub RunLoop adapter 策略边界（#1382）
 
 `RunLoopPort` 是 Loop Engine 消费的 application contract；`MainRunPort` 与 `SubAgentRun` 是该 contract 的两个 adapter。adapter 内部通过 `InputStrategy`、`EventStrategy`、`LlmStrategy`、`ToolStrategy` 四个窄策略面注入差异，策略实现归 `application/loop_engine/` 所有，不是跨 Feature Port，也不进入 Runtime crate façade。
