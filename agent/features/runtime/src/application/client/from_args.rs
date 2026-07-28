@@ -392,22 +392,7 @@ pub async fn from_args_with_workspace(
     let skill_query =
         tools::SkillQuery::new(cwd.clone(), snapshot.skills().dirs.clone(), available_tools);
     let descriptors = skill_catalog.list(skill_query);
-    let skills_map = descriptors
-        .into_iter()
-        .map(|descriptor| {
-            (
-                descriptor.name().to_string(),
-                sdk::SkillView {
-                    name: descriptor.name().to_string(),
-                    aliases: descriptor.aliases().to_vec(),
-                    slash_command: descriptor.slash_command().map(str::to_string),
-                    slash_aliases: descriptor.slash_aliases().to_vec(),
-                    description: descriptor.description().to_string(),
-                    argument_hint: descriptor.argument_hint().map(str::to_string),
-                },
-            )
-        })
-        .collect::<std::collections::HashMap<String, sdk::SkillView>>();
+    let initial_skill_snapshot = tools::SkillCatalogSnapshot::from_descriptors(descriptors);
     // #1327 承接 MCP Ready lifecycle / Catalog 同步；#1294 不保留 MCP manager 或
     // Tools 私有 CatalogExecutionWiring 接线。
 
@@ -515,7 +500,9 @@ pub async fn from_args_with_workspace(
         system_prompt_text,
         initial_git_context: prompt_parts.initial_git_context,
         user_context: prompt_parts.claude_md,
-        skills_map,
+        // ── Skills ──
+        skill_catalog: skill_catalog.clone(),
+        initial_skill_snapshot,
         memory_config,
         context_size,
         language: snapshot.language().to_string(),
@@ -815,7 +802,8 @@ mod tests {
             system_prompt_text: String::new(),
             initial_git_context: String::new(),
             user_context: String::new(),
-            skills_map: std::collections::HashMap::new(),
+            skill_catalog: tools::composition::wire_skills().catalog(),
+            initial_skill_snapshot: tools::SkillCatalogSnapshot::from_descriptors(Vec::new()),
             memory_config: share::config::MemoryConfig::default(),
             context_size: 200_000,
             language: "en".to_string(),
@@ -866,9 +854,8 @@ mod tests {
 
         // Shell has prompt bootstrap fields.
         let _system_blocks = &shell.system_blocks;
-        let _skills_map = &shell.skills_map;
+        let _initial_skill_snapshot = &shell.initial_skill_snapshot;
         let _initial_git = &shell.initial_git_context;
-
         // Shell has model switch fields.
         let _resolved_model = &shell.resolved_model;
         let _binding = shell.current_binding.read().unwrap().clone();

@@ -8,7 +8,9 @@ use crate::application::main_loop::looping::idle_lifecycle::{
     execute_set_thinking, idle_until_resume_or_shutdown, IdleResult,
 };
 use crate::application::main_loop::looping::input_gate::apply_gate;
-use crate::application::main_loop::looping::loop_phases::handle_turn_boundary_config;
+use crate::application::main_loop::looping::loop_phases::{
+    handle_turn_boundary_config, refresh_skill_catalog,
+};
 use crate::application::main_loop::looping::task_reminder::TaskReminderState;
 use crate::application::main_loop::looping::{
     ChatEventSink, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
@@ -78,10 +80,11 @@ where
             let provider_factory = shell.provider_factory.clone();
             let config_query_for_switch = shell.config_query.clone();
             let task_access = shell.runtime_context_factory.services().task.clone();
+            let skill_catalog = shell.skill_catalog.clone();
+            let mut skill_revision = shell.initial_skill_snapshot.revision.clone();
 
             let binding = shell.current_binding.read().unwrap().clone();
-            let reasoning = Arc::new(std::sync::Mutex::new(binding.requested_reasoning));
-            let mut context_size = shell.context_size;
+            let reasoning = Arc::new(std::sync::Mutex::new(binding.requested_reasoning));            let mut context_size = shell.context_size;
             let mut session_id = shell.session_id.clone();
             let mut messages = initial_messages;
             let mut initial_git_context = (!initial_git_context.is_empty())
@@ -523,10 +526,37 @@ where
                     &segment_id,
                 )
                 .await;
+                let available_tools = shell
+                    .runtime_context_factory
+                    .services()
+                    .tool_catalog
+                    .snapshot(
+                        &tools::RegistryScopeName::new("main"),
+                        &tools::ToolProfileName::new("main-full"),
+                    )
+                    .map(|snapshot| {
+                        snapshot
+                            .tools
+                            .iter()
+                            .map(|descriptor| descriptor.name.as_str().to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let skill_query = tools::SkillQuery::new(
+                    cwd.clone(),
+                    config_reader.committed_snapshot().skills().dirs.clone(),
+                    available_tools,
+                );
+                refresh_skill_catalog(
+                    &mut skill_revision,
+                    skill_catalog.as_ref(),
+                    skill_query,
+                    &sink,
+                )
+                .await;
                 let bound_main_run = match wiring.bind_main_run().await {
                     Ok(bound) => bound,
-                    Err(error) => {
-                        log::error!(target: crate::LOG_TARGET, "main run bind failed: {error}");
+                    Err(error) => {                        log::error!(target: crate::LOG_TARGET, "main run bind failed: {error}");
                         continue;
                     }
                 };

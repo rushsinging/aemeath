@@ -70,6 +70,43 @@ fn apply_ui_event(app: &mut App, event: super::event::UiEvent) {
     app.update(crate::tui::update::msg::TuiMsg::Ui(event), &tx, &spawn_refs);
 }
 
+#[tokio::test]
+async fn startup_skill_snapshot_routes_archify_before_runtime_refresh() {
+    let (mut app, _started_rx, _finish_tx) = app_with_blocking_reflection_client();
+    let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel();
+    app.chat.input_event_tx = Some(input_tx);
+    app.set_skill_snapshot(sdk::SkillsUpdatedEvent {
+        revision: "startup-r1".to_string(),
+        skills: vec![sdk::SkillView {
+            name: "archify".to_string(),
+            aliases: Vec::new(),
+            slash_command: Some("archify".to_string()),
+            slash_aliases: Vec::new(),
+            description: "Create diagrams".to_string(),
+            argument_hint: None,
+        }],
+        slash_routes: vec![sdk::SkillSlashRouteView {
+            skill: "archify".to_string(),
+            slash_command: "archify".to_string(),
+            aliases: Vec::new(),
+            argument_hint: None,
+        }],
+    });
+
+    let prompt = app
+        .handle_slash_command_with_events("/archify runtime flow", None)
+        .await;
+
+    assert!(prompt.is_none());
+    assert!(matches!(
+        input_rx.try_recv(),
+        Ok(sdk::ChatInputEvent::SkillRequest(request))
+            if request.skill == "archify"
+                && request.arguments == "runtime flow"
+                && request.raw_input == "/archify runtime flow"
+    ));
+}
+
 #[test]
 fn reflection_history_displays_safe_metadata_without_body() {
     let mut app = App::new(

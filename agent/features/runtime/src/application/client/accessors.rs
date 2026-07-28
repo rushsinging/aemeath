@@ -1,6 +1,5 @@
 //! AgentClientImpl / RuntimeHandle 结构体定义与公共访问器。
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::application::main_loop::ChatEventSinkHandle;
@@ -72,7 +71,8 @@ pub struct MainSessionShell {
     pub user_context: String,
 
     // ── Skills ──
-    pub skills_map: HashMap<String, sdk::SkillView>,
+    pub skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+    pub initial_skill_snapshot: tools::SkillCatalogSnapshot,
 
     // ── Config values ──
     pub memory_config: MemoryConfig,
@@ -237,7 +237,9 @@ impl AgentClientImpl {
             max_agent_concurrency: shell.max_agent_concurrency,
             agent_semaphore: shell.agent_semaphore.clone(),
             memory_config: super::mapping::memory_config_to_sdk(shell.memory_config.clone()),
-            skills_map: shell.skills_map.clone(),
+            skill_snapshot: super::mapping::skill_snapshot_to_sdk(
+                shell.initial_skill_snapshot.clone(),
+            ),
             hook_runner: services.hooks.clone(),
             session_reminders: Arc::new(std::sync::Mutex::new(tools::SessionReminders::new())),
             workspace_root: shell.cwd.clone(),

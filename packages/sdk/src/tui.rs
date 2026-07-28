@@ -168,7 +168,7 @@ pub struct TuiLaunchContext {
     pub cwd: PathBuf,
     pub model_display: String,
     pub memory_config: MemoryConfigView,
-    pub skills_map: std::collections::HashMap<String, SkillView>,
+    pub skill_snapshot: SkillsUpdatedEvent,
     pub initial_resume_id: Option<String>,
 }
 

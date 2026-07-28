@@ -86,8 +86,8 @@ pub(crate) async fn run_chat(args: Args) {
             ),
         );
         app.session.memory_config = bootstrap.memory_config;
+        app.set_skill_snapshot(bootstrap.skill_snapshot);
         app.set_commands(bootstrap.command_catalog, bootstrap.command_router);
-
         // 在 run() 之前设置启动上下文（替代 18 参数注入）
         app.status_bar.set_permission_mode(if bootstrap.allow_all {
             "AllowAll"

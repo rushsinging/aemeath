@@ -58,6 +58,36 @@ pub(crate) fn config_change_to_sdk(change: config::ConfigChangeSet) -> ConfigUpd
     }
 }
 
+pub(crate) fn skill_snapshot_to_sdk(
+    snapshot: tools::SkillCatalogSnapshot,
+) -> sdk::SkillsUpdatedEvent {
+    sdk::SkillsUpdatedEvent {
+        revision: snapshot.revision,
+        skills: snapshot
+            .skills
+            .into_iter()
+            .map(|skill| sdk::SkillView {
+                name: skill.name().to_string(),
+                aliases: skill.aliases().to_vec(),
+                slash_command: skill.slash_command().map(str::to_string),
+                slash_aliases: skill.slash_aliases().to_vec(),
+                description: skill.description().to_string(),
+                argument_hint: skill.argument_hint().map(str::to_string),
+            })
+            .collect(),
+        slash_routes: snapshot
+            .slash_routes
+            .into_iter()
+            .map(|route| sdk::SkillSlashRouteView {
+                skill: route.skill,
+                slash_command: route.slash_command,
+                aliases: route.aliases,
+                argument_hint: route.argument_hint,
+            })
+            .collect(),
+    }
+}
+
 pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> MemoryConfigView {
     MemoryConfigView {
         enabled: config.enabled,

@@ -1,9 +1,8 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use runtime::ProviderFactory;
-use sdk::{AgentClient, MemoryConfigView, SdkError, SkillView};
+use sdk::{AgentClient, MemoryConfigView, SdkError};
 
 use crate::runtime::{AgentArgs, AgentClientImpl};
 use logging::{LoggingOutputMode, LoggingSettings, UnifiedLogger};
@@ -23,7 +22,7 @@ pub struct AgentClientBootstrap {
     pub thinking: bool,
     pub config_view: sdk::ConfigView,
     pub memory_config: MemoryConfigView,
-    pub skills_map: HashMap<String, SkillView>,
+    pub skill_snapshot: sdk::SkillsUpdatedEvent,
     pub command_catalog: Arc<dyn sdk::CommandCatalogPort>,
     pub command_router: Arc<dyn sdk::CommandRouterPort>,
     pub user_agent: String,
@@ -314,7 +313,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         thinking,
         config_view,
         memory_config: launch.memory_config,
-        skills_map: launch.skills_map,
+        skill_snapshot: launch.skill_snapshot,
         command_catalog: command_wiring.catalog(),
         command_router: command_wiring.router(),
         user_agent,

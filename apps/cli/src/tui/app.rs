@@ -56,6 +56,38 @@ pub(crate) struct SkillCompletionCatalog {
 }
 
 impl SkillCompletionCatalog {
+    fn from_sdk(snapshot: sdk::SkillsUpdatedEvent) -> Self {
+        Self {
+            revision: snapshot.revision,
+            entries: snapshot
+                .skills
+                .into_iter()
+                .map(
+                    |skill| crate::tui::adapter::tui_runtime_event::TuiSkillView {
+                        name: skill.name,
+                        aliases: skill.aliases,
+                        slash_command: skill.slash_command,
+                        slash_aliases: skill.slash_aliases,
+                        description: skill.description,
+                        argument_hint: skill.argument_hint,
+                    },
+                )
+                .collect(),
+            slash_routes: snapshot
+                .slash_routes
+                .into_iter()
+                .map(
+                    |route| crate::tui::adapter::tui_runtime_event::TuiSkillSlashRoute {
+                        skill: route.skill,
+                        slash_command: route.slash_command,
+                        aliases: route.aliases,
+                        argument_hint: route.argument_hint,
+                    },
+                )
+                .collect(),
+        }
+    }
+
     fn resolve(&self, input: &str) -> Option<sdk::SkillRequestCommand> {
         let mut tokens = input.split_whitespace();
         let command = sdk::CommandName::new(tokens.next()?).ok()?;
@@ -222,6 +254,25 @@ impl App {
             agent_client: None,
             user_agent: composition::update::default_user_agent(),
         }
+    }
+
+    pub(crate) fn set_skill_snapshot(&mut self, snapshot: sdk::SkillsUpdatedEvent) {
+        let catalog = SkillCompletionCatalog::from_sdk(snapshot);
+        self.set_tui_skill_snapshot(catalog.revision, catalog.entries, catalog.slash_routes);
+    }
+
+    pub(crate) fn set_tui_skill_snapshot(
+        &mut self,
+        revision: String,
+        entries: Vec<crate::tui::adapter::tui_runtime_event::TuiSkillView>,
+        slash_routes: Vec<crate::tui::adapter::tui_runtime_event::TuiSkillSlashRoute>,
+    ) {
+        self.skill_completion_catalog = SkillCompletionCatalog {
+            revision,
+            entries,
+            slash_routes,
+        };
+        self.update_suggestions();
     }
 
     /// Check if Ctrl+C timeout has expired and restore status line.

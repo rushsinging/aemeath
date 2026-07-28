@@ -339,12 +339,7 @@ impl App {
                 skills,
                 slash_routes,
             } => {
-                self.skill_completion_catalog = super::SkillCompletionCatalog {
-                    revision: revision.clone(),
-                    entries: skills.clone(),
-                    slash_routes: slash_routes.clone(),
-                };
-                self.update_suggestions();
+                self.set_tui_skill_snapshot(revision.clone(), skills.clone(), slash_routes.clone());
             }
             TuiRuntimeEvent::UserMessagesAdopted { items, .. } => {
                 for item in items {
