@@ -42,11 +42,17 @@ impl ContextApplicationService {
             .await
             .map_err(ContextPortError::SessionRepository)?;
         #[cfg(test)]
-        crate::application::performance::record_snapshot(
-            snapshot.revision.get(),
-            snapshot.messages.len(),
-            snapshot_started.elapsed(),
-        );
+        {
+            let (snapshot_committed_steps, snapshot_shared_messages) =
+                snapshot.messages.shared_backing_metrics();
+            crate::application::performance::record_snapshot(
+                snapshot.revision.get(),
+                snapshot.messages.len(),
+                snapshot_committed_steps,
+                snapshot_shared_messages,
+                snapshot_started.elapsed(),
+            );
+        }
         #[cfg(test)]
         let messages_started = std::time::Instant::now();
         let messages = snapshot

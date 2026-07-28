@@ -168,6 +168,17 @@ impl ContextMessages {
         self.len == 0
     }
 
+    #[cfg(test)]
+    pub(crate) fn shared_backing_metrics(&self) -> (usize, usize) {
+        (
+            self.committed_steps.len(),
+            self.committed_steps
+                .iter()
+                .map(|messages| messages.len())
+                .sum(),
+        )
+    }
+
     pub fn with_pending(&self, pending: Vec<ContextMessage>) -> Self {
         let mut committed_steps = self.committed_steps.to_vec();
         if !self.pending.is_empty() {
