@@ -85,9 +85,29 @@ impl ToolExecutionSupervisor {
                 call.input_preview,
             ))
             .await?;
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "tool dispatch accepted: run_id={} step_id={} call_id={} tool={} index={}",
+            call.identity.run_id,
+            call.identity.step_id,
+            call.identity.runtime_call_id,
+            call.identity.tool_name,
+            call.identity.call_index,
+        );
         self.context
             .advance_tool_receipt(ToolReceiptMutation::running(call.identity.clone()))
             .await?;
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "tool execution started: run_id={} step_id={} call_id={} tool={} timeout_secs={} cancellation={:?}",
+            call.identity.run_id,
+            call.identity.step_id,
+            call.identity.runtime_call_id,
+            call.identity.tool_name,
+            descriptor.timeout_secs,
+            descriptor.cancellation,
+        );
+        let started = std::time::Instant::now();
 
         let effective_deadline = earliest_deadline(
             call.invocation.execution_scope.deadline(),
@@ -126,6 +146,30 @@ impl ToolExecutionSupervisor {
         };
 
         let terminal = terminal_receipt(&outcome);
+        let unconfirmed = matches!(outcome, PublishedToolOutcome::CancellationUnconfirmed(_));
+        if unconfirmed {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "tool cleanup unconfirmed: run_id={} step_id={} call_id={} tool={} elapsed_ms={} outcome={:?}",
+                call.identity.run_id,
+                call.identity.step_id,
+                call.identity.runtime_call_id,
+                call.identity.tool_name,
+                started.elapsed().as_millis(),
+                terminal.outcome,
+            );
+        } else {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "tool execution terminal: run_id={} step_id={} call_id={} tool={} elapsed_ms={} outcome={:?}",
+                call.identity.run_id,
+                call.identity.step_id,
+                call.identity.runtime_call_id,
+                call.identity.tool_name,
+                started.elapsed().as_millis(),
+                terminal.outcome,
+            );
+        }
         self.context
             .advance_tool_receipt(ToolReceiptMutation::terminal(call.identity, terminal))
             .await?;
