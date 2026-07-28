@@ -30,6 +30,21 @@
 
 加载触发：任何 bug 修复 / feature 实现 / PR 创建 / 发版 / Hook 阻断处理。
 
+### 2.1 运行时路径与日志调试
+
+- 默认运行时根目录为 `~/.agents/`；设置 `AEMEATH_AGENTS_DIR` 时，以下全局路径 **MUST** 相对该目录解析。
+- 全局配置文件：`~/.agents/aemeath.json`。
+- 日志目录：`~/.agents/logs/`。日志按 target 路由到多个文件；具体映射 **MUST** 以 `specs/logging.md` 的 `TargetCatalog` 为准，未注册 target 才写入 `aemeath.log`。
+- Session 文件目录：`~/.agents/sessions/`；session lock 位于 `~/.agents/sessions/{session_id}.lock`。
+- 日志级别由 `AEMEATH_LOG_LEVEL` 控制，替代旧 `RUST_LOG`；支持全局级别和 per-target directive：
+
+```bash
+AEMEATH_LOG_LEVEL=debug cargo run
+AEMEATH_LOG_LEVEL=aemeath:tui=debug,aemeath:agent:runtime=trace cargo run
+```
+
+完整配置优先级与环境变量规则见 `specs/config-compat.md`，Session 落盘规则见 `specs/storage.md`。
+
 ## 3. 渐进式披露（Progressive Disclosure）
 
 根指令（本文件）覆盖全仓库，始终适用。`specs/` 下的分片承载特定工作的 detailed 规则。**开始工作前**先加载匹配的分片，再动手。

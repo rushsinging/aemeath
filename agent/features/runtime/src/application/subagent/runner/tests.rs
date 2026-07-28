@@ -5,8 +5,7 @@ use crate::application::loop_engine::llm_log::{
     build_llm_output_log, build_named_tool_result_log, build_tool_call_log, build_tool_result_log,
 };
 use crate::application::testing::{
-    advance_until_retry_condition, empty_completion, successful_completion,
-    ScriptedInvocationProvider, RETRY_ADVANCE_LIMITS,
+    empty_completion, successful_completion, ScriptedInvocationProvider, RETRY_ADVANCE_LIMITS,
 };
 use ::logging as scoped_logging;
 use async_trait::async_trait;
@@ -1349,12 +1348,9 @@ async fn sub_empty_completion_retries_and_succeeds() {
             .await
     });
 
-    advance_until_retry_condition(
-        "second provider attempt",
-        std::time::Duration::from_secs(11),
-        || provider.calls() == 2,
-    )
-    .await;
+    provider
+        .wait_for_calls(2, std::time::Duration::from_secs(11))
+        .await;
     let result = run.await.unwrap();
 
     assert_eq!(provider.calls(), 2);
@@ -1394,11 +1390,9 @@ async fn sub_empty_completion_exhaustion_is_typed_failure() {
     });
 
     for (retry_index, virtual_time_limit) in RETRY_ADVANCE_LIMITS.into_iter().enumerate() {
-        let expected_calls = retry_index + 2;
-        advance_until_retry_condition("next empty completion retry", virtual_time_limit, || {
-            provider.calls() == expected_calls
-        })
-        .await;
+        provider
+            .wait_for_calls(retry_index + 2, virtual_time_limit)
+            .await;
     }
     let result = run.await.unwrap();
 
