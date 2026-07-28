@@ -90,11 +90,6 @@ pub(crate) async fn run_chat(args: Args) {
         app.set_commands(bootstrap.command_catalog, bootstrap.command_router);
 
         // 在 run() 之前设置启动上下文（替代 18 参数注入）
-        app.status_bar.set_permission_mode(if bootstrap.allow_all {
-            "AllowAll"
-        } else {
-            "AskMe"
-        });
         app.apply_agent_intent(
             crate::tui::update::intent::AgentIntent::RuntimePresentation(
                 crate::tui::model::runtime_presentation::RuntimePresentationIntent::ContextSize(

@@ -16,7 +16,7 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 pub use status_bar_format::WorktreeKind;
-use status_bar_format::{context_row_text, StatusLineContext};
+use status_bar_format::{context_row_text, StatusLineContext, FIELD_SEPARATOR};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StatusBarRow {
@@ -36,7 +36,7 @@ pub struct StatusBar {
 #[derive(Clone, Copy)]
 enum RuntimeSegmentStyle {
     Model,
-    Border,
+    Separator,
     Status(StatusNoticeViewKind),
     Muted,
     ContextPct(u64),
@@ -65,16 +65,6 @@ impl StatusBar {
         self.render(area, buf, selection, view);
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_permission_mode_for_test(&mut self, mode: impl Into<String>) {
-        self.context.permission_mode = mode.into();
-    }
-
-    /// Set permission mode text for the status context.
-    pub fn set_permission_mode(&mut self, mode: impl Into<String>) {
-        self.context.permission_mode = mode.into();
-    }
-
     fn context_for_view(&self, view: &StatusViewModel) -> StatusLineContext {
         let runtime = &view.runtime;
         let mut context = self.context.clone();
@@ -85,6 +75,7 @@ impl StatusBar {
             StatusWorktreeKind::Main => WorktreeKind::Main,
         };
         context.branch = runtime.context.branch.clone();
+        context.permission_mode = runtime.context.permission_mode.clone();
         context.session_id = runtime.session_id.clone();
         context
     }
@@ -124,17 +115,18 @@ impl StatusBar {
         }
 
         let base = Style::default().bg(theme::STATUS_BG);
+        buf.set_style(area, base);
         let runtime_area = Rect { height: 1, ..area };
         // Default status selection points at Runtime, but an empty view_state short-circuits in
         // spans_with_selection(), so no highlight is applied unless a real range exists.
-        let runtime_line = if selection.selection_row == StatusBarRow::Runtime {
+        let runtime_line = if selection.selection_row == StatusBarRow::Runtime
+            && selection.selection_range().is_some()
+        {
             self.runtime_row_spans_with_selection(selection, base, view)
         } else {
             self.runtime_row_spans(view)
         };
-        Paragraph::new(Line::from(runtime_line))
-            .style(base)
-            .render(runtime_area, buf);
+        Paragraph::new(Line::from(runtime_line)).render(runtime_area, buf);
 
         if area.height >= 2 {
             let context_area = Rect {
@@ -143,9 +135,7 @@ impl StatusBar {
                 ..area
             };
             let context_line = self.context_row_spans(area.width as usize, base, selection, view);
-            Paragraph::new(Line::from(context_line))
-                .style(base)
-                .render(context_area, buf);
+            Paragraph::new(Line::from(context_line)).render(context_area, buf);
         }
     }
 
@@ -153,41 +143,38 @@ impl StatusBar {
         let vm = &view.runtime;
         let mut segments = Vec::new();
         segments.push((
-            format!(" {} ", view.notice.text),
+            view.notice.text.clone(),
             RuntimeSegmentStyle::Status(view.notice.kind),
         ));
         if let Some(ref model) = vm.model {
-            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
-            segments.push((format!(" {} ", model), RuntimeSegmentStyle::Model));
+            segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
+            segments.push((model.clone(), RuntimeSegmentStyle::Model));
         }
-        segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
+        segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
         segments.push((
-            format!(" in {} ", sdk::format_tokens(vm.input_tokens)),
+            format!("in {}", sdk::format_tokens(vm.input_tokens)),
             RuntimeSegmentStyle::Muted,
         ));
-        segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
+        segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
         segments.push((
-            format!(" out {} ", sdk::format_tokens(vm.output_tokens)),
+            format!("out {}", sdk::format_tokens(vm.output_tokens)),
             RuntimeSegmentStyle::Muted,
         ));
         if vm.tps > 0.0 {
-            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
-            segments.push((format!(" {:.0} t/s ", vm.tps), RuntimeSegmentStyle::Muted));
+            segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
+            segments.push((format!("{:.0} t/s", vm.tps), RuntimeSegmentStyle::Muted));
         }
         if vm.context_size > 0 {
             let pct = self.context_pct(vm);
-            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
+            segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
             segments.push((
-                format!(" ctx {}% ", pct),
+                format!("ctx {}%", pct),
                 RuntimeSegmentStyle::ContextPct(pct),
             ));
         }
         if vm.api_calls > 0 {
-            segments.push(("│".to_string(), RuntimeSegmentStyle::Border));
-            segments.push((
-                format!(" api {} ", vm.api_calls),
-                RuntimeSegmentStyle::Muted,
-            ));
+            segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
+            segments.push((format!("api {}", vm.api_calls), RuntimeSegmentStyle::Muted));
         }
         segments
     }
@@ -205,9 +192,12 @@ impl StatusBar {
             RuntimeSegmentStyle::Model => Style::default()
                 .fg(theme::ACCENT)
                 .add_modifier(Modifier::BOLD),
-            RuntimeSegmentStyle::Border => Style::default().fg(theme::BORDER),
+            RuntimeSegmentStyle::Separator => Style::default().fg(theme::BORDER),
             RuntimeSegmentStyle::Status(StatusNoticeViewKind::Normal) => {
                 Style::default().fg(theme::TEXT)
+            }
+            RuntimeSegmentStyle::Status(StatusNoticeViewKind::Running) => {
+                Style::default().fg(theme::TOOL_RUNNING)
             }
             RuntimeSegmentStyle::Status(StatusNoticeViewKind::Success) => {
                 Style::default().fg(theme::SUCCESS)
@@ -242,11 +232,14 @@ impl StatusBar {
         if selection.selection_row == StatusBarRow::Context {
             return self.spans_with_selection(text, base, selection);
         }
-        let parts: Vec<&str> = text.split(" │ ").collect();
+        let parts: Vec<&str> = text.split(FIELD_SEPARATOR).collect();
         let mut spans = Vec::new();
         for (index, part) in parts.iter().enumerate() {
             if index > 0 {
-                spans.push(Span::styled(" │ ", Style::default().fg(theme::BORDER)));
+                spans.push(Span::styled(
+                    FIELD_SEPARATOR,
+                    Style::default().fg(theme::BORDER),
+                ));
             }
             let style = if index == 0 {
                 Style::default()

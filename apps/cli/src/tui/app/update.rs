@@ -370,6 +370,14 @@ impl App {
             }
             TuiRuntimeEvent::ConfigChanged { view, .. }
             | TuiRuntimeEvent::ConfigReloaded { view, .. } => {
+                self.config_view.model_name = view.model_name.clone();
+                self.config_view.provider = view.provider.clone();
+                self.config_view.has_api_key = view.has_api_key;
+                self.config_view.permission_mode = view.permission_mode.clone();
+                self.config_view.markdown = view.markdown;
+                self.config_view.verbose = view.verbose;
+                self.config_view.context_size = view.context_size;
+                self.config_view.logging_level = view.logging_level.clone();
                 self.config_view.markdown_spacing = match view.markdown_spacing.mode() {
                     crate::tui::render::output::spacing::MarkdownSpacingMode::Normal => {
                         sdk::MarkdownSpacingModeView::Normal
@@ -749,6 +757,7 @@ impl App {
             &self.model.workspace_provider,
             Some(&self.model.session),
             &self.model.diagnostic,
+            &self.config_view.permission_mode,
         )
     }
 

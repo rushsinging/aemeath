@@ -171,7 +171,7 @@ impl RuntimeState {
     pub(crate) fn notice_from_phase(phase: Option<&str>) -> StatusNotice {
         match phase {
             None | Some("idle") => StatusNotice::success("Ready"),
-            Some(p) => StatusNotice::normal(p.to_string()),
+            Some(p) => StatusNotice::running(p.to_string()),
         }
     }
 
@@ -283,3 +283,7 @@ impl RuntimeState {
         self.start_compact();
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_state_tests.rs"]
+mod tests;

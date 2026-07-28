@@ -31,6 +31,7 @@ fn status_view(
                 workspace_root: workspace_root.to_string(),
                 branch: Some(branch.to_string()),
                 kind,
+                permission_mode: "Ask".to_string(),
             },
             ..StatusRuntimeViewModel::default()
         },
@@ -77,21 +78,21 @@ fn test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session()
 
 #[test]
 fn test_context_row_uses_real_path_not_ctx_label_when_paths_match() {
-    let mut bar = StatusBar::new();
-    let view = status_view(
+    let bar = StatusBar::new();
+    let mut view = status_view(
         "~/Nextcloud/work/claudecode/aemeath",
         "~/Nextcloud/work/claudecode/aemeath",
         StatusWorktreeKind::Main,
         "main",
         Some("019-session-full"),
     );
-    bar.set_permission_mode("AskMe");
+    view.runtime.context.permission_mode = "AskMe".to_string();
 
     let row = bar.context_row_text_for_view(120, &view);
 
     assert_eq!(
         row,
-        "~/Nextcloud/work/claudecode/aemeath │ main │ AskMe │ session 019-session-full"
+        "~/Nextcloud/work/claudecode/aemeath  main  AskMe  session 019-session-full"
     );
     assert!(!row.contains("ctx "));
     assert!(!row.contains("root "));
@@ -100,35 +101,36 @@ fn test_context_row_uses_real_path_not_ctx_label_when_paths_match() {
 
 #[test]
 fn test_context_row_no_root_field_when_paths_differ() {
-    let mut bar = StatusBar::new();
-    let view = status_view(
+    let bar = StatusBar::new();
+    let mut view = status_view(
         "~/Nextcloud/work/claudecode/aemeath/cli",
         "~/Nextcloud/work/claudecode/aemeath",
         StatusWorktreeKind::Main,
         "main",
         Some("019-session-full"),
     );
-    bar.set_permission_mode("AskMe");
+    view.runtime.context.permission_mode = "AskMe".to_string();
 
     let row = bar.context_row_text_for_view(140, &view);
 
     assert!(row.contains("~/Nextcloud/work/claudecode/aemeath/cli"));
     assert!(!row.contains("root "));
-    assert!(row.contains(" │ main │ AskMe"));
+    assert!(row.contains("  main  AskMe"));
+    assert!(!row.contains('│'));
     assert!(row.contains("session 019-session-full"));
 }
 
 #[test]
 fn test_context_row_worktree_uses_worktree_branch_label() {
-    let mut bar = StatusBar::new();
-    let view = status_view(
+    let bar = StatusBar::new();
+    let mut view = status_view(
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
         StatusWorktreeKind::Worktree,
         "redesign/46-status-line-v2",
         Some("019-session-full"),
     );
-    bar.set_permission_mode("AskMe");
+    view.runtime.context.permission_mode = "AskMe".to_string();
 
     let row = bar.context_row_text_for_view(140, &view);
 
@@ -140,15 +142,15 @@ fn test_context_row_worktree_uses_worktree_branch_label() {
 
 #[test]
 fn test_context_row_narrow_preserves_path_permission_and_session() {
-    let mut bar = StatusBar::new();
-    let view = status_view(
+    let bar = StatusBar::new();
+    let mut view = status_view(
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2/cli/src/tui",
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
         StatusWorktreeKind::Worktree,
         "redesign/46-status-line-v2",
         Some("019-session-full"),
     );
-    bar.set_permission_mode("AllowAll");
+    view.runtime.context.permission_mode = "AllowAll".to_string();
 
     let row = bar.context_row_text_for_view(72, &view);
 
@@ -159,15 +161,15 @@ fn test_context_row_narrow_preserves_path_permission_and_session() {
 
 #[test]
 fn test_context_row_renders_path_git_permission_and_session_with_distinct_colors() {
-    let mut bar = StatusBar::new();
-    let view = status_view(
+    let bar = StatusBar::new();
+    let mut view = status_view(
         "~/Nextcloud/work/claudecode/aemeath",
         "~/Nextcloud/work/claudecode/aemeath",
         StatusWorktreeKind::Main,
         "main",
         Some("019-session-full"),
     );
-    bar.set_permission_mode("AskMe");
+    view.runtime.context.permission_mode = "AskMe".to_string();
     let area = Rect::new(0, 0, 120, 2);
     let mut buf = Buffer::empty(area);
 
@@ -185,15 +187,15 @@ fn test_context_row_renders_path_git_permission_and_session_with_distinct_colors
 
 #[test]
 fn test_context_row_narrow_keeps_path_prefix_without_invalid_splice() {
-    let mut bar = StatusBar::new();
-    let view = status_view(
+    let bar = StatusBar::new();
+    let mut view = status_view(
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2/cli/src/tui",
         "~/Nextcloud/work/claudecode/aemeath/.worktrees/redesign-46-status-line-v2",
         StatusWorktreeKind::Worktree,
         "redesign/46-status-line-v2",
         Some("019-session-full"),
     );
-    bar.set_permission_mode("AllowAll");
+    view.runtime.context.permission_mode = "AllowAll".to_string();
 
     let row = bar.context_row_text_for_view(72, &view);
 
@@ -205,15 +207,15 @@ fn test_context_row_narrow_keeps_path_prefix_without_invalid_splice() {
 
 #[test]
 fn test_context_row_cjk_path_uses_display_width_budget() {
-    let mut bar = StatusBar::new();
-    let view = status_view(
+    let bar = StatusBar::new();
+    let mut view = status_view(
         "~/项目/状态栏/aemeath",
         "~/项目/状态栏/aemeath",
         StatusWorktreeKind::Main,
         "main",
         Some("019-session-full"),
     );
-    bar.set_permission_mode("AskMe");
+    view.runtime.context.permission_mode = "AskMe".to_string();
 
     let row = bar.context_row_text_for_view(40, &view);
 
@@ -228,15 +230,15 @@ fn test_context_row_cjk_path_uses_display_width_budget() {
 
 #[test]
 fn test_context_row_without_session_uses_correct_semantic_colors() {
-    let mut bar = StatusBar::new();
-    let view = status_view(
+    let bar = StatusBar::new();
+    let mut view = status_view(
         "~/aemeath",
         "~/aemeath",
         StatusWorktreeKind::Main,
         "main",
         None,
     );
-    bar.set_permission_mode("AskMe");
+    view.runtime.context.permission_mode = "AskMe".to_string();
     let area = Rect::new(0, 0, 80, 2);
     let mut buf = Buffer::empty(area);
 
@@ -249,15 +251,15 @@ fn test_context_row_without_session_uses_correct_semantic_colors() {
 
 #[test]
 fn test_context_row_without_session_paths_differ_uses_correct_semantic_colors() {
-    let mut bar = StatusBar::new();
-    let view = status_view(
+    let bar = StatusBar::new();
+    let mut view = status_view(
         "~/aemeath/cli",
         "~/aemeath",
         StatusWorktreeKind::Main,
         "main",
         None,
     );
-    bar.set_permission_mode("AskMe");
+    view.runtime.context.permission_mode = "AskMe".to_string();
     let area = Rect::new(0, 0, 80, 2);
     let mut buf = Buffer::empty(area);
 
@@ -265,7 +267,12 @@ fn test_context_row_without_session_paths_differ_uses_correct_semantic_colors() 
 
     assert_eq!(buf.cell((0, 1)).unwrap().style().fg, Some(theme::ACCENT));
     assert_eq!(buf.cell((17, 1)).unwrap().style().fg, Some(theme::SUCCESS));
-    assert_eq!(buf.cell((26, 1)).unwrap().style().fg, Some(theme::WARNING));
+    let row = bar.context_row_text_for_view(area.width as usize, &view);
+    let permission_col = row.find("AskMe").expect("permission field") as u16;
+    assert_eq!(
+        buf.cell((permission_col, 1)).unwrap().style().fg,
+        Some(theme::WARNING)
+    );
 }
 
 #[test]
