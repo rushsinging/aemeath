@@ -398,6 +398,109 @@ impl TaskStoreState {
         ))
     }
 
+    pub fn replace_dependencies(
+        &mut self,
+        task_id: TaskId,
+        mut blocked_by_ids: Vec<TaskId>,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+        let task = self
+            .tasks
+            .get(&task_id)
+            .filter(|task| task.status() != TaskStatus::Deleted)
+            .ok_or(TaskCommandError::TaskNotFound { id: task_id })?;
+        let batch = task.batch();
+        let current = task.blocked_by().to_vec();
+
+        blocked_by_ids.sort_unstable();
+        for pair in blocked_by_ids.windows(2) {
+            if pair[0] == pair[1] {
+                return Err(TaskCommandError::DuplicateDependency {
+                    task_id,
+                    blocked_by_id: pair[0],
+                });
+            }
+        }
+        for blocked_by_id in &blocked_by_ids {
+            let blocker = self
+                .tasks
+                .get(blocked_by_id)
+                .filter(|task| task.status() != TaskStatus::Deleted)
+                .ok_or(TaskCommandError::TaskNotFound { id: *blocked_by_id })?;
+            if blocker.batch() != batch {
+                return Err(TaskCommandError::CrossBatchDependency {
+                    task_id,
+                    blocked_by_id: *blocked_by_id,
+                });
+            }
+        }
+        if current == blocked_by_ids {
+            return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+        }
+
+        let mut dry_run = self.clone();
+        dry_run.revision = TaskRevision::new(0);
+        for blocked_by_id in &current {
+            dry_run.remove_dependency(task_id, *blocked_by_id, updated_at)?;
+        }
+        for blocked_by_id in &blocked_by_ids {
+            dry_run.add_dependency(task_id, *blocked_by_id, updated_at)?;
+        }
+
+        let revision = self.reserve_revision()?;
+        let removed = current
+            .iter()
+            .copied()
+            .filter(|id| !blocked_by_ids.contains(id))
+            .collect::<Vec<_>>();
+        let added = blocked_by_ids
+            .iter()
+            .copied()
+            .filter(|id| !current.contains(id))
+            .collect::<Vec<_>>();
+        for blocked_by_id in &removed {
+            self.tasks
+                .get_mut(&task_id)
+                .expect("validated task must exist")
+                .remove_blocked_by(*blocked_by_id, updated_at);
+            self.tasks
+                .get_mut(blocked_by_id)
+                .expect("validated blocker must exist")
+                .remove_blocks(task_id, updated_at);
+        }
+        for blocked_by_id in &added {
+            self.tasks
+                .get_mut(&task_id)
+                .expect("validated task must exist")
+                .add_blocked_by(*blocked_by_id, updated_at);
+            self.tasks
+                .get_mut(blocked_by_id)
+                .expect("validated blocker must exist")
+                .add_blocks(task_id, updated_at);
+        }
+        let snapshot = self
+            .tasks
+            .get(&task_id)
+            .expect("validated task must exist")
+            .clone();
+        let events = removed
+            .into_iter()
+            .map(|blocked_by_id| TaskEvent::TaskDependencyRemoved {
+                task_id,
+                blocked_by_id,
+            })
+            .chain(
+                added
+                    .into_iter()
+                    .map(|blocked_by_id| TaskEvent::TaskDependencyAdded {
+                        task_id,
+                        blocked_by_id,
+                    }),
+            )
+            .collect();
+        Ok(self.commit(TaskCommandResult::uncommitted(snapshot, events), revision))
+    }
+
     pub fn remove_dependency(
         &mut self,
         task_id: TaskId,

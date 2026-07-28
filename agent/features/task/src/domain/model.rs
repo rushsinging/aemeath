@@ -138,6 +138,11 @@ pub enum TaskCommandError {
         task_id: TaskId,
         blocked_by_id: TaskId,
     },
+    #[error("任务 {task_id} 的依赖列表包含重复任务：{blocked_by_id}")]
+    DuplicateDependency {
+        task_id: TaskId,
+        blocked_by_id: TaskId,
+    },
     #[error("任务 {id} 被前置任务阻塞：{blocked_by:?}")]
     TaskBlocked { id: TaskId, blocked_by: Vec<TaskId> },
     #[error("批次 {active} 已经 active，不能恢复批次 {requested}")]

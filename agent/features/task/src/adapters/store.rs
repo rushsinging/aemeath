@@ -166,6 +166,16 @@ impl TaskAccess for TaskStore {
             .add_dependency(task_id, blocked_by_id, updated_at)
     }
 
+    fn replace_dependencies(
+        &self,
+        task_id: TaskId,
+        blocked_by_ids: Vec<TaskId>,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+        self.lock()
+            .replace_dependencies(task_id, blocked_by_ids, updated_at)
+    }
+
     fn remove_dependency(
         &self,
         task_id: TaskId,

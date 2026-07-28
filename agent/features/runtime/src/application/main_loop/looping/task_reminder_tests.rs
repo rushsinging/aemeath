@@ -18,6 +18,7 @@ fn every_task_mutation_tool_updates_observed_turn() {
     for tool_name in [
         "TaskCreate",
         "TaskUpdate",
+        "TaskBlockBy",
         "TaskStop",
         "TaskListCreate",
         "TaskListComplete",

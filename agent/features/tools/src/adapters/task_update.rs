@@ -58,7 +58,7 @@ impl TypedTool for TaskUpdateTool {
         "TaskUpdate"
     }
     fn description(&self) -> &str {
-        "Update a single field on a task. Valid keys: status, subject, description, priority, blocked_by_id."
+        "Update a single field on a task. Valid keys: status, subject, description, priority."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::task::task_update(lang))
@@ -104,7 +104,9 @@ impl TypedTool for TaskUpdateTool {
         let result = match args.key.as_str() {
             "status" => match value {
                 "pending" => self.access.transition(id, TaskStatus::Pending, timestamp),
-                "in_progress" => self.access.transition(id, TaskStatus::InProgress, timestamp),
+                "in_progress" => self
+                    .access
+                    .transition(id, TaskStatus::InProgress, timestamp),
                 // Task BC supports Pending -> Completed as one atomic transition/commit.
                 "completed" => self.access.transition(id, TaskStatus::Completed, timestamp),
                 "deleted" => self.access.delete(id, timestamp),
@@ -119,20 +121,13 @@ impl TypedTool for TaskUpdateTool {
                 };
                 self.access.set_priority(id, priority, timestamp)
             }
-            "blocked_by_id" => {
-                let dependency = match current_task_id(
-                    self.access.as_ref(),
-                    value,
-                    "blocked_by_id",
-                ) {                    Ok(id) => id,
-                    Err(error) => return TypedToolResult::error(error),
-                };
-                self.access.add_dependency(id, dependency, timestamp)
+            // `owner` and dependency fields are intentionally rejected: they are not
+            // mutable through TaskUpdate's Published Language.
+            key => {
+                return TypedToolResult::error(format!(
+                    "unknown field '{key}'. Valid keys: status, subject, description, priority"
+                ))
             }
-            // `owner` is intentionally rejected: it is not in Task's Published Language.
-            key => return TypedToolResult::error(format!(
-                "unknown field '{key}'. Valid keys: status, subject, description, priority, blocked_by_id"
-            )),
         };
         let updated = match result {
             Ok(result) => result.value,

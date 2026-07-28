@@ -8,8 +8,8 @@ use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use sdk::tool_input::{
-    EnterPlanModeInput, ExitPlanModeInput, TaskCreateInput, TaskGetInput, TaskListCreateInput,
-    TaskStopInput, TaskUpdateInput,
+    EnterPlanModeInput, ExitPlanModeInput, TaskBlockByInput, TaskCreateInput, TaskGetInput,
+    TaskListCreateInput, TaskStopInput, TaskUpdateInput,
 };
 use sdk::tool_result::TaskUpdateResult;
 use std::path::Path;
@@ -148,11 +148,6 @@ impl TaskUpdateDisplay {
                     parts.push(format!("p={s}"));
                 }
             }
-            "blocked_by_id" => {
-                if let Some(s) = args.value.as_str() {
-                    parts.push(format!("blocked by #{s}"));
-                }
-            }
             "subject" | "description" | "owner" => {
                 // 这些字段变更不额外展示在 header，subject 从 result 回填即可
             }
@@ -164,6 +159,50 @@ impl TaskUpdateDisplay {
 inventory::submit!(ToolDisplayEntry {
     name: "TaskUpdate",
     display: || Box::new(TaskUpdateDisplay)
+});
+
+// ── TaskBlockBy ──────────────────────────────────────────────────
+
+struct TaskBlockByDisplay;
+impl ToolDisplay for TaskBlockByDisplay {
+    fn name(&self) -> &str {
+        "TaskBlockBy"
+    }
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        let args = parse_input::<TaskBlockByInput>(input);
+        if args.id.is_empty() {
+            return self.display_name().to_string();
+        }
+        let dependencies = args
+            .block_by_ids
+            .iter()
+            .map(|id| format!("#{id}"))
+            .collect::<Vec<_>>();
+        if dependencies.is_empty() {
+            format!("{} #{} — clear blockers", self.display_name(), args.id)
+        } else {
+            format!(
+                "{} #{} — blocked by {}",
+                self.display_name(),
+                args.id,
+                dependencies.join(", ")
+            )
+        }
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        ToolRenderPolicy {
+            header: HeaderPolicy::Compact,
+            details: DetailsPolicy::Hidden,
+            result: ResultPolicy::Hidden,
+        }
+    }
+}
+inventory::submit!(ToolDisplayEntry {
+    name: "TaskBlockBy",
+    display: || Box::new(TaskBlockByDisplay)
 });
 
 // ── TaskListGet ──────────────────────────────────────────────────

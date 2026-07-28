@@ -44,6 +44,7 @@ pub mod read_mcp_resource;
 // 构建的未用告警。端口与 PL 类型已在 domain.rs / lib.rs 正式 re-export。
 #[allow(dead_code)]
 pub mod skill_filesystem;
+pub mod task_block_by;
 pub mod task_create;
 pub mod task_get;
 pub mod task_list;
