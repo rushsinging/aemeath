@@ -62,7 +62,7 @@ else:
     factory_body = struct_body(source, "RuntimeContextFactory")
     if factory_body is None or not re.search(r"\bservices\s*:\s*RuntimeServices", factory_body):
         violations.append("agent/features/runtime/src/application/run/context_factory.rs: RuntimeContextFactory must own RuntimeServices")
-    constructor = re.search(r"pub fn new\s*\((?P<params>[\s\S]*?)\)\s*->\s*Self", source)
+    constructor = re.search(r"pub fn (?:new|with_session_wiring)\s*\((?P<params>[\s\S]*?)\)\s*->\s*Self", source)
     params = constructor.group("params") if constructor else ""
     for field in ["tool_execution", "tool_context_binding"]:
         if not re.search(rf"\b{field}\s*:", params):
@@ -78,7 +78,7 @@ else:
         if not re.search(pattern, source):
             violations.append("agent/composition/src/runtime.rs: Composition must assemble every Runtime Tool/Skill/Tool Result/active-run dependency")
             break
-    factory_call = re.search(r"RuntimeContextFactory::new\s*\((?P<args>[\s\S]*?)\)\s*\)", source)
+    factory_call = re.search(r"RuntimeContextFactory::(?:new|with_session_wiring)\s*\((?P<args>[\s\S]*?)\)\s*\)", source)
     factory_args = factory_call.group("args") if factory_call else ""
     for field in ["execution", "binding"]:
         if not re.search(rf"tool_assembly\.{field}(?:\.clone\(\))?", factory_args):

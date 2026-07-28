@@ -11,11 +11,11 @@ use tools::{Tool, ToolExecutionContext, TypedTool, TypedToolAdapter, TypedToolRe
 #[test]
 fn agent_for_test_persist_uses_context_workspace_backing() {
     let temp = tempfile::tempdir().expect("workspace");
-    let ctx = crate::application::testing::test_tool_execution_context(
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
         temp.path().to_path_buf(),
         tokio_util::sync::CancellationToken::new(),
     );
-    let backing = crate::application::testing::runtime_workspace(&ctx);
+    let backing = crate::application::run::workspace_test_support::runtime_workspace(&ctx);
     let registry = TestCatalogExecutionFactory::new();
     let agent = Agent::for_test(&registry, ctx, 1);
 
@@ -73,7 +73,7 @@ impl TypedTool for TimedTool {
 }
 
 fn test_ctx() -> ToolExecutionContext {
-    crate::application::testing::test_tool_execution_context(
+    crate::application::run::workspace_test_support::test_tool_execution_context(
         std::env::current_dir().unwrap(),
         tokio_util::sync::CancellationToken::new(),
     )
@@ -601,7 +601,7 @@ async fn test_execute_tools_cancel_interrupts_in_flight_tool() {
         completed: completed.clone(),
     });
     let cancel = tokio_util::sync::CancellationToken::new();
-    let ctx = crate::application::testing::test_tool_execution_context(
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
         std::env::current_dir().unwrap(),
         cancel.clone(),
     );

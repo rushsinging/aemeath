@@ -387,3 +387,58 @@ impl ChatEventSink for ChatEventSinkHandle {
         self.inner.send_domain_event(event)
     }
 }
+
+/// Session-scoped event target used by the RuntimeContextFactory.
+///
+/// The chat ingress installs the concrete transport before a Run is prepared;
+/// every RuntimeContext receives this stable handle instead of a caller-built
+/// per-role sink.
+#[derive(Clone, Default)]
+pub struct RunEventSink {
+    target: std::sync::Arc<std::sync::RwLock<Option<ChatEventSinkHandle>>>,
+}
+
+impl RunEventSink {
+    pub fn bind(&self, target: ChatEventSinkHandle) {
+        *self
+            .target
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(target);
+    }
+
+    fn target(&self) -> Option<ChatEventSinkHandle> {
+        self.target
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+}
+
+impl ChatEventSink for RunEventSink {
+    fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
+        match self.target() {
+            Some(target) => {
+                Box::pin(async move { ChatEventSink::send_event(&target, event).await })
+            }
+            None => Box::pin(std::future::ready(())),
+        }
+    }
+
+    fn try_send_event(&self, event: RuntimeStreamEvent) {
+        if let Some(target) = self.target() {
+            ChatEventSink::try_send_event(&target, event);
+        }
+    }
+
+    fn send_domain_event<'a>(
+        &'a self,
+        event: crate::domain::agent_run::RunDomainEvent,
+    ) -> EventFuture<'a> {
+        match self.target() {
+            Some(target) => {
+                Box::pin(async move { ChatEventSink::send_domain_event(&target, event).await })
+            }
+            None => Box::pin(std::future::ready(())),
+        }
+    }
+}

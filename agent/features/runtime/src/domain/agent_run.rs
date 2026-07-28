@@ -42,7 +42,7 @@ pub use domain::Run;
 pub use event::{RunDomainEvent, RunId};
 pub use spec::{
     EventRoute, HookBindingMode, InputMode, InteractionBindingMode, InteractionMode, MemoryMode,
-    ReasoningBindingMode, ResourceMode, RunKind, RunSpec, RunSpecError, ToolScope,
+    ReasoningBindingMode, ResourceMode, RunSpec, RunSpecError, ToolScope,
 };
 pub use state::{
     DrainDecision, InteractionContinuation, PendingInteraction, RunCancellationRequest, RunStatus,

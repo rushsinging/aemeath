@@ -4,7 +4,6 @@
 /// 协议转换和运行时桥接已移入 `adapters/`。
 pub mod client;
 pub mod context;
-pub mod cost;
 pub mod hook;
 pub mod interaction;
 pub mod loop_engine;
@@ -13,8 +12,4 @@ pub mod prompt;
 pub mod reflection;
 pub mod run;
 pub mod session;
-pub mod startup;
-#[cfg(test)]
-pub(crate) mod testing;
 pub mod tool;
-pub mod workspace;

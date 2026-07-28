@@ -1,26 +1,14 @@
-pub mod claude_settings_adapter;
-pub mod concurrency;
-pub mod config_paths;
-pub mod model_runtime;
-pub mod runtime_support;
-
 use hook::HookDispatchContext;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub use concurrency::resolve_concurrency_limits;
-pub use model_runtime::{resolve_model_runtime_settings, ModelRuntimeSettings};
-pub use runtime_support::{build_agent_runner, start_session, AgentRunnerAssembly};
-
-pub type ChatBootstrapArgs = sdk::ChatBootstrapArgs;
-
-pub struct InstructionsLoadedHook {
+pub struct PromptInstructionsHook {
     pub hooks: Arc<dyn hook::HookPort>,
     pub workspace_root: PathBuf,
 }
 
 #[async_trait::async_trait(?Send)]
-impl context::guidance::InstructionsLoadedHook for InstructionsLoadedHook {
+impl context::guidance::InstructionsLoadedHook for PromptInstructionsHook {
     async fn on_instructions_loaded(&self, file_path: &str, instruction_type: &str) {
         let _ = self
             .hooks

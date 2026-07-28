@@ -97,7 +97,9 @@ impl Agent {
         Self {
             catalog: ports.catalog(),
             execution: ports.execution(),
-            workspace_persist: crate::application::testing::workspace_persist(&ctx),
+            workspace_persist: crate::application::run::workspace_test_support::workspace_persist(
+                &ctx,
+            ),
             ctx,
             max_tool_concurrency,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),

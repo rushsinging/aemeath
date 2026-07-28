@@ -547,17 +547,18 @@ where
                         continue;
                     }
                 };
+                shell.runtime_context_factory.bind_session_wiring(wiring.clone());
+                shell.runtime_context_factory.bind_session_capabilities(
+                    shell.model_state.binding(),
+                    shell.interaction_bridge.clone(),
+                    reasoning.clone(),
+                    sink_handle.clone(),
+                    crate::application::run::workspace::RuntimeWorkspaceAccess::new(
+                        workspace.clone(),
+                    ),
+                );
                 let run_preparer = crate::application::run::preparer::RunPreparer::new(
                     shell.runtime_context_factory.clone(),
-                    Arc::new(
-                        crate::application::run::context_factory::MainRunContextResolver::new(
-                            wiring.clone(),
-                            shell.model_state.binding(),
-                            shell.interaction_bridge.clone(),
-                            reasoning.clone(),
-                            sink_handle.clone(),
-                        ),
-                    ),
                 );
                 let prepared_run = match run_preparer.prepare(request) {
                     Ok(prepared) => prepared,
@@ -571,7 +572,7 @@ where
                         continue;
                     }
                 };
-                let (prepared_domain_run, mut execution, prepared_session, context) =
+                let (prepared_domain_run, mut execution, prepared_session, context, _) =
                     prepared_run.into_parts();
                 if session_id != prepared_session.session_id() {
                     session_id = prepared_session.session_id().to_string();

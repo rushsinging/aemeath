@@ -3,7 +3,7 @@ use super::*;
 use crate::application::loop_engine::llm_log::{
     build_llm_output_log, build_named_tool_result_log, build_tool_call_log, build_tool_result_log,
 };
-use crate::application::testing::{
+use crate::application::model::test_support::{
     advance_until_retry_condition, empty_completion, successful_completion,
     ScriptedInvocationProvider, RETRY_ADVANCE_LIMITS,
 };
@@ -54,7 +54,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
             }
             Arc::new(FakeRefl)
         },
-        task: crate::application::testing::test_task_access(),
+        task: crate::application::run::test_task_access(),
         hooks: {
             struct FakeHook;
             #[async_trait]
@@ -228,8 +228,8 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (parent_source, _parent_guard) = test_parent_source();
     let runner = CliAgentRunner {
-        factory: crate::application::testing::constant_factory(
-            crate::application::testing::binding_from_llm_provider(Arc::new(
+        factory: crate::application::model::test_support::constant_factory(
+            crate::application::model::test_support::binding_from_llm_provider(Arc::new(
                 ContextRecordingProvider { seen: seen.clone() },
             )),
         ),
@@ -238,9 +238,10 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
         ),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        workspace: crate::application::testing::runtime_workspace(
-            &crate::application::testing::test_tool_execution_context(
+        tool_result_materializer:
+            crate::application::tool::test_support::test_tool_result_materializer(),
+        workspace: crate::application::run::workspace_test_support::runtime_workspace(
+            &crate::application::run::workspace_test_support::test_tool_execution_context(
                 std::env::temp_dir(),
                 tokio_util::sync::CancellationToken::new(),
             ),
@@ -826,7 +827,10 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
     let (runner, _guard) = test_runner_with_blocking_provider(calls.clone());
     let cwd = std::env::current_dir().unwrap();
     let cancel = tokio_util::sync::CancellationToken::new();
-    let ctx = crate::application::testing::test_tool_execution_context(cwd, cancel.clone());
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+        cwd,
+        cancel.clone(),
+    );
 
     let canceller_calls = calls.clone();
     let canceller = tokio::spawn(async move {
@@ -954,9 +958,11 @@ async fn sub_agent_provider_spec_inherits_model_owned_settings() {
             }));
 
     let captured_spec = Arc::new(std::sync::Mutex::new(None));
-    let binding = crate::application::testing::binding_from_llm_provider(Arc::new(ErrorProvider {
-        error: ProviderError::fatal(ProviderErrorKind::Network, "stop"),
-    }));
+    let binding = crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        ErrorProvider {
+            error: ProviderError::fatal(ProviderErrorKind::Network, "stop"),
+        },
+    ));
     runner.factory = Arc::new(CapturingBuildFactory::new(binding, captured_spec.clone()));
     let ctx = test_ctx();
 
@@ -1028,9 +1034,11 @@ async fn sub_agent_provider_spec_ignores_legacy_role_reasoning_override() {
                 context: Arc::new(parent_ctx),
             }));
     let captured_spec = Arc::new(std::sync::Mutex::new(None));
-    let binding = crate::application::testing::binding_from_llm_provider(Arc::new(ErrorProvider {
-        error: ProviderError::fatal(ProviderErrorKind::Network, "stop"),
-    }));
+    let binding = crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        ErrorProvider {
+            error: ProviderError::fatal(ProviderErrorKind::Network, "stop"),
+        },
+    ));
     runner.factory = Arc::new(CapturingBuildFactory::new(binding, captured_spec.clone()));
     let ctx = test_ctx();
 
@@ -1091,9 +1099,11 @@ async fn sub_agent_provider_spec_maps_model_reasoning_to_medium_without_effort()
             }));
 
     let captured_spec = Arc::new(std::sync::Mutex::new(None));
-    let binding = crate::application::testing::binding_from_llm_provider(Arc::new(ErrorProvider {
-        error: ProviderError::fatal(ProviderErrorKind::Network, "stop"),
-    }));
+    let binding = crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+        ErrorProvider {
+            error: ProviderError::fatal(ProviderErrorKind::Network, "stop"),
+        },
+    ));
     runner.factory = Arc::new(CapturingBuildFactory::new(binding, captured_spec.clone()));
     let ctx = test_ctx();
 
@@ -1130,10 +1140,12 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
     factory.register(ReadFixtureTool);
     let (mut runner, _guard) =
         test_runner(ProviderError::fatal(ProviderErrorKind::Network, "unused"));
-    runner.factory = crate::application::testing::constant_factory(
-        crate::application::testing::binding_from_llm_provider(Arc::new(CapturingProvider {
-            captured: captured.clone(),
-        })),
+    runner.factory = crate::application::model::test_support::constant_factory(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            CapturingProvider {
+                captured: captured.clone(),
+            },
+        )),
     );
     let ports = factory.build(test_ctx());
     runner.skill_materializer = Arc::new(FixedSkillMaterializer);
@@ -1569,17 +1581,18 @@ fn test_runner_with_provider(
     let (src, guard) = test_parent_source();
     (
         CliAgentRunner {
-            factory: crate::application::testing::constant_factory(
-                crate::application::testing::binding_from_llm_provider(provider),
+            factory: crate::application::model::test_support::constant_factory(
+                crate::application::model::test_support::binding_from_llm_provider(provider),
             ),
             active_run: Arc::new(
                 crate::application::run::active_registry::ActiveRunRegistry::default(),
             ),
             max_tool_concurrency: 10,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-            tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-            workspace: crate::application::testing::runtime_workspace(
-                &crate::application::testing::test_tool_execution_context(
+            tool_result_materializer:
+                crate::application::tool::test_support::test_tool_result_materializer(),
+            workspace: crate::application::run::workspace_test_support::runtime_workspace(
+                &crate::application::run::workspace_test_support::test_tool_execution_context(
                     std::env::temp_dir(),
                     tokio_util::sync::CancellationToken::new(),
                 ),
@@ -1663,7 +1676,7 @@ impl LlmProvider for BlockingThenCancelledProvider {
 }
 
 fn test_ctx() -> ToolExecutionContext {
-    crate::application::testing::test_tool_execution_context(
+    crate::application::run::workspace_test_support::test_tool_execution_context(
         std::env::current_dir().unwrap(),
         tokio_util::sync::CancellationToken::new(),
     )

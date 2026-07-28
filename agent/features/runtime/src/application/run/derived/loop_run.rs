@@ -51,25 +51,6 @@ pub(super) fn sub_request_log_context(
     })
 }
 
-/// #1385 Task 12: Canonical sub-agent event sink (noop by design —
-/// sub-agents push events through parent).  Used by both [`SubRunCapabilities`]
-/// (for `InvocationEventReducer`) and [`derive_sub_run`] (for the
-/// derived [`RuntimeContext`]'s event_sink) so there is one definition,
-/// not duplicated inline noops.
-#[derive(Clone)]
-pub(crate) struct SubAgentEventSink;
-
-impl crate::application::loop_engine::chat::ChatEventSink for SubAgentEventSink {
-    fn send_event<'a>(
-        &'a self,
-        _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-    ) -> crate::application::loop_engine::chat::EventFuture<'a> {
-        Box::pin(async {})
-    }
-
-    fn try_send_event(&self, _event: crate::application::loop_engine::chat::RuntimeStreamEvent) {}
-}
-
 pub(super) struct CancellationPropagationGuard(tokio::task::JoinHandle<()>);
 impl CancellationPropagationGuard {
     pub(super) fn new(

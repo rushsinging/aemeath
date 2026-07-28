@@ -2,7 +2,7 @@
 //!
 //! The factory holds [`RuntimeServices`] (session-scoped shared ports) and
 //! assembles a per-Run [`RuntimeContext`] from a [`RunSpec`], a
-//! [`RunContextBindings`], and an optional parent [`RuntimeContext`].
+//! [`SessionSnapshot`] and optional parent Run capabilities.
 //!
 //! Capability-semantic decisions (interaction, hook, reasoning) are driven
 //! by the binding-mode fields in [`RunSpec`], validated against parent
@@ -15,10 +15,14 @@ use crate::application::hook::empty::BoundaryHookPort;
 use crate::application::interaction::port::{
     ParentMediatedInteractionPort, UnavailableInteractionPort,
 };
+use crate::application::loop_engine::chat::{ChatEventSinkHandle, RunEventSink};
 use crate::application::run::context::{
     RunCapabilityBindings, RuntimeContext, RuntimeContextAssemblyToken, RuntimeServices,
 };
-use crate::application::run::preparation::{RunPreparationError, RunPreparationRequest};
+use crate::application::run::preparation::{
+    RunPreparationError, RunPreparationRequest, SessionSnapshot,
+};
+use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::{
     HookBindingMode, InteractionBindingMode, ReasoningBindingMode, RunSpec,
 };
@@ -31,106 +35,35 @@ use tools::{
     ToolExecutionContextBindingPort, ToolExecutionPort, ToolProfileName,
 };
 
-// ── Runtime-owned resolution contract ──
+// ── Factory-owned session bindings ──
 
-/// Converts a pure-value Run preparation request into one frozen RuntimeContext.
-pub trait RuntimeContextResolver: Send + Sync {
-    fn resolve(
-        &self,
-        factory: &RuntimeContextFactory,
-        request: &RunPreparationRequest,
-    ) -> Result<
-        (
-            RuntimeContext,
-            crate::application::run::preparation::SessionSnapshot,
-        ),
-        RunPreparationError,
-    >;
+#[derive(Clone)]
+struct SessionBindings {
+    wiring: Arc<std::sync::RwLock<Option<Arc<context::MainSessionWiring>>>>,
+    provider: Arc<std::sync::RwLock<Option<Arc<crate::ports::ProviderBinding>>>>,
+    interaction: Arc<
+        std::sync::RwLock<Option<Arc<dyn crate::application::interaction::port::InteractionPort>>>,
+    >,
+    reasoning:
+        Arc<std::sync::RwLock<Option<Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>>>>,
+    event_sink: RunEventSink,
+    workspace: Arc<std::sync::RwLock<Option<RuntimeWorkspaceAccess>>>,
+    provider_factory: Arc<std::sync::RwLock<Option<Arc<dyn crate::ports::ProviderFactory>>>>,
+    skill_materializer: Arc<std::sync::RwLock<Option<Arc<dyn tools::SkillMaterializationPort>>>>,
 }
 
-pub(crate) struct MainRunContextResolver {
-    wiring: Arc<context::MainSessionWiring>,
-    provider: Arc<crate::ports::ProviderBinding>,
-    interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
-    reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
-    event_sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
-}
-
-impl MainRunContextResolver {
-    pub(crate) fn new(
-        wiring: Arc<context::MainSessionWiring>,
-        provider: Arc<crate::ports::ProviderBinding>,
-        interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
-        reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
-        event_sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
-    ) -> Self {
+impl SessionBindings {
+    fn new(wiring: Option<Arc<context::MainSessionWiring>>) -> Self {
         Self {
-            wiring,
-            provider,
-            interaction,
-            reasoning,
-            event_sink,
+            wiring: Arc::new(std::sync::RwLock::new(wiring)),
+            provider: Arc::new(std::sync::RwLock::new(None)),
+            interaction: Arc::new(std::sync::RwLock::new(None)),
+            reasoning: Arc::new(std::sync::RwLock::new(None)),
+            event_sink: RunEventSink::default(),
+            workspace: Arc::new(std::sync::RwLock::new(None)),
+            provider_factory: Arc::new(std::sync::RwLock::new(None)),
+            skill_materializer: Arc::new(std::sync::RwLock::new(None)),
         }
-    }
-}
-
-impl RuntimeContextResolver for MainRunContextResolver {
-    fn resolve(
-        &self,
-        factory: &RuntimeContextFactory,
-        request: &RunPreparationRequest,
-    ) -> Result<
-        (
-            RuntimeContext,
-            crate::application::run::preparation::SessionSnapshot,
-        ),
-        RunPreparationError,
-    > {
-        let _permit = self
-            .wiring
-            .gate()
-            .try_acquire_shared()
-            .map_err(|_| RunPreparationError::ContextAssembly)?;
-        let committed = self.wiring.committed_session();
-        let config = self.wiring.committed_config();
-        let resolved_session = if committed.id == request.session().session_id()
-            && config.revision().get() == request.session().revision()
-        {
-            request.session().clone()
-        } else {
-            request.session().with_bound_values(
-                committed.id.clone(),
-                request.session().workspace_root().to_path_buf(),
-                request.session().model_key().to_string(),
-                config.clone(),
-            )
-        };
-        factory
-            .create(
-                request.spec(),
-                RunCapabilityBindings {
-                    model: crate::application::run::context::ModelBindings {
-                        context: self.wiring.committed_context(),
-                        provider: self.provider.clone(),
-                        interaction: self.interaction.clone(),
-                        memory: self.wiring.committed_memory(),
-                        config: crate::application::run::config::RunConfigSnapshot::capture(config),
-                        reasoning: self.reasoning.clone(),
-                        tool_catalog: None,
-                    },
-                    io: crate::application::run::context::IoBindings {
-                        event_sink: self.event_sink.clone(),
-                        input: crate::application::run::context::RunInputBufferHandle::new(),
-                    },
-                    lifecycle: crate::application::run::context::LifecycleBindings {
-                        cancel: crate::application::run::context::RunCancellationScope::new(),
-                        usage: crate::application::run::context::RunUsageTracker::new(),
-                    },
-                },
-                None,
-            )
-            .map(|context| (context.hold_session_lease(_permit), resolved_session))
-            .map_err(|_| RunPreparationError::ContextAssembly)
     }
 }
 
@@ -153,54 +86,273 @@ impl ToolCatalogPort for RestrictedToolCatalog {
     }
 }
 
-pub(crate) struct SubRunContextResolver {
-    parent: Arc<RuntimeContext>,
-    workspace: crate::application::workspace::access::RuntimeWorkspaceAccess,
-    derived_workspace: Arc<
-        std::sync::Mutex<Option<crate::application::workspace::access::RuntimeWorkspaceAccess>>,
-    >,
-    provider_factory: Arc<dyn crate::ports::ProviderFactory>,
-    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+// ── Factory ──
+
+/// #1248 Task 3 domain-responsible RuntimeContext assembly.
+///
+/// Holds [`RuntimeServices`] (session-scoped shared ports) and assembles
+/// per-Run [`RuntimeContext`] instances from a [`RunSpec`], a
+/// [`RunContextBindings`], and an optional parent [`RuntimeContext`].
+pub struct RuntimeContextFactory {
+    services: RuntimeServices,
+    session: SessionBindings,
 }
 
-impl SubRunContextResolver {
-    pub(crate) fn new(
-        parent: Arc<RuntimeContext>,
-        workspace: crate::application::workspace::access::RuntimeWorkspaceAccess,
-        provider_factory: Arc<dyn crate::ports::ProviderFactory>,
-        skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+impl RuntimeContextFactory {
+    /// #1248 Task 3: Narrow crate-root construction entry.
+    ///
+    /// Accepts seven explicit session-scoped port parameters — no opaque
+    /// service bag. This is the only constructor callable from outside the
+    /// runtime crate.
+    pub fn new(
+        tool_catalog: Arc<dyn ToolCatalogPort>,
+        tool_execution: Arc<dyn ToolExecutionPort>,
+        tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
+        policy: Arc<dyn PolicyPort>,
+        reflection_history: Arc<dyn ReflectionHistoryStore>,
+        task: Arc<dyn TaskAccess>,
+        hooks: Arc<dyn HookPort>,
+    ) -> Self {
+        Self::from_services(
+            tool_catalog,
+            tool_execution,
+            tool_context_binding,
+            policy,
+            reflection_history,
+            task,
+            hooks,
+            None,
+        )
+    }
+
+    pub fn with_session_wiring(
+        tool_catalog: Arc<dyn ToolCatalogPort>,
+        tool_execution: Arc<dyn ToolExecutionPort>,
+        tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
+        policy: Arc<dyn PolicyPort>,
+        reflection_history: Arc<dyn ReflectionHistoryStore>,
+        task: Arc<dyn TaskAccess>,
+        hooks: Arc<dyn HookPort>,
+        wiring: Arc<context::MainSessionWiring>,
+    ) -> Self {
+        Self::from_services(
+            tool_catalog,
+            tool_execution,
+            tool_context_binding,
+            policy,
+            reflection_history,
+            task,
+            hooks,
+            Some(wiring),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_services(
+        tool_catalog: Arc<dyn ToolCatalogPort>,
+        tool_execution: Arc<dyn ToolExecutionPort>,
+        tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
+        policy: Arc<dyn PolicyPort>,
+        reflection_history: Arc<dyn ReflectionHistoryStore>,
+        task: Arc<dyn TaskAccess>,
+        hooks: Arc<dyn HookPort>,
+        wiring: Option<Arc<context::MainSessionWiring>>,
     ) -> Self {
         Self {
-            parent,
-            workspace,
-            derived_workspace: Arc::new(std::sync::Mutex::new(None)),
-            provider_factory,
-            skill_materializer,
+            services: RuntimeServices {
+                tool_catalog,
+                tool_execution,
+                tool_context_binding,
+                policy,
+                reflection_history,
+                task,
+                hooks,
+            },
+            session: SessionBindings::new(wiring),
         }
     }
 
-    pub(crate) fn take_workspace(
-        &self,
-    ) -> Option<crate::application::workspace::access::RuntimeWorkspaceAccess> {
-        self.derived_workspace
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .take()
+    /// Read-only access to session-scoped [`RuntimeServices`].
+    ///
+    /// Used by TUI launch and other callers that need to project service
+    /// ports (tool catalog/execution, hooks) without duplicating them
+    /// on [`SessionRuntime`](super::client::SessionRuntime).
+    pub fn services(&self) -> &RuntimeServices {
+        &self.services
     }
-}
 
-impl RuntimeContextResolver for SubRunContextResolver {
-    fn resolve(
+    pub fn bind_session_wiring(&self, wiring: Arc<context::MainSessionWiring>) {
+        *self
+            .session
+            .wiring
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(wiring);
+    }
+
+    pub fn bind_session_capabilities(
         &self,
-        factory: &RuntimeContextFactory,
+        provider: Arc<crate::ports::ProviderBinding>,
+        interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
+        reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
+        event_sink: ChatEventSinkHandle,
+        workspace: RuntimeWorkspaceAccess,
+    ) {
+        let session = &self.session;
+        *session
+            .provider
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(provider);
+        *session
+            .interaction
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(interaction);
+        *session
+            .reasoning
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(reasoning);
+        session.event_sink.bind(event_sink);
+        *session
+            .workspace
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(workspace);
+    }
+
+    pub fn bind_derived_factories(
+        &self,
+        provider_factory: Arc<dyn crate::ports::ProviderFactory>,
+        skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    ) {
+        let session = &self.session;
+        *session
+            .provider_factory
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(provider_factory);
+        *session
+            .skill_materializer
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(skill_materializer);
+    }
+
+    pub(crate) fn prepare(
+        &self,
         request: &RunPreparationRequest,
     ) -> Result<
         (
             RuntimeContext,
-            crate::application::run::preparation::SessionSnapshot,
+            SessionSnapshot,
+            Option<RuntimeWorkspaceAccess>,
         ),
         RunPreparationError,
     > {
+        let session = &self.session;
+        match request.parent() {
+            Some(parent) => self.prepare_derived(request, parent, session),
+            None => self.prepare_independent(request, session),
+        }
+    }
+
+    fn prepare_independent(
+        &self,
+        request: &RunPreparationRequest,
+        session: &SessionBindings,
+    ) -> Result<
+        (
+            RuntimeContext,
+            SessionSnapshot,
+            Option<RuntimeWorkspaceAccess>,
+        ),
+        RunPreparationError,
+    > {
+        let wiring = session
+            .wiring
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .ok_or(RunPreparationError::ContextAssembly)?;
+        let permit = wiring
+            .gate()
+            .try_acquire_shared()
+            .map_err(|_| RunPreparationError::ContextAssembly)?;
+        let committed = wiring.committed_session();
+        let config = wiring.committed_config();
+        let resolved_session = if committed.id == request.session().session_id()
+            && config.revision().get() == request.session().revision()
+        {
+            request.session().clone()
+        } else {
+            request.session().with_bound_values(
+                committed.id.clone(),
+                request.session().workspace_root().to_path_buf(),
+                request.session().model_key().to_string(),
+                config.clone(),
+            )
+        };
+        let provider = session
+            .provider
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .ok_or(RunPreparationError::ContextAssembly)?;
+        let interaction = session
+            .interaction
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .ok_or(RunPreparationError::ContextAssembly)?;
+        let reasoning = session
+            .reasoning
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .ok_or(RunPreparationError::ContextAssembly)?;
+        let context = self
+            .create(
+                request.spec(),
+                RunCapabilityBindings {
+                    model: crate::application::run::context::ModelBindings {
+                        context: wiring.committed_context(),
+                        provider,
+                        interaction,
+                        memory: wiring.committed_memory(),
+                        config: crate::application::run::config::RunConfigSnapshot::capture(config),
+                        reasoning,
+                        tool_catalog: None,
+                    },
+                    io: crate::application::run::context::IoBindings {
+                        event_sink: ChatEventSinkHandle::new(session.event_sink.clone()),
+                        input: crate::application::run::context::RunInputBufferHandle::new(),
+                    },
+                    lifecycle: crate::application::run::context::LifecycleBindings {
+                        cancel: crate::application::run::context::RunCancellationScope::new(),
+                        usage: crate::application::run::context::RunUsageTracker::new(),
+                    },
+                },
+                None,
+            )
+            .map_err(|_| RunPreparationError::ContextAssembly)?
+            .hold_session_lease(permit);
+        Ok((context, resolved_session, None))
+    }
+
+    fn prepare_derived(
+        &self,
+        request: &RunPreparationRequest,
+        parent: &crate::application::run::preparation::ParentRunCapabilities,
+        session: &SessionBindings,
+    ) -> Result<
+        (
+            RuntimeContext,
+            SessionSnapshot,
+            Option<RuntimeWorkspaceAccess>,
+        ),
+        RunPreparationError,
+    > {
+        let parent_context = parent
+            .context()
+            .ok_or(RunPreparationError::ContextAssembly)?;
+        let parent_workspace = parent
+            .workspace()
+            .ok_or(RunPreparationError::ContextAssembly)?;
         let role = request
             .session()
             .config()
@@ -220,7 +372,7 @@ impl RuntimeContextResolver for SubRunContextResolver {
                 role: request.spec().name.clone(),
             });
         }
-        let (_, source, model) = request
+        let (source_key, source, model) = request
             .session()
             .config()
             .models()
@@ -242,16 +394,21 @@ impl RuntimeContextResolver for SubRunContextResolver {
             } else {
                 provider::ReasoningLevel::Off
             });
-        let provider = self
+        let provider_factory = session
             .provider_factory
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .ok_or(RunPreparationError::ContextAssembly)?;
+        let provider = provider_factory
             .build(crate::ports::ProviderBuildSpec {
                 driver: source.driver.clone(),
-                source_key: self.parent.provider().model.provider.clone(),
+                source_key: source_key.clone(),
                 api_style: model.api_style.clone(),
                 api_key: source.api_key.clone(),
                 base_url: (!source.base_url.is_empty()).then(|| source.base_url.clone()),
                 model: crate::ports::ModelId {
-                    provider: self.parent.provider().model.provider.clone(),
+                    provider: source_key,
                     model: model.id.clone(),
                 },
                 max_tokens,
@@ -265,8 +422,7 @@ impl RuntimeContextResolver for SubRunContextResolver {
             .map_err(|error| RunPreparationError::SubProviderBuild {
                 message: error.to_string(),
             })?;
-        let snapshot = self
-            .parent
+        let snapshot = parent_context
             .tool_catalog()
             .snapshot(
                 &RegistryScopeName::new("sub-agent"),
@@ -275,39 +431,40 @@ impl RuntimeContextResolver for SubRunContextResolver {
             .map_err(|error| RunPreparationError::SubToolCatalog {
                 message: error.to_string(),
             })?;
-        let workspace = self.workspace.derive_isolated();
-        *self
-            .derived_workspace
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(workspace.clone());
-        let session_id = sdk::SessionId::new_v7().to_string();
-        let resolved_session = request.session().with_identity(
-            session_id,
+        let workspace = parent_workspace.derive_isolated();
+        let resolved_session = request.session().with_bound_values(
+            request.session().session_id().to_string(),
             workspace.views().read().current_workspace_root(),
             role.model.clone(),
+            request.session().config().clone(),
         );
-        let context = context::api::isolated_context_with_skill(
+        let skill_materializer = session
+            .skill_materializer
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .ok_or(RunPreparationError::ContextAssembly)?;
+        let isolated_context = context::api::isolated_context_with_skill(
             resolved_session.session_id(),
-            self.skill_materializer.clone(),
+            skill_materializer,
             Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
                 workspace.views().read(),
             )),
         );
-        factory
+        let context = self
             .create(
                 request.spec(),
                 RunCapabilityBindings {
                     model: crate::application::run::context::ModelBindings {
-                        context,
+                        context: isolated_context,
                         provider: Arc::new(provider),
-                        interaction: self.parent.interaction(),
+                        interaction: parent_context.interaction(),
                         memory: Arc::new(memory::NoOpMemory),
                         config: crate::application::run::config::RunConfigSnapshot::capture(
                             request.session().config().clone(),
                         ),
                         reasoning: Arc::new(std::sync::Mutex::new(
-                            *self
-                                .parent
+                            *parent_context
                                 .reasoning_ref()
                                 .lock()
                                 .unwrap_or_else(|error| error.into_inner()),
@@ -315,69 +472,18 @@ impl RuntimeContextResolver for SubRunContextResolver {
                         tool_catalog: Some(Arc::new(RestrictedToolCatalog { snapshot })),
                     },
                     io: crate::application::run::context::IoBindings {
-                        event_sink: crate::application::loop_engine::chat::ChatEventSinkHandle::new(
-                            crate::application::run::derived::loop_run::SubAgentEventSink,
-                        ),
+                        event_sink: ChatEventSinkHandle::new(session.event_sink.clone()),
                         input: crate::application::run::context::RunInputBufferHandle::new(),
                     },
                     lifecycle: crate::application::run::context::LifecycleBindings {
-                        cancel: self.parent.cancel().child_scope(),
+                        cancel: parent_context.cancel().child_scope(),
                         usage: crate::application::run::context::RunUsageTracker::new(),
                     },
                 },
-                Some(self.parent.as_ref()),
+                Some(parent_context.as_ref()),
             )
-            .map(|context| (context, resolved_session))
-            .map_err(|_| RunPreparationError::ContextAssembly)
-    }
-}
-
-// ── Factory ──
-
-/// #1248 Task 3 domain-responsible RuntimeContext assembly.
-///
-/// Holds [`RuntimeServices`] (session-scoped shared ports) and assembles
-/// per-Run [`RuntimeContext`] instances from a [`RunSpec`], a
-/// [`RunContextBindings`], and an optional parent [`RuntimeContext`].
-pub struct RuntimeContextFactory {
-    services: RuntimeServices,
-}
-
-impl RuntimeContextFactory {
-    /// #1248 Task 3: Narrow crate-root construction entry.
-    ///
-    /// Accepts seven explicit session-scoped port parameters — no opaque
-    /// service bag. This is the only constructor callable from outside the
-    /// runtime crate.
-    pub fn new(
-        tool_catalog: Arc<dyn ToolCatalogPort>,
-        tool_execution: Arc<dyn ToolExecutionPort>,
-        tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
-        policy: Arc<dyn PolicyPort>,
-        reflection_history: Arc<dyn ReflectionHistoryStore>,
-        task: Arc<dyn TaskAccess>,
-        hooks: Arc<dyn HookPort>,
-    ) -> Self {
-        Self {
-            services: RuntimeServices {
-                tool_catalog,
-                tool_execution,
-                tool_context_binding,
-                policy,
-                reflection_history,
-                task,
-                hooks,
-            },
-        }
-    }
-
-    /// Read-only access to session-scoped [`RuntimeServices`].
-    ///
-    /// Used by TUI launch and other callers that need to project service
-    /// ports (tool catalog/execution, hooks) without duplicating them
-    /// on [`SessionRuntime`](super::client::SessionRuntime).
-    pub fn services(&self) -> &RuntimeServices {
-        &self.services
+            .map_err(|_| RunPreparationError::ContextAssembly)?;
+        Ok((context, resolved_session, Some(workspace)))
     }
 
     /// Assemble a [`RuntimeContext`] from capability-semantic decisions
@@ -401,7 +507,7 @@ impl RuntimeContextFactory {
     /// - [`RuntimeContextAssemblyError::ReasoningUnavailable`] when
     ///   `Inherit` is requested without a parent.
     ///
-    /// Factory-private context construction used only by RuntimeContextResolver implementations.
+    /// Factory-private RuntimeContext construction used only by the unified assembly algorithm.
     pub(crate) fn create(
         &self,
         spec: &RunSpec,
@@ -519,6 +625,7 @@ impl RuntimeContextFactory {
                 hooks,
                 ..self.services.clone()
             },
+            session: self.session.clone(),
         }
     }
 }

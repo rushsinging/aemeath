@@ -3,7 +3,7 @@ use std::sync::Arc;
 use sdk::SdkError;
 use share::config::models::ResolvedModel;
 
-use crate::application::startup::{ChatBootstrapArgs, ModelRuntimeSettings};
+use crate::application::client::bootstrap::{ChatBootstrapArgs, ModelRuntimeSettings};
 use crate::ports::ProviderFactory;
 
 use super::{AgentClientImpl, RuntimeHandle};
@@ -193,7 +193,7 @@ impl RuntimeBootstrapDependencies {
         session_bootstrap: SessionBootstrapAssembly,
         prompt: PromptAssembly,
         skills: SkillBootstrapAssembly,
-        agent_runner: crate::application::startup::AgentRunnerAssembly,
+        agent_runner: crate::application::client::bootstrap::AgentRunnerAssembly,
         runtime_context_factory: Arc<
             crate::application::run::context_factory::RuntimeContextFactory,
         >,
@@ -212,7 +212,7 @@ impl RuntimeBootstrapDependencies {
             active_run,
             ..
         } = tool_assembly;
-        let crate::application::startup::AgentRunnerAssembly {
+        let crate::application::client::bootstrap::AgentRunnerAssembly {
             runner: agent_runner,
             parent_context_source,
             max_tool_concurrency,
@@ -803,7 +803,7 @@ mod tests {
         )
         .await;
         let snapshot = wiring.committed_config();
-        let binding = crate::application::testing::test_binding(Vec::new());
+        let binding = crate::application::model::test_support::test_binding(Vec::new());
         let policy: Arc<dyn PolicyPort> = Arc::new(policy::AllowAllPolicy);
         let _memory: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
         let tools_factory = tools::composition::TestCatalogExecutionFactory::empty();
@@ -828,7 +828,8 @@ mod tests {
             }
         }
         let agent_runner: Arc<dyn tools::AgentRunner> = Arc::new(NoopRunner);
-        let tool_result_materializer = crate::application::testing::test_tool_result_materializer();
+        let tool_result_materializer =
+            crate::application::tool::test_support::test_tool_result_materializer();
         let active_run =
             Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
         let config_query = wiring.config_query();
@@ -1030,7 +1031,8 @@ mod tests {
         let binding_before = ctx_before.provider();
 
         // Simulate model switch: create a new binding.
-        let new_binding = crate::application::testing::test_binding(vec!["new model response"]);
+        let new_binding =
+            crate::application::model::test_support::test_binding(vec!["new model response"]);
         shell.model_state.update_binding(new_binding.clone());
 
         // Second assembly picks up the new binding.
@@ -1162,7 +1164,8 @@ mod tests {
         let policy: Arc<dyn policy::PolicyPort> = Arc::new(policy::AllowAllPolicy);
         let tools = tools::composition::TestCatalogExecutionFactory::empty();
         let skill_wiring = tools::composition::wire_skills();
-        let tool_result_materializer = crate::application::testing::test_tool_result_materializer();
+        let tool_result_materializer =
+            crate::application::tool::test_support::test_tool_result_materializer();
         let active_run =
             Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
         let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
@@ -1236,7 +1239,7 @@ mod tests {
             SessionBootstrapAssembly::new(root.clone(), 8192, true, false, None),
             PromptAssembly::new(Vec::new(), String::new(), String::new()),
             SkillBootstrapAssembly::new(std::collections::HashMap::new()),
-            crate::application::startup::AgentRunnerAssembly {
+            crate::application::client::bootstrap::AgentRunnerAssembly {
                 runner: Arc::new(NoopRunner),
                 parent_context_source:
                     crate::application::run::context::ParentRunContextSource::new(),
@@ -1292,7 +1295,7 @@ mod tests {
             make_test_shell(crate::application::run::context::ParentRunContextSource::new()).await;
 
         // Write a distinct binding into SessionModelState.
-        let switched = crate::application::testing::test_binding(vec!["tui sees this"]);
+        let switched = crate::application::model::test_support::test_binding(vec!["tui sees this"]);
         shell.model_state.update_binding(switched.clone());
 
         let handle = RuntimeHandle {

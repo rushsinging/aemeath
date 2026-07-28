@@ -5,8 +5,8 @@ use crate::application::run::context_factory::RuntimeContextFactory;
 use crate::application::run::preparation::{
     ParentRunCapabilities, RunPreparationRequest, SessionState,
 };
+use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::application::tool::agent::Agent;
-use crate::application::workspace::access::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::RunSpec;
 use async_trait::async_trait;
 use hook::HookDispatchContext;
@@ -127,7 +127,7 @@ pub fn derive_sub_run(
             reason: e.to_string(),
         })?;
 
-    // 2. Child workspace and live capabilities are bound by SubRunContextResolver.
+    // 2. RuntimeContextFactory binds the derived workspace and live capabilities.
     let config_snapshot = parent_context.config().clone();
     let role = config_snapshot
         .config()
@@ -149,37 +149,27 @@ pub fn derive_sub_run(
     let preparation_request = RunPreparationRequest::new(
         spec.clone(),
         session.snapshot_for_run(),
-        Some(ParentRunCapabilities::new(
+        Some(ParentRunCapabilities::from_active_run(
             parent_run_id.clone(),
             parent_spec.clone(),
+            Arc::new(parent_context.clone()),
+            parent_workspace.clone(),
         )),
     )
     .map_err(|error| RuntimeContextAssemblyError::SubDerivationFailed {
         reason: error.to_string(),
     })?;
-    let resolver = Arc::new(
-        crate::application::run::context_factory::SubRunContextResolver::new(
-            Arc::new(parent_context.clone()),
-            parent_workspace.clone(),
-            provider_factory,
-            skill_materializer,
-        ),
-    );
-    let preparer = crate::application::run::preparer::RunPreparer::new(
-        runtime_context_factory,
-        resolver.clone(),
-    );
+    runtime_context_factory.bind_derived_factories(provider_factory, skill_materializer);
+    let preparer = crate::application::run::preparer::RunPreparer::new(runtime_context_factory);
     let prepared = preparer.prepare(preparation_request).map_err(|error| {
         RuntimeContextAssemblyError::SubDerivationFailed {
             reason: error.to_string(),
         }
     })?;
-    let (run, mut execution, session, context) = prepared.into_parts();
+    let (run, mut execution, session, context, workspace) = prepared.into_parts();
     execution.initialize_for_launch(Vec::new(), 0);
-    let workspace = resolver.take_workspace().ok_or_else(|| {
-        RuntimeContextAssemblyError::SubDerivationFailed {
-            reason: "子 Run workspace 未完成绑定".to_string(),
-        }
+    let workspace = workspace.ok_or_else(|| RuntimeContextAssemblyError::SubDerivationFailed {
+        reason: "子 Run workspace 未完成绑定".to_string(),
     })?;
     let context = context.expect("RunPreparer must produce RuntimeContext");
     let provider = context.provider();

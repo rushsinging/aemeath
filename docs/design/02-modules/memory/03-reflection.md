@@ -2,7 +2,7 @@
 
 > 层级：02-modules / memory（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#789（S2）
-> 本文定义 Reflection 引擎的领域模型、触发条件、prompt 构建、output schema、apply 流程，以及与 Runtime 的职责边界。**只描述目标态**；现状 Reflection 代码散落在 `runtime/business/reflection/` 的差距记入 `03-engineering/03-migration-governance.md`。
+> 本文定义 Reflection 引擎的领域模型、触发条件、prompt 构建、output schema、Memory-owned workflow，以及与 Runtime 的职责边界。**只描述目标态**。
 
 ## 1. 定位
 
@@ -240,7 +240,7 @@ struct ReflectionApplyResult {
 
 ## 8. 完整编排流程（Runtime 侧）
 
-Memory BC 提供 prompt / parse / apply 与 history 端口；Runtime 统一编排 Interval、PreCompact、Manual 三种 trigger。不存在同步执行路径。
+Memory BC 提供 prompt / parse / apply / history 的单一 `ReflectionWorkflow`；Runtime 统一编排 Interval、PreCompact、Manual 三种 trigger、Provider 调用与任务生命周期。不存在同步执行路径。
 
 ```text
 Runtime trigger
@@ -294,7 +294,7 @@ struct ReflectionConfig {
 - 模块入口：[README.md](README.md)
 - 领域模型（MemoryEntry / MemorySuggestion）：[01-domain-model.md](01-domain-model.md)
 - 检索与注入：[02-retrieval-and-injection.md](02-retrieval-and-injection.md)
-- 端口与适配器（ReflectionPromptPort）：[04-ports-and-adapters.md](04-ports-and-adapters.md)
+- 端口与适配器（ReflectionWorkflow / history）：[04-ports-and-adapters.md](04-ports-and-adapters.md)
 - Runtime 端口（ProviderPort）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Context Map（Memory 不依赖 Provider）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 

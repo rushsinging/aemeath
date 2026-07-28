@@ -24,7 +24,6 @@ pub fn resolve_model_runtime_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use share::config::models::ModelEntryConfig;
 
     fn model_entry(reasoning: Option<bool>) -> ModelEntryConfig {
         ModelEntryConfig {
@@ -40,48 +39,40 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_model_runtime_settings_uses_resolved_max_tokens() {
-        let model = model_entry(None);
-
-        let result = resolve_model_runtime_settings(8_192, &model, true);
-
-        assert_eq!(result.max_tokens, 8_192);
+    fn resolve_model_runtime_settings_uses_resolved_max_tokens() {
+        assert_eq!(
+            resolve_model_runtime_settings(8_192, &model_entry(None), true).max_tokens,
+            8_192
+        );
     }
 
     #[test]
-    fn test_resolve_model_runtime_settings_prefers_model_reasoning_over_cli_default() {
-        let model = model_entry(Some(false));
-
-        let result = resolve_model_runtime_settings(8_192, &model, true);
-
-        assert!(!result.reasoning);
+    fn resolve_model_runtime_settings_prefers_model_reasoning_over_cli_default() {
+        assert!(!resolve_model_runtime_settings(8_192, &model_entry(Some(false)), true).reasoning);
     }
 
     #[test]
-    fn test_resolve_model_runtime_settings_uses_cli_reasoning_default_when_model_missing() {
-        let model = model_entry(None);
-
-        let result = resolve_model_runtime_settings(8_192, &model, true);
-
-        assert!(result.reasoning);
+    fn resolve_model_runtime_settings_uses_cli_reasoning_default_when_model_missing() {
+        assert!(resolve_model_runtime_settings(8_192, &model_entry(None), true).reasoning);
     }
 
     #[test]
-    fn test_resolve_model_runtime_settings_passes_through_reasoning_effort() {
+    fn resolve_model_runtime_settings_passes_through_reasoning_effort() {
         let mut model = model_entry(Some(true));
         model.reasoning_effort = Some("xhigh".to_string());
-
-        let result = resolve_model_runtime_settings(8_192, &model, true);
-
-        assert_eq!(result.reasoning_effort.as_deref(), Some("xhigh"));
+        assert_eq!(
+            resolve_model_runtime_settings(8_192, &model, true)
+                .reasoning_effort
+                .as_deref(),
+            Some("xhigh")
+        );
     }
 
     #[test]
-    fn test_resolve_model_runtime_settings_reasoning_effort_none_by_default() {
-        let model = model_entry(Some(true));
-
-        let result = resolve_model_runtime_settings(8_192, &model, true);
-
-        assert_eq!(result.reasoning_effort, None);
+    fn resolve_model_runtime_settings_reasoning_effort_none_by_default() {
+        assert_eq!(
+            resolve_model_runtime_settings(8_192, &model_entry(Some(true)), true).reasoning_effort,
+            None
+        );
     }
 }

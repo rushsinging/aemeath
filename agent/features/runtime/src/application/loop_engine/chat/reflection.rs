@@ -7,7 +7,7 @@ use crate::application::reflection::{
     ReflectionTaskTrigger,
 };
 use crate::ports::{CompactOutcome, ProviderBinding};
-use memory::api::{MemoryPort, ReflectionEngine, ReflectionHistoryStore, ReflectionPromptPort};
+use memory::api::{MemoryPort, ReflectionHistoryStore};
 
 use provider::ProviderStopReason;
 
@@ -120,7 +120,6 @@ fn submit(
         system_prompt_text.to_owned(),
         lang.to_owned(),
         Arc::clone(memory),
-        Arc::new(REFLECTION_ENGINE) as Arc<dyn ReflectionPromptPort>,
         Arc::clone(history),
     )
 }
@@ -144,6 +143,3 @@ pub(crate) fn should_run_turn_reflection(
     }
     turn_count.is_multiple_of(config.reflection.interval_turns)
 }
-
-/// Production prompt implementation; exposed here to keep call sites explicit about the port.
-pub(crate) const REFLECTION_ENGINE: ReflectionEngine = ReflectionEngine;

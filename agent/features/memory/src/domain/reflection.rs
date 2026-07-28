@@ -1,5 +1,5 @@
 use super::{MemoryCategory, MemoryEntry, MemoryError, MemoryLayer};
-use crate::{ReflectionApplyResult, ReflectionPromptPort};
+use crate::ReflectionApplyResult;
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
@@ -341,14 +341,14 @@ JSON format:
     }
 }
 
-impl ReflectionPromptPort for ReflectionEngine {
-    fn build_prompt(&self, project_memory: &str, recent_summary: &str, lang: &str) -> String {
+impl ReflectionEngine {
+    pub fn build_prompt(&self, project_memory: &str, recent_summary: &str, lang: &str) -> String {
         Self::prompt_template(lang)
             .replace("{project_memory}", project_memory)
             .replace("{recent_summary}", recent_summary)
     }
 
-    fn parse_output(&self, raw: &str) -> ReflectionResult<ReflectionOutput> {
+    pub fn parse_output(&self, raw: &str) -> ReflectionResult<ReflectionOutput> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             return Err(ReflectionError::Unparseable);
@@ -380,7 +380,7 @@ impl ReflectionPromptPort for ReflectionEngine {
         Ok(output)
     }
 
-    fn format_output(&self, output: &ReflectionOutput, lang: &str) -> String {
+    pub fn format_output(&self, output: &ReflectionOutput, lang: &str) -> String {
         let (
             title,
             deviations_empty,
@@ -426,7 +426,7 @@ impl ReflectionPromptPort for ReflectionEngine {
         sections.join("\n\n")
     }
 
-    fn format_memory_summary(&self, entries: &[MemoryEntry]) -> String {
+    pub fn format_memory_summary(&self, entries: &[MemoryEntry]) -> String {
         entries
             .iter()
             .map(|entry| {
@@ -441,7 +441,11 @@ impl ReflectionPromptPort for ReflectionEngine {
             .join("\n")
     }
 
-    fn recent_messages_summary(&self, messages: &[ReflectionMessage], max_chars: usize) -> String {
+    pub fn recent_messages_summary(
+        &self,
+        messages: &[ReflectionMessage],
+        max_chars: usize,
+    ) -> String {
         if max_chars == 0 {
             return String::new();
         }

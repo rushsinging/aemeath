@@ -35,7 +35,7 @@ mod task_snapshot;
 pub(crate) mod tools;
 
 pub use events::{
-    ChatEventSink, ChatEventSinkHandle, CompactStage, EventFuture, RuntimeHookEvent,
+    ChatEventSink, ChatEventSinkHandle, CompactStage, EventFuture, RunEventSink, RuntimeHookEvent,
     RuntimeHookEventStatus, RuntimeHookExecutionResult, RuntimeHookMessage, RuntimeHookMessageKind,
     RuntimeResumedSessionStep, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };

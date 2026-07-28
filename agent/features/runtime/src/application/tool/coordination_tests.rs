@@ -117,7 +117,7 @@ fn prepare_round_applies_policy_before_fuse_and_preserves_positions() {
     let factory = TestCatalogExecutionFactory::new();
     factory.register(TestTool("Allowed"));
     factory.register(TestTool("Denied"));
-    let ctx = crate::application::testing::test_tool_execution_context(
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
         std::env::current_dir().unwrap(),
         tokio_util::sync::CancellationToken::new(),
     );
@@ -173,7 +173,7 @@ impl PolicyPort for AllowAllRecordingPolicy {
 fn allow_all_bypasses_fuse_after_single_policy_evaluation() {
     let factory = TestCatalogExecutionFactory::new();
     factory.register(TestTool("Allowed"));
-    let ctx = crate::application::testing::test_tool_execution_context(
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
         std::env::current_dir().unwrap(),
         tokio_util::sync::CancellationToken::new(),
     );
@@ -206,7 +206,7 @@ fn allow_all_bypasses_fuse_after_single_policy_evaluation() {
 fn prepare_round_maps_require_approval_to_denied_call_with_subject_and_reason() {
     let factory = TestCatalogExecutionFactory::new();
     factory.register(TestTool("Bash"));
-    let ctx = crate::application::testing::test_tool_execution_context(
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
         std::env::current_dir().unwrap(),
         tokio_util::sync::CancellationToken::new(),
     );
@@ -235,7 +235,7 @@ fn prepare_round_maps_require_approval_to_denied_call_with_subject_and_reason() 
 #[test]
 fn prepare_round_rejects_missing_catalog_tool_without_invoking_policy() {
     let factory = TestCatalogExecutionFactory::new();
-    let ctx = crate::application::testing::test_tool_execution_context(
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
         std::env::current_dir().unwrap(),
         tokio_util::sync::CancellationToken::new(),
     );
@@ -266,7 +266,7 @@ fn prepare_round_rejects_missing_catalog_tool_without_invoking_policy() {
 fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
     let factory = TestCatalogExecutionFactory::new();
     factory.register(TestTool("Read"));
-    let ctx = crate::application::testing::test_tool_execution_context(
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
         std::env::current_dir().unwrap(),
         tokio_util::sync::CancellationToken::new(),
     );
@@ -421,7 +421,7 @@ fn build_catalog() -> tools::ToolCatalogSnapshot {
     factory.register(TestTool("Denied"));
     factory.register(TestTool("ApprovalRequired"));
     factory.register(StrictTool);
-    let ctx = crate::application::testing::test_tool_execution_context(
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
         std::env::current_dir().unwrap(),
         tokio_util::sync::CancellationToken::new(),
     );

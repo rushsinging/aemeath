@@ -111,7 +111,7 @@ agent/features/runtime/src/
 ### context_coordination
 - **职责**：构建本轮 Context Window（取历史 + compact 家族 + memory 注入 + prompt/guidance 装配 + token budget）
 - 消费：仅 `ContextPort`（Context Management BC）
-- **注**：Session 对话历史与把 Memory 注入 Context Window 的流程都属 Context Management；本模块只调用 `ContextPort`，**NEVER** 旁路再检索 Memory。Memory 本体仍属独立 BC；Runtime 的后台 Reflection 编排通过 RuntimeContext 中同一个 `MemoryPort` Arc 检索 / apply，并通过 `ReflectionPromptPort` 做纯 prompt / parse / format。
+- **注**：Session 对话历史与把 Memory 注入 Context Window 的流程都属 Context Management；本模块只调用 `ContextPort`，**NEVER** 旁路再检索注入内容。Memory 本体及 Reflection 的 prompt / parse / apply / history workflow 属 Memory BC；Runtime 后台 Reflection 只决定触发、调用 `ProviderPort`，并拥有单槽任务的 cancel / timeout / drain。
 
 ### interaction
 - **职责**：将 Tool suspension、Policy approval 或 hard pause 统一映射为 Runtime-owned `InteractionRequest`，保存 request id + typed continuation，处理 reply / cancellation 竞争

@@ -393,7 +393,7 @@ where
                 .build(),
                 tools::ToolExecutionPorts::new(
                     crate::adapters::tool_runtime::cancellation(cancel.clone()),
-                    crate::application::workspace::access::RuntimeWorkspaceAccess::new(
+                    crate::application::run::workspace::RuntimeWorkspaceAccess::new(
                         workspace.clone(),
                     )
                     .read_access(),

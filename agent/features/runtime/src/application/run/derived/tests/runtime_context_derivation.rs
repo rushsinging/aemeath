@@ -4,9 +4,9 @@ use crate::application::run::context::{
     RunCancellationScope, RunContextBindings, RunInputBufferHandle, RunUsageTracker, RuntimeContext,
 };
 use crate::application::run::context_factory::RuntimeContextFactory;
-use crate::application::testing::test_task_access;
-use crate::application::workspace::access::RuntimeWorkspaceAccess;
-use crate::domain::agent_run::{RunKind, RunSpec};
+use crate::application::run::test_task_access;
+use crate::application::run::workspace::RuntimeWorkspaceAccess;
+use crate::domain::agent_run::RunSpec;
 use crate::ports::{
     ContextPort, PolicyDecision, PolicyPort, PolicyRequest, ProviderBinding, ProviderPort,
 };
@@ -622,8 +622,15 @@ fn sub_launcher_uses_derived_spec() {
     .expect("derive_sub_run should succeed");
 
     assert_eq!(derived.run.parent_id(), Some(&parent_run_id));
-    // The derived spec must be a Sub-kind spec.
-    assert_eq!(derived.run.spec().kind, RunKind::Sub);
+    // The derived spec carries restricted capabilities rather than a role tag.
+    assert_eq!(
+        derived.run.spec().input,
+        crate::domain::agent_run::InputMode::Fixed
+    );
+    assert_eq!(
+        derived.run.spec().tools,
+        crate::domain::agent_run::ToolScope::Restricted
+    );
     // The derived spec name contains the role.
     assert!(derived.run.spec().name.contains("coder"));
     // The derived spec must not be the same value as RunSpec::main().

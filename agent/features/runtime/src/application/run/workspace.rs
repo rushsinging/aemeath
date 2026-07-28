@@ -1,11 +1,11 @@
-//! Runtime-owned workspace capabilities.
+//! Runtime-owned workspace capabilities for Run assembly.
 //!
 //! The tools context only receives the read view; dispatch/control/persistence
 //! stay on explicit Runtime paths.
 
 use std::sync::Arc;
 
-/// Runtime-owned workspace capabilities.
+/// Runtime-owned workspace capabilities bound to a Run.
 #[derive(Clone)]
 pub struct RuntimeWorkspaceAccess(pub project::WorkspaceViews);
 

@@ -303,7 +303,8 @@ impl CompactHarness {
         let binding = pre_compact_test_binding();
         let memory: Arc<dyn memory::MemoryPort> = Arc::new(memory::NoOpMemory);
         let reflection_history = noop_reflection_history();
-        let tool_result_materializer = crate::application::testing::test_tool_result_materializer();
+        let tool_result_materializer =
+            crate::application::tool::test_support::test_tool_result_materializer();
         let config_snapshot = ConfigSnapshot::new(Config::default());
         let run_config =
             crate::application::run::config::RunConfigSnapshot::capture(config_snapshot.clone());
@@ -447,11 +448,13 @@ impl crate::ports::ProviderPort for StaticReflectionProvider {
         crate::ports::provider_port::InvocationStream,
         crate::ports::provider_port::ProviderError,
     > {
-        Ok(crate::application::testing::text_completion_stream(
-            r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
-            1,
-            1,
-        ))
+        Ok(
+            crate::application::model::test_support::text_completion_stream(
+                r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
+                1,
+                1,
+            ),
+        )
     }
 }
 

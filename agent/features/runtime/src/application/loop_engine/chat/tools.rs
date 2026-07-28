@@ -465,7 +465,7 @@ mod tests {
     }
 
     fn test_tool_context() -> ToolExecutionContext {
-        crate::application::testing::test_tool_execution_context(
+        crate::application::run::workspace_test_support::test_tool_execution_context(
             std::env::current_dir().unwrap(),
             tokio_util::sync::CancellationToken::new(),
         )
@@ -585,7 +585,7 @@ mod tests {
             ToolOutcome::new("finished", Value::Null, Vec::new()),
         );
         let results = complete_cancelled_tool_round(&calls, vec![completed]);
-        let materializer = crate::application::testing::test_tool_result_materializer();
+        let materializer = crate::application::tool::test_support::test_tool_result_materializer();
 
         let message = crate::application::loop_engine::shared::materialize_tool_results(
             materializer.as_ref(),
@@ -614,7 +614,7 @@ mod tests {
             "Bash".to_string(),
             ToolOutcome::new("ok", serde_json::json!({ "text": "ok" }), Vec::new()),
         )];
-        let materializer = crate::application::testing::test_tool_result_materializer();
+        let materializer = crate::application::tool::test_support::test_tool_result_materializer();
         let message = crate::application::loop_engine::shared::materialize_tool_results(
             materializer.as_ref(),
             results,
@@ -643,7 +643,7 @@ mod tests {
                 Vec::new(),
             ),
         )];
-        let materializer = crate::application::testing::test_tool_result_materializer();
+        let materializer = crate::application::tool::test_support::test_tool_result_materializer();
         let message = crate::application::loop_engine::shared::materialize_tool_results(
             materializer.as_ref(),
             results,

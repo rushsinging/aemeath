@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use share::config::domain::snapshot::ConfigSnapshot;
 
@@ -102,15 +103,6 @@ impl SessionSnapshot {
         self.revision
     }
 
-    pub(crate) fn with_identity(
-        &self,
-        session_id: impl Into<String>,
-        workspace_root: PathBuf,
-        model_key: impl Into<String>,
-    ) -> Self {
-        self.with_bound_values(session_id, workspace_root, model_key, self.config.clone())
-    }
-
     pub(crate) fn with_bound_values(
         &self,
         session_id: impl Into<String>,
@@ -129,15 +121,56 @@ impl SessionSnapshot {
 }
 
 /// 子 Run 可见的父能力上限。只携带 identity 与纯值 RunSpec。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct ParentRunCapabilities {
     run_id: RunId,
     spec: RunSpec,
+    context: Option<Arc<crate::application::run::context::RuntimeContext>>,
+    workspace: Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
 }
+
+impl std::fmt::Debug for ParentRunCapabilities {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ParentRunCapabilities")
+            .field("run_id", &self.run_id)
+            .field("spec", &self.spec)
+            .field("has_context", &self.context.is_some())
+            .field("has_workspace", &self.workspace.is_some())
+            .finish()
+    }
+}
+
+impl PartialEq for ParentRunCapabilities {
+    fn eq(&self, other: &Self) -> bool {
+        self.run_id == other.run_id && self.spec == other.spec
+    }
+}
+
+impl Eq for ParentRunCapabilities {}
 
 impl ParentRunCapabilities {
     pub fn new(run_id: RunId, spec: RunSpec) -> Self {
-        Self { run_id, spec }
+        Self {
+            run_id,
+            spec,
+            context: None,
+            workspace: None,
+        }
+    }
+
+    pub fn from_active_run(
+        run_id: RunId,
+        spec: RunSpec,
+        context: Arc<crate::application::run::context::RuntimeContext>,
+        workspace: crate::application::run::workspace::RuntimeWorkspaceAccess,
+    ) -> Self {
+        Self {
+            run_id,
+            spec,
+            context: Some(context),
+            workspace: Some(workspace),
+        }
     }
 
     pub fn run_id(&self) -> &RunId {
@@ -146,6 +179,16 @@ impl ParentRunCapabilities {
 
     pub fn spec(&self) -> &RunSpec {
         &self.spec
+    }
+
+    pub(crate) fn context(&self) -> Option<&Arc<crate::application::run::context::RuntimeContext>> {
+        self.context.as_ref()
+    }
+
+    pub(crate) fn workspace(
+        &self,
+    ) -> Option<&crate::application::run::workspace::RuntimeWorkspaceAccess> {
+        self.workspace.as_ref()
     }
 }
 
@@ -234,6 +277,7 @@ pub struct PreparedRun {
     execution: RunExecutionState,
     session: SessionSnapshot,
     context: Option<crate::application::run::context::RuntimeContext>,
+    workspace: Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
 }
 
 impl PreparedRun {
@@ -243,6 +287,7 @@ impl PreparedRun {
             execution: RunExecutionState::new(),
             session,
             context: None,
+            workspace: None,
         }
     }
 
@@ -256,12 +301,14 @@ impl PreparedRun {
         parent_run_id: Option<RunId>,
         session: SessionSnapshot,
         context: crate::application::run::context::RuntimeContext,
+        workspace: Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
     ) -> Self {
         Self {
             run: Run::new(spec, parent_run_id),
             execution: RunExecutionState::new(),
             session,
             context: Some(context),
+            workspace,
         }
     }
 
@@ -281,6 +328,10 @@ impl PreparedRun {
         self.context.as_ref()
     }
 
+    pub fn workspace(&self) -> Option<&crate::application::run::workspace::RuntimeWorkspaceAccess> {
+        self.workspace.as_ref()
+    }
+
     pub fn into_parts(
         self,
     ) -> (
@@ -288,7 +339,14 @@ impl PreparedRun {
         RunExecutionState,
         SessionSnapshot,
         Option<crate::application::run::context::RuntimeContext>,
+        Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
     ) {
-        (self.run, self.execution, self.session, self.context)
+        (
+            self.run,
+            self.execution,
+            self.session,
+            self.context,
+            self.workspace,
+        )
     }
 }

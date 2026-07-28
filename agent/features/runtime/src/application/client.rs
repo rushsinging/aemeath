@@ -1,4 +1,5 @@
 mod accessors;
+mod bootstrap;
 mod from_args;
 mod mapping;
 pub mod resume_helper;
@@ -18,6 +19,10 @@ pub(crate) use mapping::*;
 
 // 对外仅发布 Composition 装配所需的 workspace bootstrap。
 pub use accessors::AgentClientImpl;
+pub use bootstrap::{
+    build_agent_runner, resolve_concurrency_limits, resolve_model_runtime_settings,
+    AgentRunnerAssembly, ChatBootstrapArgs, ModelRuntimeSettings,
+};
 pub use from_args::{
     from_args_with_workspace, InitialProviderAssembly, PromptAssembly,
     RuntimeBootstrapDependencies, RuntimeCoreDependencies, RuntimeToolAssemblyDependencies,

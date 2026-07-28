@@ -1,9 +1,13 @@
 use std::time::Duration;
 
+/// Capability policy applied when a spec is created without a parent ceiling.
+///
+/// This policy expresses the effective capability contract directly; it is not
+/// a run-origin or lifecycle role marker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunKind {
-    Main,
-    Sub,
+enum CapabilityPolicy {
+    Full,
+    Restricted,
 }
 
 // ── #1248 Task 1: capability-semantic enums ──
@@ -233,7 +237,6 @@ impl CapabilityCeiling {
 pub struct RunSpec {
     pub name: String,
     pub timeout: Duration,
-    pub kind: RunKind,
     pub input: InputMode,
     pub interaction: InteractionMode,
     pub events: EventRoute,
@@ -247,25 +250,22 @@ pub struct RunSpec {
     interaction_kind: InteractionBindingMode,
     hooks: HookBindingMode,
     reasoning: ReasoningBindingMode,
-    /// When set (for sub specs via `derive_sub`), capability ceilings
+    /// Capability policy used when no parent ceiling is present.
+    policy: CapabilityPolicy,
+    /// When set (for derived specs via `derive_sub`), capability ceilings
     /// inherited from the parent. `with_*` methods validate against this.
     ceiling: Option<CapabilityCeiling>,
 }
 
 impl RunSpec {
-    pub fn new(name: impl Into<String>, timeout: Duration) -> Self {
-        let name = name.into();
-        if timeout.is_zero() && name == "main" {
-            return Self::main();
-        }
-        Self::sub(name, timeout)
+    pub fn main() -> Self {
+        Self::full("main", Duration::ZERO)
     }
 
-    pub fn main() -> Self {
+    fn full(name: impl Into<String>, timeout: Duration) -> Self {
         Self {
-            name: "main".to_string(),
-            timeout: Duration::ZERO,
-            kind: RunKind::Main,
+            name: name.into(),
+            timeout,
             input: InputMode::SessionQueue,
             interaction: InteractionMode::Interactive,
             events: EventRoute::Client,
@@ -276,15 +276,19 @@ impl RunSpec {
             interaction_kind: InteractionBindingMode::Client,
             hooks: HookBindingMode::Full,
             reasoning: ReasoningBindingMode::Adaptive,
+            policy: CapabilityPolicy::Full,
             ceiling: None,
         }
     }
 
     pub fn sub(name: impl Into<String>, timeout: Duration) -> Self {
+        Self::restricted(name, timeout)
+    }
+
+    fn restricted(name: impl Into<String>, timeout: Duration) -> Self {
         Self {
             name: name.into(),
             timeout,
-            kind: RunKind::Sub,
             input: InputMode::Fixed,
             interaction: InteractionMode::NonInteractive,
             events: EventRoute::ParentRun,
@@ -295,15 +299,16 @@ impl RunSpec {
             interaction_kind: InteractionBindingMode::ParentMediated,
             hooks: HookBindingMode::BoundaryOnly,
             reasoning: ReasoningBindingMode::Inherit,
+            policy: CapabilityPolicy::Restricted,
             ceiling: None,
         }
     }
 
-    /// Create a sub-run spec derived from `self` (the parent).
+    /// Create a run spec derived from `self` (the parent).
     ///
-    /// The child starts from Sub defaults (most restricted) and stores
-    /// the parent's values as capability ceilings.  Use `with_*` methods
-    /// to relax individual fields up to — but never beyond — the parent.
+    /// The derived spec starts from the restricted capability policy and stores
+    /// the parent's effective values as ceilings. Use `with_*` methods to relax
+    /// individual fields up to — but never beyond — the parent.
     pub fn derive_sub(
         &self,
         name: impl Into<String>,
@@ -314,22 +319,19 @@ impl RunSpec {
             return Err(RunSpecError::CapabilityEscalation);
         }
 
-        let mut sub = Self::sub(name, timeout);
+        let mut derived = Self::restricted(name, timeout);
 
-        // Validate every Sub-default field is within the parent's ceiling.
-        // (Sub defaults are the most restrictive, so this always passes for
-        // well-formed parents.  The check is defensive.)
-        if !sub.input.is_within(&self.input)
-            || !sub.interaction.is_within(&self.interaction)
-            || !sub.events.is_within(&self.events)
-            || !sub.context.is_within(&self.context)
-            || !sub.workspace.is_within(&self.workspace)
-            || !sub.memory.is_within(&self.memory)
-            || !sub.tools.is_within(&self.tools)
-            // #1248 Task 1: validate new capability-semantic dimensions
-            || !sub.interaction_kind.is_within(&self.interaction_kind)
-            || !sub.hooks.is_within(&self.hooks)
-            || !sub.reasoning.is_within(&self.reasoning)
+        // Validate every restricted-default field against the parent's ceiling.
+        if !derived.input.is_within(&self.input)
+            || !derived.interaction.is_within(&self.interaction)
+            || !derived.events.is_within(&self.events)
+            || !derived.context.is_within(&self.context)
+            || !derived.workspace.is_within(&self.workspace)
+            || !derived.memory.is_within(&self.memory)
+            || !derived.tools.is_within(&self.tools)
+            || !derived.interaction_kind.is_within(&self.interaction_kind)
+            || !derived.hooks.is_within(&self.hooks)
+            || !derived.reasoning.is_within(&self.reasoning)
         {
             return Err(RunSpecError::CapabilityEscalation);
         }
@@ -337,51 +339,50 @@ impl RunSpec {
         // Store parent's current values as the ceiling.
         // If parent itself has a ceiling, we inherit the *effective* values
         // (which are already bounded), not the original ceiling.
-        sub.ceiling = Some(CapabilityCeiling::from_spec(self));
-        Ok(sub)
+        derived.ceiling = Some(CapabilityCeiling::from_spec(self));
+        Ok(derived)
     }
 
     // ── with_* builders ───────────────────────────────────────────
 
     pub fn with_input(mut self, input: InputMode) -> Result<Self, RunSpecError> {
-        self.enforce_sub_fixed(input.is_within(&InputMode::Fixed))?;
+        self.enforce_policy(input.is_within(&InputMode::Fixed))?;
         self.check_ceiling(|c| input.is_within(&c.input))?;
         self.input = input;
         Ok(self)
     }
 
     pub fn with_interaction(mut self, interaction: InteractionMode) -> Result<Self, RunSpecError> {
-        self.enforce_sub_fixed(interaction.is_within(&InteractionMode::NonInteractive))?;
+        self.enforce_policy(interaction.is_within(&InteractionMode::NonInteractive))?;
         self.check_ceiling(|c| interaction.is_within(&c.interaction))?;
         self.interaction = interaction;
         Ok(self)
     }
 
     pub fn with_events(mut self, events: EventRoute) -> Result<Self, RunSpecError> {
-        self.enforce_sub_fixed(events.is_within(&EventRoute::ParentRun))?;
+        self.enforce_policy(events.is_within(&EventRoute::ParentRun))?;
         self.check_ceiling(|c| events.is_within(&c.events))?;
         self.events = events;
         Ok(self)
     }
 
     pub fn with_context(mut self, context: ResourceMode) -> Result<Self, RunSpecError> {
-        self.enforce_sub_fixed(context.is_within(&ResourceMode::Isolated))?;
+        self.enforce_policy(context.is_within(&ResourceMode::Isolated))?;
         self.check_ceiling(|c| context.is_within(&c.context))?;
         self.context = context;
         Ok(self)
     }
 
     pub fn with_workspace(mut self, workspace: ResourceMode) -> Result<Self, RunSpecError> {
-        self.enforce_sub_fixed(workspace.is_within(&ResourceMode::Isolated))?;
+        self.enforce_policy(workspace.is_within(&ResourceMode::Isolated))?;
         self.check_ceiling(|c| workspace.is_within(&c.workspace))?;
         self.workspace = workspace;
         Ok(self)
     }
 
     pub fn with_memory_mode(mut self, memory: MemoryMode) -> Result<Self, RunSpecError> {
-        // Standalone sub (no ceiling): memory must stay Disabled.
-        if self.kind == RunKind::Sub && self.ceiling.is_none() && memory == MemoryMode::Enabled {
-            return Err(RunSpecError::CapabilityEscalation);
+        if self.ceiling.is_none() {
+            self.enforce_policy(memory.is_within(&MemoryMode::Disabled))?;
         }
         self.check_ceiling(|c| memory.is_within(&c.memory))?;
         self.memory = memory;
@@ -389,7 +390,7 @@ impl RunSpec {
     }
 
     pub fn with_tool_scope(mut self, tools: ToolScope) -> Result<Self, RunSpecError> {
-        self.enforce_sub_fixed(tools.is_within(&ToolScope::Restricted))?;
+        self.enforce_policy(tools.is_within(&ToolScope::Restricted))?;
         self.check_ceiling(|c| tools.is_within(&c.tools))?;
         self.tools = tools;
         Ok(self)
@@ -474,31 +475,20 @@ impl RunSpec {
         }
     }
 
-    /// Legacy fixed-profile guard: rejects relaxing any of the six immutable
-    /// dimensions (input, interaction, events, context, workspace, tools).
+    /// Restricted policy guard: rejects relaxing the legacy fixed-profile
+    /// dimensions independently of run origin or parent presence.
     ///
-    /// These six dimensions are **always** pinned to Sub defaults for any
-    /// `RunKind::Sub` — they cannot be relaxed, even when a parent ceiling
-    /// would otherwise permit it.  This is the historical fixed-profile
-    /// contract.
-    ///
-    /// The #1248 capability-semantic dimensions (interaction_kind, hooks,
-    /// reasoning) are **not** governed by this guard — they relax
-    /// independently up to the [`CapabilityCeiling`] via `check_ceiling`.
-    ///
-    /// Both guards are orthogonal: `enforce_sub_fixed` checks the six legacy
-    /// fixed-profile fields; `check_ceiling` checks the three new
-    /// capability-semantic fields against the parent ceiling.  A `with_*`
-    /// call must pass both to succeed.
-    fn enforce_sub_fixed(&self, within_fixed: bool) -> Result<(), RunSpecError> {
-        if self.kind == RunKind::Sub && !within_fixed {
+    /// The capability-semantic dimensions (interaction binding, hooks and
+    /// reasoning) remain independently configurable up to the parent ceiling.
+    fn enforce_policy(&self, within_restricted: bool) -> Result<(), RunSpecError> {
+        if self.policy == CapabilityPolicy::Restricted && !within_restricted {
             return Err(RunSpecError::CapabilityEscalation);
         }
         Ok(())
     }
 
     /// Check `pred` against the capability ceiling if one exists.
-    /// Without a ceiling (Main spec or standalone `sub()`), everything is allowed.
+    /// Without a ceiling, the explicit capability policy is authoritative.
     fn check_ceiling(
         &self,
         pred: impl FnOnce(&CapabilityCeiling) -> bool,

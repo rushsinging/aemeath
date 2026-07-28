@@ -308,6 +308,32 @@ fn run_preparer_accepts_only_the_pure_value_request() {
 }
 
 #[test]
+fn run_preparer_depends_only_on_runtime_context_factory() {
+    let source = include_str!("preparer.rs");
+
+    assert!(source.contains("context_factory: Arc<RuntimeContextFactory>"));
+    assert!(!source.contains("RuntimeContextResolver"));
+    assert!(!source.contains("context_resolver"));
+}
+
+#[test]
+fn runtime_context_factory_owns_the_single_preparation_algorithm() {
+    let source = include_str!("context_factory.rs");
+
+    for retired in [
+        "trait RuntimeContextResolver",
+        "struct MainRunContextResolver",
+        "struct SubRunContextResolver",
+    ] {
+        assert!(
+            !source.contains(retired),
+            "retired symbol remains: {retired}"
+        );
+    }
+    assert!(source.contains("pub(crate) fn prepare("));
+}
+
+#[test]
 fn production_run_callers_do_not_assemble_context_bindings() {
     let main_source = include_str!("../loop_engine/chat/loop_runner.rs");
     let sub_source = include_str!("../run/derived/setup.rs");
@@ -331,35 +357,8 @@ fn runtime_context_construction_is_factory_private() {
 }
 
 #[test]
-fn run_preparer_coordinates_context_factory_and_complete_prepared_run() {
-    let factory = Arc::new(factory());
-    struct TestMainResolver {
-        bindings: RunCapabilityBindings,
-    }
-    impl crate::application::run::context_factory::RuntimeContextResolver for TestMainResolver {
-        fn resolve(
-            &self,
-            factory: &RuntimeContextFactory,
-            request: &RunPreparationRequest,
-        ) -> Result<
-            (
-                RuntimeContext,
-                crate::application::run::preparation::SessionSnapshot,
-            ),
-            crate::application::run::preparation::RunPreparationError,
-        > {
-            factory
-                .create(request.spec(), self.bindings.clone(), None)
-                .map(|context| (context, request.session().clone()))
-                .map_err(|_| {
-                    crate::application::run::preparation::RunPreparationError::ContextAssembly
-                })
-        }
-    }
-    let resolver = Arc::new(TestMainResolver {
-        bindings: make_bindings(),
-    });
-    let preparer = RunPreparer::new(factory.clone(), resolver);
+fn run_preparer_without_bound_session_fails_closed() {
+    let preparer = RunPreparer::new(Arc::new(factory()));
     let session = SessionState::new(
         "session-1",
         std::path::PathBuf::from("/workspace"),
@@ -369,14 +368,10 @@ fn run_preparer_coordinates_context_factory_and_complete_prepared_run() {
     let request =
         RunPreparationRequest::new(main_spec(), session.snapshot_for_run(), None).unwrap();
 
-    let prepared = preparer.prepare(request).expect("prepare complete run");
-
-    assert_eq!(
-        prepared.run().status(),
-        crate::domain::agent_run::RunStatus::Created
-    );
-    assert!(prepared.execution().messages().is_empty());
-    assert!(prepared.context().is_some());
+    assert!(matches!(
+        preparer.prepare(request),
+        Err(crate::application::run::preparation::RunPreparationError::ContextAssembly)
+    ));
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -476,78 +471,7 @@ fn grouped_capability_bindings_preserve_values() {
 }
 
 #[test]
-fn sub_run_preparer_preserves_parent_identity_and_assembles_context() {
-    let context_factory = Arc::new(factory());
-    let parent_context = make_parent_context();
-    let parent_spec = main_spec();
-    let parent_run_id = crate::domain::agent_run::RunId::new_v7();
-    let session = SessionState::new(
-        "session-sub",
-        std::path::PathBuf::from("/workspace/sub"),
-        "test-provider/test-model",
-        share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
-            share::config::domain::snapshot::ConfigRevision::new(1),
-            share::config::Config::default(),
-        ),
-    );
-    let spec = parent_spec
-        .derive_sub("coder", std::time::Duration::from_secs(30))
-        .unwrap();
-    let request = RunPreparationRequest::new(
-        spec.clone(),
-        session.snapshot_for_run(),
-        Some(
-            crate::application::run::preparation::ParentRunCapabilities::new(
-                parent_run_id.clone(),
-                parent_spec,
-            ),
-        ),
-    )
-    .unwrap();
-    struct TestSubResolver {
-        bindings: RunCapabilityBindings,
-        parent: Arc<RuntimeContext>,
-    }
-    impl crate::application::run::context_factory::RuntimeContextResolver for TestSubResolver {
-        fn resolve(
-            &self,
-            factory: &RuntimeContextFactory,
-            request: &RunPreparationRequest,
-        ) -> Result<
-            (
-                RuntimeContext,
-                crate::application::run::preparation::SessionSnapshot,
-            ),
-            crate::application::run::preparation::RunPreparationError,
-        > {
-            factory
-                .create(
-                    request.spec(),
-                    self.bindings.clone(),
-                    Some(self.parent.as_ref()),
-                )
-                .map(|context| (context, request.session().clone()))
-                .map_err(|_| {
-                    crate::application::run::preparation::RunPreparationError::ContextAssembly
-                })
-        }
-    }
-    let resolver = Arc::new(TestSubResolver {
-        bindings: make_bindings(),
-        parent: Arc::new(parent_context),
-    });
-    let preparer = RunPreparer::new(context_factory, resolver);
-
-    let prepared = preparer.prepare(request).unwrap();
-
-    assert_eq!(prepared.run().spec(), &spec);
-    assert_eq!(prepared.run().parent_id(), Some(&parent_run_id));
-    assert!(prepared.context().is_some());
-    assert!(prepared.execution().messages().is_empty());
-}
-
-#[test]
-fn sub_run_preparer_rejects_missing_parent_context() {
+fn parent_capabilities_without_live_context_fail_closed_at_factory() {
     let context_factory = Arc::new(factory());
     let parent_spec = main_spec();
     let parent_run_id = crate::domain::agent_run::RunId::new_v7();
@@ -574,28 +498,7 @@ fn sub_run_preparer_rejects_missing_parent_context() {
         ),
     )
     .unwrap();
-    struct MissingParentResolver;
-    impl crate::application::run::context_factory::RuntimeContextResolver for MissingParentResolver {
-        fn resolve(
-            &self,
-            factory: &RuntimeContextFactory,
-            request: &RunPreparationRequest,
-        ) -> Result<
-            (
-                RuntimeContext,
-                crate::application::run::preparation::SessionSnapshot,
-            ),
-            crate::application::run::preparation::RunPreparationError,
-        > {
-            factory
-                .create(request.spec(), make_bindings(), None)
-                .map(|context| (context, request.session().clone()))
-                .map_err(|_| {
-                    crate::application::run::preparation::RunPreparationError::ContextAssembly
-                })
-        }
-    }
-    let preparer = RunPreparer::new(context_factory, Arc::new(MissingParentResolver));
+    let preparer = RunPreparer::new(context_factory);
 
     assert!(matches!(
         preparer.prepare(request),

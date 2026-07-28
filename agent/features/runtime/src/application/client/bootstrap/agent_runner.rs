@@ -7,12 +7,6 @@ use share::config::AgentsConfig;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub fn start_session(resume_session_id: Option<String>) -> String {
-    let session_id = resume_session_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-    log::info!(target: crate::LOG_TARGET, "session started");
-    session_id
-}
-
 pub struct AgentRunnerAssembly {
     pub runner: Arc<dyn tools::AgentRunner>,
     pub parent_context_source: ParentRunContextSource,
@@ -43,7 +37,7 @@ pub fn build_agent_runner(
         max_tool_concurrency,
         agent_semaphore: semaphore_for_runner,
         tool_result_materializer,
-        workspace: crate::application::workspace::access::RuntimeWorkspaceAccess::new(workspace),
+        workspace: crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace),
         skill_materializer,
         parent_context: parent_context_for_runner,
         runtime_context_factory,
@@ -120,7 +114,7 @@ mod tests {
             Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default()),
             10,
             Arc::new(tokio::sync::Semaphore::new(4)),
-            crate::application::testing::test_tool_result_materializer(),
+            crate::application::tool::test_support::test_tool_result_materializer(),
             workspace,
             skill_materializer.clone(),
             ParentRunContextSource::new(),
@@ -174,7 +168,7 @@ mod tests {
                     tool_ports.binding(),
                     Arc::new(policy::AllowAllPolicy),
                     refl,
-                    crate::application::testing::test_task_access(),
+                    crate::application::run::test_task_access(),
                     hooks,
                 )
             }),
@@ -184,20 +178,6 @@ mod tests {
         // policy / hook_runner / tool_catalog / tool_execution / tool_context_binding
         // are all accessed through derived.context at runtime.
         assert!(runner.parent_context_source.get().is_none());
-    }
-
-    #[test]
-    fn test_start_session_uses_resume_session_id() {
-        let session_id = start_session(Some("resume-id".to_string()));
-
-        assert_eq!(session_id, "resume-id");
-    }
-
-    #[test]
-    fn test_start_session_generates_session_id_without_resume() {
-        let session_id = start_session(None);
-
-        assert!(!session_id.is_empty());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use memory::{ReflectionEngine, ReflectionPromptPort};
+use memory::ReflectionEngine;
 
 #[test]
 fn parse_errors_never_expose_model_response_content() {

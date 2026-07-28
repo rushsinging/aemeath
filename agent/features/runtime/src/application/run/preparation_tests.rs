@@ -39,7 +39,7 @@ fn snapshot_is_not_changed_by_later_session_updates() {
 
 #[test]
 fn session_state_tracks_production_binding_model_identity() {
-    let binding = crate::application::testing::test_binding(vec!["response"]);
+    let binding = crate::application::model::test_support::test_binding(vec!["response"]);
     let mut session = SessionState::new(
         "session-1",
         PathBuf::from("/workspace"),
@@ -113,19 +113,20 @@ fn prepared_run_consumes_into_parts_without_changing_snapshot() {
     let expected_revision = request.session().revision();
     let prepared = PreparedRun::from_request(request);
 
-    let (run, execution, session, context) = prepared.into_parts();
+    let (run, execution, session, context, workspace) = prepared.into_parts();
 
     assert_eq!(run.spec(), &RunSpec::main());
     assert_eq!(run.parent_id(), None);
     assert!(execution.messages().is_empty());
     assert_eq!(session.revision(), expected_revision);
     assert!(context.is_none());
+    assert!(workspace.is_none());
 }
 
 #[test]
 fn prepared_run_execution_can_be_initialized_after_preparation() {
     let prepared = PreparedRun::idle(RunSpec::main(), None, session_snapshot());
-    let (run, mut execution, session, context) = prepared.into_parts();
+    let (run, mut execution, session, context, workspace) = prepared.into_parts();
 
     execution.initialize_for_launch(vec![share::message::Message::user("hello")], 3);
 
@@ -135,6 +136,7 @@ fn prepared_run_execution_can_be_initialized_after_preparation() {
     assert!(execution.elapsed() >= std::time::Duration::ZERO);
     assert_eq!(session.session_id(), "session-1");
     assert!(context.is_none());
+    assert!(workspace.is_none());
 }
 
 #[test]

@@ -543,7 +543,7 @@ mod tests {
     }
 
     fn test_ctx() -> ToolExecutionContext {
-        crate::application::testing::test_tool_execution_context(
+        crate::application::run::workspace_test_support::test_tool_execution_context(
             std::env::current_dir().unwrap(),
             tokio_util::sync::CancellationToken::new(),
         )

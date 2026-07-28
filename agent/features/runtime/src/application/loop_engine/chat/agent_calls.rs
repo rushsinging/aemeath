@@ -427,8 +427,10 @@ mod tests {
             max_active: max_active.clone(),
         });
         let cwd = std::env::current_dir().unwrap();
-        let ctx =
-            crate::application::testing::test_tool_execution_context(cwd, CancellationToken::new());
+        let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+            cwd,
+            CancellationToken::new(),
+        );
         let ports = factory.build(ctx.clone());
         let catalog = ports.catalog();
         Harness {
@@ -480,7 +482,7 @@ mod tests {
                 &execution,
                 &ctx,
                 &agent_semaphore,
-                &crate::application::testing::workspace_persist(&ctx),
+                &crate::application::run::workspace_test_support::workspace_persist(&ctx),
                 &sink,
                 &hook_port,
                 &cancel,

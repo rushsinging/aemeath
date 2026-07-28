@@ -5,7 +5,7 @@ use crate::application::run::context::{
     RunCancellationScope, RunContextBindings, RunInputBufferHandle, RunUsageTracker, RuntimeContext,
 };
 use crate::application::run::context_factory::RuntimeContextFactory;
-use crate::application::testing::test_task_access;
+use crate::application::run::test_task_access;
 use crate::domain::agent_run::RunSpec;
 use crate::ports::{PolicyDecision, PolicyPort, PolicyRequest, ProviderBinding, ProviderPort};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -469,7 +469,7 @@ impl tools::TypedTool for SpyTool {
 
 #[tokio::test]
 async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
-    use crate::application::testing::{test_binding_from_port, TestProviderPort};
+    use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
         InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderStopReason,
         ProviderToolCall, ProviderToolCallId, RawUsageSnapshot, ReasoningLevel,
@@ -534,7 +534,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
         name: "spy".to_string(),
         arguments: serde_json::json!({}),
     };
-    let model = crate::application::testing::test_model_id();
+    let model = crate::application::model::test_support::test_model_id();
     let port = TestProviderPort::new(Vec::new(), model.clone()).with_invocation_fn(Arc::new(
         move |_call_idx, request, _cancel| {
             let is_second = second_call2.swap(true, Ordering::SeqCst);
@@ -577,10 +577,10 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     ));
 
     let binding = test_binding_from_port(port);
-    let factory = crate::application::testing::constant_factory(binding);
+    let factory = crate::application::model::test_support::constant_factory(binding);
 
-    let workspace = crate::application::testing::runtime_workspace(
-        &crate::application::testing::test_tool_execution_context(
+    let workspace = crate::application::run::workspace_test_support::runtime_workspace(
+        &crate::application::run::workspace_test_support::test_tool_execution_context(
             std::env::temp_dir(),
             tokio_util::sync::CancellationToken::new(),
         ),
@@ -593,7 +593,8 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
         ),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        tool_result_materializer:
+            crate::application::tool::test_support::test_tool_result_materializer(),
         workspace,
         skill_materializer: empty_skill_materializer(),
         parent_context: source,
@@ -712,7 +713,7 @@ impl tools::TypedTool for BlockingCancelTool {
 
 #[tokio::test]
 async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
-    use crate::application::testing::{test_binding_from_port, TestProviderPort};
+    use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
         InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderStopReason,
         ProviderToolCall, ProviderToolCallId, RawUsageSnapshot, ReasoningLevel,
@@ -755,7 +756,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         name: "blocking_cancel".to_string(),
         arguments: serde_json::json!({}),
     };
-    let model = crate::application::testing::test_model_id();
+    let model = crate::application::model::test_support::test_model_id();
     let port = TestProviderPort::new(Vec::new(), model.clone()).with_invocation_fn(Arc::new(
         move |_call_idx, _request, _cancel| {
             let tc = tool_call.clone();
@@ -779,10 +780,10 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     ));
 
     let binding = test_binding_from_port(port);
-    let factory = crate::application::testing::constant_factory(binding);
+    let factory = crate::application::model::test_support::constant_factory(binding);
 
-    let workspace = crate::application::testing::runtime_workspace(
-        &crate::application::testing::test_tool_execution_context(
+    let workspace = crate::application::run::workspace_test_support::runtime_workspace(
+        &crate::application::run::workspace_test_support::test_tool_execution_context(
             std::env::temp_dir(),
             tokio_util::sync::CancellationToken::new(),
         ),
@@ -795,7 +796,8 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         ),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        tool_result_materializer:
+            crate::application::tool::test_support::test_tool_result_materializer(),
         workspace,
         skill_materializer: empty_skill_materializer(),
         parent_context: source,

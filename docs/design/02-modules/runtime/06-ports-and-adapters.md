@@ -119,7 +119,7 @@ Runtime-owned Port 只对应真实外部 seam：
 | Context Management | `ContextPort` | 构建 / 压缩 / 查询 compact 状态 / 追加持久化 Context；见 [Context Management](../context-management/02-compact.md) 与 [持久化摘要树](../context-management/06-persistent-summary-tree.md) |
 | Tool | `ToolCatalogPort` / `ToolExecutionPort` | schema 投影与单次执行；见 [Tool ports](../tools/02-ports-and-lifecycle.md) |
 | Policy | `PolicyPort` | 调用前决策；见 [Policy](../policy/README.md) |
-| Memory | `MemoryPort` / `ReflectionPromptPort` / `ReflectionHistoryStore` | 当前项目 Memory、纯 Reflection prompt/parse 与 Memory-owned durable history append/query；见 [Memory ports](../memory/04-ports-and-adapters.md) |
+| Memory | `MemoryPort` / `ReflectionWorkflow` / `ReflectionHistoryStore` | 当前项目 Memory，以及 Memory-owned prompt/parse/apply/history workflow；Runtime 只负责 Reflection 触发、Provider 调用和任务生命周期，见 [Memory ports](../memory/04-ports-and-adapters.md) |
 | Task | `TaskAccess` | 日常 Task 命令 / 查询；`TaskPersist` **NEVER** 进入 Runtime；见 [Task contracts](../task/02-ports-and-published-language.md) |
 | Hook | `HookPort` | 类型化 hook dispatch；Runtime 直接消费 Hook-owned façade，不定义同义 Port/Outcome。`HookOutcome` 经 application `outcome_mapper` 无损映射 directive、结构化 reason、全部 attempts 与 typed display messages；updated input 在 `tool_coordination` 重新经过 frozen Catalog、Tools-owned schema validation 与 Policy；见 [Hook](../hook/README.md) |
 | Workflow | `ReasoningPort` | effort 调节；见 [Workflow](../workflow/01-reasoning-graph.md) |

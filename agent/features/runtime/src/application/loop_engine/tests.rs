@@ -632,7 +632,7 @@ impl InteractionCompletionPort for ScriptedPort {
             >,
         > = std::sync::OnceLock::new();
         MATERIALIZER
-            .get_or_init(crate::application::testing::test_tool_result_materializer)
+            .get_or_init(crate::application::tool::test_support::test_tool_result_materializer)
             .as_ref()
     }
 
@@ -680,7 +680,7 @@ impl InteractionMailboxPort for ScriptedPort {
     }
 }
 fn new_run(timeout: Duration) -> Run {
-    Run::new(RunSpec::new("test", timeout), None)
+    Run::new(RunSpec::main().with_timeout(timeout).unwrap(), None)
 }
 
 fn call(name: &str, input: serde_json::Value) -> ToolCall {

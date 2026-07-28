@@ -13,10 +13,8 @@ async fn shutdown_before_deadline_preserves_completed_task() {
         |_request: ReflectionTaskRequest, _cancel: CancellationToken| async move {
             Ok(runtime::application::reflection::CompleteReflectionResult {
                 output: memory::ReflectionOutput::default(),
-                formatted_content: String::new(),
                 input_tokens: 0,
                 output_tokens: 0,
-                auto_applied: false,
                 apply_result: None,
                 error_category: None,
                 record_id: None,

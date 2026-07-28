@@ -13,10 +13,11 @@ pub use application::tool::result_materialization::{
 };
 
 pub use application::client::{
-    config_snapshot_to_sdk, from_args_with_workspace, resume_session_to_backing, AgentClientImpl,
-    InitialProviderAssembly, PromptAssembly, ResumeError, RuntimeBootstrapDependencies,
-    RuntimeCoreDependencies, RuntimeToolAssemblyDependencies, SessionBootstrapAssembly,
-    SkillBootstrapAssembly,
+    build_agent_runner, config_snapshot_to_sdk, from_args_with_workspace,
+    resolve_concurrency_limits, resolve_model_runtime_settings, resume_session_to_backing,
+    AgentClientImpl, AgentRunnerAssembly, InitialProviderAssembly, ModelRuntimeSettings,
+    PromptAssembly, ResumeError, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
+    RuntimeToolAssemblyDependencies, SessionBootstrapAssembly, SkillBootstrapAssembly,
 };
 // #1248 Task 3: RuntimeContextFactory is the narrow crate-root construction
 // entry.  RuntimeServices stays internal; callers construct via
@@ -28,10 +29,6 @@ pub use application::run::context_factory::RuntimeContextFactory;
 pub use application::run::preparation::{
     ParentRunCapabilities, PreparedRun, RunPreparationError, RunPreparationRequest,
     SessionSnapshot, SessionState,
-};
-pub use application::startup::{
-    build_agent_runner, resolve_concurrency_limits, resolve_model_runtime_settings,
-    AgentRunnerAssembly, ModelRuntimeSettings,
 };
 pub use ports::{ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort};
 pub use sdk::{
@@ -49,7 +46,6 @@ mod boundary_tests {
         let allowed = [
             "client",
             "context",
-            "cost",
             "hook",
             "interaction",
             "loop_engine",
@@ -58,10 +54,7 @@ mod boundary_tests {
             "reflection",
             "run",
             "session",
-            "startup",
-            "testing",
             "tool",
-            "workspace",
         ];
         let mut unexpected = std::fs::read_dir(&application)
             .expect("read Runtime application directory")

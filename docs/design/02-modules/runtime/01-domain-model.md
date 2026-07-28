@@ -351,7 +351,7 @@ struct RuntimeContext {
     policy:    Arc<dyn PolicyPort>,     // v0.1.0: AllowAllPolicy
     interaction: Arc<dyn InteractionPort>, // Runtime-owned 等待 / reply seam
     memory:    Arc<dyn MemoryPort>,     // Sub(Disabled): NoOpMemory
-    reflection: Arc<dyn ReflectionPromptPort>, // 纯 prompt / parse / format；apply 仍走同一 memory Arc
+    reflection: Arc<dyn ReflectionWorkflowPort>, // Memory-owned prompt/parse/apply/history workflow；Provider 调用仍归 Runtime
     task:      Arc<dyn TaskAccess>,     // Sub: 独立实例；NEVER 暴露 TaskPersist
     hooks:     Arc<dyn HookPort>,       // Full / BoundaryOnly capability adapter
     reasoning: Arc<dyn ReasoningPort>,  // 发布 requested level；Sub: EffortOnly/Inherit

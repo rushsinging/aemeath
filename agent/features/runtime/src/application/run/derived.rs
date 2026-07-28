@@ -22,7 +22,7 @@ pub struct CliAgentRunner {
     pub tool_result_materializer:
         Arc<crate::application::tool::result_materialization::ToolResultMaterializer>,
     /// Runtime-owned workspace source used to derive isolated sub-run views.
-    pub workspace: crate::application::workspace::access::RuntimeWorkspaceAccess,
+    pub workspace: crate::application::run::workspace::RuntimeWorkspaceAccess,
     /// Skill materializer shared with sub-run isolated contexts so that
     /// sub-agents materialize the configured skill set into their prompt.
     pub skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
