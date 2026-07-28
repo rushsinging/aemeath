@@ -57,7 +57,7 @@ pub(crate) struct SkillCompletionCatalog {
 
 impl SkillCompletionCatalog {
     fn resolve(&self, input: &str) -> Option<sdk::SkillRequestCommand> {
-        let mut tokens = input.trim().split_whitespace();
+        let mut tokens = input.split_whitespace();
         let command = sdk::CommandName::new(tokens.next()?).ok()?;
         let route = self.slash_routes.iter().find(|route| {
             route.slash_command.eq_ignore_ascii_case(command.as_str())
