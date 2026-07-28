@@ -2,6 +2,9 @@ mod agent_calls;
 mod ask_user;
 pub(crate) mod config_reload;
 mod events;
+#[cfg(test)]
+#[path = "looping/events_tests.rs"]
+mod events_tests;
 pub(crate) mod finalize;
 mod hook_ui;
 mod idle_commands;

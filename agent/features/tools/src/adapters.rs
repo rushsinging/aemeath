@@ -45,6 +45,7 @@ pub mod read_mcp_resource;
 #[allow(dead_code)]
 pub mod skill_filesystem;
 pub mod skill_tool;
+pub mod task_block_by;
 pub mod task_create;
 pub mod task_get;
 pub mod task_list;

@@ -52,7 +52,7 @@ When you use TaskCreate to create tasks, you MUST maintain task status throughou
 - After all tasks in the current request are completed, call TaskListComplete to close the active task batch.
 - Do NOT skip TaskUpdate — task status is visible to the user and must stay accurate.
 
-Use blocked_by to set dependencies: e.g. task 3 depends on task 1 and task 2 completing first.
+Use TaskBlockBy to set dependencies: e.g. task 3 depends on tasks 1 and 2. An empty block_by_ids list clears dependencies.
 When the user says "continue", "resume", or similar without specifying a task, call TaskListGet first to inspect open task batches before choosing work.
 System reminders about tasks may refer to older task batches. If a reminder is unrelated to the latest user request, prioritize the latest user request.
 
@@ -121,7 +121,7 @@ When you use TaskCreate to create tasks, you MUST maintain task status throughou
 - After all tasks in the current request are completed, call TaskListComplete to close the active task batch.
 - Do NOT skip TaskUpdate — task status is visible to the user and must stay accurate.
 
-Use blocked_by to set dependencies: e.g. task 3 depends on task 1 and task 2 completing first.
+Use TaskBlockBy to set dependencies: e.g. task 3 depends on tasks 1 and 2. An empty block_by_ids list clears dependencies.
 When the user says "continue", "resume", or similar without specifying a task, call TaskListGet first to inspect open task batches before choosing work.
 System reminders about tasks may refer to older task batches. If a reminder is unrelated to the latest user request, prioritize the latest user request.
 

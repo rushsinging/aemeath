@@ -2,9 +2,9 @@
 
 use crate::adapters::{
     agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep,
-    memory_tool, plan_mode, skill_tool, task_create, task_get, task_list, task_list_complete,
-    task_list_create, task_lists, task_stop, task_update, tool_search, web_fetch, web_search,
-    worktree,
+    memory_tool, plan_mode, skill_tool, task_block_by, task_create, task_get, task_list,
+    task_list_complete, task_list_create, task_lists, task_stop, task_update, tool_search,
+    web_fetch, web_search, worktree,
 };
 use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::published_language::ToolCapabilities as Caps;
@@ -149,6 +149,14 @@ pub(crate) fn register_named_scope(
         Caps::TaskMutation,
         [true, false],
         task_update::TaskUpdateTool {
+            access: task_access.clone()
+        }
+    );
+    builtin!(
+        "TaskBlockBy",
+        Caps::TaskMutation,
+        [true, false],
+        task_block_by::TaskBlockByTool {
             access: task_access.clone()
         }
     );
@@ -328,6 +336,7 @@ mod tests {
         "Agent",
         "TaskCreate",
         "TaskUpdate",
+        "TaskBlockBy",
         "TaskListGet",
         "TaskLists",
         "TaskListCreate",
@@ -384,6 +393,7 @@ mod tests {
         for name in [
             "TaskCreate",
             "TaskUpdate",
+            "TaskBlockBy",
             "TaskListCreate",
             "TaskListComplete",
             "TaskStop",

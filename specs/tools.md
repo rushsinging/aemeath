@@ -23,6 +23,9 @@
 - Command Published Language 与端口位于 `agent/features/tools/src/domain/{command_pl,command_ports}.rs`；唯一生产 adapter 位于 `adapters/command.rs`，由 `tools::composition::wire_commands` 装配。SDK 只 re-export，CLI/TUI/no-TUI **NEVER** 定义第二份 Descriptor、Catalog 或 parser。
 - #1438 已将 Skill 切换为 metadata Catalog + call-time Load，并通过唯一稳定动态 Skill Tool 执行；Command Router 只发布 typed SkillRequest。
 
+- `TaskUpdate` 只发布普通单字段更新（status / subject / description / priority）；任务依赖由独立 `TaskBlockBy { id, block_by_ids }` 发布，`block_by_ids` 表示完整替换后的集合，空列表清空依赖。
+- `TaskBlockBy` adapter **MUST** 委托 Task-owned 原子集合替换命令；**NEVER** 在 Tool 层逐条 add/remove 形成部分成功。目标、重复 ID、当前 Batch 成员关系与 DAG 无环性必须在提交前验证，失败不得改变 Task revision 或任一依赖边。
+
 ## 3.11.3. MCP 工具
 
 - MCP 主体在 `agent/features/tools/src/adapters/`：`mcp_manager.rs`、`mcp_tool.rs`、`mcp.rs`、`read_mcp_resource.rs`、`list_mcp_resources.rs`。

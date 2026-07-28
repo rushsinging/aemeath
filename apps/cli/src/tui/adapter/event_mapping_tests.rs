@@ -80,6 +80,24 @@ fn ask_user_batch_is_retired_and_mapped_to_nop() {
 }
 
 #[test]
+fn tasks_snapshot_preserves_sequence_prefixed_lines() {
+    let expected = vec![
+        "━━ Tasks: 0/1 ━━".to_string(),
+        "□ #1 实现适配器".to_string(),
+    ];
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::TasksSnapshot {
+        tasks: Box::new(sdk::TaskStatusView {
+            lines: expected.clone(),
+        }),
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::TasksSnapshot { lines }) if lines == expected
+    ));
+}
+
+#[test]
 fn config_reload_maps_spacing_policy_into_tui_owned_event() {
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ConfigReloaded {
         event: sdk::ConfigReloadedEvent {

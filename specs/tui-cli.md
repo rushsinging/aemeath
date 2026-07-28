@@ -100,6 +100,8 @@ pub struct ToolRenderPolicy {
 - **Edit 是唯一使用 `ResultRender::Diff` 的工具**，显示全部 diff 行（`max_lines: None`）。
 - **Bash 使用 `tail_mode: true`**，只显示最后 5 行输出，避免长命令输出淹没 TUI。
 - **TaskCreate 使用 `Compact` 单行模式**，description 合并进 header（`TaskCreate {subject}: {description}`）。
+- Spinner 下方的 Task 状态列表 **MUST** 使用批次内稳定序号显示为 `<状态图标> #<seq_id> <Summary>`；`blocked by` 引用 **MUST** 使用同一批次内序号，**NEVER** 用当前列表枚举位置重新编号。
+- **TaskBlockBy 使用 `Compact` 单行模式**，显示目标 `#id` 及完整替换后的依赖输入摘要；空列表明确显示清空依赖。
 - **ToolResult 子块首行使用 `⎿` 圆角连接**作为 gutter marker（由 `gutter.rs` 按 `OutputBlockKind::ToolResult` 注入），连接到父 ToolCall header。
 - **Tool display name 着色为 `ACCENT_BRIGHT`（Mauve）**，与参数文本（`TEXT`）和元信息（`TEXT_MUTED`）形成视觉层次。`format_header_line` 默认实现按 `display_name` 前缀拆分；不支持前缀匹配的（如 emoji 前缀的 `CustomIcon`）自动 fallback 为整体 raw。
 - `EnterWorktreeDisplay` 的 result-aware header override **MUST** 在结构化 result 缺失、解析失败或标记为 error 时回退消费原始 input；**NEVER** 使用伪默认值掩盖实际调用参数。

@@ -4,5 +4,7 @@ include!("output_tests/bench_tests.rs");
 
 #[path = "output_tests/edit_diff_performance_tests.rs"]
 mod edit_diff_performance;
+#[path = "output_tests/frame_performance_tests.rs"]
+mod frame_performance;
 #[path = "output_tests/retained_state_performance_tests.rs"]
 mod retained_state_performance;

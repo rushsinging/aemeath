@@ -53,6 +53,8 @@ impl OutputViewAssembler {
         version: u64,
         workspace_root: Option<&std::path::Path>,
     ) -> OutputViewModel {
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         let mut roots: Vec<BlockNode> = Vec::new();
         let tool_index = ToolIndex::build(conversation);
 
@@ -308,6 +310,12 @@ impl OutputViewAssembler {
             ));
         }
 
+        #[cfg(test)]
+        crate::tui::render::performance::record_assemble(
+            conversation.timeline.items().len(),
+            roots.len(),
+            started.elapsed(),
+        );
         OutputViewModel {
             roots,
             version,

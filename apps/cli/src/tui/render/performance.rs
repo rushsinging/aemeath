@@ -3,6 +3,21 @@ use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct RenderPerformanceSnapshot {
+    pub assemble_calls: u64,
+    pub assemble_ns: u64,
+    pub assemble_source_items: u64,
+    pub assemble_output_roots: u64,
+    pub viewport_render_calls: u64,
+    pub viewport_render_ns: u64,
+    pub viewport_source_lines: u64,
+    pub viewport_visible_lines: u64,
+    pub terminal_draw_calls: u64,
+    pub terminal_draw_ns: u64,
+    pub terminal_diff_calls: u64,
+    pub terminal_diff_ns: u64,
+    pub terminal_diff_cells: u64,
+    pub backend_flush_calls: u64,
+    pub backend_flush_ns: u64,
     pub document_render_calls: u64,
     pub document_render_ns: u64,
     pub edit_diff_calls: u64,
@@ -93,6 +108,68 @@ fn update(update: impl FnOnce(&mut RenderPerformanceSnapshot)) {
 
 fn duration_ns(duration: Duration) -> u64 {
     u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
+}
+
+pub(crate) fn record_assemble(source_items: usize, output_roots: usize, duration: Duration) {
+    update(|snapshot| {
+        snapshot.assemble_calls += 1;
+        snapshot.assemble_ns = snapshot.assemble_ns.saturating_add(duration_ns(duration));
+        snapshot.assemble_source_items = snapshot
+            .assemble_source_items
+            .saturating_add(u64::try_from(source_items).unwrap_or(u64::MAX));
+        snapshot.assemble_output_roots = snapshot
+            .assemble_output_roots
+            .saturating_add(u64::try_from(output_roots).unwrap_or(u64::MAX));
+    });
+}
+
+pub(crate) fn record_viewport_render(
+    source_lines: usize,
+    visible_lines: usize,
+    duration: Duration,
+) {
+    update(|snapshot| {
+        snapshot.viewport_render_calls += 1;
+        snapshot.viewport_render_ns = snapshot
+            .viewport_render_ns
+            .saturating_add(duration_ns(duration));
+        snapshot.viewport_source_lines = snapshot
+            .viewport_source_lines
+            .saturating_add(u64::try_from(source_lines).unwrap_or(u64::MAX));
+        snapshot.viewport_visible_lines = snapshot
+            .viewport_visible_lines
+            .saturating_add(u64::try_from(visible_lines).unwrap_or(u64::MAX));
+    });
+}
+
+pub(crate) fn record_terminal_draw(duration: Duration) {
+    update(|snapshot| {
+        snapshot.terminal_draw_calls += 1;
+        snapshot.terminal_draw_ns = snapshot
+            .terminal_draw_ns
+            .saturating_add(duration_ns(duration));
+    });
+}
+
+pub(crate) fn record_terminal_diff(cells: usize, duration: Duration) {
+    update(|snapshot| {
+        snapshot.terminal_diff_calls += 1;
+        snapshot.terminal_diff_ns = snapshot
+            .terminal_diff_ns
+            .saturating_add(duration_ns(duration));
+        snapshot.terminal_diff_cells = snapshot
+            .terminal_diff_cells
+            .saturating_add(u64::try_from(cells).unwrap_or(u64::MAX));
+    });
+}
+
+pub(crate) fn record_backend_flush(duration: Duration) {
+    update(|snapshot| {
+        snapshot.backend_flush_calls += 1;
+        snapshot.backend_flush_ns = snapshot
+            .backend_flush_ns
+            .saturating_add(duration_ns(duration));
+    });
 }
 
 pub(crate) fn record_document_render(duration: Duration) {

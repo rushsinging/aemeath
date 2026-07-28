@@ -14,11 +14,11 @@ pub fn task_create(lang: &str) -> &'static str {
 1. 首先，以文字描述完整计划——列出所有计划任务，让用户看到全貌
 2. 对新的复杂多步骤用户请求，先调用 TaskListCreate 再调用 TaskCreate，使任务挂载到请求摘要
 3. 然后用 TaskCreate 逐个创建任务
-4. 用 TaskUpdate 设置依赖并分配代理
+4. 用 TaskBlockBy 设置依赖，用 TaskUpdate 更新任务字段
 
-创建任务后，用 TaskUpdate：
-- 在任务间设置依赖（blocked_by_id）
-- 开始工作前标记为 in_progress
+创建任务后：
+- 用 TaskBlockBy 设置任务间的完整依赖列表
+- 用 TaskUpdate 在开始工作前标记为 in_progress
 - 完成后标记为 completed——系统会显示哪些任务已解除阻塞
 
 用 TaskListGet 发现无未解决依赖的待处理任务。
@@ -42,11 +42,11 @@ IMPORTANT workflow when task management is actually needed:
 1. First, describe your complete plan as text — list ALL planned tasks so the user can see the full picture
 2. For a new complex multi-step user request, call TaskListCreate before TaskCreate so tasks attach to a request summary
 3. Then create tasks one by one with TaskCreate
-4. Use TaskUpdate to set dependencies and assign agents
+4. Use TaskBlockBy to set dependencies and TaskUpdate to update task fields
 
-After creating tasks, use TaskUpdate to:
-- Set dependencies (blocked_by_id) between tasks
-- Mark as in_progress before starting work
+After creating tasks:
+- Use TaskBlockBy to set the complete dependency list between tasks
+- Use TaskUpdate to mark tasks as in_progress before starting work
 - Mark as completed when done — the system will show which tasks are unblocked
 
 Use TaskListGet to discover pending tasks with no unresolved dependencies.
@@ -105,7 +105,6 @@ pub fn task_update(lang: &str) -> &'static str {
 - status: 状态（pending / in_progress / completed / deleted）
 - subject / description: 字符串
 - priority: 优先级（low / medium / high）
-- blocked_by_id: 依赖的单个任务 ID（如 "4"）
 
 状态工作流：pending → in_progress → completed。用 'deleted' 删除。
 标记任务为 completed 时，系统会显示哪些下游任务已解除阻塞、可执行。据此决定下一步处理什么。
@@ -121,7 +120,6 @@ Valid keys:
 - status: status (pending / in_progress / completed / deleted)
 - subject / description: string
 - priority: priority (low / medium / high)
-- blocked_by_id: single task ID this task depends on (e.g. "4")
 
 Status workflow: pending → in_progress → completed. Use 'deleted' to remove.
 When you mark a task as completed, the system will show which downstream tasks
@@ -129,6 +127,14 @@ are now unblocked and ready to execute. Use this to decide what to work on next.
 
 After completing a task, check the unblocked list or call TaskListGet to find the next available task."#
         }
+    }
+}
+
+/// TaskBlockBy description。
+pub fn task_block_by(lang: &str) -> &'static str {
+    match lang {
+        "zh" => "完整替换任务的前置依赖。传入 id 和完整的 block_by_ids 列表；空列表清空依赖。所有 ID 必须属于当前任务列表，且更新不得形成环。",
+        _ => "Replace all blocking dependencies of a task. Pass id and the complete block_by_ids list; an empty list clears dependencies. All IDs must belong to the current task list and the update must remain acyclic.",
     }
 }
 
@@ -168,11 +174,13 @@ mod tests {
         assert!(task_list("zh").contains("列出所有任务"));
         assert!(task_lists("zh").contains("历史任务列表"));
         assert!(task_stop("zh").contains("停止"));
+        assert!(task_block_by("zh").contains("完整替换"));
+        assert!(task_block_by("en").contains("Replace all"));
         for text in [task_update("zh"), task_update("en")] {
             assert!(text.contains("status:"));
             assert!(text.contains("subject / description:"));
             assert!(text.contains("priority:"));
-            assert!(text.contains("- blocked_by_id:"));
+            assert!(!text.contains("blocked_by_id"));
             assert!(!text.contains("owner:"));
         }
         assert!(task_list_create("zh").contains("创建任务列表"));

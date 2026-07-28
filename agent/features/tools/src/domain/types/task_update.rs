@@ -14,7 +14,7 @@ pub struct TaskUpdateResult {
     /// 当前优先级（如 "high"）
     #[serde(default)]
     pub priority: String,
-    /// 当前被阻塞的任务 id 列表
+    /// Current blocking task IDs, returned as display sequences
     #[serde(default)]
     pub blocked_by: Vec<String>,
 }
@@ -31,9 +31,9 @@ pub struct TaskUpdateInput {
     /// The ID of the task to update
     #[serde(alias = "taskId")]
     pub task_id: String,
-    /// Field to update. One of: status, subject, description, priority, blocked_by_id
+    /// Field to update. One of: status, subject, description, priority. Use TaskBlockBy to replace task dependencies.
     pub key: String,
-    /// New value for the field (always a string). For blocked_by_id, pass a single task ID.
+    /// New value for the field (always a string)
     pub value: serde_json::Value,
 }
 
@@ -43,13 +43,20 @@ mod tests {
     use crate::domain::types::ToolSchema;
 
     #[test]
-    fn task_update_schema_does_not_advertise_legacy_owner() {
+    fn task_update_schema_only_advertises_supported_fields() {
         let schema = TaskUpdateInput::data_schema();
         let key_description = schema["properties"]["key"]["description"]
             .as_str()
             .expect("key description");
+        let value_description = schema["properties"]["value"]["description"]
+            .as_str()
+            .expect("value description");
         assert!(!key_description.contains("owner"));
+        assert!(!key_description.contains("blocked_by_id"));
+        assert!(!value_description.contains("blocked_by_id"));
         assert!(key_description.contains("status"));
         assert!(key_description.contains("description"));
+        assert!(key_description.contains("TaskBlockBy"));
+        assert!(key_description.contains("dependencies"));
     }
 }
