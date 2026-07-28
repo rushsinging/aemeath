@@ -563,6 +563,85 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
 }
 
 #[tokio::test]
+async fn snapshot_shares_committed_step_message_backing() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("session");
+    let session = ten_step_session(&session_id, vec![], 10);
+    let original_ptr = session.run_slices[0].steps[0]
+        .outcome
+        .as_ref()
+        .unwrap()
+        .messages
+        .as_ptr();
+    let (repository, _) = repository_with_session(writer, session);
+
+    let snapshot = repository.snapshot(&session_id).await.unwrap();
+
+    assert_eq!(snapshot.messages.len(), 10);
+    assert_eq!(
+        snapshot.messages.first().map(|message| message as *const _),
+        Some(original_ptr)
+    );
+}
+
+#[tokio::test]
+async fn repeated_snapshots_share_every_committed_step_message_backing() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("session");
+    let session = ten_step_session(&session_id, vec![], 10);
+    let original_ptrs = session
+        .run_slices
+        .iter()
+        .map(|slice| slice.steps[0].outcome.as_ref().unwrap().messages.as_ptr())
+        .collect::<Vec<_>>();
+    let (repository, _) = repository_with_session(writer, session);
+
+    let first = repository.snapshot(&session_id).await.unwrap();
+    let second = repository.snapshot(&session_id).await.unwrap();
+
+    let first_ptrs = first
+        .messages
+        .iter()
+        .map(|message| message as *const _)
+        .collect::<Vec<_>>();
+    let second_ptrs = second
+        .messages
+        .iter()
+        .map(|message| message as *const _)
+        .collect::<Vec<_>>();
+    assert_eq!(first_ptrs, original_ptrs);
+    assert_eq!(second_ptrs, original_ptrs);
+}
+
+#[tokio::test]
+async fn snapshot_after_compact_shares_only_visible_step_backing() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("compact-shared-session");
+    let session = ten_step_session(&session_id, vec![], 0);
+    let all_ptrs = session
+        .run_slices
+        .iter()
+        .map(|slice| slice.steps[0].outcome.as_ref().unwrap().messages.as_ptr())
+        .collect::<Vec<_>>();
+    let (repository, _) = repository_with_session(writer, session);
+    compact(&repository, session_id.clone(), 0).await;
+
+    let snapshot = repository.snapshot(&session_id).await.unwrap();
+    let visible_ptrs = snapshot
+        .messages
+        .iter()
+        .map(|message| message as *const _)
+        .collect::<Vec<_>>();
+
+    assert!(!visible_ptrs.is_empty());
+    assert!(visible_ptrs.len() < all_ptrs.len());
+    assert_eq!(
+        visible_ptrs,
+        all_ptrs[all_ptrs.len() - visible_ptrs.len()..]
+    );
+}
+
+#[tokio::test]
 async fn snapshot_reads_structured_projection_not_legacy_chats() {
     let writer = Arc::new(RecordingWriter::default());
     let mut legacy = ChatSegment::normal(None);
@@ -609,6 +688,35 @@ async fn append_persists_candidate_before_publishing_revision() {
         holder.read().unwrap().tasks,
         SnapshotState::Captured(_)
     ));
+}
+
+#[tokio::test]
+async fn concurrent_appends_with_same_revision_allow_one_commit_and_reject_one_cas() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer);
+
+    let mut first = append("first");
+    first.run_id = RunId::new("run-first");
+    first.step_id = RunStepId::new("step-first");
+    let mut second = append("second");
+    second.run_id = RunId::new("run-second");
+    second.step_id = RunStepId::new("step-second");
+
+    let (first_result, second_result) = tokio::join!(
+        repository.append_finalized(&first),
+        repository.append_finalized(&second)
+    );
+    let results = [first_result, second_result];
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Err(ContextAppendError::RevisionConflict { .. })))
+            .count(),
+        1
+    );
+    assert_eq!(holder.read().unwrap().revision, 1);
+    assert_eq!(holder.read().unwrap().committed_steps.len(), 1);
 }
 
 #[tokio::test]

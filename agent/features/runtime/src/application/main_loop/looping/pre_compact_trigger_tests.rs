@@ -86,7 +86,7 @@ fn window_with(messages: Vec<Message>) -> ContextWindow {
             cacheable: true,
             cache_break: true,
         }],
-        messages,
+        messages: messages.into(),
         tool_schemas: vec![],
         token_estimation: TokenBudget::default(),
         compaction_decision: CompactionDecision {

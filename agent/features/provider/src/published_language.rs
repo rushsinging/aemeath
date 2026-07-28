@@ -638,7 +638,7 @@ pub struct InvocationRequest {
     /// returned producer lifetime, so cancellation remains live after `invoke` returns.
     pub cancellation: tokio_util::sync::CancellationToken,
     /// 本轮上下文窗口消息。
-    pub messages: Vec<Message>,
+    pub messages: std::sync::Arc<[Message]>,
     /// 本轮 system prompt 块（provider-neutral）。
     pub system: Vec<RequestSystemBlock>,
     /// 模型可见 tool schema 列表。
@@ -649,11 +649,15 @@ pub struct InvocationRequest {
 
 impl InvocationRequest {
     /// 构造一个最小请求（无 system、无 tools）。
-    pub fn new(model: ModelId, messages: Vec<Message>, options: InvocationOptions) -> Self {
+    pub fn new(
+        model: ModelId,
+        messages: impl Into<std::sync::Arc<[Message]>>,
+        options: InvocationOptions,
+    ) -> Self {
         Self {
             model,
             cancellation: tokio_util::sync::CancellationToken::new(),
-            messages,
+            messages: messages.into(),
             system: Vec::new(),
             tools: Vec::new(),
             options,

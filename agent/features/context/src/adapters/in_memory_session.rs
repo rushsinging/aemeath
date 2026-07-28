@@ -84,7 +84,7 @@ impl SessionRepository for InMemorySessionRepository {
             .ok_or_else(|| format!("Session 不存在：{session_id}"))?;
         Ok(SessionSnapshot {
             revision: SessionRevision::new(state.revision),
-            messages: state.messages.clone(),
+            messages: state.messages.clone().into(),
             active_summary: state.active_summary.clone(),
         })
     }
@@ -171,7 +171,7 @@ impl SessionRepository for InMemorySessionRepository {
             key,
             FinalizedOutcomeProjection {
                 finalize_cause: append.finalize_cause,
-                messages: append.messages.clone(),
+                messages: append.messages.clone().into(),
                 receipts: append.receipts.clone(),
                 api_input_tokens: append.api_input_tokens,
                 fingerprint: append.fingerprint.as_str().to_string(),

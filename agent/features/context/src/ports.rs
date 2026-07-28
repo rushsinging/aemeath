@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
-    CompactRequest, ContextAppend, ContextAppendError, ContextMessage, ContextPortError,
+    CompactRequest, ContextAppend, ContextAppendError, ContextMessages, ContextPortError,
     ContextRequest, ManualCompactRequest, SessionId, SessionRevision, SystemBlock,
 };
 
@@ -37,7 +37,7 @@ pub trait SessionDecoder: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct SessionSnapshot {
     pub revision: SessionRevision,
-    pub messages: Vec<ContextMessage>,
+    pub messages: ContextMessages,
     pub active_summary: Option<String>,
 }
 

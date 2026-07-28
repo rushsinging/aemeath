@@ -20,6 +20,8 @@ pub(crate) struct ContextBuildPerformanceSnapshot {
     pub decision_ns: u64,
     pub backing_revision: u64,
     pub snapshot_messages: usize,
+    pub snapshot_committed_steps: usize,
+    pub snapshot_shared_messages: usize,
     pub pending_messages: usize,
     pub final_messages: usize,
     pub system_blocks: usize,
@@ -99,12 +101,20 @@ pub(crate) fn record_build(duration: Duration) {
     });
 }
 
-pub(crate) fn record_snapshot(revision: u64, snapshot_messages: usize, duration: Duration) {
+pub(crate) fn record_snapshot(
+    revision: u64,
+    snapshot_messages: usize,
+    snapshot_committed_steps: usize,
+    snapshot_shared_messages: usize,
+    duration: Duration,
+) {
     update(|snapshot| {
         snapshot.snapshot_calls += 1;
         snapshot.snapshot_ns = snapshot.snapshot_ns.saturating_add(duration_ns(duration));
         snapshot.backing_revision = revision;
         snapshot.snapshot_messages = snapshot_messages;
+        snapshot.snapshot_committed_steps = snapshot_committed_steps;
+        snapshot.snapshot_shared_messages = snapshot_shared_messages;
     });
 }
 

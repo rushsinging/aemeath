@@ -25,7 +25,7 @@ impl SessionRepository for FakeSession {
     async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
         Ok(SessionSnapshot {
             revision: SessionRevision::new(2),
-            messages: vec![Message::user("history")],
+            messages: vec![Message::user("history")].into(),
             active_summary: Some("summary".into()),
         })
     }
@@ -171,6 +171,15 @@ async fn committed_memory_adapter_switches_from_noop_to_active_memory_for_contex
     assert_eq!(after.blocks[0].kind, "memory_context");
     assert!(after.blocks[0].cacheable);
     assert!(after.blocks[0].content.contains("active memory fact"));
+}
+
+#[tokio::test]
+async fn build_window_keeps_committed_history_shared_and_pending_owned() {
+    let window = service().build_window(&request()).await.unwrap();
+
+    assert_eq!(window.messages.len(), 2);
+    assert_eq!(window.messages[0].text_content(), "history");
+    assert_eq!(window.messages[1].text_content(), "pending");
 }
 
 #[tokio::test]
