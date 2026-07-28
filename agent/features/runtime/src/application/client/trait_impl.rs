@@ -53,6 +53,10 @@ impl AgentClient for AgentClientImpl {
         self.inner.shell.active_run.cancel(run_id)
     }
 
+    fn cancel_current_run(&self, deadline: sdk::ControlDeadline) -> sdk::CancelCurrentRunOutcome {
+        self.inner.shell.active_run.cancel_current_main(deadline)
+    }
+
     fn cancel_run_step(
         &self,
         run_id: &sdk::RunId,

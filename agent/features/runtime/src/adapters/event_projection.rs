@@ -502,6 +502,17 @@ pub(crate) fn project_stream_event(
                         .into_iter()
                         .map(crate::application::client::message_to_sdk)
                         .collect(),
+                    finalize_cause: step.finalize_cause.map(|cause| match cause {
+                        context::domain::FinalizeCause::Completed => {
+                            sdk::ResumedStepFinalizeCause::Completed
+                        }
+                        context::domain::FinalizeCause::UserCancelledStep => {
+                            sdk::ResumedStepFinalizeCause::UserCancelledStep
+                        }
+                        context::domain::FinalizeCause::RunTerminated => {
+                            sdk::ResumedStepFinalizeCause::RunTerminated
+                        }
+                    }),
                 })
                 .collect(),
             session_id,

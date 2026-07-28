@@ -233,6 +233,7 @@ impl<'a> SubAgentRun<'a> {
             spec: self.run_spec.clone(),
             parent_run_id: self.parent_run_id.clone(),
             cancel: self.runtime_cancellation.clone(),
+            register: crate::application::run_launcher::ActiveRunRegistration::Addressable,
         };
         let active_run = self.active_run.clone();
 

@@ -56,11 +56,19 @@ pub(crate) struct TuiStopHookFeedback {
     pub(crate) output_file: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiResumedStepFinalizeCause {
+    Completed,
+    UserCancelledStep,
+    RunTerminated,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiResumedSessionStep {
     pub(crate) run_id: String,
     pub(crate) step_id: String,
     pub(crate) messages: Vec<TuiChatMessage>,
+    pub(crate) finalize_cause: Option<TuiResumedStepFinalizeCause>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

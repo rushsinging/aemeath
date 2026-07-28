@@ -18,7 +18,13 @@ pub(crate) struct ActiveRun {
 
 #[derive(Debug, Default)]
 pub struct ActiveRunRegistry {
-    active: std::sync::Mutex<std::collections::HashMap<sdk::RunId, ActiveRun>>,
+    active: std::sync::Mutex<ActiveRunState>,
+}
+
+#[derive(Debug, Default)]
+struct ActiveRunState {
+    runs: std::collections::HashMap<sdk::RunId, ActiveRun>,
+    current_main_run_id: Option<sdk::RunId>,
 }
 
 impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
@@ -27,7 +33,7 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        guard.insert(
+        guard.runs.insert(
             run_id.clone(),
             ActiveRun {
                 cancel,
@@ -41,7 +47,22 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
     }
 
     fn activate_main(&self, run_id: sdk::RunId, cancel: CancellationToken) {
-        self.activate(run_id, cancel);
+        let mut guard = self
+            .active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        guard.runs.insert(
+            run_id.clone(),
+            ActiveRun {
+                cancel,
+                cancelling: false,
+                terminal: false,
+                main_step: None,
+                control: None,
+                control_delivered: false,
+            },
+        );
+        guard.current_main_run_id = Some(run_id);
     }
 
     fn set_main_active_step(
@@ -54,7 +75,7 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        if let Some(active) = guard.get_mut(run_id) {
+        if let Some(active) = guard.runs.get_mut(run_id) {
             active.main_step = Some(MainStepScope {
                 id: step_id,
                 cancel,
@@ -71,7 +92,7 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let Some(active) = guard.get_mut(run_id) else {
+        let Some(active) = guard.runs.get_mut(run_id) else {
             return false;
         };
         if active.cancelling || active.terminal {
@@ -86,7 +107,7 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let Some(active) = guard.get_mut(run_id) else {
+        let Some(active) = guard.runs.get_mut(run_id) else {
             return false;
         };
         if active.terminal {
@@ -101,11 +122,54 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        guard.remove(run_id);
+        guard.runs.remove(run_id);
+        if guard.current_main_run_id.as_ref() == Some(run_id) {
+            guard.current_main_run_id = None;
+        }
     }
 }
 
 impl ActiveRunRegistry {
+    pub fn cancel_current_main(
+        &self,
+        deadline: sdk::ControlDeadline,
+    ) -> sdk::CancelCurrentRunOutcome {
+        let mut guard = self
+            .active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Some(run_id) = guard.current_main_run_id.clone() else {
+            return sdk::CancelCurrentRunOutcome::NoActiveRun;
+        };
+        let Some(active) = guard.runs.get_mut(&run_id) else {
+            guard.current_main_run_id = None;
+            return sdk::CancelCurrentRunOutcome::NoActiveRun;
+        };
+        if active.terminal {
+            return sdk::CancelCurrentRunOutcome::RunTerminal;
+        }
+        if matches!(
+            active.control,
+            Some(crate::domain::agent_run::RunControl::Terminate { .. })
+        ) {
+            return sdk::CancelCurrentRunOutcome::RunTerminating;
+        }
+        if active.control.is_some() || active.cancelling {
+            return sdk::CancelCurrentRunOutcome::AlreadyCancelling;
+        }
+        let Some(current_step) = active.main_step.as_ref() else {
+            active.cancelling = true;
+            active.cancel.cancel();
+            return sdk::CancelCurrentRunOutcome::Accepted;
+        };
+        let step_id = current_step.id.clone();
+        current_step.cancel.cancel();
+        active.control =
+            Some(crate::domain::agent_run::RunControl::CancelStep { step_id, deadline });
+        active.control_delivered = false;
+        sdk::CancelCurrentRunOutcome::Accepted
+    }
+
     pub fn cancel_step(
         &self,
         run_id: &sdk::RunId,
@@ -116,7 +180,7 @@ impl ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let Some(active) = guard.get_mut(run_id) else {
+        let Some(active) = guard.runs.get_mut(run_id) else {
             return sdk::CancelRunStepOutcome::NotFound;
         };
         if active.terminal {
@@ -155,7 +219,7 @@ impl ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let Some(active) = guard.get_mut(run_id) else {
+        let Some(active) = guard.runs.get_mut(run_id) else {
             return sdk::TerminateRunOutcome::NotFound;
         };
         if active.terminal {
@@ -184,7 +248,7 @@ impl ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let active = guard.get_mut(run_id)?;
+        let active = guard.runs.get_mut(run_id)?;
         if active.control_delivered {
             return None;
         }
@@ -198,7 +262,7 @@ impl ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let Some(active) = guard.get_mut(run_id) else {
+        let Some(active) = guard.runs.get_mut(run_id) else {
             return sdk::CancelRunOutcome::NotFound;
         };
         if active.terminal {
@@ -223,6 +287,7 @@ impl ActiveRunRegistry {
         self.active
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+            .runs
             .keys()
             .cloned()
             .collect()

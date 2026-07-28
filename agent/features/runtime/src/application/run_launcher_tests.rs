@@ -94,6 +94,7 @@ async fn launch_creates_run_and_returns_terminal() {
         spec: RunSpec::main(),
         parent_run_id: None,
         cancel: CancellationToken::new(),
+        register: ActiveRunRegistration::CurrentMain,
     };
 
     let result = launch(input, registry.clone(), &mut port).await;
@@ -110,6 +111,7 @@ async fn launch_clears_active_run_after_completion() {
         spec: RunSpec::main(),
         parent_run_id: None,
         cancel: CancellationToken::new(),
+        register: ActiveRunRegistration::CurrentMain,
     };
 
     let _ = launch(input, registry.clone(), &mut port).await;
@@ -129,6 +131,7 @@ async fn launch_adapter_error_emits_failed_terminal_and_clears_active_run() {
             spec: RunSpec::main(),
             parent_run_id: None,
             cancel: CancellationToken::new(),
+            register: ActiveRunRegistration::CurrentMain,
         },
         registry.clone(),
         &mut port,

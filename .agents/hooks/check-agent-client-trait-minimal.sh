@@ -3,8 +3,9 @@ set -euo pipefail
 
 # 功能：检查 AgentClient trait 只开放 chat、Main Run control、Runtime-owned interaction 命令与明确登记的 Config control-plane 方法。
 # 作用：守住窄 façade；内容流仍走 ChatInputEvent/ChatEvent，所有控制命令只交换 SDK 纯值。
-#       #1247 原子切换 Main cancel_run_step / terminate_run；旧 cancel_run 由 #879 退役。
-# 例外：Run control 必须按 RunId 定位，不允许扩展为无标识的会话级取消。
+#       #1440 增加 cancel_current_run：前台取消由 Runtime 原子选择当前 Main Run，交付层不持 RunId。
+#       #1247 保留按 identity 的 cancel_run_step / terminate_run 精确控制；旧 cancel_run 由 #879 退役。
+# 例外：无标识 cancel_current_run 只表达“当前前台 Main Run”，后台/远程精确控制仍必须按 RunId 定位。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
@@ -53,7 +54,7 @@ methods = re.findall(r'(?:async\s+)?fn\s+(\w+)', trait_body)
 
 # 允许的方法
 ALLOWED = {
-    "chat", "cancel_run", "cancel_run_step", "terminate_run", "config_view", "update_config",
+    "chat", "cancel_run", "cancel_current_run", "cancel_run_step", "terminate_run", "config_view", "update_config",
     "reply_interaction", "cancel_interaction",
 }
 
@@ -64,7 +65,7 @@ if violations:
     print(json.dumps({
         "decision": "block",
         "reason": (
-            f"AgentClient trait 仅允许 chat/cancel_run、Runtime-owned interaction commands 与 Config control-plane。\n"
+            f"AgentClient trait 仅允许 chat、current/identity-scoped Run control、Runtime-owned interaction commands 与 Config control-plane。\n"
             f"内容输入与结果回传请走 ChatInputEvent/ChatEvent；interaction command 只允许 SDK 纯值。\n"            f"违规方法: {violations}\n"
             f"文件: {path}"
         )

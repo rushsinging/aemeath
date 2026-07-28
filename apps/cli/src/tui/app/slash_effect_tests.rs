@@ -60,6 +60,7 @@ async fn test_save_session_effect_no_client_emits_saved() {
                     messages: vec![
                         crate::tui::adapter::runtime_view::TuiChatMessage::user_text("hi"),
                     ],
+                    finalize_cause: None,
                 }],
             },
         ),

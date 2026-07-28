@@ -8,6 +8,7 @@ fn session_resume_keeps_context_run_step_boundaries() {
             run_id: "run-1".into(),
             step_id: "step-1".into(),
             messages: vec![sdk::ChatMessage::user_text("hello")],
+            finalize_cause: Some(sdk::ResumedStepFinalizeCause::UserCancelledStep),
         }],
         session_id: "session-1".into(),
         created_at: 0,
@@ -19,6 +20,7 @@ fn session_resume_keeps_context_run_step_boundaries() {
             if steps.len() == 1
                 && steps[0].run_id == "run-1"
                 && steps[0].step_id == "step-1"
+                && steps[0].finalize_cause == Some(super::super::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep)
                 && steps[0].messages[0].text_content() == "hello"
     ));
 }

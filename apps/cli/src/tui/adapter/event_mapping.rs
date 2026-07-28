@@ -352,6 +352,17 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                     run_id: step.run_id,
                     step_id: step.step_id,
                     messages: step.messages.into_iter().map(chat_message).collect(),
+                    finalize_cause: step.finalize_cause.map(|cause| match cause {
+                        sdk::ResumedStepFinalizeCause::Completed => {
+                            super::runtime_view::TuiResumedStepFinalizeCause::Completed
+                        }
+                        sdk::ResumedStepFinalizeCause::UserCancelledStep => {
+                            super::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep
+                        }
+                        sdk::ResumedStepFinalizeCause::RunTerminated => {
+                            super::runtime_view::TuiResumedStepFinalizeCause::RunTerminated
+                        }
+                    }),
                 })
                 .collect(),
             session_id,

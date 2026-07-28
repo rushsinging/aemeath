@@ -311,6 +311,7 @@ where
                                             run_id: step.run_id,
                                             step_id: step.step_id,
                                             messages: step.messages,
+                                            finalize_cause: step.finalize_cause,
                                         })
                                         .collect(),
                                     session_id: projection.session_id,
@@ -686,6 +687,7 @@ where
                             spec: spec.clone(),
                             parent_run_id: None,
                             cancel: cancel.clone(),
+                            register: crate::application::run_launcher::ActiveRunRegistration::CurrentMain,
                         },
                         main_active_run.clone(),
                         &mut port,

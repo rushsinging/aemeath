@@ -83,6 +83,7 @@ pub struct RuntimeResumedSessionStep {
     pub run_id: String,
     pub step_id: String,
     pub messages: Vec<Message>,
+    pub finalize_cause: Option<context::domain::FinalizeCause>,
 }
 
 #[derive(Debug)]

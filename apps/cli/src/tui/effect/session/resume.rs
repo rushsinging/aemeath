@@ -23,6 +23,11 @@ impl App {
                     .into_iter()
                     .map(crate::tui::adapter::event_mapping::chat_message)
                     .collect(),
+                finalize_cause: step.finalize_cause.map(|cause| match cause {
+                    sdk::ResumedStepFinalizeCause::Completed => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed,
+                    sdk::ResumedStepFinalizeCause::UserCancelledStep => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep,
+                    sdk::ResumedStepFinalizeCause::RunTerminated => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated,
+                }),
             })
             .collect();
         self.resume_session_messages(&resume.session_id, steps, resume.created_at.to_string());
@@ -126,6 +131,7 @@ mod tests {
                 run_id: "run-1".to_string(),
                 step_id: "step-1".to_string(),
                 messages: vec![sdk::ChatMessage::assistant_text("P5 progress is preserved")],
+                finalize_cause: None,
             }],
             session_id: "session-resumed".to_string(),
             created_at: 42,
@@ -202,6 +208,7 @@ mod tests {
                     TuiChatMessage::user_text("历史问题"),
                     TuiChatMessage::assistant_text("历史回答"),
                 ],
+                finalize_cause: None,
             }],
             "2026-01-01T00:00:00Z".to_string(),
         );

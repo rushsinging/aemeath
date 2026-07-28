@@ -154,6 +154,7 @@ pub(crate) struct RestoreStepProjection {
     pub cursor: RunStepCursor,
     pub messages: Vec<Message>,
     pub tool_receipts: Vec<ToolCallReceipt>,
+    pub finalize_cause: Option<FinalizeCause>,
 }
 
 fn step_messages(step: &CommittedRunStep) -> Vec<Message> {
@@ -386,6 +387,7 @@ impl CanonicalSession {
                     },
                     messages: step_messages(step),
                     tool_receipts: step.tool_receipts.clone(),
+                    finalize_cause: step.outcome.as_ref().map(|outcome| outcome.finalize_cause),
                 })
             })
             .collect()
@@ -415,6 +417,7 @@ impl CanonicalSession {
                         },
                         messages: step_messages(step),
                         tool_receipts: step.tool_receipts.clone(),
+                        finalize_cause: step.outcome.as_ref().map(|outcome| outcome.finalize_cause),
                     });
                 }
             }

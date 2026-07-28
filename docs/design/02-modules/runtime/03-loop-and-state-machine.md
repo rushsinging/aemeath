@@ -258,11 +258,12 @@ async fn run_loop(
 
 Runtime 入站命令区分两个 scope，均不经过 InputBuffer：
 
-1. `cancel_run_step(run_id, step_id?)`：同步原子迁移当前 Step 到 `CancellingStep`、触发 Step scope、返回 typed outcome；异步 StepFinalizer 最长 10s，完成后 Run 固定进入 `DrainingInput`。
-2. `terminate_run(run_id, reason)`：同步迁移 Run 到 `Terminating`、seal input admission、触发 Run root scope、返回 typed outcome；异步复用同一 StepFinalizer（最长 5s）、丢弃未进入 Session 的 InputBuffer、flush Session，最终进入 `Terminated`。
-3. CancelRunStep 后 Drain 有输入则 `PreparingContext` 开下一 Step；无输入且 drain epoch 原子 seal 则 `Completed(reason=StepCancelledAndInputDrained)`。
-4. TerminateRun 不回到 Drain；resume 只回放 Session committed content，并创建新 Run。
-5. 当前不定义 Force Terminate。
+1. `cancel_current_run(deadline)`：前台取消入口。Runtime 原子选择当前 Main Run；有 active Step 时等价执行 Step cancel，无 active Step 时触发 Run root scope。TUI 不参与 Run identity 寻址。
+2. `cancel_run_step(run_id, step_id?)`：精确控制入口，同步原子迁移指定当前 Step 到 `CancellingStep`、触发 Step scope、返回 typed outcome；异步 StepFinalizer 最长 10s，完成后 Run 固定进入 `DrainingInput`。
+3. `terminate_run(run_id, reason)`：同步迁移 Run 到 `Terminating`、seal input admission、触发 Run root scope、返回 typed outcome；异步复用同一 StepFinalizer（最长 5s）、丢弃未进入 Session 的 InputBuffer、flush Session，最终进入 `Terminated`。
+4. CancelRunStep 后 Drain 有输入则 `PreparingContext` 开下一 Step；无输入且 drain epoch 原子 seal 则 `Completed(reason=StepCancelledAndInputDrained)`。
+5. TerminateRun 不回到 Drain；resume 只回放 Session committed content，并创建新 Run。
+6. 当前不定义 Force Terminate。
 
 Step scope 是 Run root scope 的 child；CancelRunStep 不污染下一 Step token，TerminateRun 传播到全部 Step/Tool/SubRun scope。
 

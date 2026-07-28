@@ -11,6 +11,7 @@ pub struct SessionRestoreStep {
     pub run_id: String,
     pub step_id: String,
     pub messages: Vec<Message>,
+    pub finalize_cause: Option<crate::domain::FinalizeCause>,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +50,7 @@ fn clean_steps(raw_steps: Vec<RestoreStepProjection>) -> (Vec<SessionRestoreStep
         cursor,
         mut messages,
         tool_receipts,
+        finalize_cause,
     } in raw_steps
     {
         project_unfinished_tool_results(&mut messages, &tool_receipts);
@@ -63,6 +65,7 @@ fn clean_steps(raw_steps: Vec<RestoreStepProjection>) -> (Vec<SessionRestoreStep
                 run_id: cursor.run_id,
                 step_id: cursor.step_id,
                 messages,
+                finalize_cause,
             });
         }
     }

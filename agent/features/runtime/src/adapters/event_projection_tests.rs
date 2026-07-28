@@ -11,6 +11,7 @@ fn session_resume_projection_preserves_context_run_step_boundaries() {
             run_id: "run-1".into(),
             step_id: "step-1".into(),
             messages: vec![share::message::Message::user("hello")],
+            finalize_cause: Some(context::domain::FinalizeCause::UserCancelledStep),
         }],
         session_id: "session-1".into(),
         created_at: 0,
@@ -21,6 +22,10 @@ fn session_resume_projection_preserves_context_run_step_boundaries() {
             assert_eq!(steps[0].run_id, "run-1");
             assert_eq!(steps[0].step_id, "step-1");
             assert_eq!(steps[0].messages[0].text_content(), "hello");
+            assert_eq!(
+                steps[0].finalize_cause,
+                Some(sdk::ResumedStepFinalizeCause::UserCancelledStep)
+            );
         }
         other => panic!("unexpected event: {other:?}"),
     }

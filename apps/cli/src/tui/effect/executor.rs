@@ -272,10 +272,12 @@ impl App {
             .processing_handle
             .as_ref()
             .map(|handle| handle.cancel_current_run())
-            .unwrap_or(sdk::CancelRunOutcome::NotFound);
+            .unwrap_or(sdk::CancelCurrentRunOutcome::NoActiveRun);
         if matches!(
             outcome,
-            sdk::CancelRunOutcome::Accepted | sdk::CancelRunOutcome::AlreadyCancelling
+            sdk::CancelCurrentRunOutcome::Accepted
+                | sdk::CancelCurrentRunOutcome::AlreadyCancelling
+                | sdk::CancelCurrentRunOutcome::RunTerminating
         ) {
             self.chat.start_cancelling();
             self.apply_agent_intent(AgentIntent::Conversation(

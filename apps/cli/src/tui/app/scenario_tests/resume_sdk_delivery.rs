@@ -23,6 +23,7 @@ fn sdk_events_after_resumed_history_are_batched_reduced_and_rendered_at_tail() {
                         "RESUME-SDK-HISTORY-{index:04}"
                     )),
                 ],
+                finalize_cause: None,
             },
         )
         .collect();

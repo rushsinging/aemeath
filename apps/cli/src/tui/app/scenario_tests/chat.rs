@@ -44,6 +44,7 @@ fn terminal_text_after_thinking_matches_resume_projection() {
             run_id: "chat-p0".into(),
             step_id: "turn-p0".into(),
             messages: vec![TuiChatMessage::assistant_text(terminal_text)],
+            finalize_cause: None,
         }],
         session_id: "session-p0".into(),
         created_at: 0,

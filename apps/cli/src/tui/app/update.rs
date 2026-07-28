@@ -453,9 +453,8 @@ impl App {
                 }
             }
             TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {
-                // Done/Cancelled 走 Runtime 路径，但 stop_processing 是 App 级副作用。
-                // 不调则 is_processing 永远为 true，而 run_cancel_state 已被
-                // processing.rs 设为 Idle，导致 Ctrl+C 返回 NotFound（"没反应"）。
+                // Done/Cancelled 走 Runtime 路径，但 stop_processing 是 App 级副作用；
+                // 不执行会让 is_processing 永远保持 true。
                 self.spinner_stop();
                 self.chat.stop_processing();
                 self.mark_output_dirty();

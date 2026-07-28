@@ -37,6 +37,7 @@ fn session_history_restore_does_not_activate_runtime_spinner() {
                     TuiChatMessage::user_text("历史问题"),
                     TuiChatMessage::assistant_text("历史回答"),
                 ],
+                finalize_cause: None,
             }],
         })),
     );

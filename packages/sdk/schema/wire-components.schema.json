@@ -30,6 +30,17 @@
         }
       ]
     },
+    "CancelCurrentRunOutcome": {
+      "enum": [
+        "Accepted",
+        "AlreadyCancelling",
+        "RunTerminating",
+        "RunTerminal",
+        "NoActiveRun"
+      ],
+      "title": "CancelCurrentRunOutcome",
+      "type": "string"
+    },
     "CancelRunOutcome": {
       "enum": [
         "Accepted",

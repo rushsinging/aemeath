@@ -171,6 +171,20 @@ impl ConversationUpdate for ResumeConversation {
                     }
                 }
             }
+            if let Some(finalize_cause) = step.finalize_cause {
+                let text = match finalize_cause {
+                    crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed => None,
+                    crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep => {
+                        Some("此 Run Step 已由用户取消")
+                    }
+                    crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated => Some("此 Run 已终止"),
+                };
+                if let Some(text) = text {
+                    all_changes.extend(model.apply(AppendSystemMessage {
+                        text: text.to_string(),
+                    }));
+                }
+            }
         }
         all_changes
     }
@@ -778,12 +792,36 @@ mod tests {
     }
 
     #[test]
+    fn resume_projects_cancelled_step_terminal_notice() {
+        let mut model = ConversationModel::default();
+
+        ResumeConversation {
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "cancelled-run".into(),
+                step_id: "cancelled-step".into(),
+                messages: vec![TuiChatMessage::user_text("cancelled question")],
+                finalize_cause: Some(
+                    crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep,
+                ),
+            }],
+        }
+        .update(&mut model);
+
+        assert!(model.timeline.items().iter().any(|item| matches!(
+            item,
+            OutputTimelineItem::System { text, .. }
+                if text == "此 Run Step 已由用户取消"
+        )));
+    }
+
+    #[test]
     fn resume_conversation_equality_compares_step_identity_and_messages() {
         let first = ResumeConversation {
             steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
                 run_id: "run-1".into(),
                 step_id: "step-1".into(),
                 messages: vec![TuiChatMessage::user_text("first")],
+                finalize_cause: None,
             }],
         };
         let different = ResumeConversation {
@@ -791,6 +829,7 @@ mod tests {
                 run_id: "run-2".into(),
                 step_id: "step-1".into(),
                 messages: vec![TuiChatMessage::user_text("second")],
+                finalize_cause: None,
             }],
         };
 
@@ -825,6 +864,7 @@ mod tests {
                     assistant_two,
                     ask_result("ask-2", serde_json::json!("答案二")),
                 ],
+                finalize_cause: None,
             }],
         }
         .update(&mut model);
@@ -873,6 +913,7 @@ mod tests {
                 run_id: "history-run".into(),
                 step_id: "history-step".into(),
                 messages: vec![message],
+                finalize_cause: None,
             }],
         }
         .update(&mut model);
@@ -913,6 +954,7 @@ mod tests {
                 run_id: "history-run".into(),
                 step_id: "history-step".into(),
                 messages: vec![user, stop_hook, assistant],
+                finalize_cause: None,
             }],
         }
         .update(&mut model);

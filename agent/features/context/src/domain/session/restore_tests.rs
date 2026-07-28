@@ -115,6 +115,10 @@ fn restore_projects_unfinished_tool_receipts_as_unconfirmed_results() {
 
         assert_eq!(restore.trimmed, 0);
         assert_eq!(restore.display_steps.len(), 1);
+        assert_eq!(
+            restore.display_steps[0].finalize_cause,
+            Some(crate::domain::FinalizeCause::UserCancelledStep)
+        );
         assert_eq!(restore.display_steps[0].messages.len(), 2);
         let result = &restore.display_steps[0].messages[1];
         assert_eq!(result.role, Role::User);
