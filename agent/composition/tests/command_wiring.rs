@@ -55,7 +55,7 @@ fn malformed_slash_projection_does_not_block_command_catalog_bootstrap() {
         sdk::SkillView {
             name: "external-skill".to_string(),
             aliases: Vec::new(),
-            slash_command: Some("bad:slash".to_string()),
+            slash_command: Some("bad::slash".to_string()),
             slash_aliases: Vec::new(),
             description: "External skill".to_string(),
             argument_hint: None,
@@ -66,19 +66,19 @@ fn malformed_slash_projection_does_not_block_command_catalog_bootstrap() {
         .expect("invalid external Slash projection must be skipped");
 
     assert!(matches!(
-        wiring.router().resolve(sdk::SlashInput::new("/bad:slash")),
+        wiring.router().resolve(sdk::SlashInput::new("/bad::slash")),
         Err(sdk::CommandParseError::InvalidName { .. })
     ));
 }
 
 #[test]
-fn namespaced_skill_remains_available_without_becoming_a_slash_command() {
+fn namespaced_skill_exposes_qualified_slash_command_without_short_alias() {
     let skills = std::collections::HashMap::from([(
         "superpowers:writing-plans".to_string(),
         sdk::SkillView {
             name: "superpowers:writing-plans".to_string(),
             aliases: vec!["writing-plans".to_string()],
-            slash_command: None,
+            slash_command: Some("superpowers:writing-plans".to_string()),
             slash_aliases: Vec::new(),
             description: "Plan implementation work".to_string(),
             argument_hint: None,
@@ -86,13 +86,18 @@ fn namespaced_skill_remains_available_without_becoming_a_slash_command() {
     )]);
 
     let wiring = composition::tools::wire_commands_with_skills(&skills)
-        .expect("namespaced skill must not prevent command catalog bootstrap");
+        .expect("namespaced skill must register its qualified Slash command");
 
-    assert!(wiring
-        .catalog()
-        .list()
-        .iter()
-        .all(|command| command.name.as_str() != "superpowers:writing-plans"));
+    match wiring
+        .router()
+        .resolve(sdk::SlashInput::new("/superpowers:writing-plans feature"))
+    {
+        Ok(sdk::CommandRoute::SkillRequest(command)) => {
+            assert_eq!(command.skill, "superpowers:writing-plans");
+            assert_eq!(command.arguments.as_slice(), ["feature"]);
+        }
+        other => panic!("expected qualified SkillRequest, got {other:?}"),
+    }
     assert!(matches!(
         wiring
             .router()

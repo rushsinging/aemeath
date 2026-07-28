@@ -29,11 +29,6 @@ impl App {
             ConversationIntent::UpdateTaskLines(UpdateTaskLines(Vec::new())),
         ));
     }
-    /// Set loaded skills for slash command alias lookup
-    pub fn set_skills(&mut self, skills: std::collections::HashMap<String, sdk::SkillView>) {
-        self.skills = skills;
-    }
-
     pub fn set_commands(
         &mut self,
         catalog: std::sync::Arc<dyn sdk::CommandCatalogPort>,

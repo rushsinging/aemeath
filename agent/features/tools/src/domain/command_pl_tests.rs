@@ -13,8 +13,28 @@ fn command_name_normalizes_trimmed_slash_prefixed_ascii_names() {
 }
 
 #[test]
-fn command_name_rejects_empty_whitespace_and_non_ascii_or_punctuation() {
-    for raw in ["", "   ", "/", "two words", "命令", "bad:name"] {
+fn command_name_accepts_one_qualified_namespace_separator() {
+    for (raw, expected) in [
+        ("superpowers:brainstorming", "superpowers:brainstorming"),
+        ("/SUPERPOWERS:WRITING-PLANS", "superpowers:writing-plans"),
+    ] {
+        assert_eq!(CommandName::new(raw).unwrap().as_str(), expected);
+    }
+}
+
+#[test]
+fn command_name_rejects_empty_whitespace_and_invalid_qualified_names() {
+    for raw in [
+        "",
+        "   ",
+        "/",
+        "two words",
+        "命令",
+        ":brainstorming",
+        "superpowers:",
+        "superpowers::brainstorming",
+        "one:two:three",
+    ] {
         assert!(matches!(
             CommandName::new(raw),
             Err(CommandParseError::InvalidName { .. })
@@ -39,7 +59,7 @@ fn descriptor_normalizes_aliases_and_rejects_invalid_alias() {
     assert!(matches!(
         CommandDescriptor::new(
             "review",
-            &["bad:alias"],
+            &["bad::alias"],
             "Review",
             CommandMechanism::SkillRequest,
             CommandTarget::ContextManagement,

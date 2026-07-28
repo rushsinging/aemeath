@@ -22,17 +22,21 @@ impl super::App {
         input: &str,
         ui_tx: Option<tokio::sync::mpsc::Sender<UiEvent>>,
     ) -> Option<String> {
-        let route = match self.command_router.as_deref() {
-            Some(router) => match resolve_slash_for_delivery(router, input) {
-                Ok(route) => route,
-                Err(error) => {
-                    self.append_error_notice(error.to_string());
+        let route = if let Some(request) = self.skill_completion_catalog.resolve(input) {
+            sdk::CommandRoute::SkillRequest(request)
+        } else {
+            match self.command_router.as_deref() {
+                Some(router) => match resolve_slash_for_delivery(router, input) {
+                    Ok(route) => route,
+                    Err(error) => {
+                        self.append_error_notice(error.to_string());
+                        return None;
+                    }
+                },
+                None => {
+                    self.append_error_notice("Command router unavailable.");
                     return None;
                 }
-            },
-            None => {
-                self.append_error_notice("Command router unavailable.");
-                return None;
             }
         };
         let command = match &route {

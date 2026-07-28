@@ -171,7 +171,7 @@ struct RawSkill {
     name: String,
     description: String,
     aliases: Vec<String>,
-    /// 显式 Slash 投影；package namespace Skill 默认仅供 agent 物化。
+    /// 显式 Slash 投影；package namespace Skill 使用完整 qualified identity。
     slash_command: Option<String>,
     /// 仅当 Slash 投影存在时随之公开的合法别名。
     slash_aliases: Vec<String>,
@@ -235,7 +235,7 @@ struct Frontmatter {
     #[serde(default)]
     aliases: Vec<String>,
     /// 可选 Slash Command 名；省略时普通 Skill 默认使用自身 identity，package
-    /// namespace 会在 `apply_namespace` 阶段关闭该投影。
+    /// namespace 会在 `apply_namespace` 阶段发布完整 qualified identity。
     #[serde(default)]
     slash_command: Option<String>,
     /// `slash_command` 的用户可输入别名，不与 identity aliases 混用。
@@ -392,7 +392,7 @@ fn apply_namespace(mut raw: RawSkill, namespace: Option<&str>) -> RawSkill {
         if !ns.is_empty() {
             raw.aliases.push(raw.name.clone());
             raw.name = format!("{ns}:{}", raw.name);
-            raw.slash_command = None;
+            raw.slash_command = Some(raw.name.clone());
             raw.slash_aliases.clear();
         }
     }

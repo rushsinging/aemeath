@@ -15,11 +15,22 @@ impl CommandName {
             .trim()
             .trim_start_matches('/')
             .to_ascii_lowercase();
-        if value.is_empty()
-            || !value
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-        {
+        let valid_segment = |segment: &str| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+        };
+        let mut segments = value.split(':');
+        let first = segments.next().unwrap_or_default();
+        let second = segments.next();
+        let qualified = match second {
+            None => valid_segment(first),
+            Some(local) => {
+                valid_segment(first) && valid_segment(local) && segments.next().is_none()
+            }
+        };
+        if !qualified {
             return Err(CommandParseError::InvalidName { name: value });
         }
         Ok(Self(value))

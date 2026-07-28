@@ -297,7 +297,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await?;
     let launch = runtime_client.tui_launch_context();
-    let command_wiring = crate::tools::wire_commands_with_skills(&launch.skills_map)
+    let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
     let thinking = launch.binding.requested_reasoning != provider::ReasoningLevel::Off;
     let client = agent_client_from_runtime(runtime_client);

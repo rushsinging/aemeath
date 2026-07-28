@@ -8,19 +8,31 @@ fn skill_request_is_user_input_and_withdraw_returns_raw_slash() {
     let id = sdk::InputId::new_v7();
     let event = ChatInputEvent::SkillRequest(sdk::SkillRequest {
         input_id: id.clone(),
-        skill: "release".to_string(),
-        arguments: "v1.2.3".to_string(),
-        raw_input: "/release v1.2.3".to_string(),
+        skill: "superpowers:brainstorming".to_string(),
+        arguments: "idea".to_string(),
+        raw_input: "/superpowers:brainstorming idea".to_string(),
     });
     buf.push(event.clone());
     assert_eq!(buf.pending_user_count(), 1);
-    assert_eq!(buf.withdraw_all_user_texts(), vec!["/release v1.2.3"]);
+    assert_eq!(
+        buf.withdraw_all_user_texts(),
+        vec!["/superpowers:brainstorming idea"]
+    );
 
     buf.push(event);
     match buf.drain_or_seal(DrainEpoch(0)) {
         BufferDrain::Ready { batch, .. } => {
             assert_eq!(batch[0].input_id.as_ref(), Some(&id));
             assert!(batch[0].text.contains("Call the Skill tool first"));
+            assert!(batch[0].text.contains("superpowers:brainstorming"));
+            assert!(!batch[0].text.contains("/superpowers:brainstorming idea"));
+            let adopted = buf.take_drained_adopted();
+            assert_eq!(adopted.len(), 1);
+            assert_eq!(adopted[0].0, id);
+            assert_eq!(
+                adopted[0].1.text_content(),
+                "/superpowers:brainstorming idea"
+            );
         }
         other => panic!("expected ready Skill request, got {other:?}"),
     }

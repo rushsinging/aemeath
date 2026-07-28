@@ -334,6 +334,18 @@ impl App {
         // UserMessagesAdopted 需要在 mapper/reducer 之外执行清占位 + 用户回显，
         // 因为这些副作用依赖 App 级方法且不产生 Intent。
         match &event {
+            TuiRuntimeEvent::SkillsUpdated {
+                revision,
+                skills,
+                slash_routes,
+            } => {
+                self.skill_completion_catalog = super::SkillCompletionCatalog {
+                    revision: revision.clone(),
+                    entries: skills.clone(),
+                    slash_routes: slash_routes.clone(),
+                };
+                self.update_suggestions();
+            }
             TuiRuntimeEvent::UserMessagesAdopted { items, .. } => {
                 for item in items {
                     if let Some(id) = item.input_id.as_ref() {

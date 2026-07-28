@@ -201,6 +201,38 @@ async fn adapter_implements_both_ports() {
 }
 
 #[tokio::test]
+async fn package_skills_publish_and_load_qualified_identities() {
+    let project = fresh_project();
+    let package_root = skills_dir(&project).join("superpowers/skills");
+    write_skill(
+        &package_root,
+        "brainstorming",
+        "brainstorming",
+        "",
+        "brainstorm body",
+    );
+    let adapter = FilesystemSkillAdapter::new(fresh_global());
+
+    let descriptors = adapter.list(catalog_query(project.clone()));
+    let descriptor = descriptors
+        .iter()
+        .find(|item| item.name() == "superpowers:brainstorming")
+        .expect("qualified package Skill must be listed");
+    assert_eq!(
+        descriptor.slash_command(),
+        Some("superpowers:brainstorming")
+    );
+    assert!(descriptor.slash_aliases().is_empty());
+
+    let loaded = adapter
+        .load(load_query(project, "superpowers:brainstorming"))
+        .await
+        .expect("qualified identity must load");
+    assert_eq!(loaded.name(), "superpowers:brainstorming");
+    assert_eq!(loaded.content(), "brainstorm body");
+}
+
+#[tokio::test]
 async fn load_one_preserves_typed_io_error() {
     let error = FilesystemSkillAdapter::load_one(
         std::path::Path::new("/definitely/missing/SKILL.md"),

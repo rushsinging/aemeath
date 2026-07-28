@@ -68,9 +68,9 @@ fn tui_and_no_tui_preserve_prompt_injection_and_invalid_name_results() {
     ));
 
     let tui_invalid =
-        crate::tui::app::slash::resolve_slash_for_delivery(router.as_ref(), "/bad:name");
+        crate::tui::app::slash::resolve_slash_for_delivery(router.as_ref(), "/bad::name");
     let no_tui_invalid =
-        crate::chat::no_tui::resolve_slash_for_delivery(router.as_ref(), "/bad:name");
+        crate::chat::no_tui::resolve_slash_for_delivery(router.as_ref(), "/bad::name");
     assert_eq!(tui_invalid, no_tui_invalid);
     assert!(matches!(
         tui_invalid,

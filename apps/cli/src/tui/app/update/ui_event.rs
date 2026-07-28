@@ -17,13 +17,8 @@ impl App {
     ) -> UpdateResult {
         let mut effects = Vec::new();
         match ev {
-            UiEvent::SkillsUpdated(event) => {
-                self.skills = event
-                    .skills
-                    .into_iter()
-                    .map(|skill| (skill.name.clone(), skill))
-                    .collect();
-                self.update_suggestions();
+            UiEvent::SkillsUpdated(_) => {
+                // Runtime 事件的唯一生产路径是 TuiMsg::Runtime；AgentEvent 镜像不重复消费。
             }
             // ── Runtime 事件已走 TuiMsg::Runtime → update_runtime_event，以下分支不再触达 ──
             UiEvent::Text { .. }
