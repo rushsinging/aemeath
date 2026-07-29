@@ -437,7 +437,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),
             tools.execution(),
-            tools.binding(),
             skill_wiring.catalog(),
             skill_wiring.loader(),
             tool_result_materializer,
@@ -447,7 +446,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             Arc::new(runtime::RuntimeContextFactory::new(
                 tools.catalog_port(),
                 tools.execution(),
-                tools.binding(),
                 Arc::new(policy::AllowAllPolicy),
                 reflection_history,
                 task_access,
