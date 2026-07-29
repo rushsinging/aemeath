@@ -253,9 +253,10 @@ pub fn derive_sub_run(
     let restricted_catalog: Arc<dyn ToolCatalogPort> = {
         let snapshot = parent_context
             .tool_catalog()
-            .snapshot(
+            .snapshot_for_run(
                 &RegistryScopeName::new("sub-agent"),
                 &ToolProfileName::new("sub-agent-restricted"),
+                config_snapshot.tool_selection(),
             )
             .map_err(|e| RuntimeContextAssemblyError::SubDerivationFailed {
                 reason: e.to_string(),
@@ -487,9 +488,10 @@ impl AgentRunner for CliAgentRunner {
             let sub_catalog = match derived
                 .context
                 .tool_catalog()
-                .snapshot(
+                .snapshot_for_run(
                     &tools::RegistryScopeName::new("sub-agent"),
                     &tools::ToolProfileName::new("sub-agent-restricted"),
+                    derived.context.config_ref().tool_selection(),
                 ) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
@@ -569,7 +571,9 @@ impl AgentRunner for CliAgentRunner {
                     available_tools,
                 })
                 .with_user_agent(derived.context.config_ref().config().user_agent())
-                .with_progress(progress_sink.clone()),
+                .with_progress(progress_sink.clone())
+                .with_catalog(Some(Arc::new(sub_catalog.clone())))
+                .with_selection(derived.context.config_ref().tool_selection().clone()),
             );
             let agent = Agent {
                 catalog: sub_catalog,

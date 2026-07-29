@@ -26,6 +26,7 @@ use crate::domain::{
     ToolExecutionPorts, ToolInvocation, ToolName, ToolProfile, ToolProfileName, ToolSuspension,
     TypedTool, TypedToolResult, WorkspaceReadAccess,
 };
+use share::config::ToolSelection;
 
 struct ContractPorts {
     catalog: Arc<dyn ToolCatalogPort>,
@@ -159,6 +160,48 @@ async fn dynamic_mcp_style_tool_enters_main_catalog_and_receives_invocation_auth
             .await,
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn run_selection_filters_catalog_and_execution_with_the_same_rule() {
+    let ports = adapter_factory().await;
+    let selection = ToolSelection::new(&[], &["Counting".to_string()]);
+
+    let catalog = ports
+        .catalog
+        .snapshot_for_run(
+            &RegistryScopeName::new("main"),
+            &ToolProfileName::new("full"),
+            &selection,
+        )
+        .unwrap();
+    assert!(catalog.find(&ToolName::new("Counting")).is_none());
+    assert!(catalog.find(&ToolName::new("Suspend")).is_some());
+
+    ports
+        .contexts
+        .bind(context_for_run_profile_and_selection(
+            "selection-run",
+            "full",
+            selection,
+        ))
+        .expect("bind selection context");
+    let outcome = ports
+        .execution
+        .execute(
+            invocation_for_run_and_profile(
+                &ports.scope,
+                "selection-run",
+                "Counting",
+                json!({"value":"must-not-run"}),
+                "full",
+            ),
+            &ManualCancellation::default(),
+        )
+        .await;
+
+    assert_unavailable(outcome);
+    assert_eq!(ports.calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -566,6 +609,14 @@ fn context_for_profile(profile: &str) -> ToolExecutionContext {
 }
 
 fn context_for_run_and_profile(run_id: &str, profile: &str) -> ToolExecutionContext {
+    context_for_run_profile_and_selection(run_id, profile, ToolSelection::default())
+}
+
+fn context_for_run_profile_and_selection(
+    run_id: &str,
+    profile: &str,
+    selection: ToolSelection,
+) -> ToolExecutionContext {
     let workspace = Arc::new(FakeWorkspace::new());
     let scope = ExecutionScope::builder(
         run_id,
@@ -585,6 +636,7 @@ fn context_for_run_and_profile(run_id: &str, profile: &str) -> ToolExecutionCont
         Arc::new(FixedGuidance {
             language: "en".into(),
         }),
-    );
+    )
+    .with_selection(selection);
     ToolExecutionContext::new(scope, ports)
 }

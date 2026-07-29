@@ -15,7 +15,7 @@ use crate::config::models::{
 use crate::config::permissions::PermissionModeConfig;
 use crate::config::ui::{MarkdownSpacingMode, MarkdownSpacingOverrides};
 use crate::config::{
-    AgentsConfig, Config, HooksConfig, MemoryConfig, SkillsConfig, ToolResultConfig,
+    AgentsConfig, Config, HooksConfig, MemoryConfig, SkillsConfig, ToolResultConfig, ToolSelection,
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -193,6 +193,10 @@ impl ConfigSnapshot {
     }
 
     // ── Tools / Agents ───────────────────────────────────────
+
+    pub fn tool_selection(&self) -> ToolSelection {
+        ToolSelection::new(&self.inner.tools.enabled, &self.inner.tools.disabled)
+    }
 
     pub fn max_tool_concurrency(&self) -> usize {
         if self.inner.tools.max_concurrency > 0 {

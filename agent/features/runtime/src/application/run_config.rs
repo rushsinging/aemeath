@@ -8,11 +8,16 @@ use share::config::domain::snapshot::ConfigSnapshot;
 #[derive(Debug, Clone)]
 pub struct RunConfigSnapshot {
     config: ConfigSnapshot,
+    tool_selection: share::config::ToolSelection,
 }
 
 impl RunConfigSnapshot {
     pub fn capture(config: ConfigSnapshot) -> Self {
-        Self { config }
+        let tool_selection = config.tool_selection();
+        Self {
+            config,
+            tool_selection,
+        }
     }
 
     pub fn revision(&self) -> share::config::domain::snapshot::ConfigRevision {
@@ -21,6 +26,10 @@ impl RunConfigSnapshot {
 
     pub fn config(&self) -> &ConfigSnapshot {
         &self.config
+    }
+
+    pub fn tool_selection(&self) -> &share::config::ToolSelection {
+        &self.tool_selection
     }
 
     pub fn allow_all(&self) -> bool {

@@ -123,6 +123,18 @@ impl ExecutionAdapter {
                 "tool capabilities are not authorized by the selected profile",
             );
         }
+        let context = match self.contexts.resolve(&invocation.execution_scope) {
+            Some(context) => context,
+            None => {
+                return ToolExecutionOutcome::failure(
+                    ToolErrorKind::ResourceUnavailable,
+                    "tool execution context is unavailable for this run",
+                )
+            }
+        };
+        if !context.selection().allows(invocation.tool_name.as_str()) {
+            return unavailable(&invocation);
+        }
         let tool = match self
             .backing
             .registry()
@@ -131,22 +143,14 @@ impl ExecutionAdapter {
             Some(tool) => tool,
             None => return unavailable(&invocation),
         };
-        let context = match self.contexts.resolve(&invocation.execution_scope) {
-            Some(context) => {
-                let context = context.with_authorization(invocation.authorization);
-                // #1384: inject caller-provided progress sink so tools
-                // like Agent can emit progress events to the caller.
-                if let Some(ref progress) = invocation.progress {
-                    context.with_progress(Some(progress.clone()))
-                } else {
-                    context
-                }
-            }
-            None => {
-                return ToolExecutionOutcome::failure(
-                    ToolErrorKind::ResourceUnavailable,
-                    "tool execution context is unavailable for this run",
-                )
+        let context = {
+            let context = context.with_authorization(invocation.authorization);
+            // #1384: inject caller-provided progress sink so tools
+            // like Agent can emit progress events to the caller.
+            if let Some(ref progress) = invocation.progress {
+                context.with_progress(Some(progress.clone()))
+            } else {
+                context
             }
         };
 

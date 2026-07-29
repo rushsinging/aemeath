@@ -620,6 +620,12 @@ impl ToolCatalogSnapshot {
             .collect()
     }
 
+    pub fn selected(mut self, selection: &share::config::ToolSelection) -> Self {
+        self.tools
+            .retain(|descriptor| selection.allows(descriptor.name.as_str()));
+        self
+    }
+
     /// Snapshot 中工具数量。
     pub fn len(&self) -> usize {
         self.tools.len()
@@ -627,6 +633,31 @@ impl ToolCatalogSnapshot {
 
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
+    }
+}
+
+impl crate::domain::ToolListProvider for ToolCatalogSnapshot {
+    fn tool_names(&self) -> Vec<String> {
+        self.tools
+            .iter()
+            .map(|descriptor| descriptor.name.as_str().to_string())
+            .collect()
+    }
+
+    fn tool_description(&self, name: &str) -> Option<String> {
+        self.find(&ToolName::new(name))
+            .map(|descriptor| descriptor.description.clone())
+    }
+
+    fn tool_info(&self, name: &str) -> Option<crate::domain::types::tool_search::ToolInfo> {
+        self.find(&ToolName::new(name)).map(|descriptor| {
+            crate::domain::types::tool_search::ToolInfo {
+                name: descriptor.name.as_str().to_string(),
+                description: descriptor.description.clone(),
+                input_schema: descriptor.input_schema.clone(),
+                is_read_only: descriptor.read_only,
+            }
+        })
     }
 }
 

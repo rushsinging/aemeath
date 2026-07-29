@@ -1,7 +1,7 @@
 //! 工具与代理配置
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 pub(super) fn default_max_tool_concurrency() -> usize {
     10
@@ -41,6 +41,56 @@ impl Default for ToolResultConfig {
             preview_tail_chars: default_tool_result_preview_tail_chars(),
         }
     }
+}
+
+/// Run-scoped tool allow/deny selection derived from merged configuration.
+///
+/// Tool identities use the same ASCII case-insensitive normalization as the
+/// Tools registry. Empty and whitespace-only entries are ignored; duplicate
+/// entries collapse deterministically. A non-empty enabled set is an allowlist,
+/// while disabled always wins.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolSelection {
+    allowlist_active: bool,
+    enabled: BTreeSet<String>,
+    disabled: BTreeSet<String>,
+}
+
+impl ToolSelection {
+    pub fn new(enabled: &[String], disabled: &[String]) -> Self {
+        let mut enabled = normalize_tool_names(enabled);
+        let allowlist_active = !enabled.is_empty();
+        let disabled = normalize_tool_names(disabled);
+        enabled.retain(|name| !disabled.contains(name));
+        Self {
+            allowlist_active,
+            enabled,
+            disabled,
+        }
+    }
+
+    pub fn allows(&self, name: &str) -> bool {
+        let name = name.trim().to_ascii_lowercase();
+        !name.is_empty()
+            && !self.disabled.contains(&name)
+            && (!self.allowlist_active || self.enabled.contains(&name))
+    }
+
+    pub fn enabled(&self) -> Vec<&str> {
+        self.enabled.iter().map(String::as_str).collect()
+    }
+
+    pub fn disabled(&self) -> Vec<&str> {
+        self.disabled.iter().map(String::as_str).collect()
+    }
+}
+
+fn normalize_tool_names(names: &[String]) -> BTreeSet<String> {
+    names
+        .iter()
+        .map(|name| name.trim().to_ascii_lowercase())
+        .filter(|name| !name.is_empty())
+        .collect()
 }
 
 /// Tool configuration
