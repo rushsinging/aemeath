@@ -15,11 +15,22 @@ impl CommandName {
             .trim()
             .trim_start_matches('/')
             .to_ascii_lowercase();
-        if value.is_empty()
-            || !value
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-        {
+        let valid_segment = |segment: &str| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+        };
+        let mut segments = value.split(':');
+        let first = segments.next().unwrap_or_default();
+        let second = segments.next();
+        let qualified = match second {
+            None => valid_segment(first),
+            Some(local) => {
+                valid_segment(first) && valid_segment(local) && segments.next().is_none()
+            }
+        };
+        if !qualified {
             return Err(CommandParseError::InvalidName { name: value });
         }
         Ok(Self(value))
@@ -32,7 +43,7 @@ impl CommandName {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommandMechanism {
-    PromptInjection,
+    SkillRequest,
     SnapshotQuery,
     ApplicationControl,
 }
@@ -91,6 +102,7 @@ pub struct CommandDescriptor {
     pub description: String,
     pub mechanism: CommandMechanism,
     pub target: CommandTarget,
+    pub target_identity: Option<String>,
     pub argument_schema: CommandArgumentSchema,
 }
 
@@ -112,8 +124,14 @@ impl CommandDescriptor {
             description: description.to_string(),
             mechanism,
             target,
+            target_identity: None,
             argument_schema,
         })
+    }
+
+    pub fn with_target_identity(mut self, identity: impl Into<String>) -> Self {
+        self.target_identity = Some(identity.into());
+        self
     }
 }
 
@@ -155,7 +173,8 @@ impl ParsedArguments {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PromptCommand {
+pub struct SkillRequestCommand {
+    pub skill: String,
     pub command: CommandName,
     pub arguments: ParsedArguments,
 }
@@ -174,7 +193,7 @@ pub struct ApplicationControlCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandRoute {
-    PromptInjection(PromptCommand),
+    SkillRequest(SkillRequestCommand),
     SnapshotQuery {
         target: SnapshotQueryTarget,
         command: SnapshotQueryCommand,

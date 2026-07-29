@@ -29,11 +29,6 @@ impl App {
             ConversationIntent::UpdateTaskLines(UpdateTaskLines(Vec::new())),
         ));
     }
-    /// Set loaded skills for slash command alias lookup
-    pub fn set_skills(&mut self, skills: std::collections::HashMap<String, sdk::SkillView>) {
-        self.skills = skills;
-    }
-
     pub fn set_commands(
         &mut self,
         catalog: std::sync::Arc<dyn sdk::CommandCatalogPort>,
@@ -41,13 +36,6 @@ impl App {
     ) {
         self.command_catalog = Some(catalog);
         self.command_router = Some(router);
-    }
-
-    /// Find a skill by its name or alias
-    pub(crate) fn find_skill_by_alias(&self, alias: &str) -> Option<&sdk::SkillView> {
-        self.skills
-            .values()
-            .find(|s| s.name == alias || s.aliases.iter().any(|a| a == alias))
     }
 
     /// Update task status display in output area. Also runs lifecycle checks.

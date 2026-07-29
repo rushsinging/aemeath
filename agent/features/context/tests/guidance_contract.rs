@@ -32,44 +32,25 @@ fn test_prompt_guidance_resolves_config_fallback() {
 }
 
 #[test]
-fn test_prompt_guidance_en_has_followup_classification() {
+fn prompt_guidance_en_keeps_followup_and_scope_change_contract_concise() {
     let en = universal_execution_discipline("en");
-    assert!(
-        en.contains("handling_user_followups"),
-        "EN guidance should have a dedicated followup classification block"
-    );
-    assert!(en.contains("INTERRUPT"));
-    assert!(en.contains("NEW REQUEST"));
-    assert!(en.contains("CLARIFICATION"));
-    assert!(en.contains("ASIDE"));
-    assert!(en.contains("INTERRUPT > NEW REQUEST > CLARIFICATION > ASIDE"));
+    assert!(en.contains("When a new user message arrives mid-task"));
+    assert!(en.contains("handle interrupts first"));
+    assert!(en.contains("incorporate clarifications"));
+    assert!(en.contains("only when scope changes"));
+    assert!(!en.contains("handling_user_followups"));
+    assert!(!en.contains("modify task descriptions, add tasks, remove tasks"));
 }
 
 #[test]
-fn test_prompt_guidance_zh_has_followup_classification() {
+fn prompt_guidance_zh_keeps_followup_and_scope_change_contract_concise() {
     let zh = universal_execution_discipline("zh");
-    assert!(
-        zh.contains("handling_user_followups"),
-        "ZH guidance should have a dedicated followup classification block"
-    );
-    assert!(zh.contains("INTERRUPT > NEW REQUEST > CLARIFICATION > ASIDE"));
-    assert!(zh.contains("当用户在任务执行中发送新消息时"));
-}
-
-#[test]
-fn test_prompt_guidance_en_mentions_task_list_updates() {
-    let en = universal_execution_discipline("en");
-    assert!(en.contains("When the user sends a new message"));
-    assert!(en.contains("update the active task list"));
-    assert!(en.contains("modify task descriptions, add tasks, remove tasks"));
-}
-
-#[test]
-fn test_prompt_guidance_zh_mentions_task_list_updates() {
-    let zh = universal_execution_discipline("zh");
-    assert!(zh.contains("当用户在任务执行中发送新消息时"));
-    assert!(zh.contains("更新活跃的 task list"));
-    assert!(zh.contains("修改任务描述、添加任务、删除任务"));
+    assert!(zh.contains("任务执行中收到新消息时"));
+    assert!(zh.contains("优先处理中断"));
+    assert!(zh.contains("整合澄清"));
+    assert!(zh.contains("仅在范围变化时更新活跃任务追踪"));
+    assert!(!zh.contains("handling_user_followups"));
+    assert!(!zh.contains("修改任务描述、添加任务、删除任务"));
 }
 
 #[test]
@@ -82,7 +63,7 @@ fn test_prompt_guidance_falls_back_to_en_for_unknown_lang() {
 #[test]
 fn test_prompt_guidance_exports_universal_execution_discipline() {
     let en = universal_execution_discipline("en");
-    assert!(en.contains("Execution Discipline"));
+    assert!(en.contains("Execution discipline"));
     let zh = universal_execution_discipline("zh");
     assert!(zh.contains("执行纪律"));
 }

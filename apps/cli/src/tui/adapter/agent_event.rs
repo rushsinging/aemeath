@@ -371,6 +371,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
     };
 
     match event {
+        TuiRuntimeEvent::SkillsUpdated { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::Text { context, text } => {
             clear_placeholder_then(ConversationIntent::AssistantText(AssistantText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),

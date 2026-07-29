@@ -51,13 +51,11 @@ pub fn isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextPort> 
 /// Build an isolated (in-memory) context whose prompt source is the
 /// skill-aware [`SkillPromptSource`].
 ///
-/// Unlike [`isolated_context`], the prompt pipeline materializes available
-/// skills via the injected [`tools::SkillMaterializationPort`] supplier and the
-/// injected [`SkillQueryFactory`]. This is the construction used by Runtime for
-/// sub-agent isolated contexts so that sub-runs inherit the configured skill set.
+/// Unlike [`isolated_context`], the prompt pipeline lists metadata through the
+/// injected [`tools::SkillCatalogPort`] and [`SkillQueryFactory`].
 pub fn isolated_context_with_skill(
     session_id: &str,
-    materializer: Arc<dyn tools::SkillMaterializationPort>,
+    catalog: Arc<dyn tools::SkillCatalogPort>,
     query_factory: Arc<dyn crate::ports::SkillQueryFactory>,
 ) -> Arc<dyn crate::ports::ContextPort> {
     let repository = Arc::new(InMemorySessionRepository::new());
@@ -69,7 +67,7 @@ pub fn isolated_context_with_skill(
     );
     Arc::new(crate::application::ContextApplicationService::new(
         repository,
-        Arc::new(SkillPromptSource::new(materializer, query_factory)),
+        Arc::new(SkillPromptSource::new(catalog, query_factory)),
         Arc::new(NoOpContextMemorySource),
     ))
 }

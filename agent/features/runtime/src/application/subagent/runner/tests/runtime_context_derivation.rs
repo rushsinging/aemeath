@@ -393,7 +393,7 @@ fn sub_context_derivation_uses_parent_cancel_child_scope() {
         &workspace,
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
-        super::empty_skill_materializer(),
+        tools::composition::wire_skills().catalog(),
         &make_test_factory(),
     )
     .expect("derive_sub_run should succeed");
@@ -414,7 +414,7 @@ fn sub_context_derivation_uses_parent_cancel_child_scope() {
         &workspace,
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
-        super::empty_skill_materializer(),
+        tools::composition::wire_skills().catalog(),
         &make_test_factory(),
     )
     .expect("derive_sub_run should succeed");
@@ -441,7 +441,7 @@ fn sub_context_derivation_restricts_tool_catalog() {
         &workspace,
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
-        super::empty_skill_materializer(),
+        tools::composition::wire_skills().catalog(),
         &make_test_factory(),
     )
     .expect("derive_sub_run should succeed");
@@ -481,7 +481,7 @@ fn sub_context_derivation_disables_memory_by_default() {
         &workspace,
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
-        super::empty_skill_materializer(),
+        tools::composition::wire_skills().catalog(),
         &make_test_factory(),
     )
     .expect("derive_sub_run should succeed");
@@ -511,7 +511,7 @@ fn sub_context_derivation_uses_isolated_context() {
         &workspace,
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
-        super::empty_skill_materializer(),
+        tools::composition::wire_skills().catalog(),
         &make_test_factory(),
     )
     .expect("derive_sub_run should succeed");
@@ -547,7 +547,7 @@ fn sub_context_derivation_does_not_widen_policy_or_interaction() {
         &workspace,
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
-        super::empty_skill_materializer(),
+        tools::composition::wire_skills().catalog(),
         &factory,
     )
     .expect("derive_sub_run should succeed");
@@ -582,7 +582,7 @@ fn sub_launcher_uses_derived_spec() {
         &workspace,
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
-        super::empty_skill_materializer(),
+        tools::composition::wire_skills().catalog(),
         &make_test_factory(),
     )
     .expect("derive_sub_run should succeed");
@@ -615,7 +615,7 @@ fn sub_restricted_catalog_rejects_non_sub_agent_scope() {
         &workspace,
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
-        super::empty_skill_materializer(),
+        tools::composition::wire_skills().catalog(),
         &make_test_factory(),
     )
     .expect("derive_sub_run should succeed");
@@ -697,7 +697,7 @@ fn sub_derivation_only_queries_sub_agent_scope_from_parent_catalog() {
         &workspace,
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
-        super::empty_skill_materializer(),
+        tools::composition::wire_skills().catalog(),
         &make_test_factory(),
     )
     .expect("derive_sub_run should succeed");
@@ -762,7 +762,7 @@ fn sub_derivation_fails_closed_when_parent_catalog_errors() {
         &workspace,
         &request,
         &crate::ports::provider_port::fake::FakeProviderFactory,
-        super::empty_skill_materializer(),
+        tools::composition::wire_skills().catalog(),
         &make_test_factory(),
     );
 

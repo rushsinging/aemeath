@@ -18,6 +18,57 @@ fn test_app() -> App {
     )
 }
 
+#[test]
+fn skills_updated_atomically_rebuilds_qualified_route_and_completion_catalog() {
+    let mut app = test_app();
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let spawn_refs = make_spawn_refs();
+    app.model.input.document.buffer = "/super".to_string();
+    app.model.input.document.cursor = "/super".len();
+
+    app.update(
+        TuiMsg::Runtime(TuiRuntimeEvent::SkillsUpdated {
+            revision: "r1".to_string(),
+            skills: vec![crate::tui::adapter::tui_runtime_event::TuiSkillView {
+                name: "superpowers:brainstorming".to_string(),
+                aliases: vec!["brainstorming".to_string()],
+                slash_command: Some("superpowers:brainstorming".to_string()),
+                slash_aliases: Vec::new(),
+                description: "Explore requirements".to_string(),
+                argument_hint: None,
+            }],
+            slash_routes: vec![crate::tui::adapter::tui_runtime_event::TuiSkillSlashRoute {
+                skill: "superpowers:brainstorming".to_string(),
+                slash_command: "superpowers:brainstorming".to_string(),
+                aliases: Vec::new(),
+                argument_hint: None,
+            }],
+        }),
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    assert_eq!(app.skill_completion_catalog.revision, "r1");
+    assert!(matches!(
+        app.skill_completion_catalog.resolve("/superpowers:brainstorming idea"),
+        Some(command)
+            if command.skill == "superpowers:brainstorming"
+                && command.arguments.as_slice() == ["idea"]
+    ));
+    assert!(matches!(
+        app.command_router
+            .as_deref()
+            .expect("router")
+            .resolve(sdk::SlashInput::new("/superpowers:brainstorming idea")),
+        Err(sdk::CommandParseError::UnknownCommand { .. })
+    ));
+    assert_eq!(app.model.input.completion.items.len(), 1);
+    assert_eq!(
+        app.model.input.completion.items[0].replacement,
+        "/superpowers:brainstorming"
+    );
+}
+
 /// 消息同步事件（如 PostToolExecutionSync）只镜像 chat.messages，不产生 UserMessage 回显块，
 /// 也不清除占位（回显与占位清理由 UserMessagesAdopted 负责）。
 #[test]

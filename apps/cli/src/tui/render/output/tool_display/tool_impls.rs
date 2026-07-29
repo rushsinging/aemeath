@@ -4,5 +4,6 @@ mod filesystem;
 mod helpers;
 mod search;
 mod shell;
+mod skill;
 mod web;
 mod worktree;

@@ -315,8 +315,31 @@ pub(crate) struct TuiAgentProgress {
     pub(crate) kind: TuiAgentProgressKind,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiSkillView {
+    pub(crate) name: String,
+    pub(crate) aliases: Vec<String>,
+    pub(crate) slash_command: Option<String>,
+    pub(crate) slash_aliases: Vec<String>,
+    pub(crate) description: String,
+    pub(crate) argument_hint: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiSkillSlashRoute {
+    pub(crate) skill: String,
+    pub(crate) slash_command: String,
+    pub(crate) aliases: Vec<String>,
+    pub(crate) argument_hint: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum TuiRuntimeEvent {
+    SkillsUpdated {
+        revision: String,
+        skills: Vec<TuiSkillView>,
+        slash_routes: Vec<TuiSkillSlashRoute>,
+    },
     Text {
         context: TuiTurnContext,
         text: String,

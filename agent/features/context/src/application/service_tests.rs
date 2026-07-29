@@ -11,8 +11,8 @@ use share::message::{ContentBlock, Message};
 use super::performance::{capture, percentiles_ns};
 use super::service::ContextApplicationService;
 use crate::domain::{
-    ContextAppend, ContextRequest, ContextRequestId, Language, RunStepId, SessionId,
-    SessionRevision, SystemBlock, SystemPromptSpec, TaskReminderSnapshot,
+    ContextAppend, ContextMessages, ContextRequest, ContextRequestId, Language, RunStepId,
+    SessionId, SessionRevision, SystemBlock, SystemPromptSpec, TaskReminderSnapshot,
 };
 use crate::ports::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
@@ -21,7 +21,7 @@ use crate::ports::{
 
 struct BaselineSession {
     revision: SessionRevision,
-    messages: Vec<Message>,
+    messages: ContextMessages,
 }
 
 #[async_trait]
@@ -135,7 +135,13 @@ fn service(messages: Vec<Message>, revision: u64) -> ContextApplicationService {
     ContextApplicationService::new(
         Arc::new(BaselineSession {
             revision: SessionRevision::new(revision),
-            messages,
+            messages: ContextMessages::from_committed_steps(
+                messages
+                    .into_iter()
+                    .map(|message| Arc::<[Message]>::from(vec![message]))
+                    .collect(),
+                Vec::new(),
+            ),
         }),
         Arc::new(BaselinePrompt),
         Arc::new(BaselineMemory),
@@ -177,6 +183,8 @@ async fn build_window_capture_reports_structure_phases_and_actual_usage() {
     assert_eq!(metrics.decision_calls, 1);
     assert_eq!(metrics.backing_revision, 42);
     assert_eq!(metrics.snapshot_messages, 2);
+    assert_eq!(metrics.snapshot_committed_steps, 2);
+    assert_eq!(metrics.snapshot_shared_messages, 2);
     assert_eq!(metrics.pending_messages, 1);
     assert_eq!(metrics.final_messages, 3);
     assert_eq!(metrics.system_blocks, 5);
@@ -202,6 +210,14 @@ async fn repeated_build_captures_do_not_accumulate_structure_counts() {
 
     assert_eq!(first.backing_revision, second.backing_revision);
     assert_eq!(first.snapshot_messages, second.snapshot_messages);
+    assert_eq!(
+        first.snapshot_committed_steps,
+        second.snapshot_committed_steps
+    );
+    assert_eq!(
+        first.snapshot_shared_messages,
+        second.snapshot_shared_messages
+    );
     assert_eq!(first.final_messages, second.final_messages);
     assert_eq!(first.system_blocks, second.system_blocks);
     assert_eq!(first.tool_result_blocks, second.tool_result_blocks);
@@ -213,6 +229,45 @@ async fn repeated_build_captures_do_not_accumulate_structure_counts() {
     assert_eq!(first.decision_token_count, second.decision_token_count);
     assert_eq!(first.decision_reason, second.decision_reason);
     assert_eq!(second.build_calls, 1);
+}
+
+#[tokio::test]
+async fn repeated_builds_share_committed_message_payload_and_own_pending_delta() {
+    let history = Message {
+        role: share::message::Role::User,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: "shared-tool".into(),
+            content: serde_json::json!({"large": "structured payload"}),
+            is_error: false,
+            text: None,
+        }],
+        metadata: None,
+    };
+    let history_content_ptr = match &history.content[0] {
+        ContentBlock::ToolResult { content, .. } => content as *const _,
+        _ => unreachable!(),
+    };
+    let context = service(vec![history], 9);
+    let request = request(None);
+
+    let first = context.build_window(&request).await.unwrap();
+    let second = context.build_window(&request).await.unwrap();
+
+    let first_content_ptr = match &first.messages[0].content[0] {
+        ContentBlock::ToolResult { content, .. } => content as *const _,
+        _ => unreachable!(),
+    };
+    let second_content_ptr = match &second.messages[0].content[0] {
+        ContentBlock::ToolResult { content, .. } => content as *const _,
+        _ => unreachable!(),
+    };
+    assert_eq!(first_content_ptr, history_content_ptr);
+    assert_eq!(second_content_ptr, history_content_ptr);
+    assert_ne!(
+        first.messages.last().unwrap() as *const _,
+        second.messages.last().unwrap() as *const _,
+        "pending delta belongs to each build rather than the committed backing"
+    );
 }
 
 fn workload_messages(message_count: usize, tool_result_every: Option<usize>) -> Vec<Message> {
@@ -268,11 +323,16 @@ async fn context_build_release_workload() {
         let (build_p50, build_p95) = percentiles_ns(&build_samples).unwrap();
         let (decision_p50, decision_p95) = percentiles_ns(&decision_samples).unwrap();
         assert_eq!(metrics.final_messages, message_count + 1);
+        assert_eq!(metrics.snapshot_messages, message_count);
+        assert_eq!(metrics.snapshot_committed_steps, message_count);
+        assert_eq!(metrics.snapshot_shared_messages, message_count);
         assert_eq!(metrics.build_calls, 1);
         assert!(metrics.estimated_total_tokens > 0);
         println!(
-            "scenario={name} messages={} tool_results={} tool_result_bytes={} estimated_tokens={} | wall_p50/p95={:.3}/{:.3}ms build_p50/p95={:.3}/{:.3}ms decision_p50/p95={:.3}/{:.3}ms",
+            "scenario={name} messages={} shared_steps={} shared_messages={} tool_results={} tool_result_bytes={} estimated_tokens={} | wall_p50/p95={:.3}/{:.3}ms build_p50/p95={:.3}/{:.3}ms decision_p50/p95={:.3}/{:.3}ms",
             metrics.final_messages,
+            metrics.snapshot_committed_steps,
+            metrics.snapshot_shared_messages,
             metrics.tool_result_blocks,
             metrics.tool_result_content_bytes,
             metrics.estimated_total_tokens,

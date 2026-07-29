@@ -4,8 +4,8 @@ use std::sync::Arc;
 use crate::domain::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
-    CommandRoute, CommandRouterPort, CommandTarget, ParsedArguments, PromptCommand, SlashInput,
-    SnapshotQueryCommand, SnapshotQueryTarget,
+    CommandRoute, CommandRouterPort, CommandTarget, ParsedArguments, SkillRequestCommand,
+    SlashInput, SnapshotQueryCommand, SnapshotQueryTarget,
 };
 
 #[derive(Clone)]
@@ -79,7 +79,11 @@ impl CommandRouterPort for CommandAdapter {
         let arguments = parse_arguments(descriptor, parts.map(str::to_string).collect())?;
         let command = descriptor.name.clone();
         match descriptor.mechanism {
-            CommandMechanism::PromptInjection => Ok(CommandRoute::PromptInjection(PromptCommand {
+            CommandMechanism::SkillRequest => Ok(CommandRoute::SkillRequest(SkillRequestCommand {
+                skill: descriptor
+                    .target_identity
+                    .clone()
+                    .unwrap_or_else(|| command.as_str().to_string()),
                 command,
                 arguments,
             })),
@@ -140,7 +144,7 @@ fn parse_arguments(
 
 fn validate_target(descriptor: &CommandDescriptor) -> Result<(), CommandParseError> {
     let valid = match descriptor.mechanism {
-        CommandMechanism::PromptInjection => true,
+        CommandMechanism::SkillRequest => descriptor.target_identity.is_some(),
         CommandMechanism::SnapshotQuery => snapshot_target(descriptor.target).is_some(),
         CommandMechanism::ApplicationControl => control_target(descriptor.target).is_some(),
     };

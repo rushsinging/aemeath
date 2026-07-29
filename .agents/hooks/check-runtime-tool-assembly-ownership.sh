@@ -30,7 +30,7 @@ else:
     for pattern, message in forbidden:
         if re.search(pattern, production):
             violations.append(f"agent/features/runtime/src/application/client/from_args.rs: {message}")
-    for field in ["tool_catalog", "tool_execution", "skill_catalog", "skill_materializer", "tool_result_materializer", "active_run"]:
+    for field in ["tool_catalog", "tool_execution", "skill_catalog", "skill_loader", "tool_result_materializer", "active_run"]:
         if not re.search(rf"\b{field}\b", production):
             violations.append(f"agent/features/runtime/src/application/client/from_args.rs: Runtime dependencies must carry injected {field}")
 

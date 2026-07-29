@@ -146,7 +146,7 @@ pub fn derive_sub_run(
     parent_workspace: &RuntimeWorkspaceAccess,
     request: &SubRunRequest,
     provider_factory: &dyn crate::ports::ProviderFactory,
-    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     runtime_context_factory: &RuntimeContextFactory,
 ) -> Result<DerivedSubRun, crate::application::client::RuntimeContextAssemblyError> {
     use crate::application::client::RuntimeContextAssemblyError;
@@ -270,7 +270,7 @@ pub fn derive_sub_run(
     let skills_context_port: Arc<dyn crate::ports::ContextPort> =
         context::isolated_context_with_skill(
             &isolated_session_id,
-            skill_materializer,
+            skill_catalog,
             Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
                 sub_workspace.views().read(),
             )),
@@ -359,7 +359,7 @@ impl AgentRunner for CliAgentRunner {
             &self.workspace,
             &sub_request,
             self.factory.as_ref(),
-            self.skill_materializer.clone(),
+            self.skill_catalog.clone(),
             self.runtime_context_factory.as_ref(),
         ) {
             Ok(d) => d,
@@ -544,7 +544,13 @@ impl AgentRunner for CliAgentRunner {
             .profile(tools::ToolProfileName::new("sub-agent-restricted"))
             .build();
 
-            // #1385: Read access and persist from the SAME derived workspace.
+            let available_tools = sub_catalog
+              .tools
+              .iter()
+              .map(|descriptor| descriptor.name.as_str().to_string())
+              .collect();
+
+          // #1385: Read access and persist from the SAME derived workspace.
             // Never call derive_isolated() a second time.
             let sub_ctx = ToolExecutionContext::new(
                 sub_scope,
@@ -558,6 +564,10 @@ impl AgentRunner for CliAgentRunner {
                     derived.context.memory(),
                     guidance,
                 )
+                .with_skill_query(tools::SkillQuerySnapshot {
+                    extra_dirs: derived.context.config_ref().config().skills().dirs.clone(),
+                    available_tools,
+                })
                 .with_user_agent(derived.context.config_ref().config().user_agent())
                 .with_progress(progress_sink.clone()),
             );

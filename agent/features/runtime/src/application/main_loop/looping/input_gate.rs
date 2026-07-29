@@ -16,6 +16,7 @@ pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
     match event {
         ChatInputEvent::ControlCommand { .. } => "ControlCommand",
         ChatInputEvent::UserMessage { .. } => "UserMessage",
+        ChatInputEvent::SkillRequest(_) => "SkillRequest",
         ChatInputEvent::Reset => "Reset",
         ChatInputEvent::WithdrawAll => "WithdrawAll",
         ChatInputEvent::Compact => "Compact",
@@ -296,6 +297,15 @@ where
                     images: images.clone(),
                 });
                 added.push(build_user_message(id, text, images));
+                appended_user_messages += 1;
+            }
+            ChatInputEvent::SkillRequest(request) => {
+                added_events.push(ChatInputEvent::SkillRequest(request.clone()));
+                added.push(build_user_message(
+                    request.input_id.clone(),
+                    crate::application::loop_engine::format_skill_request(&request, "en"),
+                    Vec::new(),
+                ));
                 appended_user_messages += 1;
             }
             ChatInputEvent::Reset => {

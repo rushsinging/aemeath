@@ -58,7 +58,8 @@ fn unfinished_tool_session_with_outcome(
                             input: serde_json::json!({"command": "sleep 180"}),
                         }],
                         metadata: None,
-                    }],
+                    }]
+                    .into(),
                     receipts: Vec::new(),
                     api_input_tokens: None,
                     fingerprint: "fp".to_string(),

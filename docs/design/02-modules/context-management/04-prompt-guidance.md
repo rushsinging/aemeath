@@ -2,7 +2,7 @@
 
 > 层级：02-modules / context-management（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#786（S2）/ [#829](https://github.com/rushsinging/aemeath/issues/829) / [#972](https://github.com/rushsinging/aemeath/issues/972)
-> 本文定义 Context Management 私有 Prompt capability——系统提示组装、Guidance 解析、Skill 物化 integration、安全扫描与 prompt cache 稳定性。Prompt 不独立成 BC，也不向 Runtime / TUI 发布第二个 OHS；实现差距见 [迁移治理](../../03-engineering/03-migration-governance.md)。
+> 本文定义 Context Management 私有 Prompt capability——系统提示组装、Guidance 解析、Skill 元数据目录、安全扫描与 prompt cache 稳定性。Prompt 不独立成 BC，也不向 Runtime / TUI 发布第二个 OHS；实现差距见 [迁移治理](../../03-engineering/03-migration-governance.md)。
 
 ## 1. 定位
 
@@ -18,7 +18,7 @@ build_window
 
 - **PromptPipeline 是 Context-private 具体 capability**，不为不稳定的组装细节抽出第二个 OHS
 - **Guidance 文件 I/O 是真实的外部 seam**：由 Context-owned `GuidanceSourcePort` 隔离发现、canonical path、缓存与异步 I/O；PromptPipeline **NEVER** 直接读文件系统
-- **Skill 从供应方接入**：PromptPipeline 消费 Skill-owned `SkillMaterializationPort`；TUI picker 仍经 AgentClient / Skill catalog，**NEVER** 直调 PromptPipeline
+- **Skill 从供应方接入**：PromptPipeline 只消费 Skill-owned `SkillCatalogPort` 的 descriptor 元数据；TUI completion 经 Runtime/SDK 的版本化快照，Skill Tool 正文加载经 ToolExecution，二者都 **NEVER** 直调 PromptPipeline
 - **不独立成 BC**：Prompt 是 Context Management 的支撑子域
 
 ## 2. 私有管线与外部 seam
@@ -26,7 +26,7 @@ build_window
 ```rust
 struct PromptPipeline {
     guidance: Arc<dyn GuidanceSourcePort>,
-    skills: Arc<dyn SkillMaterializationPort>,
+    skills: Arc<dyn SkillCatalogPort>,
 }
 
 impl PromptPipeline {
@@ -81,7 +81,7 @@ struct GuidanceDocument {
 }
 ```
 
-`ContextPort::build_window` **MUST** 等待 base system prompt、model guidance、user guidance 与 Skill 物化完成后才能产生窗口；任一供应失败都返回 typed error，**NEVER** 静默使用部分 prompt。文件 adapter **MAY** 按 mtime 缓存，但对 PromptPipeline 只暴露内容与单调 `revision`；这使同一管线无需同步 / 异步两套实现。Memory、active summary 与 Task reminder 不是 Prompt 素材：它们由 `build_window` 在 PromptPipeline 返回后编排，**NEVER** 伪装成 `PromptRequest` 字段。Git 首次快照由 Runtime session bootstrap 以普通系统生成消息投递，不通过 PromptPipeline。
+`ContextPort::build_window` **MUST** 等待 base system prompt、model guidance、user guidance 完成，并同步取得所属 Run Step 冻结的 Skill metadata snapshot，才能产生窗口；任一必需供应失败都返回 typed error，**NEVER** 静默使用部分 prompt。Context 只读取 descriptor，不调用 `SkillLoadPort`，因此 Skill 正文不会在 build_window 阶段进入系统提示。文件 adapter **MAY** 按 mtime 缓存 guidance，但对 PromptPipeline 只暴露内容与单调 `revision`；这使同一管线无需同步 / 异步两套实现。Memory 与 active summary 不是 Prompt 素材：它们由 `build_window` 在 PromptPipeline 返回后编排。Task reminder 同样不是 Prompt 素材或 SystemBlock；Context 从 `TaskReminderSnapshot` 生成 typed invocation-only decoration，Runtime 仅在 Provider 消息副本上投影。Git 首次快照由 Runtime session bootstrap 以普通系统生成消息投递，不通过 PromptPipeline。
 
 ## 3. 系统提示组装管线
 
@@ -94,16 +94,16 @@ PromptPipeline 只输出稳定的 cacheable prefix；Context Window assembler �
 │ 1. system_prompt（RunSpec 的基础 prompt）        │
 │ 2. execution_discipline（编译时常量）            │
 │ 3. model_guidance（_default → 前缀 → reasoning）│
-│ 4. skills（supplier PromptFragment PL）          │
+│ 4. skills（supplier metadata directory）          │
 │ 5. agent_roles                                  │
 │ 6. user_guidance（source revision 快照，见 §8）  │
 │ 7. memory_context（Context assembler 注入）     │
 │ 8. active_summary（Context assembler 注入）     │
 └─────────────────────────────────────────────────┘
   ↓ cache_control 断点（仅 Anthropic wire adapter 消费）
-┌─ ordinary_context ──────────────────────────────┐
+┌─ ordinary_messages ─────────────────────────────┐
 │ 9. initial_git_context（仅 session 首个 Run）   │
-│10. task_reminder（ContextRequest 纯值投影）      │
+│10. task reminder（仅 Provider user 消息副本）   │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -117,13 +117,13 @@ PromptPipeline 只输出稳定的 cacheable prefix；Context Window assembler �
 | execution_discipline | 不变（编译时常量） | — | 是 |
 | model_guidance | 低（模型切换时变） | model_id 比对 | 是 |
 | _default.md / _reasoning.md | 低（用户编辑文件时变） | guidance source revision | 是 |
-| skills | 低（增删 skill 时变） | supplier materialization revision | 是 |
+| skills | 低（metadata 增删改时变） | SkillCatalogSnapshot revision | 是 |
 | agent_roles | 低（配置变更时变） | config snapshot 比对 | 是 |
 | user_guidance | 低（用户编辑文件时变） | guidance source revision | 是 |
 | memory_context | 中（reflection 写入时变） | Context assembler 的 entry fingerprint | 是（非 PromptRequest） |
 | active_summary | 低（compact 时才变） | Context assembler 的 summary hash | 是（非 PromptRequest） |
 | initial_git_context | session 启动时一次 | 普通用户消息；后续由工具按需获取 | 否 |
-| task_reminder | 每轮可能变 | ContextRequest value fingerprint | 否（非 PromptRequest） |
+| task reminder | 每轮可能变 | Provider invocation 中最后一条真实 user message 的副本 | 否（不属于 SystemBlock） |
 | 日期 / 工作区 / commit guidance | 每轮可能变 | **不注入 LLM** | 不适用 |
 
 > **关键**：user_guidance、skills、memory 不是“动态所以不 cache”，而是“变化频率低，不变时 cache，变化时 miss 重算”。Memory / summary 的最终分段由 Context assembler 完成，不因此扩张 PromptRequest。
@@ -141,7 +141,8 @@ let mut blocks = parts.cacheable;
 blocks.extend(memory);
 blocks.extend(summary);
 mark_cache_breakpoint(&mut blocks);       // 唯一 breakpoint
-blocks.extend(render_task_reminder(&context_request.task_reminder));
+let invocation_reminder = render_task_reminder(&context_request.task_reminder);
+// Runtime 从 canonical messages 构造 Provider 副本后再投影 invocation_reminder。
 ```
 
 - Provider ACL 只为 Anthropic Messages API 将该逻辑 breakpoint 映射为 `cache_control`；OpenAI Chat Completions、Responses、OpenAI-compatible 与 Ollama **NEVER** 接收该私有字段。
@@ -257,41 +258,43 @@ fn find_matching_config_guidance(model_id: &str, config: &ConfigSnapshot) -> Vec
 
 config-map 中的 guidance 条目同样按前缀长度升序追加到文件 guidance 之后。
 
-## 5. Skill 物化
+## 5. Skill 元数据目录
 
-### 5.1 直接消费 Skill-owned PromptFragment PL
+### 5.1 只消费 Skill-owned descriptor PL
 
-Prompt capability **NEVER** 定义第二份 `PromptFragment` / `SkillSummary`。唯一字段契约由 [Tool & Skill 领域模型](../tools/01-domain-model.md) 发布：`stable_key / content / source / cache_hint`。
+Prompt capability **NEVER** 定义第二份 Skill DTO，也不依赖 `LoadedSkill`。唯一字段契约由 [Tool & Skill 领域模型](../tools/01-domain-model.md) 发布：name、description、identity/slash aliases 与可选 argument hint；descriptor 不含 content 或 source path。
 
-### 5.2 加载管线
+### 5.2 目录管线
 
 ```
-Skill-owned sources
-  └─ SkillMaterializationPort::materialize_available(...).await
-       └─ SkillMaterializationSnapshot { fragments, revision }
-            └─ PromptPipeline: scan → dedup → budget → render
+Run Step frozen SkillQuery
+  └─ SkillCatalogPort::list(...)
+       └─ stable descriptors + metadata revision
+            └─ PromptPipeline: dedup → budget → render directory
 ```
 
-- Skill BC 独占 source discovery、builtin / file 合并、解析、能力校验与 I/O 缓存；Context **NEVER** 接收 Skill path 或自行打开 `SKILL.md`
-- `revision` 只在物化结果变化时前进，PromptPipeline 以它作为 cacheable prefix 指纹的一部分
-- PromptPipeline 按 `stable_key` 稳定去重（保留 supplier 顺序中的首个），用 `source` 记录扫描诊断，以 `content` 作为唯一注入正文；`cache_hint` 只是 supplier hint，最终 cache 分段仍由 Context 决定
-- PromptPipeline 仍独占注入顺序、token budget、去重与安全扫描策略
+- Tools BC 独占 source discovery、builtin/file 合并、frontmatter 解析与能力过滤；Context **NEVER** 接收 Skill path、自行打开 `SKILL.md` 或调用 `SkillLoadPort`
+- metadata revision 只由稳定排序后的 descriptor 字段决定；正文修改但 metadata 不变时 revision 保持不变
+- PromptPipeline 按 canonical identity 稳定去重，并独占目录注入顺序、token budget、description 截断与语言格式
+- 已开始 Run Step 使用冻结目录；TUI 的 `SkillsUpdated` 刷新不反向替换该 Step 的 metadata
 
 ### 5.3 渲染
 
 ```rust
-fn render_skills(fragments: &[tools::PromptFragment], lang: Language) -> String {
+fn render_skills(skills: &[tools::SkillDescriptor], lang: Language) -> String {
     let header = skills_header(lang);  // "# 可用技能\n" / "# Available Skills\n"
-    let body = dedup_by_stable_key(fragments).iter()
-        .map(|fragment| fragment.content.as_str())
+    let body = stable_dedup(skills).iter()
+        .map(|skill| render_skill_metadata(skill, lang))
         .join("\n");
     format!("{}\n{}\n", header, body)
 }
 ```
 
+目录只告诉模型有哪些 Skill、用途和调用方式。完整 `SKILL.md` 仅在模型调用唯一 `Skill { skill }` Tool 后作为普通 ToolOutcome 文本进入后续模型上下文；Context 不建立第二条 hidden-content 协议。
+
 ### 5.4 SKILL.md 安全扫描
 
-所有 materialized skill content **MUST** 在进入 prompt candidate 前经过 `scan_content()`；发现 prompt injection 模式时记录 warning 与来源路径。扫描结果遵循 §7 的本地信任策略，不在 Prompt capability 复制另一套判定。
+正文扫描属于 Tools filesystem/load adapter 的调用时职责。Context 只对自己格式化的 metadata directory 应用通用 prompt budget/escaping，不读取或扫描正文。
 
 ## 6. Git Context 注入
 
@@ -314,7 +317,7 @@ git context **不属于** system prompt 或 `PromptRequest`：Runtime 仅在 ses
 | `_default.md` | MUST |
 | `_reasoning.md` | MUST |
 | `{prefix}.md` | MUST |
-| SKILL.md | MUST |
+| SKILL.md | Tools 的调用时 Skill loader MUST；Context 不接触正文 |
 
 ### 7.2 策略
 
@@ -450,14 +453,14 @@ User guidance 归入 `cacheable_prefix`——变化频率低（用户偶尔编�
 | memory 变化 | 中（reflection 写入时变） | Context-owned cacheable extension | entry fingerprint |
 | active_summary 变化 | 低（compact 时才变） | Context-owned cacheable extension | summary hash |
 | initial_git_context | session 启动时一次 | 普通系统生成消息；后续由工具按需获取 | 否 |
-| task_reminder | 每轮可能变 | Context-owned ordinary extension | request value fingerprint |
+| task reminder | 每轮可能变 | Provider user-message 副本 | request value fingerprint |
 | 日期 / 工作区 / commit guidance | 每轮可能变 | **不注入 LLM** | 不适用 |
 
 ### 9.2 缓存策略
 
 - **Prompt parts**：PromptPipeline 只负责 RunSpec system prompt / execution discipline / guidance / skills / roles / date / git 的物化与 fingerprint，**NEVER** 缓存完整 Context Window。
 - **Context-owned cacheable extension**：Memory 与 active summary 由 Context assembler 插在 Prompt cacheable parts 之后，并把 entry fingerprint / summary hash 纳入最终 window fingerprint；变化时 miss 一次，之后恢复命中。
-- **Context-owned uncached extension**：Task reminder 位于 breakpoint 之后；它与 current date / git context 的变化不影响 prefix 命中。
+- **Invocation-only decoration**：Task reminder 不属于 SystemBlock。Context 生成带 `<task-reminder>` 标签的 typed decoration；Runtime 每次从 canonical 原文构造 Provider 消息副本，将其追加到最后一条真实 user message。无真实 user message 时不伪造，retry/工具续轮不会重复追加。
 
 ### 9.3 模型切换时的缓存失效
 
@@ -467,7 +470,7 @@ User guidance 归入 `cacheable_prefix`——变化频率低（用户偶尔编�
 
 ### 已对齐
 
-- Context `SystemBlock` 用 `cacheable` 表达低频稳定性、用唯一 `cache_break` 表达 Provider cache marker 的逻辑位置；`ContextApplicationService` 将 memory 与 active summary 追加到 prefix 后，标记最后一个实际 block，**NEVER** 发送空 sentinel。
+- Context `SystemBlock` 用 `cacheable` 表达低频稳定性、用唯一 `cache_break` 表达 Provider cache marker 的逻辑位置；`ContextApplicationService` 将 memory 与 active summary 追加到 prefix 后，标记最后一个实际 block，**NEVER** 发送空 sentinel。Task reminder 不创建 SystemBlock，仅生成 invocation-only user-message decoration。
 - Runtime Main/Sub 只将 `cache_break` 映射为 `RequestSystemBlock::Cacheable`；Composition 的 Anthropic adapter 才把该变体编码为 `cache_control: {"type":"ephemeral"}`。
 - OpenAI Chat Completions、Responses、OpenAI-compatible 与 Ollama 仅编码 system / instructions 正文，**NEVER** 接收 Anthropic 私有 cache-control。
 - 日期、工作区变化与 commit guidance 已从 ContextRequest 和 LLM 上下文删除。Git 快照在 session bootstrap 采集一次，以 `SystemGenerated` 普通消息进入首个 Main Run，不进入可持久化用户输入；后续状态通过工具按需读取。
@@ -496,7 +499,9 @@ User guidance 归入 `cacheable_prefix`——变化频率低（用户偶尔编�
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-28 | #1438 将 Skill 全文物化改为 SkillCatalog metadata directory；正文只在 Skill Tool 调用后进入模型上下文 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
 | 2026-07-12 | 初稿：prompt 组装契约、guidance 解析、skill 物化、安全扫描、cache 稳定性 | #786 |
 | 2026-07-14 | 收敛为 Context-private async PromptPipeline；只为 Guidance I/O 保留 Context-owned seam，Skill 经 supplier OHS 物化；Git 数据由 Project snapshot 经 ACL 注入；统一 user guidance 首选 / fallback、顺序与 canonical 去重 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | RunSpec system prompt 纳入唯一管线；直接消费 Skill-owned PromptFragment PL；冻结 Prompt→Memory 物化与最终 block 顺序 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-28 | 精简核心静态 Prompt；修正 Runtime 重复嵌入 execution discipline；Task reminder 迁出 SystemBlock，仅装饰 Provider user message 副本，canonical session / SDK / TUI / JSON 保持用户原文。 | [#1448](https://github.com/rushsinging/aemeath/issues/1448) |
 | 2026-07-21 | `SystemBlock` 区分低频 `cacheable` 分类与唯一 `cache_break`；Context 在 memory / summary 后将断点标在最后一个实际 prefix 块，Runtime Main/Sub 只映射该断点为 Provider cache marker；Git 仅在 session 启动时作为普通系统生成消息采集一次，日期、工作区变化与 commit guidance 不注入 LLM。 | [#829](https://github.com/rushsinging/aemeath/issues/829) |

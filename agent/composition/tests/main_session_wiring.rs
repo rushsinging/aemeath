@@ -439,7 +439,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             tools.execution(),
             tools.binding(),
             skill_wiring.catalog(),
-            skill_wiring.materializer(),
+            skill_wiring.loader(),
             tool_result_materializer,
             active_run,
         ),

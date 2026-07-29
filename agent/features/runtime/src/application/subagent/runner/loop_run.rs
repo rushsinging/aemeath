@@ -77,8 +77,10 @@ impl crate::application::main_loop::looping::ChatEventSink for SubAgentEventSink
     fn try_send_event(&self, _event: crate::application::main_loop::looping::RuntimeStreamEvent) {}
 }
 
-pub(super) fn messages_for_llm(messages: &[Message]) -> Vec<Message> {
-    messages.iter().map(Message::to_llm_view).collect()
+pub(super) fn messages_for_llm<'a>(
+    messages: impl IntoIterator<Item = &'a Message>,
+) -> Arc<[Message]> {
+    messages.into_iter().map(Message::to_llm_view).collect()
 }
 
 pub(super) struct CancellationPropagationGuard(tokio::task::JoinHandle<()>);
@@ -404,7 +406,7 @@ impl<'a> SubAgentRun<'a> {
                 };
                 let messages_for_api = window
                     .as_ref()
-                    .map(|window| messages_for_llm(&window.messages))
+                    .map(|window| messages_for_llm(window.messages.iter()))
                     .unwrap_or_else(|| messages_for_llm(&self.messages));
                 let (effective_blocks, raw_tool_schemas) = match &window {
                     Some(w) => {
@@ -447,7 +449,7 @@ impl<'a> SubAgentRun<'a> {
                                 self.committed_delta()
                             };
                             let system = effective_blocks.clone();
-                            let messages = messages_for_api.clone();
+                            let messages = Arc::clone(&messages_for_api);
                             let tools = effective_tools.clone();
                             let cancellation = self.runtime_cancellation.clone();
                             let invocation_fut = async {
@@ -1181,6 +1183,7 @@ mod tests {
     use crate::application::loop_engine::event_strategy::terminal_from_domain_event;
     use crate::domain::agent_run::{RunDomainEvent, RunId};
     use share::message::{ContentBlock, Message, Role};
+    use std::sync::Arc;
 
     #[test]
     fn terminal_domain_events_project_to_all_agent_terminal_variants() {
@@ -1252,7 +1255,9 @@ mod tests {
         }];
 
         let api_messages = messages_for_llm(&messages);
+        let retry_messages = Arc::clone(&api_messages);
 
+        assert_eq!(api_messages.as_ptr(), retry_messages.as_ptr());
         let ContentBlock::ToolResult { content, text, .. } = &api_messages[0].content[0] else {
             panic!("expected tool result");
         };

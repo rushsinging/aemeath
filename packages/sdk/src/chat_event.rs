@@ -1,4 +1,30 @@
-//! Chat 事件流类型：事件 / 上下文 / 工具调用状态。
+#[cfg(test)]
+mod skills_updated_tests {
+    #[test]
+    fn snapshot_contains_metadata_and_routes_without_body_fields() {
+        let event = crate::SkillsUpdatedEvent {
+            revision: "r1".to_string(),
+            skills: vec![crate::SkillView {
+                name: "release".to_string(),
+                aliases: Vec::new(),
+                slash_command: Some("release".to_string()),
+                slash_aliases: vec!["rel".to_string()],
+                description: "release".to_string(),
+                argument_hint: Some("[version]".to_string()),
+            }],
+            slash_routes: vec![crate::SkillSlashRouteView {
+                skill: "release".to_string(),
+                slash_command: "release".to_string(),
+                aliases: vec!["rel".to_string()],
+                argument_hint: Some("[version]".to_string()),
+            }],
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(!json.contains("content"));
+        assert!(!json.contains("source"));
+        assert!(json.contains("revision"));
+    }
+}
 
 use crate::chat::AskUserQuestionItem;
 use crate::chat_result::{ChatResult, ToolResultImage};
@@ -121,6 +147,9 @@ pub struct ReflectionHistoryView {
 /// Chat 事件流中的单个事件。
 #[derive(Debug)]
 pub enum ChatEvent {
+    SkillsUpdated {
+        event: crate::tui::SkillsUpdatedEvent,
+    },
     /// LLM 返回的文本 token。
     Token {
         context: ChatEventContext,

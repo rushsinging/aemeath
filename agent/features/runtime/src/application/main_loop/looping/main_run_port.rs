@@ -486,6 +486,7 @@ where
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory: &Arc<dyn memory::MemoryPort>,
         language: &str,
+        skill_extra_dirs: &[std::path::PathBuf],
         user_agent: &str,
         workspace: &project::WorkspaceViews,
         cancel: &CancellationToken,
@@ -503,6 +504,11 @@ where
                 &tools::ToolProfileName::new("main-full"),
             )
             .unwrap_or_else(|_| tools::ToolCatalogSnapshot::new("main", "main-full", Vec::new()));
+        let available_tools = catalog
+            .tools
+            .iter()
+            .map(|descriptor| descriptor.name.as_str().to_string())
+            .collect();
         Agent {
             catalog,
             execution: tool_execution.clone(),
@@ -528,6 +534,10 @@ where
                         language: language.to_string(),
                     }),
                 )
+                .with_skill_query(tools::SkillQuerySnapshot {
+                    extra_dirs: skill_extra_dirs.to_vec(),
+                    available_tools,
+                })
                 .with_user_agent(user_agent)
                 .with_memory_context(
                     Some(session_id.to_string()),
@@ -560,7 +570,7 @@ where
             .clone()
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
         self.task_reminder_state
-            .update_from_messages(self.turn_count as u64, &window.messages);
+            .update_from_messages(self.turn_count as u64, window.messages.iter());
         let ctx =
             crate::application::loop_engine::llm_strategy::extract_invocation_context(&window);
         log_llm_input(
@@ -597,7 +607,7 @@ where
                 let model = self.binding().model.clone();
                 let max_tokens = self.binding().max_tokens;
                 let request_tool_schemas = window.tool_schemas.clone();
-                let messages_for_api = ctx.messages_for_api.clone();
+                let messages_for_api = Arc::clone(&ctx.messages_for_api);
                 let system_blocks = ctx.system_blocks.clone();
                 let committed_delta = {
                     use crate::application::loop_engine::llm_strategy::LlmStrategy;
@@ -793,6 +803,7 @@ where
             self.agent_runner,
             self.memory(),
             self.language,
+            &self.run_config().config().skills().dirs,
             self.run_config().config().user_agent(),
             self.workspace,
             cancel,
@@ -1029,24 +1040,12 @@ where
             self.messages
                 .extend(inputs.iter().map(|input| Message::user(input.text.clone())));
         }
-        // #1272 per-turn drain identity: collect (InputId, Message) pairs
-        // for UserMessagesAdopted emission after durable accept succeeds.
-        self.per_turn_adopted = inputs
-            .iter()
-            .filter_map(|input| {
-                input.input_id.as_ref().map(|id| {
-                    let message = if input.images.is_empty() {
-                        Message::user(input.text.clone())
-                    } else {
-                        super::super::input_gate::user_message_with_images(
-                            input.text.clone(),
-                            input.images.clone(),
-                        )
-                    };
-                    (id.clone(), message)
-                })
-            })
-            .collect();
+        // #1272 per-turn drain identity: receipts are captured by RunInputBuffer while it still
+        // owns the typed ChatInputEvent. This keeps model-only Skill prompts out of TUI JSON.
+        self.per_turn_adopted = self
+            .input_strategy
+            .run_input_buffer
+            .with_lock(|buffer| buffer.take_drained_adopted());
         if !self.per_turn_adopted.is_empty() {
             let input_ids: Vec<_> = self
                 .per_turn_adopted
@@ -1198,7 +1197,7 @@ where
             .context_window
             .as_ref()
             .map(|window| {
-                context::compact::messages_selected_for_precompact_memory(&window.messages)
+                context::compact::messages_selected_for_precompact_memory(&window.messages.to_vec())
             })
             .unwrap_or_default();
         let source_revision = self
@@ -1567,6 +1566,7 @@ where
                             self.agent_runner,
                             self.memory(),
                             self.language,
+                            &self.run_config().config().skills().dirs,
                             self.run_config().config().user_agent(),
                             self.workspace,
                             &self.cancel_token(),

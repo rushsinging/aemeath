@@ -6,8 +6,8 @@
 pub use tools::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
-    CommandRoute, CommandRouterPort, CommandTarget, ParsedArguments, PromptCommand, SlashInput,
-    SnapshotQueryCommand, SnapshotQueryTarget,
+    CommandRoute, CommandRouterPort, CommandTarget, ParsedArguments, SkillRequestCommand,
+    SlashInput, SnapshotQueryCommand, SnapshotQueryTarget,
 };
 
 // ─── Command execution result views ───

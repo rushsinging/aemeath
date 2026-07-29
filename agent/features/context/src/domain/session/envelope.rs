@@ -1,7 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use share::message::Message;
+use std::ops::Deref;
 use std::path::PathBuf;
+use std::sync::Arc;
 use task::TaskSnapshot;
 
 use crate::domain::{FinalizeCause, StepReceipt, ToolCallReceipt, ToolReceiptMutation};
@@ -37,9 +39,50 @@ impl CommittedStep {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct CommittedStepMessages(Arc<[Message]>);
+
+impl CommittedStepMessages {
+    pub fn as_arc(&self) -> Arc<[Message]> {
+        Arc::clone(&self.0)
+    }
+}
+
+impl From<Vec<Message>> for CommittedStepMessages {
+    fn from(messages: Vec<Message>) -> Self {
+        Self(messages.into())
+    }
+}
+
+impl Deref for CommittedStepMessages {
+    type Target = [Message];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Serialize for CommittedStepMessages {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CommittedStepMessages {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Vec::<Message>::deserialize(deserializer).map(Self::from)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcceptedInputProjection {
-    pub messages: Vec<Message>,
+    pub messages: CommittedStepMessages,
     pub fingerprint: String,
     pub committed_revision: u64,
 }
@@ -51,7 +94,7 @@ impl AcceptedInputProjection {
         committed_revision: u64,
     ) -> Self {
         Self {
-            messages,
+            messages: messages.into(),
             fingerprint: fingerprint.into(),
             committed_revision,
         }
@@ -77,7 +120,7 @@ pub struct FinalizedOutcomeProjection {
     pub finalize_cause: FinalizeCause,
     #[serde(default)]
     pub duration_ms: Option<u64>,
-    pub messages: Vec<Message>,
+    pub messages: CommittedStepMessages,
     pub receipts: Vec<StepReceipt>,
     pub api_input_tokens: Option<u64>,
     pub fingerprint: String,
@@ -89,7 +132,7 @@ impl FinalizedOutcomeProjection {
         Self {
             finalize_cause: FinalizeCause::Completed,
             duration_ms: None,
-            messages,
+            messages: messages.into(),
             receipts: Vec::new(),
             api_input_tokens: None,
             fingerprint: String::new(),
@@ -451,10 +494,39 @@ impl CanonicalSession {
             .collect()
     }
 
+    pub fn visible_message_steps(&self) -> Vec<CommittedStepMessages> {
+        let start_at = self
+            .compact
+            .as_ref()
+            .and_then(|marker| marker.start_at.as_ref());
+        let mut visible = self.compact.is_none();
+        let mut steps = Vec::new();
+        for slice in &self.run_slices {
+            for step in &slice.steps {
+                if !visible
+                    && start_at.is_some_and(|cursor| {
+                        cursor.run_id == slice.run_id && cursor.step_id == step.step_id
+                    })
+                {
+                    visible = true;
+                }
+                if visible {
+                    if let Some(input) = &step.accepted_input {
+                        steps.push(input.messages.clone());
+                    }
+                    if let Some(outcome) = &step.outcome {
+                        steps.push(outcome.messages.clone());
+                    }
+                }
+            }
+        }
+        steps
+    }
+
     pub fn structured_messages(&self) -> Vec<Message> {
-        self.flattened_steps_from_marker()
+        self.visible_message_steps()
             .into_iter()
-            .flat_map(|(_, messages)| messages)
+            .flat_map(|messages| messages.iter().cloned().collect::<Vec<_>>())
             .collect()
     }
 

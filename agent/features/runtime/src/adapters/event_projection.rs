@@ -428,6 +428,11 @@ pub(crate) fn project_stream_event(
             tool_id,
             event: project_agent_progress_event(event),
         },
+        crate::application::main_loop::RuntimeStreamEvent::SkillsUpdated { snapshot } => {
+            ChatEvent::SkillsUpdated {
+                event: crate::application::client::skill_snapshot_to_sdk(snapshot),
+            }
+        }
         crate::application::main_loop::RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base,
             workspace_root,

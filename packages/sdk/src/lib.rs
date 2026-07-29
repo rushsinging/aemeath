@@ -41,15 +41,15 @@ pub use chat::{
     HookExecutionResultView, HookMessageKindView, HookMessageView, OptionItem,
     ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
     ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep,
-    ResumedStepFinalizeCause, ToolCallStatusView, ToolResultImage, UserInput, WorkspaceContextView,
-    WorkspaceStackEntryView,
+    ResumedStepFinalizeCause, SkillRequest, ToolCallStatusView, ToolResultImage, UserInput,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::{AgentClient, RunControlClient};
 pub use commands::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
     CommandRoute, CommandRouterPort, CommandTarget, ContextEstimate, ModelSwitchResult,
-    ParsedArguments, PromptCommand, SlashInput, SnapshotQueryCommand, SnapshotQueryTarget,
+    ParsedArguments, SkillRequestCommand, SlashInput, SnapshotQueryCommand, SnapshotQueryTarget,
 };
 pub use config_view::{
     ConfigApplicationScopeView, ConfigChangeCause, ConfigChangedEvent, ConfigField,
@@ -80,8 +80,8 @@ pub use session::{
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,
     ClipboardImageView, InputEventFuture, InputEventOptFuture, MemoryConfigView, PasteKind,
-    QueueDrainPort, QueueFuture, ReflectionConfigView, ReminderView, SkillView, TaskStatusView,
-    TuiLaunchContext,
+    QueueDrainPort, QueueFuture, ReflectionConfigView, ReminderView, SkillSlashRouteView,
+    SkillView, SkillsUpdatedEvent, TaskStatusView, TuiLaunchContext,
 };
 pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,

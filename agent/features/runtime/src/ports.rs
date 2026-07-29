@@ -29,11 +29,11 @@ pub mod tool_result_blob;
 pub use context_port::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
     CompactRequest, CompactResult, CompactSkipReason, CompactTrigger, CompactionDecision,
-    ContentFingerprint, ContextAppend, ContextAppendError, ContextMessage, ContextPort,
-    ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
-    FinalizeCause, Language, ManualCompactRequest, RunStepId, SessionId, SessionRevision,
-    StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, ToolOutcomeKind,
-    Urgency,
+    ContentFingerprint, ContextAppend, ContextAppendError, ContextMessage, ContextMessages,
+    ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
+    FinalizeCause, InvocationReminder, Language, ManualCompactRequest, RunStepId, SessionId,
+    SessionRevision, StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget,
+    ToolOutcomeKind, Urgency,
 };
 pub use hook::{HookInvocation, HookOutcome, HookPoint, HookPort};
 pub use policy_port::{

@@ -49,6 +49,7 @@ pub struct ModelStreamWaitingView {
 /// Events sent from background task to UI
 #[derive(Debug)]
 pub enum AppEvent {
+    SkillsUpdated(sdk::SkillsUpdatedEvent),
     Text {
         context: UiTurnContext,
         text: String,

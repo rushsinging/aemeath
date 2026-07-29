@@ -322,40 +322,6 @@ inventory::submit!(ToolDisplayEntry {
     display: || Box::new(TaskListCompleteDisplay)
 });
 
-// ── Skill（历史 ToolCall 展示）──────────────────────────────────────
-
-struct SkillDisplay;
-impl ToolDisplay for SkillDisplay {
-    fn name(&self) -> &str {
-        "Skill"
-    }
-    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let skill = input.get("skill").and_then(serde_json::Value::as_str);
-        skill.filter(|value| !value.is_empty()).map_or_else(
-            || self.display_name().to_string(),
-            |value| format!("{} {value}", self.display_name()),
-        )
-    }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
-    }
-    fn render_policy(&self) -> ToolRenderPolicy {
-        ToolRenderPolicy {
-            header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
-            result: ResultPolicy::Visible {
-                max_lines: Some(5),
-                render_kind: ResultRender::Plain,
-                tail_mode: false,
-            },
-        }
-    }
-}
-inventory::submit!(ToolDisplayEntry {
-    name: "Skill",
-    display: || Box::new(SkillDisplay)
-});
-
 // ── TaskGet ──────────────────────────────────────────────────────
 
 struct TaskGetDisplay;

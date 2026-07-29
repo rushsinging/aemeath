@@ -4,7 +4,8 @@ mod tests;
 
 use crate::domain::CatalogQuery;
 use crate::domain::{
-    AgentDispatch, AgentProgressEvent, RegistryScopeName, SessionReminders, ToolProfileName,
+    AgentDispatch, AgentProgressEvent, RegistryScopeName, SessionReminders, SkillQuerySnapshot,
+    ToolProfileName,
 };
 use async_trait::async_trait;
 use project::{WorkspaceId, WorkspaceRead};
@@ -175,6 +176,7 @@ pub struct ToolExecutionPorts {
     guidance: Arc<dyn Guidance>,
     user_agent: String,
     authorization: AuthorizationContext,
+    skill_query: SkillQuerySnapshot,
 }
 impl ToolExecutionPorts {
     pub fn new(
@@ -199,6 +201,7 @@ impl ToolExecutionPorts {
             guidance,
             user_agent: share::config::Config::default().api.user_agent,
             authorization: AuthorizationContext::STANDARD,
+            skill_query: SkillQuerySnapshot::default(),
         }
     }
     pub fn with_agent(mut self, agent: Option<Arc<dyn AgentDispatch>>) -> Self {
@@ -215,6 +218,11 @@ impl ToolExecutionPorts {
     }
     pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
         self.user_agent = user_agent.into();
+        self
+    }
+
+    pub fn with_skill_query(mut self, skill_query: SkillQuerySnapshot) -> Self {
+        self.skill_query = skill_query;
         self
     }
 
@@ -266,6 +274,9 @@ impl ToolExecutionContext {
     }
     pub fn memory(&self) -> Arc<dyn memory::MemoryPort> {
         self.ports.memory.clone()
+    }
+    pub fn skill_query(&self) -> &SkillQuerySnapshot {
+        &self.ports.skill_query
     }
     pub fn parent_session_id(&self) -> Option<String> {
         self.ports.parent_session_id.clone()

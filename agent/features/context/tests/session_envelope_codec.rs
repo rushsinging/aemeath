@@ -1,13 +1,35 @@
 use context::adapters::decode_session;
 use context::domain::session::{
     AcceptedInputProjection, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
-    FinalizedOutcomeProjection, SessionCodec, SessionCodecError, SnapshotState,
-    CURRENT_SESSION_SCHEMA_VERSION,
+    CommittedStepMessages, FinalizedOutcomeProjection, SessionCodec, SessionCodecError,
+    SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };
 use context::domain::{FinalizeCause, StepReceipt, ToolOutcomeKind};
 use serde_json::json;
 use share::message::Message;
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
+
+#[test]
+fn committed_step_messages_clone_shares_the_same_backing() {
+    let messages = CommittedStepMessages::from(vec![Message::user("shared")]);
+    let cloned = messages.clone();
+
+    assert!(std::ptr::eq(messages.as_ptr(), cloned.as_ptr()));
+    assert_eq!(messages[0].text_content(), "shared");
+}
+
+#[test]
+fn committed_step_messages_preserve_the_existing_json_array_wire() {
+    let messages = CommittedStepMessages::from(vec![Message::user("wire")]);
+
+    assert_eq!(
+        serde_json::to_value(&messages).unwrap(),
+        json!([Message::user("wire")])
+    );
+    let decoded: CommittedStepMessages =
+        serde_json::from_value(json!([Message::user("wire")])).unwrap();
+    assert_eq!(decoded[0].text_content(), "wire");
+}
 
 #[test]
 fn current_envelope_round_trips_canonically() {
@@ -116,7 +138,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
             outcome: Some(FinalizedOutcomeProjection {
                 finalize_cause: FinalizeCause::UserCancelledStep,
                 duration_ms: Some(7_325_000),
-                messages: vec![Message::user("partial assistant")],
+                messages: vec![Message::user("partial assistant")].into(),
                 receipts: vec![StepReceipt::agent(
                     "agent-call",
                     0,

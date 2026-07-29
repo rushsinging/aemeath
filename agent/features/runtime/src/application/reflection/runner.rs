@@ -831,7 +831,7 @@ async fn call_llm_for_reflection(
     let request = InvocationRequest {
         model: model.clone(),
         cancellation: cancel.clone(),
-        messages: vec![share::message::Message::user(prompt)],
+        messages: vec![share::message::Message::user(prompt)].into(),
         system: vec![RequestSystemBlock::Text(system_prompt_text.to_string())],
         tools: vec![],
         options: InvocationOptions::new(max_tokens, requested_reasoning),

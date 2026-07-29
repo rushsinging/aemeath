@@ -54,6 +54,7 @@ fn markdown_spacing_overrides_to_sdk(
 
 fn ui_event_name(event: &UiEvent) -> &'static str {
     match event {
+        UiEvent::SkillsUpdated(_) => "SkillsUpdated",
         UiEvent::Text { .. } => "Text",
         UiEvent::Thinking { .. } => "Thinking",
         UiEvent::BlockComplete { .. } => "BlockComplete",
@@ -333,6 +334,13 @@ impl App {
         // UserMessagesAdopted 需要在 mapper/reducer 之外执行清占位 + 用户回显，
         // 因为这些副作用依赖 App 级方法且不产生 Intent。
         match &event {
+            TuiRuntimeEvent::SkillsUpdated {
+                revision,
+                skills,
+                slash_routes,
+            } => {
+                self.set_tui_skill_snapshot(revision.clone(), skills.clone(), slash_routes.clone());
+            }
             TuiRuntimeEvent::UserMessagesAdopted { items, .. } => {
                 for item in items {
                     if let Some(id) = item.input_id.as_ref() {

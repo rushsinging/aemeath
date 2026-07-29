@@ -40,7 +40,8 @@ impl ContextPort for FakeContextPort {
         Ok(ContextWindow {
             backing_revision: SessionRevision::new(0),
             system_blocks: vec![],
-            messages: request.pending_messages.clone(),
+            messages: request.pending_messages.clone().into(),
+            invocation_reminder: None,
             tool_schemas: request.tool_schemas.clone(),
             token_estimation: TokenBudget::default(),
             compaction_decision: self.needs_compaction(request).await?,

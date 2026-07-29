@@ -1,6 +1,6 @@
 //! Task reminder state used while freezing ContextRequest input.
 
-use share::message::{ContentBlock, Message, Role};
+use share::message::{ContentBlock, Role};
 
 /// Tracks the most recent Task tool activity. Context owns final reminder text
 /// placement; Runtime only observes whether task management occurred.
@@ -14,8 +14,13 @@ impl TaskReminderState {
         Self::default()
     }
 
-    pub fn update_from_messages(&mut self, current_turn: u64, messages: &[Message]) {
-        for message in messages.iter().rev() {
+    pub fn update_from_messages<'a>(
+        &mut self,
+        current_turn: u64,
+        messages: impl IntoIterator<Item = &'a share::message::Message>,
+    ) {
+        let messages = messages.into_iter().collect::<Vec<_>>();
+        for message in messages.into_iter().rev() {
             if message.role != Role::Assistant {
                 continue;
             }

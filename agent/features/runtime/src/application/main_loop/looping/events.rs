@@ -228,6 +228,9 @@ pub enum RuntimeStreamEvent {
         tool_id: ToolCallId,
         event: AgentProgressEvent,
     },
+    SkillsUpdated {
+        snapshot: tools::SkillCatalogSnapshot,
+    },
     WorkingDirectoryChanged {
         path_base: String,
         workspace_root: String,

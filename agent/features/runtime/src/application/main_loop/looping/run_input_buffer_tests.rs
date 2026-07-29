@@ -2,6 +2,58 @@ use super::{BufferDrain, RunInputBuffer};
 use crate::application::loop_engine::DrainEpoch;
 use sdk::ChatInputEvent;
 
+#[test]
+fn skill_request_is_user_input_and_withdraw_returns_raw_slash() {
+    let mut buf = RunInputBuffer::new();
+    let id = sdk::InputId::new_v7();
+    let event = ChatInputEvent::SkillRequest(sdk::SkillRequest {
+        input_id: id.clone(),
+        skill: "superpowers:brainstorming".to_string(),
+        arguments: "idea".to_string(),
+        raw_input: "/superpowers:brainstorming idea".to_string(),
+    });
+    buf.push(event.clone());
+    assert_eq!(buf.pending_user_count(), 1);
+    assert_eq!(
+        buf.withdraw_all_user_texts(),
+        vec!["/superpowers:brainstorming idea"]
+    );
+
+    buf.push(event);
+    match buf.drain_or_seal(DrainEpoch(0)) {
+        BufferDrain::Ready { batch, .. } => {
+            assert_eq!(batch[0].input_id.as_ref(), Some(&id));
+            assert!(batch[0].text.contains("Call the Skill tool first"));
+            assert!(batch[0].text.contains("superpowers:brainstorming"));
+            assert!(!batch[0].text.contains("/superpowers:brainstorming idea"));
+            let adopted = buf.take_drained_adopted();
+            assert_eq!(adopted.len(), 1);
+            assert_eq!(adopted[0].0, id);
+            assert_eq!(
+                adopted[0].1.text_content(),
+                "/superpowers:brainstorming idea"
+            );
+        }
+        other => panic!("expected ready Skill request, got {other:?}"),
+    }
+}
+
+#[test]
+fn late_skill_request_is_rejected_after_seal() {
+    let mut buf = RunInputBuffer::new();
+    assert!(matches!(
+        buf.drain_or_seal(DrainEpoch(0)),
+        BufferDrain::EmptyAndSealed { .. }
+    ));
+    let event = ChatInputEvent::SkillRequest(sdk::SkillRequest {
+        input_id: sdk::InputId::new_v7(),
+        skill: "release".to_string(),
+        arguments: String::new(),
+        raw_input: "/release".to_string(),
+    });
+    assert!(buf.push_or_reject(event).is_some());
+}
+
 fn um(text: &str) -> ChatInputEvent {
     ChatInputEvent::UserMessage {
         id: sdk::InputId::new(uuid::Uuid::now_v7().to_string()),

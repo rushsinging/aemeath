@@ -1,7 +1,7 @@
 # TUI · 事件流与 ACL 设计
 
 > 层级：02-modules / tui（模块战术设计）
-> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#943 / #944 / #947 / [#972](https://github.com/rushsinging/aemeath/issues/972)
+> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#943 / #944 / #947 / [#972](https://github.com/rushsinging/aemeath/issues/972) / [#1438](https://github.com/rushsinging/aemeath/issues/1438)
 > 本文定义 TUI 事件流的唯一链路、AgentEventMapper 防腐层（ACL）、SDK DTO 边界、四类 Interaction reply 资源协议、agent_id 与 sub-agent 事件路由（#612）、转换集中化策略与架构门禁。
 
 > **解耦铁律**（[01-system/05-dependency-rules.md](../../01-system/05-dependency-rules.md)）：
@@ -90,7 +90,7 @@ Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
 3. **progress 格式化**：sub-agent progress 事件 → 可读字符串（`format_agent_progress`）
 4. **hook notice 派生**：Hook 事件 → HookNoticeContent（`hook_event_notice`）
 5. **placeholder 清理**：收到实际内容时清 ModelStreamWaiting 占位（`clear_placeholder_then`）
-6. **空 payload 守卫**：runtime **MAY** 发送空 payload 事件，ACL **MUST** 在此丢弃，**NEVER** 让空内容进入 Model（见 3.5）
+6. **空 payload 守卫**：runtime **MAY** 发送空 payload 事件，ACL **MUST** 在此丢弃，**NEVER** 让空内容进入 Model（见 3.6）
 
 ### 3.2 AgentEventMapping 结构
 
@@ -121,7 +121,7 @@ enum AgentIntent {
 
 `agent_event.rs` **MUST** 对封闭 `UiEvent` 枚举做穷尽 match；禁止 wildcard、默认空 mapping、静默忽略或交给另一条更新路径二次处理。允许一个事件产生多个 Context Intent，但每个 Intent 必须显式出现在下表。
 
-> **唯一例外**：3.5 的空 payload 守卫——空内容事件 **MAY** 返回空 mapping，但 **MUST** 记 `log_debug!` 留痕。事件变体本身仍 **MUST** 显式出现在下表，丢弃的是空 payload 而非事件变体。
+> **唯一例外**：3.6 的空 payload 守卫——空内容事件 **MAY** 返回空 mapping，但 **MUST** 记 `log_debug!` 留痕。事件变体本身仍 **MUST** 显式出现在下表，丢弃的是空 payload 而非事件变体。
 
 | Context | UiEvent 变体 | Intent / 关键规则 |
 |---|---|---|
@@ -132,6 +132,7 @@ enum AgentIntent {
 | Conversation + Diagnostic | `HookEvent` | Conversation 追加 sanitize 后的 hook notice；阻断 / 失败同时记录 Diagnostic Intent；PostCompact 也必须显式映射为 no-visual-state Intent，**NEVER** 静默丢弃 |
 | Conversation + Config | `ThinkingChanged` | **MUST** 无条件同时产生 `ConversationIntent`（更新可见 thinking 指示器，产生 `ConversationChange::ThinkingChanged`）与 `ConfigIntent::ThinkingChanged { visible }`（更新 reasoning 能力投影，见 [02-model.md §7 ConfigProjection](02-model.md#7-configprojection)）；**NEVER** 用条件判断只产生其中一个 |
 | Input | `ClipboardImage` | `InputIntent::AttachClipboardImage`；只携 TUI-owned image DTO |
+| App 级 Skill Catalog | `SkillsUpdated { revision, skills, slash_routes }` | 在 `update_agent_event` 的 App 级边界完整消费，原子替换 `SkillCompletionCatalog` 并立即重算 suggestions；它不进入 Conversation timeline，也不经 `AgentEventMapper` 生成业务 Intent |
 | Diagnostic | `SessionResumeFailed` / `UpdateAvailable` / `CommandResultText` | 显示可定位 notice 或命令结果；需要改变 Session 的事件同时生成 Session Intent |
 | Session | `TurnStarted` / `MicrocompactDone` / `StopHookBlocked` / `PostToolExecutionSync` / `CompactRollback` / `CompactFinished` | `MessagesSynced` 与 session dirty/save 投影 |
 | Session + Conversation | `SessionResumed` | **MUST** 同时产生 `SessionIntent::SetCurrentSession` 与 `ConversationIntent::ResumeConversation`；每个恢复 Step 保留 `run_id`、`step_id` 与 `finalize_cause`。`UserCancelledStep` / `RunTerminated` 显式投影终态提示，NEVER 把取消历史伪装为 `Completed`，也 NEVER 由 helper 绕过 reducer 改写模型 |
@@ -140,9 +141,30 @@ enum AgentIntent {
 | Workspace | `WorkingDirectoryChanged` | `ApplySnapshot` → `SnapshotApplied { root, revision }`；Coordinator 再产生异步 `ResolveWorkspaceMetadata` Effect |
 | Conversation / Session | `ReflectionDone` / `ReflectionApplyDone` | 显式记录 reflection job 终态与 session dirty 状态；若协议不再发布该事件，应从封闭枚举删除而非保留空分支 |
 
-架构测试 **MUST** 构造每个 `UiEvent` 变体并断言至少一个显式 Intent，只有带说明的 no-visual-state Intent 可表达“已消费但不渲染”。
+架构测试 **MUST** 构造每个 `UiEvent` 变体并断言其显式消费路径；进入 ACL 的事件至少产生一个 Intent，只有带说明的 no-visual-state Intent 可表达“已消费但不渲染”。`SkillsUpdated` 是明确的 App 级 catalog state 例外：它在进入 mapper 前完成原子替换，mapper 对应的 runtime-event 投影保持 no-op，禁止重复写 Model。
 
-### 3.4 sanitize 策略
+### 3.4 Skill Catalog 启动与刷新链路
+
+Skill metadata 使用同一个全量快照贯穿启动和运行期，TUI 不保存 `SKILL.md` 正文：
+
+```text
+Composition initial SkillCatalogSnapshot
+  → TuiLaunchContext.skill_snapshot
+  → App::set_skill_snapshot
+  → SkillCompletionCatalog { revision, entries, slash_routes }
+
+RuntimeStreamEvent::SkillsUpdated
+  → sdk::ChatEvent::SkillsUpdated
+  → UiEvent / TuiRuntimeEvent::SkillsUpdated
+  → App::set_tui_skill_snapshot
+  → update_suggestions
+```
+
+启动快照必须在用户首次输入前安装，因此 `/archify` 等动态 Skill 不依赖首个 Runtime 刷新才能被识别。运行期事件携带相同 revision 下的 skills 与 slash_routes 全量集合，TUI 必须一次替换整个 `SkillCompletionCatalog`，**NEVER** 分别 merge 补全与路由。空快照会删除旧候选和旧路由；若旧命令随后被输入，应按未知命令处理。revision 相同的快照由 Runtime 抑制，TUI 不承担去重或部分更新协议。
+
+`SkillsUpdated` 只维护交付层发现视图，不产生用户回显、不进入 Session，也不触发 LLM。用户选中 Skill slash 后仍发送 canonical identity 与 raw reference arguments 的 `SkillRequest`；Runtime 通过既有 `UserMessagesAdopted` 回显模型可见请求，正文只能由 LLM 调用唯一 Skill Tool 后作为 ToolResult 返回。
+
+### 3.5 sanitize 策略
 
 | 函数 | 输入 | 输出 | 策略 |
 |---|---|---|---|
@@ -153,7 +175,7 @@ enum AgentIntent {
 
 > **设计原则**：sanitize 是 ACL 的核心职责——Runtime 的 tool 输出可能包含大段文本、二进制数据或敏感信息，TUI 展示前 **MUST** 经过 sanitize。sanitize 逻辑集中在 `adapter/agent_event/sanitize.rs`，**NEVER** 散落在 Model 或 Render 层。
 
-### 3.5 空 payload 守卫
+### 3.6 空 payload 守卫
 
 **契约：runtime 允许发空，TUI 负责不渲染。** runtime 侧多处按 `if let Some(x) = ... { send(x) }` 发送——只判 `Option` 是否 `Some`，**不判空字符串**（`looping/tools.rs` 的 `emit_json_hook_context`、`looping/post_batch.rs`、`looping/compact.rs`）。据此：
 
@@ -649,6 +671,7 @@ fn test_sdk_event_types_only_in_adapter() {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-28 | #1438 接通启动 `TuiLaunchContext.skill_snapshot` 与运行期 `SkillsUpdated` 全量替换链路；TUI 同 revision 原子维护 Skill 补全与 Slash 路由，空快照撤销旧入口，正文不进入交付状态 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) / [#1446](https://github.com/rushsinging/aemeath/pull/1446) |
 | 2026-07-12 | 初稿：事件流、AgentEventMapper ACL、SDK DTO 边界、agent_id、sub-agent 路由、转换集中化与架构门禁 | #797 |
 | 2026-07-12 | 强化 R4 / R7：TUI 自有 DTO 完全隔离，门禁 #6 覆盖 app/event.rs | #797 |
 | 2026-07-12 | DDD/Hexagonal 评审：收敛 AgentEventMapping、event_mapping 与 Effect 边界 | #798 评审 |

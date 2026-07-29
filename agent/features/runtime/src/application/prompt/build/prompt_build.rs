@@ -79,19 +79,27 @@ fn static_system_prompt_for(
 
             prompt
                 .replace(
-                    "path_base = the base for resolving relative paths (relative paths are joined to path_base to form absolute paths); workspace_root = the safety boundary (absolute paths MUST fall inside it or be rejected).",
+                    "path_base is the base for resolving relative paths; workspace_root is the safety boundary.",
                     workspace_boundary,
                 )
                 .replace(
-                    "path_base = 相对路径解析基（相对路径会与 path_base 拼接成绝对路径）；workspace_root = 安全边界（绝对路径必须位于其下，否则被拒绝）。",
+                    "path_base 是相对路径解析基；workspace_root 是安全边界。",
                     workspace_boundary,
                 )
                 .replace(
-                    "Prefer relative paths for Read, Edit, Write, Glob, Grep, and Bash paths. If you need an absolute path, it MUST be inside the current workspace.",
+                    "Prefer relative paths. Absolute paths must remain inside the current workspace.",
                     relative_path_guidance,
                 )
                 .replace(
-                    "Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. When EnterWorktree or ExitWorktree returns a new path_base/workspace_root in its tool result, use that latest tool result as the current workspace context. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace.",
+                    "优先使用相对路径；绝对路径必须位于当前 workspace 内。",
+                    relative_path_guidance,
+                )
+                .replace(
+                    "After EnterWorktree or ExitWorktree, use the latest path_base/workspace_root returned by the tool and do not reuse paths from another checkout.",
+                    worktree_guidance,
+                )
+                .replace(
+                    "EnterWorktree 或 ExitWorktree 后，以工具返回的最新 path_base/workspace_root 为准，禁止复用其他 checkout 的路径。",
                     worktree_guidance,
                 )
         }

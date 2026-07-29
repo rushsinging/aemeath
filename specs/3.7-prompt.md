@@ -23,8 +23,8 @@
 | 注入路径 | 状态 | 位置 |
 |---|---|---|
 | Guidance 文件（`_default.md` 等） | ✅ 已双语（`DEFAULT_FILES_EN` / `DEFAULT_FILES_ZH`） | `constants.rs` |
-| `UNIVERSAL_EXECUTION_DISCIPLINE` | ✅ 已双语（`universal_execution_discipline(lang)`） | `constants.rs` |
-| task reminder 模板 | ✅ 已双语（`build_reminder(lang)`） | `task_reminder.rs` |
+| `UNIVERSAL_EXECUTION_DISCIPLINE` | ✅ 已双语（`universal_execution_discipline(lang)`） | `agent/shared/src/i18n/prompt/discipline.rs` |
+| task reminder 模板 | ✅ 已双语（`InvocationReminder::from_task_snapshot`） | `agent/features/context/src/domain.rs`；仅投影到 Provider user message 副本，不进入 system prompt |
 | `static_system_prompt_for()` | ✅ 已双语（`STATIC_SYSTEM_PROMPT_EN` / `_ZH`） | `prompt_build.rs` |
 | `build_commit_guidance()` | ✅ 已双语（match lang 模板） | `prompt_build.rs` |
 | `currentDate` 段 | ✅ 已双语 | `prompt_build.rs` |
@@ -39,5 +39,6 @@
 
 1. **MUST** 在注入文本的函数签名中传入 `language: &str`（或 `Config`），按值选择对应语言版本。
 2. **MUST** 为每个文本块定义 `const XXX_EN: &str` 和 `const XXX_ZH: &str`，再通过 `fn xxx(lang) -> &'static str` 选择——**NEVER** 在调用点内联 match。
-3. **SHOULD** 优先双语化直接面向 LLM 行为指令的文本（system prompt、task reminder），其次处理反馈性文本（hook 反馈、tool denied）。
-4. **MAY** 对纯结构性标签（`<system-reminder>` XML tag name、JSON key name）保持英文不翻译。
+3. **SHOULD** 优先双语化直接面向 LLM 行为指令的文本（system prompt、invocation-only task reminder），其次处理反馈性文本（hook 反馈、tool denied）。
+4. **MUST** task reminder 仅作为带 `<task-reminder>` 标签的 Provider invocation user-message decoration；**NEVER** 写入 `SystemBlock`、canonical session、SDK/TUI 事件或持久化 JSON。
+5. **MAY** 对纯结构性标签（`<system-reminder>` XML tag name、JSON key name）保持英文不翻译。

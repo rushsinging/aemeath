@@ -1,5 +1,6 @@
 use super::*;
 use crate::application::interaction::{InteractionBridge, InteractionPort};
+use crate::application::loop_engine::llm_strategy::extract_invocation_context;
 use crate::application::subagent::ToolCall;
 use sdk::{ChatInputEvent, InteractionRequest};
 use serde_json::json;
@@ -14,6 +15,46 @@ use crate::application::loop_engine::{
 use crate::domain::agent_run::{
     InteractionContinuation, Run, RunControl, RunDomainEvent, RunSpec, RunStatus, ToolCallStatus,
 };
+
+#[test]
+fn invocation_context_clone_shares_text_first_message_backing() {
+    let source = share::message::Message {
+        role: share::message::Role::User,
+        content: vec![share::message::ContentBlock::ToolResult {
+            tool_use_id: "tool-1".to_string(),
+            content: serde_json::json!({"large": "structured"}),
+            is_error: false,
+            text: Some("compact text".to_string()),
+        }],
+        metadata: None,
+    };
+    let window = crate::ports::ContextWindow {
+        backing_revision: crate::ports::SessionRevision::new(1),
+        system_blocks: Vec::new(),
+        messages: vec![source].into(),
+        invocation_reminder: None,
+        tool_schemas: Vec::new(),
+        token_estimation: crate::ports::TokenBudget::default(),
+        compaction_decision: crate::ports::CompactionDecision {
+            needed: false,
+            urgency: crate::ports::Urgency::None,
+            decision_token_count: 0,
+            threshold: 1,
+            reason: crate::ports::DecisionReason::HeuristicFallback,
+        },
+    };
+
+    let context = extract_invocation_context(&window);
+    let cloned = Arc::clone(&context.messages_for_api);
+
+    assert_eq!(context.messages_for_api.as_ptr(), cloned.as_ptr());
+    let share::message::ContentBlock::ToolResult { content, text, .. } = &cloned[0].content[0]
+    else {
+        panic!("expected tool result")
+    };
+    assert_eq!(content, &serde_json::json!("compact text"));
+    assert!(text.is_none());
+}
 
 /// #1248: Fake ToolExecutionPort that counts execute calls and returns configurable results.
 /// Used for production-level tests of the approval flow through the full engine roundtrip.

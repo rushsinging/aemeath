@@ -29,6 +29,7 @@ fn wire_runtime_tool_assembly(
     task_access: Arc<dyn task::TaskAccess>,
     memory_source: Arc<dyn tools::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
+    skill_loader: Arc<dyn tools::SkillLoadPort>,
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     agents_dir: &std::path::Path,
 ) -> Result<RuntimeToolAssembly, sdk::SdkError> {
@@ -36,6 +37,7 @@ fn wire_runtime_tool_assembly(
         task_access,
         memory_source,
         workspace_control,
+        skill_loader,
     )
     .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let policy = snapshot.tool_result_policy();
@@ -98,7 +100,7 @@ pub(crate) async fn from_args_with_gateways(
     );
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
-    let skill_materializer = skill_wiring.materializer();
+    let skill_loader = skill_wiring.loader();
     let session_blob = storage::api::file_system_blob(agents_dir)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
@@ -124,8 +126,8 @@ pub(crate) async fn from_args_with_gateways(
             context::adapters::ProductionMainContextFactory::new(Arc::new(
                 context::adapters::AtomicBlobCanonicalSessionWriter::new(session_blob),
             ))
-            .with_skill_supplier(
-                skill_materializer.clone(),
+            .with_skill_catalog(
+                skill_catalog.clone(),
                 Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
                     workspace.read(),
                 )),
@@ -142,6 +144,7 @@ pub(crate) async fn from_args_with_gateways(
             wiring: wiring.clone(),
         }),
         workspace.control(),
+        skill_loader.clone(),
         &config.reader().committed_snapshot(),
         agents_dir,
     )?;
@@ -172,7 +175,7 @@ pub(crate) async fn from_args_with_gateways(
             tool_assembly.catalog,
             tool_assembly.execution,
             skill_catalog,
-            skill_materializer,
+            skill_loader,
             tool_assembly.tool_result_materializer,
             tool_assembly.active_run,
         ),

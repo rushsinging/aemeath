@@ -28,16 +28,17 @@ fn router_classifies_all_three_mechanisms_without_executing() {
         "review",
         &[],
         "Review changes",
-        tools::CommandMechanism::PromptInjection,
+        tools::CommandMechanism::SkillRequest,
         tools::CommandTarget::ContextManagement,
         tools::CommandArgumentSchema::OptionalText,
     )
-    .expect("review descriptor");
+    .expect("review descriptor")
+    .with_target_identity("review");
     let wiring = tools::composition::wire_commands(vec![review]).expect("valid command catalog");
 
     assert!(matches!(
         wiring.router().resolve(SlashInput::new("/review staged")),
-        Ok(CommandRoute::PromptInjection(command))
+        Ok(CommandRoute::SkillRequest(command))
             if command.command.as_str() == "review"
                 && command.arguments.as_slice() == ["staged"]
     ));
@@ -128,7 +129,7 @@ fn builtin_catalog_exposes_the_complete_stable_descriptor_matrix() {
         ]
     );
     assert!(commands.iter().all(|command| match command.mechanism {
-        CommandMechanism::PromptInjection => true,
+        CommandMechanism::SkillRequest => true,
         CommandMechanism::SnapshotQuery =>
             command.target != CommandTarget::ApplicationVersionControl,
         CommandMechanism::ApplicationControl => {
@@ -151,7 +152,7 @@ fn public_wiring_preserves_duplicate_target_and_missing_argument_errors() {
         "help",
         &[],
         "duplicate",
-        CommandMechanism::PromptInjection,
+        CommandMechanism::SnapshotQuery,
         CommandTarget::ContextManagement,
         CommandArgumentSchema::OptionalText,
     )

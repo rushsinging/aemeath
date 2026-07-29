@@ -37,8 +37,9 @@ fn request(last_api_total_tokens: Option<u64>) -> ContextRequest {
 fn provider_total_is_used_without_projected_delta() {
     let decision = context_decision::calculate(
         &request(Some(700)),
-        &[Message::user("x".repeat(4_000))],
+        &vec![Message::user("x".repeat(4_000))].into(),
         &[],
+        None,
     );
 
     assert_eq!(decision.decision_token_count, 700);
@@ -48,7 +49,7 @@ fn provider_total_is_used_without_projected_delta() {
 
 #[test]
 fn provider_total_above_threshold_triggers_compaction() {
-    let decision = context_decision::calculate(&request(Some(900)), &[], &[]);
+    let decision = context_decision::calculate(&request(Some(900)), &Vec::new().into(), &[], None);
 
     assert!(decision.needed);
     assert_eq!(decision.reason, DecisionReason::ActualProviderUsage);
@@ -56,8 +57,12 @@ fn provider_total_above_threshold_triggers_compaction() {
 
 #[test]
 fn missing_provider_total_falls_back_to_complete_candidate_estimate() {
-    let decision =
-        context_decision::calculate(&request(None), &[Message::user("x".repeat(4_000))], &[]);
+    let decision = context_decision::calculate(
+        &request(None),
+        &vec![Message::user("x".repeat(4_000))].into(),
+        &[],
+        None,
+    );
 
     assert!(decision.needed);
     assert!(decision.decision_token_count > decision.threshold);

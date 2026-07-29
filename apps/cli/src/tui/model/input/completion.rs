@@ -22,9 +22,7 @@ pub fn generate_suggestions(ctx: &SuggestionContext) -> Vec<Suggestion> {
         extract_completion_token(&ctx.input, ctx.cursor_offset)
     {
         match trigger_type {
-            TriggerType::SlashCommand => {
-                generate_command_suggestions(&token, &ctx.skills, &ctx.commands)
-            }
+            TriggerType::SlashCommand => generate_command_suggestions(&token, &ctx.commands),
             TriggerType::AtSymbol => {
                 crate::tui::effect::completion::generate_file_suggestions(&token, &ctx.cwd)
             }
@@ -88,7 +86,7 @@ mod generation_tests {
     #[test]
     fn test_generate_command_suggestions() {
         let cmds = test_commands();
-        let suggestions = generate_command_suggestions("/hel", &[], &cmds);
+        let suggestions = generate_command_suggestions("/hel", &cmds);
         assert!(!suggestions.is_empty());
         assert_eq!(suggestions[0].display_text, "/help");
     }
@@ -96,30 +94,28 @@ mod generation_tests {
     #[test]
     fn test_generate_command_suggestions_empty() {
         let cmds = test_commands();
-        let suggestions = generate_command_suggestions("", &[], &cmds);
+        let suggestions = generate_command_suggestions("", &cmds);
         assert!(suggestions.len() > 5);
     }
 
     #[test]
-    fn test_generate_command_suggestions_with_skills() {
-        let cmds = test_commands();
-        let skills = vec![
-            ("cm".into(), "commit message".into(), vec!["commit".into()]),
-            ("review".into(), "code review".into(), vec!["cr".into()]),
-        ];
-        // 空部分输入 → 所有命令 + 所有技能
-        let suggestions = generate_command_suggestions("", &skills, &cmds);
-        assert!(suggestions.iter().any(|s| s.display_text == "/cm"));
-        assert!(suggestions.iter().any(|s| s.display_text == "/review"));
+    fn test_generate_command_suggestions_uses_catalog_for_qualified_skills() {
+        let mut commands = test_commands();
+        commands.push((
+            "superpowers:brainstorming".into(),
+            "Explore requirements".into(),
+            vec![],
+        ));
+
+        let suggestions = generate_command_suggestions("", &commands);
+        assert!(suggestions
+            .iter()
+            .any(|s| s.display_text == "/superpowers:brainstorming"));
         assert!(suggestions.iter().any(|s| s.display_text == "/help"));
 
-        // 部分 "c" → 匹配 /cm（技能）、/clear（命令）、/commit（命令）、/context（命令）
-        let suggestions = generate_command_suggestions("/c", &skills, &cmds);
-        assert!(suggestions.iter().any(|s| s.display_text == "/cm"));
-
-        // 部分 "cr" → 匹配技能别名 "cr" → display_text 使用别名
-        let suggestions = generate_command_suggestions("/cr", &skills, &cmds);
-        assert!(suggestions.iter().any(|s| s.display_text == "/cr"));
+        let suggestions = generate_command_suggestions("/super", &commands);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].display_text, "/superpowers:brainstorming");
     }
 }
 

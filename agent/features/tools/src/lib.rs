@@ -10,8 +10,8 @@ mod domain;
 /// remain private; production business code consumes the returned ports.
 pub mod composition {
     pub use crate::adapters::composition::{
-        wire_builtin_catalog_execution, wire_commands, wire_skill_materialization, wire_skills,
-        CatalogExecutionWiring, CommandWiring, SkillWiring,
+        wire_builtin_catalog_execution, wire_commands, wire_skills, CatalogExecutionWiring,
+        CommandWiring, SkillWiring,
     };
     #[cfg(feature = "test-harness")]
     pub use crate::adapters::composition::{TestCatalogExecution, TestCatalogExecutionFactory};
@@ -24,16 +24,16 @@ pub use domain::types;
 pub use domain::{
     AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal,
     AgentRunner, AgentToolCallProgress, ApplicationControlCommand, ApplicationControlTarget,
-    AuthorizationContext, CacheHint, CancellationDeclaration, CancellationSignal, CatalogQuery,
+    AuthorizationContext, CancellationDeclaration, CancellationSignal, CatalogQuery,
     CleanupConfirmation, CommandArgumentSchema, CommandCatalogPort, CommandCompletion,
     CommandDescriptor, CommandMechanism, CommandName, CommandParseError, CommandRoute,
     CommandRouterPort, CommandTarget, ConcurrencyDeclaration, ExecutionScope,
     ExecutionScopeBuilder, FixedGuidance, FixedPlanMode, Guidance, ImageData,
-    InputSafetyDeclaration, InvocationSource, MemoryPortSource, MutexReadSet, ParsedArguments,
-    PlanModeState, ProfileExpansionError, ProgressSink, PromptCommand, PromptFragment, ReadSet,
-    RegistryScopeName, SessionReminder, SessionReminders, SkillCatalogPort, SkillDescriptor,
-    SkillError, SkillMaterializationPort, SkillMaterializationQuery, SkillMaterializationRevision,
-    SkillMaterializationSnapshot, SkillQuery, SkillSource, SkillSourceKind, SlashInput,
+    InputSafetyDeclaration, InvocationSource, LoadedSkill, MemoryPortSource, MutexReadSet,
+    ParsedArguments, PlanModeState, ProfileExpansionError, ProgressSink, ReadSet,
+    RegistryScopeName, SessionReminder, SessionReminders, SkillCatalogPort, SkillCatalogSnapshot,
+    SkillDescriptor, SkillError, SkillLoadPort, SkillLoadQuery, SkillQuery, SkillQuerySnapshot,
+    SkillRequestCommand, SkillSlashRoute, SkillSource, SkillSourceKind, SlashInput,
     SnapshotQueryCommand, SnapshotQueryTarget, Tool, ToolCapabilities, ToolCapability,
     ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind,
     ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort, ToolExecutionPorts,
