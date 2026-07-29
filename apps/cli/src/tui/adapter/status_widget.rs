@@ -80,6 +80,7 @@ mod tests {
             &model.workspace_provider,
             Some(&model.session),
             &model.diagnostic,
+            "ask",
         );
 
         assert_eq!(view.runtime.model.as_deref(), Some("glm-5.1"));
@@ -116,6 +117,7 @@ mod tests {
             &model.workspace_provider,
             None,
             &model.diagnostic,
+            "ask",
         );
 
         assert_eq!(view.notice.text, "Interrupted");
@@ -130,6 +132,10 @@ mod tests {
             StatusNoticeViewKind::Normal
         );
         assert_eq!(
+            StatusViewAssembler::assemble_notice_view(&StatusNotice::running("Thinking")).kind,
+            StatusNoticeViewKind::Running
+        );
+        assert_eq!(
             StatusViewAssembler::assemble_notice_view(&StatusNotice::success("Copied")).kind,
             StatusNoticeViewKind::Success
         );
@@ -141,6 +147,28 @@ mod tests {
             .kind,
             StatusNoticeViewKind::Warning
         );
+    }
+
+    #[test]
+    fn permission_modes_project_to_controlled_status_labels() {
+        let model = TuiModel::default();
+        for (wire, expected) in [
+            ("ask", "Ask"),
+            ("auto_read", "AutoRead"),
+            ("allow_all", "AllowAll"),
+            ("", "Ask"),
+            ("unknown", "Ask"),
+        ] {
+            let view = StatusViewAssembler::assemble_status_view(
+                &model.conversation,
+                &model.runtime_presentation,
+                &model.workspace_provider,
+                None,
+                &model.diagnostic,
+                wire,
+            );
+            assert_eq!(view.runtime.context.permission_mode, expected);
+        }
     }
 
     #[test]
@@ -160,6 +188,7 @@ mod tests {
             &model.workspace_provider,
             None,
             &model.diagnostic,
+            "ask",
         );
 
         assert_eq!(view.line.severity, StatusSeverity::Error);

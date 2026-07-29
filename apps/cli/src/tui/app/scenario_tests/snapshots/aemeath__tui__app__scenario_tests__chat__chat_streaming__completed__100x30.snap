@@ -30,5 +30,5 @@ expression: harness.screen()
 ┌ Input ───────────────────────────────────────────────────────────────────────────────────────────┐
 │ 输 入 消 息 ...                                                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
- Ready │ scenario-model │ in 0 │ out 0
- │ main │ AskMe │ session scenario-session
+Ready  scenario-model  in 0  out 0
+  main  Ask  session scenario-session

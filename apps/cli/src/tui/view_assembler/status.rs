@@ -22,10 +22,17 @@ impl StatusViewAssembler {
         workspace: &WorkspaceProvider,
         session: Option<&SessionModel>,
         diagnostics: &DiagnosticModel,
+        permission_mode: &str,
     ) -> StatusViewModel {
         StatusViewModel {
             notice: Self::assemble_notice_view(&conversation.runtime.status_notice),
-            runtime: Self::assemble_runtime_view(conversation, presentation, workspace, session),
+            runtime: Self::assemble_runtime_view(
+                conversation,
+                presentation,
+                workspace,
+                session,
+                permission_mode,
+            ),
             line: Self::assemble_from_runtime_session(
                 conversation,
                 presentation,
@@ -42,6 +49,7 @@ impl StatusViewAssembler {
             text: notice.text.clone(),
             kind: match notice.kind {
                 StatusNoticeKind::Normal => StatusNoticeViewKind::Normal,
+                StatusNoticeKind::Running => StatusNoticeViewKind::Running,
                 StatusNoticeKind::Success => StatusNoticeViewKind::Success,
                 StatusNoticeKind::Warning => StatusNoticeViewKind::Warning,
             },
@@ -51,13 +59,13 @@ impl StatusViewAssembler {
     /// 由 `RuntimeModel`/`SessionModel` 单向派生 StatusBar 运行态视图模型
     /// （model/session/tps/token/api/context_size/工作目录上下文）。
     ///
-    /// StatusBar 不再保存运行态 widget mirror；渲染时直接消费本派生结果。
-    /// permission_mode 为启动期配置，不在本派生范围内。
+    /// StatusBar 不保存运行态或配置 widget mirror；渲染时直接消费本派生结果。
     pub fn assemble_runtime_view(
         conversation: &ConversationModel,
         presentation: &RuntimePresentation,
         workspace: &WorkspaceProvider,
         session: Option<&SessionModel>,
+        permission_mode: &str,
     ) -> StatusRuntimeViewModel {
         StatusRuntimeViewModel {
             model: presentation.model_id().map(ToOwned::to_owned),
@@ -79,9 +87,19 @@ impl StatusViewAssembler {
                     ModelWorktreeKind::LinkedWorktree => StatusWorktreeKind::Worktree,
                     _ => StatusWorktreeKind::Main,
                 },
+                permission_mode: Self::permission_mode_label(permission_mode).to_string(),
             },
         }
     }
+    fn permission_mode_label(permission_mode: &str) -> &'static str {
+        match permission_mode {
+            "auto_read" => "AutoRead",
+            "allow_all" => "AllowAll",
+            "ask" | "" => "Ask",
+            _ => "Ask",
+        }
+    }
+
     pub fn assemble_from_runtime_session(
         conversation: &ConversationModel,
         presentation: &RuntimePresentation,
@@ -263,6 +281,7 @@ mod tests {
             &presentation,
             &workspace,
             Some(&session),
+            "ask",
         );
 
         assert_eq!(vm.model.as_deref(), Some("glm-5.1"));
@@ -297,6 +316,7 @@ mod tests {
             &presentation,
             &workspace,
             None,
+            "ask",
         );
 
         assert!(vm.context.branch.is_none());
@@ -317,6 +337,7 @@ mod tests {
             &presentation,
             &workspace,
             None,
+            "ask",
         );
 
         assert!(vm.model.is_none());

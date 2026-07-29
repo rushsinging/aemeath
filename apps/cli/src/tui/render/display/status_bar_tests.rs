@@ -29,6 +29,7 @@ fn runtime_context_view(path_base: &str, workspace_root: &str, branch: &str) -> 
                 workspace_root: workspace_root.to_string(),
                 branch: Some(branch.to_string()),
                 kind,
+                permission_mode: "Ask".to_string(),
             },
             ..StatusRuntimeViewModel::default()
         },
@@ -72,7 +73,7 @@ fn test_status_bar_selection_maps_cjk_screen_col_to_char_index() {
 
     assert_eq!(
         bar.selected_text_for_view(&selection, &view),
-        Some("好a ".to_string())
+        Some("好a  ".to_string())
     );
 }
 
@@ -93,7 +94,7 @@ fn test_status_bar_selection_maps_emoji_screen_col_to_char_index() {
 
     assert_eq!(
         bar.selected_text_for_view(&selection, &view),
-        Some("🚀b".to_string())
+        Some("🚀b ".to_string())
     );
 }
 
@@ -103,6 +104,55 @@ fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
         .collect::<String>()
 }
 
+#[test]
+fn running_notice_uses_tool_running_color() {
+    let bar = StatusBar::new();
+    let view = StatusViewModel {
+        notice: StatusNoticeViewModel {
+            text: "Thinking".to_string(),
+            kind: StatusNoticeViewKind::Running,
+        },
+        ..StatusViewModel::default()
+    };
+    let area = Rect::new(0, 0, 80, 1);
+    let mut buf = Buffer::empty(area);
+
+    bar.render(area, &mut buf, &StatusSelectionViewState::default(), &view);
+
+    assert_eq!(
+        buf.cell((0, 0)).unwrap().style().fg,
+        Some(theme::TOOL_RUNNING)
+    );
+}
+
+#[test]
+fn runtime_and_context_rows_use_spaces_without_vertical_separators() {
+    let bar = StatusBar::new();
+    let mut view = runtime_context_view("~/aemeath", "~/aemeath", "main");
+    view.runtime.model = Some("model-x".to_string());
+    let area = Rect::new(0, 0, 100, 2);
+    let mut buf = Buffer::empty(area);
+
+    bar.render(area, &mut buf, &StatusSelectionViewState::default(), &view);
+
+    let runtime = bar.build_full_text(&view);
+    let context = bar.context_row_text_for_view(area.width as usize, &view);
+    assert!(!runtime.contains('│'));
+    assert!(!context.contains('│'));
+    assert!(runtime.contains("Ready  model-x"));
+    assert!(context.contains("aemeath  main  Ask"));
+}
+
+#[test]
+fn permission_mode_comes_from_view_model() {
+    let bar = StatusBar::new();
+    let mut view = runtime_context_view("~/aemeath", "~/aemeath", "main");
+    view.runtime.context.permission_mode = "AutoRead".to_string();
+
+    assert!(bar
+        .context_row_text_for_view(80, &view)
+        .contains("AutoRead"));
+}
 #[test]
 fn test_status_bar_render_uses_status_background() {
     let bar = StatusBar::new();
@@ -161,13 +211,13 @@ fn test_status_bar_render_one_row_omits_context() {
 
 #[test]
 fn test_status_line_context_defaults_to_balanced_row() {
-    let mut bar = StatusBar::new();
-    let view = runtime_context_view(
+    let bar = StatusBar::new();
+    let mut view = runtime_context_view(
         "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui",
         "/workspace/projects/example/.worktrees/topic-46-status-line",
         "feature/46-status-line",
     );
-    bar.set_permission_mode("AskMe");
+    view.runtime.context.permission_mode = "AskMe".to_string();
 
     let row = bar.context_row_text_for_view(120, &view);
 
@@ -181,13 +231,13 @@ fn test_status_line_context_defaults_to_balanced_row() {
 
 #[test]
 fn test_status_line_context_narrow_keeps_path_branch_and_permission() {
-    let mut bar = StatusBar::new();
-    let view = runtime_context_view(
+    let bar = StatusBar::new();
+    let mut view = runtime_context_view(
         "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui/app/update",
         "/workspace/projects/example/.worktrees/topic-46-status-line",
         "feature/46-status-line",
     );
-    bar.set_permission_mode("AllowAll");
+    view.runtime.context.permission_mode = "AllowAll".to_string();
 
     let row = bar.context_row_text_for_view(56, &view);
 
@@ -198,13 +248,13 @@ fn test_status_line_context_narrow_keeps_path_branch_and_permission() {
 
 #[test]
 fn test_status_line_context_wide_truncates_to_width() {
-    let mut bar = StatusBar::new();
-    let view = runtime_context_view(
+    let bar = StatusBar::new();
+    let mut view = runtime_context_view(
         "/workspace/projects/example/.worktrees/topic-46-status-line/cli/src/tui/app/update/deep/path",
         "/workspace/projects/example/.worktrees/topic-46-status-line/with/an/extra/long/root/path",
         "feature/46-status-line-with-a-very-long-branch-name",
     );
-    bar.set_permission_mode("AllowAllWithExtraLongModeName");
+    view.runtime.context.permission_mode = "AllowAllWithExtraLongModeName".to_string();
 
     let row = bar.context_row_text_for_view(70, &view);
 
@@ -300,15 +350,16 @@ fn test_main_branch_does_not_repeat_main_main() {
 
     let row = bar.context_row_text_for_view(80, &view);
 
-    assert!(row.contains(" │ main │ "));
+    assert!(row.contains("  main  "));
+    assert!(!row.contains('│'));
     assert!(!row.contains("main:main"));
 }
 
 #[test]
 fn test_status_line_context_keeps_permission_when_space_is_tight() {
-    let mut bar = StatusBar::new();
-    let view = runtime_context_view("aemeath", "aemeath", "main");
-    bar.set_permission_mode("AskMe");
+    let bar = StatusBar::new();
+    let mut view = runtime_context_view("aemeath", "aemeath", "main");
+    view.runtime.context.permission_mode = "AskMe".to_string();
 
     let row = bar.context_row_text_for_view(24, &view);
 

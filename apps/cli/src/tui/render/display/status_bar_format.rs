@@ -32,13 +32,13 @@ impl Default for StatusLineContext {
             workspace_root: String::new(),
             worktree_kind: WorktreeKind::Main,
             branch: None,
-            permission_mode: "AskMe".to_string(),
+            permission_mode: String::new(),
             session_id: None,
         }
     }
 }
 
-const FIELD_SEPARATOR: &str = " │ ";
+pub(crate) const FIELD_SEPARATOR: &str = "  ";
 const MIN_PATH_WIDTH: usize = 12;
 const DEFAULT_PATH_WIDTH: usize = 54;
 const ELLIPSIS_WIDTH: usize = 1;

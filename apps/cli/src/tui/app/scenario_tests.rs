@@ -2,6 +2,7 @@
 
 mod chat;
 mod completion;
+mod config_status;
 mod driver;
 mod frame_performance;
 mod harness;

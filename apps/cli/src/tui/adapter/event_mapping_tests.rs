@@ -119,6 +119,28 @@ fn config_reload_maps_spacing_policy_into_tui_owned_event() {
 }
 
 #[test]
+fn config_reload_preserves_permission_mode_in_tui_owned_event() {
+    for permission_mode in ["ask", "auto_read", "allow_all"] {
+        let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ConfigReloaded {
+            event: sdk::ConfigReloadedEvent {
+                changed_keys: vec!["permissions.mode".to_string()],
+                scopes: vec![sdk::ConfigApplicationScopeView::Run],
+                view: sdk::ConfigView {
+                    permission_mode: permission_mode.to_string(),
+                    ..Default::default()
+                },
+            },
+        });
+
+        assert!(matches!(
+            mapped,
+            SdkEventMapping::Runtime(TuiRuntimeEvent::ConfigReloaded { view, .. })
+                if view.permission_mode == permission_mode
+        ));
+    }
+}
+
+#[test]
 fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
     let expected_chat_id = sdk::ids::ChatId::new("chat-retry");
     let expected_turn_id = sdk::ids::ChatTurnId::new("turn-retry");
