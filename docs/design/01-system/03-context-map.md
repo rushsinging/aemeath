@@ -65,7 +65,7 @@
 | Context Management | C/S | Context-owned `ContextPort` + `SessionManagementPort` OHS | Runtime 请求“构建本轮 Context Window”；Composition 把同一 Session 管理实例注入 MainSessionWiring（resume）与 Runtime（SDK / idle Session 命令）。Session list、resume、export、import、metadata update 与 delete 仅接受当前 `ProjectIdentity`（Git 以 common-dir、非 Git 以 canonical root 匹配）；resume 成功后 Runtime 将唯一活动 Session ID 切换为恢复目标，Context / Tool / Hook / Tool Result 统一消费该 ID；TUI 只消费 SDK 事件 |
 | Workflow | C/S | Workflow-owned `ReasoningPort` OHS | Runtime 询问当前 reasoning effort（reasoning graph 观察 tool 类型 / 结果调节）；Workflow **NEVER** 阻塞 loop 或强制流程，仅作 effort 调节器。**v0.1.0 scope（#921 收缩）**：五节点固定默认 effort（Config `reasoning_graph` 已退役）；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线；是否接线由 v0.2.0 #1142 决策 |
 | Provider | C/S + **ACL**(在 Provider 内) | Runtime-owned outbound `ProviderPort` | Provider adapter 吸收各家 LLM 差异，实现 Runtime 定义的统一调用语言与有序流。**v0.1.0 scope（#921 收缩）**：option resolver 领域迁移完成但未接生产链路——Runtime 尚未在 `build_window` 前调用 resolver；是否接线由 v0.2.0 #1142 决策 |
-| Tool & Skill & Command | C/S | Tool-owned `ToolCatalogPort` + `ToolExecutionPort` OHS；Skill / Command 各自发布窄 façade | Tool 目录与函数调用分离；Skill 物化 PromptFragment；Command 按 PromptInjection / SnapshotQuery / ApplicationControl 路由；#1294 后 Composition 一次装配并把同一 Tool Catalog/Execution/binding、Skill Catalog/materializer、Tool Result materializer 与 active-run registry 注入 Runtime Main/Sub；MCP Ready 生命周期、动态同步与 revision 由 #1327 承接 |
+| Tool & Skill & Command | C/S | Tool-owned `ToolCatalogPort` + `ToolExecutionPort` OHS；Skill / Command 各自发布窄 façade | Tool 目录与函数调用分离；Tools 同时发布仅含元数据的 `SkillCatalogPort` 与调用时按 identity 加载单个正文的 `SkillLoadPort`。唯一稳定 `Skill` Tool 只经 ToolExecution 执行；Context 仅消费 Skill metadata directory，Runtime 只编排 `SkillRequest` 与 ToolExecution、不读取 Skill 文件。Skill slash route 与客户端补全由同一个版本化全量快照原子派生；普通 Command 只按 SnapshotQuery / ApplicationControl 确定性路由并保持稳定。#1294 后 Composition 一次构造 filesystem backing 并分发窄端口；MCP Ready 生命周期、动态同步与 revision 由 #1327 承接 |
 | Policy | C/S | Policy-owned `PolicyPort` OHS | v0.1.0 只装配 `AllowAllPolicy`（安全审批、Deny / RequireApproval 为 **Future**，接口预留但不在 v0.1.0 验收范围）；控制流仍归 Runtime |
 | Memory | C/S | Memory-owned `MemoryPort` OHS | 检索注入 + 反思写入（Reflection 产出 Memory Suggestion） |
 | Task Management | C/S | Task-owned `TaskAccess` / `TaskPersist` OHS | Runtime / Tool 只持 Access；Context Management 只持 Persist；同一 backing 守护状态机与依赖图不变量 |
@@ -156,6 +156,7 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 2026-07-11 | 清理 crate 路径引用改为纯目标态、文档引用链接化、新增修改历史 | #760 |
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run、缩写 AE→Runtime | #760 |
 | 2026-07-11 | Workflow 降为支撑域：移出核心框、并入 §4 出站端口表（ReasoningPort）、删原"核心内部"节、Future 去多-agent 编排 | #760 |
+| 2026-07-28 | #1438 将 Skill 边改为 metadata Catalog + call-time Load，唯一 Skill Tool 经 ToolExecution 执行；SkillRequest、route 与客户端补全使用同一版本化快照，Runtime 不读取 Skill 文件 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
 | 2026-07-12 | Tool BC 出站契约拆为 Catalog/Execution 双端口；Skill 与 Command 使用独立端口，MCP 定位为 Tool adapter | #787 |
 | 2026-07-12 | 将 Run 限定为唯一 Agent 执行生命周期状态机，与各 BC 局部聚合状态机区分 | #743 / #787 |
 | 2026-07-12 | 补齐 Audit/Tool Result → Storage 机制边，并明确 Project Snapshot 由 Session 组装而非重复落盘 | #793 |

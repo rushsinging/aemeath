@@ -15,6 +15,35 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
     use sdk::ChatEvent;
 
     let runtime = match event {
+        ChatEvent::SkillsUpdated { event } => TuiRuntimeEvent::SkillsUpdated {
+            revision: event.revision,
+            skills: event
+                .skills
+                .into_iter()
+                .map(
+                    |skill| crate::tui::adapter::tui_runtime_event::TuiSkillView {
+                        name: skill.name,
+                        aliases: skill.aliases,
+                        slash_command: skill.slash_command,
+                        slash_aliases: skill.slash_aliases,
+                        description: skill.description,
+                        argument_hint: skill.argument_hint,
+                    },
+                )
+                .collect(),
+            slash_routes: event
+                .slash_routes
+                .into_iter()
+                .map(
+                    |route| crate::tui::adapter::tui_runtime_event::TuiSkillSlashRoute {
+                        skill: route.skill,
+                        slash_command: route.slash_command,
+                        aliases: route.aliases,
+                        argument_hint: route.argument_hint,
+                    },
+                )
+                .collect(),
+        },
         ChatEvent::Token { context, text } => TuiRuntimeEvent::Text {
             context: turn_context(context),
             text,

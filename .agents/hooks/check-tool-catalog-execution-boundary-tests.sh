@@ -88,7 +88,15 @@ expect_failure schema-copy 'Schema validator implementation must exist only in T
 
 legacy_scope_probe="$TMP/agent/features/tools/src/adapters/legacy_scope.rs"
 printf '%s\n' 'enum Legacy { LegacyNoAgent }' >"$legacy_scope_probe"
-expect_failure legacy-scope 'Tools legacy Registry/Profile/SkillTool paths must stay retired' rm -f "$legacy_scope_probe"
+expect_failure legacy-scope 'Tools legacy Registry/Profile/materialization paths must stay retired' rm -f "$legacy_scope_probe"
+
+legacy_materialization_probe="$TMP/agent/features/tools/src/adapters/legacy_materialization.rs"
+printf '%s\n' 'struct SkillMaterializationPort; struct PromptFragment;' >"$legacy_materialization_probe"
+expect_failure legacy-materialization 'Tools legacy Registry/Profile/materialization paths must stay retired' rm -f "$legacy_materialization_probe"
+
+runtime_skill_fs_probe="$TMP/agent/features/runtime/src/application/skill_fs.rs"
+printf '%s\n' 'fn bad(_: FilesystemSkillAdapter) { let _ = std::fs::read("SKILL.md"); }' >"$runtime_skill_fs_probe"
+expect_failure runtime-skill-fs 'Runtime must not construct filesystem Skill adapters or read Skill files' rm -f "$runtime_skill_fs_probe"
 
 run_guard >/dev/null
 AEMEATH_PROJECT_DIR="$ROOT" "$GUARD" >/dev/null

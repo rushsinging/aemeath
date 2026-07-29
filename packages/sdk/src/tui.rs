@@ -100,7 +100,9 @@ impl Default for MemoryConfigView {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct SkillView {
     pub name: String,
     pub aliases: Vec<String>,
@@ -108,9 +110,27 @@ pub struct SkillView {
     pub slash_command: Option<String>,
     /// `slash_command` 的合法别名，不复用 Skill identity aliases。
     pub slash_aliases: Vec<String>,
-    pub description: Option<String>,
-    pub content: String,
-    pub source: Option<String>,
+    pub description: String,
+    pub argument_hint: Option<String>,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct SkillSlashRouteView {
+    pub skill: String,
+    pub slash_command: String,
+    pub aliases: Vec<String>,
+    pub argument_hint: Option<String>,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct SkillsUpdatedEvent {
+    pub revision: String,
+    pub skills: Vec<SkillView>,
+    pub slash_routes: Vec<SkillSlashRouteView>,
 }
 
 /// SDK 级 TUI 启动上下文。
@@ -148,7 +168,7 @@ pub struct TuiLaunchContext {
     pub cwd: PathBuf,
     pub model_display: String,
     pub memory_config: MemoryConfigView,
-    pub skills_map: std::collections::HashMap<String, SkillView>,
+    pub skill_snapshot: SkillsUpdatedEvent,
     pub initial_resume_id: Option<String>,
 }
 

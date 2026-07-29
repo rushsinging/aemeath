@@ -33,7 +33,7 @@ pub struct TuiLaunchContext {
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub memory_config: sdk::MemoryConfigView,
-    pub skills_map: std::collections::HashMap<String, sdk::SkillView>,
+    pub skill_snapshot: sdk::SkillsUpdatedEvent,
     pub hook_runner: Arc<dyn HookPort>,
     /// 本地 session reminders（用于 TUI 展示，独立于 RuntimeHandle 实例）
     pub session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,

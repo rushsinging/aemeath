@@ -250,20 +250,38 @@ Tool BC 不负责 token budget、截断、超大结果持久化、Context Window
 struct SkillDescriptor {
     name: SkillName,
     description: LocalizedText,
-    source: SkillSource,
+    identity_aliases: Vec<SkillName>,
+    slash_command: Option<CommandName>,
+    slash_aliases: Vec<CommandName>,
+    argument_hint: Option<String>,
 }
 
-struct PromptFragment {
-    stable_key: PromptFragmentKey,
+struct SkillCatalogSnapshot {
+    revision: SkillCatalogRevision,
+    skills: Vec<SkillDescriptor>,
+    slash_routes: Vec<SkillSlashRoute>,
+}
+
+struct SkillLoadQuery {
+    identity: SkillName,
+    project_root: WorkspaceRoot,
+    extra_dirs: Vec<PathBuf>,
+    available_tools: BTreeSet<ToolName>,
+}
+
+struct LoadedSkill {
+    name: SkillName,
     content: String,
-    source: PromptFragmentSource,
-    cache_hint: CacheHint,
+    source: SkillSource,
+    revision: SkillContentRevision,
 }
 ```
 
-Skill Catalog 负责发现；Skill Materialization 负责加载、解析并产出 PromptFragment。Skill 不作为 Tool，不执行函数，也不直接修改 System Prompt。
+Skill Catalog 只负责发现廉价元数据，并按稳定排序计算不含正文、source path 或内容 revision 的 `SkillCatalogSnapshot` revision。同一快照同时发布 Skill slash routes 与客户端补全数据，禁止出现可补全但不可路由的分裂状态。
 
-PromptFragment 是 Skill 与 Context Management 的 Published Language。Context Management 独占注入时机、位置、预算、去重、缓存分段及内容顺序。
+Skill 是一个稳定注册在 Main 与授权 Sub Scope 的特殊动态 Tool。具体 Skill 不各自注册 Tool schema；唯一 `Skill` Tool 的 input 只有 `skill: string`。模型调用后，Tool 才通过 `SkillLoadPort` 结合所属 Run 冻结的 dirs/tool names 与 live workspace root 加载单个 `LoadedSkill`。目录后删除、损坏或失效返回 typed failure，不使 Run 崩溃。
+
+Context Management 只消费 `SkillDescriptor` 生成受预算约束的 metadata directory，**NEVER** 读取 `LoadedSkill.content` 或预注入全部正文。正文仅作为正常 ToolOutcome 文本进入下一次模型调用；交付层可以隐藏结果显示，但不得引入第二套正文交付协议。
 
 ## 6. Slash Command 模型
 
@@ -314,9 +332,9 @@ enum ApplicationControlTarget {
     ApplicationShell,
 }
 
-struct PromptCommand {
-    command: CommandName,
-    arguments: ParsedArguments,
+struct SkillRequestCommand {
+    skill: SkillName,
+    arguments: RawArguments,
 }
 
 struct SnapshotQueryCommand {
@@ -334,19 +352,19 @@ Target 是封闭枚举；新增目标 BC 需扩展 Published Language 与路由�
 
 ### 6.2 执行机制
 
-Slash Command 共享 parser 和 router，但按执行机制分为三类：
+Slash 输入共享名称/参数解析，但路由结果按语义分为 Skill 请求和两类确定性 Command：
 
 ```rust
 enum CommandMechanism {
-    PromptInjection,
+    SkillRequest,
     SnapshotQuery,
     ApplicationControl,
 }
 ```
 
-### PromptInjection
+### SkillRequest
 
-将命令参数转换为 PromptFragment，交给 Context Management，并通过正常 Run 执行。适合主要表达模型任务或提示模板的命令。
+将显式 Skill slash route 解析为 canonical Skill identity 与原始参考参数。它只表达用户请求模型使用 Skill：Runtime 将其投影为模型可见用户意图，LLM 决定是否调用 `Skill { skill }`。Router、TUI 与 Runtime 都不得直接加载正文或构造 Tool Call。动态 Skill route table 来自 `SkillCatalogSnapshot`；普通 Command Catalog/Router 保持稳定，不随 Skill 刷新重建。
 
 ### SnapshotQuery
 
@@ -356,7 +374,7 @@ enum CommandMechanism {
 
 调用目标 BC 的应用 Command Port 执行状态变更，例如 compact、cancel、resume、model/thinking 配置修改、memory mutation 或 session deletion。`/thinking` 写入 Config；Workflow 只经 ReasoningPort 消费配置并调节 effort，不作为 Command target。
 
-三类机制不共享执行 trait 或结果数据模型。Command Router 只负责解析为带类型的 route：PromptCommand、SnapshotQueryCommand 或 ApplicationControlCommand；每种 route 由对应 handler 调用目标端口。CLI、TUI、Server 使用各自 ACL 展示类型化结果。
+三类 route 不共享执行 trait 或结果数据模型。Router 只解析为 `SkillRequestCommand`、`SnapshotQueryCommand` 或 `ApplicationControlCommand`；SkillRequest 进入正常 Run 并由模型决定 Tool 调用，后两类由确定性 handler 调用目标端口。CLI、TUI、Server 使用各自 ACL 展示类型化结果。
 
 ## 7. MCP Connection 聚合
 
@@ -391,9 +409,10 @@ enum McpConnectionState {
 | Tool Catalog | 领域服务 / 只读投影 | 组合 Scope、Profile 与来源 adapter |
 | Tool Executor | 应用服务 | 校验局部不变量并调用一个 Tool |
 | McpConnection | 聚合 | 守护单个 MCP server 连接生命周期 |
-| Skill Catalog | 领域服务 | 发现 SkillDescriptor |
-| Skill Materializer | 应用服务 | Skill → PromptFragment |
-| Command Parser / Router | 领域服务 / 应用服务 | 解析并路由三种机制 |
+| Skill Catalog | 领域服务 | 发布版本化 metadata 全量快照及同 revision slash routes |
+| Skill Loader | 应用服务 | 调用时按 identity 加载单个 LoadedSkill |
+| Skill Tool | Tool adapter | 以固定 schema 经 ToolExecutionPort 调用 Skill Loader |
+| Command Parser / Router | 领域服务 / 应用服务 | 解析 SkillRequest 与两类确定性 Command |
 
 ## 9. 相关文档
 
@@ -409,6 +428,7 @@ enum McpConnectionState {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-28 | #1438 将 Skill 定义为唯一稳定注册、调用时按 identity 动态加载正文的特殊 Tool；SkillRequest 替代 PromptInjection，metadata snapshot 同源发布 route 与补全 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
 | 2026-07-12 | 初稿：Tool PL、Scope/Profile、Outcome、Skill/Command 机制与 MCP 聚合 | #787 |
 | 2026-07-14 | 移除通用 Workspace resource 包装，改为 Tool 按需直接消费 WorkspaceRead / WorkspaceControl，并将 Control 限于三个 Tool | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | #993 过渡目录迁移记录移至 Migration Governance；Target 语义保持不变 | [#993](https://github.com/rushsinging/aemeath/issues/993) |

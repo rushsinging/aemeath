@@ -109,6 +109,7 @@ async fn run_single_turn(
                     .first()
                     .and_then(|value| value.parse::<usize>().ok())
             }
+            Ok(sdk::CommandRoute::SkillRequest(_)) => None,
             Ok(_) => {
                 eprintln!("该命令暂不支持 no-TUI 执行。");
                 return Ok(());
@@ -121,16 +122,41 @@ async fn run_single_turn(
     } else {
         None
     };
-    let (input_tx, input_port) =
-        crate::tui::effect::session::processing::TuiInputEventPort::channel();
-    if let Some(limit) = reflection_limit {
-        let _ = input_tx.send(sdk::ChatInputEvent::QueryReflectionHistory { limit });
+    let skill_request = if text.trim_start().starts_with('/') {
+        match resolve_slash_for_delivery(command_router.as_ref(), &text) {
+            Ok(sdk::CommandRoute::SkillRequest(command)) => Some(sdk::SkillRequest {
+                input_id: sdk::InputId::new_v7(),
+                skill: command.skill,
+                arguments: command.arguments.join(),
+                raw_input: text.clone(),
+            }),
+            _ => None,
+        }
     } else {
-        let _ = input_tx.send(sdk::ChatInputEvent::user_message(text, Vec::new()));
-    }
+        None
+    };
+    let (user_input, input_events) = if let Some(limit) = reflection_limit {
+        let (tx, port) = crate::tui::effect::session::processing::TuiInputEventPort::channel();
+        let _ = tx.send(sdk::ChatInputEvent::QueryReflectionHistory { limit });
+        (None, Some(std::sync::Arc::new(port) as _))
+    } else if let Some(request) = skill_request {
+        let (tx, port) = crate::tui::effect::session::processing::TuiInputEventPort::channel();
+        let _ = tx.send(sdk::ChatInputEvent::SkillRequest(request));
+        (None, Some(std::sync::Arc::new(port) as _))
+    } else {
+        (
+            Some(sdk::UserInput {
+                text,
+                images: Vec::new(),
+            }),
+            None,
+        )
+    };
     let mut stream = client
         .chat(sdk::ChatRequest {
-            ingress: std::sync::Arc::new(input_port),
+            user_input,
+            queue_drain: None,
+            input_events,
         })
         .await?;
     // #636 D1: SIGTERM/SIGHUP 时让 stream 自然结束（runtime 端会 graceful + auto-save）。
@@ -160,7 +186,8 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
     match event {
         sdk::ChatEvent::Token { text, .. } => print_stdout(&text)?,
         sdk::ChatEvent::BlockComplete { .. } => {}
-        sdk::ChatEvent::Thinking { .. }
+        sdk::ChatEvent::SkillsUpdated { .. }
+        | sdk::ChatEvent::Thinking { .. }
         | sdk::ChatEvent::ModelStreamWaiting { .. }
         | sdk::ChatEvent::ModelInvocationRetrying { .. }
         | sdk::ChatEvent::TurnStarted { .. }

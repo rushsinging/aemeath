@@ -83,43 +83,6 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
     )
 }
 
-struct EmptySkillMaterializer;
-
-#[async_trait]
-impl tools::SkillMaterializationPort for EmptySkillMaterializer {
-    async fn materialize_available(
-        &self,
-        _query: tools::SkillMaterializationQuery,
-    ) -> Result<tools::SkillMaterializationSnapshot, tools::SkillError> {
-        Ok(tools::SkillMaterializationSnapshot::from_fragments(
-            Vec::new(),
-        ))
-    }
-}
-
-fn empty_skill_materializer() -> Arc<dyn tools::SkillMaterializationPort> {
-    Arc::new(EmptySkillMaterializer)
-}
-
-struct FixedSkillMaterializer;
-
-#[async_trait]
-impl tools::SkillMaterializationPort for FixedSkillMaterializer {
-    async fn materialize_available(
-        &self,
-        _query: tools::SkillMaterializationQuery,
-    ) -> Result<tools::SkillMaterializationSnapshot, tools::SkillError> {
-        Ok(tools::SkillMaterializationSnapshot::from_fragments(vec![
-            tools::PromptFragment::new(
-                "runtime-skill",
-                "SUBAGENT_SKILL_SENTINEL",
-                tools::SkillSource::builtin("aemeath-builtin://runtime-skill"),
-                tools::CacheHint::Stable,
-            ),
-        ]))
-    }
-}
-
 #[derive(Default)]
 struct CapturedInvocation {
     system: Vec<String>,
@@ -246,7 +209,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
-        skill_materializer: empty_skill_materializer(),
+        skill_catalog: tools::composition::wire_skills().catalog(),
         parent_context: parent_source,
         runtime_context_factory: test_rt_factory(),
     };
@@ -1150,7 +1113,7 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
         )),
     );
     let ports = factory.build(test_ctx());
-    runner.skill_materializer = Arc::new(FixedSkillMaterializer);
+    runner.skill_catalog = tools::composition::wire_skills().catalog();
     // #1385: tool catalog and execution now come from derived.context (parent
     // context port), not from runner.tool_catalog/runner.tool_execution.
     // Install a parent frame with the factory-built catalog so the
@@ -1192,7 +1155,11 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
     assert!(captured
         .system
         .iter()
-        .any(|block| block.contains("SUBAGENT_SKILL_SENTINEL")));
+        .all(|block| !block.contains("SUBAGENT_SKILL_SENTINEL")));
+    assert!(captured
+        .system
+        .iter()
+        .any(|block| block.contains("Available Skills")));
     assert!(captured.tool_names.iter().any(|name| name == "Read"));
 }
 
@@ -1599,7 +1566,7 @@ fn test_runner_with_provider(
                     tokio_util::sync::CancellationToken::new(),
                 ),
             ),
-            skill_materializer: empty_skill_materializer(),
+            skill_catalog: tools::composition::wire_skills().catalog(),
             parent_context: src,
             runtime_context_factory: test_rt_factory(),
         },

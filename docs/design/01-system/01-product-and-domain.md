@@ -87,7 +87,7 @@ Bounded Context 是**解决方案空间**的边界，一个 BC 内部维持一�
 | **Project / Workspace** | Workspace 聚合与单一可变状态；worktree enter/exit/switch；frame/stack 隔离；git context 与 git 操作端口；Workspace Snapshot Published Language | 通用 shell/file Tool；Session 所有权；Task 业务状态；Agent Run；Snapshot 的物理落盘机制；项目代码本身的业务建模 |
 | **Policy** | 权限规则、路径/能力约束与 `PolicyDecision`；工具执行前的准入判断 | 用户审批交互；Hook 执行；Tool 函数调用；Runtime 阻断后的控制流；Audit 记录 |
 | **Audit** | 不可变 Audit Event；原始 usage 的审计语义；不可变事件 sink 策略、查询与派生投影；物理持久化经 Storage Port；Cost / Pricing 聚合属 **Future**（v0.1.0 仅 Usage metadata） | 阻塞或驱动 Runtime；权限决策；普通诊断日志及 Logging sink；Provider 调用编排；业务实体状态 |
-| **Tool & Skill & Command** | Tool Catalog/Execution；Registry Scope 与 capability Profile；ToolOutcome；Skill 发现与 PromptFragment 物化；Slash Command 解析/路由；MCP Tool adapter 与局部连接状态机；连接状态不驱动 Run | Policy/Hook/审批；timeout、跨 Tool 并发和 Run Step 编排；Context Window 注入策略；目标 BC 的查询/写入不变量；终端渲染 |
+| **Tool & Skill & Command** | Tool Catalog/Execution；Registry Scope 与 capability Profile；ToolOutcome；Skill metadata 发现、版本化快照、按 identity 调用时加载与唯一动态 Skill Tool；SkillRequest / SnapshotQuery / ApplicationControl 解析路由；MCP Tool adapter 与局部连接状态机；连接状态不驱动 Run | Policy/Hook/审批；timeout、跨 Tool 并发和 Run Step 编排；Context Window 注入策略；目标 BC 的查询/写入不变量；终端渲染 |
 | **Workflow** | Reasoning Node 局部 effort 调节状态机、effort 推断与 `ReasoningPort`；应用 Config 提供的静态上限，并根据观察信号调节推理强度；该状态机不驱动 Run | 静态阈值和默认值所有权；Run 流程编排或执行状态机；SubAgent 图；Tool gate；Policy；模型调用；Slash Command 的写入所有权 |
 | **Provider** | 各厂商 API ACL；统一 invoke/stream；模型能力声明；reasoning 参数映射；原始 token usage 提取（未定价）与供应商错误分类 | Run loop；Context Window 构建；跨调用业务重试/故障转移策略；Tool 执行；Cost/Pricing 聚合；UI 事件投影 |
 | **Hook** | Hook 配置匹配；子进程执行、环境变量、timeout；输出解析；阻断/放行与 feedback 语义 | Hook 触发时机；阻断后的 Runtime 重试/停止编排；Policy 规则；Tool 执行；Audit 事件存储 |

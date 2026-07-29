@@ -69,12 +69,11 @@ def find(path: Path, text: str, pattern: str, reason: str, flags: int = 0):
         violations.append((path, line, reason))
 
 
-# Tools legacy Registry/Profile/SkillTool compatibility paths are retired. The
-# private ToolRegistry backing remains allowed only where composition adapters
-# need it; all historical entry points and the third compatibility Scope are
-# forbidden from production source.
+# Legacy Registry/Profile compatibility paths are retired. The stable dynamic
+# Skill Tool is required, while old DTO/factory/materialization paths remain forbidden.
 legacy_tool_patterns = re.compile(
-    r"\b(?:LegacyNoAgent|legacy-no-agent|SkillTool|SkillInput|SkillResult|"
+    r"\b(?:LegacyNoAgent|legacy-no-agent|SkillInput|SkillResult|"
+    r"SkillMaterialization(?:Port|Query|Snapshot)|PromptFragment|with_skill_supplier|"
     r"register_all_tools(?:_except_agent)?|register_subagent_tools|"
     r"ToolCatalogGateway|DefaultToolCatalogGateway|wire_tools)\b"
 )
@@ -85,13 +84,14 @@ for path in production_files(tools):
             path,
             text,
             legacy_tool_patterns.pattern,
-            "Tools legacy Registry/Profile/SkillTool paths must stay retired",
+            "Tools legacy Registry/Profile/materialization paths must stay retired",
         )
 
 # Runtime business code must consume only Tool Catalog/Execution ports and PL.
 # There is deliberately no Runtime migration allowlist: remaining old paths are
 # findings that must be migrated or retired rather than hidden.
 runtime_rules = [
+    (r"\bFilesystemSkillAdapter\b|SKILL\.md", "Runtime must not construct filesystem Skill adapters or read Skill files"),
     (r"\bToolRegistry\b", "Runtime production code must not reference ToolRegistry"),
     (r"\b(?:use|pub\s+use)\s+(?:::)?tools::adapters(?:::|\b)", "Runtime production code must not import Tools private adapters"),
     (r"\b(?:ToolBacking|CatalogAdapter|ExecutionAdapter|BoundExecutionContexts)\b", "Runtime production code must not reference Tools private backing or adapters"),

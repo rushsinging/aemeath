@@ -603,7 +603,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
         tool_result_materializer:
             crate::application::tool::test_support::test_tool_result_materializer(),
         workspace,
-        skill_materializer: empty_skill_materializer(),
+        skill_catalog: tools::composition::wire_skills().catalog(),
         parent_context: source,
         runtime_context_factory: Arc::new(shared_factory),
     };
@@ -806,7 +806,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         tool_result_materializer:
             crate::application::tool::test_support::test_tool_result_materializer(),
         workspace,
-        skill_materializer: empty_skill_materializer(),
+        skill_catalog: tools::composition::wire_skills().catalog(),
         parent_context: source,
         runtime_context_factory: Arc::new(shared_factory),
     };

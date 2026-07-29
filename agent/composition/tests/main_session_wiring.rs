@@ -488,7 +488,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),
             skill_wiring.catalog(),
-            skill_wiring.materializer(),
+            skill_wiring.loader(),
             tool_result_materializer,
             active_run,
         ),
