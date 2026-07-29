@@ -3,7 +3,7 @@
 > 对应 Issue：[#1397](https://github.com/rushsinging/aemeath/issues/1397)
 > 设计基线：[07-runtime-ownership-and-assembly.md](../../design/02-modules/runtime/07-runtime-ownership-and-assembly.md)
 > 前置：[#1382](https://github.com/rushsinging/aemeath/issues/1382)、[#1385](https://github.com/rushsinging/aemeath/issues/1385)、[#1248](https://github.com/rushsinging/aemeath/issues/1248)
-> 计划状态：P0-P6 已完成并通过最终分层回归；P6.9 已完成 `RunKind`、双 Context Resolver、fat Loop adapter、完整 Runtime 测试替身与双装配结构退役；P6.12 已完成终态 façade 白名单、结构 Guard、sanity fixtures 与全仓验证。P7 尚未执行 Issue/PR 回写。
+> 计划状态：P0-P7 已全部完成。P6.9 已完成 `RunKind`、双 Context Resolver、fat Loop adapter、完整 Runtime 测试替身与双装配结构退役；P6.12 已完成终态 façade 白名单、结构 Guard、sanity fixtures 与全仓验证；P7 已完成 Issue #1397 checklist、PR #1413 Test plan、最终提交与推送回写。
 
 ## 1. 目标与实施原则
 
@@ -581,9 +581,9 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
 
 创建或更新实施 PR 前必须：
 
-- [ ] PR 分支基于最新 `origin/main`，且已执行 `git pull origin main`。
-- [ ] #1397 milestone、parent / blocked-by 关系未被擅自改动；#1248 已完成的生产能力被统一模型消费。
-- [ ] Issue body 的全部 checklist 已逐项核对；未完成项不得静默勾选。
+- [x] PR 分支基于最新 `origin/main`，且已执行 `git pull origin main`。
+- [x] #1397 milestone、parent / blocked-by 关系未被擅自改动；#1248 已完成的生产能力被统一模型消费。
+- [x] Issue body 的全部 checklist 已逐项核对；未完成项不得静默勾选。
 - [x] `RuntimeServices`、`SessionState`、`RunExecutionState`、`RuntimeContextFactory` 唯一所有权有源码和测试证据。
 - [x] `RuntimeContextParts`、生产 `RunContextBindings`、fat `RunLoopPort` / `LoopCapabilityAdapter`、`RunKind`、双 Context Resolver、双 Factory prepare/assembly 与来源型大 Capabilities adapter 均按完成定义退役，或明确记录未完成原因和后续边界。
 - [x] Main chat 与派生 Agent 的同一 Factory、capability composition 和 Loop 生产可达性，以及 capability 不扩权、ParentMediated 隔离、BoundaryOnly 过滤有测试证据。
@@ -615,6 +615,6 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
 5. [x] P6.10-P6.11：根除测试托活、dead-code 豁免和无所有权 Application 平铺模块。
 6. [x] P6.12.1-P6.12.2：固化命名规则、façade 白名单、唯一 owner Guard、snapshot purity、Factory pipeline、fat implementation 和 sanity fixtures。
 7. [x] P6.12.3：完成开发环境、workspace tests、workspace clippy、格式、diff、Runtime 定向 Guard、完整 architecture guards 与 pre-push 门禁。
-8. [ ] P7：拉取 Issue #1397 当前状态，逐项回写 checklist，更新 PR Test plan；提交、推送或创建/更新 PR 需按用户后续指令执行。
+8. [x] P7：已拉取 Issue #1397 当前状态并逐项回写 15 项 checklist；已更新 PR #1413 Test plan；最终提交 `fdff27f3` 已推送，pre-push 完整架构守卫与分层测试通过。
 
 除非某阶段验证失败需要回到根因调查，否则不得跳过前置阶段。每个步骤均为单一、具体、可验证任务；完成后必须记录变更文件、RED/GREEN 测试证据、剩余旧结构、Guard 状态和下一阶段依赖。
