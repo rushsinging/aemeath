@@ -27,6 +27,7 @@ fn test_lookup_display_finds_task_create() {
 #[test]
 fn test_lookup_display_finds_task_update() {
     assert!(lookup_display("TaskUpdate").is_some());
+    assert!(lookup_display("TaskBlockBy").is_some());
 }
 
 #[test]
@@ -308,25 +309,24 @@ fn test_format_tool_call_task_update_with_id_no_status() {
 }
 
 #[test]
-fn test_format_tool_call_task_update_shows_blocked_by() {
-    let (header, _) = format_tool_call(
-        "TaskUpdate",
-        r#"{"taskId":"7","key":"blocked_by_id","value":"4"}"#,
+fn task_block_by_formats_replacement_and_clear() {
+    let (header, details) = format_tool_call(
+        "TaskBlockBy",
+        r#"{"id":"7","block_by_ids":["4","5"]}"#,
         None,
         None,
     );
-    let text = line_to_string(&header);
-    assert!(text.contains("7"), "应包含 taskId: {text}");
-    assert!(
-        text.contains("blocked by #4"),
-        "应包含 blocked_by_id: {text}"
-    );
+    assert_eq!(line_to_string(&header), "Task #7 — blocked by #4, #5");
+    assert!(details.is_empty());
+
+    let (header, _) =
+        format_tool_call("TaskBlockBy", r#"{"id":"7","block_by_ids":[]}"#, None, None);
+    assert_eq!(line_to_string(&header), "Task #7 — clear blockers");
 }
 
 #[test]
-fn test_format_tool_call_task_update_shows_status_and_blocked_by() {
-    // key-value 模式：每次只改一个字段，所以 status 和 blocked_by 不再同时出现
-    // 这里测试 status 单独更新的场景
+fn test_format_tool_call_task_update_shows_status() {
+    // key-value 模式：每次只改一个普通字段；依赖由 TaskBlockBy 负责。
     let (header, _) = format_tool_call(
         "TaskUpdate",
         r#"{"taskId":"2","key":"status","value":"in_progress"}"#,

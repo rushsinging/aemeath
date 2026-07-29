@@ -1,6 +1,8 @@
 mod agent_calls;
 pub(crate) mod config_reload;
 pub(crate) mod events;
+#[cfg(test)]
+mod events_tests;
 pub(crate) mod finalize;
 mod hook_ui;
 mod idle_commands;

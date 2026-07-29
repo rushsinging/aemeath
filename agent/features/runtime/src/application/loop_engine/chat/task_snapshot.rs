@@ -17,7 +17,7 @@ use task::{Task, TaskAccess, TaskId, TaskStatus};
 /// 替代已被删除的 `changes()` 轮询路径（见 #567 / #642）。
 ///
 /// #889：改为同步 low-privilege 读取并按 current batch 过滤 Task PL。
-/// 任务标题隐藏持久化 ID；依赖通过当前 batch 的局部编号显示。
+/// 任务标题隐藏持久化 ID；任务自身和依赖均通过当前 batch 的稳定 `seq()` 显示。
 pub(crate) fn build_task_snapshot(access: &dyn TaskAccess) -> TaskStatusView {
     let Some(current_batch) = access.reminder_snapshot().current_batch else {
         return TaskStatusView::default();
@@ -66,8 +66,7 @@ fn task_status_lines(tasks: &[Task], max_lines: usize) -> Vec<String> {
 
     let display_map = tasks
         .iter()
-        .enumerate()
-        .map(|(index, task)| (task.id(), index + 1))
+        .map(|task| (task.id(), task.seq()))
         .collect::<HashMap<_, _>>();
     let visible = if total <= max_lines {
         ordered_tasks(completed, in_progress, pending)
@@ -125,7 +124,7 @@ fn select_task_window<'a>(
     visible
 }
 
-fn format_task_status_line(task: &Task, display_map: &HashMap<TaskId, usize>) -> String {
+fn format_task_status_line(task: &Task, display_map: &HashMap<TaskId, u64>) -> String {
     let icon = match task.status() {
         TaskStatus::Completed => "✓",
         TaskStatus::InProgress => "■",
@@ -133,10 +132,10 @@ fn format_task_status_line(task: &Task, display_map: &HashMap<TaskId, usize>) ->
         TaskStatus::Deleted => "?",
     };
     let blocked_by = format_blocked_by(task.blocked_by(), display_map);
-    format!("{} {}{}", icon, task.subject(), blocked_by)
+    format!("{} #{} {}{}", icon, task.seq(), task.subject(), blocked_by)
 }
 
-fn format_blocked_by(blocked_by: &[TaskId], display_map: &HashMap<TaskId, usize>) -> String {
+fn format_blocked_by(blocked_by: &[TaskId], display_map: &HashMap<TaskId, u64>) -> String {
     let deps = blocked_by
         .iter()
         .filter_map(|id| display_map.get(id))

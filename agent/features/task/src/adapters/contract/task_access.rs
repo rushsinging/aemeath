@@ -174,6 +174,18 @@ pub(super) fn assert_task_access_contract(
         Some(TaskRevision::new(revision_before_edges.get() + 3))
     );
 
+    let replaced = access
+        .replace_dependencies(delta.id(), vec![beta.id()], 13)
+        .expect("dependency set replacement succeeds");
+    assert_eq!(replaced.value.blocked_by(), &[beta.id()]);
+    assert_eq!(
+        replaced.revision(),
+        Some(TaskRevision::new(revision_before_edges.get() + 4))
+    );
+    access
+        .replace_dependencies(delta.id(), vec![gamma.id()], 14)
+        .expect("dependency set restoration succeeds");
+
     assert!(access.is_blocked(alpha.id()).expect("known task"));
     assert!(access.is_blocked(beta.id()).expect("known task"));
     assert!(access.is_blocked(delta.id()).expect("known task"));

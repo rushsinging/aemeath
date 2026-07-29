@@ -67,29 +67,14 @@ async fn task_update_rejects_legacy_owner_field() {
 }
 
 #[tokio::test]
-async fn task_update_uses_typed_commands_for_fields_and_dependency() {
+async fn task_update_uses_typed_commands_for_mutable_fields() {
     let (store, access, id) = setup();
-    let dependency = access
-        .create_task(
-            task::TaskCreateSpec::try_new(
-                "前置".into(),
-                String::new(),
-                None,
-                task::TaskPriority::Normal,
-            )
-            .unwrap(),
-            3,
-        )
-        .unwrap()
-        .value
-        .id();
     let tool = TaskUpdateTool { access };
 
     for (key, value) in [
         ("subject", "新标题"),
         ("description", "新描述"),
         ("priority", "high"),
-        ("blocked_by_id", &dependency.to_string()),
     ] {
         let result = tool
             .call(
@@ -103,7 +88,25 @@ async fn task_update_uses_typed_commands_for_fields_and_dependency() {
     assert_eq!(updated.subject(), "新标题");
     assert_eq!(updated.description(), "新描述");
     assert_eq!(updated.priority(), task::TaskPriority::High);
-    assert_eq!(updated.blocked_by(), &[dependency]);
+}
+
+#[tokio::test]
+async fn task_update_rejects_blocked_by_field() {
+    let (_store, access, id) = setup();
+    let tool = TaskUpdateTool { access };
+
+    let result = tool
+        .call(
+            serde_json::json!({"task_id": id.to_string(), "key": "blocked_by_id", "value": "2"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(result.text.contains("unknown field"));
+    assert!(!result
+        .text
+        .contains("Valid keys: status, subject, description, priority, blocked_by_id"));
 }
 
 #[tokio::test]

@@ -27,6 +27,7 @@ impl TaskReminderState {
                             name.as_str(),
                             "TaskCreate"
                                 | "TaskUpdate"
+                                | "TaskBlockBy"
                                 | "TaskStop"
                                 | "TaskListCreate"
                                 | "TaskListComplete"

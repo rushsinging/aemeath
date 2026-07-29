@@ -309,7 +309,12 @@ pub enum RuntimeStreamEvent {
 pub(crate) fn is_task_store_mutation(tool_name: &str) -> bool {
     matches!(
         tool_name,
-        "TaskCreate" | "TaskUpdate" | "TaskStop" | "TaskListCreate" | "TaskListComplete"
+        "TaskCreate"
+            | "TaskUpdate"
+            | "TaskBlockBy"
+            | "TaskStop"
+            | "TaskListCreate"
+            | "TaskListComplete"
     )
 }
 
