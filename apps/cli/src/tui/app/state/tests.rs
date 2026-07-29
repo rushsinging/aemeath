@@ -150,6 +150,8 @@ mod tests {
                         run_id: "history-run".into(),
                         step_id: "history-step".into(),
                         messages: vec![TuiChatMessage::user_text("late")],
+                        finalize_cause: None,
+                        duration_ms: None,
                     }],
                 },
             ),

@@ -79,7 +79,7 @@ where
                 shell.active_run.clone();
             let provider_factory = shell.provider_factory.clone();
             let config_query_for_switch = shell.config_query.clone();
-            let task_access = shell.runtime_context_factory.services().task.clone();
+            let task_access = shell.runtime_context_factory.task();
             let skill_catalog = shell.skill_catalog.clone();
             let mut skill_revision = shell.initial_skill_snapshot.revision.clone();
 
@@ -314,6 +314,8 @@ where
                                             run_id: step.run_id,
                                             step_id: step.step_id,
                                             messages: step.messages,
+                                            finalize_cause: step.finalize_cause,
+                                            duration_ms: step.duration_ms,
                                         })
                                         .collect(),
                                     session_id: projection.session_id,
@@ -528,8 +530,7 @@ where
                 .await;
                 let available_tools = shell
                     .runtime_context_factory
-                    .services()
-                    .tool_catalog
+                    .tool_catalog()
                     .snapshot(
                         &tools::RegistryScopeName::new("main"),
                         &tools::ToolProfileName::new("main-full"),
@@ -716,6 +717,7 @@ where
                             spec: spec.clone(),
                             parent_run_id: None,
                             cancel: cancel.clone(),
+                            register: crate::application::run_launcher::ActiveRunRegistration::CurrentMain,
                         },
                         main_active_run.clone(),
                         &mut port,

@@ -18,12 +18,9 @@
 
 use async_trait::async_trait;
 
-use super::{
-    published_language::{
-        RegistryScopeName, ToolCatalogError, ToolCatalogSnapshot, ToolInvocation,
-        ToolOutcome as ToolExecutionOutcome, ToolProfileName,
-    },
-    CancellationSignal,
+use super::published_language::{
+    RegistryScopeName, ToolCatalogError, ToolCatalogSnapshot, ToolInvocation,
+    ToolOutcome as ToolExecutionOutcome, ToolProfileName,
 };
 
 /// Tool Catalog 只读投影端口。
@@ -43,35 +40,6 @@ pub trait ToolCatalogPort: Send + Sync {
     ) -> Result<ToolCatalogSnapshot, ToolCatalogError>;
 }
 
-pub trait ToolExecutionContextBindingPort: Send + Sync {
-    fn bind(&self, context: super::ToolExecutionContext) -> Result<(), String>;
-    fn unbind(&self, run_id: &str);
-}
-
-/// RAII binding: every successful bind is paired with unbind on completion,
-/// cancellation, panic, or future drop.
-pub struct ToolExecutionContextBindingGuard {
-    port: std::sync::Arc<dyn ToolExecutionContextBindingPort>,
-    run_id: String,
-}
-
-impl ToolExecutionContextBindingGuard {
-    pub fn bind(
-        port: std::sync::Arc<dyn ToolExecutionContextBindingPort>,
-        context: super::ToolExecutionContext,
-    ) -> Result<Self, String> {
-        let run_id = context.scope().run_id().to_string();
-        port.bind(context)?;
-        Ok(Self { port, run_id })
-    }
-}
-
-impl Drop for ToolExecutionContextBindingGuard {
-    fn drop(&mut self) {
-        self.port.unbind(&self.run_id);
-    }
-}
-
 /// Tool 执行端口。
 ///
 /// Runtime 通过此端口执行单个 Tool 调用。执行前重新验证 Tool 存在性、
@@ -82,11 +50,13 @@ impl Drop for ToolExecutionContextBindingGuard {
 pub trait ToolExecutionPort: Send + Sync {
     /// 执行一次 Tool 调用。
     ///
+    /// `context` 是本次调用唯一的活能力来源；其 scope 必须与 invocation
+    /// 完全一致，取消与 progress 不得通过其他参数或全局绑定重复传递。
     /// 返回 `ToolOutcome`（单一通道，含错误）。Tool 不存在返回
     /// `Failure(ToolUnavailable)`；schema 失败返回 `Failure(InvalidInput)`。
     async fn execute(
         &self,
         invocation: ToolInvocation,
-        cancellation: &dyn CancellationSignal,
+        context: &super::ToolExecutionContext,
     ) -> ToolExecutionOutcome;
 }

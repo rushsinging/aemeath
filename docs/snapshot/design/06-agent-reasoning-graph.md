@@ -603,7 +603,7 @@ log::info!(
 );
 ```
 
-日志 schema 参见 `specs/logging.md`。
+日志 schema 参见 `specs/3.15-logging.md`。
 
 ## 4. 落地计划
 

@@ -1,7 +1,7 @@
 //! AgentClient trait 实现 — 薄委托到各子模块。
 
 use async_trait::async_trait;
-use sdk::{AgentClient, ChatRequest, ChatStream, SdkError};
+use sdk::{AgentClient, ChatRequest, ChatStream, RunControlClient, SdkError};
 
 use super::accessors::AgentClientImpl;
 use crate::application::interaction::InteractionPort;
@@ -49,32 +49,18 @@ impl AgentClient for AgentClientImpl {
         Ok(super::mapping::config_change_to_sdk(change))
     }
 
-    fn cancel_run(&self, run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
-        self.inner.shell.active_run.cancel(run_id)
-    }
-
-    fn cancel_run_step(
-        &self,
-        run_id: &sdk::RunId,
-        step_id: Option<&sdk::RunStepId>,
-        deadline: sdk::ControlDeadline,
-    ) -> sdk::CancelRunStepOutcome {
-        self.inner
-            .shell
-            .active_run
-            .cancel_step(run_id, step_id, deadline)
-    }
-
-    fn terminate_run(
-        &self,
-        run_id: &sdk::RunId,
-        reason: sdk::RunTerminationReason,
-        deadline: sdk::ControlDeadline,
-    ) -> sdk::TerminateRunOutcome {
-        self.inner
-            .shell
-            .active_run
-            .terminate(run_id, reason, deadline)
+    fn cancel_current_run(&self, deadline: sdk::ControlDeadline) -> sdk::CancelCurrentRunOutcome {
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "agent client received cancel_current_run: deadline_unix_ms={}",
+            deadline.unix_millis()
+        );
+        let outcome = self.inner.shell.active_run.cancel_current_main(deadline);
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "agent client completed cancel_current_run: outcome={outcome:?}"
+        );
+        outcome
     }
 
     fn reply_interaction(
@@ -98,5 +84,31 @@ impl AgentClient for AgentClientImpl {
 
     async fn chat(&self, input: ChatRequest) -> Result<ChatStream, SdkError> {
         super::trait_chat::chat_impl(self, input).await
+    }
+}
+
+impl RunControlClient for AgentClientImpl {
+    fn cancel_run_step(
+        &self,
+        run_id: &sdk::RunId,
+        step_id: Option<&sdk::RunStepId>,
+        deadline: sdk::ControlDeadline,
+    ) -> sdk::CancelRunStepOutcome {
+        self.inner
+            .shell
+            .active_run
+            .cancel_step(run_id, step_id, deadline)
+    }
+
+    fn terminate_run(
+        &self,
+        run_id: &sdk::RunId,
+        reason: sdk::RunTerminationReason,
+        deadline: sdk::ControlDeadline,
+    ) -> sdk::TerminateRunOutcome {
+        self.inner
+            .shell
+            .active_run
+            .terminate(run_id, reason, deadline)
     }
 }

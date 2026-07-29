@@ -70,9 +70,9 @@
 | 19b | `check-config-store-ownership.sh` | Config / Composition 构造权 | Composition 唯一选择 `config-overrides` filesystem backing 并注入 `NativeConfigStore`；Config application 禁止构造 blob adapter，且 wiring 必须显式要求 injected store |
 | 19c | `check-composition-construction-ownership.sh` | Composition 跨 BC 验收 | 汇总验证 Session、Config Store、Runtime Tool 与 Hook 四个 leaf ownership Guard 已注册、编排、active policy 且三侧代表性 concrete constructor 不回流；不替代 leaf Guard，也不拥有 MCP lifecycle |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
-| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()`、同步 `cancel_run(run_id)`、Runtime-owned `reply_interaction` / `cancel_interaction` 与 Config control-plane；禁止恢复 `ChatInputEvent::Cancel` |
+| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()`、同步 current/identity-scoped Run control、Runtime-owned interaction 命令与 Config control-plane；禁止恢复 `ChatInputEvent::Cancel` |
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
-| 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
+| 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`AgentClient` 必须发布 `cancel_current_run`、`cancel_run_step` 与 `terminate_run` |
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 与 Skill PL ports 消费 Tool/Skill；唯一稳定 `Skill` Tool 保留，旧 materialization/PromptFragment/legacy DTO 路径禁止复活；Runtime 禁止构造 Skill filesystem adapter 或读取 Skill 文件；Execution adapter 不下沉 Runtime 编排；Tools façade 与 schema validator 保持唯一、窄公开面 |
 | 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution/binding、Skill ports、Tool Result materializer 与 ActiveRunRegistry；Runtime bootstrap 只消费 injected resources，禁止恢复 Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
 | 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher；Runtime Main/Sub 只消费 injected HookPort，禁止恢复 HookRunner / dispatcher factory |
@@ -569,7 +569,7 @@
 
 | # | 规则 | 理由 |
 |---|---|---|
-| 21.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只允许 `chat()`、同步 `cancel_run(run_id)`、Runtime-owned `reply_interaction()` / `cancel_interaction()` 与 Config control-plane 的 `config_view()` / `update_config()` | Chat data plane 仍走事件流；interaction 与 Config 命令只交换 SDK 纯值 DTO，禁止把 waiter/channel、Config service/reader/watch 暴露给交付层 |
+| 21.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只允许 `chat()`、同步 current/identity-scoped Run control、Runtime-owned `reply_interaction()` / `cancel_interaction()` 与 Config control-plane 的 `config_view()` / `update_config()` | Chat data plane 仍走事件流；当前前台 Run 由 Runtime 选择，精确后台控制按 identity；interaction 与 Config 命令只交换 SDK 纯值 DTO |
 
 > 该 allow set 仍是窄 façade；后续 interaction/run-control 扩容按对应 leaf 同步更新并提供故意违规证据。
 
@@ -588,13 +588,13 @@
 ## 23. check-run-control-boundary.sh
 
 - **位置**：`.agents/hooks/check-run-control-boundary.sh`。
-- **功能**：锁定 SDK run control Published Language 与 `AgentClient` 的迁移期扩容边界，防止 #878 atomic cutover 完成前提前引入并发原语或新 RPC。
+- **功能**：锁定 SDK run control Published Language 与 `AgentClient` 的纯值控制边界。
 - **守护**：
   - `packages/sdk/src/run.rs`（SDK run control Published Language）只能是纯值 DTO，禁止 `CancellationToken` / `Sender<` / `Receiver<` / `Mutex<` / `RwLock<` / `Arc<`；
-  - `packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前出现 `cancel_run_step` / `terminate_run` 新 API。
-- **检查方式**：`grep -nE` 分别扫描上述两个文件，命中即输出对应说明并 `exit 1`。
+  - `packages/sdk/src/client.rs` 必须提供 `cancel_current_run`、`cancel_run_step` 与 `terminate_run`，且参数/返回值只使用纯值 SDK 类型。
+- **检查方式**：扫描上述两个文件，缺失 required API 或出现并发原语即失败。
 - **白名单**：无。
-- **失败模式**：`SDK run control Published Language must contain only pure value DTOs.` / `New run control APIs must not reach production AgentClient before #878 atomic cutover.`
+- **失败模式**：`SDK run control Published Language must contain only pure value DTOs.` / `Target Main run control API missing after cutover.`
 
 ## 23a. check-tool-catalog-execution-boundary.sh
 

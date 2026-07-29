@@ -312,8 +312,8 @@ cargo test -p cli markdown_spacing -- --nocapture
 
 **文件：**
 
-- 修改 `specs/config-compat.md`：字段、优先级、Immediate scope、ConfigSnapshot accessor、SDK/TUI 消费规则
-- 修改 `specs/tui-cli.md`：块类型、边界合并、fence 内不变量、cache key 规则
+- 修改 `specs/3.9-config-compat.md`：字段、优先级、Immediate scope、ConfigSnapshot accessor、SDK/TUI 消费规则
+- 修改 `specs/3.3-tui-cli.md`：块类型、边界合并、fence 内不变量、cache key 规则
 - 更新 Issue #1137 checklist/status
 
 **检查清单：**

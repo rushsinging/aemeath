@@ -293,6 +293,11 @@ impl ToolExecutionContext {
     pub fn authorization(&self) -> AuthorizationContext {
         self.ports.authorization
     }
+    pub fn with_cancellation(&self, cancellation: Arc<dyn CancellationSignal>) -> Self {
+        let mut next = self.clone();
+        next.ports.cancellation = cancellation;
+        next
+    }
     pub fn with_authorization(&self, authorization: AuthorizationContext) -> Self {
         let mut next = self.clone();
         next.ports.authorization = authorization;

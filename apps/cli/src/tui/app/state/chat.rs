@@ -48,12 +48,6 @@ impl ChatState {
         self.clear_processing_handle();
     }
 
-    pub(crate) fn expect_run_start(&self) {
-        if let Some(handle) = &self.processing_handle {
-            handle.expect_run_start();
-        }
-    }
-
     pub(crate) fn start_processing(&mut self) {
         self.is_processing = true;
         self.is_cancelling = false;

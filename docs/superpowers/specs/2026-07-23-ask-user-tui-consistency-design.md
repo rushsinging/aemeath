@@ -203,7 +203,7 @@ EventStream 或平台职责变化，L4 TestBackend 覆盖完整用户旅程。
 
 开发前核对：
 
-- `specs/tui-cli.md` 的输入单一真相、TEA 副作用纪律和 Ask result hidden policy。
+- `specs/3.3-tui-cli.md` 的输入单一真相、TEA 副作用纪律和 Ask result hidden policy。
 - `docs/design/03-engineering/04-testing-and-coverage.md` 的 L0-L5 责任、TUI L4 场景测试与
   测试文件分离规则。
 

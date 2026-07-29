@@ -23,7 +23,6 @@ fn test_rt_factory() -> Arc<crate::application::runtime_context_factory::Runtime
     let services = crate::application::runtime_context::RuntimeServices {
         tool_catalog: tool_ports.catalog_port(),
         tool_execution: tool_ports.execution(),
-        tool_context_binding: tool_ports.binding(),
         policy: Arc::new(policy::AllowAllPolicy),
         reflection_history: {
             struct FakeRefl;
@@ -62,7 +61,7 @@ fn test_rt_factory() -> Arc<crate::application::runtime_context_factory::Runtime
                 async fn dispatch(
                     &self,
                     _invocation: hook::HookInvocation,
-                    _cancellation: &tokio_util::sync::CancellationToken,
+                    _cancellation: &dyn hook::CancellationSignal,
                 ) -> hook::HookOutcome {
                     hook::HookOutcome::proceed()
                 }
@@ -74,7 +73,6 @@ fn test_rt_factory() -> Arc<crate::application::runtime_context_factory::Runtime
         crate::application::runtime_context_factory::RuntimeContextFactory::new(
             services.tool_catalog,
             services.tool_execution,
-            services.tool_context_binding,
             services.policy,
             services.reflection_history,
             services.task,
@@ -1099,7 +1097,6 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
     let parent_ctx = sub_context_derivation_tests::make_parent_context_with_catalog(
         ports.catalog_port(),
         ports.execution(),
-        ports.binding(),
     );
     let _catalog_guard = runner.parent_context.install(Arc::new(
         crate::application::runtime_context::ParentRunFrame {
@@ -1160,7 +1157,9 @@ async fn test_started_event_emitted_with_role_and_model() {
             system: "s",
             identity: ctx.scope(),
             cancellation: ctx.cancellation(),
-            progress: Some(crate::adapters::tool_runtime::progress(tx.clone())),
+            progress: Some(crate::application::runtime_context::tool_progress_sink(
+                tx.clone(),
+            )),
             memory: ctx.memory(),
             catalog: ctx.catalog_query(),
             read_set: ctx.read_set(),
@@ -1201,7 +1200,9 @@ async fn started_event_always_reports_required_role_and_configured_model() {
             system: "s",
             identity: ctx.scope(),
             cancellation: ctx.cancellation(),
-            progress: Some(crate::adapters::tool_runtime::progress(tx.clone())),
+            progress: Some(crate::application::runtime_context::tool_progress_sink(
+                tx.clone(),
+            )),
             memory: ctx.memory(),
             catalog: ctx.catalog_query(),
             read_set: ctx.read_set(),

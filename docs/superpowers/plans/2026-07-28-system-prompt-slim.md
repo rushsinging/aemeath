@@ -220,7 +220,7 @@ Git 首次快照继续作为普通系统生成消息；日期、工作区变化�
 3. 清理不再使用的拼接 helper、旧常量、re-export、测试专用生产入口和过期注释。
 4. 检查 `SystemPromptSpec`、`PromptMaterialization`、`SystemBlock` 的字段是否仍能表达唯一 owner、kind、revision、cacheable/cache_break；不为兼容而保留第二套拼装模型。
 5. 检查 Main/Sub role suffix 与 Hook 输入，确保 Hook 看到的 system 文本与实际 provider invocation 一致。
-6. 同步更新 `specs/prompt.md`、`specs/runtime.md` 和 Context Prompt 设计文档：System blocks 全静态且 task reminder 属于 invocation-only user-message decoration。
+6. 同步更新 `specs/3.7-prompt.md`、`specs/3.4-runtime.md` 和 Context Prompt 设计文档：System blocks 全静态且 task reminder 属于 invocation-only user-message decoration。
 
 **验证**：L0 架构守卫、L2 组装顺序、L3 Runtime/Context/Provider 契约和死代码检查。
 

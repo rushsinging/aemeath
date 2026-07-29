@@ -297,6 +297,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
         step_id: RunStepId::new("production-step"),
         source_request_id: ContextRequestId::new("production-request"),
         finalize_cause: FinalizeCause::Completed,
+        duration_ms: None,
         messages: vec![Message::user("production durable fact")],
         receipts: vec![],
         api_input_tokens: Some(34),
@@ -436,7 +437,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),
             tools.execution(),
-            tools.binding(),
             skill_wiring.catalog(),
             skill_wiring.loader(),
             tool_result_materializer,
@@ -446,7 +446,6 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             Arc::new(runtime::RuntimeContextFactory::new(
                 tools.catalog_port(),
                 tools.execution(),
-                tools.binding(),
                 Arc::new(policy::AllowAllPolicy),
                 reflection_history,
                 task_access,

@@ -19,7 +19,7 @@
 | PR3 | 各 crate LOG_TARGET 常量 + 批量改 target | PR2 | ✅ |
 | PR4 | input/output 合并到 provider + event_type | PR2, PR3 | ✅ |
 | PR5 | 架构守卫加固（Rust test + shell） | PR3 | ✅ |
-| PR6 | specs/logging.md 规范文档 + 触发表更新 | PR1-PR5 | ✅ |
+| PR6 | specs/3.15-logging.md 规范文档 + 触发表更新 | PR1-PR5 | ✅ |
 
 ---
 
@@ -28,7 +28,7 @@
 ### 新建文件
 - `release.toml`（workspace 根）— cargo-release 配置
 - `.agents/hooks/check-log-target-prefix.sh` — shell 守卫
-- `specs/logging.md` — 日志规范分片
+- `specs/3.15-logging.md` — 日志规范分片
 
 ### 删除文件
 - `packages/global/logging/src/text.rs` — 死代码（`append_*`/`LogFile` 枚举）
@@ -916,12 +916,12 @@ git commit -m "docs(guard): 注册表补充 check-log-target-prefix 守卫"
 
 ---
 
-## PR6: specs/logging.md 规范文档 + 触发表更新
+## PR6: specs/3.15-logging.md 规范文档 + 触发表更新
 
-### Task 6.1: 创建 specs/logging.md 日志规范
+### Task 6.1: 创建 specs/3.15-logging.md 日志规范
 
 **Files:**
-- Create: `specs/logging.md`
+- Create: `specs/3.15-logging.md`
 
 - [ ] **Step 1: 编写日志规范文档**
 
@@ -965,8 +965,8 @@ git commit -m "docs(guard): 注册表补充 check-log-target-prefix 守卫"
 - [ ] **Step 2: Commit**
 
 ```bash
-git add specs/logging.md
-git commit -m "docs(logging): 新增日志规范分片 specs/logging.md"
+git add specs/3.15-logging.md
+git commit -m "docs(logging): 新增日志规范分片 specs/3.15-logging.md"
 ```
 
 ### Task 6.2: 更新 AGENTS.md 触发表
@@ -979,7 +979,7 @@ git commit -m "docs(logging): 新增日志规范分片 specs/logging.md"
 在架构地图与触发表中新增：
 
 ```markdown
-| `specs/logging.md` | `packages/global/logging/**`、全仓库 `log::xxx!` 调用点 —— 日志 target 命名、14 字段 schema、event_type 枚举、级别策略 | 新增/修改 log 调用、改日志路由、改 schema 字段 |
+| `specs/3.15-logging.md` | `packages/global/logging/**`、全仓库 `log::xxx!` 调用点 —— 日志 target 命名、14 字段 schema、event_type 枚举、级别策略 | 新增/修改 log 调用、改日志路由、改 schema 字段 |
 ```
 
 - [ ] **Step 2: 更新运行时目录章节的日志文件列表**

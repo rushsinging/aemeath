@@ -137,6 +137,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
             )),
             outcome: Some(FinalizedOutcomeProjection {
                 finalize_cause: FinalizeCause::UserCancelledStep,
+                duration_ms: Some(7_325_000),
                 messages: vec![Message::user("partial assistant")].into(),
                 receipts: vec![StepReceipt::agent(
                     "agent-call",
@@ -147,6 +148,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
                 fingerprint: "outcome-fingerprint".to_string(),
                 committed_revision: 2,
             }),
+            tool_receipts: Vec::new(),
         }],
     )];
     session.revision = 2;
@@ -157,6 +159,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
         .as_ref()
         .unwrap();
     assert_eq!(outcome.finalize_cause, FinalizeCause::UserCancelledStep);
+    assert_eq!(outcome.duration_ms, Some(7_325_000));
     assert_eq!(outcome.messages[0].text_content(), "partial assistant");
     assert_eq!(
         outcome.receipts[0].outcome(),
@@ -306,6 +309,29 @@ fn explicit_empty_snapshot_is_distinct_from_missing() {
         decoded.session.workspace,
         SnapshotState::CapturedEmpty
     ));
+}
+
+#[test]
+fn v3_session_upgrades_with_empty_tool_receipt_ledgers() {
+    let mut value = serde_json::to_value(
+        serde_json::from_slice::<serde_json::Value>(
+            &SessionCodec::encode(&CanonicalSession::fixture("v3-upgrade")).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    value["schema_version"] = serde_json::json!(3);
+    let bytes = serde_json::to_vec(&value).unwrap();
+
+    let decoded = decode_session(&bytes).unwrap();
+
+    assert!(decoded.upgraded_from_legacy);
+    assert!(decoded
+        .session
+        .run_slices
+        .iter()
+        .flat_map(|slice| &slice.steps)
+        .all(|step| step.tool_receipts.is_empty()));
 }
 
 #[test]

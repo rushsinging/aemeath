@@ -43,6 +43,10 @@ impl TypedTool for AgentTool {
         1800 // 30 minutes — sub-agents run multi-turn LLM conversations
     }
 
+    fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
+        crate::domain::published_language::CancellationDeclaration::Cooperative
+    }
+
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<AgentResult> {
         let args: AgentInput = match serde_json::from_value(input) {
             Ok(a) => a,
@@ -113,27 +117,29 @@ Instructions:- Complete the task described in the user message
             })
             .await;
 
-        let final_output = terminal.output();
-        // text → 父 LLM：必须包含子代理实际产出，否则父 agent 无法基于结果决策。
-        // data → TUI：结构化展示（AgentResult.output 同步保留）。
-        let text = if final_output.trim().is_empty() {
-            "子代理执行完成（无输出）".to_string()
-        } else {
-            final_output.clone()
-        };
-        log::debug!(
-            target: crate::LOG_TARGET,
-            "agent final output: output_bytes={}, text_bytes={}, output_preview={:?}",
-            final_output.len(),
-            text.len(),
-            truncate_debug_preview(&final_output, 500)
-        );
-        TypedToolResult::success(
-            text,
-            AgentResult {
-                output: final_output,
-            },
-        )
+        match terminal {
+            crate::domain::AgentRunTerminal::Completed { result } => {
+                let text = if result.trim().is_empty() {
+                    "子代理执行完成（无输出）".to_string()
+                } else {
+                    result.clone()
+                };
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "agent final output: output_bytes={}, text_bytes={}, output_preview={:?}",
+                    result.len(),
+                    text.len(),
+                    truncate_debug_preview(&result, 500)
+                );
+                TypedToolResult::success(text, AgentResult { output: result })
+            }
+            crate::domain::AgentRunTerminal::Failed { error } => {
+                TypedToolResult::error(format!("Sub-agent error: {error}"))
+            }
+            crate::domain::AgentRunTerminal::Cancelled => {
+                TypedToolResult::error("Sub-agent cancelled")
+            }
+        }
     }
 }
 

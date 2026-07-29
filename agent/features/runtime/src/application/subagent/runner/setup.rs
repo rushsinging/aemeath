@@ -574,6 +574,10 @@ impl AgentRunner for CliAgentRunner {
             let agent = Agent {
                 catalog: sub_catalog,
                 execution: derived.context.tool_execution(),
+                context: Some(crate::application::context_coordination::ContextCoordinator::new(
+                    derived.context.context(),
+                )),
+                session_id: context::domain::SessionId::new(&derived.session_id),
                 ctx: sub_ctx,
                 max_tool_concurrency: self.max_tool_concurrency,
                 agent_semaphore: self.agent_semaphore.clone(),

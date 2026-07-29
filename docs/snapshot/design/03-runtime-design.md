@@ -524,6 +524,6 @@ pub struct ToolExecutionContext {
 | `cwd` 移除可能影响 hook 环境变量注入 | loop_runner L128 已从 workspace 读 root，验证 hook env 仍正确 |
 ## 参考文档
 
-- [runtime 引擎规约](../specs/runtime.md)
+- [runtime 引擎规约](../../../specs/3.4-runtime.md)
 - [UUIDv7 ID 设计](superpowers/specs/2026-06-13-runtime-tui-uuidv7-id-design.md)
 - [Agent Context 所有权重构](superpowers/specs/2026-06-07-agent-context-ownership-redesign.md)

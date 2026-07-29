@@ -99,6 +99,7 @@ pub enum AppEvent {
     RunCancelled,
     Cancelled {
         context: UiTurnContext,
+        duration: std::time::Duration,
     },
     /// Turn 启动，TUI 据此启动 spinner(Thinking)。
     TurnStarted {

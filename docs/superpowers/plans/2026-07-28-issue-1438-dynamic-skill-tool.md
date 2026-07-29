@@ -740,10 +740,10 @@ git commit -m "feat: render dynamic skill calls safely"
 - Modify: `.agents/hooks/check-tool-catalog-execution-boundary.sh`
 - Modify: `.agents/hooks/check-tool-catalog-execution-boundary-tests.sh`
 - Modify: `docs/design/03-engineering/01-architecture-guards.md`
-- Modify: `specs/runtime.md`
-- Modify: `specs/tools.md`
-- Modify: `specs/tui-cli.md`
-- Modify: `specs/prompt.md`
+- Modify: `specs/3.4-runtime.md`
+- Modify: `specs/3.5-tools.md`
+- Modify: `specs/3.3-tui-cli.md`
+- Modify: `specs/3.7-prompt.md`
 - Delete/rename: all obsolete Skill materialization/PromptInjection tests identified below
 
 - [ ] **Step 1: 先写 Guard 负例**

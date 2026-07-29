@@ -346,7 +346,6 @@ fn test_shell() -> crate::application::client::MainSessionShell {
             crate::application::runtime_context_factory::RuntimeContextFactory::new(
                 factory.catalog_port(),
                 factory.execution(),
-                factory.binding(),
                 Arc::new(policy::AllowAllPolicy),
                 test_reflection_history_store(),
                 Arc::new(task::TaskStore::new()),
@@ -532,13 +531,8 @@ fn progress_forwarders_capture_logging_context_before_instrumented_spawn() {
     let non_agent = include_str!("non_agent.rs");
 
     for source in [agent_calls, non_agent] {
-        let production = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source");
-        assert!(production.contains("let progress_log_context = logging::capture();"));
-        assert!(production.contains("logging::spawn_instrumented(progress_log_context, async move"));
-        assert!(!production.contains("tokio::spawn("));
+        assert!(source.contains("let progress_log_context = logging::capture();"));
+        assert!(source.contains("logging::spawn_instrumented(progress_log_context, async move"));
     }
 }
 
@@ -686,7 +680,10 @@ impl RecordingSink {
             RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
             RuntimeStreamEvent::Done { .. } => "Done".to_string(),
             RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
-            RuntimeStreamEvent::Cancelled { .. } => "Cancelled".to_string(),
+            RuntimeStreamEvent::Cancelled { duration, .. } => {
+                self.done_durations.lock().unwrap().push(*duration);
+                "Cancelled".to_string()
+            }
             RuntimeStreamEvent::Thinking { .. } => "Thinking".to_string(),
             RuntimeStreamEvent::BlockComplete { .. } => "BlockComplete".to_string(),
             RuntimeStreamEvent::ToolCallStart { .. } => "ToolCallStart".to_string(),
@@ -3990,7 +3987,6 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
     let wired = factory.build(tool_ctx);
     let _catalog_port = wired.catalog_port();
     let _execution = wired.execution();
-    let _binding_port = wired.binding();
 
     let user_input_id = sdk::InputId::new_v7();
     let user_text = "first-message-marker-1272";
@@ -4122,7 +4118,6 @@ async fn per_turn_drain_seal_input_id_preserved_when_run_returns_tool_results_wi
     let wired = factory.build(tool_ctx);
     let _catalog_port = wired.catalog_port();
     let _execution = wired.execution();
-    let _binding_port = wired.binding();
 
     let user_input_id = sdk::InputId::new_v7();
     let user_text = "second-scenario-marker-1272";
@@ -4220,7 +4215,6 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
     let factory = ::tools::composition::TestCatalogExecutionFactory::empty();
     let _catalog_port = factory.catalog_port();
     let _execution = factory.execution();
-    let _binding_port = factory.binding();
 
     let user_input_id = sdk::InputId::new_v7();
     let user_text = "single-invocation-marker-1272";

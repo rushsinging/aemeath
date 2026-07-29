@@ -78,4 +78,4 @@ apply 完成后：
 1. 删除 `docs/bug/{active,archive}.md` 与 `docs/bug/archived/`
 2. 删除 `docs/feature/{active,archive}.md` 与 `docs/feature/archived/`
 3. `docs/feature/specs/` 保留，仅在每份 md 顶部追加「对应 Issue: #<num>」链接
-4. 更新 `AGENTS.md` 工作流约束段与 `specs/bug-feature-tracking.md` 分片
+4. 更新 `AGENTS.md` 工作流约束段与 `specs/3.13-bug-feature-tracking.md` 分片

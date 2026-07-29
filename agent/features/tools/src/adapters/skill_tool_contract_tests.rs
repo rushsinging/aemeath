@@ -113,12 +113,11 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
                 available_tools: BTreeSet::from(["Skill".to_string()]),
             }),
         );
-        wiring.bind(ctx).unwrap();
         let outcome = wiring
             .execution()
             .execute(
                 ToolInvocation::new("Skill", json!({"skill": "commit"}), execution_scope),
-                &NeverCancelled,
+                &ctx,
             )
             .await;
         match outcome {
@@ -157,26 +156,24 @@ async fn deleted_skill_returns_failure_without_panicking() {
     .registry_scope(RegistryScopeName::new("main"))
     .profile(ToolProfileName::new("main-full"))
     .build();
-    wiring
-        .bind(ToolExecutionContext::new(
-            scope.clone(),
-            ToolExecutionPorts::new(
-                Arc::new(NeverCancelled),
-                WorkspaceReadAccess::new(workspace.read()),
-                Arc::new(MutexReadSet(Arc::new(Mutex::new(HashSet::new())))),
-                Arc::new(FixedPlanMode(None)),
-                Arc::new(memory::NoOpMemory),
-                Arc::new(FixedGuidance {
-                    language: "en".into(),
-                }),
-            ),
-        ))
-        .unwrap();
+    let ctx = ToolExecutionContext::new(
+        scope.clone(),
+        ToolExecutionPorts::new(
+            Arc::new(NeverCancelled),
+            WorkspaceReadAccess::new(workspace.read()),
+            Arc::new(MutexReadSet(Arc::new(Mutex::new(HashSet::new())))),
+            Arc::new(FixedPlanMode(None)),
+            Arc::new(memory::NoOpMemory),
+            Arc::new(FixedGuidance {
+                language: "en".into(),
+            }),
+        ),
+    );
     let outcome = wiring
         .execution()
         .execute(
             ToolInvocation::new("Skill", json!({"skill": "gone"}), scope),
-            &NeverCancelled,
+            &ctx,
         )
         .await;
     assert!(matches!(

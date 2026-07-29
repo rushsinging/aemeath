@@ -2,6 +2,85 @@ use super::*;
 use crate::domain::agent_run::{ActiveRunPort, RunControl};
 
 #[test]
+fn cancel_current_main_step_does_not_require_run_identity() {
+    let registry = ActiveRunRegistry::default();
+    let run_id = sdk::RunId::new_v7();
+    let step_id = sdk::RunStepId::new_v7();
+    let root = CancellationToken::new();
+    let step = root.child_token();
+    let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
+
+    registry.activate_main(run_id.clone(), root.clone());
+    registry.set_main_active_step(&run_id, step_id.clone(), step.clone());
+
+    assert_eq!(
+        registry.cancel_current_main(deadline),
+        sdk::CancelCurrentRunOutcome::Accepted
+    );
+    assert!(step.is_cancelled());
+    assert!(!root.is_cancelled());
+    assert_eq!(
+        registry.take_control(&run_id),
+        Some(RunControl::CancelStep { step_id, deadline })
+    );
+}
+
+#[test]
+fn sub_run_does_not_replace_current_main_run() {
+    let registry = ActiveRunRegistry::default();
+    let main_id = sdk::RunId::new_v7();
+    let sub_id = sdk::RunId::new_v7();
+    let main_step_id = sdk::RunStepId::new_v7();
+    let main_root = CancellationToken::new();
+    let main_step = main_root.child_token();
+    let sub_root = CancellationToken::new();
+    let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
+
+    registry.activate_main(main_id.clone(), main_root.clone());
+    registry.set_main_active_step(&main_id, main_step_id, main_step.clone());
+    registry.activate(sub_id, sub_root.clone());
+
+    assert_eq!(
+        registry.cancel_current_main(deadline),
+        sdk::CancelCurrentRunOutcome::Accepted
+    );
+    assert!(main_step.is_cancelled());
+    assert!(!main_root.is_cancelled());
+    assert!(!sub_root.is_cancelled());
+}
+
+#[test]
+fn clearing_old_main_does_not_clear_new_current_main() {
+    let registry = ActiveRunRegistry::default();
+    let old_id = sdk::RunId::new_v7();
+    let new_id = sdk::RunId::new_v7();
+    let new_step_id = sdk::RunStepId::new_v7();
+    let new_root = CancellationToken::new();
+    let new_step = new_root.child_token();
+    let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
+
+    registry.activate_main(old_id.clone(), CancellationToken::new());
+    registry.activate_main(new_id.clone(), new_root);
+    registry.set_main_active_step(&new_id, new_step_id, new_step.clone());
+    registry.clear(&old_id);
+
+    assert_eq!(
+        registry.cancel_current_main(deadline),
+        sdk::CancelCurrentRunOutcome::Accepted
+    );
+    assert!(new_step.is_cancelled());
+}
+
+#[test]
+fn cancel_current_main_without_active_run_is_explicit() {
+    let registry = ActiveRunRegistry::default();
+    assert_eq!(
+        registry.cancel_current_main(sdk::ControlDeadline::from_unix_millis(1)),
+        sdk::CancelCurrentRunOutcome::NoActiveRun
+    );
+}
+
+#[test]
 fn cancel_step_only_cancels_current_step_scope() {
     let registry = ActiveRunRegistry::default();
     let run_id = sdk::RunId::new_v7();

@@ -92,17 +92,19 @@ Session 采用两阶段 per-RunStep 持久化：`freeze_step` 已绑定的 user 
 - 本次提交时收集的 Task Published Snapshot 与 Workspace Published Snapshot；Target writer 即使为空也 **MUST** 显式写出。
 `RunId` / `RunStepId` 在这里仅作为对话事实的关联与幂等 identity，**NEVER** 表示 Session 拥有或可恢复 Runtime 状态机。
 ### 6.2 不落盘内容
-以下执行中间态 **NEVER** 进入 Session：
+以下执行中间态 **NEVER** 作为可恢复 Runtime 状态机进入 Session：
 - Run 聚合、active RunSpec、RunStatus 与 RunStepStatus；`FinalizeCause` 是已提交 projection 的原因标签，不是状态机快照；
-- ToolCall 的 PendingArgs、Ready、AwaitingApproval、Running 等进行态；finalizer 只保存其确定性 terminal projection/receipt；
-- 原始 partial assistant stream 与 delta；只有控制收口时由 finalizer 冻结后的 partial assistant projection 才可落盘；
-- 尚未被 finalizer 收敛或补齐 terminal result 的 Tool future、Tool suspension 与并发 batch；
-- PendingInteraction、typed continuation、waiter、channel 与 UI 临时状态；
+- Tool future、Tool suspension、并发 batch、PendingInteraction、typed continuation、waiter、channel 与 UI 临时状态；
 - cancellation token/scope、deadline、retry/backoff attempt 与 Provider HTTP/SSE 连接；
 - RuntimeContext、各 Port 活实例、lease 与 Composition scope；
 - StuckGuard / ToolLoopGuard 计数、临时 token 估算 cache；
+- 原始 partial assistant stream 与 delta；只有控制收口时由 finalizer 冻结后的 partial assistant projection 才可落盘；
 - Sub Run 的执行状态与完整消息链；父 Agent Tool 只保存 child terminal receipt 形成的稳定 Tool result，**NEVER** 把 Sub 私有对话链注入父 Session；
 - Stop Hook Block 后当前已完成 assistant / Tool outcome 仍按正常 finalized schema 落盘；只有 feedback 驱动的下一 Step pending input 不属于当前 outcome。
+
+已接受 ToolCall 的 `ToolCallReceipt` 以 Context-owned durable ledger 进入 Session。当前 wire schema 为 v4：每个 `CommittedRunStep` 可携带 `tool_receipts`；v3 reader 将缺失 ledger 升级为空集合，新 writer 只写 v4，未知 future version 继续 fail-closed。每条 receipt 保存 Session/Run/Step/call identity、provider call identity（若有）、Tool 名称、原始调用序号、Agent 标记、输入安全摘要，以及 `Pending | Running | Terminal` 状态。
+
+转换只允许 `Pending → Running → Terminal` 或 `Pending → Terminal`；同状态/同终态重试幂等，terminal 回退或冲突覆盖返回 typed error。mutation 与 accepted-input/finalized-outcome 共用 CanonicalSession mutation gate和 AtomicBlob generation：先 durable save，再 publish live generation；写失败不污染已发布状态。该 ledger 不是 PendingArgs/Running future，也不恢复或重放 Runtime。Terminal receipt 会按原调用序号投影为 `StepReceipt`；若崩溃遗留的 Pending/Running receipt 对应已提交但缺少结果的 `tool_use`，恢复只读投影会在完整性清理前补充 `is_error=true` 的 provider-safe `CancellationUnconfirmed` ToolResult，保留 unfinished call identity 与 possible side effects。该投影不修改 durable ledger、不自动重放，也不伪报底层工作已经停止；重复恢复因已有结果检查而保持幂等。
 ### 6.3 并发 Tool 混合结果
 同一 RunStep 的 Tool Call **MAY** 并发执行，但普通完成路径的收集与提交 **MUST NOT** fail-fast。Runtime 必须等待每个调用收敛为稳定 outcome，再按原 ToolCall 顺序构造单个 `ContextAppend`：
 - 一个调用失败 **NEVER** 丢弃、回滚或覆盖同批其他调用已经成功的结果；
@@ -112,7 +114,7 @@ Session 采用两阶段 per-RunStep 持久化：`freeze_step` 已绑定的 user 
 - L1 budget reduction 或大结果外置 **MAY** 改变成功结果的内联表示，但 **NEVER** 把成功事实变成缺失；外置时 Session 必须保存稳定引用与足够的摘要/metadata，供后续读取与判断；
 - 只有 Context 自身的 revision conflict、内容冲突或 durable write 失败才使整个 `append_and_persist` 失败；单个 Tool 的业务 Failure 不属于 Session commit failure。
 控制路径复用相同顺序与“成功事实不可丢”不变量，但不无限等待：`CancelRunStep` 最长 10s，`TerminateRun` 最长 5s，嵌套 Agent 共用控制请求创建的同一绝对 deadline。deadline 内成功返回的 Tool/Agent 结果 **MUST** 保留；未确认停止的调用由 finalizer 补齐 `CancellationUnconfirmed` receipt，而不是删除整个 batch。父 Step 取消对 Agent Tool 传播 child `TerminateRun`；父 Session 只保存 child terminal receipt 形成的 Tool result，不保存 child 完整消息链，也不为摘要额外调用 LLM。
-如果进程在 finalized projection 完成原子提交前崩溃，该未提交 Step 不属于可恢复 Session；系统仍遵循“不持久化 Run 中间态”，**NEVER** 为保住进行中调用引入 Tool/Run checkpoint。这里的 finalized partial 只有在 `StepFinalizer` 收口且 `append_and_persist` 成功后才成为 durable 对话事实，不承诺崩溃下的 exactly-once。
+如果进程在 finalized projection 完成原子提交前崩溃，该 Step 的 assistant/tool terminal outcome 可能尚未提交，但此前已 durable 接受的 `ToolCallReceipt` ledger 仍属于可恢复 Session 事实。系统仍不持久化 Run 状态机或可执行 future，也不承诺 exactly-once。恢复会将与已提交孤立 `tool_use` 对应的 Pending/Running receipt 只读投影为 `CancellationUnconfirmed` provider-safe result，并保留 unfinished call identity 与 possible side effects；不会修改 ledger、自动重放或伪造成功。若 receipt 没有对应已提交 `tool_use`，则仅保留为可诊断事实，不凭空生成消息。
 ### 6.4 提交与恢复语义
 - 相同 `(run_id, step_id)` 与相同 fingerprint 的重试 **MUST** 幂等返回原 committed receipt；
 - 相同幂等键但内容不同 **MUST** 返回 typed conflict，**NEVER** 覆盖已提交结果；

@@ -7,7 +7,8 @@ use crate::domain::session::{AcceptedInputProjection, FinalizedOutcomeProjection
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
     CompactRequest, CompactSkipReason, ContextAppend, ContextAppendError, ContextMessage,
-    ContextPortError, SessionId, SessionRevision,
+    ContextPortError, SessionId, SessionRevision, ToolCallReceipt, ToolReceiptMutation,
+    ToolReceiptMutationError, ToolReceiptMutationReceipt,
 };
 use crate::ports::{SessionRepository, SessionSnapshot};
 
@@ -18,6 +19,7 @@ struct SessionState {
     active_summary: Option<String>,
     accepted_steps: HashMap<(String, String), AcceptedInputProjection>,
     committed_steps: HashMap<(String, String), FinalizedOutcomeProjection>,
+    tool_receipts: HashMap<String, ToolCallReceipt>,
 }
 
 /// #870 的确定性内存 backing；durable Envelope/AtomicBlob 由 #869/#880 替换。
@@ -49,6 +51,7 @@ impl InMemorySessionRepository {
                     active_summary,
                     accepted_steps: HashMap::new(),
                     committed_steps: HashMap::new(),
+                    tool_receipts: HashMap::new(),
                 },
             );
     }
@@ -130,6 +133,41 @@ impl SessionRepository for InMemorySessionRepository {
         Ok(Self::accepted_receipt(append, committed_revision))
     }
 
+    async fn advance_tool_receipt(
+        &self,
+        mutation: ToolReceiptMutation,
+    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?;
+        let state = sessions
+            .get_mut(mutation.identity.session_id.as_str())
+            .ok_or_else(|| {
+                ToolReceiptMutationError::SessionNotFound(mutation.identity.session_id.clone())
+            })?;
+        let key = mutation.identity.runtime_call_id.clone();
+        let advanced = if let Some(receipt) = state.tool_receipts.get(&key) {
+            receipt.clone().advance(mutation)?
+        } else {
+            let preview = mutation.input_preview.clone().unwrap_or_default();
+            let receipt = ToolCallReceipt::pending(mutation.identity.clone(), preview);
+            if mutation.next == crate::domain::ToolCallState::Pending {
+                ToolReceiptMutationReceipt {
+                    receipt,
+                    changed: true,
+                }
+            } else {
+                receipt.advance(mutation)?
+            }
+        };
+        if advanced.changed {
+            state.revision += 1;
+            state.tool_receipts.insert(key, advanced.receipt.clone());
+        }
+        Ok(advanced)
+    }
+
     async fn append_finalized(
         &self,
         append: &ContextAppend,
@@ -159,10 +197,17 @@ impl SessionRepository for InMemorySessionRepository {
         }
         let actual = SessionRevision::new(state.revision);
         if actual != append.expected_revision {
-            return Err(ContextAppendError::RevisionConflict {
-                expected: append.expected_revision,
-                actual,
-            });
+            let receipt_only_advances = state.accepted_steps.contains_key(&key)
+                || state.tool_receipts.values().any(|receipt| {
+                    receipt.identity.run_id == append.run_id
+                        && receipt.identity.step_id == append.step_id
+                });
+            if !receipt_only_advances {
+                return Err(ContextAppendError::RevisionConflict {
+                    expected: append.expected_revision,
+                    actual,
+                });
+            }
         }
         state.messages.extend(append.messages.clone());
         state.revision += 1;
@@ -171,6 +216,7 @@ impl SessionRepository for InMemorySessionRepository {
             key,
             FinalizedOutcomeProjection {
                 finalize_cause: append.finalize_cause,
+                duration_ms: append.duration_ms,
                 messages: append.messages.clone().into(),
                 receipts: append.receipts.clone(),
                 api_input_tokens: append.api_input_tokens,
@@ -207,6 +253,7 @@ impl SessionRepository for InMemorySessionRepository {
         state.active_summary = None;
         state.accepted_steps.clear();
         state.committed_steps.clear();
+        state.tool_receipts.clear();
         state.revision += 1;
         Ok(())
     }

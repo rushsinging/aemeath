@@ -2,11 +2,10 @@
 //!
 //! Tests in this file live inside the `composition::runtime` module, giving
 //! direct access to `wire_runtime_tool_assembly` and `RuntimeToolAssembly`.
-//! They prove that production composition produces working
-//! catalog/execution/binding ports. The `tool_result_materializer` and
-//! `active_run` fields on `RuntimeToolAssembly` are constructable but have
-//! no public functional API — their wiring is verified by struct field
-//! existence only.
+//! They prove that production composition produces working catalog/execution
+//! ports. The `tool_result_materializer` and `active_run` fields on
+//! `RuntimeToolAssembly` are constructable but have no public functional API —
+//! their wiring is verified by struct field existence only.
 
 use std::sync::Arc;
 
@@ -107,14 +106,14 @@ fn write_file_in_root(
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Test 1: wire_runtime_tool_assembly integrates catalog/execution/binding
+// Test 1: wire_runtime_tool_assembly integrates catalog/execution
 // ═══════════════════════════════════════════════════════════════════════
 
 /// Calls the private `wire_runtime_tool_assembly` — the exact function used
 /// by production `from_args_with_gateways` — and verifies:
 ///
-///   - Catalog, execution, and binding ports are populated and functional
-///     (snapshot returns real built-in tools; bind→execute→unbind works).
+///   - Catalog and execution ports are populated and functional
+///     (snapshot returns real built-in tools; invocation context executes).
 ///   - `tool_result_materializer` and `active_run` fields are constructable
 ///     (no public functional API — verified by struct field existence).
 ///
@@ -124,7 +123,7 @@ fn write_file_in_root(
 /// Uses a temp directory for `agents_dir` injected directly into
 /// `wire_runtime_tool_assembly` — no env var manipulation, no global races.
 #[tokio::test]
-async fn wire_runtime_tool_assembly_produces_working_catalog_execution_binding() {
+async fn wire_runtime_tool_assembly_produces_working_catalog_and_execution() {
     let env_temp = tempfile::tempdir().expect("temp dir for agents dir");
 
     let (_temp, workspace) = temp_workspace();
@@ -145,10 +144,9 @@ async fn wire_runtime_tool_assembly_produces_working_catalog_execution_binding()
     )
     .expect("wire_runtime_tool_assembly must succeed");
 
-    // ── All three tool ports are populated (fields exist, not null) ──
+    // ── Both tool ports are populated (fields exist, not null) ──
     let catalog = &assembly.catalog;
     let execution = &assembly.execution;
-    let binding = &assembly.binding;
 
     // ── Catalog is functional ──
     let snap = catalog
@@ -161,9 +159,8 @@ async fn wire_runtime_tool_assembly_produces_working_catalog_execution_binding()
     assert!(tool_names.contains(&"Bash"));
     assert!(tool_names.contains(&"Read"));
 
-    // ── Binding + execution works ──
+    // ── Invocation-scoped context + execution works ──
     let ctx = tool_context(&workspace, "run-assembly");
-    binding.bind(ctx).expect("bind context via assembly");
 
     let file_path = write_file_in_root(&workspace, "assembly.txt", "assembly test content");
     let root: std::path::PathBuf = workspace_root(&workspace);
@@ -176,29 +173,11 @@ async fn wire_runtime_tool_assembly_produces_working_catalog_execution_binding()
         serde_json::json!({"file_path": file_path.to_string_lossy()}),
         scope,
     );
-    let outcome = execution.execute(invocation, &*cancellation()).await;
+    let outcome = execution.execute(invocation, &ctx).await;
     assert!(
         outcome.is_success(),
         "execution via assembly must succeed, got: {:?}",
         outcome
-    );
-
-    // ── Unbind → execution must fail (ports share backing) ──
-    binding.unbind("run-assembly");
-    let root2: std::path::PathBuf = workspace_root(&workspace);
-    let scope2 =
-        tools::ExecutionScope::builder("run-assembly", workspace.read().workspace_id(), root2)
-            .build();
-    let invocation2 = tools::ToolInvocation::new(
-        "Read",
-        serde_json::json!({"file_path": file_path.to_string_lossy()}),
-        scope2,
-    );
-    let outcome2 = execution.execute(invocation2, &*cancellation()).await;
-    assert!(
-        outcome2.is_failure(),
-        "execution after unbind must fail, got: {:?}",
-        outcome2
     );
 
     // ── tool_result_materializer and active_run are constructable ──

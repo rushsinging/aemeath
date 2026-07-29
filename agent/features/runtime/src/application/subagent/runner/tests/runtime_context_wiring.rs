@@ -90,7 +90,7 @@ impl hook::HookPort for LocalFakeHookPort {
     async fn dispatch(
         &self,
         _invocation: hook::HookInvocation,
-        _cancellation: &tokio_util::sync::CancellationToken,
+        _cancellation: &dyn hook::CancellationSignal,
     ) -> hook::HookOutcome {
         hook::HookOutcome::proceed()
     }
@@ -146,7 +146,6 @@ fn wiring_test_factory() -> Arc<RuntimeContextFactory> {
     Arc::new(RuntimeContextFactory::new(
         Arc::new(sub_context_derivation_tests::FakeToolCat),
         Arc::new(sub_context_derivation_tests::FakeToolExec),
-        Arc::new(sub_context_derivation_tests::FakeToolCtxBind),
         Arc::new(sub_context_derivation_tests::FakePolicyPort),
         Arc::new(sub_context_derivation_tests::FakeReflHist),
         test_task_access(),
@@ -157,7 +156,6 @@ fn wiring_test_factory() -> Arc<RuntimeContextFactory> {
 fn assemble_test_context(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     policy: Arc<dyn PolicyPort>,
     config: RunConfigSnapshot,
 ) -> (RuntimeContext, RuntimeContextFactory) {
@@ -176,7 +174,6 @@ fn assemble_test_context(
     let factory = RuntimeContextFactory::new(
         tool_catalog,
         tool_execution,
-        tool_context_binding,
         policy,
         Arc::new(sub_context_derivation_tests::FakeReflHist),
         test_task_access(),
@@ -221,13 +218,7 @@ fn make_spy_parent_context(
         called: policy_called,
     });
 
-    let (ctx, _factory) = assemble_test_context(
-        catalog,
-        ports.execution(),
-        ports.binding(),
-        policy,
-        run_config,
-    );
+    let (ctx, _factory) = assemble_test_context(catalog, ports.execution(), policy, run_config);
     ctx
 }
 
@@ -326,42 +317,17 @@ fn parent_source_returns_none_when_empty() {
 // ── M7: Comprehensive derived context integration ──
 //
 // Exercises run_agent through the real production derivation path and
-// verifies that the derived RuntimeContext:
-// - Captures ToolExecutionContext scope via spy binding port
-// - Exercises policy and catalog through derived context
-
-/// Spy ToolExecutionContextBindingPort that captures the bound context.
-struct SpyToolCtxBinding {
-    captured: Arc<std::sync::Mutex<Option<tools::ToolExecutionContext>>>,
-    inner: Arc<dyn tools::ToolExecutionContextBindingPort>,
-}
-
-impl tools::ToolExecutionContextBindingPort for SpyToolCtxBinding {
-    fn bind(&self, context: tools::ToolExecutionContext) -> Result<(), String> {
-        *self.captured.lock().unwrap() = Some(context.clone());
-        self.inner.bind(context)
-    }
-    fn unbind(&self, run_id: &str) {
-        self.inner.unbind(run_id)
-    }
-}
+// verifies that the derived RuntimeContext exercises policy and catalog through
+// the same factory-owned ports.
 
 #[tokio::test]
-async fn derived_context_integration_verifies_binding_policy_catalog() {
-    let captured_ctx = Arc::new(std::sync::Mutex::new(None));
+async fn derived_context_integration_verifies_policy_catalog() {
     let cat_called = Arc::new(AtomicBool::new(false));
     let policy_called = Arc::new(AtomicBool::new(false));
 
     let tool_factory = tools::composition::TestCatalogExecutionFactory::new();
     tool_factory.register(ReadFixtureTool);
     let tool_ports = tool_factory.build(test_ctx());
-
-    let spy_binding: Arc<dyn tools::ToolExecutionContextBindingPort> =
-        Arc::new(SpyToolCtxBinding {
-            captured: captured_ctx.clone(),
-            inner: tool_ports.binding(),
-        });
-
     let catalog: Arc<dyn tools::ToolCatalogPort> = Arc::new(SpyToolCatalog {
         inner: tool_ports.catalog_port(),
         called: cat_called.clone(),
@@ -370,7 +336,6 @@ async fn derived_context_integration_verifies_binding_policy_catalog() {
     let (parent_ctx, shared_factory) = assemble_test_context(
         catalog,
         tool_ports.execution(),
-        spy_binding,
         Arc::new(SpyPolicy {
             called: policy_called.clone(),
         }),
@@ -411,20 +376,6 @@ async fn derived_context_integration_verifies_binding_policy_catalog() {
             role: "coder",
         })
         .await;
-
-    // M2: ToolExecutionContext scope captured.
-    let captured = captured_ctx.lock().unwrap();
-    assert!(
-        captured.is_some(),
-        "M2: ToolExecutionContext must be bound during sub-agent run"
-    );
-    let exec_ctx = captured.as_ref().unwrap();
-    let scope = exec_ctx.scope();
-    assert!(
-        !scope.workspace_root().as_os_str().is_empty(),
-        "M2: workspace_root must be set in derived ToolExecutionContext"
-    );
-    drop(captured);
 
     // M1: Catalog spied during derivation.
     assert!(
@@ -480,7 +431,7 @@ impl tools::TypedTool for SpyTool {
 }
 
 #[tokio::test]
-async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
+async fn run_agent_executes_tool_and_propagates_progress_and_policy() {
     use crate::application::testing::{test_binding_from_port, TestProviderPort};
     use provider::{
         InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderStopReason,
@@ -502,14 +453,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
 
     // ── Spies ──
     let policy_called = Arc::new(AtomicBool::new(false));
-    let captured_ctx = Arc::new(std::sync::Mutex::new(None));
     let cat_called = Arc::new(AtomicBool::new(false));
-
-    let spy_binding: Arc<dyn tools::ToolExecutionContextBindingPort> =
-        Arc::new(SpyToolCtxBinding {
-            captured: captured_ctx.clone(),
-            inner: tool_ports.binding(),
-        });
 
     let catalog: Arc<dyn tools::ToolCatalogPort> = Arc::new(SpyToolCatalog {
         inner: tool_ports.catalog_port(),
@@ -520,7 +464,6 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     let (parent_ctx, shared_factory) = assemble_test_context(
         catalog,
         tool_ports.execution(),
-        spy_binding,
         Arc::new(SpyPolicy {
             called: policy_called.clone(),
         }),
@@ -618,7 +561,9 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
             system: "system",
             identity: ctx.scope(),
             cancellation: ctx.cancellation(),
-            progress: Some(crate::adapters::tool_runtime::progress(tx.clone())),
+            progress: Some(crate::application::runtime_context::tool_progress_sink(
+                tx.clone(),
+            )),
             memory: ctx.memory(),
             catalog: ctx.catalog_query(),
             read_set: ctx.read_set(),
@@ -635,19 +580,6 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     assert!(
         tool_executed.load(Ordering::SeqCst),
         "L2: spy tool must be executed"
-    );
-    // ToolExecutionContextBinding captured.
-    let captured = captured_ctx.lock().unwrap();
-    assert!(
-        captured.is_some(),
-        "L2: ToolExecutionContextBinding must capture the context"
-    );
-    assert!(
-        matches!(
-            captured.as_ref().unwrap().scope().invocation_source(),
-            tools::InvocationSource::SubAgent
-        ),
-        "L2: derived binding scope must be SubAgent"
     );
     // Policy spy called during tool execution.
     assert!(
@@ -743,7 +675,6 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     let (parent_ctx, shared_factory) = assemble_test_context(
         catalog,
         tool_ports.execution(),
-        tool_ports.binding(),
         Arc::new(SpyPolicy {
             called: Arc::new(AtomicBool::new(false)),
         }),
@@ -822,7 +753,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
                 system: "system",
                 identity: ctx.scope(),
                 cancellation: ctx.cancellation(),
-                progress: Some(crate::adapters::tool_runtime::progress(tx)),
+                progress: Some(crate::application::runtime_context::tool_progress_sink(tx)),
                 memory: ctx.memory(),
                 catalog: ctx.catalog_query(),
                 read_set: ctx.read_set(),

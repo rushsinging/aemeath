@@ -244,6 +244,7 @@ async fn append_delegates_finalized_step_to_session_backing() {
         step_id: RunStepId::new("step"),
         source_request_id: ContextRequestId::new("request"),
         finalize_cause: FinalizeCause::RunTerminated,
+        duration_ms: None,
         messages: vec![Message::user("partial")],
         receipts: vec![],
         api_input_tokens: None,

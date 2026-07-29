@@ -96,6 +96,12 @@ pub struct ToolResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalNotice {
+    pub cause: super::terminal::TerminalCause,
+    pub duration: Option<std::time::Duration>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppendSystemMessage {
     pub text: String,
 }
@@ -418,6 +424,7 @@ pub enum ConversationIntent {
     ToolCallStart(ToolCallStart),
     ToolCallUpdate(ToolCallUpdate),
     ToolResult(ToolResult),
+    TerminalNotice(TerminalNotice),
     AppendSystemMessage(AppendSystemMessage),
     UpsertModelStreamPlaceholder(UpsertModelStreamPlaceholder),
     ClearModelStreamPlaceholder(ClearModelStreamPlaceholder),

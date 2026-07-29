@@ -27,7 +27,7 @@ pub(crate) fn test_tool_execution_context(
     tools::ToolExecutionContext::new(
         tools::ExecutionScope::builder("test-run", views.read().workspace_id(), root).build(),
         tools::ToolExecutionPorts::new(
-            crate::adapters::tool_runtime::cancellation(cancel.clone()),
+            crate::application::runtime_context::tool_cancellation_signal(cancel.clone()),
             workspace.read_access(),
             Arc::new(tools::MutexReadSet(Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),

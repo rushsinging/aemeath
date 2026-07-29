@@ -28,7 +28,6 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use tokio_util::sync::CancellationToken;
 
 use crate::domain::invocation::{HookInvocation, HookPoint, StopFailureInput};
 use crate::domain::outcome::{
@@ -38,7 +37,7 @@ use crate::domain::outcome::{
 use crate::domain::protocol::classify_output;
 use crate::domain::subscription::{HookCommand, HookSubscription, SubscriptionError};
 
-use crate::ports::{HookDispatchContext, HookPort};
+use crate::ports::{CancellationSignal, HookDispatchContext, HookPort};
 
 pub(crate) use executor::{ExecutionFault, Executor, ProcessDriverExecutor};
 #[cfg(test)]
@@ -134,7 +133,7 @@ impl HookPort for Dispatcher {
     async fn dispatch(
         &self,
         invocation: HookInvocation,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         self.dispatch_at(invocation, HookDispatchContext::new(cwd), cancellation)
@@ -145,7 +144,7 @@ impl HookPort for Dispatcher {
         &self,
         invocation: HookInvocation,
         context: HookDispatchContext,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         let point = invocation.point();
 
@@ -427,7 +426,7 @@ impl Dispatcher {
         current_input: &serde_json::Value,
         cwd: &std::path::Path,
         env: &HashMap<String, String>,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> AttemptOutcome {
         let mut attempts: u8 = 0;
         let mut executions: Vec<HookExecution> = Vec::new();
@@ -541,7 +540,7 @@ impl Dispatcher {
         error: String,
         cwd: &std::path::Path,
         env: &HashMap<String, String>,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         let turns = match stop_invocation {
             HookInvocation::Stop(input) => input.turns,
