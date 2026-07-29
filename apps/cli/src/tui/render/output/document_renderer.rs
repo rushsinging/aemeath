@@ -64,6 +64,12 @@ struct RootLayoutKey {
     markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
 }
 
+impl RootLayoutKey {
+    fn matches_semantics(self, other: Self) -> bool {
+        self.fingerprint == other.fingerprint && self.markdown_spacing == other.markdown_spacing
+    }
+}
+
 #[derive(Clone, Copy)]
 struct RootLayoutEntry {
     key: RootLayoutKey,
@@ -213,10 +219,6 @@ impl OutputDocumentRenderer {
     ) -> OutputRenderResult {
         #[cfg(test)]
         let started = std::time::Instant::now();
-        // 先用 root 轻量布局索引解析每棵子树的行数。索引命中只扫描 BlockNode
-        // 元数据，不执行 Markdown/diff/syntax render；未知或失效 root 本帧渲染一次完成测量。
-        let mut measured_groups: HashMap<String, Vec<RenderedBlock>> = HashMap::new();
-        let mut root_line_counts = Vec::with_capacity(view_model.roots.len());
         let semantic_root_ids: HashSet<&str> = view_model
             .roots
             .iter()
@@ -225,50 +227,73 @@ impl OutputDocumentRenderer {
         self.root_layouts
             .retain(|id, _| semantic_root_ids.contains(id.as_str()));
 
-        for root in &view_model.roots {
+        let mut root_line_counts = Vec::with_capacity(view_model.roots.len());
+        let mut measured_groups: HashMap<String, Vec<RenderedBlock>> = HashMap::new();
+        let mut stale_layouts = Vec::new();
+        for (index, root) in view_model.roots.iter().enumerate() {
             let key = root_layout_key(root, outer_width, animation_frame, markdown_spacing);
-            let cached_lines = self
-                .root_layouts
-                .get(&root.block_id)
-                .filter(|entry| entry.key == key)
-                .map(|entry| entry.line_count);
-            let line_count = if let Some(line_count) = cached_lines {
-                line_count
-            } else {
-                let mut group = Vec::new();
-                self.render_node(
-                    root,
-                    outer_width,
-                    0,
-                    animation_frame,
-                    markdown_spacing,
-                    &mut group,
-                );
-                let line_count = group.iter().map(|block| block.lines.len()).sum();
-                self.root_layouts
-                    .insert(root.block_id.clone(), RootLayoutEntry { key, line_count });
-                measured_groups.insert(root.block_id.clone(), group);
-                line_count
-            };
-            root_line_counts.push(line_count);
+            match self.root_layouts.get(&root.block_id).copied() {
+                Some(entry) if entry.key == key => root_line_counts.push(entry.line_count),
+                Some(entry) if entry.key.matches_semantics(key) => {
+                    root_line_counts.push(entry.line_count);
+                    stale_layouts.push((index, key));
+                }
+                _ => {
+                    let group = self.render_root_group(
+                        root,
+                        outer_width,
+                        animation_frame,
+                        markdown_spacing,
+                    );
+                    let line_count = root_group_line_count(&group);
+                    self.root_layouts
+                        .insert(root.block_id.clone(), RootLayoutEntry { key, line_count });
+                    measured_groups.insert(root.block_id.clone(), group);
+                    root_line_counts.push(line_count);
+                }
+            }
         }
 
-        let selected = select_root_window(&root_line_counts, window);
+        let mut selected = select_root_window(&root_line_counts, window);
+        let mut selected_groups = HashMap::new();
+        loop {
+            let selected_indices = selected.root_range.clone().collect::<HashSet<_>>();
+            let selected_stale = stale_layouts
+                .iter()
+                .copied()
+                .filter(|(index, _)| selected_indices.contains(index))
+                .collect::<Vec<_>>();
+            if selected_stale.is_empty() {
+                break;
+            }
+            for (index, key) in selected_stale {
+                let root = &view_model.roots[index];
+                let group =
+                    self.render_root_group(root, outer_width, animation_frame, markdown_spacing);
+                let line_count = root_group_line_count(&group);
+                self.root_layouts
+                    .insert(root.block_id.clone(), RootLayoutEntry { key, line_count });
+                root_line_counts[index] = line_count;
+                selected_groups.insert(root.block_id.clone(), group);
+            }
+            stale_layouts.retain(|(index, _)| !selected_indices.contains(index));
+            selected = select_root_window(&root_line_counts, window);
+        }
+
         let mut groups = Vec::with_capacity(selected.root_range.len());
         for root in &view_model.roots[selected.root_range.clone()] {
-            if let Some(group) = measured_groups.remove(&root.block_id) {
+            if let Some(group) = selected_groups
+                .remove(&root.block_id)
+                .or_else(|| measured_groups.remove(&root.block_id))
+            {
                 groups.push(group);
             } else {
-                let mut group = Vec::new();
-                self.render_node(
+                groups.push(self.render_root_group(
                     root,
                     outer_width,
-                    0,
                     animation_frame,
                     markdown_spacing,
-                    &mut group,
-                );
-                groups.push(group);
+                ));
             }
         }
         let mut document = RenderedDocument::with_root_groups(groups);
@@ -306,6 +331,25 @@ impl OutputDocumentRenderer {
             source_total_lines: selected.source_total_lines,
             folded_earlier_lines: selected.folded_earlier_lines,
         }
+    }
+
+    fn render_root_group(
+        &mut self,
+        root: &BlockNode,
+        outer_width: u16,
+        animation_frame: u64,
+        markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
+    ) -> Vec<RenderedBlock> {
+        let mut group = Vec::new();
+        self.render_node(
+            root,
+            outer_width,
+            0,
+            animation_frame,
+            markdown_spacing,
+            &mut group,
+        );
+        group
     }
 
     fn render_node(
@@ -460,6 +504,13 @@ impl OutputDocumentRenderer {
     pub fn gutted_render_count(&self) -> usize {
         self.gutted_render_count.get()
     }
+}
+
+fn root_group_line_count(group: &[RenderedBlock]) -> usize {
+    group
+        .iter()
+        .map(|block| block.lines.len())
+        .fold(0usize, usize::saturating_add)
 }
 
 fn collect_semantic_block_ids(roots: &[BlockNode]) -> HashSet<&str> {

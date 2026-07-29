@@ -438,6 +438,142 @@ fn rendered_caches_never_exceed_configured_capacity_across_windows() {
 }
 
 #[test]
+fn resize_reflows_only_the_requested_window_before_remote_history() {
+    let roots = (0..100)
+        .map(|idx| node(&format!("root-{idx}"), &"x".repeat(60), vec![]))
+        .collect();
+    let vm = vm_with_roots(roots);
+    let mut renderer = OutputDocumentRenderer::default();
+    renderer.render_tree_with_window(
+        &vm,
+        80,
+        0,
+        MarkdownSpacingPolicy::normal(),
+        OutputRenderWindow::all(),
+    );
+    let before_resize = renderer.render_count();
+
+    let resized = renderer.render_tree_with_window(
+        &vm,
+        40,
+        0,
+        MarkdownSpacingPolicy::normal(),
+        OutputRenderWindow {
+            line_limit: 4,
+            tail_offset: 0,
+        },
+    );
+
+    assert!(
+        renderer.render_count().saturating_sub(before_resize) <= 2,
+        "resize 只允许重排旧宽度索引选出的边界窗口，不能重排全部 100 个 root"
+    );
+    assert_eq!(
+        resized
+            .document
+            .blocks
+            .last()
+            .map(|block| block.block_id.as_str()),
+        Some("root-99")
+    );
+    assert!(
+        resized.document.total_lines() <= 4 + 1,
+        "精确重排后必须重新收敛到当前宽度的窗口预算"
+    );
+}
+
+#[test]
+fn scrolling_after_resize_reflows_remote_history_on_demand() {
+    let roots = (0..6)
+        .map(|idx| node(&format!("root-{idx}"), &"x".repeat(60), vec![]))
+        .collect();
+    let vm = vm_with_roots(roots);
+    let mut renderer = OutputDocumentRenderer::default();
+    renderer.render_tree_with_window(
+        &vm,
+        80,
+        0,
+        MarkdownSpacingPolicy::normal(),
+        OutputRenderWindow::all(),
+    );
+    renderer.render_tree_with_window(
+        &vm,
+        40,
+        0,
+        MarkdownSpacingPolicy::normal(),
+        OutputRenderWindow {
+            line_limit: 4,
+            tail_offset: 0,
+        },
+    );
+    let before_scroll = renderer.render_count();
+
+    let older = renderer.render_tree_with_window(
+        &vm,
+        40,
+        0,
+        MarkdownSpacingPolicy::normal(),
+        OutputRenderWindow {
+            line_limit: 4,
+            tail_offset: 4,
+        },
+    );
+
+    assert!(
+        renderer.render_count() > before_scroll,
+        "滚动进入窗口的旧宽度 root 必须在访问时惰性重排"
+    );
+    assert_eq!(
+        older
+            .document
+            .blocks
+            .last()
+            .map(|block| block.block_id.as_str()),
+        Some("root-3")
+    );
+    assert!(older.document.total_lines() <= 4 + 1);
+}
+
+#[test]
+fn semantic_change_outside_window_is_measured_before_window_selection() {
+    let roots = (0..6)
+        .map(|idx| node(&format!("root-{idx}"), "one", vec![]))
+        .collect();
+    let vm = vm_with_roots(roots);
+    let mut renderer = OutputDocumentRenderer::default();
+    renderer.render_tree_with_window(
+        &vm,
+        80,
+        0,
+        MarkdownSpacingPolicy::normal(),
+        OutputRenderWindow::all(),
+    );
+    let before_change = renderer.render_count();
+    let mut changed_roots = (0..6)
+        .map(|idx| node(&format!("root-{idx}"), "one", vec![]))
+        .collect::<Vec<_>>();
+    changed_roots[0] = node("root-0", "one\ntwo\nthree", vec![]);
+
+    let rendered = renderer.render_tree_with_window(
+        &vm_with_roots(changed_roots),
+        80,
+        0,
+        MarkdownSpacingPolicy::normal(),
+        OutputRenderWindow {
+            line_limit: 2,
+            tail_offset: 0,
+        },
+    );
+
+    assert_eq!(
+        renderer.render_count(),
+        before_change + 1,
+        "语义变化即使在窗口外也必须更新轻量行数索引"
+    );
+    assert_eq!(rendered.source_total_lines, 14);
+}
+
+#[test]
 fn render_window_zero_limit_returns_empty_window() {
     let selected = select_root_window(
         &[1],
