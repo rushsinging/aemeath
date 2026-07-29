@@ -160,6 +160,20 @@ impl CanonicalSessionRepository {
             fingerprint: append.fingerprint.clone(),
         }
     }
+
+    fn publish_generation(
+        &self,
+        current: &Arc<CanonicalSession>,
+        candidate: CanonicalSession,
+    ) -> Result<(), String> {
+        let mut committed = self.session.write().map_err(|error| error.to_string())?;
+        #[cfg(any(test, feature = "dev"))]
+        crate::adapters::session_lifecycle::record_generation_transition(current, &candidate);
+        #[cfg(not(any(test, feature = "dev")))]
+        let _ = current;
+        *committed = Arc::new(candidate);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -224,10 +238,8 @@ impl SessionRepository for CanonicalSessionRepository {
             .await
             .map_err(AcceptedInputError::Storage)?;
         let revision = SessionRevision::new(candidate.revision);
-        *self
-            .session
-            .write()
-            .map_err(|error| AcceptedInputError::Storage(error.to_string()))? = Arc::new(candidate);
+        self.publish_generation(&current, candidate)
+            .map_err(AcceptedInputError::Storage)?;
         Ok(Self::accepted_receipt(append, revision))
     }
 
@@ -298,10 +310,8 @@ impl SessionRepository for CanonicalSessionRepository {
             .await
             .map_err(ContextAppendError::Storage)?;
         let revision = SessionRevision::new(candidate.revision);
-        *self
-            .session
-            .write()
-            .map_err(|error| ContextAppendError::Storage(error.to_string()))? = Arc::new(candidate);
+        self.publish_generation(&current, candidate)
+            .map_err(ContextAppendError::Storage)?;
         Ok(Self::receipt(append, revision))
     }
 
@@ -365,11 +375,8 @@ impl SessionRepository for CanonicalSessionRepository {
             .save(&candidate)
             .await
             .map_err(ContextPortError::Compact)?;
-        *self
-            .session
-            .write()
-            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))? =
-            Arc::new(candidate);
+        self.publish_generation(&current, candidate)
+            .map_err(ContextPortError::SessionRepository)?;
         Ok(CompactOutcome::Committed(crate::domain::CompactResult {
             summary,
             recent_messages: compacted.recent_messages,
@@ -432,11 +439,8 @@ impl SessionRepository for CanonicalSessionRepository {
             .save(&candidate)
             .await
             .map_err(ContextPortError::Compact)?;
-        *self
-            .session
-            .write()
-            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))? =
-            Arc::new(candidate);
+        self.publish_generation(&current, candidate)
+            .map_err(ContextPortError::SessionRepository)?;
         Ok(CompactOutcome::Committed(crate::domain::CompactResult {
             summary,
             recent_messages: compacted.recent_messages,
@@ -467,11 +471,8 @@ impl SessionRepository for CanonicalSessionRepository {
             .save(&candidate)
             .await
             .map_err(ContextPortError::SessionRepository)?;
-        *self
-            .session
-            .write()
-            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))? =
-            Arc::new(candidate);
+        self.publish_generation(&current, candidate)
+            .map_err(ContextPortError::SessionRepository)?;
         Ok(())
     }
 }

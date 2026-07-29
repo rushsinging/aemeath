@@ -694,6 +694,60 @@ fn static_edit_diff_reuses_render_and_highlight_across_spinner_frames() {
 }
 
 #[test]
+fn retained_cache_capacity_tracks_current_and_peak_entries() {
+    let mut renderer = OutputDocumentRenderer::default();
+    let large = vm_with_roots(vec![
+        assistant_node("a", "alpha"),
+        assistant_node("b", "beta"),
+    ]);
+    let small = vm_with_roots(vec![assistant_node("b", "beta")]);
+
+    renderer.render_tree(&large, 80);
+    let large_capacity = renderer.retained_cache_capacity();
+    assert_eq!(large_capacity.block_entries, 2);
+    assert_eq!(large_capacity.gutted_entries, 2);
+    assert_eq!(large_capacity.root_layout_entries, 2);
+    assert_eq!(large_capacity.peak_block_entries, 2);
+    assert_eq!(large_capacity.peak_gutted_entries, 2);
+    assert_eq!(large_capacity.peak_root_layout_entries, 2);
+
+    renderer.render_tree(&small, 80);
+    let retained = renderer.retained_cache_capacity();
+    assert_eq!(retained.block_entries, 1);
+    assert_eq!(retained.gutted_entries, 1);
+    assert_eq!(retained.root_layout_entries, 1);
+    assert_eq!(retained.peak_block_entries, 2);
+    assert_eq!(retained.peak_gutted_entries, 2);
+    assert_eq!(retained.peak_root_layout_entries, 2);
+
+    renderer.render_tree(&vm_with_roots(Vec::new()), 80);
+    let empty = renderer.retained_cache_capacity();
+    assert_eq!(empty.block_entries, 0);
+    assert_eq!(empty.gutted_entries, 0);
+    assert_eq!(empty.root_layout_entries, 0);
+    assert_eq!(empty.peak_block_entries, 2);
+    assert_eq!(empty.peak_gutted_entries, 2);
+    assert_eq!(empty.peak_root_layout_entries, 2);
+}
+
+#[test]
+fn resize_and_spinner_frame_do_not_grow_retained_cache_entries() {
+    let mut renderer = OutputDocumentRenderer::default();
+    let vm = vm_with_roots(vec![assistant_node("stable", "content")]);
+
+    renderer.render_tree_with_animation_frame(&vm, 80, 0, MarkdownSpacingPolicy::normal());
+    renderer.render_tree_with_animation_frame(&vm, 100, 1, MarkdownSpacingPolicy::normal());
+
+    let retained = renderer.retained_cache_capacity();
+    assert_eq!(retained.block_entries, 1);
+    assert_eq!(retained.gutted_entries, 1);
+    assert_eq!(retained.root_layout_entries, 1);
+    assert_eq!(retained.peak_block_entries, 1);
+    assert_eq!(retained.peak_gutted_entries, 1);
+    assert_eq!(retained.peak_root_layout_entries, 1);
+}
+
+#[test]
 fn test_render_tree_various_widths_keep_every_line_within_outer_width() {
     // 横扫多种 outer_width / text 长度组合，确保 wrap 边界 + gutter 后不超。
     // 修复前：text 长度 = outer_width 时必失败；修复后全过。
