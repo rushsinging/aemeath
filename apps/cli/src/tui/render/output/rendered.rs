@@ -181,6 +181,12 @@ impl RenderedBlock {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RenderedLineAnchor {
+    block_id: String,
+    line_offset: usize,
+}
+
 /// 整个输出文档的渲染产物（按 block 顺序）。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RenderedDocument {
@@ -268,6 +274,45 @@ impl RenderedDocument {
             .copied()
             .unwrap_or(0);
         block.lines.get(index - block_start)
+    }
+
+    pub(crate) fn line_anchor_at(&self, index: usize) -> Option<RenderedLineAnchor> {
+        let (block_index, line_offset) = self.locate_line(index)?;
+        Some(RenderedLineAnchor {
+            block_id: self.blocks.get(block_index)?.block_id.clone(),
+            line_offset,
+        })
+    }
+
+    pub(crate) fn stable_line_anchor_in_range(
+        &self,
+        range: Range<usize>,
+    ) -> Option<(RenderedLineAnchor, usize)> {
+        let end = range.end.min(self.total_lines());
+        for index in range.start.min(end)..end {
+            let anchor = self.line_anchor_at(index)?;
+            if anchor.block_id != "_folded_hint" {
+                return Some((anchor, index.saturating_sub(range.start)));
+            }
+        }
+        None
+    }
+
+    pub(crate) fn line_index_for_anchor(&self, anchor: &RenderedLineAnchor) -> Option<usize> {
+        let block_index = self
+            .blocks
+            .iter()
+            .position(|block| block.block_id == anchor.block_id)?;
+        let block = self.blocks.get(block_index)?;
+        if anchor.line_offset >= block.lines.len() {
+            return None;
+        }
+        let block_start = block_index
+            .checked_sub(1)
+            .and_then(|previous| self.block_line_ends.get(previous))
+            .copied()
+            .unwrap_or(0);
+        Some(block_start.saturating_add(anchor.line_offset))
     }
 
     /// 迭代逻辑行范围。每次单行查询通过累计行索引二分定位，
@@ -408,6 +453,46 @@ mod tests {
         assert_eq!(doc.line_at(1).map(|line| line.plain.as_str()), Some("one"));
         assert_eq!(doc.line_at(2).map(|line| line.plain.as_str()), Some("two"));
         assert_eq!(doc.line_at(3), None);
+    }
+
+    #[test]
+    fn line_anchor_round_trips_across_prefixed_blocks() {
+        let old = RenderedDocument::new(vec![
+            RenderedBlock {
+                block_id: "a".into(),
+                lines: Rc::new(vec![RenderedLine::from_plain("a0")]),
+            },
+            RenderedBlock {
+                block_id: "anchor".into(),
+                lines: Rc::new(vec![
+                    RenderedLine::from_plain("anchor0"),
+                    RenderedLine::from_plain("anchor1"),
+                ]),
+            },
+        ]);
+        let expanded = RenderedDocument::new(vec![
+            RenderedBlock {
+                block_id: "earlier".into(),
+                lines: Rc::new(vec![
+                    RenderedLine::from_plain("earlier0"),
+                    RenderedLine::from_plain("earlier1"),
+                ]),
+            },
+            RenderedBlock {
+                block_id: "a".into(),
+                lines: Rc::new(vec![RenderedLine::from_plain("a0")]),
+            },
+            RenderedBlock {
+                block_id: "anchor".into(),
+                lines: Rc::new(vec![
+                    RenderedLine::from_plain("anchor0"),
+                    RenderedLine::from_plain("anchor1"),
+                ]),
+            },
+        ]);
+
+        let anchor = old.line_anchor_at(2).expect("old anchor");
+        assert_eq!(expanded.line_index_for_anchor(&anchor), Some(4));
     }
 
     #[test]
