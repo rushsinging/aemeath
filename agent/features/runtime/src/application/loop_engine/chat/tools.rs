@@ -332,7 +332,7 @@ pub(crate) async fn send_tool_result<S>(
 ) where
     S: ChatEventSink,
 {
-    let preview = crate::application::tool_result_materialization::ToolResultDisplayPreview::new(
+    let preview = crate::application::tool::result_materialization::ToolResultDisplayPreview::new(
         &execution.outcome.text,
         &execution.outcome.data,
     );
@@ -363,7 +363,7 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
 
 #[cfg(test)]
 mod tests {
-    use super::{execute_tool_round, send_tool_result, tool_results_for_api};
+    use super::{execute_tool_round, send_tool_result};
     use crate::application::loop_engine::chat::{
         ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext,
     };
