@@ -1,7 +1,7 @@
 # 发布与自动更新设计
 
 > 对应 Issue: <https://github.com/rushsinging/aemeath/issues/307>
-> 状态：**已落地**——实现见 `agent/features/update`。本文档为设计归档快照，运行规则以 `specs/update.md` 为准。
+> 状态：**已落地**——实现见 `agent/features/update`。本文档为设计归档快照，运行规则以 `specs/3.12-update.md` 为准。
 
 ## 定位
 
@@ -49,7 +49,7 @@
 
 5. **`docs/design/outline.md`**：支撑域表加入 Update 行
 
-6. **`AGENTS.md` 触发表**：新增 `specs/update.md` 行
+6. **`AGENTS.md` 触发表**：新增 `specs/3.12-update.md` 行
 
 7. **`Cargo.toml` workspace members**：加入 `"agent/features/update"`
 

@@ -7,8 +7,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio_util::sync::CancellationToken;
-
 use crate::application::client::RuntimeContextAssemblyError;
 use crate::application::interaction::port::InteractionBridge;
 use crate::application::run::config::RunConfigSnapshot;
@@ -27,8 +25,8 @@ use crate::ports::{
 };
 use hook::{HookInvocation, HookOutcome, HookPort};
 use tools::{
-    ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionContextBindingPort,
-    ToolExecutionOutcome, ToolExecutionPort, ToolInvocation, ToolProfileName,
+    ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionOutcome,
+    ToolExecutionPort, ToolInvocation, ToolProfileName,
 };
 
 // ── Test helpers ──
@@ -134,18 +132,10 @@ impl ToolExecutionPort for FakeToolExecution {
     async fn execute(
         &self,
         _invocation: ToolInvocation,
-        _cancellation: &dyn tools::CancellationSignal,
+        _context: &tools::ToolExecutionContext,
     ) -> ToolExecutionOutcome {
         ToolExecutionOutcome::success_text("fake")
     }
-}
-
-struct FakeToolContextBinding;
-impl ToolExecutionContextBindingPort for FakeToolContextBinding {
-    fn bind(&self, _context: tools::ToolExecutionContext) -> Result<(), String> {
-        Ok(())
-    }
-    fn unbind(&self, _run_id: &str) {}
 }
 
 struct FakePolicy;
@@ -187,7 +177,7 @@ impl HookPort for FakeHook {
     async fn dispatch(
         &self,
         _invocation: HookInvocation,
-        _cancellation: &CancellationToken,
+        _cancellation: &dyn hook::CancellationSignal,
     ) -> HookOutcome {
         HookOutcome::proceed()
     }
@@ -220,7 +210,6 @@ fn make_services() -> RuntimeServices {
     RuntimeServices {
         tool_catalog: Arc::new(FakeToolCatalog),
         tool_execution: Arc::new(FakeToolExecution),
-        tool_context_binding: Arc::new(FakeToolContextBinding),
         policy: Arc::new(FakePolicy),
         reflection_history: Arc::new(FakeReflectionHistory),
         task: Arc::new(task::TaskStore::new()),
@@ -233,7 +222,6 @@ fn factory() -> RuntimeContextFactory {
     RuntimeContextFactory::new(
         s.tool_catalog,
         s.tool_execution,
-        s.tool_context_binding,
         s.policy,
         s.reflection_history,
         s.task,
@@ -856,7 +844,6 @@ fn assembled_context_preserves_service_port_identity() {
     let _ = ctx.provider();
     let _ = ctx.tool_catalog();
     let _ = ctx.tool_execution();
-    let _ = ctx.tool_context_binding();
     let _ = ctx.policy();
     let _ = ctx.interaction();
     let _ = ctx.memory();
@@ -975,10 +962,6 @@ fn service_ports_are_shared_across_assemblies_binding_ports_are_not() {
     // ── Cross-Run service ports: same Arc identity ──
     assert!(Arc::ptr_eq(&ctx1.tool_catalog(), &ctx2.tool_catalog()));
     assert!(Arc::ptr_eq(&ctx1.tool_execution(), &ctx2.tool_execution()));
-    assert!(Arc::ptr_eq(
-        &ctx1.tool_context_binding(),
-        &ctx2.tool_context_binding()
-    ));
     assert!(Arc::ptr_eq(&ctx1.policy(), &ctx2.policy()));
     assert!(Arc::ptr_eq(
         &ctx1.reflection_history(),

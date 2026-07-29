@@ -155,7 +155,7 @@ mod tests {
                         async fn dispatch(
                             &self,
                             _invocation: hook::HookInvocation,
-                            _cancellation: &tokio_util::sync::CancellationToken,
+                            _cancellation: &dyn hook::CancellationSignal,
                         ) -> hook::HookOutcome {
                             hook::HookOutcome::proceed()
                         }
@@ -165,7 +165,6 @@ mod tests {
                 crate::application::run::context_factory::RuntimeContextFactory::new(
                     tool_ports.catalog_port(),
                     tool_ports.execution(),
-                    tool_ports.binding(),
                     Arc::new(policy::AllowAllPolicy),
                     refl,
                     crate::application::run::test_task_access(),

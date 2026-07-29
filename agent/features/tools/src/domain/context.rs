@@ -177,6 +177,7 @@ pub struct ToolExecutionPorts {
     user_agent: String,
     authorization: AuthorizationContext,
     skill_query: SkillQuerySnapshot,
+    selection: share::config::ToolSelection,
 }
 impl ToolExecutionPorts {
     pub fn new(
@@ -202,6 +203,7 @@ impl ToolExecutionPorts {
             user_agent: share::config::Config::default().api.user_agent,
             authorization: AuthorizationContext::STANDARD,
             skill_query: SkillQuerySnapshot::default(),
+            selection: share::config::ToolSelection::default(),
         }
     }
     pub fn with_agent(mut self, agent: Option<Arc<dyn AgentDispatch>>) -> Self {
@@ -226,6 +228,11 @@ impl ToolExecutionPorts {
         self
     }
 
+    pub fn with_selection(mut self, selection: share::config::ToolSelection) -> Self {
+        self.selection = selection;
+        self
+    }
+
     pub fn with_memory_context(
         mut self,
         parent_session_id: Option<String>,
@@ -244,6 +251,9 @@ pub struct ToolExecutionContext {
 impl ToolExecutionContext {
     pub fn new(scope: ExecutionScope, ports: ToolExecutionPorts) -> Self {
         Self { scope, ports }
+    }
+    pub fn selection(&self) -> &share::config::ToolSelection {
+        &self.ports.selection
     }
     pub fn scope(&self) -> &ExecutionScope {
         &self.scope
@@ -292,6 +302,11 @@ impl ToolExecutionContext {
     }
     pub fn authorization(&self) -> AuthorizationContext {
         self.ports.authorization
+    }
+    pub fn with_cancellation(&self, cancellation: Arc<dyn CancellationSignal>) -> Self {
+        let mut next = self.clone();
+        next.ports.cancellation = cancellation;
+        next
     }
     pub fn with_authorization(&self, authorization: AuthorizationContext) -> Self {
         let mut next = self.clone();

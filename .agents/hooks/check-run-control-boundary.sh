@@ -11,7 +11,7 @@ if grep -nE 'CancellationToken|Sender<|Receiver<|Mutex<|RwLock<|Arc<' "$SDK_RUN"
   fail=1
 fi
 
-for api in cancel_run_step terminate_run; do
+for api in cancel_current_run cancel_run_step terminate_run; do
   if ! grep -q "fn ${api}" "$CLIENT"; then
     echo "Target Main run control API missing after #1247 cutover: ${api}." >&2
     fail=1

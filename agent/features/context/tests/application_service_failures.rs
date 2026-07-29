@@ -22,7 +22,7 @@ impl SessionRepository for Session {
     async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
         Ok(SessionSnapshot {
             revision: SessionRevision::new(0),
-            messages: vec![],
+            messages: vec![].into(),
             active_summary: None,
         })
     }

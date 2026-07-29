@@ -21,8 +21,7 @@ pub(super) async fn list_reflection_history_impl(
         .inner
         .shell
         .runtime_context_factory
-        .services()
-        .reflection_history
+        .reflection_history()
         .list(limit)
         .await
         .map_err(|error| SdkError::Internal(format!("List reflection history failed: {error}")))?;

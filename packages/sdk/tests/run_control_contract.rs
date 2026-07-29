@@ -1,10 +1,26 @@
-use sdk::{CancelRunStepOutcome, ControlDeadline, RunTerminationReason, TerminateRunOutcome};
+use sdk::{
+    CancelCurrentRunOutcome, CancelRunStepOutcome, ControlDeadline, RunTerminationReason,
+    TerminateRunOutcome,
+};
 
 fn round_trip<T>(value: &T) -> T
 where
     T: serde::Serialize + serde::de::DeserializeOwned,
 {
     serde_json::from_str(&serde_json::to_string(value).unwrap()).unwrap()
+}
+
+#[test]
+fn cancel_current_run_outcomes_round_trip() {
+    for outcome in [
+        CancelCurrentRunOutcome::Accepted,
+        CancelCurrentRunOutcome::AlreadyCancelling,
+        CancelCurrentRunOutcome::RunTerminating,
+        CancelCurrentRunOutcome::RunTerminal,
+        CancelCurrentRunOutcome::NoActiveRun,
+    ] {
+        assert_eq!(round_trip(&outcome), outcome);
+    }
 }
 
 #[test]

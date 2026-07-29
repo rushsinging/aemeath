@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio_util::sync::CancellationToken;
 
 use crate::domain::subscription::HookCommand;
+use crate::ports::CancellationSignal;
 
 use super::executor::{ExecutionFault, Executor, RawExecution};
 
@@ -129,7 +129,7 @@ impl Executor for Scripted {
         _cwd: &std::path::Path,
         _env: &std::collections::HashMap<String, String>,
         _timeout: Duration,
-        _cancellation: &CancellationToken,
+        _cancellation: &dyn CancellationSignal,
     ) -> Result<RawExecution, ExecutionFault> {
         self.calls
             .lock()

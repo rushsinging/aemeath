@@ -31,6 +31,9 @@ pub struct Run {
     /// Incremented each time the stop hook blocks completion.
     /// After 15 blocks the 16th triggers RetryExhausted → Run Failed.
     stop_hook_block_count: usize,
+    /// 当前 Run 是否有由用户取消并完成持久化收口的 Step。
+    /// Run 可以随后 drain/seal 为 Completed，但对外终态必须保持 UserCancelled。
+    user_cancelled_step: bool,
     steps: Vec<RunStep>,
     started_at: Option<Instant>,
     events: Vec<RunDomainEvent>,
@@ -52,6 +55,7 @@ impl Run {
             pending_completion_result: None,
             next_drain_epoch: 0,
             stop_hook_block_count: 0,
+            user_cancelled_step: false,
             steps: Vec::new(),
             started_at: None,
             events: Vec::new(),
@@ -553,6 +557,7 @@ impl Run {
                 run_id: self.id.clone(),
                 parent_run_id: self.parent_id.clone(),
                 result,
+                user_cancelled_step: self.user_cancelled_step,
             });
         }
         Ok(())
@@ -635,6 +640,9 @@ impl Run {
         }
         let confirmed = terminal == RunStepStatus::Cancelled;
         step.status = terminal;
+        if confirmed {
+            self.user_cancelled_step = true;
+        }
         self.transition(RunTransition::StepCancelled)?;
         self.events.push(RunDomainEvent::StepCancelled {
             run_id: self.id.clone(),

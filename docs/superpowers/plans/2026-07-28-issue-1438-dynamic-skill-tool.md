@@ -740,10 +740,10 @@ git commit -m "feat: render dynamic skill calls safely"
 - Modify: `.agents/hooks/check-tool-catalog-execution-boundary.sh`
 - Modify: `.agents/hooks/check-tool-catalog-execution-boundary-tests.sh`
 - Modify: `docs/design/03-engineering/01-architecture-guards.md`
-- Modify: `specs/runtime.md`
-- Modify: `specs/tools.md`
-- Modify: `specs/tui-cli.md`
-- Modify: `specs/prompt.md`
+- Modify: `specs/3.4-runtime.md`
+- Modify: `specs/3.5-tools.md`
+- Modify: `specs/3.3-tui-cli.md`
+- Modify: `specs/3.7-prompt.md`
 - Delete/rename: all obsolete Skill materialization/PromptInjection tests identified below
 
 - [ ] **Step 1: 先写 Guard 负例**
@@ -835,4 +835,3 @@ git commit -m "chore: retire eager skill delivery"
 - 不新增 Skill 正文缓存、filesystem watcher 或 MCP remote Skill 协议；metadata 仅在明确边界重新扫描并以 revision 去重。
 - 不在本 Issue 引入 `allowed-tools` 动态扩权、model override、forked Skill 或 hook 注册；这些需要独立安全设计和用户确认。
 - 不增加 L5 真终端测试；进程内 L4 已覆盖完整 typed 链路。
-

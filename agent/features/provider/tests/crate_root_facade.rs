@@ -5,6 +5,7 @@ use provider::{
     RawUsageSnapshot, ReasoningCapability, ReasoningLevel, ReasoningMappingKind,
     RequestSystemBlock, RequestedInvocationOptions, ResolvedInvocationOptions,
 };
+use share::message::Message;
 
 #[test]
 fn crate_root_exposes_complete_provider_published_language_as_send_sync_values() {
@@ -31,6 +32,22 @@ fn crate_root_exposes_complete_provider_published_language_as_send_sync_values()
     assert_send_sync::<RequestSystemBlock>();
     assert_send_sync::<RequestedInvocationOptions>();
     assert_send_sync::<ResolvedInvocationOptions>();
+}
+
+#[test]
+fn invocation_request_clone_shares_message_backing() {
+    let request = InvocationRequest::new(
+        ModelId {
+            provider: "contract-provider".to_string(),
+            model: "contract-model".to_string(),
+        },
+        vec![Message::user("history")],
+        InvocationOptions::new(8_192, ReasoningLevel::Off),
+    );
+    let cloned = request.clone();
+
+    assert_eq!(request.messages.as_ptr(), cloned.messages.as_ptr());
+    assert_eq!(cloned.messages[0].text_content(), "history");
 }
 
 #[test]

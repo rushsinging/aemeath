@@ -1,13 +1,35 @@
 use context::adapters::decode_session;
 use context::domain::session::{
-    AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
-    FinalizedStepRecord, SessionCodec, SessionCodecError, SnapshotState,
-    CURRENT_SESSION_SCHEMA_VERSION,
+    AcceptedInputProjection, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
+    CommittedStepMessages, FinalizedOutcomeProjection, SessionCodec, SessionCodecError,
+    SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };
 use context::domain::{FinalizeCause, StepReceipt, ToolOutcomeKind};
 use serde_json::json;
 use share::message::Message;
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
+
+#[test]
+fn committed_step_messages_clone_shares_the_same_backing() {
+    let messages = CommittedStepMessages::from(vec![Message::user("shared")]);
+    let cloned = messages.clone();
+
+    assert!(std::ptr::eq(messages.as_ptr(), cloned.as_ptr()));
+    assert_eq!(messages[0].text_content(), "shared");
+}
+
+#[test]
+fn committed_step_messages_preserve_the_existing_json_array_wire() {
+    let messages = CommittedStepMessages::from(vec![Message::user("wire")]);
+
+    assert_eq!(
+        serde_json::to_value(&messages).unwrap(),
+        json!([Message::user("wire")])
+    );
+    let decoded: CommittedStepMessages =
+        serde_json::from_value(json!([Message::user("wire")])).unwrap();
+    assert_eq!(decoded[0].text_content(), "wire");
+}
 
 #[test]
 fn current_envelope_round_trips_canonically() {
@@ -44,14 +66,14 @@ fn legacy_messages_upgrade_to_single_normal_chat() {
 }
 
 #[test]
-fn structured_view_flattens_steps_once() {
+fn structured_projection_flattens_steps_once() {
     let mut session = CanonicalSession::fixture("structured");
     session.run_slices = vec![
         CommittedRunSlice::new(
             "run-a",
             vec![CommittedRunStep::accepted_only(
                 "step-a",
-                AcceptedInputRecord::new(vec![Message::user("accepted-a")], "fp-a", 1),
+                AcceptedInputProjection::new(vec![Message::user("accepted-a")], "fp-a", 1),
             )],
         ),
         CommittedRunSlice::new(
@@ -78,7 +100,7 @@ fn accepted_only_step_round_trips_without_outcome_or_runtime_state() {
         "run",
         vec![CommittedRunStep::accepted_only(
             "step",
-            AcceptedInputRecord::new(vec![Message::user("durable input")], "fp", 1),
+            AcceptedInputProjection::new(vec![Message::user("durable input")], "fp", 1),
         )],
     )];
     session.revision = 1;
@@ -108,14 +130,15 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
         "run",
         vec![CommittedRunStep {
             step_id: "step".to_string(),
-            accepted_input: Some(AcceptedInputRecord::new(
+            accepted_input: Some(AcceptedInputProjection::new(
                 vec![Message::user("accepted")],
                 "input-fingerprint",
                 1,
             )),
-            outcome: Some(FinalizedStepRecord {
+            outcome: Some(FinalizedOutcomeProjection {
                 finalize_cause: FinalizeCause::UserCancelledStep,
-                messages: vec![Message::user("partial assistant")],
+                duration_ms: Some(7_325_000),
+                messages: vec![Message::user("partial assistant")].into(),
                 receipts: vec![StepReceipt::agent(
                     "agent-call",
                     0,
@@ -125,6 +148,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
                 fingerprint: "outcome-fingerprint".to_string(),
                 committed_revision: 2,
             }),
+            tool_receipts: Vec::new(),
         }],
     )];
     session.revision = 2;
@@ -135,6 +159,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
         .as_ref()
         .unwrap();
     assert_eq!(outcome.finalize_cause, FinalizeCause::UserCancelledStep);
+    assert_eq!(outcome.duration_ms, Some(7_325_000));
     assert_eq!(outcome.messages[0].text_content(), "partial assistant");
     assert_eq!(
         outcome.receipts[0].outcome(),
@@ -155,7 +180,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
 }
 
 #[test]
-fn v2_compatibility_outcome_vector_upgrades_as_single_view() {
+fn v2_compatibility_outcome_vector_upgrades_as_single_projection() {
     let bytes = serde_json::to_vec(&json!({
         "schema_version": 2,
         "id": "v2-bridge",
@@ -284,6 +309,29 @@ fn explicit_empty_snapshot_is_distinct_from_missing() {
         decoded.session.workspace,
         SnapshotState::CapturedEmpty
     ));
+}
+
+#[test]
+fn v3_session_upgrades_with_empty_tool_receipt_ledgers() {
+    let mut value = serde_json::to_value(
+        serde_json::from_slice::<serde_json::Value>(
+            &SessionCodec::encode(&CanonicalSession::fixture("v3-upgrade")).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    value["schema_version"] = serde_json::json!(3);
+    let bytes = serde_json::to_vec(&value).unwrap();
+
+    let decoded = decode_session(&bytes).unwrap();
+
+    assert!(decoded.upgraded_from_legacy);
+    assert!(decoded
+        .session
+        .run_slices
+        .iter()
+        .flat_map(|slice| &slice.steps)
+        .all(|step| step.tool_receipts.is_empty()));
 }
 
 #[test]

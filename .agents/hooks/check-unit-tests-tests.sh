@@ -33,6 +33,7 @@ make_fake_cargo() {
 set -euo pipefail
 
 package=""
+args=("$@")
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "-p" ]; then
     package="$2"
@@ -42,6 +43,9 @@ while [ "$#" -gt 0 ]; do
 done
 
 printf '%s\n' "$package" >>"$FAKE_CARGO_LOG"
+printf '%s\t' "$package" >>"$FAKE_CARGO_ARGS_LOG"
+printf '%s ' "${args[@]}" >>"$FAKE_CARGO_ARGS_LOG"
+printf '\n' >>"$FAKE_CARGO_ARGS_LOG"
 while IFS= read -r git_local_env; do
   if [ -n "$git_local_env" ]; then
     eval "git_local_value=\${$git_local_env-<unset>}"
@@ -73,6 +77,7 @@ run_hook() {
     CARGO_TARGET_DIR="$repo/target/hook-tests" \
     FAKE_CARGO_MODE="$mode" \
     FAKE_CARGO_LOG="$log" \
+    FAKE_CARGO_ARGS_LOG="$repo/cargo-args.log" \
     FAKE_CARGO_ENV_LOG="$repo/cargo-env.log" \
     FAKE_CARGO_PID_FILE="$pid_file" \
     FAKE_GIT_LOCAL_ENV_NAMES="$(git rev-parse --local-env-vars)" \
@@ -130,6 +135,17 @@ main() {
   expected_env_lines=$(($(printf '%s\n' "$git_local_env_names" | grep -c .) * 2))
   [ "$(wc -l <"$repo/cargo-env.log" | tr -d ' ')" -eq "$expected_env_lines" ] \
     || fail "every git repository-local variable must be checked for both cargo runs"
+
+  : >"$log"
+  : >"$repo/cargo-env.log"
+  : >"$repo/cargo-args.log"
+  output="$(run_hook "$repo" "$bin_dir" pass "$log" "$pid_file")"
+  printf '%s' "$output" | grep -q 'cargo test -p composition --tests' \
+    || fail "hook output must identify the composition integration-test gate: $output"
+  [ "$(grep -c '^composition$' "$log")" -eq 1 ] \
+    || fail "composition must run exactly once: $(cat "$log")"
+  grep -q $'^composition\t.*test -p composition --tests ' "$repo/cargo-args.log" \
+    || fail "composition must run all integration tests: $(cat "$repo/cargo-args.log")"
 
   echo "check-unit-tests hook regression tests passed"
 }

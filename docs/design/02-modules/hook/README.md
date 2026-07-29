@@ -15,7 +15,7 @@ Hook 是可插拔生命周期扩展机制，不是 Policy、Workflow 或第二�
   → 调用方解释 directive 并推进自己的聚合
 ```
 
-本期采用一个类型化 HookPort。Boundary / Tool / Notification 是 HookPoint 元数据，不拆成多个端口；未来只有出现不同沙箱、一致性、并发或安全策略时才重新评估。
+本期采用一个类型化 HookPort。Boundary / Tool / Notification 是 HookPoint 元数据，不拆成多个端口；未来只有出现不同沙箱、一致性、并发或安全策略时才重新评估。`CancellationSignal` 是 Hook-owned 最小协作取消 PL（`is_cancelled` + `cancelled`），**NEVER** 在 HookPort 公开签名中暴露 Tokio `CancellationToken`；Runtime 仅在调用边界适配自己的 cancellation scope。
 
 ## 2. 单一端口与类型化输入
 

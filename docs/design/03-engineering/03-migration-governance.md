@@ -2,7 +2,7 @@
 
 > 层级：03-engineering（工程守则）
 > 状态：过渡追踪｜Milestone：v0.1.0｜对应 Issue：#743 / #761（S2 盘点）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
-> **本文是 Current → Target 差距、迁移责任、进度与退出条件的唯一真相源**。01-system / 02-modules 设计文档只写目标态；已启用守卫的脚本行为、常量与白名单以 [Architecture Guards](01-architecture-guards.md) 为真相源；开发者当前 **MUST** 遵守的 Project 操作约束见 [`specs/project.md`](../../../specs/project.md)。
+> **本文是 Current → Target 差距、迁移责任、进度与退出条件的唯一真相源**。01-system / 02-modules 设计文档只写目标态；已启用守卫的脚本行为、常量与白名单以 [Architecture Guards](01-architecture-guards.md) 为真相源；开发者当前 **MUST** 遵守的 Project 操作约束见 [`specs/3.8-project.md`](../../../specs/3.8-project.md)。
 >
 > **#1021 Guard 例外治理基线（2026-07-19）**：`.agents/architecture-guard-registry.json` 已成为 Guard policy / scope / suppression / migration exception 的单一机器可读注册表；`check-guard-registry.sh` 通过 xtask 校验 stable id、必填归责、path stale、Shell 隐式排除引用和仓库/模块预算。#883 删除 Storage-owned `memory_store` / `task_store` 后，Current migration debt 降为 repository `6`：Runtime `5`（4 个层间倒置 + 1 个 shared-adapter bridge）、TUI `1`（#947 承接的 slash async dispatch），Storage `0`。Storage 的 façade/Cargo edge、Composition 唯一装配点均归 Target policy，不计债务；Workflow、Audit、Project 机器报告 migration exception 为 `0`，与人工基线一致。该注册表只治理 Current 例外，capability-first 正式 Guard 与 legacy COLA 退役仍由 #1022 承接。
 
@@ -59,6 +59,14 @@ legacy guard 替换的退出证据 **MUST** 包括：
 O6 只有在 Runtime #874/#878 与 TUI 三个 issue 的退出证据全部附于各自 PR、父 Issue 状态同步，且 #982 完成全局故意违规证明后才可标记完成。任何中间 PR **NEVER** 通过保留第二条 UiEvent 直达 Model 或 TUI-owned reply registry 路径换取兼容。
 
 ## 2. Agent Runtime Current → Target
+
+### Issue #1440：Tool 硬 deadline 与 durable receipt
+
+| Current | Target | 责任与退出条件 |
+|---|---|---|
+| #1440 前，Runtime、Bash、Agent/MCP 路径分别解释 timeout；同步 Glob/文件工作可能阻塞 Tokio worker；已接受 ToolCall 只在 finalized Step 后进入 Session，强制 abort 可能丢失 call identity | 当前已落地 Runtime `ToolExecutionSupervisor`：按 Scope、Run 与 descriptor 选择最早 absolute deadline，协调用户取消与 250ms grace，并把 cleanup 未确认诚实映射为 `CancellationUnconfirmed`；Tool phase 不再被外层 interrupt select 提前 drop，必须完成 terminal receipt durable mutation 后才能 finalize Step。Context Management 以同一 CanonicalSession/AtomicBlob 原子推进 durable `ToolCallReceipt` 的 `Pending → Running → terminal`；恢复对有对应孤立 `tool_use` 的历史 Pending/Running receipt 只读补齐 provider-safe `CancellationUnconfirmed` ToolResult，不回写 ledger或重放 future。Glob 已进入 blocking pool并轮询 cancellation；Bash/Agent 保留各自资源 cleanup/child Run 终止语义 | Issue #1440 当前证据：Main/Sub 普通 Tool、Agent Tool、AskUser 首次调用及 approval continuation 均经 supervisor；Session wire v4 与 v3 兼容 reader、receipt mutation、mixed-result finalization、Tool phase settle-before-finalize、历史 unfinished receipt 恢复投影、Glob cancellation、Bash process-tree timeout、生命周期日志及静态 guard 均有对应测试。仍属后续 Target：实现未确认调用的跨 Step 同名重入门禁；将 MCP remote cancellation confirmation 建模为独立协议 |
+
+实施证据记录在 `docs/superpowers/plans/2026-07-28-issue-1440-tool-hard-timeout-persistence.md`；完成前必须同步 #1440 checklist、测试命令与未完成项的可验证理由。
 
 ### SDK Wire Schema 基线（#674）
 

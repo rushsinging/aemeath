@@ -5,7 +5,7 @@ use crate::tui::model::conversation::intent::{
 };
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
-use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
+use crate::tui::render::output::document_renderer::{OutputDocumentRenderer, OutputRenderWindow};
 use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
 use crate::tui::render::performance::{capture, percentiles_ns, RenderPerformanceSnapshot};
 use crate::tui::view_model::OutputBlockKind;
@@ -135,6 +135,43 @@ fn edit_cold_work_scales_and_spinner_warm_render_reuses_static_diff() {
 }
 
 #[test]
+fn edit_cold_window_limits_diff_work_to_selected_history() {
+    fn render(edit_count: usize) -> RenderPerformanceSnapshot {
+        let conversation = edit_conversation(edit_count, 100);
+        let vm = OutputViewAssembler::assemble_from_conversation(
+            &conversation,
+            conversation.revision(),
+            None,
+        );
+        let mut renderer = OutputDocumentRenderer::default();
+        let (_, metrics) = capture(|| {
+            renderer.render_tree_with_window(
+                &vm,
+                100,
+                0,
+                MarkdownSpacingPolicy::normal(),
+                OutputRenderWindow {
+                    line_limit: 100,
+                    tail_offset: 0,
+                },
+            )
+        });
+        metrics
+    }
+
+    let small = render(10);
+    let large = render(100);
+
+    assert_eq!(small.edit_diff_calls, 1);
+    assert_eq!(large.edit_diff_calls, small.edit_diff_calls);
+    assert_eq!(
+        large.syntax_highlighter_creations,
+        small.syntax_highlighter_creations
+    );
+    assert_eq!(large.syntax_highlight_calls, small.syntax_highlight_calls);
+}
+
+#[test]
 fn revision_update_after_history_trim_reuses_windowed_static_edit_layout() {
     let mut conversation = edit_conversation(6, 2_000);
     let mut renderer = OutputDocumentRenderer::default();
@@ -144,9 +181,17 @@ fn revision_update_after_history_trim_reuses_windowed_static_edit_layout() {
         None,
     );
     let (_, cold) = capture(|| {
-        renderer.render_model_document(&first_vm, 100, 100, 0, MarkdownSpacingPolicy::normal())
+        renderer.render_tree_with_window(
+            &first_vm,
+            100,
+            0,
+            MarkdownSpacingPolicy::normal(),
+            OutputRenderWindow {
+                line_limit: 10_000,
+                tail_offset: 0,
+            },
+        )
     });
-
     conversation.apply(AppendSystemMessage {
         text: "与既有 Edit 内容无关的新消息".to_string(),
     });
@@ -156,14 +201,88 @@ fn revision_update_after_history_trim_reuses_windowed_static_edit_layout() {
         None,
     );
     let (_, revised) = capture(|| {
-        renderer.render_model_document(&next_vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+        renderer.render_tree_with_window(
+            &next_vm,
+            100,
+            1,
+            MarkdownSpacingPolicy::normal(),
+            OutputRenderWindow {
+                line_limit: 10_000,
+                tail_offset: 0,
+            },
+        )
     });
-
-    assert!(cold.block_cache_retain_evictions > 0);
-    assert!(cold.gutted_cache_retain_evictions > 0);
+    assert_eq!(
+        cold.block_cache_retain_evictions, 0,
+        "窗口裁剪不再逐出语义上仍存活的 block cache"
+    );
+    assert_eq!(
+        cold.gutted_cache_retain_evictions, 0,
+        "窗口裁剪不再逐出语义上仍存活的 gutted cache"
+    );
     assert_eq!(revised.edit_diff_calls, 0);
     assert_eq!(revised.diff_build_calls, 0);
     assert_eq!(revised.syntax_highlight_calls, 0);
+}
+
+#[test]
+#[ignore = "性能验收；手动运行：cargo test -p cli --release edit_diff_window_release_workload -- --ignored --nocapture"]
+#[allow(clippy::print_stdout)]
+fn edit_diff_window_release_workload() {
+    const SAMPLES: usize = 20;
+    const WINDOW_LINES: usize = 1_000;
+    println!(
+        "\n=== #1420 Edit diff 窗口化验收（width=100, window_lines={WINDOW_LINES}, samples={SAMPLES}）==="
+    );
+
+    for edit_count in [10usize, 50, 100] {
+        let conversation = edit_conversation(edit_count, 2_000);
+        let vm = OutputViewAssembler::assemble_from_conversation(
+            &conversation,
+            conversation.revision(),
+            None,
+        );
+        let mut cold_ns = Vec::with_capacity(SAMPLES);
+        let mut representative = RenderPerformanceSnapshot::default();
+
+        for sample in 0..SAMPLES {
+            let mut renderer = OutputDocumentRenderer::default();
+            let ((), cold) = capture(|| {
+                let started = Instant::now();
+                let _ = renderer.render_tree_with_window(
+                    &vm,
+                    100,
+                    0,
+                    MarkdownSpacingPolicy::normal(),
+                    OutputRenderWindow {
+                        line_limit: WINDOW_LINES,
+                        tail_offset: 0,
+                    },
+                );
+                cold_ns.push(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX));
+            });
+            assert_eq!(
+                cold.edit_diff_calls, 1,
+                "冷启动 diff 工作量必须受历史窗口约束"
+            );
+            if sample == 0 {
+                representative = cold;
+            }
+        }
+
+        let (cold_p50, cold_p95) = percentiles_ns(&cold_ns).unwrap();
+        println!(
+            "edits={edit_count:>3} total_source_lines={:>6} | cold_p50/p95={:.2}/{:.2}ms diff_calls={} diff_output_lines={} highlighter_creations={} highlight_calls={} highlight_bytes={}",
+            edit_count * 2_000,
+            cold_p50 as f64 / 1_000_000.0,
+            cold_p95 as f64 / 1_000_000.0,
+            representative.edit_diff_calls,
+            representative.diff_build_output_lines,
+            representative.syntax_highlighter_creations,
+            representative.syntax_highlight_calls,
+            representative.syntax_highlight_input_bytes,
+        );
+    }
 }
 
 #[test]
@@ -222,7 +341,7 @@ fn edit_diff_release_workload() {
         let (cold_p50, cold_p95) = percentiles_ns(&cold_ns).unwrap();
         let (warm_p50, warm_p95) = percentiles_ns(&warm_ns).unwrap();
         println!(
-            "edits={edit_count:>2} lines_per_diff={lines_per_diff:>4} total_source_lines={:>5} | assemble_p50/p95={:.2}/{:.2}ms cold_p50/p95={:.2}/{:.2}ms warm_p50/p95={:.3}/{:.3}ms | diff_calls={} diff_output_lines={} highlighter_creations={} highlight_calls={} highlight_bytes={} block_miss={} block_absent={} block_version={} block_width={} block_spacing={} block_evicted={} gutted_miss={} gutted_absent={} gutted_version={} gutted_width={} gutted_depth={} gutted_spacing={} gutted_marker={} gutted_evicted={}",
+            "edits={edit_count:>2} lines_per_diff={lines_per_diff:>4} total_source_lines={:>5} | assemble_p50/p95={:.2}/{:.2}ms cold_p50/p95={:.2}/{:.2}ms warm_p50/p95={:.3}/{:.3}ms | diff_calls={} diff_output_lines={} highlighter_creations={} highlight_calls={} highlight_bytes={} block_miss={} block_absent={} block_version={} block_width={} block_spacing={} block_evicted={} gutted_miss={} gutted_absent={} gutted_version={} gutted_width={} gutted_depth={} gutted_spacing={} gutted_evicted={}",
             edit_count * lines_per_diff,
             assemble_p50 as f64 / 1_000_000.0,
             assemble_p95 as f64 / 1_000_000.0,
@@ -247,8 +366,6 @@ fn edit_diff_release_workload() {
             representative.gutted_cache_width_misses,
             representative.gutted_cache_depth_misses,
             representative.gutted_cache_spacing_misses,
-            representative.gutted_cache_marker_misses,
-            representative.gutted_cache_retain_evictions,
-        );
+            representative.gutted_cache_retain_evictions,        );
     }
 }

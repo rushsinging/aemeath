@@ -123,7 +123,7 @@ runtime: load_session → SessionRestore::from_session → ChatChain::from_chats
 
 ### 对齐项目既有 doctrine（非另立标准）
 
-- `specs/project.md`：`WorkspaceService` 是**唯一可变 workspace 状态源**，单锁，"NEVER 在别处另建可变状态或缓存副本" + COLA 分层 + git 出站端口。
+- `specs/3.8-project.md`：`WorkspaceService` 是**唯一可变 workspace 状态源**，单锁，"NEVER 在别处另建可变状态或缓存副本" + COLA 分层 + git 出站端口。
 - TUI **输入唯一真相**在 `model.input.document`。
 
 输入与 workspace 都已收敛为「单一可变真相 + 投影」，**会话历史是目前唯一未收口的核心状态**，应照同一模式治理。

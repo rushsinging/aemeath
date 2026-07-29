@@ -9,6 +9,8 @@ use crate::domain::skill_pl::{
     SkillCatalogPort, SkillError, SkillLoadPort, SkillLoadQuery, SkillQuery, SkillSourceKind,
 };
 
+// ── helpers ────────────────────────────────────────────────────────────
+
 fn fresh_project() -> std::path::PathBuf {
     tempfile::tempdir().expect("tempdir").keep()
 }

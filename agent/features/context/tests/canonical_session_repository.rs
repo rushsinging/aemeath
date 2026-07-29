@@ -3,14 +3,14 @@ use std::sync::{Arc, Mutex, RwLock};
 use async_trait::async_trait;
 use context::adapters::{CanonicalSessionRepository, CanonicalSessionWriter};
 use context::domain::session::{
-    AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
+    AcceptedInputProjection, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
     SnapshotState,
 };
 use context::domain::{
     AcceptedInputAppend, AcceptedInputError, CompactRequest, CompactTrigger, ContentFingerprint,
     ContextAppend, ContextAppendError, ContextRequest, ContextRequestId, FinalizeCause, Language,
     ManualCompactRequest, RunStepId, SessionId, SessionRevision, SystemPromptSpec,
-    TaskReminderSnapshot,
+    TaskReminderSnapshot, ToolCallIdentity, ToolCallState, ToolReceiptMutation,
 };
 use context::ports::SessionRepository;
 use project::{PreparedWorkspaceRestore, WorkspacePersist, WorkspaceRestoreError};
@@ -96,10 +96,24 @@ fn append(fingerprint: &str) -> ContextAppend {
         step_id: RunStepId::new("step"),
         source_request_id: ContextRequestId::new("request"),
         finalize_cause: FinalizeCause::Completed,
+        duration_ms: None,
         messages: vec![Message::user("fact")],
         receipts: vec![],
         api_input_tokens: None,
         fingerprint: ContentFingerprint::new(fingerprint),
+    }
+}
+
+fn tool_identity() -> ToolCallIdentity {
+    ToolCallIdentity {
+        session_id: SessionId::new("session"),
+        run_id: RunId::new("run"),
+        step_id: RunStepId::new("step"),
+        runtime_call_id: "call-1".to_string(),
+        provider_call_id: Some("provider-1".to_string()),
+        tool_name: "Glob".to_string(),
+        call_index: 0,
+        agent: false,
     }
 }
 
@@ -260,6 +274,7 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
                         tool_result,
                     ]),
                 ),
+                tool_receipts: Vec::new(),
             }],
         )],
         committed_steps: vec![context::domain::session::CommittedStep {
@@ -563,7 +578,86 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
 }
 
 #[tokio::test]
-async fn snapshot_reads_structured_view_not_legacy_chats() {
+async fn snapshot_shares_committed_step_message_backing() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("session");
+    let session = ten_step_session(&session_id, vec![], 10);
+    let original_ptr = session.run_slices[0].steps[0]
+        .outcome
+        .as_ref()
+        .unwrap()
+        .messages
+        .as_ptr();
+    let (repository, _) = repository_with_session(writer, session);
+
+    let snapshot = repository.snapshot(&session_id).await.unwrap();
+
+    assert_eq!(snapshot.messages.len(), 10);
+    assert_eq!(
+        snapshot.messages.first().map(|message| message as *const _),
+        Some(original_ptr)
+    );
+}
+
+#[tokio::test]
+async fn repeated_snapshots_share_every_committed_step_message_backing() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("session");
+    let session = ten_step_session(&session_id, vec![], 10);
+    let original_ptrs = session
+        .run_slices
+        .iter()
+        .map(|slice| slice.steps[0].outcome.as_ref().unwrap().messages.as_ptr())
+        .collect::<Vec<_>>();
+    let (repository, _) = repository_with_session(writer, session);
+
+    let first = repository.snapshot(&session_id).await.unwrap();
+    let second = repository.snapshot(&session_id).await.unwrap();
+
+    let first_ptrs = first
+        .messages
+        .iter()
+        .map(|message| message as *const _)
+        .collect::<Vec<_>>();
+    let second_ptrs = second
+        .messages
+        .iter()
+        .map(|message| message as *const _)
+        .collect::<Vec<_>>();
+    assert_eq!(first_ptrs, original_ptrs);
+    assert_eq!(second_ptrs, original_ptrs);
+}
+
+#[tokio::test]
+async fn snapshot_after_compact_shares_only_visible_step_backing() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("compact-shared-session");
+    let session = ten_step_session(&session_id, vec![], 0);
+    let all_ptrs = session
+        .run_slices
+        .iter()
+        .map(|slice| slice.steps[0].outcome.as_ref().unwrap().messages.as_ptr())
+        .collect::<Vec<_>>();
+    let (repository, _) = repository_with_session(writer, session);
+    compact(&repository, session_id.clone(), 0).await;
+
+    let snapshot = repository.snapshot(&session_id).await.unwrap();
+    let visible_ptrs = snapshot
+        .messages
+        .iter()
+        .map(|message| message as *const _)
+        .collect::<Vec<_>>();
+
+    assert!(!visible_ptrs.is_empty());
+    assert!(visible_ptrs.len() < all_ptrs.len());
+    assert_eq!(
+        visible_ptrs,
+        all_ptrs[all_ptrs.len() - visible_ptrs.len()..]
+    );
+}
+
+#[tokio::test]
+async fn snapshot_reads_structured_projection_not_legacy_chats() {
     let writer = Arc::new(RecordingWriter::default());
     let mut legacy = ChatSegment::normal(None);
     legacy.messages = vec![Message::user("legacy-only")];
@@ -582,7 +676,7 @@ async fn snapshot_reads_structured_view_not_legacy_chats() {
             "run",
             vec![CommittedRunStep::accepted_only(
                 "step",
-                AcceptedInputRecord::new(vec![Message::user("structured-only")], "fp", 0),
+                AcceptedInputProjection::new(vec![Message::user("structured-only")], "fp", 0),
             )],
         )],
         committed_steps: vec![],
@@ -609,6 +703,76 @@ async fn append_persists_candidate_before_publishing_revision() {
         holder.read().unwrap().tasks,
         SnapshotState::Captured(_)
     ));
+}
+
+#[tokio::test]
+async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer.clone());
+    let mutation =
+        ToolReceiptMutation::pending(tool_identity(), "{\"pattern\":\"**/archify.mjs\"}");
+
+    let first = repository
+        .advance_tool_receipt(mutation.clone())
+        .await
+        .unwrap();
+    let second = repository.advance_tool_receipt(mutation).await.unwrap();
+
+    assert!(first.changed);
+    assert!(!second.changed);
+    assert_eq!(holder.read().unwrap().revision, 1);
+    assert_eq!(writer.saved.lock().unwrap().len(), 1);
+    assert_eq!(
+        holder.read().unwrap().run_slices[0].steps[0].tool_receipts[0].state,
+        ToolCallState::Pending
+    );
+}
+
+#[tokio::test]
+async fn advance_tool_receipt_write_failure_does_not_publish_candidate() {
+    let writer = Arc::new(RecordingWriter {
+        saved: Mutex::new(vec![]),
+        fail: true,
+    });
+    let (repository, holder) = repository(writer);
+
+    assert!(matches!(
+        repository
+            .advance_tool_receipt(ToolReceiptMutation::pending(tool_identity(), "safe preview"))
+            .await,
+        Err(context::domain::ToolReceiptMutationError::Storage(message)) if message == "disk full"
+    ));
+    assert_eq!(holder.read().unwrap().revision, 0);
+    assert!(holder.read().unwrap().run_slices.is_empty());
+}
+
+#[tokio::test]
+async fn concurrent_appends_with_same_revision_allow_one_commit_and_reject_one_cas() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer);
+
+    let mut first = append("first");
+    first.run_id = RunId::new("run-first");
+    first.step_id = RunStepId::new("step-first");
+    let mut second = append("second");
+    second.run_id = RunId::new("run-second");
+    second.step_id = RunStepId::new("step-second");
+
+    let (first_result, second_result) = tokio::join!(
+        repository.append_finalized(&first),
+        repository.append_finalized(&second)
+    );
+    let results = [first_result, second_result];
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Err(ContextAppendError::RevisionConflict { .. })))
+            .count(),
+        1
+    );
+    assert_eq!(holder.read().unwrap().revision, 1);
+    assert_eq!(holder.read().unwrap().committed_steps.len(), 1);
 }
 
 #[tokio::test]

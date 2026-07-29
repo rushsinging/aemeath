@@ -28,7 +28,7 @@ pub use models::{ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
 pub use permissions::{PermissionConfig, PermissionModeConfig};
 pub use skills::SkillsConfig;
 pub use storage::StorageConfig;
-pub use tools::{AgentRoleConfig, AgentsConfig, ToolResultConfig, ToolsConfig};
+pub use tools::{AgentRoleConfig, AgentsConfig, ToolResultConfig, ToolSelection, ToolsConfig};
 pub use ui::{
     ElementSpacingOverride, MarkdownSpacingMode, MarkdownSpacingOverrides, SpacingLines,
     TaskLifecycleConfig, TaskListConfig, UiConfig,

@@ -413,6 +413,7 @@ async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
             step_id: RunStepId::new("step-finalized"),
             source_request_id: ContextRequestId::new("request-finalized"),
             finalize_cause: FinalizeCause::RunTerminated,
+            duration_ms: None,
             messages: vec![Message::user("finalized partial")],
             receipts: vec![StepReceipt::agent(
                 "agent-call",
@@ -469,6 +470,7 @@ async fn finalized_append_persists_and_is_visible_after_resume() {
         step_id: RunStepId::new("step-persist"),
         source_request_id: ContextRequestId::new("request-persist"),
         finalize_cause: FinalizeCause::Completed,
+        duration_ms: None,
         messages: vec![Message::user("durable fact")],
         receipts: vec![],
         api_input_tokens: Some(21),

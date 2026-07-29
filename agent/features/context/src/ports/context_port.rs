@@ -38,6 +38,15 @@ pub trait ContextPort: Send + Sync {
         ))
     }
 
+    async fn advance_tool_receipt(
+        &self,
+        _mutation: ToolReceiptMutation,
+    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        Err(ToolReceiptMutationError::Storage(
+            "此 ContextPort 未实现 Tool receipt 持久化".to_string(),
+        ))
+    }
+
     async fn append_and_persist(
         &self,
         append: &ContextAppend,

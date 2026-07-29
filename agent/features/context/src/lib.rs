@@ -13,7 +13,7 @@ pub use adapters::{isolated_context, isolated_context_with_skill};
 pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
 pub use domain::session::{
     SessionListEntry, SessionManagementError, SessionMetadataUpdate, SessionRestoreStep,
-    SessionResumeView,
+    SessionResumeProjection,
 };
 pub use ports::SessionManagementPort;
 
@@ -27,7 +27,7 @@ pub use application::{
 };
 
 pub mod api {
-    pub use crate::adapters::{isolated_context_with_skill, MemoryRetrieveAdapter};
+    pub use crate::adapters::MemoryRetrieveAdapter;
     pub use crate::ports::MemoryMaterialization;
 }
 

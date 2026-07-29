@@ -4,8 +4,9 @@ use async_trait::async_trait;
 
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
-    CompactRequest, ContextAppend, ContextAppendError, ContextMessage, ContextPortError,
+    CompactRequest, ContextAppend, ContextAppendError, ContextMessages, ContextPortError,
     ContextRequest, ManualCompactRequest, SessionId, SessionRevision, SystemBlock,
+    ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt,
 };
 
 pub mod context_port;
@@ -37,7 +38,7 @@ pub trait SessionDecoder: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct SessionSnapshot {
     pub revision: SessionRevision,
-    pub messages: Vec<ContextMessage>,
+    pub messages: ContextMessages,
     pub active_summary: Option<String>,
 }
 
@@ -50,6 +51,14 @@ pub trait SessionRepository: Send + Sync {
     ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
         Err(AcceptedInputError::Storage(
             "此 SessionRepository 未实现已接受输入持久化".to_string(),
+        ))
+    }
+    async fn advance_tool_receipt(
+        &self,
+        _mutation: ToolReceiptMutation,
+    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        Err(ToolReceiptMutationError::Storage(
+            "此 SessionRepository 未实现 Tool receipt 持久化".to_string(),
         ))
     }
     async fn append_finalized(

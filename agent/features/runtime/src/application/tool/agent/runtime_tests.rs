@@ -630,7 +630,7 @@ async fn test_execute_tools_cancel_interrupts_in_flight_tool() {
     cancel_task.await.unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0].outcome.is_error);
-    assert!(results[0].outcome.text.contains("cancelled"));
+    assert!(results[0].outcome.text.contains("cleanup unconfirmed"));
     assert_eq!(completed.load(AtomicOrdering::SeqCst), 0);
 }
 
@@ -686,12 +686,11 @@ async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() 
 
     assert_eq!(results.len(), 1);
     assert!(results[0].outcome.is_error);
-    assert!(results[0]
+    assert!(results[0].outcome.text.contains("effective deadline"));
+    assert!(!results[0]
         .outcome
         .text
         .contains("tool.call execution timed out"));
-    assert!(results[0].outcome.text.contains("tool=short_timeout"));
-    assert!(results[0].outcome.text.contains("timeout_secs=0"));
 }
 
 #[tokio::test]

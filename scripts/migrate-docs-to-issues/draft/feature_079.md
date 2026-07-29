@@ -119,7 +119,7 @@
 - `agent/features/runtime/src/business/agent/runner/setup.rs` — `set_current_model()` 调用
 - `agent/features/hook/src/business/hook/runner.rs` — 5 处 `info` → `debug`
 - `agent/features/runtime/src/utils/audit/**` — 调用点从 `JsonLogger::log_input(...)` 改为 `UnifiedLogger::log_input(...)`（如保留审计 API 命名）
-- `specs/rust-coding.md` — 更新日志规范（统一入口、target 路由表、JSON 格式、职责边界）
+- `specs/3.2-rust-coding.md` — 更新日志规范（统一入口、target 路由表、JSON 格式、职责边界）
 - `docs/feature/active.md` — 本条目
 
 **验证**：

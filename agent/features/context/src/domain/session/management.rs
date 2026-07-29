@@ -4,7 +4,7 @@ use share::session_types::ProjectIdentity;
 
 use super::{CanonicalSession, SessionMetadata, SessionRestoreStep, SnapshotState};
 
-/// Context-owned session list view published to Runtime/SDK adapters.
+/// Context-owned session list projection published to Runtime/SDK adapters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionListEntry {
     pub id: String,
@@ -102,9 +102,9 @@ impl SessionMetadataUpdate {
     }
 }
 
-/// Runtime-safe resume view. Session internals never cross the crate boundary.
+/// Runtime-safe resume projection. Session internals never cross the crate boundary.
 #[derive(Debug, Clone)]
-pub struct SessionResumeView {
+pub struct SessionResumeProjection {
     pub session_id: String,
     pub active_messages: Vec<Message>,
     pub display_steps: Vec<SessionRestoreStep>,

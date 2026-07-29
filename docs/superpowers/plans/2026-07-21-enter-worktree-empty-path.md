@@ -408,7 +408,7 @@ git commit -m "fix(cli): show failed EnterWorktree target (#1297)"
 **Files:**
 - Modify: `docs/design/02-modules/project/01-domain-model.md`
 - Modify: `docs/design/02-modules/project/02-ports-and-adapters.md`
-- Modify: `specs/tui-cli.md`
+- Modify: `specs/3.3-tui-cli.md`
 
 - [ ] **Step 1: Update Project target documentation**
 
@@ -433,7 +433,7 @@ Run:
 rg -n "base|NotLinkedWorktree|result-aware" \
   docs/design/02-modules/project/01-domain-model.md \
   docs/design/02-modules/project/02-ports-and-adapters.md \
-  specs/tui-cli.md
+  specs/3.3-tui-cli.md
 git diff --check
 ```
 
@@ -442,7 +442,7 @@ Expected: each new contract appears in its owning document and `git diff --check
 - [ ] **Step 4: Commit documentation**
 
 ```bash
-git add docs/design/02-modules/project specs/tui-cli.md
+git add docs/design/02-modules/project specs/3.3-tui-cli.md
 git commit -m "docs: align EnterWorktree base and display contracts (#1297)"
 ```
 

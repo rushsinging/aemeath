@@ -100,9 +100,9 @@
 - `agent/features/tools/src/business/worktree.rs:50-61`——将 `workspace_context_payload` 改写为其字段嵌套于 `data` 之下（status/message 保持在顶层，branch/path_base/working_root/guidance 进入 `data`）。
 - `agent/features/tools/src/business/ask_user.rs:121,134`——迁移至 `success_json`（保留 `__ASK_USER_*__:` 消息协议前缀）。
 
-**新增测试：** 每个被修改的文件按照 `specs/rust-coding.md` 的约定追加 `#[cfg(test)] mod tests`。每个测试组至少覆盖 3 种情况（正常 / 边界 / 错误）——详见下方各任务。
+**新增测试：** 每个被修改的文件按照 `specs/3.2-rust-coding.md` 的约定追加 `#[cfg(test)] mod tests`。每个测试组至少覆盖 3 种情况（正常 / 边界 / 错误）——详见下方各任务。
 
-**无规范变更：** 已验证 `specs/tui-cli.md` 与当前代码一致（无漂移）。
+**无规范变更：** 已验证 `specs/3.3-tui-cli.md` 与当前代码一致（无漂移）。
 
 ---
 

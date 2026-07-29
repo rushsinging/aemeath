@@ -42,7 +42,7 @@
 
 **关键风险**：`ToolResult` **不 derive Serialize/Deserialize**（仅 `Debug, Clone`），不参与持久化/wire。真正序列化的是 `share::message::ContentBlock::ToolResult`（独立结构）。字段改名**不破坏 session 文件**。
 
-**架构守卫**：改动涉及 `agent/shared/**`、`agent/features/tools/**`、`apps/cli/**`、`agent/features/runtime/**`。加载分片：`specs/rust-coding.md`（横切）、`specs/tools.md`、`specs/tui-cli.md`、`specs/runtime.md`。
+**架构守卫**：改动涉及 `agent/shared/**`、`agent/features/tools/**`、`apps/cli/**`、`agent/features/runtime/**`。加载分片：`specs/3.2-rust-coding.md`（横切）、`specs/3.5-tools.md`、`specs/3.3-tui-cli.md`、`specs/3.4-runtime.md`。
 
 ---
 

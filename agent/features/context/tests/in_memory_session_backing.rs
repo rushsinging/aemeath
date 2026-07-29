@@ -15,6 +15,7 @@ fn append(fingerprint: &str) -> ContextAppend {
         step_id: RunStepId::new("step"),
         source_request_id: ContextRequestId::new("request"),
         finalize_cause: FinalizeCause::Completed,
+        duration_ms: None,
         messages: vec![Message::user("fact")],
         receipts: vec![],
         api_input_tokens: None,

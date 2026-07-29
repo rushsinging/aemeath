@@ -31,6 +31,9 @@ impl TypedTool for GlobTool {
     fn is_concurrency_safe(&self) -> bool {
         true
     }
+    fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
+        crate::domain::published_language::CancellationDeclaration::Cooperative
+    }
 
     async fn call(
         &self,
@@ -62,12 +65,23 @@ impl TypedTool for GlobTool {
             None => ctx.workspace_read().current_path_base(),
         };
         let full_pattern = base_dir.join(pattern).to_string_lossy().to_string();
-        match glob::glob(&full_pattern) {
-            Ok(paths) => {
-                let mut matches: Vec<String> = paths
-                    .filter_map(|e| e.ok())
-                    .map(|p| p.to_string_lossy().to_string())
-                    .collect();
+        let cancellation = ctx.cancellation();
+        let matches = tokio::task::spawn_blocking(move || {
+            let paths = glob::glob(&full_pattern).map_err(|error| error.to_string())?;
+            let mut matches = Vec::new();
+            for entry in paths {
+                if cancellation.is_cancelled() {
+                    return Err("glob cancelled".to_string());
+                }
+                if let Ok(path) = entry {
+                    matches.push(path.to_string_lossy().to_string());
+                }
+            }
+            Ok::<_, String>(matches)
+        })
+        .await;
+        match matches {
+            Ok(Ok(mut matches)) => {
                 matches.sort();
                 if matches.is_empty() {
                     TypedToolResult::success(
@@ -89,14 +103,8 @@ impl TypedTool for GlobTool {
                     )
                 }
             }
-            Err(e) => TypedToolResult::error(
-                serde_json::json!({
-                    "status": "error",
-                    "message": format!("invalid glob pattern: {e}"),
-                    "data": {}
-                })
-                .to_string(),
-            ),
+            Ok(Err(error)) => TypedToolResult::error(error),
+            Err(error) => TypedToolResult::error(format!("glob worker failed: {error}")),
         }
     }
 }

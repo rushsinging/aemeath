@@ -58,7 +58,8 @@ impl ContextPort for FakeContextPort {
         Ok(ContextWindow {
             backing_revision: SessionRevision::new(3),
             system_blocks: vec![],
-            messages: request.pending_messages.clone(),
+            messages: request.pending_messages.clone().into(),
+            invocation_reminder: None,
             tool_schemas: request.tool_schemas.clone(),
             token_estimation: TokenBudget::default(),
             compaction_decision: decision(),
@@ -196,6 +197,7 @@ fn finalized_append() -> ContextAppend {
         step_id: RunStepId::new("step-1"),
         source_request_id: ContextRequestId::new("request-1"),
         finalize_cause: FinalizeCause::UserCancelledStep,
+        duration_ms: Some(7_325_000),
         messages: vec![Message::user("finalized")],
         receipts: vec![
             StepReceipt::tool("call-1", 0, ToolOutcomeKind::Success),

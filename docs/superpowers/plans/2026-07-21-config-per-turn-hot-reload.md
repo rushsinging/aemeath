@@ -37,7 +37,7 @@
 | `agent/features/runtime/src/application/reconfiguration_tests.rs`（新建） | Main/Sub binding 生效边界与失败回退测试。 |
 | `agent/features/runtime/src/application/subagent/runner.rs`、`setup.rs` | 新建 Subagent 时经动态配置/binding factory 获取当前 snapshot，不永久冻结启动时配置。 |
 | `agent/shared/src/config/domain/config.rs`、`snapshot.rs`、`merge.rs` | 为规范化有效配置 fingerprint、reload policy accessor 与优先级补齐领域能力。 |
-| `specs/config-compat.md` | 更新精确优先级、热重载边界和 restart-required 规则。 |
+| `specs/3.9-config-compat.md` | 更新精确优先级、热重载边界和 restart-required 规则。 |
 
 ### Task 1: 建立 Config reload 契约与有效配置等价性
 
@@ -307,9 +307,9 @@ git commit -m "feat(runtime): use current config for new subagents"
 ### Task 6: 更新规格、添加架构守卫并完成跨层验证
 
 **Files:**
-- Modify: `specs/config-compat.md`
-- Modify: `specs/runtime.md`
-- Modify: `specs/prompt.md`
+- Modify: `specs/3.9-config-compat.md`
+- Modify: `specs/3.4-runtime.md`
+- Modify: `specs/3.7-prompt.md`
 - Modify: `.agents/hooks/check-config-reader-injection.sh`
 - Test: `.agents/hooks/check-config-reader-injection.sh` fixture coverage
 
@@ -319,14 +319,14 @@ git commit -m "feat(runtime): use current config for new subagents"
 
 - [ ] **Step 2: 更新规范**
 
-在 `specs/config-compat.md` 明确：
+在 `specs/3.9-config-compat.md` 明确：
 
 - 完整合并顺序和 Aemeath 覆盖 Claude compatibility；
 - ConfigReader 为单一 committed snapshot / refresh 服务，Reader getter 不做 I/O；
 - JSON reload 的 hash、effective-config diff、失败回退与 revision 语义；
 - invocation、subagent、resource、restart-required 的应用边界。
 
-在 `specs/runtime.md` 写明每 turn refresh / reconcile 顺序及 in-flight 不变式；在 `specs/prompt.md` 写明 guidance 与 instructions 改变只发 path-aware Read reminder、不能重建 system prompt。
+在 `specs/3.4-runtime.md` 写明每 turn refresh / reconcile 顺序及 in-flight 不变式；在 `specs/3.7-prompt.md` 写明 guidance 与 instructions 改变只发 path-aware Read reminder、不能重建 system prompt。
 
 - [ ] **Step 3: 实现或更新 guard**
 
@@ -360,7 +360,7 @@ Expected: 全部 PASS；若 logging dynamic port 属于未完成依赖，必须�
 - [ ] **Step 6: Commit**
 
 ```bash
-git add specs/config-compat.md specs/runtime.md specs/prompt.md .agents/hooks/check-config-reader-injection.sh
+git add specs/3.9-config-compat.md specs/3.4-runtime.md specs/3.7-prompt.md .agents/hooks/check-config-reader-injection.sh
 git commit -m "docs(config): define hot reload boundaries"
 ```
 

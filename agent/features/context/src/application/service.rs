@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
     CompactRequest, CompactionDecision, ContextAppend, ContextAppendError, ContextPortError,
-    ContextRequest, ContextWindow, ManualCompactRequest, SessionId, SystemBlock,
+    ContextRequest, ContextWindow, InvocationReminder, ManualCompactRequest, SessionId,
+    SystemBlock, ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
@@ -42,15 +43,22 @@ impl ContextApplicationService {
             .await
             .map_err(ContextPortError::SessionRepository)?;
         #[cfg(test)]
-        crate::application::performance::record_snapshot(
-            snapshot.revision.get(),
-            snapshot.messages.len(),
-            snapshot_started.elapsed(),
-        );
+        {
+            let (snapshot_committed_steps, snapshot_shared_messages) =
+                snapshot.messages.shared_backing_metrics();
+            crate::application::performance::record_snapshot(
+                snapshot.revision.get(),
+                snapshot.messages.len(),
+                snapshot_committed_steps,
+                snapshot_shared_messages,
+                snapshot_started.elapsed(),
+            );
+        }
         #[cfg(test)]
         let messages_started = std::time::Instant::now();
-        let mut messages = snapshot.messages;
-        messages.extend(request.pending_messages.clone());
+        let messages = snapshot
+            .messages
+            .with_pending(request.pending_messages.clone());
         #[cfg(test)]
         let messages_assembly_duration = messages_started.elapsed();
 
@@ -89,27 +97,8 @@ impl ContextApplicationService {
             last_cacheable.cache_break = true;
         }
         blocks.extend(prompt.uncached);
-        if request.task_reminder.has_unfinished() {
-            let id = request.task_reminder.task_list_id.as_deref().unwrap_or("?");
-            let summary = request.task_reminder.summary.as_deref().unwrap_or("未命名");
-            let reminder = if request.language.as_str() == "zh" {
-                format!(
-                    "当前 task list #{id}「{summary}」仍有 {} pending、{} in_progress。若与最新用户请求相关，调用 TaskListGet 查看详情；否则优先处理最新请求。",
-                    request.task_reminder.pending, request.task_reminder.in_progress
-                )
-            } else {
-                format!(
-                    "Current task list #{id} \"{summary}\" has {} pending and {} in_progress tasks. If it is relevant to the latest user request, call TaskListGet for details; otherwise prioritize the latest request.",
-                    request.task_reminder.pending, request.task_reminder.in_progress
-                )
-            };
-            blocks.push(SystemBlock {
-                kind: "task_reminder".into(),
-                content: reminder,
-                cacheable: false,
-                cache_break: false,
-            });
-        }
+        let invocation_reminder =
+            InvocationReminder::from_task_snapshot(&request.task_reminder, &request.language);
 
         #[cfg(test)]
         {
@@ -128,9 +117,18 @@ impl ContextApplicationService {
         }
         #[cfg(test)]
         let decision_started = std::time::Instant::now();
-        let token_estimation =
-            crate::domain::context_decision::token_budget(request, &messages, &blocks);
-        let decision = crate::domain::context_decision::calculate(request, &messages, &blocks);
+        let token_estimation = crate::domain::context_decision::token_budget(
+            request,
+            &messages,
+            &blocks,
+            invocation_reminder.as_ref().map(InvocationReminder::as_str),
+        );
+        let decision = crate::domain::context_decision::calculate(
+            request,
+            &messages,
+            &blocks,
+            invocation_reminder.as_ref().map(InvocationReminder::as_str),
+        );
         #[cfg(test)]
         crate::application::performance::record_decision(
             token_estimation.total_tokens,
@@ -143,6 +141,7 @@ impl ContextApplicationService {
             backing_revision: snapshot.revision,
             system_blocks: blocks,
             messages,
+            invocation_reminder,
             tool_schemas: request.tool_schemas.clone(),
             token_estimation,
             compaction_decision: decision,
@@ -154,7 +153,7 @@ impl ContextApplicationService {
 }
 
 #[cfg(test)]
-fn context_message_tool_result_metrics(messages: &[share::message::Message]) -> (usize, u64) {
+fn context_message_tool_result_metrics(messages: &crate::domain::ContextMessages) -> (usize, u64) {
     messages
         .iter()
         .flat_map(|message| message.content.iter())
@@ -206,6 +205,13 @@ impl ContextPort for ContextApplicationService {
         append: &AcceptedInputAppend,
     ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
         self.session.append_accepted_input(append).await
+    }
+
+    async fn advance_tool_receipt(
+        &self,
+        mutation: ToolReceiptMutation,
+    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        self.session.advance_tool_receipt(mutation).await
     }
 
     async fn append_and_persist(
