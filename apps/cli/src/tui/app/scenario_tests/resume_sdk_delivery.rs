@@ -34,10 +34,12 @@ fn sdk_events_after_resumed_history_are_batched_reduced_and_rendered_at_tail() {
         created_at: 0,
     });
     harness.render();
-    for _ in 0..20 {
+    while harness.app.view_state.output.render_line_limit() < 3_000 {
         harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
         harness.render();
     }
+    harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
+    harness.render();
     assert!(harness.app.view_state.output.history_window_tail_offset > 0);
     assert!(!harness.app.view_state.output.auto_scroll);
 
