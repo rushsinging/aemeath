@@ -84,6 +84,63 @@ fn frame_pipeline_reports_cold_spinner_and_resize_phase_work() {
 }
 
 #[test]
+#[ignore = "性能验收；手动运行：cargo test -p cli --release tui_viewport_virtualization_release_workload -- --ignored --nocapture"]
+#[allow(clippy::print_stdout)]
+fn tui_viewport_virtualization_release_workload() {
+    println!("\n=== #1420 TUI viewport virtualization 验收（samples={SAMPLES}）===");
+    for blocks in [100usize, 1_000, 5_000] {
+        let mut viewport_samples = Vec::with_capacity(SAMPLES);
+        let mut draw_samples = Vec::with_capacity(SAMPLES);
+        let mut wall_samples = Vec::with_capacity(SAMPLES);
+        let mut representative = RenderPerformanceSnapshot::default();
+
+        for sample in 0..SAMPLES {
+            let mut app = frame_app(blocks);
+            let mut terminal =
+                Terminal::new(InstrumentedBackend::new(TestBackend::new(WIDTH, HEIGHT)))
+                    .expect("test terminal");
+            let _ = draw_frame(&mut app, &mut terminal);
+
+            let started = Instant::now();
+            let metrics = draw_frame(&mut app, &mut terminal);
+            wall_samples.push(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX));
+            viewport_samples.push(metrics.viewport_render_ns);
+            draw_samples.push(metrics.terminal_draw_ns);
+            assert_eq!(
+                metrics.assemble_calls, 0,
+                "warm draw 不应重新 assemble 历史"
+            );
+            assert_eq!(
+                metrics.document_render_calls, 0,
+                "静止 redraw 不应重新构建历史 document"
+            );
+            assert!(
+                metrics.viewport_visible_lines <= u64::from(HEIGHT),
+                "viewport 访问行数必须受终端高度约束"
+            );
+            if sample == 0 {
+                representative = metrics;
+            }
+        }
+
+        let (viewport_p50, viewport_p95) = percentiles_ns(&viewport_samples).unwrap();
+        let (draw_p50, draw_p95) = percentiles_ns(&draw_samples).unwrap();
+        let (wall_p50, wall_p95) = percentiles_ns(&wall_samples).unwrap();
+        println!(
+            "blocks={blocks:>5} window_lines={} visible_lines={} | warm_wall_p50/p95={:.3}/{:.3}ms viewport={:.3}/{:.3}ms draw={:.3}/{:.3}ms",
+            representative.viewport_source_lines,
+            representative.viewport_visible_lines,
+            wall_p50 as f64 / 1_000_000.0,
+            wall_p95 as f64 / 1_000_000.0,
+            viewport_p50 as f64 / 1_000_000.0,
+            viewport_p95 as f64 / 1_000_000.0,
+            draw_p50 as f64 / 1_000_000.0,
+            draw_p95 as f64 / 1_000_000.0,
+        );
+    }
+}
+
+#[test]
 #[ignore = "性能基线；手动运行：cargo test -p cli --release tui_frame_phase_release_workload -- --ignored --nocapture"]
 #[allow(clippy::print_stdout)]
 fn tui_frame_phase_release_workload() {

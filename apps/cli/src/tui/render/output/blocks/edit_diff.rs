@@ -12,6 +12,9 @@
 use crate::tui::render::output::primitives::diff::diff_from;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::syntax::extension_from_path;
+use crate::tui::render::theme;
+use ratatui::style::Style;
+use ratatui::text::Span;
 use serde_json::Value;
 
 /// Edit 工具结果中包裹 old/new 文本的旧标记。
@@ -19,6 +22,197 @@ pub(crate) const LEGACY_DIFF_MARKER: &str = "---DIFF---";
 const DIFF_MARKER_PREFIX: &str = "---DIFF";
 const DIFF_MARKER_SUFFIX: &str = "---";
 const DIFF_LINE_PREFIX: &str = ":LINE:";
+
+const HIGHLIGHT_MAX_SIDE_LINES: usize = 20_000;
+const HIGHLIGHT_MAX_TOTAL_BYTES: usize = 4 * 1024 * 1024;
+const HIGHLIGHT_MAX_LINE_BYTES: usize = 2 * 1024 * 1024;
+const RENDER_MAX_SIDE_LINES: usize = 100_000;
+const RENDER_MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+const RENDER_MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
+const RETAINED_LINES_PER_END: usize = 250;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DiffRenderMode {
+    Highlighted,
+    Plain,
+    HeadTailPlain,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DiffRenderBudget {
+    mode: DiffRenderMode,
+    old_lines: usize,
+    new_lines: usize,
+    total_bytes: usize,
+    max_line_bytes: usize,
+}
+
+impl DiffRenderBudget {
+    fn classify(old: &str, new: &str) -> Self {
+        let old_stats = source_stats(old);
+        let new_stats = source_stats(new);
+        let old_lines = old_stats.line_count;
+        let new_lines = new_stats.line_count;
+        let total_bytes = old.len().saturating_add(new.len());
+        let max_line_bytes = old_stats.max_line_bytes.max(new_stats.max_line_bytes);
+        let mode = if old_lines > RENDER_MAX_SIDE_LINES
+            || new_lines > RENDER_MAX_SIDE_LINES
+            || total_bytes > RENDER_MAX_TOTAL_BYTES
+            || max_line_bytes > RENDER_MAX_LINE_BYTES
+        {
+            DiffRenderMode::HeadTailPlain
+        } else if old_lines > HIGHLIGHT_MAX_SIDE_LINES
+            || new_lines > HIGHLIGHT_MAX_SIDE_LINES
+            || total_bytes > HIGHLIGHT_MAX_TOTAL_BYTES
+            || max_line_bytes > HIGHLIGHT_MAX_LINE_BYTES
+        {
+            DiffRenderMode::Plain
+        } else {
+            DiffRenderMode::Highlighted
+        };
+        Self {
+            mode,
+            old_lines,
+            new_lines,
+            total_bytes,
+            max_line_bytes,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct SourceStats {
+    line_count: usize,
+    max_line_bytes: usize,
+}
+
+fn source_stats(source: &str) -> SourceStats {
+    source
+        .lines()
+        .fold(SourceStats::default(), |mut stats, line| {
+            stats.line_count += 1;
+            stats.max_line_bytes = stats.max_line_bytes.max(line.len());
+            stats
+        })
+}
+
+struct SourceWindow {
+    head: String,
+    tail: String,
+    tail_start: usize,
+    omitted_lines: usize,
+}
+
+fn source_window(source: &str, line_count: usize) -> SourceWindow {
+    let head_count = line_count.min(RETAINED_LINES_PER_END);
+    let tail_count = line_count
+        .saturating_sub(head_count)
+        .min(RETAINED_LINES_PER_END);
+    let tail_start_index = line_count.saturating_sub(tail_count);
+    let head = source
+        .lines()
+        .take(head_count)
+        .map(truncate_render_line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tail = source
+        .lines()
+        .skip(tail_start_index)
+        .map(truncate_render_line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    SourceWindow {
+        head,
+        tail,
+        tail_start: tail_start_index.saturating_add(1),
+        omitted_lines: line_count.saturating_sub(head_count.saturating_add(tail_count)),
+    }
+}
+
+fn truncate_render_line(line: &str) -> String {
+    if line.len() <= RENDER_MAX_LINE_BYTES {
+        return line.to_string();
+    }
+    const LABEL_RESERVE_BYTES: usize = 128;
+    let prefix = crate::tui::text::safe_byte_prefix(
+        line,
+        RENDER_MAX_LINE_BYTES.saturating_sub(LABEL_RESERVE_BYTES),
+    );
+    format!("{prefix} …（单行已截断，原始 {} 字节）", line.len())
+}
+
+fn render_plain(parsed: &EditDiff, budget: DiffRenderBudget, width: u16) -> Vec<RenderedLine> {
+    if budget.max_line_bytes <= RENDER_MAX_LINE_BYTES {
+        return diff_from(
+            &parsed.old,
+            &parsed.new,
+            parsed.start_line,
+            parsed.start_line,
+            None,
+            width,
+        );
+    }
+    let old = parsed
+        .old
+        .lines()
+        .map(truncate_render_line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let new = parsed
+        .new
+        .lines()
+        .map(truncate_render_line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    diff_from(
+        &old,
+        &new,
+        parsed.start_line,
+        parsed.start_line,
+        None,
+        width,
+    )
+}
+
+fn render_head_tail_plain(
+    parsed: &EditDiff,
+    budget: DiffRenderBudget,
+    width: u16,
+) -> Vec<RenderedLine> {
+    let old = source_window(&parsed.old, budget.old_lines);
+    let new = source_window(&parsed.new, budget.new_lines);
+    let mut lines = diff_from(
+        &old.head,
+        &new.head,
+        parsed.start_line,
+        parsed.start_line,
+        None,
+        width,
+    );
+    if old.omitted_lines > 0 || new.omitted_lines > 0 {
+        let omitted = format!(
+            "─── Edit diff 中间已省略（old {} 行 / new {} 行）───",
+            old.omitted_lines, new.omitted_lines
+        );
+        lines.push(RenderedLine::new(vec![Span::styled(
+            omitted,
+            Style::default().fg(theme::TEXT_DIM),
+        )]));
+    }
+    lines.extend(diff_from(
+        &old.tail,
+        &new.tail,
+        parsed
+            .start_line
+            .saturating_add(old.tail_start.saturating_sub(1)),
+        parsed
+            .start_line
+            .saturating_add(new.tail_start.saturating_sub(1)),
+        None,
+        width,
+    ));
+    lines
+}
 
 /// 解析后的 Edit diff 数据：变更前/后文本与真实文件起始行号。
 pub struct EditDiff {
@@ -154,14 +348,29 @@ pub fn render_edit_diff(
     #[cfg(test)]
     let started = std::time::Instant::now();
     let ext = file_ext_for_edit(summary, result);
-    let lines = diff_from(
-        &parsed.old,
-        &parsed.new,
-        parsed.start_line,
-        parsed.start_line,
-        ext.as_deref(),
-        width,
-    );
+    let budget = DiffRenderBudget::classify(&parsed.old, &parsed.new);
+    if budget.mode != DiffRenderMode::Highlighted {
+        crate::tui::log_debug!(
+            "Edit diff 渲染降级 mode={:?} old_lines={} new_lines={} total_bytes={} max_line_bytes={}",
+            budget.mode,
+            budget.old_lines,
+            budget.new_lines,
+            budget.total_bytes,
+            budget.max_line_bytes,
+        );
+    }
+    let lines = match budget.mode {
+        DiffRenderMode::Highlighted => diff_from(
+            &parsed.old,
+            &parsed.new,
+            parsed.start_line,
+            parsed.start_line,
+            ext.as_deref(),
+            width,
+        ),
+        DiffRenderMode::Plain => render_plain(&parsed, budget, width),
+        DiffRenderMode::HeadTailPlain => render_head_tail_plain(&parsed, budget, width),
+    };
     #[cfg(test)]
     crate::tui::render::performance::record_edit_diff(started.elapsed());
     Some(lines)
@@ -389,5 +598,141 @@ mod tests {
             lines.iter().any(|l| l.plain.contains("1;")),
             "回退路径也应正确渲染 diff"
         );
+    }
+
+    fn numbered_source(lines: usize, changed: bool) -> String {
+        (0..lines)
+            .map(|index| {
+                if changed && index == lines / 2 {
+                    format!("fn item_{index}() {{ new_value(); }}")
+                } else {
+                    format!("fn item_{index}() {{ old_value(); }}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn render_budget_uses_measured_threshold_boundaries() {
+        let highlighted = numbered_source(20_000, false);
+        let plain = numbered_source(20_001, false);
+        let extreme = numbered_source(100_001, false);
+
+        assert_eq!(
+            DiffRenderBudget::classify(&highlighted, &highlighted).mode,
+            DiffRenderMode::Highlighted
+        );
+        assert_eq!(
+            DiffRenderBudget::classify(&plain, &plain).mode,
+            DiffRenderMode::Plain
+        );
+        assert_eq!(
+            DiffRenderBudget::classify(&extreme, &extreme).mode,
+            DiffRenderMode::HeadTailPlain
+        );
+    }
+
+    #[test]
+    fn edit_within_highlight_budget_keeps_syntax_highlighting() {
+        let old = numbered_source(20, false);
+        let new = numbered_source(20, true);
+        let data = serde_json::json!({"old": old, "new": new, "start_line": 100});
+
+        let (lines, snapshot) = crate::tui::render::performance::capture(|| {
+            render_edit_diff(
+                Some(&data),
+                Some(r#"{"file_path":"src/lib.rs"}"#),
+                "edited src/lib.rs",
+                80,
+            )
+            .unwrap()
+        });
+
+        assert!(snapshot.syntax_highlight_calls > 0);
+        assert!(lines.iter().all(|line| !line.plain.contains("省略")));
+    }
+
+    #[test]
+    fn edit_over_highlight_line_budget_keeps_full_diff_without_syntax_highlighting() {
+        let old = numbered_source(20_001, false);
+        let new = numbered_source(20_001, true);
+        let data = serde_json::json!({"old": old, "new": new, "start_line": 1});
+
+        let (lines, snapshot) = crate::tui::render::performance::capture(|| {
+            render_edit_diff(
+                Some(&data),
+                Some(r#"{"file_path":"src/lib.rs"}"#),
+                "edited src/lib.rs",
+                80,
+            )
+            .unwrap()
+        });
+
+        assert_eq!(snapshot.syntax_highlight_calls, 0);
+        assert_eq!(lines.len(), 20_002);
+        assert!(lines.iter().all(|line| !line.plain.contains("省略")));
+        assert!(lines.iter().any(|line| line.plain.contains("+ ")));
+        assert!(lines.iter().any(|line| line.plain.contains("- ")));
+    }
+
+    #[test]
+    fn extreme_edit_keeps_head_and_tail_with_real_line_numbers() {
+        let old = numbered_source(100_001, false);
+        let new = numbered_source(100_001, true);
+        let data = serde_json::json!({"old": old, "new": new, "start_line": 42});
+
+        let (lines, snapshot) = crate::tui::render::performance::capture(|| {
+            render_edit_diff(
+                Some(&data),
+                Some(r#"{"file_path":"src/lib.rs"}"#),
+                "edited src/lib.rs",
+                80,
+            )
+            .unwrap()
+        });
+
+        assert_eq!(snapshot.syntax_highlight_calls, 0);
+        assert!(lines.len() <= 503, "首尾窗口必须有硬上限: {}", lines.len());
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line.plain.contains("省略"))
+                .count(),
+            1
+        );
+        assert!(lines.iter().any(|line| line.plain.contains("item_0")));
+        assert!(lines.iter().any(|line| line.plain.contains("item_100000")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.plain.trim_start().starts_with("100042")),
+            "尾部必须保留原文件真实行号"
+        );
+    }
+
+    #[test]
+    fn line_over_render_limit_is_utf8_safely_truncated() {
+        let long = format!("{}尾", "界".repeat((4 * 1024 * 1024) / 3 + 10));
+        let data = serde_json::json!({"old": long, "new": "短行", "start_line": 7});
+
+        let (lines, snapshot) = crate::tui::render::performance::capture(|| {
+            render_edit_diff(
+                Some(&data),
+                Some(r#"{"file_path":"src/lib.rs"}"#),
+                "edited src/lib.rs",
+                80,
+            )
+            .unwrap()
+        });
+
+        assert_eq!(snapshot.syntax_highlight_calls, 0);
+        let removed = lines
+            .iter()
+            .find(|line| line.plain.contains("- "))
+            .expect("删除行存在");
+        assert!(removed.plain.len() < 4 * 1024 * 1024);
+        assert!(removed.plain.contains("单行已截断"));
+        assert!(std::str::from_utf8(removed.plain.as_bytes()).is_ok());
     }
 }

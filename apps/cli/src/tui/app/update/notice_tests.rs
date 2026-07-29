@@ -299,21 +299,30 @@ fn test_spinner_tick_idle_does_not_mark_output_dirty() {
 }
 
 #[test]
-fn test_spinner_tick_active_marks_output_dirty() {
+fn test_spinner_tick_active_requests_redraw_without_marking_output_dirty() {
     use crate::tui::app::event::UiEvent;
     use crate::tui::effect::session::processing::SpawnContextRefs;
     use crate::tui::update::msg::TuiMsg;
     let mut app = make_app();
     app.model.conversation.runtime.spinner.chat_active = true;
     app.model.conversation.runtime.spinner.phase =
-        Some(crate::tui::model::conversation::spinner::SpinnerPhase::Thinking); // 处理中，需要 gutter 动画
+        Some(crate::tui::model::conversation::spinner::SpinnerPhase::Thinking);
     app.view_state.dirty.clear_output();
     let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(8);
     let spawn_refs = SpawnContextRefs { agent_client: None };
-    app.update(TuiMsg::SpinnerTick, &ui_tx, &spawn_refs);
+
+    let result = app.update(TuiMsg::SpinnerTick, &ui_tx, &spawn_refs);
+
     assert!(
-        app.view_state.dirty.output,
-        "active 时 SpinnerTick 应标脏 output，以驱动运行中 tool 的 gutter 动画"
+        !app.view_state.dirty.output,
+        "active SpinnerTick 只应重画可视动画，不得触发历史文档重建"
+    );
+    assert!(
+        result
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, crate::tui::effect::effect::Effect::RequestRender)),
+        "active SpinnerTick 仍须请求终端重绘"
     );
 }
 

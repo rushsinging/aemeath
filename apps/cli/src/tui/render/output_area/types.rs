@@ -1,6 +1,3 @@
-/// 最大保留行数
-pub const MAX_LINES: usize = 10000;
-
 /// 默认终端宽度
 pub const DEFAULT_WIDTH: usize = 120;
 
