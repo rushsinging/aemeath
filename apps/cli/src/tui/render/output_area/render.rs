@@ -176,12 +176,15 @@ impl OutputArea {
         let line_fill_styles = trim_line_fill_styles(line_fill_styles, area.height as usize);
         let display_lines = self.trim_to_area_height(display_lines, area.height as usize);
         crate::tui::log_trace!(
-              "tui.output.render area={}x{} content={}x{} total_lines={} visible_lines={} auto_scroll={} scroll_offset={} range={}..{} spinner={} queued_lines={} task_lines={} before_status_lines={} after_status_lines={} after_trim_lines={} visible_overwide_lines={} max_visible_line_width={} first_visible={:?} last_visible={:?} last_doc={:?}",
+              "tui.output.render area={}x{} content={}x{} total_lines={} source_total_lines={} render_limit={} tail_offset={} visible_lines={} auto_scroll={} scroll_offset={} range={}..{} spinner={} queued_lines={} task_lines={} before_status_lines={} after_status_lines={} after_trim_lines={} visible_overwide_lines={} max_visible_line_width={} first_visible={:?} last_visible={:?} last_doc={:?}",
               area.width,
               area.height,
               content_area.width,
               content_area.height,
               total_lines,
+              view.source_total_lines,
+              view.render_line_limit(),
+              view.history_window_tail_offset,
               visible_lines,
               view.auto_scroll,
               view.scroll_offset,

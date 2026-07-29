@@ -46,6 +46,73 @@ fn left_click(modifiers: KeyModifiers) -> MouseEvent {
     }
 }
 
+fn scroll_up() -> MouseEvent {
+    MouseEvent {
+        kind: MouseEventKind::ScrollUp,
+        column: 1,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+fn scroll_down() -> MouseEvent {
+    MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: 1,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+#[test]
+fn consecutive_mouse_scroll_up_events_load_multiple_viewport_sized_batches() {
+    let mut app = app_with_link();
+    app.view_state.output.last_visible_height = 20;
+    app.view_state.output.source_total_lines = 5_000;
+
+    app.handle_mouse_event(scroll_up(), Rect::new(0, 0, 80, 10));
+    assert_eq!(app.view_state.output.render_line_limit(), 1_015);
+
+    app.handle_mouse_event(scroll_up(), Rect::new(0, 0, 80, 10));
+    assert_eq!(app.view_state.output.render_line_limit(), 1_030);
+}
+
+#[test]
+fn mouse_scroll_down_moves_older_history_window_toward_latest() {
+    let mut app = app_with_link();
+    app.view_state.output.auto_scroll = false;
+    app.view_state.output.scroll_offset = 2;
+    app.view_state.output.render_line_limit = 3_000;
+    app.view_state.output.source_total_lines = 10_000;
+    app.view_state.output.history_window_tail_offset = 1_200;
+
+    let effects = app.handle_mouse_event(scroll_down(), Rect::new(0, 0, 80, 10));
+
+    assert!(effects.is_empty());
+    assert_eq!(app.view_state.output.history_window_tail_offset, 1_185);
+    assert_eq!(app.view_state.output.scroll_offset, 14);
+    assert!(!app.view_state.output.auto_scroll);
+}
+
+#[test]
+fn mouse_scroll_down_at_latest_bottom_restores_initial_window_and_marks_output_dirty() {
+    let mut app = app_with_link();
+    app.view_state.output.auto_scroll = false;
+    app.view_state.output.scroll_offset = 3;
+    app.view_state.output.render_line_limit = 3_000;
+    app.view_state.output.source_total_lines = 10_000;
+    app.view_state.output.history_window_tail_offset = 0;
+    app.view_state.dirty.clear_output();
+
+    let effects = app.handle_mouse_event(scroll_down(), Rect::new(0, 0, 80, 10));
+
+    assert!(effects.is_empty());
+    assert_eq!(app.view_state.output.scroll_offset, 0);
+    assert!(app.view_state.output.auto_scroll);
+    assert_eq!(app.view_state.output.render_line_limit(), 1_000);
+    assert!(app.view_state.dirty.output);
+}
+
 #[test]
 fn ordinary_click_on_link_begins_output_selection_without_opening_url() {
     let mut app = app_with_link();

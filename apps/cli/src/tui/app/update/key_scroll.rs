@@ -9,50 +9,52 @@ pub(super) fn handle_scroll_key(app: &mut App, key: KeyEvent, modifiers: KeyModi
     let before_limit = view.render_line_limit();
     let before_offset = view.scroll_offset;
     let before_auto_scroll = view.auto_scroll;
-    let mut expanded = false;
-    match (modifiers, key.code) {
+    let before_tail_offset = view.history_window_tail_offset;
+    let (action, window_changed) = match (modifiers, key.code) {
         (KeyModifiers::NONE, KeyCode::PageUp) => {
             view.scroll_up(10, total_lines);
-            expanded = view.try_load_older_at_top(total_lines);
+            ("page_up", view.try_load_older_near_top(total_lines))
         }
-        (KeyModifiers::NONE, KeyCode::PageDown) => view.scroll_down(10),
+        (KeyModifiers::NONE, KeyCode::PageDown) => ("page_down", view.scroll_down(10)),
         (KeyModifiers::SHIFT, KeyCode::Up) => {
             view.scroll_up(1, total_lines);
-            expanded = view.try_load_older_at_top(total_lines);
+            ("line_up", view.try_load_older_near_top(total_lines))
         }
-        (KeyModifiers::SHIFT, KeyCode::Down) => view.scroll_down(1),
-        (KeyModifiers::SHIFT, KeyCode::Home) => {
-            expanded = view.scroll_to_top(total_lines);
+        (KeyModifiers::SHIFT, KeyCode::Down) => ("line_down", view.scroll_down(1)),
+        (KeyModifiers::SHIFT, KeyCode::Home) => ("top", view.scroll_to_top(total_lines)),
+        (KeyModifiers::SHIFT, KeyCode::End) => {
+            view.scroll_to_bottom();
+            (
+                "bottom",
+                before_tail_offset > 0 || before_limit != view.render_line_limit(),
+            )
         }
-        (KeyModifiers::SHIFT, KeyCode::End) => view.scroll_to_bottom(),
         _ => return false,
-    }
-    if expanded {
-        crate::tui::log_debug!(
-            "tui.history.load_older expanded=true key={:?} modifiers={:?} total_lines={} before_limit={} after_limit={} before_offset={} after_offset={} before_auto_scroll={} after_auto_scroll={}",
-            key.code,
-            modifiers,
-            total_lines,
-            before_limit,
-            view.render_line_limit(),
-            before_offset,
-            view.scroll_offset,
-            before_auto_scroll,
-            view.auto_scroll
-        );
+    };
+    crate::tui::log_debug!(
+        "tui.output.scroll_input source=keyboard action={} key={:?} modifiers={:?} total_lines={} visible_height={} window_changed={} before_limit={} after_limit={} before_offset={} after_offset={} before_auto_scroll={} after_auto_scroll={} before_tail_offset={} after_tail_offset={} source_total_lines={} pending_load_older={}",
+        action,
+        key.code,
+        modifiers,
+        total_lines,
+        view.last_visible_height,
+        window_changed,
+        before_limit,
+        view.render_line_limit(),
+        before_offset,
+        view.scroll_offset,
+        before_auto_scroll,
+        view.auto_scroll,
+        before_tail_offset,
+        view.history_window_tail_offset,
+        view.source_total_lines,
+        view.pending_load_older
+    );
+    if window_changed {
         app.mark_output_dirty();
-    } else {
-        crate::tui::log_trace!(
-            "tui.history.load_older expanded=false key={:?} modifiers={:?} total_lines={} visible_height={} limit={} offset={} auto_scroll={} source_total_lines={} pending_load_older={}",
-            key.code,
-            modifiers,
-            total_lines,
-            view.last_visible_height,
-            view.render_line_limit(),
-            view.scroll_offset,
-            view.auto_scroll,
-            view.source_total_lines,
-            view.pending_load_older
+        crate::tui::log_debug!(
+            "tui.output.scroll_dirty source=keyboard action={} reason=history_window_changed dirty_output=true",
+            action
         );
     }
     true
