@@ -275,7 +275,7 @@ fn test_user_message_blank_lines_receive_fill_style_without_filler_text() {
 
 #[test]
 fn render_window_drops_oldest_group_when_over_line_limit() {
-    let selected = select_root_window(
+    let selected = select_root_window_from_counts(
         &[2, 2],
         OutputRenderWindow {
             line_limit: 3,
@@ -290,7 +290,7 @@ fn render_window_drops_oldest_group_when_over_line_limit() {
 
 #[test]
 fn render_window_never_splits_subtree() {
-    let selected = select_root_window(
+    let selected = select_root_window_from_counts(
         &[2, 5, 2],
         OutputRenderWindow {
             line_limit: 3,
@@ -304,7 +304,7 @@ fn render_window_never_splits_subtree() {
 
 #[test]
 fn render_window_keeps_single_root_even_if_over_line_limit() {
-    let selected = select_root_window(
+    let selected = select_root_window_from_counts(
         &[5, 10],
         OutputRenderWindow {
             line_limit: 3,
@@ -317,7 +317,7 @@ fn render_window_keeps_single_root_even_if_over_line_limit() {
 
 #[test]
 fn render_window_tail_offset_selects_older_roots() {
-    let selected = select_root_window(
+    let selected = select_root_window_from_counts(
         &[2, 2, 2, 2],
         OutputRenderWindow {
             line_limit: 4,
@@ -331,7 +331,7 @@ fn render_window_tail_offset_selects_older_roots() {
 
 #[test]
 fn render_window_at_oldest_history_has_no_folded_earlier_lines() {
-    let selected = select_root_window(
+    let selected = select_root_window_from_counts(
         &[2, 2, 2, 2],
         OutputRenderWindow {
             line_limit: 4,
@@ -369,8 +369,8 @@ fn render_window_only_materializes_requested_blocks_but_keeps_recent_cache_entri
     assert_eq!(rendered.source_total_lines, 12_012);
     assert!(rendered.folded_earlier_lines > 0);
     assert!(
-        renderer.cache.contains("root-0"),
-        "测量过的窗口外 block 在容量内应保留，供历史窗口往返复用"
+        !renderer.cache.contains("root-0"),
+        "冷启动窗口外 block 只保留轻量布局估算，不应进入 rendered cache"
     );
     assert!(
         renderer.cache.contains("root-5"),
@@ -435,6 +435,111 @@ fn rendered_caches_never_exceed_configured_capacity_across_windows() {
         assert!(retained.block_entries <= 3);
         assert!(retained.gutted_entries <= 3);
     }
+}
+
+#[test]
+fn cold_window_estimates_remote_roots_without_rendering_full_history() {
+    let roots = (0..1_000)
+        .map(|idx| assistant_node(&format!("root-{idx}"), &format!("message-{idx}")))
+        .collect();
+    let vm = vm_with_roots(roots);
+    let mut renderer = OutputDocumentRenderer::default();
+
+    let rendered = renderer.render_tree_with_window(
+        &vm,
+        80,
+        0,
+        MarkdownSpacingPolicy::normal(),
+        OutputRenderWindow {
+            line_limit: 20,
+            tail_offset: 0,
+        },
+    );
+
+    assert!(
+        renderer.render_count() <= 20,
+        "冷启动只能精确渲染候选窗口，不能渲染全部 1000 个 root"
+    );
+    assert_eq!(
+        rendered
+            .document
+            .blocks
+            .last()
+            .map(|block| block.block_id.as_str()),
+        Some("root-999")
+    );
+    assert!(rendered.source_total_lines >= 1_000);
+}
+
+#[test]
+fn cold_window_scrolls_into_estimated_remote_history_on_demand() {
+    let roots = (0..100)
+        .map(|idx| assistant_node(&format!("root-{idx}"), &format!("message-{idx}")))
+        .collect();
+    let vm = vm_with_roots(roots);
+    let mut renderer = OutputDocumentRenderer::default();
+    renderer.render_tree_with_window(
+        &vm,
+        80,
+        0,
+        MarkdownSpacingPolicy::normal(),
+        OutputRenderWindow {
+            line_limit: 20,
+            tail_offset: 0,
+        },
+    );
+    let before_scroll = renderer.render_count();
+
+    let older = renderer.render_tree_with_window(
+        &vm,
+        80,
+        0,
+        MarkdownSpacingPolicy::normal(),
+        OutputRenderWindow {
+            line_limit: 20,
+            tail_offset: 80,
+        },
+    );
+
+    assert!(renderer.render_count() > before_scroll);
+    assert!(
+        older
+            .document
+            .blocks
+            .iter()
+            .any(|block| block.block_id == "root-50"),
+        "滚入远端估算历史后必须精确渲染对应 root"
+    );
+    assert!(older.document.total_lines() <= 21);
+}
+
+#[test]
+fn cold_window_highlights_only_selected_edit_diff() {
+    let vm = vm_with_roots(
+        (0..100)
+            .map(|idx| static_edit_root(&format!("edit-{idx}"), 2_000))
+            .collect(),
+    );
+    let mut renderer = OutputDocumentRenderer::default();
+
+    let (_, metrics) = crate::tui::render::performance::capture(|| {
+        renderer.render_tree_with_window(
+            &vm,
+            100,
+            0,
+            MarkdownSpacingPolicy::normal(),
+            OutputRenderWindow {
+                line_limit: 1_000,
+                tail_offset: 0,
+            },
+        )
+    });
+
+    assert_eq!(
+        metrics.edit_diff_calls, 1,
+        "冷启动 Edit 高亮次数必须受窗口约束，不得随完整历史线性增长"
+    );
+    assert!(metrics.syntax_highlight_calls > 0);
 }
 
 #[test]
@@ -535,7 +640,7 @@ fn scrolling_after_resize_reflows_remote_history_on_demand() {
 }
 
 #[test]
-fn semantic_change_outside_window_is_measured_before_window_selection() {
+fn semantic_change_outside_window_updates_estimate_without_rendering() {
     let roots = (0..6)
         .map(|idx| node(&format!("root-{idx}"), "one", vec![]))
         .collect();
@@ -567,15 +672,15 @@ fn semantic_change_outside_window_is_measured_before_window_selection() {
 
     assert_eq!(
         renderer.render_count(),
-        before_change + 1,
-        "语义变化即使在窗口外也必须更新轻量行数索引"
+        before_change,
+        "窗口外语义变化只更新轻量估算，不应执行完整 block 渲染"
     );
     assert_eq!(rendered.source_total_lines, 14);
 }
 
 #[test]
 fn render_window_zero_limit_returns_empty_window() {
-    let selected = select_root_window(
+    let selected = select_root_window_from_counts(
         &[1],
         OutputRenderWindow {
             line_limit: 0,

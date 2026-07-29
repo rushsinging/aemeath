@@ -1,13 +1,17 @@
 //! 输出文档渲染器：遍历 ViewModel.blocks，经 block 级缓存产出 RenderedDocument。
 
+use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::block_cache::{
     BlockCache, CacheKey, DEFAULT_RENDER_CACHE_CAPACITY,
 };
 use crate::tui::render::output::bounded_lru::BoundedLruMap;
 use crate::tui::render::output::gutter;
 use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
+use crate::tui::render::output::tool_display::{result_policy, ResultPolicy, ResultRender};
 use crate::tui::render::theme;
-use crate::tui::view_model::output::{BlockNode, OutputViewModel};
+use crate::tui::view_model::output::{
+    AskUserPhaseView, BlockNode, OutputBlockKind, OutputViewModel,
+};
 use ratatui::style::Style;
 use ratatui::text::Span;
 use std::collections::{HashMap, HashSet};
@@ -74,6 +78,13 @@ impl RootLayoutKey {
 struct RootLayoutEntry {
     key: RootLayoutKey,
     line_count: usize,
+    exact: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+struct RootLayoutState {
+    line_count: usize,
+    needs_exact_layout: bool,
 }
 
 #[cfg(test)]
@@ -227,65 +238,74 @@ impl OutputDocumentRenderer {
         self.root_layouts
             .retain(|id, _| semantic_root_ids.contains(id.as_str()));
 
-        let mut root_line_counts = Vec::with_capacity(view_model.roots.len());
-        let mut measured_groups: HashMap<String, Vec<RenderedBlock>> = HashMap::new();
-        let mut stale_layouts = Vec::new();
-        for (index, root) in view_model.roots.iter().enumerate() {
+        let mut root_layout_states = Vec::with_capacity(view_model.roots.len());
+        for root in &view_model.roots {
             let key = root_layout_key(root, outer_width, animation_frame, markdown_spacing);
-            match self.root_layouts.get(&root.block_id).copied() {
-                Some(entry) if entry.key == key => root_line_counts.push(entry.line_count),
-                Some(entry) if entry.key.matches_semantics(key) => {
-                    root_line_counts.push(entry.line_count);
-                    stale_layouts.push((index, key));
-                }
+            let state = match self.root_layouts.get(&root.block_id).copied() {
+                Some(entry) if entry.key == key && entry.exact => RootLayoutState {
+                    line_count: entry.line_count,
+                    needs_exact_layout: false,
+                },
+                Some(entry) if entry.key.matches_semantics(key) => RootLayoutState {
+                    line_count: entry.line_count,
+                    needs_exact_layout: true,
+                },
                 _ => {
-                    let group = self.render_root_group(
-                        root,
-                        outer_width,
-                        animation_frame,
-                        markdown_spacing,
+                    let line_count = estimate_root_group_lines(root, outer_width);
+                    self.root_layouts.insert(
+                        root.block_id.clone(),
+                        RootLayoutEntry {
+                            key,
+                            line_count,
+                            exact: false,
+                        },
                     );
-                    let line_count = root_group_line_count(&group);
-                    self.root_layouts
-                        .insert(root.block_id.clone(), RootLayoutEntry { key, line_count });
-                    measured_groups.insert(root.block_id.clone(), group);
-                    root_line_counts.push(line_count);
+                    RootLayoutState {
+                        line_count,
+                        needs_exact_layout: true,
+                    }
                 }
-            }
+            };
+            root_layout_states.push(state);
         }
 
-        let mut selected = select_root_window(&root_line_counts, window);
+        let mut selected = select_root_window(&root_layout_states, window);
         let mut selected_groups = HashMap::new();
         loop {
-            let selected_indices = selected.root_range.clone().collect::<HashSet<_>>();
-            let selected_stale = stale_layouts
-                .iter()
-                .copied()
-                .filter(|(index, _)| selected_indices.contains(index))
+            let selected_stale = selected
+                .root_range
+                .clone()
+                .filter(|index| root_layout_states[*index].needs_exact_layout)
                 .collect::<Vec<_>>();
             if selected_stale.is_empty() {
                 break;
             }
-            for (index, key) in selected_stale {
+            for index in selected_stale {
                 let root = &view_model.roots[index];
+                let key = root_layout_key(root, outer_width, animation_frame, markdown_spacing);
                 let group =
                     self.render_root_group(root, outer_width, animation_frame, markdown_spacing);
                 let line_count = root_group_line_count(&group);
-                self.root_layouts
-                    .insert(root.block_id.clone(), RootLayoutEntry { key, line_count });
-                root_line_counts[index] = line_count;
+                self.root_layouts.insert(
+                    root.block_id.clone(),
+                    RootLayoutEntry {
+                        key,
+                        line_count,
+                        exact: true,
+                    },
+                );
+                root_layout_states[index] = RootLayoutState {
+                    line_count,
+                    needs_exact_layout: false,
+                };
                 selected_groups.insert(root.block_id.clone(), group);
             }
-            stale_layouts.retain(|(index, _)| !selected_indices.contains(index));
-            selected = select_root_window(&root_line_counts, window);
+            selected = select_root_window(&root_layout_states, window);
         }
 
         let mut groups = Vec::with_capacity(selected.root_range.len());
         for root in &view_model.roots[selected.root_range.clone()] {
-            if let Some(group) = selected_groups
-                .remove(&root.block_id)
-                .or_else(|| measured_groups.remove(&root.block_id))
-            {
+            if let Some(group) = selected_groups.remove(&root.block_id) {
                 groups.push(group);
             } else {
                 groups.push(self.render_root_group(
@@ -513,6 +533,143 @@ fn root_group_line_count(group: &[RenderedBlock]) -> usize {
         .fold(0usize, usize::saturating_add)
 }
 
+fn estimate_root_group_lines(root: &BlockNode, outer_width: u16) -> usize {
+    fn estimate(node: &BlockNode, outer_width: u16, depth: usize) -> usize {
+        let effective_depth = if gutter::is_gutter_suppressed(outer_width) || outer_width < 50 {
+            0
+        } else {
+            depth
+        };
+        let text_width = gutter::effective_block_width(outer_width, effective_depth) as usize;
+        let own_lines =
+            estimate_block_lines(&node.kind, text_width).saturating_add(usize::from(depth == 0));
+        node.children.iter().fold(own_lines, |total, child| {
+            total.saturating_add(estimate(child, outer_width, depth + 1))
+        })
+    }
+
+    estimate(root, outer_width, 0).max(1)
+}
+
+fn estimate_block_lines(kind: &OutputBlockKind, text_width: usize) -> usize {
+    match kind {
+        OutputBlockKind::UserMessage(view) => {
+            estimate_wrapped_text_lines(&view.text, text_width, false)
+                .max(1)
+                .saturating_add(2)
+        }
+        OutputBlockKind::AssistantMessage(view) => {
+            estimate_wrapped_text_lines(&view.text, text_width, true).max(1)
+        }
+        OutputBlockKind::ThinkingMessage(view) => {
+            estimate_wrapped_text_lines(&view.text, text_width, false).max(1)
+        }
+        OutputBlockKind::ModelStreamPlaceholder(_) => 2,
+        OutputBlockKind::ToolCall(view) => {
+            let activity_lines = view.activity_lines.iter().fold(0usize, |total, line| {
+                total.saturating_add(estimate_wrapped_line_count(line, text_width))
+            });
+            1usize.saturating_add(activity_lines)
+        }
+        OutputBlockKind::ToolResult(view) => estimate_tool_result_lines(view, text_width),
+        OutputBlockKind::HookNotice(view) => 1usize
+            .saturating_add(view.body.lines().count())
+            .saturating_add(
+                view.details
+                    .as_deref()
+                    .map(str::lines)
+                    .map(Iterator::count)
+                    .unwrap_or(0),
+            ),
+        OutputBlockKind::DiagnosticNotice(view) | OutputBlockKind::SystemNotice(view) => view
+            .text
+            .lines()
+            .count()
+            .saturating_add(usize::from(view.text.ends_with('\n'))),
+        OutputBlockKind::AskUserBatch(view) => match (view.confirmed, view.phase) {
+            (true, _) => 2usize.saturating_add(view.slots.len().saturating_mul(3)),
+            (false, AskUserPhaseView::Confirming) => {
+                6usize.saturating_add(view.slots.len().saturating_mul(2))
+            }
+            (false, AskUserPhaseView::Answering) => {
+                let answered = view
+                    .slots
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, slot)| *index != view.active_index && slot.answer.is_some())
+                    .count();
+                let active = view.slots.get(view.active_index);
+                let options = active.map(|slot| slot.options.len()).unwrap_or(0);
+                5usize
+                    .saturating_add(answered)
+                    .saturating_add(options.saturating_mul(2))
+            }
+        },
+    }
+}
+
+fn estimate_tool_result_lines(
+    view: &crate::tui::view_model::output::ToolResultBlockView,
+    text_width: usize,
+) -> usize {
+    match result_policy(&view.tool_title) {
+        ResultPolicy::Hidden => 0,
+        ResultPolicy::Visible {
+            max_lines,
+            render_kind,
+            tail_mode: _,
+        } => match render_kind {
+            ResultRender::Plain => max_lines.unwrap_or(5).saturating_add(1),
+            ResultRender::Diff => {
+                let (old_lines, new_lines) = view
+                    .data
+                    .as_ref()
+                    .and_then(|data| Some((data.get("old")?.as_str()?, data.get("new")?.as_str()?)))
+                    .map(|(old, new)| (old.lines().count(), new.lines().count()))
+                    .unwrap_or_else(|| {
+                        let marker_count = view
+                            .result_text
+                            .lines()
+                            .filter(|line| line.starts_with("---DIFF"))
+                            .count();
+                        let source_lines = view
+                            .result_text
+                            .lines()
+                            .count()
+                            .saturating_sub(marker_count + 1);
+                        (
+                            source_lines / 2,
+                            source_lines.saturating_sub(source_lines / 2),
+                        )
+                    });
+                old_lines
+                    .max(new_lines)
+                    .saturating_add(2)
+                    .max(estimate_wrapped_line_count(&view.result_text, text_width).min(8))
+            }
+        },
+    }
+}
+
+fn estimate_wrapped_text_lines(text: &str, width: usize, preserve_blank: bool) -> usize {
+    text.lines().fold(0usize, |total, line| {
+        let lines = if line.is_empty() {
+            usize::from(preserve_blank)
+        } else {
+            estimate_wrapped_line_count(line, width)
+        };
+        total.saturating_add(lines)
+    })
+}
+
+fn estimate_wrapped_line_count(line: &str, width: usize) -> usize {
+    if line.is_empty() {
+        return 1;
+    }
+    let width = width.max(1);
+    str_display_width(line).max(1).div_ceil(width)
+}
+
 fn collect_semantic_block_ids(roots: &[BlockNode]) -> HashSet<&str> {
     fn collect<'a>(node: &'a BlockNode, ids: &mut HashSet<&'a str>) {
         ids.insert(node.block_id.as_str());
@@ -554,13 +711,45 @@ fn hash_node_layout(node: &BlockNode, hasher: &mut DefaultHasher) {
 
 /// 根据已知 root group 行数，从最新端跳过 `tail_offset` 覆盖的完整 root，
 /// 再向旧端选择 `line_limit` 覆盖的完整 root。边界 root 永不拆分。
-fn select_root_window(
+fn select_root_window_from_counts(
     root_line_counts: &[usize],
     window: OutputRenderWindow,
 ) -> SelectedRootWindow {
     let source_total_lines = root_line_counts
         .iter()
         .fold(0usize, |total, lines| total.saturating_add(*lines));
+    select_root_range(root_line_counts, window, source_total_lines)
+}
+
+fn select_root_window(
+    root_layout_states: &[RootLayoutState],
+    window: OutputRenderWindow,
+) -> SelectedRootWindow {
+    let source_total_lines = root_layout_states.iter().fold(0usize, |total, state| {
+        total.saturating_add(state.line_count)
+    });
+    if window.tail_offset >= source_total_lines {
+        let exact_prefix_lines = root_layout_states
+            .iter()
+            .scan(true, |prefix_exact, state| {
+                *prefix_exact &= !state.needs_exact_layout;
+                Some(if *prefix_exact { state.line_count } else { 0 })
+            })
+            .collect::<Vec<_>>();
+        return select_root_range(&exact_prefix_lines, window, source_total_lines);
+    }
+    let estimated_lines = root_layout_states
+        .iter()
+        .map(|state| state.line_count)
+        .collect::<Vec<_>>();
+    select_root_range(&estimated_lines, window, source_total_lines)
+}
+
+fn select_root_range(
+    root_line_counts: &[usize],
+    window: OutputRenderWindow,
+    source_total_lines: usize,
+) -> SelectedRootWindow {
     if window.line_limit == 0 || root_line_counts.is_empty() {
         return SelectedRootWindow {
             root_range: root_line_counts.len()..root_line_counts.len(),
