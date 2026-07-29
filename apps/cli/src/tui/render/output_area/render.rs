@@ -32,6 +32,8 @@ impl OutputArea {
         view: &OutputViewState,
         live_status: &LiveStatusViewModel,
     ) {
+        #[cfg(test)]
+        let viewport_started = std::time::Instant::now();
         if area.height == 0 {
             return;
         }
@@ -168,6 +170,12 @@ impl OutputArea {
             visible_lines,
             view.auto_scroll,
             view.scroll_offset,
+        );
+        #[cfg(test)]
+        crate::tui::render::performance::record_viewport_render(
+            total_lines,
+            end.saturating_sub(start),
+            viewport_started.elapsed(),
         );
     }
 }

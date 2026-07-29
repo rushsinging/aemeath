@@ -3,6 +3,7 @@
 mod chat;
 mod completion;
 mod driver;
+mod frame_performance;
 mod harness;
 mod history_window;
 mod input;
