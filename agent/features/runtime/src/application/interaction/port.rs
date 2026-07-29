@@ -72,10 +72,6 @@ pub enum InteractionResolution {
 }
 
 impl InteractionResolution {
-    pub fn is_closed(&self) -> bool {
-        matches!(self, Self::Closed { .. })
-    }
-
     pub fn metadata(&self) -> &InteractionRequestMetadata {
         match self {
             Self::Resolved { metadata, .. } | Self::Closed { metadata } => metadata,

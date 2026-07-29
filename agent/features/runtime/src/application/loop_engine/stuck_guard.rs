@@ -1,5 +1,3 @@
-use std::time::{Duration, Instant};
-
 use crate::application::loop_engine::chat::stall::StallDetector;
 use crate::application::tool::agent::ToolCall;
 use crate::application::tool::coordination::loop_guard::{ToolCallFuse, ToolFuseDecision};
@@ -9,7 +7,6 @@ pub enum StuckDecision {
     Allow,
     SoftBlock { reason: String },
     HardPause { reason: String },
-    Fail { reason: String },
 }
 
 /// Guard against stuck loops (repeated text, tool call loops, timeout).
@@ -20,22 +17,14 @@ pub enum StuckDecision {
 pub struct StuckGuard {
     stall: StallDetector,
     tool_fuse: ToolCallFuse,
-    timeout: Duration,
-    started_at: Instant,
     text_stall_count: usize,
 }
 
 impl StuckGuard {
-    pub fn new(timeout: Duration) -> Self {
-        Self::with_started_at(timeout, Instant::now())
-    }
-
-    pub fn with_started_at(timeout: Duration, started_at: Instant) -> Self {
+    pub fn new() -> Self {
         Self {
             stall: StallDetector::new(),
             tool_fuse: ToolCallFuse::new(),
-            timeout,
-            started_at,
             text_stall_count: 0,
         }
     }
@@ -62,16 +51,6 @@ impl StuckGuard {
             ToolFuseDecision::Allow => StuckDecision::Allow,
             ToolFuseDecision::SoftBlock { reason } => StuckDecision::SoftBlock { reason },
             ToolFuseDecision::HardPause { reason } => StuckDecision::HardPause { reason },
-        }
-    }
-
-    pub fn inspect_timeout(&self, now: Instant) -> StuckDecision {
-        if self.timeout.is_zero() || now.duration_since(self.started_at) < self.timeout {
-            StuckDecision::Allow
-        } else {
-            StuckDecision::Fail {
-                reason: format!("run timed out after {} seconds", self.timeout.as_secs()),
-            }
         }
     }
 }

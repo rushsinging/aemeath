@@ -20,6 +20,7 @@ fn agent_for_test_persist_uses_context_workspace_backing() {
     let agent = Agent::for_test(&registry, ctx, 1);
 
     backing
+        .views()
         .control()
         .change_directory(temp.path().to_path_buf())
         .expect("mutate shared workspace backing");

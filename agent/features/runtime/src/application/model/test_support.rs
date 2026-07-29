@@ -113,18 +113,20 @@ pub(crate) async fn advance_until_retry_condition(
     virtual_time_limit: std::time::Duration,
     condition: impl Fn() -> bool,
 ) {
-    let tick = std::time::Duration::from_millis(100);
-    let max_ticks = virtual_time_limit.as_millis().div_ceil(tick.as_millis());
-    for _ in 0..max_ticks {
+    // Under the full parallel Runtime suite, Main Run setup can require many
+    // scheduler turns before it registers the retry timer. Advancing paused
+    // time during that setup would consume the virtual-time budget before the
+    // timer exists and make the test fail even though retry behavior is sound.
+    for _ in 0..10_000 {
         if condition() {
             return;
         }
-        // Let the task under test register its retry timer before advancing
-        // virtual time.  Advancing first can move the clock past the
-        // invocation that creates the timer, making the timer's deadline
-        // relative to a later instant and causing a false timeout under
-        // heavily instrumented test runs.
         tokio::task::yield_now().await;
+    }
+
+    let tick = std::time::Duration::from_millis(100);
+    let max_ticks = virtual_time_limit.as_millis().div_ceil(tick.as_millis());
+    for _ in 0..max_ticks {
         if condition() {
             return;
         }

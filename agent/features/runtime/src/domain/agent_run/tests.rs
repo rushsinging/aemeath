@@ -327,7 +327,7 @@ fn run_follows_the_happy_path_to_completed() {
         .unwrap();
     run.transition(RunTransition::ContextPrepared).unwrap();
     let step_id = run.begin_step().unwrap();
-    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+    run.record_model_invocation(&step_id, ModelInvocation::new("response"))
         .unwrap();
     run.transition(RunTransition::ModelInvoked).unwrap();
     run.transition(RunTransition::ContinueAfterResponse)
@@ -597,7 +597,7 @@ const ALL_RUN_TRANSITIONS: [RunTransition; 19] = [
 fn invoke_to_applying(run: &mut Run) -> RunStepId {
     run.transition(RunTransition::ContextPrepared).unwrap();
     let step_id = run.begin_step().unwrap();
-    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+    run.record_model_invocation(&step_id, ModelInvocation::new("response"))
         .unwrap();
     run.transition(RunTransition::ModelInvoked).unwrap();
     step_id
@@ -744,7 +744,7 @@ fn run_transition_matrix_exhaustively_accepts_only_documented_edges() {
             let mut run = run_at_status(from);
             if from == RunStatus::InvokingModel && transition == RunTransition::ModelInvoked {
                 let step_id = run.begin_step().unwrap();
-                run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+                run.record_model_invocation(&step_id, ModelInvocation::new("response"))
                     .unwrap();
             }
             let result = run.transition(transition);
@@ -786,7 +786,7 @@ fn model_invoked_requires_recorded_invocation_on_active_step() {
         run.transition(RunTransition::ModelInvoked),
         Err(RunTransitionError::StepIncomplete)
     );
-    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+    run.record_model_invocation(&step_id, ModelInvocation::new("response"))
         .unwrap();
     assert_eq!(
         run.transition(RunTransition::ModelInvoked),
@@ -813,7 +813,7 @@ fn run_rejects_second_active_step_and_incomplete_step_completion() {
 fn run_step_accepts_at_most_one_model_invocation() {
     let mut run = run_at_status(RunStatus::InvokingModel);
     let step_id = run.begin_step().unwrap();
-    let invocation = ModelInvocation::new("request", "response");
+    let invocation = ModelInvocation::new("response");
 
     run.record_model_invocation(&step_id, invocation.clone())
         .unwrap();
@@ -829,7 +829,7 @@ fn run_step_accepts_at_most_one_model_invocation() {
 fn tool_call_is_owned_by_a_run_step_and_advances_monotonically() {
     let mut run = run_at_status(RunStatus::InvokingModel);
     let step_id = run.begin_step().unwrap();
-    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+    run.record_model_invocation(&step_id, ModelInvocation::new("response"))
         .unwrap();
     run.transition(RunTransition::ModelInvoked).unwrap();
     let call = tool_call("provider-call-1");
@@ -1445,7 +1445,7 @@ fn finishing_transition_and_run_complete_bypass_are_not_in_the_machine() {
             let mut run = run_at_status(from);
             if from == RunStatus::InvokingModel && transition == RunTransition::ModelInvoked {
                 let step_id = run.begin_step().unwrap();
-                run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+                run.record_model_invocation(&step_id, ModelInvocation::new("response"))
                     .unwrap();
             }
             let next = try_transition(&mut run, transition);
@@ -1468,7 +1468,7 @@ fn completed_only_via_draining_input_and_empty_and_sealed() {
             let mut run = run_at_status(from);
             if from == RunStatus::InvokingModel && transition == RunTransition::ModelInvoked {
                 let step_id = run.begin_step().unwrap();
-                run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+                run.record_model_invocation(&step_id, ModelInvocation::new("response"))
                     .unwrap();
             }
             let next = try_transition(&mut run, transition);
@@ -1674,7 +1674,7 @@ fn drain_epoch_persists_across_run_operations() {
         .unwrap();
     run.transition(RunTransition::ContextPrepared).unwrap();
     let step_id = run.begin_step().unwrap();
-    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+    run.record_model_invocation(&step_id, ModelInvocation::new("response"))
         .unwrap();
     run.transition(RunTransition::ModelInvoked).unwrap();
     run.transition(RunTransition::ContinueAfterResponse)

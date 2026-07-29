@@ -10,22 +10,18 @@
 
 use std::sync::Arc;
 
-use crate::application::client::RuntimeContextAssemblyError;
 use crate::application::hook::empty::BoundaryHookPort;
 use crate::application::interaction::port::{
     ParentMediatedInteractionPort, UnavailableInteractionPort,
 };
-use crate::application::loop_engine::chat::{ChatEventSinkHandle, RunEventSink};
 use crate::application::run::context::{
     RunCapabilityBindings, RuntimeContext, RuntimeContextAssemblyToken, RuntimeServices,
 };
-use crate::application::run::preparation::{
-    RunPreparationError, RunPreparationRequest, SessionSnapshot,
+use crate::application::run::creation::{
+    RunCreationBindings, RunCreationError, RunCreationRequest, SessionSnapshot,
 };
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
-use crate::domain::agent_run::{
-    HookBindingMode, InteractionBindingMode, ReasoningBindingMode, RunSpec,
-};
+use crate::domain::agent_run::{HookBindingMode, InteractionBindingMode, RunSpec};
 use crate::ports::PolicyPort;
 use hook::HookPort;
 use memory::api::ReflectionHistoryStore;
@@ -35,37 +31,7 @@ use tools::{
     ToolExecutionContextBindingPort, ToolExecutionPort, ToolProfileName,
 };
 
-// ── Factory-owned session bindings ──
-
-#[derive(Clone)]
-struct SessionBindings {
-    wiring: Arc<std::sync::RwLock<Option<Arc<context::MainSessionWiring>>>>,
-    provider: Arc<std::sync::RwLock<Option<Arc<crate::ports::ProviderBinding>>>>,
-    interaction: Arc<
-        std::sync::RwLock<Option<Arc<dyn crate::application::interaction::port::InteractionPort>>>,
-    >,
-    reasoning:
-        Arc<std::sync::RwLock<Option<Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>>>>,
-    event_sink: RunEventSink,
-    workspace: Arc<std::sync::RwLock<Option<RuntimeWorkspaceAccess>>>,
-    provider_factory: Arc<std::sync::RwLock<Option<Arc<dyn crate::ports::ProviderFactory>>>>,
-    skill_materializer: Arc<std::sync::RwLock<Option<Arc<dyn tools::SkillMaterializationPort>>>>,
-}
-
-impl SessionBindings {
-    fn new(wiring: Option<Arc<context::MainSessionWiring>>) -> Self {
-        Self {
-            wiring: Arc::new(std::sync::RwLock::new(wiring)),
-            provider: Arc::new(std::sync::RwLock::new(None)),
-            interaction: Arc::new(std::sync::RwLock::new(None)),
-            reasoning: Arc::new(std::sync::RwLock::new(None)),
-            event_sink: RunEventSink::default(),
-            workspace: Arc::new(std::sync::RwLock::new(None)),
-            provider_factory: Arc::new(std::sync::RwLock::new(None)),
-            skill_materializer: Arc::new(std::sync::RwLock::new(None)),
-        }
-    }
-}
+// ── Factory-owned immutable services ──
 
 struct RestrictedToolCatalog {
     snapshot: ToolCatalogSnapshot,
@@ -88,14 +54,66 @@ impl ToolCatalogPort for RestrictedToolCatalog {
 
 // ── Factory ──
 
+struct SessionResolution {
+    snapshot: SessionSnapshot,
+    lease: Option<context::OwnedSessionSharedPermit>,
+}
+
+struct WorkspaceSelection {
+    access: Option<RuntimeWorkspaceAccess>,
+}
+
+struct ProviderSelection {
+    binding: Arc<crate::ports::ProviderBinding>,
+}
+
+struct ContextSelection {
+    port: Arc<dyn crate::ports::ContextPort>,
+}
+
+struct MemorySelection {
+    port: Arc<dyn memory::api::MemoryPort>,
+}
+
+struct ToolCatalogSelection {
+    port: Option<Arc<dyn ToolCatalogPort>>,
+}
+
+struct InteractionSelection {
+    port: Arc<dyn crate::application::interaction::port::InteractionPort>,
+}
+
+struct HookSelection {
+    port: Arc<dyn HookPort>,
+}
+
+struct ReasoningSelection {
+    port: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
+}
+
+struct EventRouteSelection {
+    sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
+}
+
+struct LifecycleSelection {
+    cancel: crate::application::run::context::RunCancellationScope,
+    usage: crate::application::run::context::RunUsageTracker,
+}
+
+struct RunCreationResources {
+    session: SessionResolution,
+    workspace: WorkspaceSelection,
+}
+
 /// #1248 Task 3 domain-responsible RuntimeContext assembly.
 ///
 /// Holds [`RuntimeServices`] (session-scoped shared ports) and assembles
-/// per-Run [`RuntimeContext`] instances from a [`RunSpec`], a
-/// [`RunContextBindings`], and an optional parent [`RuntimeContext`].
+/// per-Run [`RuntimeContext`] instances from a [`RunSpec`], grouped
+/// [`RunCapabilityBindings`], and an optional parent [`RuntimeContext`].
 pub struct RuntimeContextFactory {
     services: RuntimeServices,
-    session: SessionBindings,
+    provider_factory: Option<Arc<dyn crate::ports::ProviderFactory>>,
+    skill_materializer: Option<Arc<dyn tools::SkillMaterializationPort>>,
 }
 
 impl RuntimeContextFactory {
@@ -121,29 +139,6 @@ impl RuntimeContextFactory {
             reflection_history,
             task,
             hooks,
-            None,
-        )
-    }
-
-    pub fn with_session_wiring(
-        tool_catalog: Arc<dyn ToolCatalogPort>,
-        tool_execution: Arc<dyn ToolExecutionPort>,
-        tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
-        policy: Arc<dyn PolicyPort>,
-        reflection_history: Arc<dyn ReflectionHistoryStore>,
-        task: Arc<dyn TaskAccess>,
-        hooks: Arc<dyn HookPort>,
-        wiring: Arc<context::MainSessionWiring>,
-    ) -> Self {
-        Self::from_services(
-            tool_catalog,
-            tool_execution,
-            tool_context_binding,
-            policy,
-            reflection_history,
-            task,
-            hooks,
-            Some(wiring),
         )
     }
 
@@ -156,7 +151,6 @@ impl RuntimeContextFactory {
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
         hooks: Arc<dyn HookPort>,
-        wiring: Option<Arc<context::MainSessionWiring>>,
     ) -> Self {
         Self {
             services: RuntimeServices {
@@ -168,114 +162,136 @@ impl RuntimeContextFactory {
                 task,
                 hooks,
             },
-            session: SessionBindings::new(wiring),
+            provider_factory: None,
+            skill_materializer: None,
         }
     }
 
-    /// Read-only access to session-scoped [`RuntimeServices`].
-    ///
-    /// Used by TUI launch and other callers that need to project service
-    /// ports (tool catalog/execution, hooks) without duplicating them
-    /// on [`SessionRuntime`](super::client::SessionRuntime).
+    pub fn with_derived_bindings(
+        &self,
+        provider_factory: Arc<dyn crate::ports::ProviderFactory>,
+        skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    ) -> Self {
+        Self {
+            services: self.services.clone(),
+            provider_factory: Some(provider_factory),
+            skill_materializer: Some(skill_materializer),
+        }
+    }
+
+    /// Read-only access to process-stable [`RuntimeServices`].
     pub fn services(&self) -> &RuntimeServices {
         &self.services
     }
 
-    pub fn bind_session_wiring(&self, wiring: Arc<context::MainSessionWiring>) {
-        *self
-            .session
-            .wiring
-            .write()
-            .unwrap_or_else(|error| error.into_inner()) = Some(wiring);
-    }
-
-    pub fn bind_session_capabilities(
-        &self,
-        provider: Arc<crate::ports::ProviderBinding>,
-        interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
-        reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
-        event_sink: ChatEventSinkHandle,
-        workspace: RuntimeWorkspaceAccess,
-    ) {
-        let session = &self.session;
-        *session
-            .provider
-            .write()
-            .unwrap_or_else(|error| error.into_inner()) = Some(provider);
-        *session
-            .interaction
-            .write()
-            .unwrap_or_else(|error| error.into_inner()) = Some(interaction);
-        *session
-            .reasoning
-            .write()
-            .unwrap_or_else(|error| error.into_inner()) = Some(reasoning);
-        session.event_sink.bind(event_sink);
-        *session
-            .workspace
-            .write()
-            .unwrap_or_else(|error| error.into_inner()) = Some(workspace);
-    }
-
-    pub fn bind_derived_factories(
-        &self,
-        provider_factory: Arc<dyn crate::ports::ProviderFactory>,
-        skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
-    ) {
-        let session = &self.session;
-        *session
-            .provider_factory
-            .write()
-            .unwrap_or_else(|error| error.into_inner()) = Some(provider_factory);
-        *session
-            .skill_materializer
-            .write()
-            .unwrap_or_else(|error| error.into_inner()) = Some(skill_materializer);
-    }
-
     pub(crate) fn prepare(
         &self,
-        request: &RunPreparationRequest,
+        request: &RunCreationRequest,
+        bindings: &RunCreationBindings,
     ) -> Result<
         (
             RuntimeContext,
             SessionSnapshot,
             Option<RuntimeWorkspaceAccess>,
         ),
-        RunPreparationError,
+        RunCreationError,
     > {
-        let session = &self.session;
-        match request.parent() {
-            Some(parent) => self.prepare_derived(request, parent, session),
-            None => self.prepare_independent(request, session),
-        }
+        let session = self.resolve_session(request, bindings)?;
+        let workspace = self.select_workspace(bindings)?;
+        let provider = self.select_provider(request, bindings)?;
+        let context = self.select_context(request, bindings, &session, &workspace)?;
+        let memory = self.select_memory(bindings)?;
+        let tool_catalog = self.select_tool_catalog(bindings)?;
+        let parent = bindings.parent().map(|parent| parent.context().clone());
+        let interaction =
+            self.select_interaction_port(request.spec(), bindings, parent.as_deref())?;
+        let hook = self.select_hook_port(request.spec(), parent.as_deref())?;
+        let reasoning = self.select_reasoning_port(bindings, parent.as_deref())?;
+        let event_route = self.select_event_route(bindings)?;
+        let lifecycle = self.select_lifecycle(request, parent.as_deref())?;
+        let bindings = RunCapabilityBindings {
+            model: crate::application::run::context::ModelBindings {
+                context: context.port,
+                provider: provider.binding,
+                interaction: interaction.port,
+                memory: memory.port,
+                config: crate::application::run::config::RunConfigSnapshot::capture(
+                    session.snapshot.config().clone(),
+                ),
+                reasoning: reasoning.port,
+                tool_catalog: tool_catalog.port,
+            },
+            io: crate::application::run::context::IoBindings {
+                event_sink: event_route.sink,
+                input: crate::application::run::context::RunInputBufferHandle::new(),
+            },
+            lifecycle: crate::application::run::context::LifecycleBindings {
+                cancel: lifecycle.cancel,
+                usage: lifecycle.usage,
+            },
+        };
+        self.bind_runtime_context(bindings, hook, RunCreationResources { session, workspace })
     }
 
-    fn prepare_independent(
+    fn bind_runtime_context(
         &self,
-        request: &RunPreparationRequest,
-        session: &SessionBindings,
+        bindings: RunCapabilityBindings,
+        hook: HookSelection,
+        resources: RunCreationResources,
     ) -> Result<
         (
             RuntimeContext,
             SessionSnapshot,
             Option<RuntimeWorkspaceAccess>,
         ),
-        RunPreparationError,
+        RunCreationError,
     > {
-        let wiring = session
-            .wiring
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
-            .ok_or(RunPreparationError::ContextAssembly)?;
-        let permit = wiring
+        let services = RuntimeServices {
+            tool_catalog: bindings
+                .model
+                .tool_catalog
+                .clone()
+                .unwrap_or_else(|| self.services.tool_catalog.clone()),
+            hooks: hook.port,
+            ..self.services.clone()
+        };
+        let context = RuntimeContext::new(services, bindings, RuntimeContextAssemblyToken::new());
+        let context = match resources.session.lease {
+            Some(lease) => context.hold_session_lease(lease),
+            None => context,
+        };
+        Ok((
+            context,
+            resources.session.snapshot,
+            resources.workspace.access,
+        ))
+    }
+
+    fn resolve_session(
+        &self,
+        request: &RunCreationRequest,
+        bindings: &RunCreationBindings,
+    ) -> Result<SessionResolution, RunCreationError> {
+        if request.parent().is_some() != bindings.parent().is_some() {
+            return Err(RunCreationError::ContextAssembly);
+        }
+        let Some(session) = bindings.session() else {
+            if bindings.parent().is_none() {
+                return Err(RunCreationError::ContextAssembly);
+            }
+            return Ok(SessionResolution {
+                snapshot: request.session().clone(),
+                lease: None,
+            });
+        };
+        let wiring = session.wiring();
+        let lease = wiring
             .gate()
             .try_acquire_shared()
-            .map_err(|_| RunPreparationError::ContextAssembly)?;
+            .map_err(|_| RunCreationError::ContextAssembly)?;
         let committed = wiring.committed_session();
         let config = wiring.committed_config();
-        let resolved_session = if committed.id == request.session().session_id()
+        let snapshot = if committed.id == request.session().session_id()
             && config.revision().get() == request.session().revision()
         {
             request.session().clone()
@@ -284,100 +300,43 @@ impl RuntimeContextFactory {
                 committed.id.clone(),
                 request.session().workspace_root().to_path_buf(),
                 request.session().model_key().to_string(),
-                config.clone(),
+                config,
             )
         };
-        let provider = session
-            .provider
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
-            .ok_or(RunPreparationError::ContextAssembly)?;
-        let interaction = session
-            .interaction
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
-            .ok_or(RunPreparationError::ContextAssembly)?;
-        let reasoning = session
-            .reasoning
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
-            .ok_or(RunPreparationError::ContextAssembly)?;
-        let context = self
-            .create(
-                request.spec(),
-                RunCapabilityBindings {
-                    model: crate::application::run::context::ModelBindings {
-                        context: wiring.committed_context(),
-                        provider,
-                        interaction,
-                        memory: wiring.committed_memory(),
-                        config: crate::application::run::config::RunConfigSnapshot::capture(config),
-                        reasoning,
-                        tool_catalog: None,
-                    },
-                    io: crate::application::run::context::IoBindings {
-                        event_sink: ChatEventSinkHandle::new(session.event_sink.clone()),
-                        input: crate::application::run::context::RunInputBufferHandle::new(),
-                    },
-                    lifecycle: crate::application::run::context::LifecycleBindings {
-                        cancel: crate::application::run::context::RunCancellationScope::new(),
-                        usage: crate::application::run::context::RunUsageTracker::new(),
-                    },
-                },
-                None,
-            )
-            .map_err(|_| RunPreparationError::ContextAssembly)?
-            .hold_session_lease(permit);
-        Ok((context, resolved_session, None))
+        Ok(SessionResolution {
+            snapshot,
+            lease: Some(lease),
+        })
     }
 
-    fn prepare_derived(
+    fn select_workspace(
         &self,
-        request: &RunPreparationRequest,
-        parent: &crate::application::run::preparation::ParentRunCapabilities,
-        session: &SessionBindings,
-    ) -> Result<
-        (
-            RuntimeContext,
-            SessionSnapshot,
-            Option<RuntimeWorkspaceAccess>,
-        ),
-        RunPreparationError,
-    > {
-        let parent_context = parent
-            .context()
-            .ok_or(RunPreparationError::ContextAssembly)?;
-        let parent_workspace = parent
-            .workspace()
-            .ok_or(RunPreparationError::ContextAssembly)?;
-        let role = request
-            .session()
-            .config()
-            .agents()
-            .roles
-            .get(&request.spec().name)
-            .ok_or_else(|| RunPreparationError::SubRoleNotFound {
-                role: request.spec().name.clone(),
-            })?;
-        if !role.enabled {
-            return Err(RunPreparationError::SubRoleDisabled {
-                role: request.spec().name.clone(),
+        bindings: &RunCreationBindings,
+    ) -> Result<WorkspaceSelection, RunCreationError> {
+        Ok(WorkspaceSelection {
+            access: bindings
+                .parent()
+                .map(|parent| parent.workspace().derive_isolated()),
+        })
+    }
+
+    fn select_provider(
+        &self,
+        request: &RunCreationRequest,
+        bindings: &RunCreationBindings,
+    ) -> Result<ProviderSelection, RunCreationError> {
+        if let Some(session) = bindings.session() {
+            return Ok(ProviderSelection {
+                binding: session.provider().clone(),
             });
         }
-        if role.model.trim().is_empty() {
-            return Err(RunPreparationError::SubRoleNoModel {
-                role: request.spec().name.clone(),
-            });
-        }
+        let role = self.resolve_derived_role(request)?;
         let (source_key, source, model) = request
             .session()
             .config()
             .models()
             .find_model(&role.model)
-            .ok_or_else(|| RunPreparationError::SubUnknownModel {
+            .ok_or_else(|| RunCreationError::SubUnknownModel {
                 model: role.model.clone(),
             })?;
         let max_tokens = role
@@ -385,7 +344,7 @@ impl RuntimeContextFactory {
             .filter(|tokens| *tokens > 0)
             .or_else(|| (model.max_tokens > 0).then_some(model.max_tokens))
             .unwrap_or(8192);
-        let reasoning_level = model
+        let requested_reasoning = model
             .reasoning_effort
             .as_deref()
             .and_then(provider::ReasoningLevel::parse)
@@ -394,13 +353,10 @@ impl RuntimeContextFactory {
             } else {
                 provider::ReasoningLevel::Off
             });
-        let provider_factory = session
+        let binding = self
             .provider_factory
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
-            .ok_or(RunPreparationError::ContextAssembly)?;
-        let provider = provider_factory
+            .as_ref()
+            .ok_or(RunCreationError::ContextAssembly)?
             .build(crate::ports::ProviderBuildSpec {
                 driver: source.driver.clone(),
                 source_key: source_key.clone(),
@@ -412,201 +368,194 @@ impl RuntimeContextFactory {
                     model: model.id.clone(),
                 },
                 max_tokens,
-                requested_reasoning: reasoning_level,
+                requested_reasoning,
                 context_window: (model.context_window > 0).then_some(model.context_window),
                 timeout: std::time::Duration::from_secs(
                     request.session().config().api_timeout_secs(),
                 ),
                 user_agent: request.session().config().user_agent().to_string(),
             })
-            .map_err(|error| RunPreparationError::SubProviderBuild {
+            .map_err(|error| RunCreationError::SubProviderBuild {
                 message: error.to_string(),
             })?;
-        let snapshot = parent_context
+        Ok(ProviderSelection {
+            binding: Arc::new(binding),
+        })
+    }
+
+    fn select_context(
+        &self,
+        _request: &RunCreationRequest,
+        bindings: &RunCreationBindings,
+        session: &SessionResolution,
+        workspace: &WorkspaceSelection,
+    ) -> Result<ContextSelection, RunCreationError> {
+        if let Some(bindings) = bindings.session() {
+            return Ok(ContextSelection {
+                port: bindings.wiring().committed_context(),
+            });
+        }
+        let workspace = workspace
+            .access
+            .as_ref()
+            .ok_or(RunCreationError::ContextAssembly)?;
+        let skill_materializer = self
+            .skill_materializer
+            .as_ref()
+            .ok_or(RunCreationError::ContextAssembly)?
+            .clone();
+        Ok(ContextSelection {
+            port: context::api::isolated_context_with_skill(
+                session.snapshot.session_id(),
+                skill_materializer,
+                Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
+                    workspace.views().read(),
+                )),
+            ),
+        })
+    }
+
+    fn select_memory(
+        &self,
+        bindings: &RunCreationBindings,
+    ) -> Result<MemorySelection, RunCreationError> {
+        let port = match bindings.session() {
+            Some(session) => session.wiring().committed_memory(),
+            None => Arc::new(memory::NoOpMemory),
+        };
+        Ok(MemorySelection { port })
+    }
+
+    fn select_tool_catalog(
+        &self,
+        bindings: &RunCreationBindings,
+    ) -> Result<ToolCatalogSelection, RunCreationError> {
+        let Some(parent) = bindings.parent() else {
+            return Ok(ToolCatalogSelection { port: None });
+        };
+        let snapshot = parent
+            .context()
             .tool_catalog()
             .snapshot(
                 &RegistryScopeName::new("sub-agent"),
                 &ToolProfileName::new("sub-agent-restricted"),
             )
-            .map_err(|error| RunPreparationError::SubToolCatalog {
+            .map_err(|error| RunCreationError::SubToolCatalog {
                 message: error.to_string(),
             })?;
-        let workspace = parent_workspace.derive_isolated();
-        let resolved_session = request.session().with_bound_values(
-            request.session().session_id().to_string(),
-            workspace.views().read().current_workspace_root(),
-            role.model.clone(),
-            request.session().config().clone(),
-        );
-        let skill_materializer = session
-            .skill_materializer
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone()
-            .ok_or(RunPreparationError::ContextAssembly)?;
-        let isolated_context = context::api::isolated_context_with_skill(
-            resolved_session.session_id(),
-            skill_materializer,
-            Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
-                workspace.views().read(),
-            )),
-        );
-        let context = self
-            .create(
-                request.spec(),
-                RunCapabilityBindings {
-                    model: crate::application::run::context::ModelBindings {
-                        context: isolated_context,
-                        provider: Arc::new(provider),
-                        interaction: parent_context.interaction(),
-                        memory: Arc::new(memory::NoOpMemory),
-                        config: crate::application::run::config::RunConfigSnapshot::capture(
-                            request.session().config().clone(),
-                        ),
-                        reasoning: Arc::new(std::sync::Mutex::new(
-                            *parent_context
-                                .reasoning_ref()
-                                .lock()
-                                .unwrap_or_else(|error| error.into_inner()),
-                        )),
-                        tool_catalog: Some(Arc::new(RestrictedToolCatalog { snapshot })),
-                    },
-                    io: crate::application::run::context::IoBindings {
-                        event_sink: ChatEventSinkHandle::new(session.event_sink.clone()),
-                        input: crate::application::run::context::RunInputBufferHandle::new(),
-                    },
-                    lifecycle: crate::application::run::context::LifecycleBindings {
-                        cancel: parent_context.cancel().child_scope(),
-                        usage: crate::application::run::context::RunUsageTracker::new(),
-                    },
-                },
-                Some(parent_context.as_ref()),
-            )
-            .map_err(|_| RunPreparationError::ContextAssembly)?;
-        Ok((context, resolved_session, Some(workspace)))
+        Ok(ToolCatalogSelection {
+            port: Some(Arc::new(RestrictedToolCatalog { snapshot })),
+        })
     }
 
-    /// Assemble a [`RuntimeContext`] from capability-semantic decisions
-    /// driven by the [`RunSpec`].
-    ///
-    /// # Assembly rules
-    ///
-    /// | Capability | Rule |
-    /// |---|---|
-    /// | Interaction | `ParentMediated` requires `parent`; `Client` / `Unavailable` are self-sufficient |
-    /// | Hook | `BoundaryOnly` requires `parent` (Task 3 validates availability, keeps parent hook; Task 4/6 swaps restricted adapter) |
-    /// | Reasoning | `Adaptive` → bindings port; `Fixed` → bindings port; `Inherit` → parent reasoning clone (fails if absent); `NoOp` → no-op port |
-    /// | Tool catalog | If `bindings.tool_catalog` is `Some`, use that; otherwise use factory's services catalog |
-    ///
-    /// # Errors
-    ///
-    /// - [`RuntimeContextAssemblyError::InteractionUnavailable`] when
-    ///   `ParentMediated` is requested without a parent.
-    /// - [`RuntimeContextAssemblyError::HookUnavailable`] when
-    ///   `BoundaryOnly` is requested without a parent.
-    /// - [`RuntimeContextAssemblyError::ReasoningUnavailable`] when
-    ///   `Inherit` is requested without a parent.
-    ///
-    /// Factory-private RuntimeContext construction used only by the unified assembly algorithm.
-    pub(crate) fn create(
+    fn select_interaction_port(
         &self,
         spec: &RunSpec,
-        bindings: impl Into<RunCapabilityBindings>,
+        bindings: &RunCreationBindings,
         parent: Option<&RuntimeContext>,
-    ) -> Result<RuntimeContext, RuntimeContextAssemblyError> {
-        let bindings = bindings.into();
-        // ── Validate interaction binding mode ──
-        let interaction_mode = self.select_interaction(spec);
-        match interaction_mode {
-            InteractionBindingMode::ParentMediated if parent.is_none() => {
-                return Err(RuntimeContextAssemblyError::InteractionUnavailable);
-            }
-            _ => {}
-        }
-
-        // Wire interaction port based on RunSpec mode
-        let interaction: std::sync::Arc<
-            dyn crate::application::interaction::port::InteractionPort,
-        > = match interaction_mode {
-            InteractionBindingMode::Client => bindings.model.interaction.clone(),
-            InteractionBindingMode::ParentMediated => std::sync::Arc::new(
-                ParentMediatedInteractionPort::new(parent.unwrap().interaction()),
-            ),
-            InteractionBindingMode::Unavailable => std::sync::Arc::new(UnavailableInteractionPort),
+    ) -> Result<InteractionSelection, RunCreationError> {
+        let port = match spec.interaction_binding() {
+            InteractionBindingMode::Client => bindings
+                .session()
+                .map(|session| session.interaction().clone())
+                .or_else(|| parent.map(RuntimeContext::interaction))
+                .ok_or(RunCreationError::ContextAssembly)?,
+            InteractionBindingMode::ParentMediated => Arc::new(ParentMediatedInteractionPort::new(
+                parent
+                    .ok_or(RunCreationError::ContextAssembly)?
+                    .interaction(),
+            )),
+            InteractionBindingMode::Unavailable => Arc::new(UnavailableInteractionPort),
         };
-
-        // ── Validate hook binding mode ──
-        let hook_mode = self.select_hook(spec);
-        match hook_mode {
-            HookBindingMode::BoundaryOnly if parent.is_none() => {
-                return Err(RuntimeContextAssemblyError::HookUnavailable);
-            }
-            _ => {}
-        }
-
-        // #1248 Task 3: Allow per-Run tool_catalog override (e.g. restricted catalog for sub-runs).
-        let services = if let Some(tool_catalog) = bindings.model.tool_catalog.clone() {
-            RuntimeServices {
-                tool_catalog,
-                ..self.services.clone()
-            }
-        } else {
-            self.services.clone()
-        };
-        let services = match hook_mode {
-            HookBindingMode::Full => services,
-            HookBindingMode::BoundaryOnly => RuntimeServices {
-                hooks: std::sync::Arc::new(BoundaryHookPort::new(services.hooks.clone())),
-                ..services
-            },
-        };
-
-        let mut final_bindings = bindings;
-        final_bindings.model.interaction = interaction;
-
-        Ok(RuntimeContext::new(
-            services,
-            final_bindings,
-            RuntimeContextAssemblyToken::new(),
-        ))
+        Ok(InteractionSelection { port })
     }
 
-    // ── Binding-mode selectors (Task 1, preserved) ──
-
-    /// Select the interaction binding mode from the RunSpec.
-    pub fn select_interaction(&self, spec: &RunSpec) -> InteractionBindingMode {
-        spec.interaction_binding()
-    }
-
-    /// Select interaction binding mode with an optional parent capability
-    /// snapshot.
-    pub fn select_interaction_with_parent(
+    fn select_hook_port(
         &self,
         spec: &RunSpec,
-        parent_caps: Option<&RunSpec>,
-    ) -> Result<InteractionBindingMode, RuntimeContextAssemblyError> {
-        match spec.interaction_binding() {
-            InteractionBindingMode::Client | InteractionBindingMode::Unavailable => {
-                Ok(spec.interaction_binding())
+        parent: Option<&RuntimeContext>,
+    ) -> Result<HookSelection, RunCreationError> {
+        let port = match spec.hook_binding() {
+            HookBindingMode::Full => self.services.hooks.clone(),
+            HookBindingMode::BoundaryOnly => {
+                parent.ok_or(RunCreationError::ContextAssembly)?;
+                Arc::new(BoundaryHookPort::new(self.services.hooks.clone()))
             }
-            InteractionBindingMode::ParentMediated => {
-                if parent_caps.is_some() {
-                    Ok(InteractionBindingMode::ParentMediated)
-                } else {
-                    Err(RuntimeContextAssemblyError::InteractionUnavailable)
-                }
-            }
+        };
+        Ok(HookSelection { port })
+    }
+
+    fn select_reasoning_port(
+        &self,
+        bindings: &RunCreationBindings,
+        parent: Option<&RuntimeContext>,
+    ) -> Result<ReasoningSelection, RunCreationError> {
+        let port = match bindings.session() {
+            Some(session) => session.reasoning().clone(),
+            None => Arc::new(std::sync::Mutex::new(
+                *parent
+                    .ok_or(RunCreationError::ContextAssembly)?
+                    .reasoning_ref()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()),
+            )),
+        };
+        Ok(ReasoningSelection { port })
+    }
+
+    fn select_event_route(
+        &self,
+        bindings: &RunCreationBindings,
+    ) -> Result<EventRouteSelection, RunCreationError> {
+        let sink = bindings
+            .session()
+            .map(|session| session.event_sink().clone())
+            .or_else(|| {
+                bindings
+                    .parent()
+                    .map(|parent| parent.context().event_sink())
+            })
+            .ok_or(RunCreationError::ContextAssembly)?;
+        Ok(EventRouteSelection { sink })
+    }
+
+    fn select_lifecycle(
+        &self,
+        _request: &RunCreationRequest,
+        parent: Option<&RuntimeContext>,
+    ) -> Result<LifecycleSelection, RunCreationError> {
+        Ok(LifecycleSelection {
+            cancel: parent
+                .map(|context| context.cancel().child_scope())
+                .unwrap_or_default(),
+            usage: crate::application::run::context::RunUsageTracker::new(),
+        })
+    }
+
+    fn resolve_derived_role<'a>(
+        &self,
+        request: &'a RunCreationRequest,
+    ) -> Result<&'a share::config::AgentRoleConfig, RunCreationError> {
+        let role = request
+            .session()
+            .config()
+            .agents()
+            .roles
+            .get(&request.spec().name)
+            .ok_or_else(|| RunCreationError::SubRoleNotFound {
+                role: request.spec().name.clone(),
+            })?;
+        if !role.enabled {
+            return Err(RunCreationError::SubRoleDisabled {
+                role: request.spec().name.clone(),
+            });
         }
-    }
-
-    /// Select the hook binding mode from the RunSpec.
-    pub fn select_hook(&self, spec: &RunSpec) -> HookBindingMode {
-        spec.hook_binding()
-    }
-
-    /// Static reasoning is supplied directly by RunContextBindings.
-    pub fn select_reasoning(&self, _spec: &RunSpec) -> ReasoningBindingMode {
-        ReasoningBindingMode::Fixed
+        if role.model.trim().is_empty() {
+            return Err(RunCreationError::SubRoleNoModel {
+                role: request.spec().name.clone(),
+            });
+        }
+        Ok(role)
     }
 }
 
@@ -617,6 +566,77 @@ impl RuntimeContextFactory {
 
 #[cfg(test)]
 impl RuntimeContextFactory {
+    pub(crate) fn create(
+        &self,
+        spec: &RunSpec,
+        bindings: impl Into<RunCapabilityBindings>,
+        parent: Option<&RuntimeContext>,
+    ) -> Result<RuntimeContext, crate::application::client::RuntimeContextAssemblyError> {
+        use crate::application::client::RuntimeContextAssemblyError;
+
+        let mut bindings = bindings.into();
+        bindings.model.interaction = match spec.interaction_binding() {
+            InteractionBindingMode::Client => bindings.model.interaction.clone(),
+            InteractionBindingMode::ParentMediated => Arc::new(ParentMediatedInteractionPort::new(
+                parent
+                    .ok_or(RuntimeContextAssemblyError::InteractionUnavailable)?
+                    .interaction(),
+            )),
+            InteractionBindingMode::Unavailable => Arc::new(UnavailableInteractionPort),
+        };
+        let hooks = match spec.hook_binding() {
+            HookBindingMode::Full => self.services.hooks.clone(),
+            HookBindingMode::BoundaryOnly => {
+                parent.ok_or(RuntimeContextAssemblyError::HookUnavailable)?;
+                Arc::new(BoundaryHookPort::new(self.services.hooks.clone()))
+            }
+        };
+        let services = RuntimeServices {
+            tool_catalog: bindings
+                .model
+                .tool_catalog
+                .clone()
+                .unwrap_or_else(|| self.services.tool_catalog.clone()),
+            hooks,
+            ..self.services.clone()
+        };
+        Ok(RuntimeContext::new(
+            services,
+            bindings,
+            RuntimeContextAssemblyToken::new(),
+        ))
+    }
+
+    pub fn select_interaction(&self, spec: &RunSpec) -> InteractionBindingMode {
+        spec.interaction_binding()
+    }
+
+    pub fn select_interaction_with_parent(
+        &self,
+        spec: &RunSpec,
+        parent: Option<&RunSpec>,
+    ) -> Result<InteractionBindingMode, crate::application::client::RuntimeContextAssemblyError>
+    {
+        if spec.interaction_binding() == InteractionBindingMode::ParentMediated && parent.is_none()
+        {
+            return Err(
+                crate::application::client::RuntimeContextAssemblyError::InteractionUnavailable,
+            );
+        }
+        Ok(spec.interaction_binding())
+    }
+
+    pub fn select_hook(&self, spec: &RunSpec) -> HookBindingMode {
+        spec.hook_binding()
+    }
+
+    pub fn select_reasoning(
+        &self,
+        _spec: &RunSpec,
+    ) -> crate::domain::agent_run::ReasoningBindingMode {
+        crate::domain::agent_run::ReasoningBindingMode::Fixed
+    }
+
     /// Test-only: create a factory with the given hook port replacing the
     /// default.  Prefer this over mutating `shell.hook_runner`.
     pub(crate) fn with_hooks(&self, hooks: std::sync::Arc<dyn hook::HookPort>) -> Self {
@@ -625,7 +645,8 @@ impl RuntimeContextFactory {
                 hooks,
                 ..self.services.clone()
             },
-            session: self.session.clone(),
+            provider_factory: self.provider_factory.clone(),
+            skill_materializer: self.skill_materializer.clone(),
         }
     }
 }

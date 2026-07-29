@@ -580,7 +580,7 @@
 
 - **功能**：验证 Runtime 内只有一个共享 Loop Engine 实现，禁止在 `agent/shared/` 或其他 feature crate 中出现平行 run-loop 实现。
 - **守护**：确保 Loop Engine 的单一真相——所有 Main / Sub Run 共用同一驱动骨架（[03-loop-and-state-machine.md](../02-modules/runtime/03-loop-and-state-machine.md)）。
-- **检查方式**：确认 Runtime 的 Main/Sub 入口调用唯一 `loop_engine::run_loop`，禁止旧 FSM；并扫描 `agent/features/runtime/src`、`agent/features/tools/src/adapters/agent_tool.rs` 与 `agent/features/tools/src/domain/types/agent.rs`，禁止恢复 Session token 槽或 `max_turns`。
+- **检查方式**：确认 Runtime 的 Main/Sub 入口调用唯一 `loop_engine::run_loop`，禁止旧 FSM；唯一入口检测兼容普通函数、带 visibility scope 的函数以及泛型 `run_loop<P>` 形状，避免把合法的窄阶段泛型重构误判为入口消失；并扫描 `agent/features/runtime/src`、`agent/features/tools/src/adapters/agent_tool.rs` 与 `agent/features/tools/src/domain/types/agent.rs`，禁止恢复 Session token 槽或 `max_turns`。
 - **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
 
 - **#872 Context 边界 / #1397 公共 owner**：扫描整个 `agent/features/runtime/src` 的生产源码，禁止引用 `context::session::*`、`ChatChain` / `ChatSegment`、`current_chain` / `frozen_chats` / `active_summary`、`SessionProjectionParticipant`、`projection_start_index`、`save_chain` 或 legacy compact helper；测试路径由已登记的 `scope.runtime.shared-loop-tests` 排除。独立 Run 与派生 Run 均委托 `application/loop_engine/step_persistence.rs` 的无角色 owner 接入唯一 `append_finalized`，Main/Sub adapter 禁止各自保留 finalized append 算法。Interaction completion 必须由 `application/interaction/coordinator.rs` 的 `InteractionCompletionContext` 与 `complete_tool_interaction` 统一拥有；禁止恢复 `InteractionCompletionPort` 或 Main/Sub 五组角色 completion 方法。消息归属必须使用显式 Step ownership，idle compact/reset 经 ContextPort，resume 与 session commands 经 Context crate-root Published Language。

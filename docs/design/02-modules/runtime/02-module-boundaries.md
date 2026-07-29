@@ -130,7 +130,7 @@ agent/features/runtime/src/
 
 ### agent_client（入站 façade）
 - **职责**：实现入站端口 `AgentClient`（OHS + PL）；将命令标准化为 typed bootstrap/session/run request，并调用 application service
-- **注**：生产对象图和具体 adapter 只在 Composition Root；`agent_client` 不创建 Provider、Tool、Hook、Workspace 或 RuntimeContext，也不参与 Main/Sub 分型。所有 Run 创建统一提交 `RunPreparationRequest` 给 `RuntimeContextFactory`
+- **注**：生产对象图和具体 adapter 只在 Composition Root；`agent_client` 不创建 Provider、Tool、Hook、Workspace 或 RuntimeContext，也不参与 Main/Sub 分型。所有 Run 创建统一提交 `RunCreationRequest` 给 `RuntimeContextFactory`
 
 ### Runtime / Hook 边界（跨模块）
 Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtime 编排**：

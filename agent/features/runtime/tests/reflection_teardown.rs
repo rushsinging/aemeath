@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use runtime::application::reflection::{
-    ReflectionTaskAdapter, ReflectionTaskCompletionStatus, ReflectionTaskRequest,
-    ReflectionTaskSubmitOutcome, ReflectionTaskTrigger,
+use runtime::{
+    CompleteReflectionResult, ReflectionTaskAdapter, ReflectionTaskCompletionStatus,
+    ReflectionTaskRequest, ReflectionTaskSubmitOutcome, ReflectionTaskTrigger,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -11,7 +11,7 @@ async fn shutdown_before_deadline_preserves_completed_task() {
     let adapter = ReflectionTaskAdapter::new(
         Duration::from_secs(30),
         |_request: ReflectionTaskRequest, _cancel: CancellationToken| async move {
-            Ok(runtime::application::reflection::CompleteReflectionResult {
+            Ok(CompleteReflectionResult {
                 output: memory::ReflectionOutput::default(),
                 input_tokens: 0,
                 output_tokens: 0,

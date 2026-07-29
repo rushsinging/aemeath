@@ -22,9 +22,6 @@ impl RuntimeWorkspaceAccess {
     pub fn views(&self) -> project::WorkspaceViews {
         self.0.clone()
     }
-    pub fn control(&self) -> Arc<dyn project::WorkspaceControl> {
-        self.0.control()
-    }
     pub fn persist(&self) -> Arc<dyn project::WorkspacePersist> {
         self.0.persist()
     }

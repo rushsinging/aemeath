@@ -1,9 +1,8 @@
-use super::loop_run::DerivedLoopCapabilityAdapter;
 use super::CliAgentRunner;
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::context_factory::RuntimeContextFactory;
-use crate::application::run::preparation::{
-    ParentRunCapabilities, RunPreparationRequest, SessionState,
+use crate::application::run::creation::{
+    ParentRunBindings, ParentRunFacts, RunCreationRequest, RunInstance, SessionState,
 };
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::application::tool::agent::Agent;
@@ -26,21 +25,14 @@ pub struct SubRunRequest {
 }
 
 /// Result of [`derive_sub_run`]: a single-source-of-truth bundle for the
-/// sub-agent launcher.  Every downstream consumer reads from this bundle —
-/// no second `derive_isolated()` call, no separate config snapshot, no
-/// parallel catalog query.
+/// derived launcher. Run ownership stays in `instance`; remaining fields are
+/// derived-only metadata and never duplicate Run execution state.
 ///
 /// #1385: holds full [`RuntimeWorkspaceAccess`] (not just [`project::WorkspaceViews`]);
-/// all scope/read_access/persist/skill query/hook workspace root come from this
-/// single derived workspace.
-pub struct PreparedSubRun {
-    pub context: RuntimeContext,
-    pub run: crate::domain::agent_run::Run,
-    pub execution: crate::application::run::execution_state::RunExecutionState,
-    /// Full workspace access — used for execution scope, read_access, persist,
-    /// skill query factory, and hook workspace root.  Never call
-    /// `derive_isolated()` a second time.
-    pub workspace: RuntimeWorkspaceAccess,
+/// all scope/read_access/persist/skill query/hook workspace root come from the
+/// workspace capability retained by `DerivedRun.instance`.
+pub struct DerivedRun {
+    pub instance: RunInstance,
     /// Resolved role config — avoids re-parsing config snapshot in run_agent.
     pub role_config: share::config::AgentRoleConfig,
     /// Resolved model display string (e.g. "test-provider/test-model").
@@ -51,7 +43,7 @@ pub struct PreparedSubRun {
     pub max_tokens: u32,
     /// Requested reasoning level.
     pub reasoning_level: provider::ReasoningLevel,
-    /// Session ID for the isolated context (used as DerivedLoopCapabilityAdapter.session_id).
+    /// Session ID for the isolated context.
     pub session_id: String,
 }
 
@@ -104,10 +96,10 @@ impl tools::CancellationSignal for CombinedCancellationSignal {
 /// - **task/hook/reflection/config**: shared from parent.
 /// - **reasoning**: Inherit mode via factory (`workflow::inherited_reasoning`) — independent port.
 /// - **workspace**: isolated via `parent_workspace.derive_isolated()` — used exactly once here;
-///   all downstream access comes from the returned `PreparedSubRun.workspace`.
+///   all downstream access comes from the returned `DerivedRun.instance`.
 ///   **Never call `derive_isolated` a second time.**
 ///
-/// #1397 P6.2: Uses the pure-value RunPreparer entry; context creation stays factory-private.
+/// #1397 P6.2: Uses the pure-value RunFactory entry; context creation stays factory-private.
 pub fn derive_sub_run(
     parent_spec: &RunSpec,
     parent_context: &RuntimeContext,
@@ -117,7 +109,7 @@ pub fn derive_sub_run(
     provider_factory: Arc<dyn crate::ports::ProviderFactory>,
     skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
     runtime_context_factory: Arc<RuntimeContextFactory>,
-) -> Result<PreparedSubRun, crate::application::client::RuntimeContextAssemblyError> {
+) -> Result<DerivedRun, crate::application::client::RuntimeContextAssemblyError> {
     use crate::application::client::RuntimeContextAssemblyError;
 
     // 1. Derive the RunSpec from parent.
@@ -146,49 +138,48 @@ pub fn derive_sub_run(
         resolved_spec.clone(),
         config_snapshot.config().clone(),
     );
-    let preparation_request = RunPreparationRequest::new(
-        spec.clone(),
-        session.snapshot_for_run(),
-        Some(ParentRunCapabilities::from_active_run(
-            parent_run_id.clone(),
-            parent_spec.clone(),
-            Arc::new(parent_context.clone()),
-            parent_workspace.clone(),
-        )),
-    )
-    .map_err(|error| RuntimeContextAssemblyError::SubDerivationFailed {
-        reason: error.to_string(),
-    })?;
-    runtime_context_factory.bind_derived_factories(provider_factory, skill_materializer);
-    let preparer = crate::application::run::preparer::RunPreparer::new(runtime_context_factory);
-    let prepared = preparer.prepare(preparation_request).map_err(|error| {
+    let parent_facts = ParentRunFacts::new(parent_run_id.clone(), parent_spec.clone());
+    let parent_bindings = ParentRunBindings::from_active_run(
+        Arc::new(parent_context.clone()),
+        parent_workspace.clone(),
+    );
+    let creation_request =
+        RunCreationRequest::new(spec.clone(), session.snapshot_for_run(), Some(parent_facts))
+            .map_err(|error| RuntimeContextAssemblyError::SubDerivationFailed {
+                reason: error.to_string(),
+            })?;
+    let runtime_context_factory = Arc::new(
+        runtime_context_factory.with_derived_bindings(provider_factory, skill_materializer),
+    );
+    let run_factory = crate::application::run::factory::RunFactory::for_parent(
+        runtime_context_factory,
+        parent_bindings,
+    );
+    let mut run_instance = run_factory.create(creation_request).map_err(|error| {
         RuntimeContextAssemblyError::SubDerivationFailed {
             reason: error.to_string(),
         }
     })?;
-    let (run, mut execution, session, context, workspace) = prepared.into_parts();
-    execution.initialize_for_launch(Vec::new(), 0);
-    let workspace = workspace.ok_or_else(|| RuntimeContextAssemblyError::SubDerivationFailed {
-        reason: "子 Run workspace 未完成绑定".to_string(),
-    })?;
-    let context = context.expect("RunPreparer must produce RuntimeContext");
-    let provider = context.provider();
+    run_instance.initialize(Vec::new(), 0);
+    run_instance
+        .workspace()
+        .ok_or_else(|| RuntimeContextAssemblyError::SubDerivationFailed {
+            reason: "子 Run workspace 未完成绑定".to_string(),
+        })?;
+    let provider = run_instance.context().provider();
     let model_display = role.model.clone();
     let model_name = role.model.clone();
     let max_tokens = provider.max_tokens;
     let reasoning_level = provider.requested_reasoning;
 
-    Ok(PreparedSubRun {
-        context,
-        run,
-        execution,
-        workspace,
+    Ok(DerivedRun {
+        session_id: run_instance.session().session_id().to_string(),
+        instance: run_instance,
         role_config: role,
         model_display,
         model_name,
         max_tokens,
         reasoning_level,
-        session_id: session.session_id().to_string(),
     })
 }
 
@@ -202,7 +193,7 @@ impl AgentRunner for CliAgentRunner {
         let external_cancel = request.cancellation.child_signal();
         let request_progress = request.progress;
         // #1385: request catalog/memory are NOT used for child;
-        // all catalog/memory access comes from derived.context.
+        // all catalog/memory access comes from derived.instance.context().
         let plan_mode = request.plan_mode;
         let plan_mode_active = plan_mode.is_plan_mode().unwrap_or(false);
         let guidance = request.guidance;
@@ -224,7 +215,7 @@ impl AgentRunner for CliAgentRunner {
             role: role_name.to_string(),
             timeout,
         };
-        let derived = match derive_sub_run(
+        let mut derived = match derive_sub_run(
             &parent_frame.spec,
             &parent_frame.context,
             &self.workspace,
@@ -242,11 +233,11 @@ impl AgentRunner for CliAgentRunner {
             }
         };
 
-        // ── #1385: Every value below comes from `derived` or `derived.context` ──
+        // ── #1385: Every value below comes from `derived` or `derived.instance.context()` ──
         // No `config_reader` snapshot, no `self.tool_catalog`, no second
         // `derive_isolated()`, no separate `self.policy`/`self.tool_context_binding`.
 
-        let runtime_token = derived.context.cancel().token().clone();
+        let runtime_token = derived.instance.context().cancel().token().clone();
         // Combined cancellation for ToolExecutionPorts: external (tools-layer)
         // OR runtime token cancelling stops executing tools.
         let combined_cancel: Arc<dyn tools::CancellationSignal> =
@@ -262,17 +253,19 @@ impl AgentRunner for CliAgentRunner {
         let model_name = derived.model_name.clone();
         let max_tokens = derived.max_tokens;
         // #1248 Task 7: reasoning level from RuntimeContext's ReasoningPort,
-        // not a duplicate static field. PreparedSubRun.reasoning_level is
+        // not a duplicate static field. DerivedRun.reasoning_level is
         // still available for diagnostics but no longer used at construction.
         let _reasoning_level = derived.reasoning_level;
-        let binding = derived.context.provider();
+        let binding = derived.instance.context().provider();
 
         let session_id = identity
             .parent_run_id()
             .map(ToString::to_string)
             .or_else(|| {
                 derived
-                    .workspace
+                    .instance
+                    .workspace()
+                    .expect("DerivedRun must retain workspace")
                     .views()
                     .read()
                     .current_workspace_root()
@@ -285,7 +278,7 @@ impl AgentRunner for CliAgentRunner {
         let sub_run_context = super::loop_run::sub_run_log_context(
             &logging::capture(),
             &session_id,
-            derived.run.id().as_ref(),
+            derived.instance.run().id().as_ref(),
             &model_name,
             &binding.model.provider,
             &role_name_for_log,
@@ -295,10 +288,10 @@ impl AgentRunner for CliAgentRunner {
             // ── Logging ──
             log::info!(target: crate::LOG_TARGET,
                 "[SubAgent] derived run_spec={} role={} model={} max_tokens={}",
-                derived.run.spec().name, role_name_for_log, model_display, max_tokens
+                derived.instance.run().spec().name, role_name_for_log, model_display, max_tokens
             );
 
-            let hook_port = derived.context.hooks();
+            let hook_port = derived.instance.context().hooks();
 
             // Append role-specific system suffix if configured
             let system = match role_config.system_suffix.as_ref() {
@@ -307,7 +300,13 @@ impl AgentRunner for CliAgentRunner {
             };
 
             // Call SubagentStart hook — workspace root from derived workspace.
-            let workspace_root = derived.workspace.views().read().current_workspace_root();
+            let workspace_root = derived
+                .instance
+                .workspace()
+                .expect("DerivedRun must retain workspace")
+                .views()
+                .read()
+                .current_workspace_root();
             let hook_outcome = hook_port
                 .dispatch_at(
                     hook::HookInvocation::SubRunStart(hook::SubRunInput {
@@ -349,8 +348,8 @@ impl AgentRunner for CliAgentRunner {
                 );
             };
 
-            // ── #1385: Catalog from derived.context (NOT from self.tool_catalog) ──
-            let sub_catalog = match derived.context.tool_catalog().snapshot(
+            // ── #1385: Catalog from derived.instance.context() (NOT from self.tool_catalog) ──
+            let sub_catalog = match derived.instance.context().tool_catalog().snapshot(
                 &tools::RegistryScopeName::new("sub-agent"),
                 &tools::ToolProfileName::new("sub-agent-restricted"),
             ) {
@@ -364,9 +363,13 @@ impl AgentRunner for CliAgentRunner {
             let tool_schemas = sub_catalog.model_schemas();
 
             // ── #1385: Execution scope from derived workspace (the single source) ──
-            let sub_views = derived.workspace.views();
+            let sub_views = derived
+                .instance
+                .workspace()
+                .expect("DerivedRun must retain workspace")
+                .views();
             let sub_scope = tools::ExecutionScope::builder(
-                derived.run.id().to_string(),
+                derived.instance.run().id().to_string(),
                 sub_views.read().workspace_id(),
                 sub_views.read().current_workspace_root(),
             )
@@ -382,25 +385,40 @@ impl AgentRunner for CliAgentRunner {
                 sub_scope,
                 tools::ToolExecutionPorts::new(
                     combined_cancel.clone(),
-                    derived.workspace.read_access(),
+                    derived
+                        .instance
+                        .workspace()
+                        .expect("DerivedRun must retain workspace")
+                        .read_access(),
                     Arc::new(tools::MutexReadSet(Arc::new(std::sync::Mutex::new(
                         std::collections::HashSet::new(),
                     )))),
                     plan_mode,
-                    derived.context.memory(),
+                    derived.instance.context().memory(),
                     guidance,
                 )
-                .with_user_agent(derived.context.config_ref().config().user_agent())
+                .with_user_agent(
+                    derived
+                        .instance
+                        .context()
+                        .config_ref()
+                        .config()
+                        .user_agent(),
+                )
                 .with_progress(progress_sink.clone()),
             );
             let agent = Agent {
                 catalog: sub_catalog,
-                execution: derived.context.tool_execution(),
+                execution: derived.instance.context().tool_execution(),
                 ctx: sub_ctx,
                 max_tool_concurrency: self.max_tool_concurrency,
                 agent_semaphore: self.agent_semaphore.clone(),
                 // #1385: workspace_persist from the same derived workspace.
-                workspace_persist: derived.workspace.persist(),
+                workspace_persist: derived
+                    .instance
+                    .workspace()
+                    .expect("DerivedRun must retain workspace")
+                    .persist(),
                 runtime_cancellation: runtime_token.clone(),
             };
 
@@ -418,47 +436,141 @@ impl AgentRunner for CliAgentRunner {
                 &format!("Sub-agent started with model: {}", model_display),
             );
 
-            // ── #1385: Context port from derived.context (skills-wired) ──
-            // ContextCoordinator is constructed on-demand inside DerivedLoopCapabilityAdapter,
-            // not stored as a field.
+            let progress: super::loop_run::ProgressReporter = Arc::new(progress);
 
             let context_size = derived
-                .context
+                .instance
+                .context()
                 .config_ref()
                 .config()
                 .resolve_context_size(None, 0);
-
-            let config_snapshot = derived.context.config_ref().config().clone();
+            let config_snapshot = derived.instance.context().config_ref().config().clone();
+            let language = config_snapshot.language().to_string();
+            let agent_roles = config_snapshot
+                .agents()
+                .roles
+                .iter()
+                .filter(|(_, role)| role.enabled)
+                .map(|(name, role)| (name.clone(), role.clone()))
+                .collect();
+            let run_id = derived.instance.run().id().clone();
+            let session_id = derived.session_id;
+            let runtime_context = derived.instance.context().clone();
+            let execution_scope = agent.ctx.scope().clone();
+            let tool_execution_context = agent.ctx.clone();
+            let tool_workspace_root = agent.ctx.workspace_read().current_workspace_root();
+            let turn_context = crate::application::loop_engine::chat::RuntimeTurnContext::new(
+                sdk::ChatId::from_legacy_or_new(&session_id),
+                sdk::ChatTurnId::new_v7(),
+            );
+            let input =
+                crate::application::loop_engine::input_strategy::FixedInputAdapter::new(prompt);
+            let events = super::loop_run::DerivedEventPort {
+                progress: progress.clone(),
+            };
+            let model = crate::application::loop_engine::run_services::RuntimeModelInvocation::new(
+                super::loop_run::DerivedModelObserver {
+                    runtime_context: runtime_context.clone(),
+                    progress_sink: progress_sink.clone(),
+                    runtime_cancellation: runtime_token.clone(),
+                    role_name: role_name_for_log.clone(),
+                    model_name: model_name.clone(),
+                    context_size,
+                    progress: progress.clone(),
+                },
+                true,
+            );
+            let persistence =
+                crate::application::loop_engine::run_services::RuntimeStepPersistence::new(
+                    run_id.clone(),
+                    crate::application::loop_engine::run_services::ContextRequestData {
+                        runtime_context: &runtime_context,
+                        session_id: &session_id,
+                        system_prompt: &system,
+                        model_id: &model_name,
+                        language: &language,
+                        task_reminder: crate::ports::TaskReminderSnapshot::default(),
+                        agent_roles,
+                        config: runtime_context.config_ref(),
+                        context_size,
+                        max_output_tokens: max_tokens as usize,
+                        raw_tool_schemas: tool_schemas,
+                    },
+                    None,
+                    crate::application::loop_engine::step_persistence::NoopAcceptedInputObserver,
+                );
+            let compaction = crate::application::loop_engine::run_services::RuntimeCompaction::new(
+                &runtime_context,
+                crate::application::loop_engine::compaction::NoopCompactionObserver,
+            );
+            let interaction =
+                crate::application::loop_engine::run_services::RuntimeInteraction::new(
+                    crate::application::loop_engine::run_services::ProgressInteractionPublisher {
+                        runtime_context: &runtime_context,
+                        execution_scope,
+                        session_id: &session_id,
+                        materializer: self.tool_result_materializer.as_ref(),
+                        progress: progress.as_ref(),
+                    },
+                );
+            let stop_hook = crate::application::loop_engine::run_services::RuntimeStopHook::new(
+                crate::application::hook::stop_coordination::StopHookExecutionContext::new(
+                    runtime_context.hooks(),
+                    workspace_root.clone(),
+                    session_id.clone(),
+                    language.clone(),
+                ),
+                crate::application::hook::stop_coordination::NoopStopHookObserver,
+            );
+            let tool_context = crate::application::tool::coordination::ToolRoundContext {
+                runtime_context: &runtime_context,
+                agent,
+                turn_context,
+                language: &language,
+                workspace_root: tool_workspace_root,
+                session_id: &session_id,
+                materializer: self.tool_result_materializer.as_ref(),
+                log_patch: logging::LogContextPatch::default(),
+            };
+            let tools =
+                crate::application::loop_engine::run_services::RuntimeToolOrchestration::new(
+                    tool_context,
+                    super::loop_run::ProgressToolRoundObserver {
+                        progress_sink: progress_sink.clone(),
+                        progress: progress.clone(),
+                        role_name: role_name_for_log.clone(),
+                    },
+                );
+            let stuck = super::loop_run::DerivedStuckObserver {
+                progress: progress.clone(),
+            };
+            let finalizer = super::loop_run::SubRunFinalizer {
+                role_name: role_name_for_log,
+                model_name: model_name.clone(),
+                runtime_context: runtime_context.clone(),
+                workspace_root,
+                session_id: session_id.clone(),
+                prompt: prompt.to_string(),
+                system: system.clone(),
+                model_spec: Some(model_display),
+                progress_sink,
+            };
 
             super::loop_run::launch_sub_run(
-                derived.run,
-                derived.execution,
-                DerivedLoopCapabilityAdapter {
-                    prompt,
-                    system,
-                    progress_sink,
-                    runtime_context: derived.context,
-                    max_tokens,
-                    workspace_root,
-                    tool_schemas,
-                    config_snapshot: config_snapshot.clone(),
-                    language: config_snapshot.language().to_string(),
-                    agent,
-                    runtime_cancellation: runtime_token,
-                    active_run: self.active_run.clone(),
-                    session_id: derived.session_id,
-                    role_name_for_log: role_name_for_log.clone(),
-                    model_name_for_log: model_name,
-                    resolved_spec: Some(model_display),
-                    progress: Box::new(progress),
-                    ctx_context_size: context_size,
-                    tool_result_materializer: self.tool_result_materializer.clone(),
-                    input_strategy:
-                        crate::application::loop_engine::input_strategy::FixedInputAdapter::new(
-                            prompt,
-                        ),
-                    plan_mode: plan_mode_active,
-                },
+                &mut derived.instance,
+                self.active_run.clone(),
+                tool_execution_context,
+                input,
+                events,
+                model,
+                persistence,
+                compaction,
+                interaction,
+                stop_hook,
+                tools,
+                stuck,
+                plan_mode_active,
+                finalizer,
             )
             .await
         })

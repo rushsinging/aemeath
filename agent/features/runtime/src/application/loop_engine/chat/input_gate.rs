@@ -1,10 +1,12 @@
 use crate::application::loop_engine::chat::events::{ChatEventSink, RuntimeStreamEvent};
+#[cfg(test)]
 use crate::application::loop_engine::chat::queue::{QueueDrainPort, QueueFuture};
 use sdk::ChatInputEvent;
 use share::message::Message;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 
 pub type InputEventFuture<'a> = Pin<Box<dyn Future<Output = Vec<ChatInputEvent>> + Send + 'a>>;
 pub type InputEventOptFuture<'a> =
@@ -40,7 +42,9 @@ pub trait InputEventDrainPort: Clone + Send + Sync + 'static {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GateKind {
     BeforeLlm,
+    #[cfg(test)]
     BeforeFinish,
+    #[cfg(test)]
     AfterBlockingBoundary,
 }
 
@@ -113,9 +117,12 @@ impl Eq for PendingCommand {}
 
 #[derive(Debug, Clone)]
 pub struct GateOutcome {
+    #[cfg(test)]
     pub decision: GateDecision,
+    #[cfg(test)]
     pub commands: Vec<ControlCommand>,
     pub appended_user_messages: usize,
+    #[cfg(test)]
     pub dropped_events: usize,
     /// 本次 gate 采用的用户消息；调用方把它们绑定到下一 RunStep。
     pub adopted_messages: Vec<(sdk::InputId, Message)>,
@@ -130,69 +137,56 @@ pub struct GateOutcome {
 
 #[derive(Debug, Clone, Default)]
 pub struct PendingInputBuffer {
-    events: VecDeque<ChatInputEvent>,
+    events: Arc<Mutex<VecDeque<ChatInputEvent>>>,
 }
 
 impl PendingInputBuffer {
-    pub fn push(&mut self, event: ChatInputEvent) {
-        self.events.push_back(event);
+    pub fn push(&self, event: ChatInputEvent) {
+        self.events
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .push_back(event);
     }
 
-    pub fn extend(&mut self, events: impl IntoIterator<Item = ChatInputEvent>) {
-        for event in events {
-            self.push(event);
-        }
+    #[cfg(test)]
+    pub fn extend(&self, events: impl IntoIterator<Item = ChatInputEvent>) {
+        self.events
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .extend(events);
     }
 
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty()
+        self.events
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .is_empty()
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
-        self.events.len()
+        self.events
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .len()
     }
 
     /// 批量取出并清空整个缓冲区（#391 S3：撤回 pending 输入用）。
     /// 空则返回空 Vec。
-    pub fn drain_all(&mut self) -> Vec<ChatInputEvent> {
-        self.events.drain(..).collect()
-    }
-
-    /// 取出所有 `UserMessage` 事件的文本，并从缓冲区移除这些事件。
-    /// 非 UserMessage 事件（命令等）保留在缓冲区中。
-    /// 用于 WithdrawAll：只撤回用户消息，保留命令待后续处理。
-    pub fn drain_user_message_texts(&mut self) -> Vec<String> {
-        let mut texts = Vec::new();
-        let mut retained = VecDeque::new();
-        while let Some(event) = self.events.pop_front() {
-            match event {
-                ChatInputEvent::UserMessage { text, .. } => texts.push(text),
-                other => retained.push_back(other),
-            }
-        }
-        self.events = retained;
-        texts
-    }
-
-    /// 快照当前缓冲区中所有 `UserMessage` 事件（不修改缓冲区）。
-    /// 用于 busy select! 期间 emit `UserMessagesQueued` 事件。
-    pub fn user_message_snapshot(&self) -> Vec<(sdk::InputId, Message)> {
+    pub fn drain_all(&self) -> Vec<ChatInputEvent> {
         self.events
-            .iter()
-            .filter_map(|e| match e {
-                ChatInputEvent::UserMessage { id, text, .. } => {
-                    Some((id.clone(), Message::user(text.clone())))
-                }
-                _ => None,
-            })
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .drain(..)
             .collect()
     }
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub async fn run_loop_gate<Q, I, S>(
     kind: GateKind,
-    buffer: &mut PendingInputBuffer,
+    buffer: &PendingInputBuffer,
     queue: &Q,
     input_events: &I,
     sink: &S,
@@ -208,7 +202,8 @@ where
     apply_gate(kind, buffer, sink, task_access, is_idle).await
 }
 
-pub async fn drain_sources<Q, I>(buffer: &mut PendingInputBuffer, queue: &Q, input_events: &I)
+#[cfg(test)]
+pub async fn drain_sources<Q, I>(buffer: &PendingInputBuffer, queue: &Q, input_events: &I)
 where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
@@ -226,7 +221,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_gate<S>(
     kind: GateKind,
-    buffer: &mut PendingInputBuffer,
+    buffer: &PendingInputBuffer,
     sink: &S,
     task_access: &dyn task::TaskAccess,
     is_idle: bool,
@@ -464,10 +459,18 @@ where
     }
 
     if decision == GateDecision::Proceed && appended_user_messages > 0 {
-        decision = match kind {
-            GateKind::AfterBlockingBoundary => GateDecision::Proceed,
-            GateKind::BeforeLlm | GateKind::BeforeFinish => GateDecision::ContinueNextTurn,
-        };
+        #[cfg(test)]
+        {
+            decision = match kind {
+                GateKind::AfterBlockingBoundary => GateDecision::Proceed,
+                GateKind::BeforeLlm | GateKind::BeforeFinish => GateDecision::ContinueNextTurn,
+            };
+        }
+        #[cfg(not(test))]
+        {
+            let _ = kind;
+            decision = GateDecision::ContinueNextTurn;
+        }
     }
 
     // [loop_debug] DEBUG 级：gate 最终决策 + 追加用户消息数。仅在有事件 / 有 append /
@@ -481,10 +484,16 @@ where
         );
     }
 
+    #[cfg(not(test))]
+    let _ = (&commands, dropped_events);
+
     GateOutcome {
+        #[cfg(test)]
         decision,
+        #[cfg(test)]
         commands,
         appended_user_messages,
+        #[cfg(test)]
         dropped_events,
         adopted_messages: added,
         adopted_events: added_events,
@@ -535,22 +544,11 @@ pub(crate) fn user_message_with_images(text: String, images: Vec<sdk::ChatInputI
     )
 }
 
-#[derive(Clone, Default)]
-pub struct EmptyInputEventDrainPort;
-
-impl InputEventDrainPort for EmptyInputEventDrainPort {
-    fn drain_input_events<'a>(&'a self) -> InputEventFuture<'a> {
-        Box::pin(async { Vec::new() })
-    }
-
-    fn recv_next_input<'a>(&'a self) -> InputEventOptFuture<'a> {
-        Box::pin(async { None })
-    }
-}
-
+#[cfg(test)]
 #[derive(Clone, Default)]
 pub struct EmptyQueueDrainPort;
 
+#[cfg(test)]
 impl QueueDrainPort for EmptyQueueDrainPort {
     fn drain_queued_input<'a>(&'a self) -> QueueFuture<'a> {
         Box::pin(async { None })

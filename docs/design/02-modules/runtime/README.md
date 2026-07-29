@@ -18,7 +18,7 @@
 
 1. **单执行生命周期状态机**：全系统只有 `Run` 驱动 Agent 执行生命周期（内存态、不持久化、崩溃从头开始）；其他 BC 可拥有不驱动 Run 的局部状态机
 2. **Loop Engine 零来源分支**：所有 Run 共用一套 Loop；来源差异 100% 在 RunSpec + RuntimeContext capability adapter，NEVER 形成 Main/Sub 生产类型
-3. **IoC 装配**：Runtime 定义 factory/port contracts 与能力选择规则，Composition 只实现和连接；调用方只提交 `RunPreparationRequest`
+3. **IoC 装配**：Runtime 定义 factory/port contracts 与能力选择规则，Composition 只实现和连接；调用方只提交 `RunCreationRequest`
 4. **单能力直接分层**：仓库 `agent/features/*` 是 VSA；事实核验后 Runtime 当前只有一个完整业务能力 `agent_execution`，因此不增加单元素 `capabilities/agent_execution` 包装，直接在 crate 根按 `domain/application/ports/adapters` 组织
 5. **内部角色不是平级 slice**：`agent_run` 是领域模型，Loop Engine 与各 coordinator 是应用编排，事件投影是 adapter；未来出现多个具有独立用例、状态所有权和变化轴的真实能力时才递归竖切
 6. **唯一生产装配**：具体实现实例化和对象图连接全部位于 `agent/composition`；能力决策与统一 `RuntimeContextFactory` 契约属于 Runtime，Runtime 内不建立第二个 Composition Root

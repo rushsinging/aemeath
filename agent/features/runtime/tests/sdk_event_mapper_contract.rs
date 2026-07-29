@@ -1,5 +1,4 @@
-use runtime::adapters::sdk_event_mapper::map_domain_event;
-use runtime::domain::agent_run::RunDomainEvent;
+use runtime::{map_domain_event, RunDomainEvent};
 use sdk::{ChatEvent, ControlDeadline, RunId, RunStepId, RunTerminationReason};
 
 #[test]

@@ -6,7 +6,7 @@ use share::config::models::ResolvedModel;
 use crate::application::client::bootstrap::{ChatBootstrapArgs, ModelRuntimeSettings};
 use crate::ports::ProviderFactory;
 
-use super::{AgentClientImpl, RuntimeHandle};
+use super::accessors::{AgentClientImpl, RuntimeHandle};
 
 /// 由 Composition 装配、供 Runtime bootstrap 转发的 Tool/Skill/Run 资源。
 pub struct RuntimeToolAssemblyDependencies {
@@ -431,7 +431,7 @@ pub async fn from_args_with_workspace(
     // 20b. 构建统一 SessionRuntime（session 级状态，§2.2）
     let shell = crate::application::client::accessors::SessionRuntime::new(
         Arc::new(std::sync::RwLock::new(
-            crate::application::run::preparation::SessionState::new(
+            crate::application::run::creation::SessionState::new(
                 session_id.clone(),
                 cwd.clone(),
                 format!("{}/{}", binding.model.provider, binding.model.model),
@@ -852,7 +852,7 @@ mod tests {
 
         SessionRuntime::new(
             Arc::new(std::sync::RwLock::new(
-                crate::application::run::preparation::SessionState::new(
+                crate::application::run::creation::SessionState::new(
                     "test-session",
                     cwd,
                     format!("{}/{}", binding.model.provider, binding.model.model),
@@ -950,18 +950,24 @@ mod tests {
 
         let make_bindings = |context: Arc<dyn ContextPort>, memory: Arc<dyn MemoryPort>| {
             let binding = shell.model_state.binding();
-            crate::application::run::context::RunContextBindings {
-                context,
-                provider: binding,
-                interaction: shell.interaction_bridge.clone(),
-                memory,
-                config: config.clone(),
-                cancel: crate::application::run::context::RunCancellationScope::new(),
-                event_sink: sink.clone(),
-                usage: crate::application::run::context::RunUsageTracker::new(),
-                input: crate::application::run::context::RunInputBufferHandle::new(),
-                reasoning: reasoning.clone(),
-                tool_catalog: None,
+            crate::application::run::context::RunCapabilityBindings {
+                model: crate::application::run::context::ModelBindings {
+                    context,
+                    provider: binding,
+                    interaction: shell.interaction_bridge.clone(),
+                    memory,
+                    config: config.clone(),
+                    reasoning: reasoning.clone(),
+                    tool_catalog: None,
+                },
+                io: crate::application::run::context::IoBindings {
+                    event_sink: sink.clone(),
+                    input: crate::application::run::context::RunInputBufferHandle::new(),
+                },
+                lifecycle: crate::application::run::context::LifecycleBindings {
+                    cancel: crate::application::run::context::RunCancellationScope::new(),
+                    usage: crate::application::run::context::RunUsageTracker::new(),
+                },
             }
         };
 
@@ -1007,18 +1013,24 @@ mod tests {
 
         let make_bindings = |context: Arc<dyn ContextPort>, memory: Arc<dyn MemoryPort>| {
             let binding = shell.model_state.binding();
-            crate::application::run::context::RunContextBindings {
-                context,
-                provider: binding,
-                interaction: shell.interaction_bridge.clone(),
-                memory,
-                config: config.clone(),
-                cancel: crate::application::run::context::RunCancellationScope::new(),
-                event_sink: sink.clone(),
-                usage: crate::application::run::context::RunUsageTracker::new(),
-                input: crate::application::run::context::RunInputBufferHandle::new(),
-                reasoning: reasoning.clone(),
-                tool_catalog: None,
+            crate::application::run::context::RunCapabilityBindings {
+                model: crate::application::run::context::ModelBindings {
+                    context,
+                    provider: binding,
+                    interaction: shell.interaction_bridge.clone(),
+                    memory,
+                    config: config.clone(),
+                    reasoning: reasoning.clone(),
+                    tool_catalog: None,
+                },
+                io: crate::application::run::context::IoBindings {
+                    event_sink: sink.clone(),
+                    input: crate::application::run::context::RunInputBufferHandle::new(),
+                },
+                lifecycle: crate::application::run::context::LifecycleBindings {
+                    cancel: crate::application::run::context::RunCancellationScope::new(),
+                    usage: crate::application::run::context::RunUsageTracker::new(),
+                },
             }
         };
 

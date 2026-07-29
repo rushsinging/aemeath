@@ -164,7 +164,7 @@ impl Default for RunUsageTracker {
 
 /// Handle to the per-Run input buffer — exposes only the **push side**
 /// of [`RunInputBuffer`]; drain / epoch methods remain on the owning
-/// `ChatLoopCapabilityAdapter` so per-step execution state never leaks into
+/// Main session input strategy so per-step execution state never leaks into
 /// [`RuntimeContext`].
 ///
 /// The inner [`RunInputBuffer`] is guarded by a `std::sync::Mutex`
@@ -286,47 +286,6 @@ pub struct IoBindings {
 pub struct LifecycleBindings {
     pub cancel: RunCancellationScope,
     pub usage: RunUsageTracker,
-}
-
-#[cfg(test)]
-#[derive(Clone)]
-pub struct RunContextBindings {
-    pub context: Arc<dyn ContextPort>,
-    pub provider: Arc<ProviderBinding>,
-    pub interaction: Arc<dyn InteractionPort>,
-    pub memory: Arc<dyn MemoryPort>,
-    pub config: RunConfigSnapshot,
-    pub cancel: RunCancellationScope,
-    pub event_sink: ChatEventSinkHandle,
-    pub usage: RunUsageTracker,
-    pub input: RunInputBufferHandle,
-    pub reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
-    pub tool_catalog: Option<Arc<dyn ToolCatalogPort>>,
-}
-
-#[cfg(test)]
-impl From<RunContextBindings> for RunCapabilityBindings {
-    fn from(bindings: RunContextBindings) -> Self {
-        Self {
-            model: ModelBindings {
-                context: bindings.context,
-                provider: bindings.provider,
-                interaction: bindings.interaction,
-                memory: bindings.memory,
-                config: bindings.config,
-                reasoning: bindings.reasoning,
-                tool_catalog: bindings.tool_catalog,
-            },
-            io: IoBindings {
-                event_sink: bindings.event_sink,
-                input: bindings.input,
-            },
-            lifecycle: LifecycleBindings {
-                cancel: bindings.cancel,
-                usage: bindings.usage,
-            },
-        }
-    }
 }
 
 ///

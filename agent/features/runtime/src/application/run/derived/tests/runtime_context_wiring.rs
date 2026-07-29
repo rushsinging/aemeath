@@ -2,7 +2,8 @@ use super::*;
 use crate::application::interaction::port::InteractionBridge;
 use crate::application::run::config::RunConfigSnapshot;
 use crate::application::run::context::{
-    RunCancellationScope, RunContextBindings, RunInputBufferHandle, RunUsageTracker, RuntimeContext,
+    IoBindings, LifecycleBindings, ModelBindings, RunCancellationScope, RunCapabilityBindings,
+    RunInputBufferHandle, RunUsageTracker, RuntimeContext,
 };
 use crate::application::run::context_factory::RuntimeContextFactory;
 use crate::application::run::test_task_access;
@@ -173,18 +174,24 @@ fn assemble_test_context(
         test_task_access(),
         Arc::new(LocalFakeHookPort),
     );
-    let bindings = RunContextBindings {
-        context: Arc::new(LocalFakeCtxPort),
-        provider: Arc::new(binding),
-        interaction: Arc::new(InteractionBridge::new()),
-        memory: Arc::new(memory::NoOpMemory),
-        config,
-        cancel: RunCancellationScope::new(),
-        event_sink: noop_event_sink(),
-        usage: RunUsageTracker::new(),
-        input: RunInputBufferHandle::new(),
-        reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
-        tool_catalog: None,
+    let bindings = RunCapabilityBindings {
+        model: ModelBindings {
+            context: Arc::new(LocalFakeCtxPort),
+            provider: Arc::new(binding),
+            interaction: Arc::new(InteractionBridge::new()),
+            memory: Arc::new(memory::NoOpMemory),
+            config,
+            reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
+            tool_catalog: None,
+        },
+        io: IoBindings {
+            event_sink: noop_event_sink(),
+            input: RunInputBufferHandle::new(),
+        },
+        lifecycle: LifecycleBindings {
+            cancel: RunCancellationScope::new(),
+            usage: RunUsageTracker::new(),
+        },
     };
     let ctx = factory
         .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)
@@ -222,7 +229,7 @@ fn make_spy_parent_context(
     ctx
 }
 
-// ── M1: catalog access goes through derived.context's tool_catalog ──
+// ── M1: catalog access goes through derived.instance.context()'s tool_catalog ──
 
 #[tokio::test]
 async fn derived_tool_catalog_is_spied_during_sub_agent_run() {

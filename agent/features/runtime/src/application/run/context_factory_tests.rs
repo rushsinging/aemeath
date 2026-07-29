@@ -17,8 +17,8 @@ use crate::application::run::context::{
     RuntimeContext, RuntimeServices,
 };
 use crate::application::run::context_factory::RuntimeContextFactory;
-use crate::application::run::preparation::{RunPreparationRequest, SessionState};
-use crate::application::run::preparer::RunPreparer;
+use crate::application::run::creation::{RunCreationRequest, SessionState};
+use crate::application::run::factory::RunFactory;
 use crate::domain::agent_run::{
     HookBindingMode, InteractionBindingMode, ReasoningBindingMode, RunSpec,
 };
@@ -293,23 +293,26 @@ fn make_parent_context() -> RuntimeContext {
 }
 
 #[test]
-fn run_preparer_accepts_only_the_pure_value_request() {
-    let source = include_str!("preparer.rs");
+fn run_factory_create_accepts_only_the_creation_request() {
+    let source = include_str!("factory.rs");
     let signature = source
-        .split("pub fn prepare(")
+        .split("pub(crate) fn create(")
         .nth(1)
-        .and_then(|tail| tail.split(") -> Result<PreparedRun").next())
-        .expect("RunPreparer::prepare signature");
+        .and_then(|tail| tail.split(") -> Result<RunInstance").next())
+        .expect("RunFactory::create signature");
 
-    assert!(signature.contains("request: RunPreparationRequest"));
+    assert!(signature.contains("request: RunCreationRequest"));
+    assert!(!signature.contains("RunCreationBindings"));
     assert!(!signature.contains("RunCapabilityBindings"));
     assert!(!signature.contains("RuntimeContext"));
     assert!(!signature.contains("parent:"));
+    assert!(!source.contains("RunPreparer"));
+    assert!(!source.contains("PreparedRun"));
 }
 
 #[test]
-fn run_preparer_depends_only_on_runtime_context_factory() {
-    let source = include_str!("preparer.rs");
+fn run_factory_depends_only_on_runtime_context_factory() {
+    let source = include_str!("factory.rs");
 
     assert!(source.contains("context_factory: Arc<RuntimeContextFactory>"));
     assert!(!source.contains("RuntimeContextResolver"));
@@ -324,13 +327,52 @@ fn runtime_context_factory_owns_the_single_preparation_algorithm() {
         "trait RuntimeContextResolver",
         "struct MainRunContextResolver",
         "struct SubRunContextResolver",
+        "fn prepare_independent(",
+        "fn prepare_derived(",
     ] {
         assert!(
             !source.contains(retired),
-            "retired symbol remains: {retired}"
+            "retired or parallel preparation path remains: {retired}"
         );
     }
     assert!(source.contains("pub(crate) fn prepare("));
+    assert!(source.contains("fn bind_runtime_context("));
+}
+
+#[test]
+fn p6_9_8_factory_uses_narrow_capability_selectors() {
+    let source = include_str!("context_factory.rs");
+
+    for forbidden in [
+        "struct RuntimeContextBindingDecision",
+        "fn select_binding_decisions(",
+        "fn select_session_bindings(",
+        "fn select_inherited_bindings(",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "source-wide binding selector remains: {forbidden}"
+        );
+    }
+
+    for required in [
+        "fn resolve_session(",
+        "fn select_workspace(",
+        "fn select_provider(",
+        "fn select_context(",
+        "fn select_memory(",
+        "fn select_tool_catalog(",
+        "fn select_interaction_port(",
+        "fn select_hook_port(",
+        "fn select_reasoning_port(",
+        "fn select_event_route(",
+        "fn select_lifecycle(",
+    ] {
+        assert!(
+            source.contains(required),
+            "narrow capability selector is missing: {required}"
+        );
+    }
 }
 
 #[test]
@@ -347,6 +389,27 @@ fn production_run_callers_do_not_assemble_context_bindings() {
 }
 
 #[test]
+fn p6_9_5_factory_has_no_mutable_session_binding_bag() {
+    let factory = include_str!("context_factory.rs");
+
+    for forbidden in [
+        "struct SessionBindings",
+        "session: SessionBindings",
+        "RwLock<Option<",
+        "bind_session_wiring",
+        "bind_session_capabilities",
+        "bind_derived_factories",
+    ] {
+        assert!(
+            !factory.contains(forbidden),
+            "RuntimeContextFactory retains mutable session ownership: {forbidden}"
+        );
+    }
+    assert!(factory.contains("services: RuntimeServices"));
+    assert!(factory.contains("SessionSnapshot"));
+}
+
+#[test]
 fn runtime_context_construction_is_factory_private() {
     let context_source = include_str!("context.rs");
     let factory_source = include_str!("context_factory.rs");
@@ -357,20 +420,25 @@ fn runtime_context_construction_is_factory_private() {
 }
 
 #[test]
-fn run_preparer_without_bound_session_fails_closed() {
-    let preparer = RunPreparer::new(Arc::new(factory()));
+fn run_factory_without_bound_session_fails_closed() {
     let session = SessionState::new(
         "session-1",
         std::path::PathBuf::from("/workspace"),
         "test/test-model",
         share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
     );
-    let request =
-        RunPreparationRequest::new(main_spec(), session.snapshot_for_run(), None).unwrap();
+    let request = RunCreationRequest::new(main_spec(), session.snapshot_for_run(), None).unwrap();
+    let factory = RunFactory::for_parent(
+        Arc::new(factory()),
+        crate::application::run::creation::ParentRunBindings::from_active_run(
+            Arc::new(make_parent_context()),
+            crate::application::run::workspace_test_support::test_runtime_workspace_access(),
+        ),
+    );
 
     assert!(matches!(
-        preparer.prepare(request),
-        Err(crate::application::run::preparation::RunPreparationError::ContextAssembly)
+        factory.create(request),
+        Err(crate::application::run::creation::RunCreationError::ContextAssembly)
     ));
 }
 
@@ -471,8 +539,7 @@ fn grouped_capability_bindings_preserve_values() {
 }
 
 #[test]
-fn parent_capabilities_without_live_context_fail_closed_at_factory() {
-    let context_factory = Arc::new(factory());
+fn parent_value_facts_without_parent_bindings_fail_closed_at_request_boundary() {
     let parent_spec = main_spec();
     let parent_run_id = crate::domain::agent_run::RunId::new_v7();
     let session = SessionState::new(
@@ -487,23 +554,23 @@ fn parent_capabilities_without_live_context_fail_closed_at_factory() {
     let spec = parent_spec
         .derive_sub("coder", std::time::Duration::from_secs(30))
         .unwrap();
-    let request = RunPreparationRequest::new(
+    let request = RunCreationRequest::new(
         spec,
         session.snapshot_for_run(),
-        Some(
-            crate::application::run::preparation::ParentRunCapabilities::new(
-                parent_run_id,
-                parent_spec,
-            ),
-        ),
+        Some(crate::application::run::creation::ParentRunFacts::new(
+            parent_run_id,
+            parent_spec,
+        )),
     )
     .unwrap();
-    let preparer = RunPreparer::new(context_factory);
 
-    assert!(matches!(
-        preparer.prepare(request),
-        Err(crate::application::run::preparation::RunPreparationError::ContextAssembly)
-    ));
+    assert!(request.parent().is_some());
+    assert!(!include_str!("creation.rs")
+        .split("pub struct RunCreationRequest")
+        .nth(1)
+        .and_then(|tail| tail.split("impl RunCreationRequest").next())
+        .expect("RunCreationRequest definition")
+        .contains("ParentRunBindings"));
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -891,8 +958,8 @@ fn two_independent_assemblies_have_independent_cancel() {
 // ══════════════════════════════════════════════════════════════════
 
 /// Prove that `RuntimeServices` ports (cross-Run stable) are shared across
-/// independent assemblies from the same factory, while `RunContextBindings`
-/// ports (per-Run) are NOT shared.
+/// independent assemblies from the same factory, while per-Run grouped
+/// capability bindings are NOT shared.
 ///
 /// This validates the lifecycle split: services hold tool/policy/reflection/
 /// task/hooks (cross-Run); bindings hold context/provider/interaction/

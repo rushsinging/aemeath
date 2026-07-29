@@ -5,7 +5,6 @@ use crate::application::run::context_factory::RuntimeContextFactory;
 use crate::ports::ProviderFactory;
 
 mod finalize;
-pub use finalize::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 pub(crate) mod loop_run;
 pub(crate) mod progress;
 pub(super) mod setup;

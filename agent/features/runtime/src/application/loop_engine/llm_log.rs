@@ -9,6 +9,7 @@ use crate::application::tool::agent::ToolCall;
 use provider::RequestSystemBlock;
 use sdk::ids::ToolCallId;
 use share::message::Message;
+#[cfg(test)]
 use std::collections::HashMap;
 
 /// 记录 LLM 输入日志。
@@ -136,6 +137,7 @@ pub(crate) fn build_named_tool_result_log(
 }
 
 /// 构造 tool_result 日志数据。
+#[cfg(test)]
 pub(crate) fn build_tool_result_log(
     id: &ToolCallId,
     output: &str,
@@ -148,20 +150,4 @@ pub(crate) fn build_tool_result_log(
         .map(|(name, _)| name.as_str())
         .unwrap_or("?");
     build_named_tool_result_log(id, tool_name, output, is_error, role)
-}
-
-/// 记录 tool_result 日志。
-pub(crate) fn log_tool_result(
-    id: &ToolCallId,
-    output: &str,
-    is_error: bool,
-    call_info: &HashMap<ToolCallId, (String, String)>,
-    role: &str,
-) {
-    let data = build_tool_result_log(id, output, is_error, call_info, role);
-    log::debug!(
-        target: crate::LOG_TARGET,
-        "tool_result: {}",
-        serde_json::to_string(&data).unwrap_or_default()
-    );
 }

@@ -293,7 +293,7 @@ submit(trigger, owned message snapshot)
 
 `RuntimeContext` **MUST** 只持有本 Run 消费的活契约，**NEVER** 持有 Project wiring、composition scope、Session coordinator 或 active resource slot。`RuntimeServices` 持有 Runtime 生命周期稳定的共享 Port 与 Runtime-owned factory contracts；`SessionState` 持有跨 Run 变化的会话事实。Composition 保存供应 BC 的 opaque wiring，并实现 Runtime 定义的 factory/port；Runtime application 决定 snapshot 时机与 `RunSpec` 能力选择。
 
-调用方只提交 `RunPreparationRequest { spec, session, parent }`。`RuntimeContextFactory::create` 通过注入的 `ProviderBindingFactory`、`ContextBindingFactory`、`ToolBindingFactory`、`InteractionBindingFactory`、`HookBindingFactory` 与 `WorkspaceBindingFactory` 创建且只创建 `RuntimeContext`；Runtime-owned `RunPreparer::prepare` 协调创建处于 `Idle` 的 `PreparedRun { run, context, execution }`。调用方不得构造具体 Port 后通过 `RunContextBindings`、`RuntimeContextParts` 或同构参数袋手填 Context；输入内容也不得混入装配请求，首次和后续输入统一经 `InputPort` 激活 Run。
+调用方只提交 `RunCreationRequest { spec, session, parent }`。`RuntimeContextFactory` 负责绑定 `RuntimeContext`；Runtime-owned `RunFactory::create` 协调创建处于 `Idle` 的 `RunInstance { run, context, execution }`。调用方不得构造具体 Port 后通过 `RunContextBindings`、`RuntimeContextParts` 或同构参数袋手填 Context；输入内容也不得混入创建请求，首次和后续输入统一经 `InputPort` 激活 Run。
 
 ```rust
 // Runtime-owned application contracts.
@@ -306,24 +306,24 @@ trait RuntimeContextFactory: Send + Sync {
     ) -> Result<RuntimeContext, RuntimeContextError>;
 }
 
-struct RunPreparer {
+struct RunFactory {
     context_factory: Arc<dyn RuntimeContextFactory>,
 }
 
-impl RunPreparer {
-    async fn prepare(
+impl RunFactory {
+    fn create(
         &self,
-        request: RunPreparationRequest,
-    ) -> Result<PreparedRun, RunPreparationError>;
+        request: RunCreationRequest,
+    ) -> Result<RunInstance, RunCreationError>;
 }
 
-struct RunPreparationRequest {
+struct RunCreationRequest {
     spec: RunSpec,
     session: SessionSnapshot,
     parent: Option<ParentRunCapabilities>,
 }
 
-struct PreparedRun {
+struct RunInstance {
     run: Run,
     context: RuntimeContext,
     execution: RunExecutionState,
@@ -334,7 +334,7 @@ struct PreparedRun {
 struct RuntimeAssembly {
     runtime_services: RuntimeServices,
     session_state: SessionState,
-    run_preparer: RunPreparer,
+    run_factory: RunFactory,
     workspace_wiring: project::WorkspaceWiring,
     session_wiring: context::SessionWiring,
     task_wiring: task::TaskWiring,
@@ -366,29 +366,25 @@ async fn launch_run(
     assembly: &RuntimeAssembly,
     session: &SessionState,
     parent: Option<ParentRunCapabilities>,
-) -> Result<PreparedRun, RunError> {
-    let request = RunPreparationRequest {
+) -> Result<RunInstance, RunError> {
+    let request = RunCreationRequest {
         spec: RunSpec::from_parent(parent.as_ref())?,
         session: session.snapshot_for_run()?,
         parent,
     };
-    assembly.run_preparer.prepare(request).await
+    assembly.run_factory.create(request)
 }
 
 async fn activate_run(
-    mut prepared: PreparedRun,
+    instance: RunInstance,
     input: InputEnvelope,
 ) -> Result<AgentRunTerminal, RunError> {
-    prepared.context.input().submit(input).await?;
-    loop_engine::run_loop(
-        &mut prepared.run,
-        &mut prepared.execution,
-        &prepared.context,
-    ).await
+    instance.context().input().submit(input).await?;
+    run_launcher::launch(instance).await
 }
 ```
 
-`launch_run` 与 `activate_run` 形成唯一调用链：入站 args → typed bootstrap → Session snapshot → RunSpec → `RunPreparationRequest` → `RunPreparer::prepare` → `RuntimeContextFactory::create` → Idle `PreparedRun`；随后任意来源输入 → `InputPort::submit` → 状态机激活 → Loop Engine。任何调用方直接构造 Provider、Tool、Interaction、Hook、Workspace 或 `RuntimeContext`，都表示绕过 IoC；任何把首次输入塞进装配请求或按 Main/Sub 选择 assembler 的路径，都表示重新引入启动特例。
+`launch_run` 与 `activate_run` 形成唯一调用链：入站 args → typed bootstrap → Session snapshot → RunSpec → `RunCreationRequest` → `RunFactory::create` → `RuntimeContextFactory` → Idle `RunInstance`；随后任意来源输入 → `InputPort::submit` → `RunLauncher::launch` → 状态机激活 → Loop Engine。任何调用方直接构造 Provider、Tool、Interaction、Hook、Workspace 或 `RuntimeContext`，都表示绕过 IoC；任何把首次输入塞进创建请求、拆散 `RunInstance` 启动或按 Main/Sub 选择 assembler 的路径，都表示重新引入启动特例。
 
 ### 3.1 IoC 合同与验证伪代码
 
@@ -396,7 +392,7 @@ async fn activate_run(
 #[test]
 fn composition_implements_runtime_contract_without_leaking_wiring() {
     let assembly = compose_runtime(test_graph());
-    let prepared = block_on(assembly.run_preparer.prepare(root_request())).unwrap();
+    let prepared = block_on(assembly.run_factory.prepare(root_request())).unwrap();
     assert!(prepared.context.has_provider());
     assert!(!prepared.context.exposes_composition_wiring());
 }
@@ -405,7 +401,7 @@ fn composition_implements_runtime_contract_without_leaking_wiring() {
 fn child_preparation_cannot_expand_parent_capabilities() {
     let parent = parent_capabilities_with_tool_scope(ToolScope::ReadOnly);
     let request = child_request(parent).with_tool_scope(ToolScope::Write);
-    assert!(matches!(prepare(request), Err(RunPreparationError::CapabilityExceeded)));
+    assert!(matches!(prepare(request), Err(RunCreationError::CapabilityExceeded)));
 }
 
 #[test]
@@ -454,7 +450,7 @@ session wiring 内部可持有唯一 SessionSwitchCoordinator、稳定 backing�
 - Runtime 当前只有一个完整业务能力，因此 **NEVER** 添加单元素 `capabilities/agent_execution` 包装；没有真实跨 capability 复用内容时也 **NEVER** 创建 `shared/`。
 - Project workspace 的生产装配 **MUST** 经 Project-owned factory 取得 `WorkspaceWiring`，并 **MUST** 只保存在 `CompositionWorkspaceScope`；Composition **NEVER** 向 Runtime 或业务模块分发 handle / scope。
 - 独立根 Run：Composition Root 初次建立 Workspace 与 Session wiring 并跨 Run 保留；每个 Run 由 Runtime 从 `SessionState` 捕获 snapshot 后调用统一 factory。resume 在 exclusive lease 内更新完整 live state，**NEVER** 重建 wiring。
-- 派生 Run：Runtime 提交带 `ParentRunCapabilities` 的同一种 `RunPreparationRequest`；factory adapter 从 parent workspace capability 隔离派生并装配相同结构。Runtime tool coordination 只消费统一 `PreparedRun` / typed terminal。
+- 派生 Run：Runtime 提交带 `ParentRunCapabilities` 的同一种 `RunCreationRequest`；factory adapter 从 parent workspace capability 隔离派生并装配相同结构。Runtime tool coordination 只消费统一 `RunInstance` / typed terminal。
 - 任何模块 **NEVER** 私自 `new` Port 实现绕过 Composition Root。
 
 ## 5. 关键 ACL

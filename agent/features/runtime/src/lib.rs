@@ -1,11 +1,12 @@
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:runtime";
 
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量.
-pub mod adapters;
-pub mod application;
-pub mod domain;
-pub mod ports;
+pub(crate) mod adapters;
+pub(crate) mod application;
+pub(crate) mod domain;
+pub(crate) mod ports;
 
+pub use adapters::sdk_event_mapper::map_domain_event;
 pub use adapters::tool_result_blob::AtomicBlobToolResultStore;
 pub use application::run::active_registry::ActiveRunRegistry;
 pub use application::tool::result_materialization::{
@@ -24,13 +25,18 @@ pub use application::client::{
 // RuntimeContextFactory::new(…).
 pub use application::prompt::build::{build_system_prompt_parts, PromptContext};
 pub use application::prompt::prompt_build_ext::build_static_prompt;
+pub use application::reflection::{
+    CompleteReflectionResult, ReflectionError, ReflectionTaskAdapter, ReflectionTaskCompletion,
+    ReflectionTaskCompletionStatus, ReflectionTaskMetadata, ReflectionTaskRequest,
+    ReflectionTaskSubmitOutcome, ReflectionTaskTrigger,
+};
 pub use application::run::context::ParentRunContextSource;
 pub use application::run::context_factory::RuntimeContextFactory;
-pub use application::run::preparation::{
-    ParentRunCapabilities, PreparedRun, RunPreparationError, RunPreparationRequest,
-    SessionSnapshot, SessionState,
+pub use domain::agent_run::RunDomainEvent;
+pub use ports::{
+    ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort, ToolResultBlobError,
+    ToolResultBlobPort, ToolResultBlobRef,
 };
-pub use ports::{ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort};
 pub use sdk::{
     AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ProjectContext,
     TaskSummary,

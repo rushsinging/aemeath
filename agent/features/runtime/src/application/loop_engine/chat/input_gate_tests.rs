@@ -132,14 +132,14 @@ impl ChatEventSink for TestSink {
 
 #[tokio::test]
 async fn test_run_loop_gate_before_finish_continues_on_user_message() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let queue = EmptyQueueDrainPort;
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message("继续", Vec::new())]);
     let sink = TestSink::default();
 
     let outcome = run_loop_gate(
         GateKind::BeforeFinish,
-        &mut buffer,
+        &buffer,
         &queue,
         &input,
         &sink,
@@ -170,7 +170,7 @@ async fn test_user_message_with_images_assembles_image_block() {
     };
     // text 含 `[Image #1]` 占位符，期望 image 穿插到 text 中占位位置
     let text_with_marker = "看[Image #1]这张图".to_string();
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(
         text_with_marker.clone(),
         vec![img],
@@ -179,7 +179,7 @@ async fn test_user_message_with_images_assembles_image_block() {
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -236,13 +236,13 @@ async fn test_user_message_with_multiple_images_interleaves_by_placeholder() {
     ];
     // text 中 [Image #2] 在 [Image #1] 前面，期望穿插顺序: [Image #2], [Image #1]
     let text = "B: [Image #2], A: [Image #1]".to_string();
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(text.clone(), imgs)]);
     let sink = TestSink::default();
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -275,13 +275,13 @@ async fn test_user_message_with_multiple_images_interleaves_by_placeholder() {
 
 #[tokio::test]
 async fn query_reflection_history_is_buffered_while_gate_is_busy() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::QueryReflectionHistory { limit: 7 }]);
     let sink = TestSink::default();
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -300,7 +300,7 @@ async fn query_reflection_history_is_buffered_while_gate_is_busy() {
 
 #[tokio::test]
 async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(
         "tool 后输入",
         Vec::new(),
@@ -309,7 +309,7 @@ async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
 
     let outcome = run_loop_gate(
         GateKind::AfterBlockingBoundary,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -326,7 +326,7 @@ async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
 
 #[tokio::test]
 async fn test_run_loop_gate_preserves_side_effect_command_order() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![
         ChatInputEvent::user_message("text1", Vec::new()),
         ChatInputEvent::ControlCommand {
@@ -338,7 +338,7 @@ async fn test_run_loop_gate_preserves_side_effect_command_order() {
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -357,7 +357,7 @@ async fn test_run_loop_gate_preserves_side_effect_command_order() {
 
 #[tokio::test]
 async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![
         ChatInputEvent::user_message("text1", Vec::new()),
         ChatInputEvent::ControlCommand {
@@ -369,7 +369,7 @@ async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
 
     let outcome = run_loop_gate(
         GateKind::BeforeFinish,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -386,7 +386,7 @@ async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
 
 #[tokio::test]
 async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     // 含重复文本：验证不去重
     let input = TestInputEventPort::new(vec![
         ChatInputEvent::user_message("same", Vec::new()),
@@ -396,7 +396,7 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -422,14 +422,14 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
 #[tokio::test]
 async fn test_run_loop_gate_no_dedup_push_and_pull_same_text() {
     // 设计 §8：不去重。queue 和 input 各来一条相同文本，两条都 append。
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let queue = TestQueuePort::new(Some(vec!["same".to_string()]));
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message("same", Vec::new())]);
     let sink = TestSink::default();
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &queue,
         &input,
         &sink,
@@ -445,7 +445,7 @@ async fn test_run_loop_gate_no_dedup_push_and_pull_same_text() {
 /// #391 S3-1：drain_all 非空 → 返回全部事件 + buffer 清空。
 #[test]
 fn test_drain_all_returns_all_events_and_clears() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let a = ChatInputEvent::user_message("aaa", Vec::new());
     let b = ChatInputEvent::user_message("bbb", Vec::new());
     buffer.push(a.clone());
@@ -468,7 +468,7 @@ async fn test_apply_gate_adopted_events_preserve_input_id_and_images() {
         base64: "Zm9vYmFy".to_string(),
         media_type: "image/png".to_string(),
     };
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(
         "看图[Image #1]".to_string(),
         vec![img.clone()],
@@ -477,7 +477,7 @@ async fn test_apply_gate_adopted_events_preserve_input_id_and_images() {
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -523,7 +523,7 @@ async fn test_apply_gate_adopted_events_preserve_input_id_and_images() {
 /// Gate 的 adopted data 仅供 RunPort 携带，UI 投影由 accept_step_input 后发出。
 #[tokio::test]
 async fn test_apply_gate_no_premature_adopted_emission() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![
         ChatInputEvent::user_message("hello", Vec::new()),
         ChatInputEvent::user_message("world", Vec::new()),
@@ -532,7 +532,7 @@ async fn test_apply_gate_no_premature_adopted_emission() {
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,

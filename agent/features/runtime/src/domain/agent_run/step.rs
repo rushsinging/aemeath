@@ -9,22 +9,17 @@ pub struct ToolCall {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelInvocation {
-    request: String,
     response: String,
 }
 
 impl ModelInvocation {
-    pub fn new(request: impl Into<String>, response: impl Into<String>) -> Self {
+    pub fn new(response: impl Into<String>) -> Self {
         Self {
-            request: request.into(),
             response: response.into(),
         }
     }
 
-    pub fn request(&self) -> &str {
-        &self.request
-    }
-
+    #[cfg(test)]
     pub fn response(&self) -> &str {
         &self.response
     }
@@ -34,7 +29,6 @@ impl ModelInvocation {
 pub enum ToolCallStatus {
     Pending,
     Ready,
-    AwaitingApproval,
     Running,
     Success,
     Error,
@@ -46,11 +40,7 @@ impl ToolCallStatus {
         matches!(
             (self, next),
             (Self::Pending, Self::Ready | Self::Cancelled)
-                | (
-                    Self::Ready,
-                    Self::AwaitingApproval | Self::Running | Self::Cancelled
-                )
-                | (Self::AwaitingApproval, Self::Running | Self::Cancelled)
+                | (Self::Ready, Self::Running | Self::Cancelled)
                 | (Self::Running, Self::Success | Self::Error | Self::Cancelled)
         )
     }
@@ -84,10 +74,6 @@ impl RunToolCall {
 
     pub fn id(&self) -> &sdk::ids::ToolCallId {
         &self.call.id
-    }
-
-    pub fn call(&self) -> &ToolCall {
-        &self.call
     }
 
     pub fn status(&self) -> ToolCallStatus {

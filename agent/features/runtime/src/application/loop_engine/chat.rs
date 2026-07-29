@@ -35,19 +35,18 @@ mod task_snapshot;
 pub(crate) mod tools;
 
 pub use events::{
-    ChatEventSink, ChatEventSinkHandle, CompactStage, EventFuture, RunEventSink, RuntimeHookEvent,
-    RuntimeHookEventStatus, RuntimeHookExecutionResult, RuntimeHookMessage, RuntimeHookMessageKind,
-    RuntimeResumedSessionStep, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeHookEvent, RuntimeHookEventStatus,
+    RuntimeHookMessage, RuntimeHookMessageKind, RuntimeResumedSessionStep, RuntimeStreamEvent,
+    RuntimeToolCallStatus, RuntimeTurnContext,
 };
 pub use input_gate::{
-    apply_gate, drain_sources, run_loop_gate, ControlCommand, ControlCommandKind,
-    EmptyInputEventDrainPort, EmptyQueueDrainPort, GateDecision, GateKind, GateOutcome,
-    InputEventDrainPort, InputEventFuture, InputEventOptFuture, PendingCommand, PendingInputBuffer,
+    apply_gate, GateKind, InputEventDrainPort, InputEventFuture, InputEventOptFuture,
+    PendingCommand, PendingInputBuffer,
 };
 pub use input_log::logged_input_messages;
-pub use loop_context::{ChatLoopContext, SwitchClientFn};
+pub use loop_context::ChatLoopContext;
 pub use loop_runner::process_chat_loop;
-pub use queue::{append_queued_input, QueueDrainPort, QueueFuture};
+pub use queue::{QueueDrainPort, QueueFuture};
 pub(crate) use stream_handler::{
     should_emit_model_stream_waiting, InvocationEventReducer, InvocationResponse,
 };

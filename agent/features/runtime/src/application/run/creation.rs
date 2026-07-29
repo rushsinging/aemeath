@@ -3,8 +3,60 @@ use std::sync::Arc;
 
 use share::config::domain::snapshot::ConfigSnapshot;
 
+use crate::application::loop_engine::chat::ChatEventSinkHandle;
 use crate::application::run::execution_state::RunExecutionState;
+use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::{Run, RunId, RunSpec, RunSpecError};
+
+/// 纯值 [`RunCreationRequest`] 的 Session live binding view。
+#[derive(Clone)]
+pub(crate) struct SessionRunBindings {
+    wiring: Arc<context::MainSessionWiring>,
+    provider: Arc<crate::ports::ProviderBinding>,
+    interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
+    reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
+    event_sink: ChatEventSinkHandle,
+}
+
+impl SessionRunBindings {
+    pub(crate) fn new(
+        wiring: Arc<context::MainSessionWiring>,
+        provider: Arc<crate::ports::ProviderBinding>,
+        interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
+        reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
+        event_sink: ChatEventSinkHandle,
+    ) -> Self {
+        Self {
+            wiring,
+            provider,
+            interaction,
+            reasoning,
+            event_sink,
+        }
+    }
+
+    pub(crate) fn wiring(&self) -> &Arc<context::MainSessionWiring> {
+        &self.wiring
+    }
+
+    pub(crate) fn provider(&self) -> &Arc<crate::ports::ProviderBinding> {
+        &self.provider
+    }
+
+    pub(crate) fn interaction(
+        &self,
+    ) -> &Arc<dyn crate::application::interaction::port::InteractionPort> {
+        &self.interaction
+    }
+
+    pub(crate) fn reasoning(&self) -> &Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>> {
+        &self.reasoning
+    }
+
+    pub(crate) fn event_sink(&self) -> &ChatEventSinkHandle {
+        &self.event_sink
+    }
+}
 
 /// 会话级可变事实的 owner。
 ///
@@ -120,57 +172,16 @@ impl SessionSnapshot {
     }
 }
 
-/// 子 Run 可见的父能力上限。只携带 identity 与纯值 RunSpec。
-#[derive(Clone)]
-pub struct ParentRunCapabilities {
+/// 子 Run 可见的父纯值事实与 capability ceiling。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParentRunFacts {
     run_id: RunId,
     spec: RunSpec,
-    context: Option<Arc<crate::application::run::context::RuntimeContext>>,
-    workspace: Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
 }
 
-impl std::fmt::Debug for ParentRunCapabilities {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ParentRunCapabilities")
-            .field("run_id", &self.run_id)
-            .field("spec", &self.spec)
-            .field("has_context", &self.context.is_some())
-            .field("has_workspace", &self.workspace.is_some())
-            .finish()
-    }
-}
-
-impl PartialEq for ParentRunCapabilities {
-    fn eq(&self, other: &Self) -> bool {
-        self.run_id == other.run_id && self.spec == other.spec
-    }
-}
-
-impl Eq for ParentRunCapabilities {}
-
-impl ParentRunCapabilities {
+impl ParentRunFacts {
     pub fn new(run_id: RunId, spec: RunSpec) -> Self {
-        Self {
-            run_id,
-            spec,
-            context: None,
-            workspace: None,
-        }
-    }
-
-    pub fn from_active_run(
-        run_id: RunId,
-        spec: RunSpec,
-        context: Arc<crate::application::run::context::RuntimeContext>,
-        workspace: crate::application::run::workspace::RuntimeWorkspaceAccess,
-    ) -> Self {
-        Self {
-            run_id,
-            spec,
-            context: Some(context),
-            workspace: Some(workspace),
-        }
+        Self { run_id, spec }
     }
 
     pub fn run_id(&self) -> &RunId {
@@ -180,26 +191,60 @@ impl ParentRunCapabilities {
     pub fn spec(&self) -> &RunSpec {
         &self.spec
     }
+}
 
-    pub(crate) fn context(&self) -> Option<&Arc<crate::application::run::context::RuntimeContext>> {
-        self.context.as_ref()
+/// 只在 Factory 装配子 Run 时可见的父 live binding view。
+#[derive(Clone)]
+pub(crate) struct ParentRunBindings {
+    context: Arc<crate::application::run::context::RuntimeContext>,
+    workspace: RuntimeWorkspaceAccess,
+}
+
+impl ParentRunBindings {
+    pub(crate) fn from_active_run(
+        context: Arc<crate::application::run::context::RuntimeContext>,
+        workspace: RuntimeWorkspaceAccess,
+    ) -> Self {
+        Self { context, workspace }
     }
 
-    pub(crate) fn workspace(
-        &self,
-    ) -> Option<&crate::application::run::workspace::RuntimeWorkspaceAccess> {
-        self.workspace.as_ref()
+    pub(crate) fn context(&self) -> &Arc<crate::application::run::context::RuntimeContext> {
+        &self.context
+    }
+
+    pub(crate) fn workspace(&self) -> &RuntimeWorkspaceAccess {
+        &self.workspace
+    }
+}
+
+#[derive(Clone)]
+pub(crate) enum RunCreationBindings {
+    Session(SessionRunBindings),
+    Parent(ParentRunBindings),
+}
+
+impl RunCreationBindings {
+    pub(crate) fn session(&self) -> Option<&SessionRunBindings> {
+        match self {
+            Self::Session(bindings) => Some(bindings),
+            Self::Parent(_) => None,
+        }
+    }
+
+    pub(crate) fn parent(&self) -> Option<&ParentRunBindings> {
+        match self {
+            Self::Parent(bindings) => Some(bindings),
+            Self::Session(_) => None,
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum RunPreparationError {
+pub enum RunCreationError {
     #[error("子 Run 能力不得超过父 Run")]
     CapabilityEscalation,
     #[error("RuntimeContext 装配失败")]
     ContextAssembly,
-    #[error("Session 快照已过期")]
-    SessionSnapshotStale,
     #[error("子 Run 角色不存在：{role}")]
     SubRoleNotFound { role: String },
     #[error("sub-agent role disabled: {role}")]
@@ -214,7 +259,7 @@ pub enum RunPreparationError {
     SubToolCatalog { message: String },
 }
 
-impl From<RunSpecError> for RunPreparationError {
+impl From<RunSpecError> for RunCreationError {
     fn from(_: RunSpecError) -> Self {
         Self::CapabilityEscalation
     }
@@ -223,19 +268,19 @@ impl From<RunSpecError> for RunPreparationError {
 /// RuntimeContextFactory 的纯值准备输入。
 ///
 /// 输入消息不属于装配契约；首次和后续输入都必须经 InputPort 激活 Run。
-#[derive(Debug, Clone)]
-pub struct RunPreparationRequest {
+#[derive(Clone)]
+pub struct RunCreationRequest {
     spec: RunSpec,
     session: SessionSnapshot,
-    parent: Option<ParentRunCapabilities>,
+    parent: Option<ParentRunFacts>,
 }
 
-impl RunPreparationRequest {
+impl RunCreationRequest {
     pub fn new(
         spec: RunSpec,
         session: SessionSnapshot,
-        parent: Option<ParentRunCapabilities>,
-    ) -> Result<Self, RunPreparationError> {
+        parent: Option<ParentRunFacts>,
+    ) -> Result<Self, RunCreationError> {
         if let Some(parent) = &parent {
             spec.validate_against(parent.spec())?;
         }
@@ -254,7 +299,7 @@ impl RunPreparationRequest {
         &self.session
     }
 
-    pub fn parent(&self) -> Option<&ParentRunCapabilities> {
+    pub fn parent(&self) -> Option<&ParentRunFacts> {
         self.parent.as_ref()
     }
 
@@ -262,41 +307,22 @@ impl RunPreparationRequest {
         self.session = session;
         self
     }
-
-    pub(crate) fn into_parts(self) -> (RunSpec, SessionSnapshot, Option<ParentRunCapabilities>) {
-        (self.spec, self.session, self.parent)
-    }
 }
 
-/// Factory 最终准备产物。
+/// 一次完整、可执行的 Run 实例。
 ///
-/// `PreparedRun` 同时持有 Run identity、execution state、session snapshot
-/// 与可选 RuntimeContext，避免通过额外 identity copy 丢失领域状态。
-pub struct PreparedRun {
+/// `RunInstance` 统一拥有领域 Run、执行状态、Session 快照与冻结的
+/// `RuntimeContext`，调用方不得将这些状态拆散后分别启动。
+pub struct RunInstance {
     run: Run,
     execution: RunExecutionState,
     session: SessionSnapshot,
-    context: Option<crate::application::run::context::RuntimeContext>,
+    context: crate::application::run::context::RuntimeContext,
     workspace: Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
 }
 
-impl PreparedRun {
-    pub fn idle(spec: RunSpec, parent_run_id: Option<RunId>, session: SessionSnapshot) -> Self {
-        Self {
-            run: Run::new(spec, parent_run_id),
-            execution: RunExecutionState::new(),
-            session,
-            context: None,
-            workspace: None,
-        }
-    }
-
-    pub fn from_request(request: RunPreparationRequest) -> Self {
-        let (spec, session, parent) = request.into_parts();
-        Self::idle(spec, parent.map(|parent| parent.run_id), session)
-    }
-
-    pub(crate) fn with_context(
+impl RunInstance {
+    pub(crate) fn new(
         spec: RunSpec,
         parent_run_id: Option<RunId>,
         session: SessionSnapshot,
@@ -307,7 +333,7 @@ impl PreparedRun {
             run: Run::new(spec, parent_run_id),
             execution: RunExecutionState::new(),
             session,
-            context: Some(context),
+            context,
             workspace,
         }
     }
@@ -316,37 +342,33 @@ impl PreparedRun {
         &self.run
     }
 
-    pub fn execution(&self) -> &RunExecutionState {
-        &self.execution
-    }
-
     pub fn session(&self) -> &SessionSnapshot {
         &self.session
     }
 
-    pub fn context(&self) -> Option<&crate::application::run::context::RuntimeContext> {
-        self.context.as_ref()
+    pub fn context(&self) -> &crate::application::run::context::RuntimeContext {
+        &self.context
     }
 
     pub fn workspace(&self) -> Option<&crate::application::run::workspace::RuntimeWorkspaceAccess> {
         self.workspace.as_ref()
     }
 
-    pub fn into_parts(
-        self,
+    pub fn initialize(&mut self, messages: Vec<share::message::Message>, turn_count: usize) {
+        self.execution.initialize_for_launch(messages, turn_count);
+    }
+
+    pub(crate) fn execution_parts_mut(
+        &mut self,
     ) -> (
-        Run,
-        RunExecutionState,
-        SessionSnapshot,
-        Option<crate::application::run::context::RuntimeContext>,
-        Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
+        &mut Run,
+        &mut RunExecutionState,
+        &crate::application::run::context::RuntimeContext,
     ) {
-        (
-            self.run,
-            self.execution,
-            self.session,
-            self.context,
-            self.workspace,
-        )
+        (&mut self.run, &mut self.execution, &self.context)
+    }
+
+    pub(crate) fn execution_mut(&mut self) -> &mut RunExecutionState {
+        &mut self.execution
     }
 }

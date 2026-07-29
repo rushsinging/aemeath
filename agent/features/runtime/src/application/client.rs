@@ -11,17 +11,16 @@ pub(crate) mod trait_model;
 mod trait_reflection;
 mod trait_session;
 
-pub(crate) use accessors::*;
-#[allow(unused_imports)]
-pub(crate) use from_args::*;
-#[allow(unused_imports)]
-pub(crate) use mapping::*;
+#[cfg(test)]
+pub(crate) use accessors::{InputPortPair, SessionModelState};
+pub(crate) use accessors::{RuntimeContextAssemblyError, SessionRuntime};
+pub(crate) use mapping::{message_to_sdk, workspace_context_to_sdk};
 
 // 对外仅发布 Composition 装配所需的 workspace bootstrap。
 pub use accessors::AgentClientImpl;
 pub use bootstrap::{
     build_agent_runner, resolve_concurrency_limits, resolve_model_runtime_settings,
-    AgentRunnerAssembly, ChatBootstrapArgs, ModelRuntimeSettings,
+    AgentRunnerAssembly, ModelRuntimeSettings,
 };
 pub use from_args::{
     from_args_with_workspace, InitialProviderAssembly, PromptAssembly,

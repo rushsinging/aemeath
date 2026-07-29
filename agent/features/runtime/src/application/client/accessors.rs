@@ -74,7 +74,7 @@ impl SessionModelState {
 pub struct SessionRuntime {
     // ── Session identity & workspace ──
     pub(crate) session_state:
-        Arc<std::sync::RwLock<crate::application::run::preparation::SessionState>>,
+        Arc<std::sync::RwLock<crate::application::run::creation::SessionState>>,
     pub workspace: project::WorkspaceViews,
     pub wiring: Arc<context::MainSessionWiring>,
 
@@ -148,7 +148,7 @@ pub struct SessionRuntime {
 impl SessionRuntime {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        session_state: Arc<std::sync::RwLock<crate::application::run::preparation::SessionState>>,
+        session_state: Arc<std::sync::RwLock<crate::application::run::creation::SessionState>>,
         workspace: project::WorkspaceViews,
         wiring: Arc<context::MainSessionWiring>,
         config_query: Arc<dyn config::ConfigQuery>,
@@ -239,53 +239,22 @@ impl SessionRuntime {
         state.update_session(session_id, config);
     }
 
-    pub(crate) fn session_snapshot(&self) -> crate::application::run::preparation::SessionSnapshot {
+    pub(crate) fn session_snapshot(&self) -> crate::application::run::creation::SessionSnapshot {
         self.session_state.read().unwrap().snapshot_for_run()
     }
 }
 
-/// Error returned when RuntimeContext assembly fails.
-///
-/// Merged from `client::RuntimeContextAssemblyError` and
-/// `runtime_context_factory::RuntimeContextAssemblyError` (no duplicate naming).
-///
-/// #1248 Task 3: Typed error variants.  Role/model errors are retained as typed;
-/// provider build errors have their own variant.  `SubDerivationFailed` is
-/// reserved for truly untyped derivation failures (e.g. spec derivation
-/// errors from the domain layer or tool catalog snapshot errors).
+/// 子 Run 派生 façade 的错误。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RuntimeContextAssemblyError {
-    /// The RunSpec requests `ParentMediated` interaction but no parent
-    /// RuntimeContext was provided.
+    #[cfg(test)]
     #[error("interaction is unavailable — ParentMediated requires a parent")]
     InteractionUnavailable,
-    /// The RunSpec requests `BoundaryOnly` hooks but no parent
-    /// RuntimeContext was provided.
+    #[cfg(test)]
     #[error("hooks are unavailable — BoundaryOnly requires a parent")]
     HookUnavailable,
-    /// The RunSpec requests `Inherit` reasoning but no parent
-    /// RuntimeContext was provided.  Inherit without a parent is a
-    /// hard error — no fallback to NoOp.
-    #[error("reasoning is unavailable — Inherit requires a parent")]
-    ReasoningUnavailable,
-    /// #1385 Task 6: sub-agent role not found in config.
     #[error("sub-agent role `{role}` not found in config")]
     SubRoleNotFound { role: String },
-    /// #1385 Task 6: sub-agent role is disabled.
-    #[error("sub-agent role `{role}` is disabled")]
-    SubRoleDisabled { role: String },
-    /// #1385 Task 6: sub-agent role has no configured model.
-    #[error("sub-agent role `{role}` has no configured model")]
-    SubRoleNoModel { role: String },
-    /// #1385 Task 6: unknown model for sub-agent role.
-    #[error("unknown model `{model}` for sub-agent role `{role}`")]
-    SubUnknownModel { model: String, role: String },
-    /// #1248 Task 3: provider factory failed to build a binding for the
-    /// sub-agent role.
-    #[error("provider build failed for sub-agent role `{role}`: {message}")]
-    SubProviderBuildFailed { role: String, message: String },
-    /// #1385 Task 6: derivation guard failed (catch-all for spec/tool-catalog
-    /// errors; role/model errors have their own typed variants above).
     #[error("sub derivation failed: {reason}")]
     SubDerivationFailed { reason: String },
 }

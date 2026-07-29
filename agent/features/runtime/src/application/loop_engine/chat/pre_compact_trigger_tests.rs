@@ -1,13 +1,13 @@
 //! External tests for the production PreCompact reflection trigger (#1284).
 //!
 //! These tests verify that the production automatic compact path
-//! (`ChatLoopCapabilityAdapter::compact`) submits a `ReflectionTaskTrigger::PreCompact` job
-//! using the **pre-compact** messages snapshot only when the context port
-//! returns `CompactOutcome::Committed`. Errors and `CompactOutcome::Skipped`
-//! must never enqueue a job. The submission shares the session-scoped
-//! `ReflectionTaskAdapter` slot with `Interval` and `Manual` triggers; the
-//! single-slot contention contract itself is already covered by the
-//! `task_adapter_tests` in the reflection runner.
+//! (`RuntimeCompaction` + `ChatCompactionObserver`) submits a
+//! `ReflectionTaskTrigger::PreCompact` job using the **pre-compact** messages
+//! snapshot only when the context port returns `CompactOutcome::Committed`.
+//! Errors and `CompactOutcome::Skipped` must never enqueue a job. The
+//! submission shares the session-scoped `ReflectionTaskAdapter` slot with
+//! `Interval` and `Manual` triggers; the single-slot contention contract itself
+//! is already covered by the `task_adapter_tests` in the reflection runner.
 
 #![allow(clippy::type_complexity)]
 
@@ -16,19 +16,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use sdk::{ChatId, ChatTurnId, RunId, RunStepId};
+use sdk::{RunId, RunStepId};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
-use super::loop_runner::main_run_port::ChatLoopCapabilityAdapter;
-use super::task_reminder::TaskReminderState;
+use super::loop_runner::main_run_port::ChatCompactionObserver;
 use crate::application::loop_engine::chat::reflection::{
     maybe_submit_pre_compact_reflection, submit_pre_compact_reflection,
-};
-use crate::application::loop_engine::chat::{
-    EmptyInputEventDrainPort, EmptyQueueDrainPort, PendingInputBuffer, RuntimeTurnContext,
 };
 use crate::application::loop_engine::CompactionPort;
 use crate::application::reflection::{
@@ -46,10 +42,9 @@ use crate::ports::{
 /// adapter's `executor` field, so we cannot use a capturing closure to
 /// observe submissions. The unit tests below therefore exercise the
 /// helpers via the production adapter and a real provider whose response
-/// parses as a (empty) reflection output. The integration tests against
-/// `ChatLoopCapabilityAdapter::compact` observe behavior through `adapter.drain()`,
-/// which joins the spawned task and yields a `ReflectionTaskCompletion`
-/// carrying the trigger regardless of execution status.
+/// parses as an empty reflection output. The integration tests exercise the
+/// production `RuntimeCompaction` and `ChatCompactionObserver` seam, then use
+/// `adapter.drain()` to join the spawned task and inspect its trigger.
 fn production_adapter() -> ReflectionTaskAdapter {
     ReflectionTaskAdapter::production(Duration::from_secs(5))
 }
@@ -229,70 +224,25 @@ fn failing_append_reflection_history() -> Arc<dyn memory::api::ReflectionHistory
     Arc::new(FailingAppendHistory)
 }
 
-/// Inline builder for `ChatLoopCapabilityAdapter`. Returns the port together with a
-/// `Keepalive` struct that pins every `Arc`/owned value the port borrows so
-/// the returned references stay valid for the test scope.
-#[allow(clippy::too_many_lines)]
-fn build_compact_test_port<'a>(
-    harness: &'a mut CompactHarness,
-) -> ChatLoopCapabilityAdapter<'a, EmptyQueueDrainPort, EmptyInputEventDrainPort> {
-    let event_sink = harness.runtime_context.event_sink();
-    ChatLoopCapabilityAdapter {
-        runtime_context: &harness.runtime_context,
-        queue: &harness.queue,
-        input_events: &harness.input_events,
-        system_prompt_text: "system",
-        context_size: 128_000,
-        workspace: &harness.workspace,
-        session_id: "pre-compact-test",
-        read_files: &harness.read_files,
-        session_reminders: &harness.session_reminders,
-        agent_runner: &None,
-        tool_result_materializer: harness.tool_result_materializer.as_ref(),
-        max_tool_concurrency: 1,
-        agent_semaphore: &harness.agent_semaphore,
-        reflection_tasks: &harness.adapter,
-        language: "en",
-        input_strategy: crate::application::loop_engine::input_strategy::BufferedInputAdapter {
-            input_events: &harness.input_events,
-            // #1385 Task 12: sink from runtime context, not separate reference.
-            sink: event_sink,
-            queue: &harness.queue,
-            pending_input: &mut harness.pending_input,
-            run_input_buffer: crate::application::run::context::RunInputBufferHandle::new(),
-            stop_hook_feedback: None,
-            pending_stop_hook_feedback: None,
-            pending_tool_results: false,
-            run_id: RunId::new("run"),
+/// Inline builder for the production compaction seam.
+fn build_compact_test_port(
+    harness: &CompactHarness,
+) -> crate::application::loop_engine::run_services::RuntimeCompaction<'_, ChatCompactionObserver> {
+    crate::application::loop_engine::run_services::RuntimeCompaction::new(
+        &harness.runtime_context,
+        ChatCompactionObserver {
+            runtime_context: harness.runtime_context.clone(),
+            reflection_tasks: harness.adapter.clone(),
+            system_prompt: "system".to_string(),
+            language: "en".to_string(),
         },
-        run_id: RunId::new("run"),
-        active_run: harness.active_run.as_ref(),
-        turn_context: RuntimeTurnContext::new(ChatId::new_v7(), ChatTurnId::new_v7()),
-        // #1385 Task 12: last_total_tokens eliminated.
-        task_reminder_state: &mut harness.task_reminder_state,
-        tool_identity: &harness.tool_identity,
-        plan_mode: false,
-    }
+    )
 }
 
-/// Per-test harness. Holds all owned state that the borrowed `ChatLoopCapabilityAdapter`
-/// references. Must outlive the port that `build_compact_test_port` returns.
+/// Per-test harness for the production compaction service and observer.
 struct CompactHarness {
     adapter: ReflectionTaskAdapter,
     stub: Arc<StubContextPort>,
-    tool_result_materializer:
-        Arc<crate::application::tool::result_materialization::ToolResultMaterializer>,
-    workspace: project::WorkspaceViews,
-    read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    session_reminders: Arc<std::sync::Mutex<::tools::SessionReminders>>,
-    active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
-    agent_semaphore: Arc<tokio::sync::Semaphore>,
-    queue: EmptyQueueDrainPort,
-    input_events: EmptyInputEventDrainPort,
-    pending_input: PendingInputBuffer,
-    // #1385 Task 12: sink and last_total_tokens eliminated — both from runtime_context.
-    task_reminder_state: TaskReminderState,
-    tool_identity: crate::application::tool::coordination::identity::ToolIdentityRegistry,
     runtime_context: crate::application::run::context::RuntimeContext,
 }
 
@@ -303,8 +253,6 @@ impl CompactHarness {
         let binding = pre_compact_test_binding();
         let memory: Arc<dyn memory::MemoryPort> = Arc::new(memory::NoOpMemory);
         let reflection_history = noop_reflection_history();
-        let tool_result_materializer =
-            crate::application::tool::test_support::test_tool_result_materializer();
         let config_snapshot = ConfigSnapshot::new(Config::default());
         let run_config =
             crate::application::run::config::RunConfigSnapshot::capture(config_snapshot.clone());
@@ -318,24 +266,17 @@ impl CompactHarness {
             )
             .unwrap(),
         );
-        let workspace = project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace 初始化成功")
-            .into_views();
         let tool_catalog =
             ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port();
         let tool_execution = ::tools::composition::TestCatalogExecutionFactory::empty().execution();
         let tool_context_binding =
             ::tools::composition::TestCatalogExecutionFactory::empty().binding();
-        let read_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
-        let session_reminders = Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new()));
-        let active_run =
-            Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
         let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
-        let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(1));
         let reasoning = Arc::new(std::sync::Mutex::new(share::reasoning::ReasoningLevel::Off));
         let runtime_context = {
             use crate::application::run::context::{
-                RunCancellationScope, RunContextBindings, RunInputBufferHandle, RunUsageTracker,
+                IoBindings, LifecycleBindings, ModelBindings, RunCancellationScope,
+                RunCapabilityBindings, RunInputBufferHandle, RunUsageTracker,
             };
             use crate::application::run::context_factory::RuntimeContextFactory;
 
@@ -348,38 +289,44 @@ impl CompactHarness {
                 task_access.clone(),
                 hook_runner.clone(),
             );
-            let bindings = RunContextBindings {
-                context: stub.clone(),
-                provider: binding.clone(),
-                interaction: Arc::new(
-                    crate::application::interaction::port::InteractionBridge::new(),
-                ),
-                memory: memory.clone(),
-                config: run_config.clone(),
-                cancel: RunCancellationScope::new(),
-                event_sink: {
-                    #[derive(Clone)]
-                    struct NoOpSink;
-                    impl crate::application::loop_engine::chat::ChatEventSink for NoOpSink {
-                        fn send_event<'a>(
-                            &'a self,
-                            _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-                        ) -> crate::application::loop_engine::chat::EventFuture<'a>
-                        {
-                            Box::pin(std::future::ready(()))
-                        }
-                        fn try_send_event(
-                            &self,
-                            _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-                        ) {
-                        }
-                    }
-                    crate::application::loop_engine::chat::ChatEventSinkHandle::new(NoOpSink)
+            let bindings = RunCapabilityBindings {
+                model: ModelBindings {
+                    context: stub.clone(),
+                    provider: binding.clone(),
+                    interaction: Arc::new(
+                        crate::application::interaction::port::InteractionBridge::new(),
+                    ),
+                    memory: memory.clone(),
+                    config: run_config.clone(),
+                    reasoning: reasoning.clone(),
+                    tool_catalog: None,
                 },
-                usage: RunUsageTracker::new(),
-                input: RunInputBufferHandle::new(),
-                reasoning: reasoning.clone(),
-                tool_catalog: None,
+                io: IoBindings {
+                    event_sink: {
+                        #[derive(Clone)]
+                        struct NoOpSink;
+                        impl crate::application::loop_engine::chat::ChatEventSink for NoOpSink {
+                            fn send_event<'a>(
+                                &'a self,
+                                _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
+                            ) -> crate::application::loop_engine::chat::EventFuture<'a>
+                            {
+                                Box::pin(std::future::ready(()))
+                            }
+                            fn try_send_event(
+                                &self,
+                                _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
+                            ) {
+                            }
+                        }
+                        crate::application::loop_engine::chat::ChatEventSinkHandle::new(NoOpSink)
+                    },
+                    input: RunInputBufferHandle::new(),
+                },
+                lifecycle: LifecycleBindings {
+                    cancel: RunCancellationScope::new(),
+                    usage: RunUsageTracker::new(),
+                },
             };
             factory
                 .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)
@@ -388,19 +335,6 @@ impl CompactHarness {
         Self {
             adapter,
             stub,
-            tool_result_materializer,
-            workspace,
-            read_files,
-            session_reminders,
-            active_run,
-            agent_semaphore,
-            queue: EmptyQueueDrainPort,
-            input_events: EmptyInputEventDrainPort,
-            pending_input: PendingInputBuffer::default(),
-            // #1385 Task 12: sink and last_total_tokens eliminated.
-            task_reminder_state: TaskReminderState::new(),
-            tool_identity:
-                crate::application::tool::coordination::identity::ToolIdentityRegistry::new(),
             runtime_context,
         }
     }
@@ -631,7 +565,7 @@ async fn submit_pre_compact_reflection_reports_history_failure_and_releases_slot
     let _ = adapter.drain().await;
 }
 
-/// Integration: `ChatLoopCapabilityAdapter::compact` submits a PreCompact job exactly once
+/// Integration: the production compaction service and chat observer submit a PreCompact job exactly once
 /// on `CompactOutcome::Committed`, using the early window the compact will
 /// discard (not the empty recent tail).
 #[tokio::test]
@@ -643,7 +577,7 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
     let window = window_with(pre_compact_messages);
     let request = frozen_request();
 
-    let mut harness = CompactHarness::new(Ok(CompactOutcome::Committed(CompactResult {
+    let harness = CompactHarness::new(Ok(CompactOutcome::Committed(CompactResult {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
@@ -652,7 +586,7 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();
     execution.initialize_for_launch(port_messages, 1);
     execution.replace_context_state(request, Some(window));
-    let mut port = build_compact_test_port(&mut harness);
+    let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
     let result = port.compact(&mut execution, &cancel).await;
@@ -677,21 +611,21 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
     assert_eq!(harness.stub.compact_calls().len(), 1);
 }
 
-/// Integration: `ChatLoopCapabilityAdapter::compact` treats a Context-owned skip as a
+/// Integration: the production compaction service treats a Context-owned skip as a
 /// non-fatal no-op and does not submit a PreCompact reflection.
 #[tokio::test]
 async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
     let window = window_with(vec![Message::user("only")]);
     let request = frozen_request();
 
-    let mut harness = CompactHarness::new(Ok(CompactOutcome::Skipped(
+    let harness = CompactHarness::new(Ok(CompactOutcome::Skipped(
         CompactSkipReason::ResumeProtection,
     )));
 
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();
     execution.initialize_for_launch(vec![Message::user("only")], 1);
     execution.replace_context_state(request, Some(window));
-    let mut port = build_compact_test_port(&mut harness);
+    let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
     let result = port.compact(&mut execution, &cancel).await;
@@ -710,7 +644,7 @@ async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
     assert_eq!(harness.stub.compact_calls().len(), 1);
 }
 
-/// Integration: `ChatLoopCapabilityAdapter::compact` does NOT submit when the context port
+/// Integration: the production compaction service does NOT submit when the context port
 /// returns an error from `compact`. The pre-compact snapshot must never be
 /// observed by the reflection job because compact did not commit.
 #[tokio::test]
@@ -718,14 +652,14 @@ async fn pre_compact_trigger_skips_when_context_compact_call_errors() {
     let window = window_with(vec![Message::user("only")]);
     let request = frozen_request();
 
-    let mut harness = CompactHarness::new(Err(ContextPortError::Compact(
+    let harness = CompactHarness::new(Err(ContextPortError::Compact(
         "context port error".to_string(),
     )));
 
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();
     execution.initialize_for_launch(vec![Message::user("only")], 1);
     execution.replace_context_state(request, Some(window));
-    let mut port = build_compact_test_port(&mut harness);
+    let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
     let result = port.compact(&mut execution, &cancel).await;

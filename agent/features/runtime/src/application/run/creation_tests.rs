@@ -4,8 +4,85 @@ use std::time::Duration;
 use share::config::domain::snapshot::{ConfigRevision, ConfigSnapshot};
 use share::config::Config;
 
-use super::preparation::{ParentRunCapabilities, PreparedRun, RunPreparationRequest, SessionState};
-use crate::domain::agent_run::{InteractionBindingMode, RunSpec, RunStatus};
+use super::creation::{ParentRunFacts, RunCreationRequest, SessionState};
+use crate::domain::agent_run::{InteractionBindingMode, RunSpec};
+
+#[test]
+fn p6_9_5_session_snapshot_contains_only_value_facts() {
+    let source = include_str!("creation.rs");
+    let snapshot = source
+        .split("pub struct SessionSnapshot")
+        .nth(1)
+        .and_then(|tail| tail.split("impl SessionSnapshot").next())
+        .expect("SessionSnapshot definition");
+
+    for forbidden in [
+        "SessionCapabilitySnapshot",
+        "Arc<",
+        "RuntimeWorkspaceAccess",
+        "MainSessionWiring",
+        "InteractionPort",
+        "ProviderBinding",
+        "Mutex<",
+    ] {
+        assert!(
+            !snapshot.contains(forbidden),
+            "SessionSnapshot contains live capability: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn p6_9_5_parent_facts_are_separate_from_live_bindings() {
+    let source = include_str!("creation.rs");
+    let facts = source
+        .split("pub struct ParentRunFacts")
+        .nth(1)
+        .and_then(|tail| tail.split("impl ParentRunFacts").next())
+        .expect("ParentRunFacts definition");
+
+    for forbidden in [
+        "RuntimeContext",
+        "RuntimeWorkspaceAccess",
+        "Arc<",
+        "Option<",
+    ] {
+        assert!(
+            !facts.contains(forbidden),
+            "ParentRunFacts contains live binding: {forbidden}"
+        );
+    }
+
+    assert!(source.contains("pub(crate) struct ParentRunBindings"));
+    assert!(!source.contains("facts: ParentRunFacts"));
+}
+
+#[test]
+fn p6_12_run_creation_request_contains_only_value_inputs() {
+    let source = include_str!("creation.rs");
+    let request = source
+        .split("pub struct RunCreationRequest")
+        .nth(1)
+        .and_then(|tail| tail.split("impl RunCreationRequest").next())
+        .expect("RunCreationRequest definition");
+
+    assert!(request.contains("session: SessionSnapshot"));
+    assert!(request.contains("parent: Option<ParentRunFacts>"));
+    for forbidden in [
+        "bindings:",
+        "RunCreationBindings",
+        "SessionRunBindings",
+        "ParentRunBindings",
+        "RuntimeContext",
+        "Arc<",
+        "dyn ",
+    ] {
+        assert!(
+            !request.contains(forbidden),
+            "RunCreationRequest contains live binding: {forbidden}"
+        );
+    }
+}
 
 fn config_snapshot(revision: u64) -> ConfigSnapshot {
     ConfigSnapshot::new_with_revision(ConfigRevision::new(revision), Config::default())
@@ -58,7 +135,7 @@ fn session_state_tracks_production_binding_model_identity() {
 }
 
 #[test]
-fn preparation_request_contains_spec_snapshot_and_parent_but_no_input() {
+fn creation_request_contains_spec_snapshot_and_parent_but_no_input() {
     let session = SessionState::new(
         "session-1",
         PathBuf::from("/workspace"),
@@ -69,9 +146,9 @@ fn preparation_request_contains_spec_snapshot_and_parent_but_no_input() {
     let child_spec = parent_spec
         .derive_sub("research", Duration::from_secs(30))
         .unwrap();
-    let parent = ParentRunCapabilities::new(crate::domain::agent_run::RunId::new_v7(), parent_spec);
+    let parent = ParentRunFacts::new(crate::domain::agent_run::RunId::new_v7(), parent_spec);
 
-    let request = RunPreparationRequest::new(
+    let request = RunCreationRequest::new(
         child_spec.clone(),
         session.snapshot_for_run(),
         Some(parent.clone()),
@@ -84,14 +161,14 @@ fn preparation_request_contains_spec_snapshot_and_parent_but_no_input() {
 }
 
 #[test]
-fn preparation_rejects_child_capability_above_parent_ceiling() {
+fn creation_rejects_child_capability_above_parent_ceiling() {
     let session = SessionState::new(
         "session-1",
         PathBuf::from("/workspace"),
         "model-a",
         config_snapshot(1),
     );
-    let parent = ParentRunCapabilities::new(
+    let parent = ParentRunFacts::new(
         crate::domain::agent_run::RunId::new_v7(),
         RunSpec::sub("restricted-parent", Duration::from_secs(30)),
     );
@@ -99,62 +176,10 @@ fn preparation_rejects_child_capability_above_parent_ceiling() {
         .with_interaction_kind(InteractionBindingMode::Client)
         .unwrap();
 
-    let result = RunPreparationRequest::new(elevated, session.snapshot_for_run(), Some(parent));
+    let result = RunCreationRequest::new(elevated, session.snapshot_for_run(), Some(parent));
 
     assert!(matches!(
         result,
-        Err(super::preparation::RunPreparationError::CapabilityEscalation)
+        Err(super::creation::RunCreationError::CapabilityEscalation)
     ));
-}
-
-#[test]
-fn prepared_run_consumes_into_parts_without_changing_snapshot() {
-    let request = RunPreparationRequest::new(RunSpec::main(), session_snapshot(), None).unwrap();
-    let expected_revision = request.session().revision();
-    let prepared = PreparedRun::from_request(request);
-
-    let (run, execution, session, context, workspace) = prepared.into_parts();
-
-    assert_eq!(run.spec(), &RunSpec::main());
-    assert_eq!(run.parent_id(), None);
-    assert!(execution.messages().is_empty());
-    assert_eq!(session.revision(), expected_revision);
-    assert!(context.is_none());
-    assert!(workspace.is_none());
-}
-
-#[test]
-fn prepared_run_execution_can_be_initialized_after_preparation() {
-    let prepared = PreparedRun::idle(RunSpec::main(), None, session_snapshot());
-    let (run, mut execution, session, context, workspace) = prepared.into_parts();
-
-    execution.initialize_for_launch(vec![share::message::Message::user("hello")], 3);
-
-    assert_eq!(run.status(), RunStatus::Created);
-    assert_eq!(execution.messages().len(), 1);
-    assert_eq!(execution.turn_count(), 3);
-    assert!(execution.elapsed() >= std::time::Duration::ZERO);
-    assert_eq!(session.session_id(), "session-1");
-    assert!(context.is_none());
-    assert!(workspace.is_none());
-}
-
-#[test]
-fn prepared_run_starts_created_with_empty_execution_state() {
-    let prepared = PreparedRun::idle(RunSpec::main(), None, session_snapshot());
-
-    assert_eq!(prepared.run().status(), RunStatus::Created);
-    assert!(prepared.execution().messages().is_empty());
-    assert_eq!(prepared.execution().turn_count(), 0);
-    assert_eq!(prepared.session().session_id(), "session-1");
-}
-
-fn session_snapshot() -> super::preparation::SessionSnapshot {
-    SessionState::new(
-        "session-1",
-        PathBuf::from("/workspace"),
-        "model-a",
-        config_snapshot(1),
-    )
-    .snapshot_for_run()
 }

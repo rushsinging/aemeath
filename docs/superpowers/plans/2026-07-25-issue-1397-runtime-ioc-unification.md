@@ -3,7 +3,7 @@
 > 对应 Issue：[#1397](https://github.com/rushsinging/aemeath/issues/1397)
 > 设计基线：[07-runtime-ownership-and-assembly.md](../../design/02-modules/runtime/07-runtime-ownership-and-assembly.md)
 > 前置：[#1382](https://github.com/rushsinging/aemeath/issues/1382)、[#1385](https://github.com/rushsinging/aemeath/issues/1385)、[#1248](https://github.com/rushsinging/aemeath/issues/1248)
-> 计划状态：P0-P5、P6.1-P6.8、P6.10-P6.11 的原阶段门禁已有完成记录；复核发现 P6.2 只收口了纯值 request 外形，未实现唯一 Factory 装配终态，因此 P6.9 与 P6.12 已重新打开；P7 未开始
+> 计划状态：P0-P6 已完成并通过最终分层回归；P6.9 已完成 `RunKind`、双 Context Resolver、fat Loop adapter、完整 Runtime 测试替身与双装配结构退役；P6.12 已完成终态 façade 白名单、结构 Guard、sanity fixtures 与全仓验证。P7 尚未执行 Issue/PR 回写。
 
 ## 1. 目标与实施原则
 
@@ -20,7 +20,7 @@ Run + RunExecutionState + RuntimeContext
 实施必须遵循以下原则：
 
 1. **根因级收敛**：不通过保留 `MainRunPort` / `SubAgentRun` 外壳或新增兼容超集字段止血；流程控制权最终归 Loop Engine，外部能力拆成窄 Port。
-2. **单一装配入口**：所有 Run 来源只提交 `RunPreparationRequest`，统一取得 `PreparedRun`；调用方不得手填 `RuntimeContext` 同构参数包。
+2. **单一装配入口**：所有 Run 来源只提交 `RunCreationRequest`，统一取得 `RunInstance`；调用方不得手填 `RuntimeContext` 同构参数包。
 3. **所有权先于搬运**：先建立 `RuntimeServices`、`SessionState`、`RunExecutionState` 的字段归属和快照边界，再迁移消费者，避免同一事实双写。
 4. **按依赖方向迁移**：领域模型 → Runtime-owned Port / Published Language → Factory → Composition adapter → Loop consumer → 退役旧路径 → Guard / 文档回写。
 5. **逐层 TDD**：核心逻辑先补失败测试或确认现有覆盖，再实施；跨层链路必须覆盖每个相邻边界，不能只测最终 Loop。
@@ -50,28 +50,28 @@ fn compose_runtime(graph: CompositionGraph) -> RuntimeAssembly {
 }
 
 // Runtime application：捕获 snapshot、声明 RunSpec，创建 Idle Run。
-async fn prepare_run(
+async fn create_run(
     runtime: &mut AgentRuntime,
     parent: Option<ParentRunCapabilities>,
-) -> Result<PreparedRun, RunPreparationError> {
+) -> Result<RunInstance, RunCreationError> {
     let spec = RunSpec::from_parent(parent.as_ref())?;
-    runtime.preparer.prepare(RunPreparationRequest {
+    runtime.run_factory.create(RunCreationRequest {
         spec,
         session: runtime.session.snapshot_for_run()?,
         parent,
-    }).await
+    })
 }
 
 // 输入独立于装配；首次和后续输入都通过同一个 Port 激活 Run。
 async fn submit_input(
-    prepared: &PreparedRun,
+    prepared: &RunInstance,
     input: InputEnvelope,
 ) -> Result<(), InputError> {
     prepared.context.input().submit(input).await
 }
 
-// RunPreparer：校验 ceiling，委托 Context factory 绑定窄能力，原子返回 Idle per-Run 对象。
-async fn prepare(&self, request: RunPreparationRequest) -> Result<PreparedRun, RunPreparationError> {
+// RunFactory：校验 ceiling，委托 Context factory 绑定窄能力，原子返回 Idle per-Run 对象。
+async fn create(&self, request: RunCreationRequest) -> Result<RunInstance, RunCreationError> {
     request.spec.validate_against(request.parent.as_ref())?;
     let interaction = self.interaction.bind(request.spec.interaction_mode,
                                               request.parent.as_ref()).await?;
@@ -88,13 +88,12 @@ async fn prepare(&self, request: RunPreparationRequest) -> Result<PreparedRun, R
     );
     let run = Run::idle(request.spec);
     let execution = RunExecutionState::empty(run.id());
-    Ok(PreparedRun { run, context, execution })
+    Ok(RunInstance { run, context, execution })
 }
 
 // Loop Engine：只消费已绑定能力，不重新装配或按 Main/Sub 分支。
-async fn execute(prepared: PreparedRun) -> Result<AgentRunTerminal, RunExecutionError> {
-    let PreparedRun { mut run, mut execution, context } = prepared;
-    loop_engine::run_loop(&mut run, &mut execution, &context).await
+async fn execute(instance: RunInstance) -> Result<AgentRunTerminal, RunExecutionError> {
+    run_launcher::launch(instance).await
 }
 ```
 
@@ -105,23 +104,24 @@ async fn execute(prepared: PreparedRun) -> Result<AgentRunTerminal, RunExecution
 | `compose_runtime` | P3/P4 | concrete constructor 只在 Composition，factory contracts 可注入 |
 | `snapshot_for_run` | P2/P4 | Session 变化不污染已准备 Run |
 | `RunSpec::from_parent` | P2 | 能力只收缩不扩权，无 Main/Sub 控制分支 |
-| `RunPreparer::prepare` | P3 | 单一入口、mode adapter、typed unavailable、无参数袋、产出 Idle Run |
+| `RunFactory::create` | P3 | 单一入口、mode adapter、typed unavailable、无参数袋、产出 Idle Run |
 | `InputPort::submit` | P1/P5 | 首次与后续输入同路径，Idle 状态只由输入激活 |
 | `ParentMediated` / `BoundaryOnly` | P3 | child identity 隔离、Hook invocation 入口过滤 |
-| `PreparedRun` | P1/P3 | Run、Context、Execution 一致创建且无双 owner |
+| `RunInstance` | P1/P3 | Run、Context、Execution 一致创建且无双 owner |
 | `loop_engine::run_loop` | P5/P6 | Engine 直接编排，fat `RunLoopPort` 不再拥有流程 |
 
 ## 2. 当前实现基线与主要缺口
 
-当前分支已经统一 Run 创建、`RunLauncher::launch_prepared`、Loop Engine 以及 Model/Tool/Interaction/Step/Stop 的核心 application orchestration，但尚未达到 #1397 的生产类型与装配终态：
+当前分支已经删除 `RunKind` 和双 Context Resolver，并统一 Run 创建、`RunLauncher::launch`、Loop Engine 以及 Model/Tool/Interaction/Step/Stop 的核心 application orchestration，但尚未达到 #1397 的结构终态：
 
-- `RunKind::Main/Sub` 与公开 `RunSpec.kind` 仍存在；`with_memory_mode`、`enforce_sub_fixed` 等能力校验仍直接按角色分支，因此 `RunKind` 不是观测标签，而是生产策略开关。
-- `RunPreparer` 虽只接受纯值 `RunPreparationRequest`，但仍注入 `RuntimeContextResolver`；`MainRunContextResolver` 与 `SubRunContextResolver` 分别解析会话/provider/interaction/reasoning/event、角色/model/restricted catalog/isolated workspace/context，再各自调用 `RuntimeContextFactory::create`。Factory 尚未成为唯一装配决策入口。
-- `MainRunCapabilities` 与 `SubRunCapabilities` 仍分别实现 Input、Event、Persistence、Compaction、Model、Hook、Tool、Interaction、Control、Lifecycle 等同一组窄 Port。共享 coordinator 已消除核心算法双轨，但两套角色化大 adapter 仍承接模型生命周期、ContextRequest、工具观察、事件投影和 finalize 差异。
-- `MainEventStrategy`、`SubEventStrategy` 与 `SubAgentEventSink` 等角色化辅助类型仍固化来源身份；只有真正无法由 capability 数据表达的输入源、外部事件目标和生命周期 callback 才可保留为窄 adapter，且名称必须按职责而非 Main/Sub 命名。
-- P6.9 曾把旧类型改名为 `MainRunCapabilities` / `SubRunCapabilities` 后错误标记完成；P6.12 的 Guard 与验证未覆盖上述残留，因此两项均重新打开。此前验证记录保留为历史证据，但不得作为 #1397 终态完成证明。
-
-当前准确状态是：共享 Run 创建/启动/Loop Engine 骨架与核心 application orchestration 已完成；去除 Main/Sub 生产类型、唯一 RuntimeContext 装配入口和双 adapter 退役尚未完成。
+- 生产代码已删除 `LoopCapabilityAdapter`、`ChatLoopCapabilityAdapter`、`DerivedLoopCapabilityAdapter`；`RunLoop` 现在只借用独立的窄 Port，生产 Engine/Launcher 不再要求单个来源对象实现整组能力。
+- Runtime 测试仍保留 `application/loop_engine/tests.rs` 中的 `ScriptedPort`、`DrainOnlyPort` 等完整或跨类别 Port 替身；这会继续掩盖窄 Port 独立组合是否成立。
+- `SessionSnapshot` 仍通过 `SessionCapabilitySnapshot` 混入 `MainSessionWiring`、Provider、Interaction、Reasoning lock、Event sink 与 `RuntimeWorkspaceAccess` 等 live handles；Factory 动态 mutation 已删除，但 Session facts 与 live bindings 尚未物理分离。
+- `RuntimeContextFactory::prepare` 已删除 `prepare_independent` / `prepare_derived` 并保持一次最终 Context 构造，但 `select_session_bindings` 与 `select_inherited_bindings` 仍分别完成整套来源装配；`RuntimeContextBindingDecision` 混合 capability bindings、resolved session、workspace、parent 与 lease，窄 selector 终态尚未完成。
+- `ParentRunCapabilities` 同时携带 parent identity/spec 与 Runtime Context/workspace live handles，尚未拆成纯值 parent facts 和 live parent binding view。
+- `RunContextBindings` 仅存在于 `#[cfg(test)]`，不属于生产残留；但测试 builder 仍需按职责收窄，不能继续作为平铺能力包扩展。
+- 依赖模块 façade 白名单、按能力类别识别 fat implementation 的结构 Guard、retired-symbol hygiene 与 sanity fixtures 尚未按终态完成。
+- 当前准确状态是：共享 Run/Engine 骨架、九个无角色 application owner、生产 fat adapter 退役、统一启动 façade 已完成；Session/Parent 纯值边界、Factory 窄 selector、测试替身拆分和终态 Guard 尚未完成。
 
 计划中的“删除”均指生产路径和目标模型中的退役；只有在无生产引用、测试替代完成、Guard 更新且验证通过后才物理删除旧类型。
 
@@ -200,7 +200,7 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 2. 定义 Runtime-owned `SessionState`，只保存 session identity、模型/config/workspace revision、resume/reminder/read-files、active run 和 parent frame 等会话事实；不得保存 services、factory、RuntimeContext 或 RunExecutionState。
 3. 定义窄 `SessionSnapshot`，明确 snapshot 时机、不可变字段和 revision；后续 Session 变更不得污染已准备 Run。
 4. 定义 `RunSpec` 的 capability modes、purpose、parent relation 和 ceiling；能力差异由数据表达，不再由 Main/Sub 类型表达。
-5. 定义 `RunPreparationRequest`、`ParentRunCapabilities`、`PreparedRun` 和 typed preparation errors。准备请求不得包含输入内容，也不得暴露锁、完整父 Context、Composition wiring 或 concrete adapter；Factory 必须创建 `Idle Run + empty RunExecutionState`，首次和后续输入全部经 `InputPort` 激活。
+5. 定义 `RunCreationRequest`、`ParentRunCapabilities`、`RunInstance` 和 typed preparation errors。准备请求不得包含输入内容，也不得暴露锁、完整父 Context、Composition wiring 或 concrete adapter；Factory 必须创建 `Idle Run + empty RunExecutionState`，首次和后续输入全部经 `InputPort` 激活。
 6. 为 snapshot 隔离、parent ceiling 收缩、unavailable capability、request 字段完整性，以及 `prepare → Idle → InputPort 激活` 补 L1/L2/L3 契约测试。
 
 **主要文件**：
@@ -210,7 +210,7 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 - `agent/features/runtime/src/domain/agent_run/spec.rs`
 - `agent/features/runtime/src/application/client/accessors.rs`
 - 新增或调整 `agent/features/runtime/src/application/session_state.rs`、`session_snapshot.rs`
-- `agent/features/runtime/src/application/runtime_preparation.rs` 及测试（如现有模块不适合承载）
+- `agent/features/runtime/src/application/runtime_creation.rs` 及测试（如现有模块不适合承载）
 - `agent/features/runtime/src/lib.rs`
 
 **完成证据**：字段分类表落实到代码、snapshot/ceiling 契约测试、无 `*Parts` 替代参数袋进入新 API。
@@ -221,7 +221,7 @@ P3 完成后，P4 与 P5 可以在同一分支中按文件冲突情况交错实�
 
 **实施**：
 
-1. 将公共生产准备入口收敛为 `RunPreparer::prepare(RunPreparationRequest) -> Result<PreparedRun, RunPreparationError>`；`RuntimeContextFactory` 只产出 `RuntimeContext`，并把 `RuntimeContext::new` 保持为 factory 私有可达入口。
+1. 将公共生产创建入口收敛为 `RunFactory::create(RunCreationRequest) -> Result<RunInstance, RunCreationError>`；`RuntimeContextFactory` 只产出 `RuntimeContext`，并把 `RuntimeContext::new` 保持为 factory 私有可达入口。
 2. 把现有 seven explicit port parameters / `RuntimeServices` 组装改为 Composition 注入 Runtime-owned 的窄 binding factories；Runtime 决定 capability mode 和 ceiling，Composition 只实现契约。
 3. 删除 `RuntimeContextParts`、`RunContextBindings` 及同构参数袋；所有 per-Run Input/Event/Usage/Control/Interaction/Hook/Reasoning/Workspace 绑定由 factory 按 request 产生。
 4. 实现三类关键受限 adapter：
@@ -327,15 +327,15 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
   - 删除 `execute_prepared_loop` 入口前后的 `std::mem::swap`，Engine 全程直接持有 `&mut RunExecutionState`。
   - 删除只为 adapter 暴露 execution 的 `ExecutionStatePort`；确认 `Run` 与 execution 无重复事实。
   - 完成门禁：execution ownership L1/L2 测试通过；搜索 adapter execution 字段、swap 和 `ExecutionStatePort` 均为空。
-  - 完成记录：Main/Sub launcher 将 `RunExecutionState` 作为 per-run 输入直接传给 `launch_prepared`，角色化 adapter 不再保存 execution；新增源码契约覆盖 Main/Sub adapter 字段。
+  - 完成记录：Main/Sub launcher 当时将 `RunExecutionState` 作为 per-run 输入直接传给旧 `launch_prepared`，角色化 adapter 不再保存 execution；P6.9.9 已进一步改为由完整 `RunInstance` 保持聚合并交给 `RunLauncher::launch`。
   - 验证结果：`cargo test -p runtime --lib`（711 passed）；P6.1 三项定向测试通过；`cargo check -p runtime` 通过；生产源码搜索未发现 `ExecutionStatePort`、execution accessor、swap 或 `MainRunPort` / `SubAgentRun` execution 字段。
 
 - [x] **P6.2 将 Run 准备收口为纯值 request 单入口**
-  - `RunPreparer::prepare` 只接受 `RunPreparationRequest`，按 `RunSpec + SessionSnapshot + parent ceiling` 绑定能力并返回 `PreparedRun`。
+  - `RunFactory::create` 只接受 `RunCreationRequest`，按 `RunSpec + SessionSnapshot + parent ceiling` 绑定能力并返回 `RunInstance`。
   - 删除 Main/Sub 调用方手填的 `RunCapabilityBindings`、`RunContextBindings`、`RuntimeContextParts` 及同构参数袋。
   - `RuntimeContext` 构造保持 factory 私有；生产代码不得出现第二条 assemble/prepare 路径。
   - 完成门禁：prepare/ceiling/snapshot 契约测试通过；旧 bindings、公开 context 构造和多参数 prepare 搜索为空。
-  - 完成记录：`RunPreparer::prepare` 唯一业务输入为 `RunPreparationRequest`；Main resolver 从 `MainSessionWiring` 语义源绑定 committed Context/Memory/Config 并让 `RuntimeContext` 持有 shared session lease；Sub resolver 从 parent/workspace/provider/skill 语义源一次性派生 isolated workspace、provider、skills context 与 restricted catalog，并回传 resolved `SessionSnapshot`。Main/Sub 生产调用点均不再构造 `RunCapabilityBindings` 或同构 source/parts 参数袋。
+  - 完成记录：`RunFactory::create` 唯一业务输入为 `RunCreationRequest`；Main resolver 从 `MainSessionWiring` 语义源绑定 committed Context/Memory/Config 并让 `RuntimeContext` 持有 shared session lease；Sub resolver 从 parent/workspace/provider/skill 语义源一次性派生 isolated workspace、provider、skills context 与 restricted catalog，并回传 resolved `SessionSnapshot`。Main/Sub 生产调用点均不再构造 `RunCapabilityBindings` 或同构 source/parts 参数袋。
   - 验证结果：`cargo test -p runtime --lib`（673 passed）；P6.2 pure-request、生产调用方、parent identity、session snapshot 定向契约通过；`cargo check -p runtime`、`cargo check -p composition`、`cargo fmt --all -- --check` 通过；Runtime Capability Assembly guard 与完整 fast architecture guards 通过；生产 Main/Sub 搜索未发现 `RunCapabilityBindings`、`RunContextBindings`、`RuntimeContextParts`、`PreparedCapabilityResolver`、`SubRunCapabilitySource`、公开 context 构造或直接 factory create。
 
 - [x] **P6.3 合并模型调用为单一 orchestration**
@@ -378,13 +378,13 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
 
 - [x] **P6.8 删除 Sub 的直接 LLM completion 旁路**
   - 核实 `AgentDispatch::complete` 的生产消费者；无消费者则删除 trait 方法、`CliAgentRunner::complete` 和专属测试/替身。
-  - 若存在真实消费者，必须迁入统一 `RunPreparationRequest → PreparedRun → RunLauncher` 链路，禁止保留直接 provider stream。
+  - 若存在真实消费者，必须迁入统一 `RunCreationRequest → RunInstance → RunLauncher` 链路，禁止保留直接 provider stream。
   - 完成门禁：全仓调用点审计有记录；生产代码不存在绕过 Run Engine 的 provider invocation。
-  - 调用点审计：全仓没有 `AgentDispatch::complete`、`AgentRunner::complete`、`runner.complete(...)` 或 agent dispatch completion 消费者；Tools 的正式 Agent tool 只调用 `run_agent(AgentRunRequest)`，该入口继续经 `derive_sub_run → RunPreparer → PreparedRun → RunLauncher::launch_prepared → shared Loop Engine`。
+  - 调用点审计：全仓没有 `AgentDispatch::complete`、`AgentRunner::complete`、`runner.complete(...)` 或 agent dispatch completion 消费者；Tools 的正式 Agent tool 只调用 `run_agent(AgentRunRequest)`，该入口继续经 `derive_sub_run → RunFactory::create → RunInstance → RunLauncher::launch → shared Loop Engine`。
   - 删除记录：从 Tools Published Language 删除 `AgentDispatch::complete`；删除 `CliAgentRunner::complete` 中自行读取 Config、构建 Provider、拼 InvocationRequest、消费 provider stream 的完整旁路；相应移除 `CliAgentRunner.config_reader`、`build_agent_runner` 的冗余 ConfigReader 参数、全部测试替身方法，以及已无消费者的 `test_config_reader.rs`。
   - 契约与验证：新增 source contract 禁止 AgentDispatch completion、Sub direct provider invocation 和 completion-only config state。Tools Agent tests 10、Loop Engine tests 60、Sub runner tests 51 全部通过；Runtime/Tools production 与 all-targets clippy、格式、diff、Shared Run Loop guard 和完整 architecture guards 全部通过；生产搜索确认 Runtime Application 中 provider invocation 仅存在统一 model coordinator，Sub runner 无 InvocationRequest/provider stream 构造。
 
-- [x] **P6.9 退役 `RunKind`、双 Context Resolver 与双 Capabilities adapter**
+- [x] **P6.9 退役 `RunKind`、双 Context Resolver、fat Loop adapter 与双装配结构**
   - [x] **P6.9.1 用能力与 parent ceiling 取代 `RunKind` 生产决策**
     - 先修改 Domain 测试：证明独立 Run 与派生 Run 的能力合法性只由有效 capability 值、是否存在 parent ceiling 及 ceiling 比较决定，不再读取角色枚举。
     - 删除 `RunKind`、公开 `RunSpec.kind` 及 `RunSpec::main/sub` 中的 kind 写入；将 standalone restricted spec 的约束表达为显式 capability policy/ceiling 状态，不得用 `name == "main"`、timeout 或其他旁路重新推断角色。
@@ -393,12 +393,12 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
     - 完成记录：物理删除 `RunKind` 与公开 `RunSpec.kind`；移除 `RunSpec::new` 基于 name/timeout 推断角色的构造旁路。`RunSpec` 内部以私有 `CapabilityPolicy::Full/Restricted` 表达无父场景的能力合同，`derive_sub` 只从父有效能力建立 ceiling，产物不携带角色标签。legacy fixed-profile 与 memory 约束统一由 policy + 可选 parent ceiling 执行。
     - 验证结果：RunSpec Domain 82 tests、derived launcher 契约、Runtime lib 658 tests 全部通过；`cargo check -p runtime`、`cargo clippy -p runtime --all-targets -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`、Shared Run Loop guard 与完整 fast architecture guards 通过；全仓 `agent/**/*.rs` 搜索无 `RunKind`，Runtime 搜索无 `RunSpec::new`、name/timeout 角色推断或 `enforce_sub_fixed`。
   - [x] **P6.9.2 完成 P6.2 遗留：Factory-owned 统一绑定输入与单一装配算法**
-    - 先为 `RunPreparationRequest → PreparedRun` 建立失败契约：相同入口能处理无父和有父 Run，并验证 session snapshot、provider、context、tool catalog、interaction、hook、reasoning、workspace、cancel 与 event sink 的逐层绑定。
-    - 删除 `RuntimeContextResolver` trait、`MainRunContextResolver`、`SubRunContextResolver`；`RunPreparer` 不再注入来源特定 resolver，只持唯一 `RuntimeContextFactory`。
-    - 将现有 resolver 使用的活依赖按职责移入 `RuntimeServices` 的窄 factory/port，或作为 `RunPreparationRequest` 引用的明确 session/parent capability handle；禁止新增同构 `*Parts`、`*Source`、Main/Sub enum 或带大量 `Option` 的装配参数袋。
+    - 先为 `RunCreationRequest → RunInstance` 建立失败契约：相同入口能处理无父和有父 Run，并验证 session snapshot、provider、context、tool catalog、interaction、hook、reasoning、workspace、cancel 与 event sink 的逐层绑定。
+    - 删除 `RuntimeContextResolver` trait、`MainRunContextResolver`、`SubRunContextResolver`；`RunFactory` 不再注入来源特定 resolver，只持唯一 `RuntimeContextFactory`。
+    - 将现有 resolver 使用的活依赖按职责移入 `RuntimeServices` 的窄 factory/port，或作为 `RunCreationRequest` 引用的明确 session/parent capability handle；禁止新增同构 `*Parts`、`*Source`、Main/Sub enum 或带大量 `Option` 的装配参数袋。
     - `RuntimeContextFactory` 统一根据 `RunSpec` capability、SessionSnapshot、可选 parent context/identity 选择 shared/isolated context、provider binding、restricted/full catalog、interaction、hook、reasoning、workspace、event route 与 cancellation scope，并原子返回 resolved session 与 `RuntimeContext`。
     - 完成门禁：Factory L1/L2、preparation L3、parent-child L4 场景通过；生产 RuntimeContext 构造只有 Factory 一处；三个 resolver 符号及调用点搜索为空。
-    - 完成记录：物理删除 `RuntimeContextResolver`、`MainRunContextResolver`、`SubRunContextResolver`。`RunPreparer` 构造只接收 `Arc<RuntimeContextFactory>`，独立 Run 与 parent-derived Run 都委托 Factory 的同一 `prepare` 入口。Factory 持有 session wiring 与 capability factory bindings，统一冻结 committed session/config、Provider、Context、Memory、Tool Catalog、Interaction、Hook、Reasoning、Workspace、event/input/usage/cancel；`ParentRunCapabilities` 仅增加准备派生 Run 所需的父 Context capability view 与 Workspace capability，不暴露服务集合。派生 workspace 随 `PreparedRun` 原子返回，调用方不再通过 resolver 单槽取回。
+    - 完成记录：物理删除 `RuntimeContextResolver`、`MainRunContextResolver`、`SubRunContextResolver`。`RunFactory` 构造只接收 `Arc<RuntimeContextFactory>`，独立 Run 与 parent-derived Run 都委托 Factory 的同一 `prepare` 入口。Factory 持有 session wiring 与 capability factory bindings，统一冻结 committed session/config、Provider、Context、Memory、Tool Catalog、Interaction、Hook、Reasoning、Workspace、event/input/usage/cancel；`ParentRunCapabilities` 仅增加准备派生 Run 所需的父 Context capability view 与 Workspace capability，不暴露服务集合。派生 workspace 随 `RunInstance` 原子返回，调用方不再通过 resolver 单槽取回。
     - 验证结果：Factory 34 tests、Preparation 7 tests、派生 Run launcher 契约、Runtime lib 659 tests、Composition MainSessionWiring 5 tests、Runtime bootstrap integration 1 test 全部通过；`cargo check -p runtime`、`cargo check -p composition`、`cargo clippy -p runtime --all-targets -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` 通过；`RunKind`/三个 Context Resolver 生产符号搜索为空，`RuntimeContext::new` 生产调用只有 Factory 一处，Main chat 与派生 Agent 不直接创建 capability bindings；Shared Run Loop 与完整 fast architecture guards 通过。
   - [x] **P6.9.3 将公共 Loop 能力实现下沉为无角色 owner**
     - [x] Step persistence：新增 `application/loop_engine/step_persistence.rs::StepPersistenceCoordinator`，统一拥有 accepted input durable append 与 finalized Step append；独立 Run 的 adopted-input 事件通过窄 `AcceptedInputObserver` 投影，派生 Run 使用 NoOp observer。Main/Sub adapter 只保留 ContextRequest 构造与委派，不再各自调用 `append_accepted_input` / `append_finalized`。
@@ -413,25 +413,70 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
     - ContextRequest 构造、ModelInvocation lifecycle、ToolRound observer、Run finalization 中的差异拆成可组合的窄策略值或 callback，由 `RunSpec`/RuntimeContext 已绑定能力选择；差异名称按输入来源、事件目标或生命周期用途命名。
     - 每迁移一个端口先补或调整 L2 相邻契约，确保独立 Run 与 parent-derived Run 共用该 owner；禁止一次性复制后再清理。
     - 完成门禁：共享端口只有一个生产实现 owner；允许的窄差异均可独立构造和测试，不持有整组 Loop 能力。
-    - 当前进度：P6.9.3 的九个公共 owner 已全部完成（100%）。新增 ContextRequest/Run finalization L2 source contract；ContextRequest 字段装配、terminal fallback/分类、Main done/task archival 与 SubRunStop Hook 均由无角色 coordinator 驱动，角色 adapter 只提供 source/observer。Runtime 668 unit tests 与 18 integration tests、all-targets check/clippy、格式、diff、Shared Run Loop、Runtime Capability Assembly 及完整 fast architecture guards 全部通过；两项 paused-time retry 用例首次全量并发运行超时，定向重跑与第二次全量均通过，未用重跑覆盖首次失败，记录为并发调度分类证据。下一阶段进入 P6.9.4，删除 `MainRunCapabilities` / `SubRunCapabilities` 与角色化 event strategy。
-  - [x] **P6.9.4 删除角色化大 adapter 与辅助类型**
-    - Engine 与 `RunLauncher::launch_prepared` 现在通过 `&mut dyn LoopCapabilityAdapter` 擦除来源具体类型；内部算法仍只依赖各窄 Port，并以 `?Sized` 接受组合对象。Main/Sub 调用方不再让具体泛型类型泄漏到统一入口。
-    - 物理退役 `MainRunCapabilities`、`SubRunCapabilities`、`MainEventStrategy`、`SubEventStrategy`、`SubAgentEventSink`；保留的入口 adapter 改按真实来源命名为 `ChatLoopCapabilityAdapter` 与 `DerivedLoopCapabilityAdapter`，事件差异由 `ChatStreamEventObserver`、`ProgressTerminalObserver`、`RunEventObserver` 等窄 observer 表达。
-    - Main chat 与 parent-derived Agent 均继续执行 `RunPreparationRequest → RunPreparer → PreparedRun → RunLauncher::launch_prepared → execute_prepared_loop`，没有恢复 Model/Tool/Context 分流。
-    - 完成门禁：生产搜索无上述退役角色符号；新增 L2 契约锁定 Engine/Launcher 擦除来源 adapter 类型。Runtime 669 tests 中 667 首轮通过，两项既有 paused-time retry 用例在全量并发运行超时，定向重跑均通过；Loop Engine 59 tests、runtime check/clippy、格式、diff、Shared Run Loop、Runtime Capability Assembly 与完整 fast architecture guards 均通过。
-  - 历史记录：原 P6.9 已成功删除 fat `LoopEnginePort`、`MainRunPort`、`SubAgentRun` 等旧符号并统一 Engine 入口，但将其改名为两套 Capabilities 大对象不满足 Issue 的“删除双 adapter”完成定义，故本项重新打开。
+    - 当前进度：P6.9.3 的九个公共 owner 已全部完成（100%）。新增 ContextRequest/Run finalization L2 source contract；ContextRequest 字段装配、terminal fallback/分类、Main done/task archival 与 SubRunStop Hook 均由无角色 coordinator 驱动，角色 adapter 只提供 source/observer。Runtime 668 unit tests 与 18 integration tests、all-targets check/clippy、格式、diff、Shared Run Loop、Runtime Capability Assembly 及完整 fast architecture guards 全部通过；两项 paused-time retry 用例首次全量并发运行超时，定向重跑与第二次全量均通过，未用重跑覆盖首次失败，记录为并发调度分类证据。下一阶段进入重新定义后的 P6.9.4，先固化 Chat/Derived 来源目录前置边界。
+  - [x] **P6.9.4 固化来源目录前置边界**
+    - 历史证据：提交 `4784f48c` 已删除 `MainRunCapabilities`、`SubRunCapabilities`、角色化 event strategy，并让 Engine/Launcher 擦除 concrete 类型；这些清理保留，不回滚。
+    - 已建立迁移失败契约 `p6_9_4_source_directories_expose_only_source_observer_topology_and_mapping`：来源目录不得继续实现 Model Invocation、Tool Round、Context/Compaction、Interaction Completion、Step Persistence、Stop Hook 与 Run Lifecycle workflow port。当前测试按预期失败，首个证据是 Derived 仍实现 `ModelInvocationPort`；该红灯属于 P6.9.6-P6.9.7 的迁移门禁，不在 P6.9.4 伪装为已满足终态。
+    - `loop_engine/chat/**` 与 `run/derived/**` 的允许职责已冻结。Chat 只允许 session ingress/input source、event/progress/active-step/finalization observer 和 client result mapping；Derived 只允许 parent-derived request/topology、capability ceiling、progress/final terminal mapping。
+    - 来源目录禁止拥有或重新装配 Model Invocation、Tool Round、Context/Compaction、Interaction、Step Persistence、Stop Hook、Run Finalization 主流程；上述流程必须委托 P6.9.3 已建立的无角色 coordinator。
+    - 字段审计结论：`RuntimeContext`、workspace/session/config/model/tool execution/materializer/agent/semaphore/cancellation/active-run 等执行依赖当前被两个大 adapter 聚合，属于非法 workflow/assembly 输入，应在 P6.9.5-P6.9.6 分别迁入不可变 Factory binding 与阶段 context；input strategy、queue/input events 属于 Input source；event/progress、accepted-input、compaction/stop-hook、active-step、finalization callback 属于窄 observer；derived prompt/role/model/spec 与 parent capability 只可保留在 request/topology 或 terminal mapping。
+    - impl 审计结论：Input/Event 与窄 observer 可保留并拆成独立类型；`StepPersistencePort`、`CompactionPort`、`ModelInvocationPort`、`ToolOrchestrationPort`、`InteractionCompletionContextProvider`、`StopHookObserver`、`RunLifecyclePort` 以及 ContextRequest/Agent/ToolRound context 构造均为非法 workflow/assembly owner，迁移目标依次为 `StepPersistenceCoordinator`、`CompactionCoordinator`、Model Invocation phase、`ToolRoundCoordinator`、`InteractionCoordinator`、Stop Hook phase、`RunLifecycleCoordinator` 与 `RuntimeContextFactory`/phase context。
+    - 完成证据：字段与 impl 已逐项归类并明确迁移 owner；L2 source 契约已加入，且当前失败真实记录。P6.9.4 只冻结前置边界，不宣称大 adapter 已退役；生产迁移继续由 P6.9.5-P6.9.7 完成。
+  - [x] **P6.9.5 分离静态 `RuntimeServices`、纯值 Session facts 与 live Session bindings**
+    - [x] 已建立字段归属契约 `p6_9_5_factory_has_no_mutable_session_binding_bag`，禁止 Factory 保存 `SessionBindings`、`RwLock<Option<_>>` 与 `bind_session_*` / `bind_derived_factories` mutation API。
+    - [x] 已物理删除 `SessionBindings` 及七个延迟绑定槽；Provider factory 与 Skill materializer 改为 Factory 构造期不可变依赖，派生入口使用返回新 Factory 值的 `with_derived_bindings`，不再修改共享 Factory。
+    - [x] `RuntimeContextFactory` 构造后不再改变依赖图；Composition 不再把 `MainSessionWiring` 注入 Factory，chat 启动也不再调用动态 bind API。
+    - [x] `SessionSnapshot` 只保留 session identity、workspace root、model key、config 与 revision；已物理删除混入 live handles 的 `SessionCapabilitySnapshot`，Session update 继续通过既有冻结快照测试证明只影响新 Run。
+    - [x] live Session bindings 已迁入 crate-private、构造后只读的 `SessionRunBindings`；Main Run 使用 `RunCreationRequest::for_session` 显式传入 typed view，不提供动态 map、`Any`、service locator、任意 capability 插入或 mutation API。
+    - [x] 已将 `ParentRunCapabilities` 拆为公开纯值 `ParentRunFacts` 与 crate-private `ParentRunBindings`；前者只含 identity/spec 与 capability ceiling，后者只在 Factory 装配子 Run 时提供 parent `RuntimeContext`/workspace live view。
+    - [x] TDD 证据：先新增 Session facts、Parent facts、Run request 三项结构契约并确认 3 项按预期失败，随后实现并通过；Session preparation 7 tests、Factory 35 tests、Derived 51 tests、Main Loop 44 tests通过，覆盖当前 Run 快照不漂移、parent-child cancellation、workspace/catalog/interaction 隔离。
+    - 验证结果：`cargo check -p runtime`、`cargo fmt --all -- --check`、`git diff --check` 通过；生产搜索仅剩测试断言中的两个退役名称。
+  - [x] **P6.9.6 按领域阶段重塑 Engine 窄契约**
+    - 已新增 L2 source 契约 `p6_9_6_engine_expresses_context_model_and_tool_as_typed_narrow_phases`，要求 Engine 显式存在 Input/Drain、Step Input、Step Finalization、Context/Compaction、Model Invocation 与 Tool Round typed phase；每个 phase 的 generic bound 只包含该阶段的窄 Port（Step Input 额外依赖 RunLifecycle 注册 step scope）。
+    - 新增 `InputDrainOutcome`、`StepInputOutcome`、`StepFinalizationOutcome`、`ContextCompactionOutcome`、`ModelInvocationOutcome`、`ToolRoundPhaseOutcome`，将 cancel/timeout/error/needs-compaction 从散落的 `await_interruptible` match 收口为 typed outcome；不新增 `*Parts`、能力集合 struct、trait alias 或 supertrait。
+    - `run_loop` 的 drain、`execute_step` 的 step 接纳/持久化、compact/model/tool 等调用已切到 phase 函数；原有 Run 状态迁移、epoch、context-too-long 单次 compact、cancel/timeout/finalization 顺序保持不变。
+    - 验证结果：P6.9.6 source 契约通过；Loop Engine 行为测试 59 项通过，覆盖 input→context 顺序、model/tool/compaction cancel、context-too-long 重建和 tool continuation；`cargo check -p runtime` 通过。剩余两个红灯仍仅为 P6.9.7 要删除的 fat `LoopCapabilityAdapter` 与来源型大 adapter。
+    - 完成门禁：阶段依赖已可独立理解和测试，typed outcome 已覆盖核心异步边界；本阶段刻意不删除 fat adapter，物理退役进入 P6.9.7。
+  - [x] **P6.9.7 物理删除生产 fat adapter，并拆除完整 Runtime 测试替身**
+    - [x] 已物理删除 `LoopCapabilityAdapter`、`ChatLoopCapabilityAdapter`、`DerivedLoopCapabilityAdapter`。Engine/Launcher 改为接收 `RunLoop`，该调用上下文分别借用 Input、Event、Control、Lifecycle、Interaction、Persistence、Compaction、Model、Stop Hook、Tool、Stuck 与 Plan Approval 窄端口，不再要求一个来源对象实现完整端口交集。
+    - [x] 已新增 `run_services.rs`，按职责提供 `RuntimeStepPersistence`、`RuntimeCompaction`、`RuntimeInteraction`、`RuntimeModelInvocation`、`RuntimeToolOrchestration`、`RuntimeStopHook`；Main 与 Derived topology 装配同一批职责型服务。
+    - [x] 已由 `run_ports.rs` 统一承载 Active Run control/lifecycle、fixed plan approval 和 noop stuck seam，并删除旧生产大 adapter 及其接线。
+    - [x] `application/loop_engine/tests.rs` 已将原 `ScriptedPort` / `DrainOnlyPort` 拆为共享 `ScriptedScenarioState`、仅组合 fake 的 `ScriptedPorts` fixture bundle，以及 Input、Event、Control、Lifecycle、Interaction、Persistence、Compaction、Model、Stop Hook、Tool、Stuck、Plan Approval 各职责型 fake；单个 fake 不跨能力类别实现完整 Port 集。
+    - [x] fixture bundle 只组合窄 fake，自身不实现生产 Port；input-drain 场景改用最小职责 fake 组合，不再存在 `DrainOnlyPort`。
+    - [x] 原平铺 `RunContextBindings` 测试参数包已删除；Factory 测试改用职责型 builder/typed binding 组合，测试未扩大生产可见性。
+    - [x] 测试结构契约与 Runtime Capability Assembly Guard 同时扫描生产和 Runtime 测试源码；sanity fixtures 覆盖测试单对象跨类别 Port 的失败反例及独立窄 fake composition 正例。
+    - 完成证据：生产搜索无三个 fat adapter；Runtime 源码搜索只在退役符号断言中出现旧名称；Runtime lib 652 tests、workspace tests、workspace clippy、完整 architecture guards 与 pre-push 门禁全部通过。
+  - [x] **P6.9.8 将 Factory 来源总算法拆为单一 typed selector pipeline**
+    - [x] 已物理删除 `prepare_independent`、`prepare_derived`，`prepare` 统一执行一次窄 selector pipeline → `bind_runtime_context` → `RuntimeContext::new`。
+    - [x] 已禁止按 Main/Sub 名称或公开角色枚举选择装配路径，生产最终 Context 构造点保持唯一；原 `create` 仅作为 `cfg(test)` 低层装配测试 helper 保留。
+    - [x] 已物理删除 `select_session_bindings`、`select_inherited_bindings`、`select_binding_decisions` 与 `RuntimeContextBindingDecision`，不再存在来源总 selector 或混合 binding decision。
+    - [x] selector 已按职责拆为 session resolution、workspace、model/provider、context、memory、tool catalog、interaction、hook、reasoning、event route、cancellation/lifecycle；每项返回独立 typed selection。
+    - [x] Derived role/model 解析与 Provider build 归 model/provider selector；restricted catalog 归 tool catalog selector；workspace isolation 归 workspace selector，并保持各自 typed error。
+    - [x] Session snapshot/lease 与 workspace 仅进入 `RunCreationResources`；per-Run capability bindings 单独组合，不再把 parent、lease、workspace 和完整 bindings 堆入一个总参数包。
+    - [x] 完成门禁：每个能力类别只有一个生产 selector owner；无 session/parent 两套完整 binding 算法；最终装配只消费各窄 selector 结果一次；provider/context/catalog/workspace/cancel 不存在第二生产 assembly owner。
+    - TDD 记录：先新增 `p6_9_8_factory_uses_narrow_capability_selectors`，确认因 `RuntimeContextBindingDecision` 仍存在而按预期失败；实施后通过。
+    - 验证结果：Factory 36 tests、Session creation 7 tests、Derived 51 tests、Main Loop 44 tests、`cargo check -p runtime`、`cargo check -p composition`、`cargo fmt --all -- --check` 与 `git diff --check` 全部通过；production check 无 warning。
+  - [x] **P6.9.9 收口统一启动 façade 与来源目录终态**
+    - 复核 `chat/main_run_port.rs`、`run/derived/loop_run.rs`、`derive_sub_run` 与 `launch_sub_run`：只保留 P6.9.4 允许的 topology/ingress/observer/mapping 差异，删除承担 Loop 能力实现或 Context assembly 的来源型代码。
+    - Main chat 与 parent-derived Agent 必须共同消费 `RunCreationRequest → RunFactory::create → RunInstance → RunLauncher::launch → execute_prepared_loop`，启动入口只传完整 `RunInstance` 和独立窄 observer，禁止调用方拆散 Run、Execution 与 Context。
+    - 文件按 owner 归档：chat 目录只负责流式输入/事件适配；derived 目录只负责 parent-derived request/topology 与 progress/final terminal 映射。任一文件不得再次形成完整运行时实现。
+    - 命名与聚合边界：创建服务使用名词 `RunFactory`，行为使用动词 `create`，返回对象使用名词 `RunInstance`；物理退役 `RunPreparer`、`PreparedRun`、`RunPreparation*`、`launch_prepared` 与 `PreparedSubRun`。
+    - 完成门禁：调用图审计证明两种来源只有 request/snapshot、topology 和窄 observer 差异；无第二 launch/create/model/tool/finalize 算法；生产文件职责与测试 owner 对齐。
+    - 完成记录：创建链统一命名为 `RunCreationRequest → RunFactory::create → RunInstance → RunLauncher::launch`。物理删除 `preparer.rs`、`preparation.rs` 与对应测试文件；Main 和 Derived 启动调用不再执行 `RunInstance::into_parts`，Launcher 内部借用实例的 Run、Execution 与 Context。原 `PreparedSubRun` 收窄并改名为 `DerivedRun`，只组合完整 `RunInstance` 与派生元数据。
+    - 验证结果：命名与启动 façade 两项 TDD 契约通过；Runtime 662 unit tests 全通过；`cargo check -p runtime`、`cargo fmt --all`、`git diff --check` 通过。Shared Run Loop Guard 已同步完整 `RunInstance` 入口，最终 Guard 集合与跨 crate 回归进入后续任务。
+  - 历史记录：P6.9.1 删除 `RunKind`、P6.9.2 删除双 Context Resolver、P6.9.3 下沉九个无角色 application owner 均保持完成。P6.9.4 的旧符号清理是有效中间成果，但不能作为结构终态完成证明。
 
 - [x] **P6.10 根除测试托活和 dead-code 豁免**
   - 记录完整测试清单后临时隔离 Runtime 测试模块与 integration tests，以 production-only `cargo check` / `cargo clippy` 暴露死代码；诊断结束必须完整恢复测试。
   - 删除模块级 `#![allow(dead_code)]`、无生产消费者的 service/scheduler/legacy API；测试辅助能力使用 `#[cfg(test)]`，禁止虚假 re-export 或测试引用制造生产可达性。
   - 完成门禁：隔离前后测试清单一致；production target 无 dead-code 告警；最终工作树不存在缺失或禁用的有效测试。
   - 隔离审计：基线为 Runtime lib 667 tests、含 6 个 integration test 文件共 685 tests、60 个外置 `*_tests.rs` 文件；临时将源码测试接线替换为恒 false cfg 并移出 integration tests 后，以 `RUSTFLAGS='-D dead-code -D unused-imports' cargo test -p runtime --lib --no-run` 验证 production-only 可达图，命令通过且源码摘要恢复一致。
-  - 清理记录：删除仅测试读取的 `RunPreparer::context_factory`；删除无消费者的 `RuntimeContext::{context_ref, tool_context_binding_ref, cancel_ref}`；删除无消费者的 `Agent::execute_tools_filtered`；将仅测试使用的 Agent 批量执行、并发判定和 prepared 执行 helper 收紧为 `#[cfg(test)]`；删除测试 harness 中 3 个未调用 helper 和 `CompactHarness` 的 12 个仅为延长局部构造值生命周期而遗留、实际已由 `RuntimeContext` 持有的重复字段。
+  - 清理记录：删除仅测试读取的 `RunFactory::context_factory`；删除无消费者的 `RuntimeContext::{context_ref, tool_context_binding_ref, cancel_ref}`；删除无消费者的 `Agent::execute_tools_filtered`；将仅测试使用的 Agent 批量执行、并发判定和 prepared 执行 helper 收紧为 `#[cfg(test)]`；删除测试 harness 中 3 个未调用 helper 和 `CompactHarness` 的 12 个仅为延长局部构造值生命周期而遗留、实际已由 `RuntimeContext` 持有的重复字段。
   - dead-code 豁免：Runtime `application/**` 的 `#![allow(dead_code)]` / `#[allow(dead_code)]` 搜索为空；未新增虚假 re-export 或生产测试 API。
   - 恢复与验证：隔离前后 lib 测试清单均为 667、完整清单均为 685，逐行 diff 为 0；6 个 integration test 文件全部恢复。`RUSTFLAGS='-D dead-code -D unused-imports' cargo check -p runtime --lib`、同配置 production clippy、`cargo clippy -p runtime --all-targets -- -D warnings`、`cargo test -p runtime`（667 unit + 18 integration）、格式、diff、Shared Run Loop guard 与完整 architecture guards 全部通过。
 
 - [x] **P6.11 按所有权完成 Application 目录归档**
-  - `application/run/`：active registry、config snapshot、execution state、launcher、preparer、preparation。
+  - `application/run/`：active registry、config snapshot、execution state、launcher、factory、creation。
   - `application/session/`：ingress、session state；`interaction/`、`hook/`、`context/`、`model/`、`tool/` 分别承载对应能力；Run 绑定的 Workspace capability access 归入 `application/run/workspace.rs`。
   - 保留真实稳定的 `client/`、`loop_engine/`、`prompt/`、`reflection/`；删除顶层平铺的兼容 re-export、无生产消费者的 `cost/`、职责混杂的 `startup/` 和 Main/Sub 同义目录，不新增万能 `common/shared`。
   - 完成门禁：`application.rs` 与 crate exports 只暴露稳定边界；目录所有权审计无无主文件、重复实现或兼容转发层。
@@ -445,24 +490,32 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
   - Reflection owner 校正：删除 1438 行 `application/reflection/runner.rs`；Memory 新增 `ReflectionWorkflow`，统一拥有 prompt 构建、output parse、apply 与 Running/terminal history 物化；Runtime 拆为 `reflection/execution.rs`（仅 Provider 调用桥）与 `reflection/task.rs`（仅触发后的单槽、cancel/timeout/drain）。退役 `ReflectionPromptPort` 和 Runtime 内 `run_complete_reflection`/`execute_and_record` 第二业务顺序，Context 仍只拥有 compact 与 Memory 注入时序。
   - Reflection 验证：Memory 51 unit tests、Runtime Reflection 7 unit tests、PreCompact 6 tests、trigger 2 tests、Reflection teardown/error 3 integration tests、格式与 diff 检查通过；COLA Guard 将 Memory target 层补齐为 `domain/application/ports/adapters`。
 
-- [ ] **P6.12 固化防双轨 Guard 并执行最终验证**
+- [x] **P6.12 固化防双轨 Guard 并执行最终验证**
   - [x] **P6.12.1 固化宽泛命名与当前 owner 路径规则**
     - 已完成：Shared Run Loop、Runtime Capability Assembly、crate façade 与禁止 import 规则已同步当前 owner 路径；生产标识禁止 `Projection` / `projection` 宽泛命名。
     - 已完成：`ModelInvocationProjection` 拆为 `ModelInvocationContext` 与 `ModelInvocationLifecycle`；record/view/mapper 等名称按职责修正；根 `AGENTS.md`、`specs/rust-coding.md`、`specs/runtime.md` 与设计文档已同步。
     - 历史验证：Runtime/Context/CLI check、clippy、测试、格式、diff 与当时的 architecture guards 通过；该证据只证明命名和旧 Guard，不证明 #1397 终态。
-  - [ ] **P6.12.2 增加无角色生产类型与唯一 Factory 守卫**
-    - Guard 必须禁止 Runtime 生产代码出现 `RunKind`、`MainRunContextResolver`、`SubRunContextResolver`、`RuntimeContextResolver`、`MainRunCapabilities`、`SubRunCapabilities`、`MainEventStrategy`、`SubEventStrategy`、`SubAgentEventSink`。
-    - Guard 必须证明 `RunPreparer` 只依赖唯一 `RuntimeContextFactory`，RuntimeContext 私有构造只有一个 Factory owner，Main chat 与派生 Agent 不直接创建 capability bindings、provider/context/catalog 或第二 resolver。
-    - 能用禁止 import 机械表达的调用方向使用 import Guard；唯一实现、构造次数和类型不存在性使用结构 Guard，不设置路径白名单。
-    - 为 Guard 添加 pass/fail sanity fixtures，避免只对当前文本偶然通过。
-  - [ ] **P6.12.3 执行分层回归与最终旧符号审计**
-    - L1：RunSpec capability/ceiling、Factory selector、窄 adapter 单元测试。
-    - L2/L3：Preparation、RuntimeContext binding、每个 Loop Port 相邻契约、独立/派生 Run 同一 owner 测试。
-    - L4：Main chat 与 Agent tool parent-child journey，覆盖 input epoch、retry/cancel、compact/reflection、interaction/control、tool continuation、Stop Hook 与 finalization。
-    - 验证命令至少包括 `scripts/setup-dev-env.sh --check`、Runtime/Context/Composition/SDK/CLI 受影响测试、all-targets clippy、`cargo fmt --check`、`git diff --check`、Runtime 定向 Guard、全部 fast architecture guards 与 workspace pre-push 门禁。
-    - 完成门禁：Issue #1397 每个完成定义都有源码、测试或 Guard 证据；任何残留或失败均保持本项未勾选并真实记录。
+  - [x] **P6.12.2 在终态边界上固化 façade 白名单与结构 Guard**
+    - [x] 前置门禁已满足：P6.9.5 的 Session/Parent 纯值边界、P6.9.7 的测试替身拆分、P6.9.8 的窄 selector pipeline 均已完成。
+    - [x] 被依赖模块已声明显式 façade 白名单：Run 创建模块只导出纯值 request/facts、`RunInstance`、`RunFactory::create` 与 typed error；Model/Tool/Interaction/Persistence/Stop Hook owner 只导出 Engine 需要的窄入口与 typed outcome，内部 binding、selector、assembly token、creation resource 与 concrete adapter 保持受限可见。
+    - [x] 优先通过私有模块、`pub(crate)` / `pub(super)`、受限构造器和 assembly token 使非法依赖无法编译；Guard 只补充检查稳定 façade 与唯一 owner，不把内部方法名长黑名单作为主约束。
+    - [x] Capability ownership Guard 按唯一 owner 检查 Context 构造、Provider invocation、Tool execution、finalized Step append 与 Stop Hook dispatch；检查稳定导出与调用 owner，不绑定容易改名的内部方法。
+    - [x] Fat implementation Guard 同时覆盖生产与 Runtime 测试：禁止 fat supertrait、trait alias、blanket impl 和单个 struct 跨多个能力类别实现完整 Port 集；允许 fixture bundle 组合多个窄 fake，但 bundle 自身不得实现生产 Port。
+    - [x] Snapshot purity Guard 检查 facts/snapshot/request 字段：禁止 trait object、同步锁、event/channel handle、wiring、Runtime workspace access、`RuntimeContext`、capability map、`Any` 与 service locator。
+    - [x] Factory pipeline Guard 证明每个能力类别只有一个 selector owner、最终 Context 构造唯一、Factory 不保存动态 Session binding 槽、不存在 binding mutation API、Run request 不携带 live capabilities，且无来源总 selector 返回完整 binding 集合。
+    - [x] `RunLoop` 仅作为顶层 orchestrator 持有多个独立窄依赖；不实现这些 Port、Clone、导出内部 Port、被 Session/Factory/source object 保存或成为跨模块 capability source，phase 只取得对应窄能力。
+    - [x] retired-symbol hygiene 已与终态结构证明分离，仅防旧实现 revert/cherry-pick。
+    - [x] sanity fixtures 覆盖改名 fat adapter、fat supertrait、trait alias/blanket impl、生产/测试单对象跨类别 Port、Snapshot 新名称 live port、动态 service map/`Any`、第二来源总算法、Factory 外 Context 构造、未审批 façade export、wildcard export，并包含独立窄 fake composition 与合法 `RunLoop` orchestration 正例。
+    - 完成证据：`check-runtime-capability-assembly-tests.sh` 终态 boundary probes 通过；完整 architecture guards 通过。
+  - [x] **P6.12.3 执行分层回归与最终旧结构审计**
+    - L1：RunSpec capability/ceiling、纯值 Session/Parent facts、typed live binding source、Factory 每项窄 selector、职责型 fake 与 RuntimeServices 字段归属已由 Runtime unit/source-contract tests 覆盖。
+    - L2/L3：Session update→new Run/active Run 隔离、RuntimeContext 每项 binding、每个 Loop phase 相邻契约、独立/派生 Run 同一 owner/pipeline、parent-child cancellation/workspace 隔离已由 Runtime、Composition 与边界探针覆盖。
+    - L4：Main chat 与 Agent tool parent-child journey 覆盖 input epoch、retry/cancel、compact/reflection、interaction/control、tool continuation、Stop Hook 与 finalization，workspace 全量测试通过。
+    - 结构审计同时搜索旧符号、fat supertrait/trait alias/blanket impl、生产与测试单对象整组 Port impl、Snapshot live handles、Factory 动态绑定槽、来源总 selector、混合 binding decision和来源目录中的模型/工具/Context 重装配；旧名称只保留在明确的退役符号断言或历史文档中。
+    - 最终验证：`scripts/setup-dev-env.sh --check` 通过（仅报告可选 `llvm-tools-preview` 未安装）；`cargo test --workspace` 通过；`cargo clippy --workspace --all-targets --all-features -- -D warnings` 通过；`cargo fmt --all -- --check`、`git diff --check`、Runtime terminal boundary probes、完整 architecture guards 与 workspace pre-push 门禁全部通过。
+    - 完成门禁：Issue #1397 的 P0-P6 完成定义均已有源码、测试或 Guard 证据；P7 Issue/PR 回写尚未执行。
 
-**依赖顺序**：P6.1 → P6.2（纯值入口外形）→ P6.3 → P6.4 → P6.5 → P6.6 → P6.7 → P6.8 → P6.10 → P6.11 → P6.9.1 → P6.9.2 → P6.9.3 → P6.9.4 → P6.12.2 → P6.12.3 → P7。P6.12.1 是已完成的独立命名治理证据。若任一项验证失败，保持未勾选并记录失败证据；不得跳到依赖它的删除、Guard 或 Issue 回写。
+**依赖顺序**：已完成阶段保持历史证据；剩余主链固定为 P6.9.5（Session facts/live bindings 与 Parent facts/live view 分离）→ P6.9.8（按能力职责拆窄 selector，并拆除混合 binding decision）→ P6.9.7（拆 Runtime fat 测试替身与平铺测试 binding builder）→ P6.12.2（定义依赖模块 façade 白名单、结构 Guard、retired-symbol hygiene 与 sanity fixtures）→ P6.12.3（最终全仓回归）→ P7。P6.9.6、P6.9.9 和 P6.12.1 保持完成。不得先做 Guard：否则会把 capability snapshot、来源总 selector 或 fat 测试替身作为永久允许结构固化。若任一项验证失败，保持未勾选并记录失败证据；不得跳到依赖它的 Guard、Issue 回写或完成声明。
 
 **主要文件**：
 
@@ -516,9 +569,9 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
 | 领域 | L1/L2 | L3 | L4 | L0 / 守卫 |
 |---|---|---|---|---|
 | Run / RunExecutionState | 状态迁移、唯一 owner、pending interaction、无 `RunKind` 的 capability/ceiling 约束 | Run preparation 字段与 terminal 契约 | 完整 Run 生命周期 | source/API/无重复状态/无角色 enum 守卫 |
-| RuntimeServices / SessionState | 字段归属、snapshot 不变 | 单一 RuntimeContextFactory 输入输出契约 | Session 创建→Run→后续 Session 变更隔离 | 唯一 Factory 与无 Resolver construction ownership |
+| RuntimeServices / SessionState | 字段归属、snapshot 不变、Factory 无动态 binding 槽 | 单一 RuntimeContextFactory typed binding pipeline 输入输出契约 | Session 创建→Run→后续 Session 变更隔离 | 唯一 Factory、无 Resolver、无双 prepare/assembly、无 `bind_session_*` ownership |
 | Capability factory | mode/ceiling/unavailable 组合 | Interaction/Hook/Provider/Tool/Workspace adapter 契约 | parent-child dispatch / interaction journey | capability assembly、hexagonal dependency、双 Resolver 禁止 |
-| Loop Engine | 每阶段编排、epoch、command scheduling、input/interaction 等待态隔离、finalization | 统一 Engine 与无角色窄 adapter 契约 | user input / command / interaction → model/tool → terminal journey | shared loop、双 Capabilities adapter 与 Main/Sub branch absence |
+| Loop Engine | 每个领域阶段的输入/typed outcome、epoch、command scheduling、input/interaction 等待态隔离、finalization | 阶段 coordinator 与窄 source/observer 相邻契约，统一 Engine 无能力全集 | user input / command / interaction → model/tool → terminal journey | shared loop、fat supertrait/fat struct/参数袋、双大 adapter 与单对象整组 Port impl absence |
 | Composition/bootstrap | factory 注入、生命周期、SessionIngress 分类 | SDK/CLI bootstrap boundary、单一输入源 | 启动→分类→目标 mailbox→Run→终态 | cross-BC construction ownership |
 | TUI/SDK projection | 现有纯值映射单元 | Interaction / event field completeness | 用户交互闭环（受影响时） | crate/API boundary |
 
@@ -531,12 +584,12 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
 - [ ] PR 分支基于最新 `origin/main`，且已执行 `git pull origin main`。
 - [ ] #1397 milestone、parent / blocked-by 关系未被擅自改动；#1248 已完成的生产能力被统一模型消费。
 - [ ] Issue body 的全部 checklist 已逐项核对；未完成项不得静默勾选。
-- [ ] `RuntimeServices`、`SessionState`、`RunExecutionState`、`RuntimeContextFactory` 唯一所有权有源码和测试证据。
-- [ ] `RuntimeContextParts`、`RunContextBindings`、fat `RunLoopPort`、`RunKind`、双 Context Resolver 与 Main/Sub 角色化 Capabilities 生产类型均按完成定义退役，或明确记录未完成原因和后续边界。
-- [ ] Main chat 与派生 Agent 的同一 Factory、capability composition 和 Loop 生产可达性，以及 capability 不扩权、ParentMediated 隔离、BoundaryOnly 过滤有测试证据。
-- [ ] `from_args.rs` 已删除或收敛为薄 bootstrap，并有 Composition boundary 测试。
-- [ ] 文档、Migration Governance、Guard registry 和 PR Test plan 同步。
-- [ ] 全量验证通过，失败项有真实报告，不使用 `--no-verify` 隐藏失败。
+- [x] `RuntimeServices`、`SessionState`、`RunExecutionState`、`RuntimeContextFactory` 唯一所有权有源码和测试证据。
+- [x] `RuntimeContextParts`、生产 `RunContextBindings`、fat `RunLoopPort` / `LoopCapabilityAdapter`、`RunKind`、双 Context Resolver、双 Factory prepare/assembly 与来源型大 Capabilities adapter 均按完成定义退役，或明确记录未完成原因和后续边界。
+- [x] Main chat 与派生 Agent 的同一 Factory、capability composition 和 Loop 生产可达性，以及 capability 不扩权、ParentMediated 隔离、BoundaryOnly 过滤有测试证据。
+- [x] `from_args.rs` 已删除或收敛为薄 bootstrap，并有 Composition boundary 测试。
+- [x] 文档、Migration Governance、Guard registry 和 PR Test plan 同步。
+- [x] 全量验证通过，失败项有真实报告，不使用 `--no-verify` 隐藏失败。
 
 ## 7. 风险与止损策略
 
@@ -544,9 +597,9 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
 |---|---|
 | 迁移时同时改变 Loop 行为和所有权 | 先以旧行为测试锁定状态机与跨层契约，再单次迁移一条 owner 边界；每阶段运行相邻测试 |
 | `RunExecutionState` 与 `Run` 继续双写 | 以字段归属表和 source guard 阻止重复字段；发现双 owner 立即停在 P1，不继续搬消费者 |
-| Factory 退化为被动 bindings 复制器 | `prepare` 只接受纯值 request；唯一 Factory 直接消费 capability 与 session/parent 语义源；删除双 Resolver 后由 mode/ceiling 与 binding 测试证明选择发生在 Runtime |
+| Factory 退化为被动 bindings 复制器或动态 Session 容器 | `prepare` 只接受纯值 request；Factory 只持不可变 RuntimeServices/factories 并消费 SessionSnapshot；删除 `SessionBindings`、`bind_session_*` 与双 prepare helper，由 typed selector 测试证明单一 pipeline |
 | 删除 `RunKind` 后用名称或 Option 形状偷偷恢复角色判断 | capability policy 与 parent ceiling 必须有显式领域类型和测试；Guard 禁止 `name == "main"`、`is_sub`、Main/Sub enum 及来源推断 |
-| 统一 Capabilities 时形成新的超集大对象 | 按端口逐个下沉 owner；差异只保留窄 input/event/lifecycle adapter；禁止重新聚合全部 Port 或用大量 Option 表示角色 |
+| 统一 Capabilities 时形成新的超集大对象 | 先稳定来源边界与 Factory/Session 输入，再按领域阶段重塑 Engine；禁止 fat supertrait、fat struct、参数袋、参数展开和“单对象实现整组 Port”，差异只保留窄 source/observer/topology/mapping |
 | Parent interaction 泄露或 sibling 互相取消 | child-scoped identity + route mapping + teardown 测试；失败时禁止进入统一 Loop 退役阶段 |
 | BoundaryOnly 只做存在性校验 | adapter 入口做真实 invocation filter，并以 forbidden invocation 契约测试锁定 |
 | `from_args.rs` 搬家后形成第二 Composition Root | 以 construction ownership guard 和 bootstrap contract 测试检查 concrete constructor 位置 |
@@ -555,18 +608,13 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
 
 ## 8. 交付顺序
 
-1. P0 基线与契约冻结
-2. P1 `RunExecutionState` 与领域状态所有权
-3. P2 `RuntimeServices` / `SessionState` / preparation PL
-4. P3 Factory 与 capability adapter
-5. P4 Composition/bootstrap
-6. P5 Loop Engine
-7. P6 已完成的核心编排、dead-code 与目录所有权工作
-8. P6.9.1 删除 `RunKind` 生产决策
-9. P6.9.2 完成 P6.2 遗留：删除双 Context Resolver 并收口唯一 Factory
-10. P6.9.3 按端口下沉无角色能力 owner
-11. P6.9.4 删除双 Capabilities adapter 与角色化辅助类型
-12. P6.12.2-P6.12.3 固化终态 Guard 并分层回归
-13. P7 文档、Issue 与 PR 证据回写
+1. [x] P0-P5、P6.1-P6.8：统一 Run/Engine 基础、能力边界和公共 owner。
+2. [x] P6.9.1-P6.9.6：退役角色决策与双 Resolver，分离 Session/Parent facts 和 live bindings，建立阶段窄契约。
+3. [x] P6.9.8-P6.9.9：拆分 Factory typed selector pipeline，统一 `RunCreationRequest → RunFactory::create → RunInstance → RunLauncher::launch` façade。
+4. [x] P6.9.7：删除生产 fat adapter，拆分 `ScriptedPort` / `DrainOnlyPort` / 平铺测试 binding bag 为职责型 fake 组合。
+5. [x] P6.10-P6.11：根除测试托活、dead-code 豁免和无所有权 Application 平铺模块。
+6. [x] P6.12.1-P6.12.2：固化命名规则、façade 白名单、唯一 owner Guard、snapshot purity、Factory pipeline、fat implementation 和 sanity fixtures。
+7. [x] P6.12.3：完成开发环境、workspace tests、workspace clippy、格式、diff、Runtime 定向 Guard、完整 architecture guards 与 pre-push 门禁。
+8. [ ] P7：拉取 Issue #1397 当前状态，逐项回写 checklist，更新 PR Test plan；提交、推送或创建/更新 PR 需按用户后续指令执行。
 
-除非某阶段验证失败需要回到根因调查，否则不得跳过前置阶段。每阶段完成后应记录：变更文件、测试证据、剩余旧符号、Guard 状态和下一阶段依赖。
+除非某阶段验证失败需要回到根因调查，否则不得跳过前置阶段。每个步骤均为单一、具体、可验证任务；完成后必须记录变更文件、RED/GREEN 测试证据、剩余旧结构、Guard 状态和下一阶段依赖。

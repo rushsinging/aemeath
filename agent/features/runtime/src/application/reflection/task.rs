@@ -101,6 +101,7 @@ type ReflectionTaskExecutor = dyn Fn(ReflectionTaskRequest, tokio_util::sync::Ca
     + Send
     + Sync;
 
+#[derive(Clone)]
 pub struct ReflectionTaskAdapter {
     timeout: std::time::Duration,
     submissions_enabled: bool,

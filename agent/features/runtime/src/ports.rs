@@ -17,41 +17,33 @@
 //! - RuntimeStreamEvent::Usage 路径 -> audit BC (#927)
 
 pub mod context_port;
-pub mod legacy;
 pub mod policy_port;
 pub mod provider_factory;
 pub mod provider_port;
 pub mod session_query;
-pub mod task_port;
-pub mod tool_port;
 pub mod tool_result_blob;
 
 pub use context_port::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
-    CompactRequest, CompactResult, CompactSkipReason, CompactTrigger, CompactionDecision,
-    ContentFingerprint, ContextAppend, ContextAppendError, ContextMessage, ContextPort,
-    ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
-    FinalizeCause, Language, ManualCompactRequest, RunStepId, SessionId, SessionRevision,
-    StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, ToolOutcomeKind,
-    Urgency,
+    CompactRequest, CompactTrigger, ContentFingerprint, ContextAppend, ContextAppendError,
+    ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, FinalizeCause,
+    Language, ManualCompactRequest, RunStepId, SessionId, SessionRevision, StepReceipt,
+    SystemPromptSpec, TaskReminderSnapshot,
 };
-pub use hook::{HookInvocation, HookOutcome, HookPoint, HookPort};
-pub use policy_port::{
-    ApprovalSubject, PolicyDecision, PolicyMode, PolicyPort, PolicyReason, PolicyRequest,
-    PolicyRequestError,
+#[cfg(test)]
+pub use context_port::{
+    CompactResult, CompactSkipReason, CompactionDecision, DecisionReason, SystemBlock, TokenBudget,
+    ToolOutcomeKind, Urgency,
 };
+pub use policy_port::PolicyPort;
+#[cfg(test)]
+pub use policy_port::{PolicyDecision, PolicyRequest};
 pub use provider_factory::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
 pub use provider_port::{
-    InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest, InvocationStream,
-    ModelCapability, ModelId, ModelToolSchema, ProviderCompletion, ProviderContentBlock,
-    ProviderError, ProviderErrorKind, ProviderPort, ProviderToolCall, ProviderToolCallId,
-    RawUsageSnapshot, ReasoningCapability, ReasoningLevel, ReasoningMappingKind,
+    InvocationOptions, InvocationRequest, ModelId, ModelToolSchema, ProviderPort, RawUsageSnapshot,
     RequestSystemBlock, StopReason,
 };
+#[cfg(test)]
+pub use provider_port::{InvocationStream, ModelCapability, ProviderError, ReasoningCapability};
 pub use session_query::SessionQueryPort;
-pub use task_port::TaskPort;
-pub use tool_port::{
-    RegistryScopeName, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionPort, ToolInvocation,
-    ToolOutcome, ToolProfileName,
-};
 pub use tool_result_blob::{ToolResultBlobError, ToolResultBlobPort, ToolResultBlobRef};

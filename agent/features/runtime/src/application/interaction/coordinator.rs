@@ -79,10 +79,11 @@ pub enum CoordinationError {
     Unavailable,
     /// The scoped interaction adapter rejected a different Run identity.
     RunIdMismatch,
-    /// The interaction was already registered (duplicate ID).
-    AlreadyRegistered,
+    #[cfg(test)]
     /// The interaction waiter was dropped before resolution.
     WaiterDropped,
+    /// The interaction was already registered (duplicate ID).
+    AlreadyRegistered,
     /// Reply validation failed — body type mismatch or answer count mismatch.
     InvalidReply(InteractionReplyError),
     /// The domain Run rejected the interaction request.
@@ -110,11 +111,6 @@ impl From<InteractionPortError> for CoordinationError {
 pub struct InteractionCoordinator;
 
 impl InteractionCoordinator {
-    /// Create a new coordinator.
-    pub fn new() -> Self {
-        Self
-    }
-
     /// Begin a synchronous interaction round-trip (steps 1–2).
     ///
     /// **Atomicity guarantee**: registers on the port FIRST.  If registration
@@ -157,9 +153,7 @@ impl InteractionCoordinator {
         Ok((request_id, receiver))
     }
 
-    /// Wait for the receiver to resolve (step 4).
-    ///
-    /// Returns either `Replied(reply)` or `Cancelled(reason)`.
+    #[cfg(test)]
     pub async fn wait(
         receiver: tokio::sync::oneshot::Receiver<InteractionCompletion>,
     ) -> Result<InteractionCompletion, CoordinationError> {

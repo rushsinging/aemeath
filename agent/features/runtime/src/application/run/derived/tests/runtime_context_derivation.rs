@@ -1,7 +1,8 @@
 use crate::application::interaction::port::InteractionBridge;
 use crate::application::run::config::RunConfigSnapshot;
 use crate::application::run::context::{
-    RunCancellationScope, RunContextBindings, RunInputBufferHandle, RunUsageTracker, RuntimeContext,
+    IoBindings, LifecycleBindings, ModelBindings, RunCancellationScope, RunCapabilityBindings,
+    RunInputBufferHandle, RunUsageTracker, RuntimeContext,
 };
 use crate::application::run::context_factory::RuntimeContextFactory;
 use crate::application::run::test_task_access;
@@ -216,18 +217,24 @@ fn assemble_parent_context(
         Arc::new(FakeHookPort),
     );
 
-    let bindings = RunContextBindings {
-        context: Arc::new(FakeCtxPort),
-        provider: Arc::new(binding),
-        interaction: Arc::new(InteractionBridge::new()),
-        memory: Arc::new(memory::NoOpMemory),
-        config,
-        cancel: RunCancellationScope::new(),
-        event_sink: noop_event_sink(),
-        usage: RunUsageTracker::new(),
-        input: RunInputBufferHandle::new(),
-        reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
-        tool_catalog: None,
+    let bindings = RunCapabilityBindings {
+        model: ModelBindings {
+            context: Arc::new(FakeCtxPort),
+            provider: Arc::new(binding),
+            interaction: Arc::new(InteractionBridge::new()),
+            memory: Arc::new(memory::NoOpMemory),
+            config,
+            reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
+            tool_catalog: None,
+        },
+        io: IoBindings {
+            event_sink: noop_event_sink(),
+            input: RunInputBufferHandle::new(),
+        },
+        lifecycle: LifecycleBindings {
+            cancel: RunCancellationScope::new(),
+            usage: RunUsageTracker::new(),
+        },
     };
 
     factory
@@ -384,18 +391,24 @@ fn make_parent_context_with_factory(
         requested_reasoning: provider::ReasoningLevel::Medium,
         context_window: None,
     };
-    let bindings = RunContextBindings {
-        context: Arc::new(FakeCtxPort),
-        provider: Arc::new(binding),
-        interaction: Arc::new(InteractionBridge::new()),
-        memory: Arc::new(memory::NoOpMemory),
-        config: config_snapshot,
-        cancel: RunCancellationScope::new(),
-        event_sink: noop_event_sink(),
-        usage: RunUsageTracker::new(),
-        input: RunInputBufferHandle::new(),
-        reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
-        tool_catalog: None,
+    let bindings = RunCapabilityBindings {
+        model: ModelBindings {
+            context: Arc::new(FakeCtxPort),
+            provider: Arc::new(binding),
+            interaction: Arc::new(InteractionBridge::new()),
+            memory: Arc::new(memory::NoOpMemory),
+            config: config_snapshot,
+            reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
+            tool_catalog: None,
+        },
+        io: IoBindings {
+            event_sink: noop_event_sink(),
+            input: RunInputBufferHandle::new(),
+        },
+        lifecycle: LifecycleBindings {
+            cancel: RunCancellationScope::new(),
+            usage: RunUsageTracker::new(),
+        },
     };
     factory
         .create(&RunSpec::main(), bindings, None)
@@ -427,7 +440,7 @@ fn sub_context_derivation_uses_parent_cancel_child_scope() {
     .expect("derive_sub_run should succeed");
 
     // Child cancel token is derived from parent scope.
-    let child_cancel = derived.context.cancel().clone();
+    let child_cancel = derived.instance.context().cancel().clone();
     let parent_cancel = parent_ctx.cancel().clone();
 
     // Child cancel does NOT propagate to parent.
@@ -447,7 +460,7 @@ fn sub_context_derivation_uses_parent_cancel_child_scope() {
         Arc::new(make_test_factory()),
     )
     .expect("derive_sub_run should succeed");
-    let child2_cancel = derived2.context.cancel().clone();
+    let child2_cancel = derived2.instance.context().cancel().clone();
     parent_cancel.token().cancel();
     assert!(child2_cancel.token().is_cancelled());
 }
@@ -478,12 +491,13 @@ fn sub_context_derivation_restricts_tool_catalog() {
 
     // Derived tool catalog is not the parent's full catalog.
     assert!(!Arc::ptr_eq(
-        &derived.context.tool_catalog(),
+        &derived.instance.context().tool_catalog(),
         &parent_ctx.tool_catalog()
     ));
     // The restricted snapshot must be retrievable.
     let snapshot = derived
-        .context
+        .instance
+        .context()
         .tool_catalog()
         .snapshot(
             &tools::RegistryScopeName::new("sub-agent"),
@@ -519,7 +533,7 @@ fn sub_context_derivation_disables_memory_by_default() {
 
     // Sub memory is NOT the same Arc as parent.
     assert!(!Arc::ptr_eq(
-        &derived.context.memory(),
+        &derived.instance.context().memory(),
         &parent_ctx.memory()
     ));
 }
@@ -550,7 +564,7 @@ fn sub_context_derivation_uses_isolated_context() {
 
     // Context port must be DIFFERENT from parent.
     assert!(!Arc::ptr_eq(
-        &derived.context.context(),
+        &derived.instance.context().context(),
         &parent_ctx.context()
     ));
 }
@@ -586,12 +600,15 @@ fn sub_context_derivation_does_not_widen_policy_or_interaction() {
     .expect("derive_sub_run should succeed");
 
     // Policy: same Arc as parent (both from the same factory).
-    assert!(Arc::ptr_eq(&derived.context.policy(), &parent_ctx.policy()));
+    assert!(Arc::ptr_eq(
+        &derived.instance.context().policy(),
+        &parent_ctx.policy()
+    ));
 
     // Interaction: ParentMediated uses a child-scoped wrapper rather than
     // exposing the parent's port identity directly.
     assert!(!Arc::ptr_eq(
-        &derived.context.interaction(),
+        &derived.instance.context().interaction(),
         &parent_ctx.interaction()
     ));
 }
@@ -621,22 +638,25 @@ fn sub_launcher_uses_derived_spec() {
     )
     .expect("derive_sub_run should succeed");
 
-    assert_eq!(derived.run.parent_id(), Some(&parent_run_id));
+    assert_eq!(derived.instance.run().parent_id(), Some(&parent_run_id));
     // The derived spec carries restricted capabilities rather than a role tag.
     assert_eq!(
-        derived.run.spec().input,
+        derived.instance.run().spec().input,
         crate::domain::agent_run::InputMode::Fixed
     );
     assert_eq!(
-        derived.run.spec().tools,
+        derived.instance.run().spec().tools,
         crate::domain::agent_run::ToolScope::Restricted
     );
     // The derived spec name contains the role.
-    assert!(derived.run.spec().name.contains("coder"));
+    assert!(derived.instance.run().spec().name.contains("coder"));
     // The derived spec must not be the same value as RunSpec::main().
-    assert_ne!(derived.run.spec(), &RunSpec::main());
+    assert_ne!(derived.instance.run().spec(), &RunSpec::main());
     // The derived spec timeout must match the request.
-    assert_eq!(derived.run.spec().timeout, Duration::from_secs(30));
+    assert_eq!(
+        derived.instance.run().spec().timeout,
+        Duration::from_secs(30)
+    );
 }
 
 // ── Test 7: restricted catalog rejects non-sub-agent scope/profile ──
@@ -663,7 +683,7 @@ fn sub_restricted_catalog_rejects_non_sub_agent_scope() {
     )
     .expect("derive_sub_run should succeed");
 
-    let catalog = derived.context.tool_catalog();
+    let catalog = derived.instance.context().tool_catalog();
 
     // sub-agent / sub-agent-restricted must succeed.
     catalog

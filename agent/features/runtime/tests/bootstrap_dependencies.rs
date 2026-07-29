@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 struct TestProviderFactory;
 
-impl runtime::ports::ProviderFactory for TestProviderFactory {
+impl runtime::ProviderFactory for TestProviderFactory {
     fn build(
         &self,
-        spec: runtime::ports::ProviderBuildSpec,
-    ) -> Result<runtime::ports::ProviderBinding, provider::ProviderError> {
+        spec: runtime::ProviderBuildSpec,
+    ) -> Result<runtime::ProviderBinding, provider::ProviderError> {
         struct UnusedPort;
         #[async_trait::async_trait]
-        impl runtime::ports::ProviderPort for UnusedPort {
+        impl runtime::ProviderPort for UnusedPort {
             fn capabilities(
                 &self,
                 _model: &provider::ModelId,
@@ -32,7 +32,7 @@ impl runtime::ports::ProviderFactory for TestProviderFactory {
                 ))
             }
         }
-        Ok(runtime::ports::ProviderBinding {
+        Ok(runtime::ProviderBinding {
             provider: Arc::new(UnusedPort),
             model: spec.model,
             max_tokens: spec.max_tokens,
@@ -43,7 +43,7 @@ impl runtime::ports::ProviderFactory for TestProviderFactory {
 }
 
 fn initial_provider_assembly() -> runtime::InitialProviderAssembly {
-    let spec = runtime::ports::ProviderBuildSpec {
+    let spec = runtime::ProviderBuildSpec {
         driver: "test".to_string(),
         source_key: "test".to_string(),
         api_style: None,
@@ -59,7 +59,7 @@ fn initial_provider_assembly() -> runtime::InitialProviderAssembly {
         timeout: std::time::Duration::from_secs(30),
         user_agent: "aemeath-test".to_string(),
     };
-    let binding = runtime::ports::ProviderFactory::build(&TestProviderFactory, spec)
+    let binding = runtime::ProviderFactory::build(&TestProviderFactory, spec)
         .expect("build test provider binding");
     runtime::InitialProviderAssembly::new(
         binding,

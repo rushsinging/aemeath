@@ -34,32 +34,46 @@ if [ -e "$OLD_FSM" ]; then
   exit 2
 fi
 
-engine_defs=$(grep -RInE 'pub[[:space:]]+async[[:space:]]+fn[[:space:]]+run_loop[[:space:]]*\(' \
+engine_defs=$(grep -RInE 'pub([[:space:]]*\([^)]*\))?[[:space:]]+async[[:space:]]+fn[[:space:]]+run_loop([[:space:]]*<[^>]+>)?[[:space:]]*\(' \
   agent/features/runtime/src/application --include='*.rs' --exclude='*_tests.rs' | wc -l | tr -d ' ') # guard-registry:scope.runtime.shared-loop-tests
 if [ "$engine_defs" -ne 1 ]; then
   echo "{\"decision\":\"block\",\"reason\":\"生产代码必须恰有一个共享 run_loop 定义，当前数量：$engine_defs\"}"
   exit 2
 fi
 
-# #1397: Main/Sub must call launch_prepared; the launcher owns the single
-# execute_prepared_loop entry and the legacy launch/run_loop bridge is retired.
+# #1397: Main/Derived must call the single RunInstance launcher; the launcher
+# owns the execute_prepared_loop entry and all legacy launch bridges are retired.
 if ! grep -q 'execute_prepared_loop(' "$LAUNCHER"; then
   echo '{"decision":"block","reason":"RunLauncher 未调用统一 execute_prepared_loop 入口。"}'
   exit 2
 fi
-if grep -q 'pub async fn launch<' "$LAUNCHER"; then
-  echo '{"decision":"block","reason":"RunLauncher 禁止恢复旧 launch/run_loop 兼容入口。"}'
+if ! grep -q 'pub async fn launch(' "$LAUNCHER" ||
+   ! grep -q 'instance: &mut RunInstance' "$LAUNCHER"; then
+  echo '{"decision":"block","reason":"RunLauncher 必须以 launch 动词入口消费完整 RunInstance。"}'
+  exit 2
+fi
+if grep -q 'pub async fn launch<' "$LAUNCHER" ||
+   grep -q 'pub async fn launch_prepared' "$LAUNCHER"; then
+  echo '{"decision":"block","reason":"RunLauncher 禁止恢复旧 launch 泛型入口或 launch_prepared 兼容入口。"}'
   exit 2
 fi
 
-# Main/Sub both enter through launch_prepared.
-if ! grep -q 'run::launcher::launch_prepared' "$MAIN"; then
-  echo '{"decision":"block","reason":"Main Run 未调用统一 launch_prepared 入口。"}'
+# Main/Derived both enter through launch and pass a complete RunInstance.
+if ! grep -q 'run::launcher::launch(' "$MAIN" ||
+   ! grep -q '&mut run_instance' "$MAIN"; then
+  echo '{"decision":"block","reason":"Main Run 未将完整 RunInstance 交给统一 launch 入口。"}'
   exit 2
 fi
 
-if ! grep -q 'run::launcher::launch_prepared' "$SUB"; then
-  echo '{"decision":"block","reason":"Sub Run 未调用统一 launch_prepared 入口。"}'
+if ! grep -q 'run::launcher::launch(' "$SUB" ||
+   ! grep -q 'instance' "$SUB"; then
+  echo '{"decision":"block","reason":"Derived Run 未将完整 RunInstance 交给统一 launch 入口。"}'
+  exit 2
+fi
+
+if grep -q 'run_instance\.into_parts()' "$MAIN" ||
+   grep -q 'run_instance\.into_parts()' "$SUB"; then
+  echo '{"decision":"block","reason":"Run 来源禁止在启动前拆散 RunInstance。"}'
   exit 2
 fi
 

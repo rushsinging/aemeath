@@ -13,14 +13,12 @@ use crate::application::loop_engine::chat::{
     ChatEventSink, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
     QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
-use crate::application::run::context::RuntimeContext;
 use crate::domain::agent_run::RunSpec;
 
 use super::loop_context::ChatLoopContext;
 
 #[path = "main_run_port.rs"]
 pub(crate) mod main_run_port;
-use main_run_port::ChatLoopCapabilityAdapter;
 
 /// Session actor for Main chat. The session itself only idles, accepts one real user input,
 /// creates one fresh `Run`, drives it to a terminal state through the shared engine, then idles
@@ -93,7 +91,7 @@ where
             // #1385 Task 12: last_total_tokens eliminated — usage tracker is per-Run via RuntimeContext.
             let mut turn_count = 0;
             let mut pending_input = PendingInputBuffer::default();
-            let mut task_reminder_state = TaskReminderState::new();
+            let task_reminder_state = TaskReminderState::new();
             let tool_identity =
                 crate::application::tool::coordination::identity::ToolIdentityRegistry::new();
             let mut config_snapshot =
@@ -412,7 +410,7 @@ where
                               let next_segment = ChatId::new_v7().to_string();
                               let gate = apply_gate(
                                   GateKind::BeforeLlm,
-                                  &mut pending_input,
+                                  &pending_input,
                                   &sink,
                                   task_access.as_ref(),
                                   true,
@@ -529,14 +527,21 @@ where
                     );
                     session_state.snapshot_for_run()
                 };
-                log::debug!(target: crate::LOG_TARGET,
-                    "[config] starting main run with revision={} allow_all={} session_revision={}",
+                let session_bindings =
+                    crate::application::run::creation::SessionRunBindings::new(
+                        wiring.clone(),
+                        shell.model_state.binding(),
+                        shell.interaction_bridge.clone(),
+                        reasoning.clone(),
+                        sink_handle.clone(),
+                    );
+                log::debug!(target: crate::LOG_TARGET,                    "[config] starting main run with revision={} allow_all={} session_revision={}",
                     run_config.revision().get(),
                     run_config.allow_all(),
                     session_snapshot.revision(),
                 );
                 let spec = RunSpec::main();
-                let request = match crate::application::run::preparation::RunPreparationRequest::new(
+                let request = match crate::application::run::creation::RunCreationRequest::new(
                     spec.clone(),
                     session_snapshot,
                     None,
@@ -547,22 +552,12 @@ where
                         continue;
                     }
                 };
-                shell.runtime_context_factory.bind_session_wiring(wiring.clone());
-                shell.runtime_context_factory.bind_session_capabilities(
-                    shell.model_state.binding(),
-                    shell.interaction_bridge.clone(),
-                    reasoning.clone(),
-                    sink_handle.clone(),
-                    crate::application::run::workspace::RuntimeWorkspaceAccess::new(
-                        workspace.clone(),
-                    ),
-                );
-                let run_preparer = crate::application::run::preparer::RunPreparer::new(
+                let run_factory = crate::application::run::factory::RunFactory::for_session(
                     shell.runtime_context_factory.clone(),
+                    session_bindings,
                 );
-                let prepared_run = match run_preparer.prepare(request) {
-                    Ok(prepared) => prepared,
-                    Err(error) => {
+                let mut run_instance = match run_factory.create(request) {
+                    Ok(instance) => instance,                    Err(error) => {
                         log::error!(target: crate::LOG_TARGET, "main run preparation failed: {error}");
                         sink.send_event(RuntimeStreamEvent::CommandResultText {
                             text: format!("无法启动 Run：{error}"),
@@ -572,8 +567,7 @@ where
                         continue;
                     }
                 };
-                let (prepared_domain_run, mut execution, prepared_session, context, _) =
-                    prepared_run.into_parts();
+                let prepared_session = run_instance.session().clone();
                 if session_id != prepared_session.session_id() {
                     session_id = prepared_session.session_id().to_string();
                     shell
@@ -582,10 +576,10 @@ where
                         .unwrap_or_else(|error| error.into_inner())
                         .update_session(session_id.clone(), prepared_session.config().clone());
                 }
-                execution.initialize_for_launch(messages.clone(), turn_count);
-                let runtime_context = context.expect("RunPreparer must produce RuntimeContext");
-                let run_id = prepared_domain_run.id().clone();
-                let spec = prepared_domain_run.spec().clone();
+                run_instance.initialize(messages.clone(), turn_count);
+                let runtime_context = run_instance.context().clone();
+                let run_id = run_instance.run().id().clone();
+                let spec = run_instance.run().spec().clone();
 
                 let cancel = runtime_context.cancel().token().clone();
                 let cacheable_system_prompt = system_blocks
@@ -594,45 +588,19 @@ where
                     .chain((!user_context.is_empty()).then_some(user_context.as_str()))
                     .collect::<Vec<_>>()
                     .join("\n\n");
-                let run_ctx_ref: &RuntimeContext = &runtime_context;
-
-                let mut port = ChatLoopCapabilityAdapter {
-                    // #1385: per-run service contracts from RuntimeContext (non-Option)
-                  runtime_context: run_ctx_ref,
-                  queue: &queue,
-                  input_events: &input_events,
-                  system_prompt_text: &cacheable_system_prompt,
-                  context_size,
-                  workspace: &workspace,                    session_id: &session_id,
-                    read_files: &read_files,
-                    session_reminders: &session_reminders,
-                    agent_runner: &agent_runner,
-                    tool_result_materializer: tool_result_materializer.as_ref(),
-                    max_tool_concurrency,
-                    agent_semaphore: &agent_semaphore,
-                    reflection_tasks: &reflection_tasks,
-                    language: &language,
-                    input_strategy: crate::application::loop_engine::input_strategy::BufferedInputAdapter {
-                        input_events: &input_events,
-                        // #1385 Task 12: sink from RuntimeContext, not a separate reference.
+              let input_continuation =
+                    crate::application::loop_engine::input_strategy::InputContinuationState::default();
+                let mut input_source =
+                    crate::application::loop_engine::input_strategy::BufferedInputAdapter {
+                        input_events: input_events.clone(),
                         sink: runtime_context.event_sink(),
-                        queue: &queue,
-                        pending_input: &mut pending_input,
-                        // #1385 Task 12: Use the same RunInputBufferHandle from RuntimeContext.
+                        queue: queue.clone(),
+                        pending_input: pending_input.clone(),
                         run_input_buffer: runtime_context.input(),
-                        stop_hook_feedback: None,
-                        pending_stop_hook_feedback: None,
-                        pending_tool_results: false,
+                        continuation: input_continuation.clone(),
                         run_id: run_id.clone(),
-                    },
-                    run_id: run_id.clone(),
-                    active_run: active_run.as_ref(),
-                    turn_context,
-                    // #1385 Task 12: last_total_tokens eliminated — usage tracker from RuntimeContext.
-                    task_reminder_state: &mut task_reminder_state,
-                    tool_identity: &tool_identity,
-                    plan_mode: false,
-                };
+                    };
+                let mut launch_input = input_source.clone();
                 // #1272: The idle gate consumed the user input from the channel
                 // and placed it in `messages`. Seed the run_input_buffer with                // InputId and images are preserved through drain→freeze→adopt.
                 // This ensures drain_input returns Ready (not EmptyAndSealed)
@@ -646,11 +614,11 @@ where
                               id, text.len(), images.len()
                           );
                       }
-                      port.input_strategy.run_input_buffer.with_lock(|b| b.push(event));
+                      input_source.run_input_buffer.with_lock(|buffer| buffer.push(event));
                   }
                 // #1280: Main Run creation, ActiveRun registration, shared
                 // run_loop and cleanup are all owned by RunLauncher.
-                // await_user_input is handled inside ChatLoopCapabilityAdapter (async park
+                // await_user_input is handled inside the Main input strategy (async park
                 // on input_events channel), so run_loop only returns Terminal.
                 let main_active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort> =
                     active_run.clone();
@@ -666,19 +634,170 @@ where
                     },
                 ));
 
-                let launch_context = port.runtime_context;
+                let accepted_input = main_run_port::ChatAcceptedInputObserver {
+                    sink: runtime_context.event_sink(),
+                    input: runtime_context.input(),
+                };
+                let context_request =
+                    crate::application::loop_engine::run_services::ContextRequestData {
+                        runtime_context: &runtime_context,
+                        session_id: &session_id,
+                        system_prompt: &cacheable_system_prompt,
+                        model_id: &runtime_context.provider_ref().model.model,
+                        language: &language,
+                        task_reminder: main_run_port::task_reminder_snapshot(
+                            runtime_context.task_ref().as_ref(),
+                        ),
+                        agent_roles: std::collections::HashMap::new(),
+                        config: runtime_context.config_ref(),
+                        context_size,
+                        max_output_tokens: runtime_context.provider_ref().max_tokens as usize,
+                        raw_tool_schemas: runtime_context
+                            .tool_catalog_ref()
+                            .snapshot(
+                                &tools::RegistryScopeName::new("main"),
+                                &tools::ToolProfileName::new("main-full"),
+                            )
+                            .map(|snapshot| snapshot.model_schemas())
+                            .unwrap_or_default(),
+                    };
+                let mut persistence =
+                    crate::application::loop_engine::run_services::RuntimeStepPersistence::new(
+                        run_id.clone(),
+                        context_request,
+                        input_continuation.take_step_prefix(),
+                        accepted_input,
+                    );
+                let mut events = main_run_port::ChatEventPort {
+                    sink: runtime_context.event_sink(),
+                    session_id: session_id.clone(),
+                    turn_context: turn_context.clone(),
+                    task_access: runtime_context.task(),
+                    model: runtime_context.provider_ref().model.model.clone(),
+                };
+                let model_observer = main_run_port::ChatModelObserver {
+                    runtime_context: runtime_context.clone(),
+                    input: input_source.clone(),
+                    system_prompt: cacheable_system_prompt.clone(),
+                    context_size,
+                    reflection_tasks: reflection_tasks.clone(),
+                    language: language.clone(),
+                    turn_context: turn_context.clone(),
+                    task_reminder_state: task_reminder_state.clone(),
+                    tool_identity: tool_identity.clone(),
+                };
+                let mut model =
+                    crate::application::loop_engine::run_services::RuntimeModelInvocation::new(
+                        model_observer,
+                        false,
+                    );
+                let mut compaction =
+                    crate::application::loop_engine::run_services::RuntimeCompaction::new(
+                        &runtime_context,
+                        main_run_port::ChatCompactionObserver {
+                            runtime_context: runtime_context.clone(),
+                            reflection_tasks: reflection_tasks.clone(),
+                            system_prompt: cacheable_system_prompt.clone(),
+                            language: language.clone(),
+                        },
+                    );
+                let workspace_access =
+                    crate::application::run::workspace::RuntimeWorkspaceAccess::new(
+                        workspace.clone(),
+                    );
+                let mut interaction =
+                    crate::application::loop_engine::run_services::RuntimeInteraction::new(
+                        crate::application::loop_engine::run_services::ChatInteractionPublisher {
+                            runtime_context: &runtime_context,
+                            workspace: &workspace_access,
+                            run_id: &run_id,
+                            session_id: &session_id,
+                            materializer: tool_result_materializer.as_ref(),
+                        },
+                    );
+                let mut stop_hook =
+                    crate::application::loop_engine::run_services::RuntimeStopHook::new(
+                        crate::application::hook::stop_coordination::StopHookExecutionContext::new(
+                            runtime_context.hooks(),
+                            workspace.read().current_workspace_root(),
+                            session_id.clone(),
+                            language.clone(),
+                        ),
+                        main_run_port::ChatStopHookObserver {
+                            sink: runtime_context.event_sink(),
+                            continuation: input_continuation.clone(),
+                        },
+                    );
+                let tool_agent = main_run_port::make_agent(
+                    &runtime_context,
+                    agent_runner.clone(),
+                    &language,
+                    &workspace,
+                    &cancel,
+                    read_files.clone(),
+                    session_reminders.clone(),
+                    max_tool_concurrency,
+                    agent_semaphore.clone(),
+                    &session_id,
+                    &run_id,
+                );
+                let tool_workspace_root = workspace.read().current_workspace_root();
+                let tool_context = crate::application::tool::coordination::ToolRoundContext {
+                    runtime_context: &runtime_context,
+                    agent: tool_agent,
+                    turn_context: turn_context.clone(),
+                    language: &language,
+                    workspace_root: tool_workspace_root.clone(),
+                    session_id: &session_id,
+                    materializer: tool_result_materializer.as_ref(),
+                    log_patch: logging::LogContextPatch::default(),
+                };
+                let mut tools =
+                    crate::application::loop_engine::run_services::RuntimeToolOrchestration::new(
+                        tool_context,
+                        main_run_port::ChatToolRoundObserver {
+                            runtime_context: runtime_context.clone(),
+                            workspace_root: tool_workspace_root,
+                        },
+                    );
+                let control = crate::application::loop_engine::run_ports::ActiveRunControl::new(
+                    active_run.as_ref(),
+                    &run_id,
+                );
+                let lifecycle =
+                    crate::application::loop_engine::run_ports::ActiveRunLifecycle::new(
+                        active_run.as_ref(),
+                        crate::application::loop_engine::run_ports::StepScopeRegistration::Active(
+                            active_run.as_ref(),
+                        ),
+                    );
+                let mut stuck = crate::application::loop_engine::run_ports::NoopStuckObserver;
+                let plan_approval =
+                    crate::application::loop_engine::run_ports::FixedPlanApproval::new(false);
+                let mut loop_context = crate::application::loop_engine::RunLoop::new(
+                    &mut launch_input,
+                    &mut events,
+                    &control,
+                    &lifecycle,
+                    &mut interaction,
+                    &mut persistence,
+                    &mut compaction,
+                    &mut model,
+                    &mut stop_hook,
+                    &mut tools,
+                    &mut stuck,
+                    &plan_approval,
+                );
                 let launch_result = logging::within(
                     logging::LogContextPatch {
                         turn: logging::FieldPatch::Set(turn_count),
                         ..logging::LogContextPatch::default()
                     },
-                    crate::application::run::launcher::launch_prepared(
-                        prepared_domain_run,
-                        &mut execution,
-                        launch_context,
+                    crate::application::run::launcher::launch(
+                        &mut run_instance,
                         cancel.clone(),
                         main_active_run.clone(),
-                        &mut port,
+                        &mut loop_context,
                     ),
                 )
                 .await;
@@ -694,7 +813,7 @@ where
                 }
                 // Return any remaining Run-scoped events (control commands
                 // buffered during await_user_input) to the session idle gate.
-                port.drain_remaining_events();
+                input_source.drain_remaining_events();
                 // Runtime 不保留跨 Run 的语义消息；已提交历史只存在于 Context backing。
                 messages.clear();
             }

@@ -40,16 +40,20 @@ pub trait ActiveRunPort: Send + Sync {
 
 pub use domain::Run;
 pub use event::{RunDomainEvent, RunId};
+#[cfg(test)]
 pub use spec::{
-    EventRoute, HookBindingMode, InputMode, InteractionBindingMode, InteractionMode, MemoryMode,
-    ReasoningBindingMode, ResourceMode, RunSpec, RunSpecError, ToolScope,
+    EventRoute, InputMode, InteractionMode, MemoryMode, ReasoningBindingMode, ResourceMode,
+    ToolScope,
 };
+pub use spec::{HookBindingMode, InteractionBindingMode, RunSpec, RunSpecError};
 pub use state::{
-    DrainDecision, InteractionContinuation, PendingInteraction, RunCancellationRequest, RunStatus,
-    RunStep, RunStepCancellationRequest, RunStepId, RunStepStatus, RunTerminationRequest,
-    RunTransition, RunTransitionError, RunTransitionReason, StopHookBlockResult,
+    DrainDecision, InteractionContinuation, RunCancellationRequest, RunStatus,
+    RunStepCancellationRequest, RunStepId, RunTerminationRequest, RunTransition,
+    RunTransitionError, StopHookBlockResult,
 };
-pub use step::{ModelInvocation, RunToolCall, ToolCall, ToolCallStatus};
+#[cfg(test)]
+pub use state::{PendingInteraction, RunStepStatus, RunTransitionReason};
+pub use step::{ModelInvocation, ToolCall, ToolCallStatus};
 
 #[cfg(test)]
 mod tests;

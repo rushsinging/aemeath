@@ -390,8 +390,8 @@ async fn sub_logging_scopes_isolate_concurrent_roles_turns_and_restore_parent() 
 fn sub_production_path_is_wired_to_run_launcher() {
     let run = include_str!("loop_run.rs");
     assert!(
-        run.contains("run::launcher::launch_prepared"),
-        "DerivedLoopCapabilityAdapter::run_loop must call RunLauncher::launch_prepared"
+        run.contains("run::launcher::launch"),
+        "launch_sub_run must call RunLauncher::launch"
     );
 }
 
@@ -407,8 +407,10 @@ fn sub_logging_path_uses_scopes_and_no_legacy_setters() {
     let setup = include_str!("setup.rs");
     let run = include_str!("loop_run.rs");
 
+    let services = include_str!("../../loop_engine/run_services.rs");
+
     assert!(setup.contains("logging::instrument(sub_run_context"));
-    assert!(run.contains("turn: logging::FieldPatch::Set(turn_number)"));
+    assert!(services.contains("turn: logging::FieldPatch::Set(turn)"));
     assert!(run.contains("sub_request_log_context("));
     for source in [setup, run] {
         assert!(!source.contains("logging::set_current_model"));
@@ -1194,7 +1196,7 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
     assert!(captured.tool_names.iter().any(|name| name == "Read"));
 }
 
-// issue #646：DerivedLoopCapabilityAdapter emit Started 事件测试
+// issue #646：派生 Run emit Started 事件测试
 #[tokio::test]
 async fn test_started_event_emitted_with_role_and_model() {
     use tokio::sync::mpsc;

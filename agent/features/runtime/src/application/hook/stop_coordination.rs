@@ -66,6 +66,7 @@ pub struct StopHookFeedbackMaterial {
 pub use crate::application::hook::outcome_mapper::RuntimeHookBlockDetail;
 
 /// Run-scoped dependencies required to execute one Stop Hook.
+#[derive(Clone)]
 pub struct StopHookExecutionContext {
     hook_port: Arc<dyn HookPort>,
     workspace_root: PathBuf,
@@ -110,6 +111,11 @@ pub trait StopHookObserver: Send {
         Ok(())
     }
 }
+
+pub struct NoopStopHookObserver;
+
+#[async_trait]
+impl StopHookObserver for NoopStopHookObserver {}
 
 pub async fn coordinate_stop_hook<O>(
     observer: &mut O,

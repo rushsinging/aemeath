@@ -13,7 +13,7 @@ use task::TaskAccess;
 /// #391 S1-3：idle gate 收到 Reset → 清空 messages + 发 SessionReset，保持 idle。
 #[tokio::test]
 async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::Reset]);
     let sink = TestSink::default();
 
@@ -35,7 +35,7 @@ async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
         .unwrap();
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -68,13 +68,13 @@ async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
 /// #391 S1-3：busy gate 收到 Reset → 放回 buffer，messages 不变，等 idle 处理。
 #[tokio::test]
 async fn test_busy_gate_reset_defers_to_buffer() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::Reset]);
     let sink = TestSink::default();
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -102,7 +102,7 @@ async fn test_busy_gate_reset_defers_to_buffer() {
 /// #391 S1-3：idle Reset 后跟 UserMessage → 先清空再 append（Reset break，UserMessage 丢弃）。
 #[tokio::test]
 async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![
         ChatInputEvent::Reset,
         ChatInputEvent::user_message("after-reset", Vec::new()),
@@ -127,7 +127,7 @@ async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
         .unwrap();
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -147,7 +147,7 @@ async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
 /// #391 S3-3：WithdrawAll 非空 → 回滚已 append + 收集剩余 text + 发 Withdrawn。
 #[tokio::test]
 async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![
         ChatInputEvent::user_message("aaa", Vec::new()),
         ChatInputEvent::user_message("bbb", Vec::new()),
@@ -173,7 +173,7 @@ async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
         .unwrap();
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -203,13 +203,13 @@ async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
 /// #391 S3-3：WithdrawAll 空（无 UserMessage）→ no-op（无事件）。
 #[tokio::test]
 async fn test_withdraw_all_empty_buffer_is_noop() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::WithdrawAll]);
     let sink = TestSink::default();
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,
@@ -232,7 +232,7 @@ async fn test_withdraw_all_empty_buffer_is_noop() {
 /// #391 S3-3：busy gate 也立即处理 WithdrawAll（回滚 + 收集，不延迟）。
 #[tokio::test]
 async fn test_busy_gate_withdraw_all_executes_immediately() {
-    let mut buffer = PendingInputBuffer::default();
+    let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![
         ChatInputEvent::user_message("queued", Vec::new()),
         ChatInputEvent::WithdrawAll,
@@ -241,7 +241,7 @@ async fn test_busy_gate_withdraw_all_executes_immediately() {
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
-        &mut buffer,
+        &buffer,
         &EmptyQueueDrainPort,
         &input,
         &sink,

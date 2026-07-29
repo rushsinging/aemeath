@@ -52,7 +52,7 @@ where
     }
 
     pub(crate) async fn execute(
-        mut self,
+        &mut self,
         execution: &mut crate::application::run::execution_state::RunExecutionState,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
@@ -62,7 +62,7 @@ where
         logging::within(
             self.context.log_patch.clone(),
             execute_tools_impl(
-                self.context,
+                &self.context,
                 &mut self.observer,
                 execution,
                 run_id,
@@ -107,7 +107,7 @@ pub(crate) trait ToolRoundObserver: Send {
 }
 
 async fn execute_tools_impl<O: ToolRoundObserver>(
-    context: ToolRoundContext<'_>,
+    context: &ToolRoundContext<'_>,
     observer: &mut O,
     execution: &mut crate::application::run::execution_state::RunExecutionState,
     run_id: &sdk::RunId,

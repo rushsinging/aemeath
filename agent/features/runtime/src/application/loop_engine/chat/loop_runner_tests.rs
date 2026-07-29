@@ -284,7 +284,7 @@ fn test_shell() -> crate::application::client::SessionRuntime {
 
     crate::application::client::SessionRuntime {
         session_state: Arc::new(std::sync::RwLock::new(
-            crate::application::run::preparation::SessionState::new(
+            crate::application::run::creation::SessionState::new(
                 "test-session",
                 cwd,
                 format!("{}/{}", binding.model.provider, binding.model.model),
@@ -434,7 +434,7 @@ fn runtime_resume_replaces_the_only_active_session_id() {
     assert!(runner_source.contains("session_id = prepared_session.session_id().to_string();"));
     assert!(!runner_source.contains("context_session_id"));
     assert!(!port_source.contains("context_session_id"));
-    assert!(port_source.contains("session_id: self.session_id"));
+    assert!(runner_source.contains("session_id: &session_id"));
     assert!(context_request_source.contains("session_id: SessionId::new(self.source.session_id)"));
 }
 
@@ -443,8 +443,8 @@ fn main_production_path_is_wired_to_shared_run_loop_without_legacy_fsm() {
     // Architecture guard: behavioral tests below exercise this entry point, while this assertion
     // prevents a future reintroduction of the retired Main-only orchestration state machine.
     let source = include_str!("loop_runner.rs");
-    // #1397: Main enters the shared engine only through RunLauncher::launch_prepared.
-    assert!(source.contains("run::launcher::launch_prepared"));
+    // #1397: Main enters the shared engine only through RunLauncher::launch.
+    assert!(source.contains("run::launcher::launch"));
     assert!(!source.contains("ChatLoopFsm"));
     assert!(!source.contains("StallDetector"));
     assert!(!source.contains("ChatLoopTransition"));
@@ -3992,7 +3992,7 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
     assert_eq!(*call_count.lock().unwrap(), 2, "tool call + final text");
 }
 
-/// #1272: Same ChatLoopCapabilityAdapter construction point, verifies the post-tool
+/// #1272: Same Main Run service assembly point, verifies the post-tool
 /// continuation re-entry does NOT re-emit UserMessagesAdopted for the
 /// original user message.
 #[tokio::test]

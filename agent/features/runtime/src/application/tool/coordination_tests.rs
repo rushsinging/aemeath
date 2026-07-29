@@ -11,8 +11,9 @@ use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 #[test]
 fn p6_4_production_uses_explicit_tool_round_boundaries() {
     let coordinator = include_str!("coordination.rs");
-    let main = include_str!("../loop_engine/chat/main_run_port.rs");
-    let sub = include_str!("../run/derived/loop_run.rs");
+    let services = include_str!("../loop_engine/run_services.rs");
+    let main = include_str!("../loop_engine/chat/loop_runner.rs");
+    let sub = include_str!("../run/derived/setup.rs");
 
     assert!(coordinator.contains("pub(crate) struct ToolRoundContext"));
     assert!(coordinator.contains("pub(crate) trait ToolRoundObserver"));
@@ -24,15 +25,15 @@ fn p6_4_production_uses_explicit_tool_round_boundaries() {
         coordinator.matches("async fn execute_tools_impl").count(),
         1
     );
-    for adapter in [main, sub] {
-        assert!(adapter.contains("ToolRoundCoordinator::new("));
-        assert!(adapter.contains("ToolRoundContext"));
-        assert!(adapter.contains("ToolRoundObserver"));
-        assert!(!adapter.contains("ToolRoundProjection"));
-        assert!(!adapter.contains("async fn execute_tools_impl"));
-        assert!(!adapter.contains("prepare_tool_round("));
-        assert!(!adapter.contains("execute_tool_round("));
-        assert!(!adapter.contains("agent.execute_prepared_tools("));
+    assert!(services.contains("ToolRoundCoordinator::new("));
+    for topology in [main, sub] {
+        assert!(topology.contains("RuntimeToolOrchestration::new("));
+        assert!(topology.contains("ToolRoundContext"));
+        assert!(!topology.contains("ToolRoundProjection"));
+        assert!(!topology.contains("async fn execute_tools_impl"));
+        assert!(!topology.contains("prepare_tool_round("));
+        assert!(!topology.contains("execute_tool_round("));
+        assert!(!topology.contains("agent.execute_prepared_tools("));
     }
 }
 

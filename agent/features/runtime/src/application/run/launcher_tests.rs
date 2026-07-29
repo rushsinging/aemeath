@@ -1,6 +1,22 @@
 #[test]
-fn legacy_launcher_entry_is_retired_after_production_migration() {
+fn legacy_launcher_entries_are_retired_after_instance_migration() {
     let source = include_str!("launcher.rs");
     assert!(!source.contains("pub async fn launch<P>"));
+    assert!(!source.contains("pub async fn launch_prepared("));
     assert!(!source.contains("迁移期兼容入口"));
+}
+
+#[test]
+fn launcher_consumes_run_instance_without_requiring_callers_to_unpack_runtime_state() {
+    let launcher = include_str!("launcher.rs");
+    let main = include_str!("../loop_engine/chat/loop_runner.rs");
+    let derived_setup = include_str!("derived/setup.rs");
+    let derived_loop = include_str!("derived/loop_run.rs");
+
+    assert!(launcher.contains("instance: &mut RunInstance"));
+    assert!(!launcher.contains("mut run: Run"));
+    assert!(!launcher.contains("execution: &mut RunExecutionState"));
+    assert!(!main.contains("run_instance.into_parts()"));
+    assert!(!derived_setup.contains("run_instance.into_parts()"));
+    assert!(derived_loop.contains("instance: &mut RunInstance"));
 }

@@ -150,7 +150,7 @@ pub(crate) async fn from_args_with_gateways(
 
     // #1248 Task 3: Construct RuntimeContextFactory via its narrow crate-root
     // entry — seven explicit port parameters, no opaque RuntimeServices bag.
-    let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::with_session_wiring(
+    let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
         tool_assembly.catalog.clone(),
         tool_assembly.execution.clone(),
         tool_assembly.binding.clone(),
@@ -158,7 +158,6 @@ pub(crate) async fn from_args_with_gateways(
         reflection_history.clone(),
         task_wiring.access(),
         hook_runner.clone(),
-        wiring.clone(),
     ));
 
     let snapshot = config.reader().committed_snapshot();

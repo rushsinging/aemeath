@@ -174,6 +174,7 @@ impl Run {
             .continuation)
     }
 
+    #[cfg(test)]
     pub fn events(&self) -> &[RunDomainEvent] {
         &self.events
     }
@@ -187,12 +188,9 @@ impl Run {
         self.events = events;
     }
 
+    #[cfg(test)]
     pub fn is_terminal(&self) -> bool {
         self.status.is_terminal()
-    }
-
-    pub fn started_at(&self) -> Option<Instant> {
-        self.started_at
     }
 
     pub fn remaining_time(&self, now: Instant) -> Option<Duration> {
@@ -311,6 +309,7 @@ impl Run {
             .map(|step| step.id.clone())
     }
 
+    #[cfg(test)]
     pub fn begin_step(&mut self) -> Result<RunStepId, RunTransitionError> {
         self.begin_step_with_id(RunStepId::new_v7())
     }
@@ -475,6 +474,7 @@ impl Run {
     /// `apply_drain_decision(EmptyAndSealed, …)` when sealing the
     /// run as Completed.  Callers that know they are going to seal
     /// should use this before calling `apply_drain_decision`.
+    #[cfg(test)]
     pub fn set_pending_completion_result(&mut self, result: String) {
         self.pending_completion_result = Some(result);
     }
@@ -616,6 +616,7 @@ impl Run {
         self.finish_controlled_step(step_id, RunStepStatus::Cancelled)
     }
 
+    #[cfg(test)]
     pub fn finish_unconfirmed_step(
         &mut self,
         step_id: &RunStepId,

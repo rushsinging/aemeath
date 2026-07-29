@@ -37,7 +37,7 @@ fn run_in_executing_tools() -> Run {
     run.transition(RunTransition::ContextPrepared).unwrap();
     // Need an active step with invocation for ModelInvoked
     let step_id = run.begin_step().unwrap();
-    run.record_model_invocation(&step_id, ModelInvocation::new("req", "resp"))
+    run.record_model_invocation(&step_id, ModelInvocation::new("resp"))
         .unwrap();
     // InvokingModel → ApplyingResponse
     run.transition(RunTransition::ModelInvoked).unwrap();
