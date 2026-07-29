@@ -19,7 +19,9 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             let mut stream = match ctx
                 .agent_client
                 .chat(sdk::ChatRequest {
-                    ingress: Arc::new(ctx.input_event_port.clone()),
+                    user_input: None,
+                    queue_drain: None,
+                    input_events: Some(Arc::new(ctx.input_event_port.clone())),
                 })
                 .await
             {

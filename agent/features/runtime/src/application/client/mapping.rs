@@ -132,6 +132,20 @@ pub(crate) fn workspace_context_to_sdk(
     }
 }
 
+pub(crate) fn map_finalize_cause_to_sdk(
+    cause: context::domain::FinalizeCause,
+) -> sdk::ResumedStepFinalizeCause {
+    match cause {
+        context::domain::FinalizeCause::Completed => sdk::ResumedStepFinalizeCause::Completed,
+        context::domain::FinalizeCause::UserCancelledStep => {
+            sdk::ResumedStepFinalizeCause::UserCancelledStep
+        }
+        context::domain::FinalizeCause::RunTerminated => {
+            sdk::ResumedStepFinalizeCause::RunTerminated
+        }
+    }
+}
+
 pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessage {
     sdk::ChatMessage {
         role: match message.role {

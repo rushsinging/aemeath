@@ -111,13 +111,6 @@ pub(super) async fn launch_sub_run(
     let cancel = runtime_context.cancel().token().clone();
     let _signal_propagation =
         CancellationPropagationGuard::new(tool_execution_context.cancellation(), cancel.clone());
-    let _binding = match tools::ToolExecutionContextBindingGuard::bind(
-        runtime_context.tool_context_binding(),
-        tool_execution_context,
-    ) {
-        Ok(binding) => binding,
-        Err(error) => return AgentRunTerminal::Failed { error },
-    };
     let control = crate::application::loop_engine::run_ports::NoopRunControl;
     let lifecycle_active_run = active_run.clone();
     let lifecycle = crate::application::loop_engine::run_ports::ActiveRunLifecycle::new(
@@ -469,6 +462,7 @@ mod tests {
                     run_id: run_id.clone(),
                     parent_run_id: parent_run_id.clone(),
                     result: "done".to_string(),
+                    user_cancelled_step: false,
                 },
                 Some(tools::AgentRunTerminal::Completed {
                     result: "done".to_string(),

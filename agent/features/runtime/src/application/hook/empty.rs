@@ -1,6 +1,5 @@
 use async_trait::async_trait;
-use hook::{HookDispatchContext, HookInvocation, HookOutcome, HookPort};
-use tokio_util::sync::CancellationToken;
+use hook::{CancellationSignal, HookDispatchContext, HookInvocation, HookOutcome, HookPort};
 
 #[derive(Clone)]
 pub struct BoundaryHookPort {
@@ -28,7 +27,7 @@ impl HookPort for BoundaryHookPort {
     async fn dispatch(
         &self,
         invocation: HookInvocation,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         if Self::allows(&invocation) {
             self.inner.dispatch(invocation, cancellation).await
@@ -41,7 +40,7 @@ impl HookPort for BoundaryHookPort {
         &self,
         invocation: HookInvocation,
         context: HookDispatchContext,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         if Self::allows(&invocation) {
             self.inner

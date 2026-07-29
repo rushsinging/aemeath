@@ -306,6 +306,8 @@ where
                                             run_id: step.run_id,
                                             step_id: step.step_id,
                                             messages: step.messages,
+                                            finalize_cause: step.finalize_cause,
+                                            duration_ms: step.duration_ms,
                                         })
                                         .collect(),
                                     session_id: resume_view.session_id,
@@ -701,16 +703,24 @@ where
                             language: language.clone(),
                         },
                     );
-                let workspace_access =
-                    crate::application::run::workspace::RuntimeWorkspaceAccess::new(
-                        workspace.clone(),
-                    );
+                let tool_agent = main_run_port::make_agent(
+                    &runtime_context,
+                    agent_runner.clone(),
+                    &language,
+                    &workspace,
+                    &cancel,
+                    read_files.clone(),
+                    session_reminders.clone(),
+                    max_tool_concurrency,
+                    agent_semaphore.clone(),
+                    &session_id,
+                    &run_id,
+                );
                 let mut interaction =
                     crate::application::loop_engine::run_services::RuntimeInteraction::new(
                         crate::application::loop_engine::run_services::ChatInteractionPublisher {
                             runtime_context: &runtime_context,
-                            workspace: &workspace_access,
-                            run_id: &run_id,
+                            tool_context: tool_agent.ctx.clone(),
                             session_id: &session_id,
                             materializer: tool_result_materializer.as_ref(),
                         },
@@ -728,19 +738,6 @@ where
                             continuation: input_continuation.clone(),
                         },
                     );
-                let tool_agent = main_run_port::make_agent(
-                    &runtime_context,
-                    agent_runner.clone(),
-                    &language,
-                    &workspace,
-                    &cancel,
-                    read_files.clone(),
-                    session_reminders.clone(),
-                    max_tool_concurrency,
-                    agent_semaphore.clone(),
-                    &session_id,
-                    &run_id,
-                );
                 let tool_workspace_root = workspace.read().current_workspace_root();
                 let tool_context = crate::application::tool::coordination::ToolRoundContext {
                     runtime_context: &runtime_context,

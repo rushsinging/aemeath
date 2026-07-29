@@ -38,7 +38,8 @@ fn context_window(revision: u64) -> ContextWindow {
     ContextWindow {
         backing_revision: SessionRevision::new(revision),
         system_blocks: vec![],
-        messages: vec![],
+        messages: vec![].into(),
+        invocation_reminder: None,
         tool_schemas: vec![],
         token_estimation: TokenBudget::default(),
         compaction_decision: CompactionDecision {

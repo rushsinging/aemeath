@@ -71,7 +71,9 @@ impl CompactionCoordinator {
             .map(|window| {
                 (
                     window.backing_revision,
-                    context::compact::messages_selected_for_precompact_memory(&window.messages),
+                    context::compact::messages_selected_for_precompact_memory(
+                        &window.messages.to_vec(),
+                    ),
                 )
             })
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;

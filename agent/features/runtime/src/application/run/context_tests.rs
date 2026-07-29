@@ -20,8 +20,7 @@ use hook::{HookInvocation, HookOutcome, HookPort};
 use memory::api::MemoryPort;
 use tools::{
     CancellationSignal, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot,
-    ToolExecutionContextBindingPort, ToolExecutionOutcome, ToolExecutionPort, ToolInvocation,
-    ToolProfileName,
+    ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort, ToolInvocation, ToolProfileName,
 };
 
 // ── Test helper: noop event sink ──
@@ -134,18 +133,10 @@ impl ToolExecutionPort for FakeToolExecution {
     async fn execute(
         &self,
         _invocation: ToolInvocation,
-        _cancellation: &dyn CancellationSignal,
+        _context: &ToolExecutionContext,
     ) -> ToolExecutionOutcome {
         ToolExecutionOutcome::success_text("fake")
     }
-}
-
-struct FakeToolContextBinding;
-impl ToolExecutionContextBindingPort for FakeToolContextBinding {
-    fn bind(&self, _context: tools::ToolExecutionContext) -> Result<(), String> {
-        Ok(())
-    }
-    fn unbind(&self, _run_id: &str) {}
 }
 
 struct FakePolicy;
@@ -189,7 +180,7 @@ impl HookPort for FakeHook {
     async fn dispatch(
         &self,
         _invocation: HookInvocation,
-        _cancellation: &CancellationToken,
+        _cancellation: &dyn hook::CancellationSignal,
     ) -> HookOutcome {
         HookOutcome::proceed()
     }
@@ -208,7 +199,6 @@ fn make_factory() -> RuntimeContextFactory {
     RuntimeContextFactory::new(
         Arc::new(FakeToolCatalog),
         Arc::new(FakeToolExecution),
-        Arc::new(FakeToolContextBinding),
         Arc::new(FakePolicy),
         Arc::new(FakeReflectionHistory),
         Arc::new(task::TaskStore::new()),
@@ -281,8 +271,6 @@ fn main_runtime_context_preserves_injected_port_identity() {
     let provider_arc = Arc::new(binding);
     let tool_catalog_arc: Arc<dyn ToolCatalogPort> = Arc::new(FakeToolCatalog);
     let tool_execution_arc: Arc<dyn ToolExecutionPort> = Arc::new(FakeToolExecution);
-    let tool_ctx_binding_arc: Arc<dyn ToolExecutionContextBindingPort> =
-        Arc::new(FakeToolContextBinding);
     let policy_arc: Arc<dyn PolicyPort> = Arc::new(FakePolicy);
     let interaction_arc: Arc<dyn InteractionPort> = Arc::new(InteractionBridge::new());
     let memory_arc: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
@@ -295,7 +283,6 @@ fn main_runtime_context_preserves_injected_port_identity() {
     let factory = RuntimeContextFactory::new(
         tool_catalog_arc.clone(),
         tool_execution_arc.clone(),
-        tool_ctx_binding_arc.clone(),
         policy_arc.clone(),
         reflection_history_arc.clone(),
         task_arc.clone(),
@@ -334,10 +321,6 @@ fn main_runtime_context_preserves_injected_port_identity() {
     assert!(Arc::ptr_eq(&ctx.provider(), &provider_arc));
     assert!(Arc::ptr_eq(&ctx.tool_catalog(), &tool_catalog_arc));
     assert!(Arc::ptr_eq(&ctx.tool_execution(), &tool_execution_arc));
-    assert!(Arc::ptr_eq(
-        &ctx.tool_context_binding(),
-        &tool_ctx_binding_arc
-    ));
     assert!(Arc::ptr_eq(&ctx.policy(), &policy_arc));
     assert!(Arc::ptr_eq(&ctx.interaction(), &interaction_arc));
     assert!(Arc::ptr_eq(&ctx.memory(), &memory_arc));
@@ -389,7 +372,6 @@ fn runtime_context_has_all_required_accessors() {
     let _provider = ctx.provider();
     let _tool_catalog = ctx.tool_catalog();
     let _tool_execution = ctx.tool_execution();
-    let _tool_ctx_binding = ctx.tool_context_binding();
     let _policy = ctx.policy();
     let _interaction = ctx.interaction();
     let _memory = ctx.memory();
@@ -912,7 +894,6 @@ fn runtime_context_has_all_required_accessors_with_io_seams() {
     let _provider = ctx.provider();
     let _tool_catalog = ctx.tool_catalog();
     let _tool_execution = ctx.tool_execution();
-    let _tool_ctx_binding = ctx.tool_context_binding();
     let _policy = ctx.policy();
     let _interaction = ctx.interaction();
     let _memory = ctx.memory();

@@ -22,9 +22,9 @@ pub struct CliAgentRunner {
         Arc<crate::application::tool::result_materialization::ToolResultMaterializer>,
     /// Runtime-owned workspace source used to derive isolated sub-run views.
     pub workspace: crate::application::run::workspace::RuntimeWorkspaceAccess,
-    /// Skill materializer shared with sub-run isolated contexts so that
-    /// sub-agents materialize the configured skill set into their prompt.
-    pub skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    /// Skill metadata catalog shared with sub-run isolated contexts.
+    /// Skill bodies remain call-time Tool-owned loads.
+    pub skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     /// #1385 Task 6: Injectable parent context source — set by the Main Run
     /// loop before tool execution so sub-agent runs can derive from it.
     pub parent_context: ParentRunContextSource,

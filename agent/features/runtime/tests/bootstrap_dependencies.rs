@@ -102,7 +102,7 @@ fn test_session_bootstrap_assembly(root: &std::path::Path) -> runtime::SessionBo
 }
 
 fn test_skill_bootstrap_assembly() -> runtime::SkillBootstrapAssembly {
-    runtime::SkillBootstrapAssembly::new(std::collections::HashMap::new())
+    runtime::SkillBootstrapAssembly::new(tools::SkillCatalogSnapshot::from_descriptors(Vec::new()))
 }
 
 fn test_agent_runner_assembly() -> runtime::AgentRunnerAssembly {
@@ -239,7 +239,6 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let tools = tools::composition::TestCatalogExecutionFactory::empty();
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
-    let skill_loader = skill_wiring.loader();
     let tool_result_materializer = Arc::new(runtime::ToolResultMaterializer::new(
         Arc::new(runtime::AtomicBlobToolResultStore::new(
             Arc::new(storage::FileSystemBlobAdapter::new(temp.path()).unwrap()),
@@ -267,7 +266,6 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),
             skill_catalog,
-            skill_loader.clone(),
             tool_result_materializer.clone(),
             active_run.clone(),
         ),
@@ -280,7 +278,6 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
             Arc::new(runtime::RuntimeContextFactory::new(
                 tools.catalog_port(),
                 tools.execution(),
-                tools.binding(),
                 Arc::new(policy::AllowAllPolicy),
                 history.clone(),
                 access.clone(),
@@ -301,7 +298,6 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     );
 
     // ── Arc identity: Tool assembly dependencies ──
-    assert!(Arc::ptr_eq(&dependencies.skill_loader(), &skill_loader));
     assert!(Arc::ptr_eq(
         &dependencies.tool_result_materializer(),
         &tool_result_materializer

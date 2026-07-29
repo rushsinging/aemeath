@@ -78,11 +78,9 @@ LAYER_MIGRATION_EXCEPTIONS = set()
 RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/runtime/src/application/client/accessors.rs", "adapters"),
     ("agent/features/runtime/src/ports/legacy.rs", "application"),    # #1381: Runtime-owned types (hook_types, workspace_access) moved back to application.
-    # Remaining adapter refs: tool_runtime (progress/cancellation), input_buffer,
+    # Remaining adapter refs: tool_runtime cancellation, input_buffer,
     # tool_suspension_acl, sdk_event_sink, tui_launch — pending composition injection.
-    ("agent/features/runtime/src/application/loop_engine/chat/agent_calls.rs", "adapters"),
     ("agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs", "adapters"),
-    ("agent/features/runtime/src/application/loop_engine/chat/non_agent.rs", "adapters"),
 }
 use_crate_segment = re.compile(r"\b(?:use\s+)?crate::([A-Za-z_][A-Za-z0-9_]*)")
 project_domain_adapter_pattern = re.compile(

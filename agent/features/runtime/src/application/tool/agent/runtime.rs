@@ -1,9 +1,13 @@
+use context::domain::ToolCallIdentity;
 use share::message::{ContentBlock, Message};
 use std::sync::Arc;
 use tools::{
     ToolCatalogSnapshot, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
     ToolInvocation, ToolOutcome,
 };
+
+use crate::application::context::coordination::ContextCoordinator;
+use crate::application::tool::execution_supervisor::{SupervisedToolCall, ToolExecutionSupervisor};
 
 #[derive(Debug, Clone)]
 pub struct ToolExecution {
@@ -45,6 +49,8 @@ pub struct Agent {
     pub max_tool_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub workspace_persist: Arc<dyn project::WorkspacePersist>,
+    pub(crate) context: ContextCoordinator,
+    pub(crate) session_id: context::domain::SessionId,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
 }
 
@@ -100,6 +106,8 @@ impl Agent {
             workspace_persist: crate::application::run::workspace_test_support::workspace_persist(
                 &ctx,
             ),
+            context: ContextCoordinator::new(context::adapters::isolated_context("test-session")),
+            session_id: context::domain::SessionId::new("test-session"),
             ctx,
             max_tool_concurrency,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -139,43 +147,17 @@ impl Agent {
             .is_some_and(|d| d.is_concurrency_safe())
     }
 
+    #[cfg(test)]
     async fn execute_call(
         &self,
         call: &ToolCall,
         ctx: &ToolExecutionContext,
         authorization: tools::AuthorizationContext,
+        step_id: &sdk::RunStepId,
     ) -> ToolExecution {
-        if ctx.cancellation().is_cancelled() {
-            return ToolExecution::new(
-                call,
-                ToolOutcome::error("tool execution cancelled by user"),
-            );
-        }
-        let Some(descriptor) = self.catalog.find(&tools::ToolName::new(&call.name)) else {
-            return ToolExecution::new(
-                call,
-                ToolOutcome::error(format!("unknown tool: {}", call.name)),
-            );
-        };
-        let mut input = call.input.clone();
-        tools::strip_runtime_meta(&mut input);
-        let invocation = ToolInvocation::new(call.name.as_str(), input, ctx.scope().clone())
-            .with_authorization(authorization);
-        let cancellation = ctx.cancellation();
-        let domain = tokio::select! {
-            _ = cancellation.cancelled() => ToolExecutionOutcome::cancelled("tool execution cancelled by user"),
-            result = tokio::time::timeout(
-                std::time::Duration::from_secs(descriptor.timeout_secs),
-                self.execution.execute(invocation, cancellation.as_ref()),
-            ) => match result {
-                Ok(outcome) => outcome,
-                Err(_) => ToolExecutionOutcome::failure(
-                    tools::ToolErrorKind::Internal,
-                    format!("tool.call execution timed out: tool={}, timeout_secs={}", call.name, descriptor.timeout_secs),
-                ),
-            }
-        };
-        ToolExecution::new(call, legacy_outcome(domain))
+        let authorized_ctx = ctx.with_authorization(authorization);
+        self.execute_one_with_ctx(call, &authorized_ctx, step_id)
+            .await
     }
 
     #[cfg(test)]
@@ -190,13 +172,15 @@ impl Agent {
                 },
             )
             .collect::<Vec<_>>();
-        self.execute_prepared_tools(&prepared).await
+        self.execute_prepared_tools(&prepared, &sdk::RunStepId::new_v7())
+            .await
     }
 
     #[cfg(test)]
     async fn execute_prepared_tools(
         &self,
         calls: &[crate::application::tool::coordination::PreparedToolCall],
+        step_id: &sdk::RunStepId,
     ) -> Vec<ToolExecution> {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_tool_concurrency));
         let sequential = Arc::new(tokio::sync::Mutex::new(()));
@@ -210,13 +194,15 @@ impl Agent {
                     let _permit = semaphore.acquire().await.expect("tool semaphore closed");
                     (
                         position,
-                        self.execute_call(call, &self.ctx, authorization).await,
+                        self.execute_call(call, &self.ctx, authorization, step_id)
+                            .await,
                     )
                 } else {
                     let _serial = sequential.lock().await;
                     (
                         position,
-                        self.execute_call(call, &self.ctx, authorization).await,
+                        self.execute_call(call, &self.ctx, authorization, step_id)
+                            .await,
                     )
                 }
             }
@@ -230,9 +216,58 @@ impl Agent {
         &self,
         call: &ToolCall,
         ctx: &ToolExecutionContext,
+        step_id: &sdk::RunStepId,
     ) -> ToolExecution {
-        self.execute_call(call, ctx, ctx.authorization()).await
+        ToolExecution::new(
+            call,
+            legacy_outcome(self.execute_one_outcome_with_ctx(call, ctx, step_id).await),
+        )
     }
+
+    pub(crate) async fn execute_one_outcome_with_ctx(
+        &self,
+        call: &ToolCall,
+        ctx: &ToolExecutionContext,
+        step_id: &sdk::RunStepId,
+    ) -> ToolExecutionOutcome {
+        let authorization = ctx.authorization();
+        let mut input = call.input.clone();
+        tools::strip_runtime_meta(&mut input);
+        let invocation = ToolInvocation::new(call.name.as_str(), input, ctx.scope().clone())
+            .with_authorization(authorization);
+        let supervisor = ToolExecutionSupervisor::new(
+            Arc::clone(&self.execution),
+            self.catalog.clone(),
+            self.context.clone(),
+        );
+        supervisor
+            .execute(SupervisedToolCall {
+                identity: ToolCallIdentity {
+                    session_id: self.session_id.clone(),
+                    run_id: sdk::RunId::from_legacy_or_new(ctx.scope().run_id()),
+                    step_id: step_id.clone(),
+                    runtime_call_id: call.id.to_string(),
+                    provider_call_id: Some(call.provider_id.clone()),
+                    tool_name: call.name.clone(),
+                    call_index: call.index,
+                    agent: call.name == "Agent",
+                },
+                invocation,
+                context: ctx.clone(),
+                input_preview: safe_input_preview(&call.input),
+                run_deadline: ctx.scope().deadline(),
+                cancellation: ctx.cancellation(),
+            })
+            .await
+            .unwrap_or_else(|error| {
+                ToolExecutionOutcome::failure(tools::ToolErrorKind::Internal, error.to_string())
+            })
+    }
+}
+
+fn safe_input_preview(input: &serde_json::Value) -> String {
+    let rendered = serde_json::to_string(input).unwrap_or_else(|_| "<unserializable>".to_string());
+    rendered.chars().take(500).collect()
 }
 
 pub(crate) fn legacy_outcome(outcome: ToolExecutionOutcome) -> ToolOutcome {
@@ -254,6 +289,10 @@ pub(crate) fn legacy_outcome(outcome: ToolExecutionOutcome) -> ToolOutcome {
             images: Vec::new(),
         },
         ToolExecutionOutcome::Cancelled(cancelled) => ToolOutcome::error(cancelled.reason),
+        ToolExecutionOutcome::TimedOut(details)
+        | ToolExecutionOutcome::CancellationUnconfirmed(details) => {
+            ToolOutcome::error(details.safe_reason)
+        }
         ToolExecutionOutcome::Suspended(_) => {
             ToolOutcome::error("tool execution suspended at an unsupported ordinary-execution seam")
         }

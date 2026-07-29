@@ -14,7 +14,9 @@ mod trait_session;
 #[cfg(test)]
 pub(crate) use accessors::{InputPortPair, SessionModelState};
 pub(crate) use accessors::{RuntimeContextAssemblyError, SessionRuntime};
-pub(crate) use mapping::{message_to_sdk, workspace_context_to_sdk};
+pub(crate) use mapping::{
+    map_finalize_cause_to_sdk, message_to_sdk, skill_snapshot_to_sdk, workspace_context_to_sdk,
+};
 
 // 对外仅发布 Composition 装配所需的 workspace bootstrap。
 pub use accessors::AgentClientImpl;

@@ -410,9 +410,9 @@ impl tools::ToolExecutionPort for FakeToolExecutionPort {
     async fn execute(
         &self,
         invocation: tools::ToolInvocation,
-        cancellation: &dyn tools::CancellationSignal,
+        context: &tools::ToolExecutionContext,
     ) -> tools::ToolExecutionOutcome {
-        let _ = cancellation;
+        let _ = context;
         self.execute_count
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         self.recorded_invocations.lock().unwrap().push(invocation);
@@ -1093,19 +1093,16 @@ impl crate::application::interaction::coordinator::InteractionCompletionContextP
             &*UNUSED_TOOL_EXECUTION as &dyn tools::ToolExecutionPort,
             |port| port,
         );
-        crate::application::interaction::coordinator::InteractionCompletionContext::new(
-            tools::ExecutionScope::builder(
-                "test-run".to_string(),
-                project::WorkspaceId::from("test-ws".to_string()),
+        let tool_context =
+            crate::application::run::workspace_test_support::test_tool_execution_context(
                 std::path::PathBuf::from("/tmp"),
-            )
-            .build(),
+                step_cancel,
+            );
+        crate::application::interaction::coordinator::InteractionCompletionContext::new(
+            tool_context,
             tool_execution,
             materializer,
             "test-session",
-            std::sync::Arc::new(
-                crate::application::run::context::RunCancellationScope::from_token(step_cancel),
-            ),
         )
     }
 }

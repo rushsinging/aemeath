@@ -72,6 +72,7 @@ impl StepPersistenceCoordinator {
                 commit.step_id.clone(),
                 expected_revision,
                 commit.cause,
+                None,
                 commit.messages.clone(),
                 vec![],
                 self.usage.get(),

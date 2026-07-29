@@ -27,7 +27,6 @@ use crate::application::loop_engine::{
 };
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
-use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::application::tool::result_materialization::ToolResultMaterializer;
 use crate::ports::{ContextRequest, RunStepId};
 
@@ -235,10 +234,9 @@ where
 
 pub(crate) struct ChatInteractionPublisher<'a> {
     pub runtime_context: &'a RuntimeContext,
-    pub workspace: &'a RuntimeWorkspaceAccess,
-    pub run_id: &'a sdk::RunId,
-    pub session_id: &'a str,
+    pub tool_context: tools::ToolExecutionContext,
     pub materializer: &'a ToolResultMaterializer,
+    pub session_id: &'a str,
 }
 
 #[async_trait]
@@ -251,21 +249,13 @@ impl InteractionPublisher for ChatInteractionPublisher<'_> {
         &self,
         step_cancel: CancellationToken,
     ) -> InteractionCompletionContext<'_> {
-        let workspace = self.workspace.views().read();
-        let scope = tools::ExecutionScope::builder(
-            self.run_id.to_string(),
-            workspace.workspace_id(),
-            workspace.current_workspace_root(),
-        )
-        .build();
         InteractionCompletionContext::new(
-            scope,
+            self.tool_context.with_cancellation(Arc::new(
+                crate::application::run::context::RunCancellationScope::from_token(step_cancel),
+            )),
             self.runtime_context.tool_execution_ref().as_ref(),
             self.materializer,
             self.session_id,
-            Arc::new(
-                crate::application::run::context::RunCancellationScope::from_token(step_cancel),
-            ),
         )
     }
 
@@ -286,7 +276,7 @@ impl InteractionPublisher for ChatInteractionPublisher<'_> {
 
 pub(crate) struct ProgressInteractionPublisher<'a> {
     pub runtime_context: &'a RuntimeContext,
-    pub execution_scope: tools::ExecutionScope,
+    pub tool_context: tools::ToolExecutionContext,
     pub session_id: &'a str,
     pub materializer: &'a ToolResultMaterializer,
     pub progress: &'a (dyn Fn(Option<usize>, &str) + Send + Sync),
@@ -303,13 +293,12 @@ impl InteractionPublisher for ProgressInteractionPublisher<'_> {
         step_cancel: CancellationToken,
     ) -> InteractionCompletionContext<'_> {
         InteractionCompletionContext::new(
-            self.execution_scope.clone(),
+            self.tool_context.with_cancellation(Arc::new(
+                crate::application::run::context::RunCancellationScope::from_token(step_cancel),
+            )),
             self.runtime_context.tool_execution_ref().as_ref(),
             self.materializer,
             self.session_id,
-            Arc::new(
-                crate::application::run::context::RunCancellationScope::from_token(step_cancel),
-            ),
         )
     }
 

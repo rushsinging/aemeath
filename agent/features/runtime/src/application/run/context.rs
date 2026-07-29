@@ -99,29 +99,6 @@ impl Default for RunCancellationScope {
     }
 }
 
-struct ToolCancellationSignal(CancellationToken);
-
-#[async_trait::async_trait]
-impl tools::CancellationSignal for ToolCancellationSignal {
-    fn is_cancelled(&self) -> bool {
-        self.0.is_cancelled()
-    }
-
-    async fn cancelled(&self) {
-        self.0.cancelled().await
-    }
-
-    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
-        Arc::new(Self(self.0.child_token()))
-    }
-}
-
-pub(crate) fn tool_cancellation_signal(
-    token: CancellationToken,
-) -> Arc<dyn tools::CancellationSignal> {
-    Arc::new(ToolCancellationSignal(token))
-}
-
 struct ToolProgressSink(tokio::sync::mpsc::Sender<tools::AgentProgressEvent>);
 
 impl tools::ProgressSink for ToolProgressSink {
@@ -334,7 +311,7 @@ pub struct LifecycleBindings {
 /// - 移除 `WorkspacePort`（无生产实现，过期端口）。
 /// - `task` 从旧空壳 `TaskPort` 校正为生产已使用的 `TaskAccess`。
 /// - `provider` 收敛为 `ProviderBinding`（含 port + model 约束）。
-/// - 新增 `InteractionBridge`、`ReflectionHistoryStore`、`ToolExecutionContextBindingPort`。
+/// - 新增 `InteractionBridge` 与 `ReflectionHistoryStore`。
 /// - 不含 `MainSessionWiring`、`WorkspaceViews`、`SessionQueryPort`、`ConfigQuery`/`ConfigWriter`。
 ///
 /// ## Clone & cancellation

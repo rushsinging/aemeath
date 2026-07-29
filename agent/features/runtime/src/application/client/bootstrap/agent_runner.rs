@@ -25,7 +25,7 @@ pub fn build_agent_runner(
         crate::application::tool::result_materialization::ToolResultMaterializer,
     >,
     workspace: project::WorkspaceViews,
-    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     parent_context_source: ParentRunContextSource,
     runtime_context_factory: Arc<crate::application::run::context_factory::RuntimeContextFactory>,
 ) -> AgentRunnerAssembly {
@@ -38,7 +38,7 @@ pub fn build_agent_runner(
         agent_semaphore: semaphore_for_runner,
         tool_result_materializer,
         workspace: crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace),
-        skill_materializer,
+        skill_catalog,
         parent_context: parent_context_for_runner,
         runtime_context_factory,
     });
@@ -107,7 +107,7 @@ mod tests {
             .into_views();
 
         let skill_wiring = tools::composition::wire_skills();
-        let skill_materializer = skill_wiring.materializer();
+        let skill_catalog = skill_wiring.catalog();
         let tool_ports = tools::composition::TestCatalogExecutionFactory::empty();
         let runner = build_agent_runner(
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
@@ -116,7 +116,7 @@ mod tests {
             Arc::new(tokio::sync::Semaphore::new(4)),
             crate::application::tool::test_support::test_tool_result_materializer(),
             workspace,
-            skill_materializer.clone(),
+            skill_catalog.clone(),
             ParentRunContextSource::new(),
             Arc::new({
                 let refl: Arc<dyn memory::api::ReflectionHistoryStore> = {

@@ -143,7 +143,6 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
     let round = crate::application::loop_engine::chat::tools::execute_tool_round(
         &context.turn_context,
         &raw_calls,
-        context.runtime_context.tool_execution_ref(),
         &agent.catalog,
         context.runtime_context.policy_ref().as_ref(),
         run_id,

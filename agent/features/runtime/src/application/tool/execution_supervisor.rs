@@ -5,13 +5,13 @@ use context::domain::{
     CleanupConfirmation as ReceiptCleanupConfirmation, ToolCallIdentity, ToolReceiptMutation,
     ToolTerminalReceipt,
 };
-use tokio_util::sync::CancellationToken;
 use tools::{
-    CancellationDeclaration, CleanupConfirmation, ToolCatalogSnapshot, ToolExecutionContext,
-    ToolExecutionOutcome as PublishedToolOutcome, ToolExecutionPort, ToolInvocation,
+    CancellationDeclaration, CancellationSignal, CleanupConfirmation, ToolCatalogSnapshot,
+    ToolExecutionContext, ToolExecutionOutcome as PublishedToolOutcome, ToolExecutionPort,
+    ToolInvocation,
 };
 
-use crate::application::context_coordination::ContextCoordinator;
+use crate::application::context::coordination::ContextCoordinator;
 
 const DEFAULT_GRACE: Duration = Duration::from_millis(250);
 
@@ -29,7 +29,7 @@ pub(crate) struct SupervisedToolCall {
     pub context: ToolExecutionContext,
     pub input_preview: String,
     pub run_deadline: Option<SystemTime>,
-    pub cancellation: CancellationToken,
+    pub cancellation: Arc<dyn CancellationSignal>,
 }
 
 impl ToolExecutionSupervisor {
@@ -288,3 +288,7 @@ pub(crate) enum ToolExecutionSupervisorError {
     #[error(transparent)]
     Receipt(#[from] context::domain::ToolReceiptMutationError),
 }
+
+#[cfg(test)]
+#[path = "execution_supervisor_tests.rs"]
+mod tests;

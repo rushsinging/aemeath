@@ -1,4 +1,4 @@
-use super::tool_execution_supervisor::earliest_deadline;
+use super::earliest_deadline;
 use std::time::{Duration, SystemTime};
 
 #[test]

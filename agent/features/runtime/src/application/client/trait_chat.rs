@@ -11,7 +11,8 @@ pub(super) async fn chat_impl(
     me: &AgentClientImpl,
     input: ChatRequest,
 ) -> Result<ChatStream, SdkError> {
-    let input_events = Some(input.ingress.clone());
+    let queue_drain = input.queue_drain.clone();
+    let input_events = input.input_events.clone();
 
     // #872: Runtime 不再持有/回写会话链；将初始 user_input 转为
     // Vec<Message> 并准备传 ChatLoopContext（历史由 Context backing 提供）。
@@ -19,7 +20,7 @@ pub(super) async fn chat_impl(
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let sink = (me.inner.shell.event_sink_factory)(tx);
-    let input_ports = (me.inner.shell.input_port_factory)(None, input_events);
+    let input_ports = (me.inner.shell.input_port_factory)(queue_drain, input_events);
     let shell = me.inner.shell.clone();
     let inner = me.inner.clone();
     let session_context = logging::capture();

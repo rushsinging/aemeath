@@ -1181,7 +1181,7 @@ async fn test_started_event_emitted_with_role_and_model() {
             system: "s",
             identity: ctx.scope(),
             cancellation: ctx.cancellation(),
-            progress: Some(crate::application::runtime_context::tool_progress_sink(
+            progress: Some(crate::application::run::context::tool_progress_sink(
                 tx.clone(),
             )),
             memory: ctx.memory(),
@@ -1224,7 +1224,7 @@ async fn started_event_always_reports_required_role_and_configured_model() {
             system: "s",
             identity: ctx.scope(),
             cancellation: ctx.cancellation(),
-            progress: Some(crate::application::runtime_context::tool_progress_sink(
+            progress: Some(crate::application::run::context::tool_progress_sink(
                 tx.clone(),
             )),
             memory: ctx.memory(),

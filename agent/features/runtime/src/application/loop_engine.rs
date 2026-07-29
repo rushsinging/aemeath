@@ -3,6 +3,7 @@ pub(crate) mod compaction;
 pub(crate) mod context_request;
 mod engine;
 pub(crate) mod event_strategy;
+pub(crate) mod input;
 pub(crate) mod input_strategy;
 pub(crate) mod llm_log;
 pub(crate) mod llm_strategy;

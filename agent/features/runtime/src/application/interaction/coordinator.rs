@@ -38,27 +38,24 @@ use crate::domain::agent_run::{InteractionContinuation, Run, RunTransitionError}
 /// Role adapters only construct this narrow context. The coordinator owns all
 /// completion decisions, approved tool execution, and result materialization.
 pub struct InteractionCompletionContext<'a> {
-    execution_scope: tools::ExecutionScope,
+    tool_context: tools::ToolExecutionContext,
     tool_execution: &'a dyn tools::ToolExecutionPort,
     materializer: &'a crate::application::tool::result_materialization::ToolResultMaterializer,
     session_id: &'a str,
-    cancellation: std::sync::Arc<dyn tools::CancellationSignal>,
 }
 
 impl<'a> InteractionCompletionContext<'a> {
     pub fn new(
-        execution_scope: tools::ExecutionScope,
+        tool_context: tools::ToolExecutionContext,
         tool_execution: &'a dyn tools::ToolExecutionPort,
         materializer: &'a crate::application::tool::result_materialization::ToolResultMaterializer,
         session_id: &'a str,
-        cancellation: std::sync::Arc<dyn tools::CancellationSignal>,
     ) -> Self {
         Self {
-            execution_scope,
+            tool_context,
             tool_execution,
             materializer,
             session_id,
-            cancellation,
         }
     }
 }
@@ -405,12 +402,18 @@ async fn execute_approved_call(
     let call = approval.call;
     let mut input = call.input.clone();
     tools::strip_runtime_meta(&mut input);
-    let invocation =
-        tools::ToolInvocation::new(call.name.as_str(), input, context.execution_scope.clone())
-            .with_authorization(approval.authorization);
+    let invocation = tools::ToolInvocation::new(
+        call.name.as_str(),
+        input,
+        context.tool_context.scope().clone(),
+    )
+    .with_authorization(approval.authorization);
+    let tool_context = context
+        .tool_context
+        .with_authorization(approval.authorization);
     let domain = context
         .tool_execution
-        .execute(invocation, context.cancellation.as_ref())
+        .execute(invocation, &tool_context)
         .await;
     ToolExecution::from_parts(
         id.clone(),

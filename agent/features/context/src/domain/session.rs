@@ -18,7 +18,7 @@ pub use envelope::{
 };
 pub use management::{
     same_project_identity, session_matches_project, SessionListEntry, SessionManagementError,
-    SessionMetadataUpdate, SessionResumeProjection,
+    SessionMetadataUpdate, SessionResumeView,
 };
 pub use restore::{SessionRestore, SessionRestoreStep};
 pub use types::{

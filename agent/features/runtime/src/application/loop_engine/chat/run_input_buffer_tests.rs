@@ -26,13 +26,6 @@ fn skill_request_is_user_input_and_withdraw_returns_raw_slash() {
             assert!(batch[0].text.contains("Call the Skill tool first"));
             assert!(batch[0].text.contains("superpowers:brainstorming"));
             assert!(!batch[0].text.contains("/superpowers:brainstorming idea"));
-            let adopted = buf.take_drained_adopted();
-            assert_eq!(adopted.len(), 1);
-            assert_eq!(adopted[0].0, id);
-            assert_eq!(
-                adopted[0].1.text_content(),
-                "/superpowers:brainstorming idea"
-            );
         }
         other => panic!("expected ready Skill request, got {other:?}"),
     }

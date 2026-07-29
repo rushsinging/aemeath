@@ -12,7 +12,6 @@ use super::accessors::{AgentClientImpl, RuntimeHandle};
 pub struct RuntimeToolAssemblyDependencies {
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,
-    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
     tool_result_materializer:
         Arc<crate::application::tool::result_materialization::ToolResultMaterializer>,
     active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
@@ -22,7 +21,6 @@ impl RuntimeToolAssemblyDependencies {
     pub fn new(
         tool_catalog: Arc<dyn tools::ToolCatalogPort>,
         skill_catalog: Arc<dyn tools::SkillCatalogPort>,
-        skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
         tool_result_materializer: Arc<
             crate::application::tool::result_materialization::ToolResultMaterializer,
         >,
@@ -31,7 +29,6 @@ impl RuntimeToolAssemblyDependencies {
         Self {
             tool_catalog,
             skill_catalog,
-            skill_materializer,
             tool_result_materializer,
             active_run,
         }
@@ -89,12 +86,12 @@ impl SessionBootstrapAssembly {
 }
 
 pub struct SkillBootstrapAssembly {
-    pub skills_map: std::collections::HashMap<String, sdk::SkillView>,
+    pub snapshot: tools::SkillCatalogSnapshot,
 }
 
 impl SkillBootstrapAssembly {
-    pub fn new(skills_map: std::collections::HashMap<String, sdk::SkillView>) -> Self {
-        Self { skills_map }
+    pub fn new(snapshot: tools::SkillCatalogSnapshot) -> Self {
+        Self { snapshot }
     }
 }
 
@@ -169,7 +166,6 @@ pub struct RuntimeBootstrapDependencies {
     session_management: Arc<dyn context::SessionManagementPort>,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,
-    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
     tool_result_materializer:
         Arc<crate::application::tool::result_materialization::ToolResultMaterializer>,
     active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
@@ -207,7 +203,6 @@ impl RuntimeBootstrapDependencies {
         let RuntimeToolAssemblyDependencies {
             tool_catalog,
             skill_catalog,
-            skill_materializer,
             tool_result_materializer,
             active_run,
             ..
@@ -226,7 +221,6 @@ impl RuntimeBootstrapDependencies {
             session_management,
             tool_catalog,
             skill_catalog,
-            skill_materializer,
             tool_result_materializer,
             active_run,
             initial_provider,
@@ -264,10 +258,6 @@ impl RuntimeBootstrapDependencies {
         self.skill_catalog.clone()
     }
 
-    pub fn skill_materializer(&self) -> Arc<dyn tools::SkillMaterializationPort> {
-        self.skill_materializer.clone()
-    }
-
     pub fn tool_result_materializer(
         &self,
     ) -> Arc<crate::application::tool::result_materialization::ToolResultMaterializer> {
@@ -295,8 +285,7 @@ pub async fn from_args_with_workspace(
         provider_factory,
         session_management,
         tool_catalog: _,
-        skill_catalog: _,
-        skill_materializer: _,
+        skill_catalog,
         tool_result_materializer,
         active_run,
         initial_provider,
@@ -355,6 +344,10 @@ pub async fn from_args_with_workspace(
                                 .into_iter()
                                 .map(crate::application::client::message_to_sdk)
                                 .collect(),
+                            finalize_cause: step
+                                .finalize_cause
+                                .map(super::mapping::map_finalize_cause_to_sdk),
+                            duration_ms: step.duration_ms,
                         })
                         .collect(),
                     session_id: resume_view.session_id,
@@ -393,7 +386,9 @@ pub async fn from_args_with_workspace(
     } = initial_provider;
 
     // Tool and Skill bootstrap results are assembled and frozen by Composition.
-    let SkillBootstrapAssembly { skills_map } = skills;
+    let SkillBootstrapAssembly {
+        snapshot: initial_skill_snapshot,
+    } = skills;
     // #1327 承接 MCP Ready lifecycle / Catalog 同步；#1294 不保留 MCP manager 或
     // Tools 私有 CatalogExecutionWiring 接线。
 
@@ -455,7 +450,8 @@ pub async fn from_args_with_workspace(
         system_prompt_text,
         initial_git_context,
         user_context,
-        skills_map,
+        skill_catalog,
+        initial_skill_snapshot,
         memory_config,
         context_size,
         snapshot.language().to_string(),
@@ -765,7 +761,7 @@ mod tests {
         async fn dispatch(
             &self,
             _invocation: HookInvocation,
-            _cancellation: &tokio_util::sync::CancellationToken,
+            _cancellation: &dyn hook::CancellationSignal,
         ) -> HookOutcome {
             HookOutcome::proceed()
         }
@@ -809,8 +805,6 @@ mod tests {
         let tools_factory = tools::composition::TestCatalogExecutionFactory::empty();
         let tool_catalog: Arc<dyn tools::ToolCatalogPort> = tools_factory.catalog_port();
         let tool_execution: Arc<dyn tools::ToolExecutionPort> = tools_factory.execution();
-        let tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort> =
-            tools_factory.binding();
         let reflection_history: Arc<dyn ReflectionHistoryStore> = Arc::new(FakeReflectionHistory);
         let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
         let hook_runner: Arc<dyn HookPort> = Arc::new(FakeHook);
@@ -842,13 +836,15 @@ mod tests {
             crate::application::run::context_factory::RuntimeContextFactory::new(
                 tool_catalog.clone(),
                 tool_execution.clone(),
-                tool_context_binding.clone(),
                 policy.clone(),
                 reflection_history.clone(),
                 task_access.clone(),
                 hook_runner.clone(),
             ),
         );
+
+        let skill_wiring = tools::composition::wire_skills();
+        let initial_skill_snapshot = tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
 
         SessionRuntime::new(
             Arc::new(std::sync::RwLock::new(
@@ -890,7 +886,8 @@ mod tests {
             String::new(),
             String::new(),
             String::new(),
-            std::collections::HashMap::new(),
+            skill_wiring.catalog(),
+            initial_skill_snapshot,
             share::config::MemoryConfig::default(),
             200_000,
             "en".to_string(),
@@ -923,7 +920,7 @@ mod tests {
 
         // SessionRuntime has prompt bootstrap fields.
         let _system_blocks = &shell.system_blocks;
-        let _skills_map = &shell.skills_map;
+        let _skill_snapshot = &shell.initial_skill_snapshot;
         let _initial_git = &shell.initial_git_context;
 
         // SessionRuntime has model switch fields.
@@ -1243,14 +1240,13 @@ mod tests {
             RuntimeToolAssemblyDependencies::new(
                 tools.catalog_port(),
                 skill_wiring.catalog(),
-                skill_wiring.materializer(),
                 tool_result_materializer,
                 active_run,
             ),
             initial_provider,
             SessionBootstrapAssembly::new(root.clone(), 8192, true, false, None),
             PromptAssembly::new(Vec::new(), String::new(), String::new()),
-            SkillBootstrapAssembly::new(std::collections::HashMap::new()),
+            SkillBootstrapAssembly::new(tools::SkillCatalogSnapshot::from_descriptors(Vec::new())),
             crate::application::client::bootstrap::AgentRunnerAssembly {
                 runner: Arc::new(NoopRunner),
                 parent_context_source:
@@ -1264,7 +1260,6 @@ mod tests {
                     crate::application::run::context_factory::RuntimeContextFactory::new(
                         tools.catalog_port(),
                         tools.execution(),
-                        tools.binding(),
                         policy,
                         Arc::new(TestReflectionHistory),
                         task_wiring.access(),

@@ -22,7 +22,7 @@ use tools::ToolOutcome;
 pub(crate) async fn execute_agent_calls<S>(
     context: &RuntimeTurnContext,
     agent_approved: &[PreparedToolCall],
-    agent: &crate::application::subagent::Agent,
+    agent: &crate::application::tool::agent::Agent,
     agent_ctx: &ToolExecutionContext,
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
@@ -105,7 +105,7 @@ async fn execute_one_agent<S>(
     call: ToolCall,
     sink: S,
     hook_port: Arc<dyn HookPort>,
-    agent: &crate::application::subagent::Agent,
+    agent: &crate::application::tool::agent::Agent,
     ag_ctx: &mut ToolExecutionContext,
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
     workspace_root: &std::path::Path,
@@ -179,7 +179,7 @@ where
         step_id,
         workspace_root,
     );
-    let (effective_call, effective_authorization, _hook_context) = match hook_outcome {
+    let (effective_call, _effective_authorization, _hook_context) = match hook_outcome {
         HookDirectiveOutcome::Continue { call, context } => (call, authorization, context),
         HookDirectiveOutcome::Ready {
             call,
@@ -249,7 +249,7 @@ where
     );
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-    let prog_adapter = crate::application::runtime_context::tool_progress_sink(prog_tx);
+    let prog_adapter = crate::application::run::context::tool_progress_sink(prog_tx);
     *ag_ctx = ag_ctx.with_progress(Some(prog_adapter.clone()));
     let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
@@ -274,8 +274,8 @@ where
         }
     });
 
-    let outcome = agent
-        .execute_domain_with_ctx(&effective_call, ag_ctx, effective_authorization, step_id)
+    let execution = agent
+        .execute_one_with_ctx(&effective_call, ag_ctx, step_id)
         .await;
     let workspace = workspace_persist.snapshot();
     let _ = sink
@@ -285,10 +285,6 @@ where
             workspace,
         })
         .await;
-    let execution = ToolExecution::new(
-        &effective_call,
-        crate::application::tool::agent::runtime::legacy_outcome(outcome),
-    );
     *ag_ctx = ag_ctx.with_progress(None);
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), forward_handle).await;
 
@@ -467,19 +463,18 @@ mod tests {
                     authorization: tools::AuthorizationContext::STANDARD,
                 })
                 .collect::<Vec<_>>();
-            let agent = crate::application::subagent::Agent {
+            let agent = crate::application::tool::agent::Agent {
                 catalog: catalog.clone(),
                 execution,
+                context: crate::application::context::coordination::ContextCoordinator::new(
+                    context::adapters::isolated_context("test-session"),
+                ),
+                session_id: context::domain::SessionId::new("test-session"),
                 ctx: ctx.clone(),
                 max_tool_concurrency: 1,
                 agent_semaphore: agent_semaphore.clone(),
-                workspace_persist: crate::application::testing::workspace_persist(&ctx),
-                context: Some(
-                    crate::application::context_coordination::ContextCoordinator::new(
-                        context::adapters::isolated_context("agent-call-test"),
-                    ),
-                ),
-                session_id: context::domain::SessionId::new("agent-call-test"),
+                workspace_persist:
+                    crate::application::run::workspace_test_support::workspace_persist(&ctx),
                 runtime_cancellation: cancel.clone(),
             };
             execute_agent_calls(

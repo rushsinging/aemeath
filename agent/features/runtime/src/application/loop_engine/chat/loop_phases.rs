@@ -10,23 +10,6 @@ use config::{ConfigReader, ConfigRefreshOutcome};
 use share::config::GuidanceReloadPolicy;
 use share::message::Message;
 
-pub(crate) async fn refresh_skill_catalog<S>(
-    previous_revision: &mut String,
-    skill_catalog: &dyn tools::SkillCatalogPort,
-    query: tools::SkillQuery,
-    sink: &S,
-) where
-    S: ChatEventSink,
-{
-    let snapshot = tools::SkillCatalogSnapshot::from_descriptors(skill_catalog.list(query));
-    if snapshot.revision == *previous_revision {
-        return;
-    }
-    *previous_revision = snapshot.revision.clone();
-    sink.send_event(RuntimeStreamEvent::SkillsUpdated { snapshot })
-        .await;
-}
-
 /// Turn 边界配置变更检测与 guidance 注入。
 ///
 /// 在每个 turn 开始时轮询配置/指令/guidance 文件是否有外部修改，

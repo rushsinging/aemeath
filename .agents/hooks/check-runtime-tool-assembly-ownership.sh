@@ -48,10 +48,10 @@ else:
     else:
         if not re.search(r"\bruntime_context_factory\s*:", bootstrap):
             violations.append("agent/features/runtime/src/application/client/from_args.rs: Runtime bootstrap must consume injected RuntimeContextFactory")
-        for duplicate in ["tool_execution", "tool_context_binding"]:
+        for duplicate in ["tool_execution"]:
             if re.search(rf"\b{duplicate}\s*:", bootstrap):
                 violations.append(f"agent/features/runtime/src/application/client/from_args.rs: Runtime bootstrap must not duplicate factory-owned {duplicate}")
-        for field in ["tool_catalog", "skill_catalog", "skill_materializer", "tool_result_materializer", "active_run"]:
+        for field in ["tool_catalog", "skill_catalog", "tool_result_materializer", "active_run"]:
             if not re.search(rf"\b{field}\s*:", bootstrap):
                 violations.append(f"agent/features/runtime/src/application/client/from_args.rs: Runtime dependencies must carry injected {field}")
 
@@ -64,7 +64,7 @@ else:
         violations.append("agent/features/runtime/src/application/run/context_factory.rs: RuntimeContextFactory must own RuntimeServices")
     constructor = re.search(r"pub fn (?:new|with_session_wiring)\s*\((?P<params>[\s\S]*?)\)\s*->\s*Self", source)
     params = constructor.group("params") if constructor else ""
-    for field in ["tool_execution", "tool_context_binding"]:
+    for field in ["tool_execution"]:
         if not re.search(rf"\b{field}\s*:", params):
             violations.append(f"agent/features/runtime/src/application/run/context_factory.rs: RuntimeContextFactory constructor must receive {field}")
         if not re.search(rf"(?<!:)\b{field}\s*(?:,|\}})", source):
@@ -80,10 +80,8 @@ else:
             break
     factory_call = re.search(r"RuntimeContextFactory::(?:new|with_session_wiring)\s*\((?P<args>[\s\S]*?)\)\s*\)", source)
     factory_args = factory_call.group("args") if factory_call else ""
-    for field in ["execution", "binding"]:
-        if not re.search(rf"tool_assembly\.{field}(?:\.clone\(\))?", factory_args):
-            violations.append(f"agent/composition/src/runtime.rs: Composition must inject Tool {field} into RuntimeContextFactory")
-
+    if not re.search(r"tool_assembly\.execution(?:\.clone\(\))?", factory_args):
+        violations.append("agent/composition/src/runtime.rs: Composition must inject Tool execution into RuntimeContextFactory")
 if violations:
     print(json.dumps({"decision": "block", "reason": "Runtime Tool assembly ownership guard FAILED:\n" + "\n".join(violations)}, ensure_ascii=False))
     sys.exit(2)

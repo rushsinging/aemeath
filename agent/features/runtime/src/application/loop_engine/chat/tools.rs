@@ -12,7 +12,6 @@ use hook::{HookInvocation, HookPort, PermissionInput, PostToolUseFailureInput, P
 use sdk::ids::ToolCallId;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tools::ToolExecutionPort;
 use tools::{ToolOutcome, ToolSuspension};
 
 /// Result of a tool execution round.
@@ -32,7 +31,6 @@ pub(crate) struct ToolRoundResult {
 pub(crate) async fn execute_tool_round<S>(
     context: &RuntimeTurnContext,
     tool_calls: &[ToolCall],
-    tool_execution: &Arc<dyn ToolExecutionPort>,
     catalog: &tools::ToolCatalogSnapshot,
     policy: &dyn policy::PolicyPort,
     run_id: &sdk::RunId,
@@ -85,13 +83,9 @@ where
         .filter(|prepared| prepared.call.name == "AskUserQuestion")
     {
         let call = &prepared.call;
-        let mut input = call.input.clone();
-        tools::strip_runtime_meta(&mut input);
-        let invocation =
-            tools::ToolInvocation::new(call.name.as_str(), input, agent.ctx.scope().clone())
-                .with_authorization(prepared.authorization);
-        match tool_execution
-            .execute(invocation, agent.ctx.cancellation().as_ref())
+        let tool_ctx = agent.ctx.with_authorization(prepared.authorization);
+        match agent
+            .execute_one_outcome_with_ctx(call, &tool_ctx, step_id)
             .await
         {
             tools::ToolExecutionOutcome::Suspended(suspension) => {
@@ -133,7 +127,7 @@ where
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,
-        tool_execution,
+        agent,
         &agent.ctx,
         &agent.agent_semaphore,
         &agent.workspace_persist,
@@ -376,7 +370,6 @@ mod tests {
     use serde_json::Value;
     use share::message::ContentBlock;
     use std::sync::{Arc, Mutex};
-    use tokio_util::sync::CancellationToken;
     use tools::ToolOutcome;
     use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
@@ -388,7 +381,7 @@ mod tests {
         async fn dispatch(
             &self,
             _invocation: HookInvocation,
-            _cancellation: &CancellationToken,
+            _cancellation: &dyn hook::CancellationSignal,
         ) -> HookOutcome {
             HookOutcome::proceed()
         }
@@ -496,12 +489,10 @@ mod tests {
         let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
         let call = lifecycle_call(0);
-        let ports = registry.build(agent.ctx.clone());
 
         let result = execute_tool_round(
             &context,
             std::slice::from_ref(&call),
-            &ports.execution(),
             &agent.catalog,
             &policy::AllowAllPolicy,
             &sdk::RunId::new_v7(),
@@ -546,12 +537,9 @@ mod tests {
             .map(|call| (call, ToolGuardDecision::Allow))
             .collect::<Vec<_>>();
 
-        let ports = registry.build(agent.ctx.clone());
-        let execution_port = ports.execution();
         let _ = execute_tool_round(
             &context,
             &calls,
-            &execution_port,
             &agent.catalog,
             &policy::AllowAllPolicy,
             &sdk::RunId::new_v7(),

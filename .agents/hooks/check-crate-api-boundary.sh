@@ -189,7 +189,7 @@ ROOT_ACCESS_ALLOW = {
     # guard-registry:policy.hook.crate-root-facade
     "hook": {
         "Dispatcher", "MAX_ATTEMPTS", "classify_directive", "ClassifyError", "HookClass",
-        "HookCommand", "HookDispatchContext", "HookDirective",
+        "HookCommand", "HookDispatchContext", "HookDirective", "CancellationSignal",
         "HookDisplayMessage", "HookDisplayMessageKind", "HookExecution",
         "HookExecutionStatus", "HookFailurePolicy", "HookInvocation", "HookMatcher",
         "HookOutcome", "HookPoint", "HookPointMetadata", "HookPort", "HookReason",

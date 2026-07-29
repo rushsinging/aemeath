@@ -123,7 +123,7 @@ async fn call_provider(
     let request = InvocationRequest {
         model: invocation.model.clone(),
         cancellation: cancel.clone(),
-        messages: vec![share::message::Message::user(prompt)],
+        messages: vec![share::message::Message::user(prompt)].into(),
         system: vec![RequestSystemBlock::Text(
             invocation.system_prompt_text.to_string(),
         )],

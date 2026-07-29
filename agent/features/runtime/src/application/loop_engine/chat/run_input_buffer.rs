@@ -65,9 +65,6 @@ pub(crate) enum BufferDrain {
 #[derive(Debug)]
 pub(crate) struct RunInputBuffer {
     events: VecDeque<ChatInputEvent>,
-    /// User-facing receipts for the most recently drained batch. Model inputs are returned as
-    /// `LoopInput`; these messages remain ordinary UserMessages for `UserMessagesAdopted`.
-    drained_adopted: Vec<(sdk::InputId, share::message::Message)>,
     sealed: bool,
     /// Current expected epoch for the next `drain_or_seal` call.
     current_epoch: DrainEpoch,
@@ -91,7 +88,6 @@ impl RunInputBuffer {
     pub(crate) fn new() -> Self {
         Self {
             events: VecDeque::new(),
-            drained_adopted: Vec::new(),
             sealed: false,
             current_epoch: DrainEpoch(0),
             sealed_epoch: None,
@@ -164,19 +160,12 @@ impl RunInputBuffer {
     /// BEFORE the seal decision.
     pub(crate) fn drain_user_inputs(&mut self) -> Vec<LoopInput> {
         let mut inputs = Vec::new();
-        let mut adopted = Vec::new();
         let mut retained = VecDeque::new();
         while let Some(event) = self.events.pop_front() {
             match event {
                 ChatInputEvent::UserMessage {
                     id, text, images, ..
                 } => {
-                    let message = if images.is_empty() {
-                        share::message::Message::user(text.clone())
-                    } else {
-                        super::input_gate::user_message_with_images(text.clone(), images.clone())
-                    };
-                    adopted.push((id.clone(), message));
                     inputs.push(LoopInput {
                         text,
                         input_id: Some(id),
@@ -184,12 +173,10 @@ impl RunInputBuffer {
                     });
                 }
                 ChatInputEvent::SkillRequest(request) => {
-                    adopted.push((
-                        request.input_id.clone(),
-                        share::message::Message::user(request.raw_input.clone()),
-                    ));
                     inputs.push(LoopInput {
-                        text: crate::application::loop_engine::format_skill_request(&request, "en"),
+                        text: crate::application::loop_engine::input::format_skill_request(
+                            &request, "en",
+                        ),
                         input_id: Some(request.input_id),
                         images: Vec::new(),
                     });
@@ -197,13 +184,8 @@ impl RunInputBuffer {
                 other => retained.push_back(other),
             }
         }
-        self.drained_adopted.extend(adopted);
         self.events = retained;
         inputs
-    }
-
-    pub(crate) fn take_drained_adopted(&mut self) -> Vec<(sdk::InputId, share::message::Message)> {
-        std::mem::take(&mut self.drained_adopted)
     }
 
     // ── internal continuation ──────────────────────────────────────────

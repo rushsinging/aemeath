@@ -156,6 +156,10 @@ pub(crate) fn make_agent(
     Agent {
         catalog,
         execution: runtime_context.tool_execution(),
+        context: crate::application::context::coordination::ContextCoordinator::new(
+            runtime_context.context(),
+        ),
+        session_id: context::domain::SessionId::new(session_id),
         ctx: tools::ToolExecutionContext::new(
             tools::ExecutionScope::builder(
                 run_id.to_string(),
@@ -478,7 +482,7 @@ where
     async fn on_window(&mut self, execution: &RunExecutionState) {
         if let Some(window) = execution.context_window() {
             self.task_reminder_state
-                .update_from_messages(execution.turn_count() as u64, &window.messages);
+                .update_from_messages(execution.turn_count() as u64, window.messages.iter());
         }
     }
 

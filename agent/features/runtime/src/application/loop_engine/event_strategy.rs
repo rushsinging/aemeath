@@ -94,6 +94,7 @@ impl ChatStreamEventObserver<'_> {
         self.sink
             .send_event(RuntimeStreamEvent::Cancelled {
                 context: self.turn_context.clone(),
+                duration: self.started_at.elapsed(),
             })
             .await;
     }

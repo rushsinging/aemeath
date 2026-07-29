@@ -98,6 +98,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             run_id,
             parent_run_id,
             result,
+            ..
         } => ChatEvent::RunCompleted {
             run_id,
             parent_run_id,
@@ -401,11 +402,13 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::RunCancelled { run_id } => {
             ChatEvent::RunCancelled { run_id }
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::Cancelled { context } => {
-            ChatEvent::Cancelled {
-                context: turn_context_to_sdk(context),
-            }
-        }
+        crate::application::loop_engine::chat::RuntimeStreamEvent::Cancelled {
+            context,
+            duration,
+        } => ChatEvent::Cancelled {
+            context: turn_context_to_sdk(context),
+            duration_ms: duration.as_millis() as u64,
+        },
         crate::application::loop_engine::chat::RuntimeStreamEvent::LiveTps(tps) => {
             ChatEvent::LiveTps(tps)
         }
@@ -434,6 +437,11 @@ pub(crate) fn map_stream_event(
             tool_id,
             event: project_agent_progress_event(event),
         },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::SkillsUpdated { snapshot } => {
+            ChatEvent::SkillsUpdated {
+                event: crate::application::client::skill_snapshot_to_sdk(snapshot),
+            }
+        }
         crate::application::loop_engine::chat::RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base,
             workspace_root,
@@ -513,6 +521,10 @@ pub(crate) fn map_stream_event(
                         .into_iter()
                         .map(crate::application::client::message_to_sdk)
                         .collect(),
+                    finalize_cause: step
+                        .finalize_cause
+                        .map(crate::application::client::map_finalize_cause_to_sdk),
+                    duration_ms: step.duration_ms,
                 })
                 .collect(),
             session_id,

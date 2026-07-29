@@ -11,6 +11,8 @@ fn session_resume_mapping_preserves_context_run_step_boundaries() {
             run_id: "run-1".into(),
             step_id: "step-1".into(),
             messages: vec![share::message::Message::user("hello")],
+            finalize_cause: None,
+            duration_ms: None,
         }],
         session_id: "session-1".into(),
         created_at: 0,

@@ -298,7 +298,7 @@ where
                 added_events.push(ChatInputEvent::SkillRequest(request.clone()));
                 added.push(build_user_message(
                     request.input_id.clone(),
-                    crate::application::loop_engine::format_skill_request(&request, "en"),
+                    crate::application::loop_engine::input::format_skill_request(&request, "en"),
                     Vec::new(),
                 ));
                 appended_user_messages += 1;

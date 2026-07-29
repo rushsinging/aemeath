@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 use crate::application::client::RuntimeContextAssemblyError;
 use crate::application::interaction::port::InteractionBridge;
@@ -586,7 +587,7 @@ impl HookPort for RecordingHook {
     async fn dispatch(
         &self,
         invocation: HookInvocation,
-        _cancellation: &CancellationToken,
+        _cancellation: &dyn hook::CancellationSignal,
     ) -> HookOutcome {
         self.points
             .lock()

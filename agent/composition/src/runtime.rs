@@ -21,7 +21,6 @@ impl tools::MemoryPortSource for WiringMemoryPortSource {
 struct RuntimeToolAssembly {
     catalog: Arc<dyn tools::ToolCatalogPort>,
     execution: Arc<dyn tools::ToolExecutionPort>,
-    binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     tool_result_materializer: Arc<runtime::ToolResultMaterializer>,
     active_run: Arc<runtime::ActiveRunRegistry>,
 }
@@ -53,7 +52,6 @@ fn wire_runtime_tool_assembly(
     Ok(RuntimeToolAssembly {
         catalog: tools.catalog(),
         execution: tools.execution(),
-        binding: tools.binding(),
         tool_result_materializer: Arc::new(runtime::ToolResultMaterializer::new(
             blobs,
             runtime::ToolResultMaterializationPolicy::new(
@@ -152,11 +150,10 @@ pub(crate) async fn from_args_with_gateways(
     )?;
 
     // #1248 Task 3: Construct RuntimeContextFactory via its narrow crate-root
-    // entry — seven explicit port parameters, no opaque RuntimeServices bag.
+    // entry — six explicit port parameters, no opaque RuntimeServices bag.
     let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
         tool_assembly.catalog.clone(),
         tool_assembly.execution.clone(),
-        tool_assembly.binding.clone(),
         gateways.policy.clone(),
         reflection_history.clone(),
         task_wiring.access(),
@@ -274,39 +271,9 @@ pub(crate) async fn from_args_with_gateways(
         snapshot.skills().dirs.clone(),
         available_tools,
     );
-    let descriptors = skill_catalog.list(skill_query.clone());
-    let materialized = skill_materializer
-        .materialize_available(tools::SkillMaterializationQuery::new(
-            skill_query.project_root,
-            skill_query.extra_dirs,
-            skill_query.available_tools,
-        ))
-        .await
-        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let fragments = materialized
-        .fragments()
-        .iter()
-        .map(|fragment| (fragment.stable_key(), fragment))
-        .collect::<std::collections::HashMap<_, _>>();
+    let descriptors = skill_catalog.list(skill_query);
     let skills = runtime::SkillBootstrapAssembly::new(
-        descriptors
-            .into_iter()
-            .filter_map(|descriptor| {
-                let fragment = fragments.get(descriptor.name())?;
-                Some((
-                    descriptor.name().to_string(),
-                    sdk::SkillView {
-                        name: descriptor.name().to_string(),
-                        aliases: descriptor.aliases().to_vec(),
-                        slash_command: descriptor.slash_command().map(str::to_string),
-                        slash_aliases: descriptor.slash_aliases().to_vec(),
-                        description: Some(descriptor.description().to_string()),
-                        content: fragment.content().to_string(),
-                        source: Some(descriptor.source().path.clone()),
-                    },
-                ))
-            })
-            .collect(),
+        tools::SkillCatalogSnapshot::from_descriptors(descriptors),
     );
 
     let (max_tool_concurrency, max_agent_concurrency) = runtime::resolve_concurrency_limits(
@@ -321,7 +288,7 @@ pub(crate) async fn from_args_with_gateways(
         Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency)),
         tool_assembly.tool_result_materializer.clone(),
         workspace.clone(),
-        skill_materializer.clone(),
+        skill_catalog.clone(),
         runtime::ParentRunContextSource::new(),
         runtime_context_factory.clone(),
     );
@@ -336,7 +303,6 @@ pub(crate) async fn from_args_with_gateways(
         runtime::RuntimeToolAssemblyDependencies::new(
             tool_assembly.catalog,
             skill_catalog,
-            skill_loader,
             tool_assembly.tool_result_materializer,
             tool_assembly.active_run,
         ),

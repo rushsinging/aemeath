@@ -80,7 +80,8 @@ fn window_with(messages: Vec<Message>) -> ContextWindow {
             cacheable: true,
             cache_break: true,
         }],
-        messages,
+        messages: messages.into(),
+        invocation_reminder: None,
         tool_schemas: vec![],
         token_estimation: TokenBudget::default(),
         compaction_decision: CompactionDecision {
@@ -269,8 +270,6 @@ impl CompactHarness {
         let tool_catalog =
             ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port();
         let tool_execution = ::tools::composition::TestCatalogExecutionFactory::empty().execution();
-        let tool_context_binding =
-            ::tools::composition::TestCatalogExecutionFactory::empty().binding();
         let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
         let reasoning = Arc::new(std::sync::Mutex::new(share::reasoning::ReasoningLevel::Off));
         let runtime_context = {
@@ -283,7 +282,6 @@ impl CompactHarness {
             let factory = RuntimeContextFactory::new(
                 tool_catalog.clone(),
                 tool_execution.clone(),
-                tool_context_binding.clone(),
                 Arc::new(policy::AllowAllPolicy),
                 reflection_history.clone(),
                 task_access.clone(),

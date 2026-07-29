@@ -107,7 +107,7 @@ pub fn derive_sub_run(
     parent_run_id: crate::domain::agent_run::RunId,
     request: &SubRunRequest,
     provider_factory: Arc<dyn crate::ports::ProviderFactory>,
-    skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+    skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     runtime_context_factory: Arc<RuntimeContextFactory>,
 ) -> Result<DerivedRun, crate::application::client::RuntimeContextAssemblyError> {
     use crate::application::client::RuntimeContextAssemblyError;
@@ -148,9 +148,8 @@ pub fn derive_sub_run(
             .map_err(|error| RuntimeContextAssemblyError::SubDerivationFailed {
                 reason: error.to_string(),
             })?;
-    let runtime_context_factory = Arc::new(
-        runtime_context_factory.with_derived_bindings(provider_factory, skill_materializer),
-    );
+    let runtime_context_factory =
+        Arc::new(runtime_context_factory.with_derived_bindings(provider_factory, skill_catalog));
     let run_factory = crate::application::run::factory::RunFactory::for_parent(
         runtime_context_factory,
         parent_bindings,
@@ -222,7 +221,7 @@ impl AgentRunner for CliAgentRunner {
             parent_frame.run_id.clone(),
             &sub_request,
             self.factory.clone(),
-            self.skill_materializer.clone(),
+            self.skill_catalog.clone(),
             self.runtime_context_factory.clone(),
         ) {
             Ok(d) => d,
@@ -410,6 +409,10 @@ impl AgentRunner for CliAgentRunner {
             let agent = Agent {
                 catalog: sub_catalog,
                 execution: derived.instance.context().tool_execution(),
+                context: crate::application::context::coordination::ContextCoordinator::new(
+                    derived.instance.context().context(),
+                ),
+                session_id: context::domain::SessionId::new(&derived.session_id),
                 ctx: sub_ctx,
                 max_tool_concurrency: self.max_tool_concurrency,
                 agent_semaphore: self.agent_semaphore.clone(),
@@ -456,7 +459,6 @@ impl AgentRunner for CliAgentRunner {
             let run_id = derived.instance.run().id().clone();
             let session_id = derived.session_id;
             let runtime_context = derived.instance.context().clone();
-            let execution_scope = agent.ctx.scope().clone();
             let tool_execution_context = agent.ctx.clone();
             let tool_workspace_root = agent.ctx.workspace_read().current_workspace_root();
             let turn_context = crate::application::loop_engine::chat::RuntimeTurnContext::new(
@@ -507,7 +509,7 @@ impl AgentRunner for CliAgentRunner {
                 crate::application::loop_engine::run_services::RuntimeInteraction::new(
                     crate::application::loop_engine::run_services::ProgressInteractionPublisher {
                         runtime_context: &runtime_context,
-                        execution_scope,
+                        tool_context: tool_execution_context.clone(),
                         session_id: &session_id,
                         materializer: self.tool_result_materializer.as_ref(),
                         progress: progress.as_ref(),

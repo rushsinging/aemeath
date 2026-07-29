@@ -27,8 +27,8 @@ use hook::HookPort;
 use memory::api::ReflectionHistoryStore;
 use task::TaskAccess;
 use tools::{
-    RegistryScopeName, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot,
-    ToolExecutionContextBindingPort, ToolExecutionPort, ToolProfileName,
+    RegistryScopeName, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionPort,
+    ToolProfileName,
 };
 
 // ── Factory-owned immutable services ──
@@ -113,19 +113,18 @@ struct RunCreationResources {
 pub struct RuntimeContextFactory {
     services: RuntimeServices,
     provider_factory: Option<Arc<dyn crate::ports::ProviderFactory>>,
-    skill_materializer: Option<Arc<dyn tools::SkillMaterializationPort>>,
+    skill_catalog: Option<Arc<dyn tools::SkillCatalogPort>>,
 }
 
 impl RuntimeContextFactory {
     /// #1248 Task 3: Narrow crate-root construction entry.
     ///
-    /// Accepts seven explicit session-scoped port parameters — no opaque
+    /// Accepts six explicit session-scoped port parameters — no opaque
     /// service bag. This is the only constructor callable from outside the
     /// runtime crate.
     pub fn new(
         tool_catalog: Arc<dyn ToolCatalogPort>,
         tool_execution: Arc<dyn ToolExecutionPort>,
-        tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
         policy: Arc<dyn PolicyPort>,
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
@@ -134,7 +133,6 @@ impl RuntimeContextFactory {
         Self::from_services(
             tool_catalog,
             tool_execution,
-            tool_context_binding,
             policy,
             reflection_history,
             task,
@@ -146,7 +144,6 @@ impl RuntimeContextFactory {
     fn from_services(
         tool_catalog: Arc<dyn ToolCatalogPort>,
         tool_execution: Arc<dyn ToolExecutionPort>,
-        tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
         policy: Arc<dyn PolicyPort>,
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
@@ -156,26 +153,25 @@ impl RuntimeContextFactory {
             services: RuntimeServices {
                 tool_catalog,
                 tool_execution,
-                tool_context_binding,
                 policy,
                 reflection_history,
                 task,
                 hooks,
             },
             provider_factory: None,
-            skill_materializer: None,
+            skill_catalog: None,
         }
     }
 
     pub fn with_derived_bindings(
         &self,
         provider_factory: Arc<dyn crate::ports::ProviderFactory>,
-        skill_materializer: Arc<dyn tools::SkillMaterializationPort>,
+        skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     ) -> Self {
         Self {
             services: self.services.clone(),
             provider_factory: Some(provider_factory),
-            skill_materializer: Some(skill_materializer),
+            skill_catalog: Some(skill_catalog),
         }
     }
 
@@ -399,15 +395,15 @@ impl RuntimeContextFactory {
             .access
             .as_ref()
             .ok_or(RunCreationError::ContextAssembly)?;
-        let skill_materializer = self
-            .skill_materializer
+        let skill_catalog = self
+            .skill_catalog
             .as_ref()
             .ok_or(RunCreationError::ContextAssembly)?
             .clone();
         Ok(ContextSelection {
-            port: context::api::isolated_context_with_skill(
+            port: context::isolated_context_with_skill(
                 session.snapshot.session_id(),
-                skill_materializer,
+                skill_catalog,
                 Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
                     workspace.views().read(),
                 )),
@@ -646,7 +642,7 @@ impl RuntimeContextFactory {
                 ..self.services.clone()
             },
             provider_factory: self.provider_factory.clone(),
-            skill_materializer: self.skill_materializer.clone(),
+            skill_catalog: self.skill_catalog.clone(),
         }
     }
 }
