@@ -59,6 +59,9 @@ impl ExecutionAdapter {
                 "tool capabilities are not authorized by the selected profile",
             );
         }
+        if !context.selection().allows(invocation.tool_name.as_str()) {
+            return unavailable(&invocation);
+        }
         let tool = match self
             .backing
             .registry()

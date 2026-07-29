@@ -385,9 +385,10 @@ pub async fn from_args_with_workspace(
 
     // 11. Tooling
     let available_tools = tool_catalog
-        .snapshot(
+        .snapshot_for_run(
             &tools::RegistryScopeName::new("main"),
             &tools::ToolProfileName::new("main-full"),
+            &snapshot.tool_selection(),
         )
         .map_err(|error| SdkError::Init(error.to_string()))?
         .tools

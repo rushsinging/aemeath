@@ -38,6 +38,19 @@ pub trait ToolCatalogPort: Send + Sync {
         scope: &RegistryScopeName,
         profile: &ToolProfileName,
     ) -> Result<ToolCatalogSnapshot, ToolCatalogError>;
+
+    /// Projects a run-scoped catalog using the frozen Config tool selection.
+    /// Implementations share the same filtering semantics through
+    /// [`ToolCatalogSnapshot::selected`].
+    fn snapshot_for_run(
+        &self,
+        scope: &RegistryScopeName,
+        profile: &ToolProfileName,
+        selection: &share::config::ToolSelection,
+    ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
+        self.snapshot(scope, profile)
+            .map(|snapshot| snapshot.selected(selection))
+    }
 }
 
 /// Tool 执行端口。

@@ -381,9 +381,10 @@ where
             .unwrap_or_default();
         let raw_tool_schemas = self
             .tool_catalog()
-            .snapshot(
+            .snapshot_for_run(
                 &tools::RegistryScopeName::new("main"),
                 &tools::ToolProfileName::new("main-full"),
+                self.run_config().tool_selection(),
             )
             .map(|snapshot| snapshot.model_schemas())
             .unwrap_or_default();
@@ -497,11 +498,13 @@ where
         session_id: &str,
         context_port: Arc<dyn context::ports::ContextPort>,
         run_id: &sdk::RunId,
+        tool_selection: &share::config::ToolSelection,
     ) -> Agent {
         let catalog = tool_catalog
-            .snapshot(
+            .snapshot_for_run(
                 &tools::RegistryScopeName::new("main"),
                 &tools::ToolProfileName::new("main-full"),
+                tool_selection,
             )
             .unwrap_or_else(|_| tools::ToolCatalogSnapshot::new("main", "main-full", Vec::new()));
         let available_tools = catalog
@@ -510,7 +513,7 @@ where
             .map(|descriptor| descriptor.name.as_str().to_string())
             .collect();
         Agent {
-            catalog,
+            catalog: catalog.clone(),
             execution: tool_execution.clone(),
             context: Some(ContextCoordinator::new(context_port)),
             session_id: context::domain::SessionId::new(session_id),
@@ -538,12 +541,14 @@ where
                     extra_dirs: skill_extra_dirs.to_vec(),
                     available_tools,
                 })
+                .with_catalog(Some(Arc::new(catalog.clone())))
                 .with_user_agent(user_agent)
                 .with_memory_context(
                     Some(session_id.to_string()),
                     Some(session_reminders.clone()),
                 )
-                .with_agent(agent_runner.clone()),
+                .with_agent(agent_runner.clone())
+                .with_selection(tool_selection.clone()),
             ),
             max_tool_concurrency,
             agent_semaphore: agent_semaphore.clone(),
@@ -814,12 +819,12 @@ where
             self.session_id,
             self.runtime_context.context(),
             &self.run_id,
+            self.run_config().tool_selection(),
         );
         let sink = self.runtime_context.event_sink();
         let round_result = execute_tool_round(
             &self.turn_context,
             &raw_calls,
-            self.tool_catalog(),
             self.tool_execution(),
             self.policy(),
             run_id,
@@ -1577,6 +1582,7 @@ where
                             self.session_id,
                             self.runtime_context.context(),
                             &self.run_id,
+                            self.run_config().tool_selection(),
                         )
                         .execute_domain_with_ctx(
                             &crate::application::subagent::ToolCall {

@@ -12,7 +12,7 @@ use hook::{HookInvocation, HookPort, PermissionInput, PostToolUseFailureInput, P
 use sdk::ids::ToolCallId;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tools::{ToolCatalogPort, ToolExecutionPort};
+use tools::ToolExecutionPort;
 use tools::{ToolOutcome, ToolSuspension};
 
 /// Result of a tool execution round.
@@ -32,7 +32,6 @@ pub(crate) struct ToolRoundResult {
 pub(crate) async fn execute_tool_round<S>(
     context: &RuntimeTurnContext,
     tool_calls: &[ToolCall],
-    tool_catalog: &Arc<dyn ToolCatalogPort>,
     _tool_execution: &Arc<dyn ToolExecutionPort>,
     policy: &dyn policy::PolicyPort,
     run_id: &sdk::RunId,
@@ -48,29 +47,7 @@ pub(crate) async fn execute_tool_round<S>(
 where
     S: ChatEventSink,
 {
-    let catalog = match tool_catalog.snapshot(
-        &tools::RegistryScopeName::new("main"),
-        &tools::ToolProfileName::new("main-full"),
-    ) {
-        Ok(catalog) => catalog,
-        Err(error) => {
-            log::error!(target: crate::LOG_TARGET, "tool catalog snapshot failed: {error}");
-            return ToolRoundResult {
-                results: tool_calls
-                    .iter()
-                    .map(|call| {
-                        ToolExecution::new(
-                            call,
-                            ToolOutcome::error(format!("tool catalog unavailable: {error}")),
-                        )
-                    })
-                    .collect(),
-                fuse_bypassed: Vec::new(),
-                suspensions: Vec::new(),
-                approvals: Vec::new(),
-            };
-        }
-    };
+    let catalog = agent.catalog.clone();
     let prepared = prepare_tool_round(
         guarded_calls,
         &catalog,
@@ -538,7 +515,6 @@ mod tests {
         let result = execute_tool_round(
             &context,
             std::slice::from_ref(&call),
-            &ports.catalog_port(),
             &ports.execution(),
             &policy::AllowAllPolicy,
             &sdk::RunId::new_v7(),
@@ -584,12 +560,10 @@ mod tests {
             .collect::<Vec<_>>();
 
         let ports = registry.build(agent.ctx.clone());
-        let catalog_port = ports.catalog_port();
         let execution_port = ports.execution();
         let _ = execute_tool_round(
             &context,
             &calls,
-            &catalog_port,
             &execution_port,
             &policy::AllowAllPolicy,
             &sdk::RunId::new_v7(),

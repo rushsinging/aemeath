@@ -528,12 +528,14 @@ where
                     &segment_id,
                 )
                 .await;
+                let committed_config = config_reader.committed_snapshot();
                 let available_tools = shell
                     .runtime_context_factory
                     .tool_catalog()
-                    .snapshot(
+                    .snapshot_for_run(
                         &tools::RegistryScopeName::new("main"),
                         &tools::ToolProfileName::new("main-full"),
+                        &committed_config.tool_selection(),
                     )
                     .map(|snapshot| {
                         snapshot
@@ -545,7 +547,7 @@ where
                     .unwrap_or_default();
                 let skill_query = tools::SkillQuery::new(
                     cwd.clone(),
-                    config_reader.committed_snapshot().skills().dirs.clone(),
+                    committed_config.skills().dirs.clone(),
                     available_tools,
                 );
                 refresh_skill_catalog(
