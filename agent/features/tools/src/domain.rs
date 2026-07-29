@@ -10,6 +10,8 @@ pub mod context;
 pub mod memory_source;
 pub mod ports;
 pub mod published_language;
+#[cfg(test)]
+mod published_language_tests;
 pub mod resources;
 pub mod schema_validator;
 #[cfg(test)]
@@ -47,14 +49,12 @@ pub use context::{
     ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
 pub use memory_source::MemoryPortSource;
-pub use ports::{
-    ToolCatalogPort, ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort,
-    ToolExecutionPort,
-};
+pub use ports::{ToolCatalogPort, ToolExecutionPort};
 pub use published_language::{
-    CancellationDeclaration, ConcurrencyDeclaration, InputSafetyDeclaration, RegistryScopeName,
-    ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogSnapshot, ToolDescriptor,
-    ToolErrorKind, ToolInvocation, ToolName, ToolOutcome as ToolExecutionOutcome, ToolProfileName,
+    CancellationDeclaration, CleanupConfirmation, ConcurrencyDeclaration, InputSafetyDeclaration,
+    RegistryScopeName, ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogSnapshot,
+    ToolDescriptor, ToolErrorKind, ToolInvocation, ToolName, ToolOutcome as ToolExecutionOutcome,
+    ToolProfileName, ToolTerminalDetails,
 };
 pub use resources::CatalogQuery;
 pub use scope_profile::{ProfileExpansionError, ToolProfile};

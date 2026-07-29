@@ -26,6 +26,7 @@ use crate::ports::{
     ContextPort, ContextPortError, ContextRequest, ContextWindow, FinalizeCause,
     ManualCompactRequest, SessionId, SessionRevision, StepReceipt,
 };
+use context::domain::{ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt};
 use sdk::RunStepId;
 use sha2::{Digest, Sha256};
 use share::message::Message;
@@ -121,6 +122,13 @@ impl ContextCoordinator {
             .await
     }
 
+    pub(crate) async fn advance_tool_receipt(
+        &self,
+        mutation: ToolReceiptMutation,
+    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        self.port.advance_tool_receipt(mutation).await
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn append_finalized(
         &self,
@@ -128,6 +136,7 @@ impl ContextCoordinator {
         step_id: RunStepId,
         expected_revision: SessionRevision,
         finalize_cause: FinalizeCause,
+        duration_ms: Option<u64>,
         messages: Vec<Message>,
         receipts: Vec<StepReceipt>,
         api_input_tokens: Option<u64>,
@@ -136,6 +145,7 @@ impl ContextCoordinator {
             request,
             &step_id,
             finalize_cause,
+            duration_ms,
             &messages,
             &receipts,
             api_input_tokens,
@@ -148,6 +158,7 @@ impl ContextCoordinator {
                 step_id,
                 source_request_id: request.request_id.clone(),
                 finalize_cause,
+                duration_ms,
                 messages,
                 receipts,
                 api_input_tokens,
@@ -180,6 +191,7 @@ fn fingerprint(
     request: &ContextRequest,
     step_id: &RunStepId,
     finalize_cause: FinalizeCause,
+    duration_ms: Option<u64>,
     messages: &[Message],
     receipts: &[StepReceipt],
     api_input_tokens: Option<u64>,
@@ -189,6 +201,7 @@ fn fingerprint(
         request.run_id.to_string(),
         step_id.as_str(),
         format!("{finalize_cause:?}"),
+        duration_ms,
         messages,
         receipts
             .iter()

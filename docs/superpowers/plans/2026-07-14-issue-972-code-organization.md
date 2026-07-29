@@ -76,7 +76,7 @@
 - Modify: `docs/design/03-engineering/architecture-guards.md`
 - Modify: `docs/design/03-engineering/migration-governance.md`
 - Modify: `AGENTS.md`
-- Modify: `specs/project.md`
+- Modify: `specs/3.8-project.md`
 
 - [x] **Step 1: Make the Project target tree capability-first**
 
@@ -92,13 +92,13 @@
 
 - [x] **Step 4: Remove the retired concept from project instructions**
 
-  Update the Project row in `AGENTS.md` to describe workspace ownership and the git outbound port without naming or mandating the retired directory template. Reframe the existing directory constraints in `specs/project.md` as migration-period implementation constraints, preserving the runtime truth without retaining the retired architecture concept.
+  Update the Project row in `AGENTS.md` to describe workspace ownership and the git outbound port without naming or mandating the retired directory template. Reframe the existing directory constraints in `specs/3.8-project.md` as migration-period implementation constraints, preserving the runtime truth without retaining the retired architecture concept.
 
 ### Task 3.5: Resolve repository-wide active-document contradictions
 
 **Files:**
 - Modify: `README.md`
-- Modify: `specs/update.md`
+- Modify: `specs/3.12-update.md`
 - Modify: `docs/design/01-system/04-system-architecture.md`
 - Modify: `docs/design/02-modules/project/README.md`
 - Modify: `docs/design/02-modules/project/01-domain-model.md`

@@ -93,10 +93,6 @@ impl sdk::AgentClient for RecordingInteractionClient {
         sdk::InteractionCommandOutcome::Accepted
     }
 
-    fn cancel_run(&self, _run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
-        sdk::CancelRunOutcome::NotFound
-    }
-
     async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
         unreachable!("interaction effect test does not start chat")
     }

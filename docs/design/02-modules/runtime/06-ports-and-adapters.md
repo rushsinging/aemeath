@@ -14,6 +14,10 @@
 ```rust
 trait AgentClient {
     // 其他命令省略
+    fn cancel_current_run(
+        &self,
+        deadline: ControlDeadline,
+    ) -> CancelCurrentRunOutcome;
     fn cancel_run_step(
         &self,
         run_id: RunId,
@@ -48,6 +52,14 @@ trait AgentClient {
 enum ReasoningLevelOutcome {
     Accepted { requested: ReasoningLevel }, // Workflow requested 值（Config user-max clamp 已退役，#921）
     Unsupported,
+}
+
+enum CancelCurrentRunOutcome {
+    Accepted,              // Runtime 已原子选择当前 Main Run 并触发 Step/Run scope
+    AlreadyCancelling,
+    RunTerminating,
+    RunTerminal,
+    NoActiveRun,
 }
 
 enum CancelRunStepOutcome {
@@ -86,15 +98,24 @@ enum InteractionCommandOutcome {
 }
 ```
 
-- `cancel_run_step` 与 `terminate_run` 是同步、幂等、out-of-band 的控制命令，NEVER 经 `InputBuffer` 排队。
+- `cancel_current_run`、`cancel_run_step` 与 `terminate_run` 是同步、幂等、out-of-band 的控制命令，NEVER 经 `InputBuffer` 排队。
+- 前台 TUI 的 Cancel 语义固定为“取消当前 Main Run”：只调用 `cancel_current_run`，由 Runtime 原子选择当前 Main Run；TUI NEVER 因取消而缓存或等待 `RunStarted.run_id`。按 `run_id` 的接口只用于后台、远程或内部精确控制。
 - `ControlDeadline` 是 wire-only 绝对时间；Runtime 在控制边界转换到注入的 monotonic clock，嵌套 Sub **NEVER** 重新分配 5s/10s。
-- TUI 只持 `Arc<dyn AgentClient>` 或 SDK 提供的、绑定 `run_id` / `step_id` 的薄控制 handle；NEVER 持有 Runtime 实例、Run 聚合或 `CancellationToken`。
+- TUI 只持 `Arc<dyn AgentClient>`；NEVER 持有 Runtime 实例、Run 聚合、控制寻址用 `run_id` 或 `CancellationToken`。
 - `CancelRunStepOutcome::Accepted` 只确认 Step scope 已即时停止调度；完成由 `RunStepCancelled` / `RunDrainingInput` 异步确认。`TerminateRunOutcome::Accepted` 只确认 Run root scope 已触发；完成由 `RunTerminated` 确认。
 - 迁移期旧 `cancel_run` / `CancelRunOutcome` 只允许为当前 TUI 生产兼容保留；#878 原子切换后由 #879 删除，**NEVER** 作为目标 OHS 的第二套语义。
 - interaction reply / cancel 同样是同步、幂等、out-of-band command；它们只完成 Runtime-owned pending request，**NEVER** 经输入队列排队，也 **NEVER** 由 TUI 持有 channel sender。
 - SDK Published Language 的 `RunStepId`、`AgentId`、`InteractionRequestId`、`InteractionReply`、`InteractionCancelReason`、`InteractionCommandOutcome` 与 `ChatEvent::InteractionRequested` **MUST** 可序列化且不含 channel / lock / Runtime handle。#874 已建立这些强类型 identity、纯值 DTO/outcome 与纯 event projection；旧 `AskUserBatch.reply_tx` 只作为 #878 生产切换前的兼容路径存在，**NEVER** 进入新 Interaction PL。当前只要求 local adapter；远端帧、重连与 WSS 行为不在 v0.1.0 冻结。
 
 ## 2. Runtime 消费的能力契约
+
+### ToolExecutionSupervisor：唯一执行监督入口（#1440）
+
+当前生产基线中，Main/Sub 的普通 Tool、Agent Tool 与 approval continuation 最终都经 Runtime-owned `ToolExecutionSupervisor` 调用 `ToolExecutionPort`；`AskUser` 首次调用也经 supervisor，返回的 `Suspended` 由 Runtime-owned interaction continuation 继续收敛。Supervisor 从 `ExecutionScope.deadline`、Run deadline 与 `now + ToolDescriptor.timeout_secs` 选择最早 deadline，并按 `Pending → Running → terminal` 顺序调用 Context receipt mutation；Pending/Running durable 写成功后才执行 Tool。
+
+到达 deadline 或收到用户取消时，Supervisor 取消 child signal。声明 `Cooperative` 的 Tool 最多获得当前 250ms grace 让执行 future 返回；按时返回才确认 cleanup 并记录 `TimedOut`/`Cancelled`，否则记录 `CancellationUnconfirmed` 与 possible side effects。声明 `NonCooperative` 的 Tool 不因 future 被 drop 而伪报停止，直接进入未确认终态。Tool phase 一旦进入 `execute_tools`，Loop Engine 不再用通用 interrupt select 直接 drop 该 future；Step cancellation 只通过 step token 传播，必须等待 supervisor 完成 bounded cleanup、terminal receipt durable mutation 与 ToolResult 物化后，才允许 Step finalizer 提交。Run deadline 到达时也先取消 step token并等待 supervisor 收敛，再将 Run 标记为 timeout。当前 supervisor 在 Main/Sub 共享的 Agent 执行对象及普通 Tool 执行入口中按共享 Catalog、ExecutionPort、ContextCoordinator 构造；后续若将其提升为 `RuntimeContextFactory` 单点装配，必须保持这些依赖来自同一 Run snapshot。
+
+`ToolExecutionPort` 仍只负责单次 Tools 调用正确性；Policy、Hook、审批、并发、effective deadline、grace 和 receipt mutation 留在 Runtime/Context 边界。当前尚未实现 `CancellationUnconfirmed` 调用的跨 Step 同名重入门禁，也尚未把 MCP remote cancellation confirmation 建模为独立协议；这两项仍是 Target，**NEVER** 在文档或 UI 中声称未确认底层工作已经停止。
 
 ### Main/Sub RunLoop adapter 策略边界（#1382）
 

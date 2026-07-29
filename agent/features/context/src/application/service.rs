@@ -6,7 +6,7 @@ use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
     CompactRequest, CompactionDecision, ContextAppend, ContextAppendError, ContextPortError,
     ContextRequest, ContextWindow, InvocationReminder, ManualCompactRequest, SessionId,
-    SystemBlock,
+    SystemBlock, ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
@@ -205,6 +205,13 @@ impl ContextPort for ContextApplicationService {
         append: &AcceptedInputAppend,
     ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
         self.session.append_accepted_input(append).await
+    }
+
+    async fn advance_tool_receipt(
+        &self,
+        mutation: ToolReceiptMutation,
+    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        self.session.advance_tool_receipt(mutation).await
     }
 
     async fn append_and_persist(

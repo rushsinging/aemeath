@@ -414,7 +414,7 @@ pub(crate) struct OutputViewCache {
     }
 ```
 
-> 注意：原日志的 `version={}` 字段改为 `revision={}` 并新增 `rebuilt={}`，与 specs/logging.md 的 14 字段无关（这是 message 文本）。`self.view_state.output.version` 不再传入 assemble（该字段恒 0，已废用）。
+> 注意：原日志的 `version={}` 字段改为 `revision={}` 并新增 `rebuilt={}`，与 specs/3.15-logging.md 的 14 字段无关（这是 message 文本）。`self.view_state.output.version` 不再传入 assemble（该字段恒 0，已废用）。
 
 - [ ] **Step 4: 运行测试确认通过**
 

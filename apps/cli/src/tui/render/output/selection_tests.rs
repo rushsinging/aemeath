@@ -52,6 +52,7 @@ fn set_plain_lines(output: &mut OutputArea, texts: &[&str]) {
             lines: Rc::new(lines),
         }],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
 }
 
@@ -67,6 +68,7 @@ fn set_assistant_markdown(output: &mut OutputArea, text: &str, width: u16) {
     output.replace_document(RenderedDocument {
         blocks: vec![block],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
 }
 
@@ -363,6 +365,7 @@ fn test_screen_to_anchor_gutter_columns_map_to_plain_zero() {
             lines: Rc::new(vec![line]),
         }],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
     let area = Rect::new(0, 0, 20, 3);
     let mut buf = Buffer::empty(area);

@@ -13,9 +13,9 @@
 ## Required context before execution
 
 - Load root `AGENTS.md` instructions.
-- Load `specs/rust-coding.md` because all tasks edit Rust files.
-- Load `specs/tui-cli.md` because all tasks edit `apps/cli/src/**` TUI code.
-- Load `specs/bug-feature-tracking.md` because this is feature implementation work tied to issue `rushsinging/aemeath#151`.
+- Load `specs/3.2-rust-coding.md` because all tasks edit Rust files.
+- Load `specs/3.3-tui-cli.md` because all tasks edit `apps/cli/src/**` TUI code.
+- Load `specs/3.13-bug-feature-tracking.md` because this is feature implementation work tied to issue `rushsinging/aemeath#151`.
 - Work in an isolated git worktree. Do not edit the main checkout directly.
 - Keep `apps/cli/src/tui/render/output/tool_display.rs` in render. Per 049 rev.3, only nesting and general text helpers move upward; tool_display remains render-owned.
 

@@ -29,7 +29,6 @@ fn capture_when_scope_active_returns_accumulated_snapshot() {
         record_gutted_cache_width_miss();
         record_gutted_cache_depth_miss();
         record_gutted_cache_spacing_miss();
-        record_gutted_cache_marker_miss();
         record_gutted_cache_retain_evictions(3);
         42
     });
@@ -74,7 +73,6 @@ fn capture_when_scope_active_returns_accumulated_snapshot() {
     assert_eq!(snapshot.gutted_cache_width_misses, 1);
     assert_eq!(snapshot.gutted_cache_depth_misses, 1);
     assert_eq!(snapshot.gutted_cache_spacing_misses, 1);
-    assert_eq!(snapshot.gutted_cache_marker_misses, 1);
     assert_eq!(snapshot.gutted_cache_retain_evictions, 3);
 }
 

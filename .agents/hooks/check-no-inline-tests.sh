@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 检查源码文件中是否存在内嵌 #[cfg(test)] mod tests。
 #
-# 约定（specs/rust-coding.md）：测试文件 MUST 与源码分离（foo.rs ↔ foo_tests.rs），
+# 约定（specs/3.2-rust-coding.md）：测试文件 MUST 与源码分离（foo.rs ↔ foo_tests.rs），
 # 通过 #[cfg(test)] #[path = "foo_tests.rs"] mod tests; 引入。
 # 内嵌 #[cfg(test)] mod tests { ... } 让测试代码不参与 dead code 分析，
 # 无法通过"移除测试文件后 cargo build 看 unused warning"发现只在测试中引用的代码。

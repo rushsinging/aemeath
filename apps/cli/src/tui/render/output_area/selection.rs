@@ -15,8 +15,7 @@ impl super::OutputArea {
     /// 点击列 → plain 字符映射需先减去此宽度（gutter 是 chrome，不可选）。
     fn gutter_cols_for_line(&self, idx: usize) -> usize {
         self.document
-            .iter_lines()
-            .nth(idx)
+            .line_at(idx)
             .map(|line| line.gutter_cols)
             .unwrap_or(0)
     }
@@ -31,7 +30,7 @@ impl super::OutputArea {
         if let Some(rendered) = self.rendered_line_content.get(&idx) {
             return Some(rendered.clone());
         }
-        if let Some(line) = self.document.iter_lines().nth(idx) {
+        if let Some(line) = self.document.line_at(idx) {
             return Some(line.plain.clone());
         }
         let task_idx = idx - self.document.total_lines();
@@ -86,7 +85,7 @@ impl super::OutputArea {
             return None;
         }
         let (logic_idx, _, _) = self.screen_line_map.get(rel_row).copied()?;
-        let line = self.document.iter_lines().nth(logic_idx)?;
+        let line = self.document.line_at(logic_idx)?;
         let gutter = line.gutter_cols;
         let content_col = rel_col.saturating_sub(gutter);
         // gutter 不进 plain（见 RenderedLine 文档与 apply_gutter_with_frame 实现），
@@ -245,6 +244,7 @@ mod document_selection_tests {
                 ]),
             }],
             root_group_block_counts: Vec::new(),
+            block_line_ends: Vec::new(),
         });
         let view = output_selection_view_for_test((0, CharIdx::new(0)), (1, CharIdx::new(2)));
         let copied = area.selected_text_for_view(&view, &LiveStatusViewModel::default());

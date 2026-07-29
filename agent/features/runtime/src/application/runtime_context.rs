@@ -29,7 +29,7 @@ use crate::ports::{ContextPort, PolicyPort, ProviderBinding};
 use hook::HookPort;
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 use task::TaskAccess;
-use tools::{ToolCatalogPort, ToolExecutionContextBindingPort, ToolExecutionPort};
+use tools::{ToolCatalogPort, ToolExecutionPort};
 
 /// per-Run 协作式取消作用域；属于 RuntimeContext 活资源，不持久化。
 ///
@@ -77,6 +77,43 @@ impl Default for RunCancellationScope {
     fn default() -> Self {
         Self::new()
     }
+}
+
+struct ToolCancellationSignal(CancellationToken);
+
+#[async_trait::async_trait]
+impl tools::CancellationSignal for ToolCancellationSignal {
+    fn is_cancelled(&self) -> bool {
+        self.0.is_cancelled()
+    }
+
+    async fn cancelled(&self) {
+        self.0.cancelled().await
+    }
+
+    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
+        Arc::new(Self(self.0.child_token()))
+    }
+}
+
+pub(crate) fn tool_cancellation_signal(
+    token: CancellationToken,
+) -> Arc<dyn tools::CancellationSignal> {
+    Arc::new(ToolCancellationSignal(token))
+}
+
+struct ToolProgressSink(tokio::sync::mpsc::Sender<tools::AgentProgressEvent>);
+
+impl tools::ProgressSink for ToolProgressSink {
+    fn emit(&self, event: tools::AgentProgressEvent) {
+        let _ = self.0.try_send(event);
+    }
+}
+
+pub(crate) fn tool_progress_sink(
+    tx: tokio::sync::mpsc::Sender<tools::AgentProgressEvent>,
+) -> Arc<dyn tools::ProgressSink> {
+    Arc::new(ToolProgressSink(tx))
 }
 
 // ── I/O seams (#1385 Task 11) ──
@@ -226,8 +263,6 @@ pub struct RuntimeServices {
     pub tool_catalog: Arc<dyn ToolCatalogPort>,
     /// Tool BC 执行端口。
     pub tool_execution: Arc<dyn ToolExecutionPort>,
-    /// 工具执行上下文绑定（作用域守卫）。
-    pub tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
     /// Policy BC 出站端口。
     pub policy: Arc<dyn PolicyPort>,
     /// Reflection 历史存储（会话级）。
@@ -316,7 +351,6 @@ pub struct RuntimeContext {
     provider: Arc<ProviderBinding>,
     tool_catalog: Arc<dyn ToolCatalogPort>,
     tool_execution: Arc<dyn ToolExecutionPort>,
-    tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
     policy: Arc<dyn PolicyPort>,
     interaction: Arc<dyn InteractionPort>,
     memory: Arc<dyn MemoryPort>,
@@ -373,7 +407,6 @@ impl RuntimeContext {
             provider: bindings.provider,
             tool_catalog: services.tool_catalog,
             tool_execution: services.tool_execution,
-            tool_context_binding: services.tool_context_binding,
             policy: services.policy,
             interaction: bindings.interaction,
             memory: bindings.memory,
@@ -406,10 +439,6 @@ impl RuntimeContext {
     /// Tool 执行端口（生产 `tools::ToolExecutionPort`），`Arc` clone。
     pub fn tool_execution(&self) -> Arc<dyn ToolExecutionPort> {
         self.tool_execution.clone()
-    }
-    /// 工具执行上下文绑定，`Arc` clone。
-    pub fn tool_context_binding(&self) -> Arc<dyn ToolExecutionContextBindingPort> {
-        self.tool_context_binding.clone()
     }
     /// Policy 端口，`Arc` clone。
     pub fn policy(&self) -> Arc<dyn PolicyPort> {
@@ -468,10 +497,6 @@ impl RuntimeContext {
     /// Tool execution port reference.
     pub fn tool_execution_ref(&self) -> &Arc<dyn ToolExecutionPort> {
         &self.tool_execution
-    }
-    /// Tool context binding reference.
-    pub fn tool_context_binding_ref(&self) -> &Arc<dyn ToolExecutionContextBindingPort> {
-        &self.tool_context_binding
     }
     /// Policy port reference.
     pub fn policy_ref(&self) -> &Arc<dyn PolicyPort> {

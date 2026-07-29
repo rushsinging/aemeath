@@ -17,8 +17,8 @@
 
 - `docs/design/02-modules/task/01-domain-model.md`：Batch 是 Task-owned 有标识实体，历史归档保留；本实现不改状态机和持久化 wire。
 - `docs/design/02-modules/task/02-ports-and-published-language.md`：扩展 Task-owned 查询 PL；Tools/Runtime 只消费窄 `TaskAccess`，不自行计算 Batch 统计。
-- `specs/tools.md`：新工具进入同一 Catalog/Execution 注册规格，使用 `TaskRead` capability，仅 Main 可见。
-- `specs/runtime.md`：Runtime 只冻结结构化 Task reminder snapshot，不拥有最终提示文本。
+- `specs/3.5-tools.md`：新工具进入同一 Catalog/Execution 注册规格，使用 `TaskRead` capability，仅 Main 可见。
+- `specs/3.4-runtime.md`：Runtime 只冻结结构化 Task reminder snapshot，不拥有最终提示文本。
 
 ## 任务 1：Task BC 发布 Batch 查询投影
 

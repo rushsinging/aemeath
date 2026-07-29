@@ -1,99 +1,35 @@
 //! Execution adapter with invocation-time registry, scope, profile, and schema checks.
 
-use std::{collections::HashMap, sync::Arc};
-
 use async_trait::async_trait;
-use parking_lot::RwLock;
 
 use crate::adapters::catalog::ToolBacking;
 use crate::domain::published_language::{
     ToolErrorKind, ToolInvocation, ToolOutcome as ToolExecutionOutcome, ToolSuccess,
 };
 use crate::domain::scope_profile::is_authorized;
-use crate::domain::{CancellationSignal, ExecutionScope, ToolExecutionContext};
-
-trait ExecutionContextResolver: Send + Sync {
-    fn resolve(&self, scope: &ExecutionScope) -> Option<ToolExecutionContext>;
-}
-
-/// Run-bound contexts are private adapter state; invocation PL never carries
-/// resource ports or Runtime handles.
-pub struct BoundExecutionContexts {
-    by_run: RwLock<HashMap<String, ToolExecutionContext>>,
-}
-
-impl BoundExecutionContexts {
-    pub fn new() -> Self {
-        Self {
-            by_run: RwLock::new(HashMap::new()),
-        }
-    }
-
-    pub fn bind(&self, context: ToolExecutionContext) -> Result<(), String> {
-        let run_id = context.scope().run_id().to_string();
-        let mut contexts = self.by_run.write();
-        if let Some(existing) = contexts.get(&run_id) {
-            return if existing.scope() == context.scope() {
-                Err(format!(
-                    "tool execution context already bound for run {run_id}"
-                ))
-            } else {
-                Err(format!(
-                    "tool execution context scope conflict for run {run_id}"
-                ))
-            };
-        }
-        contexts.insert(run_id, context);
-        Ok(())
-    }
-
-    pub fn unbind(&self, run_id: &str) {
-        self.by_run.write().remove(run_id);
-    }
-}
-
-impl Default for BoundExecutionContexts {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl crate::domain::ToolExecutionContextBindingPort for BoundExecutionContexts {
-    fn bind(&self, context: ToolExecutionContext) -> Result<(), String> {
-        BoundExecutionContexts::bind(self, context)
-    }
-
-    fn unbind(&self, run_id: &str) {
-        BoundExecutionContexts::unbind(self, run_id);
-    }
-}
-
-impl ExecutionContextResolver for BoundExecutionContexts {
-    fn resolve(&self, scope: &ExecutionScope) -> Option<ToolExecutionContext> {
-        self.by_run
-            .read()
-            .get(scope.run_id())
-            .filter(|context| context.scope() == scope)
-            .cloned()
-    }
-}
+use crate::domain::ToolExecutionContext;
 
 pub struct ExecutionAdapter {
     backing: ToolBacking,
-    contexts: Arc<dyn ExecutionContextResolver>,
 }
 
 impl ExecutionAdapter {
-    pub fn new(backing: ToolBacking, contexts: Arc<BoundExecutionContexts>) -> Self {
-        Self { backing, contexts }
+    pub fn new(backing: ToolBacking) -> Self {
+        Self { backing }
     }
 
     async fn execute_checked(
         &self,
         invocation: ToolInvocation,
-        cancellation: &dyn CancellationSignal,
+        context: &ToolExecutionContext,
     ) -> ToolExecutionOutcome {
-        if cancellation.is_cancelled() {
+        if invocation.execution_scope != *context.scope() {
+            return ToolExecutionOutcome::failure(
+                ToolErrorKind::ResourceUnavailable,
+                "tool execution context does not match invocation scope",
+            );
+        }
+        if context.cancellation().is_cancelled() {
             return ToolExecutionOutcome::cancelled("tool invocation cancelled before dispatch");
         }
 
@@ -123,15 +59,6 @@ impl ExecutionAdapter {
                 "tool capabilities are not authorized by the selected profile",
             );
         }
-        let context = match self.contexts.resolve(&invocation.execution_scope) {
-            Some(context) => context,
-            None => {
-                return ToolExecutionOutcome::failure(
-                    ToolErrorKind::ResourceUnavailable,
-                    "tool execution context is unavailable for this run",
-                )
-            }
-        };
         if !context.selection().allows(invocation.tool_name.as_str()) {
             return unavailable(&invocation);
         }
@@ -143,16 +70,7 @@ impl ExecutionAdapter {
             Some(tool) => tool,
             None => return unavailable(&invocation),
         };
-        let context = {
-            let context = context.with_authorization(invocation.authorization);
-            // #1384: inject caller-provided progress sink so tools
-            // like Agent can emit progress events to the caller.
-            if let Some(ref progress) = invocation.progress {
-                context.with_progress(Some(progress.clone()))
-            } else {
-                context
-            }
-        };
+        let context = context.with_authorization(invocation.authorization);
 
         if let Err(mismatch) = crate::domain::schema_validator::validate_tool_input(
             tool.name(),
@@ -181,9 +99,9 @@ impl crate::domain::ToolExecutionPort for ExecutionAdapter {
     async fn execute(
         &self,
         invocation: ToolInvocation,
-        cancellation: &dyn CancellationSignal,
+        context: &ToolExecutionContext,
     ) -> ToolExecutionOutcome {
-        self.execute_checked(invocation, cancellation).await
+        self.execute_checked(invocation, context).await
     }
 }
 

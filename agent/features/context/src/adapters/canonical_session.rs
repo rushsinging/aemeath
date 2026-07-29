@@ -9,7 +9,8 @@ use crate::domain::session::{
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
     CompactRequest, CompactSkipReason, ContextAppend, ContextAppendError, ContextPortError,
-    ManualCompactRequest, SessionId, SessionRevision,
+    ManualCompactRequest, SessionId, SessionRevision, ToolReceiptMutation,
+    ToolReceiptMutationError, ToolReceiptMutationReceipt,
 };
 use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
 
@@ -247,6 +248,59 @@ impl SessionRepository for CanonicalSessionRepository {
         Ok(Self::accepted_receipt(append, revision))
     }
 
+    async fn advance_tool_receipt(
+        &self,
+        mutation: ToolReceiptMutation,
+    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        let _mutation_guard = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?
+            .clone();
+        if current.id != mutation.identity.session_id.as_str() {
+            return Err(ToolReceiptMutationError::SessionNotFound(
+                mutation.identity.session_id.clone(),
+            ));
+        }
+        if let Some(receipt) = current.tool_receipt(&mutation) {
+            let advanced = receipt.clone().advance(mutation.clone())?;
+            if !advanced.changed {
+                return Ok(advanced);
+            }
+        }
+        let mut candidate = (*current).clone();
+        let changed = candidate.advance_tool_receipt(mutation.clone())?;
+        if !changed {
+            let receipt = candidate
+                .tool_receipt(&mutation)
+                .expect("unchanged receipt must exist")
+                .clone();
+            return Ok(ToolReceiptMutationReceipt {
+                receipt,
+                changed: false,
+            });
+        }
+        candidate.revision += 1;
+        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        self.writer
+            .save(&candidate)
+            .await
+            .map_err(ToolReceiptMutationError::Storage)?;
+        let receipt = candidate
+            .tool_receipt(&mutation)
+            .expect("advanced receipt must exist")
+            .clone();
+        self.publish_generation(&current, candidate)
+            .map_err(ToolReceiptMutationError::Storage)?;
+        Ok(ToolReceiptMutationReceipt {
+            receipt,
+            changed: true,
+        })
+    }
+
     async fn append_finalized(
         &self,
         append: &ContextAppend,
@@ -279,13 +333,31 @@ impl SessionRepository for CanonicalSessionRepository {
         }
         let actual = SessionRevision::new(current.revision);
         if actual != append.expected_revision {
-            return Err(ContextAppendError::RevisionConflict {
-                expected: append.expected_revision,
-                actual,
-            });
+            let receipt_only_advances = current
+                .run_slices
+                .iter()
+                .find(|slice| slice.run_id == append.run_id.as_ref())
+                .and_then(|slice| {
+                    slice
+                        .steps
+                        .iter()
+                        .find(|step| step.step_id == append.step_id.as_str())
+                })
+                .is_some_and(|step| step.outcome.is_none());
+            if !receipt_only_advances {
+                return Err(ContextAppendError::RevisionConflict {
+                    expected: append.expected_revision,
+                    actual,
+                });
+            }
         }
 
         let mut candidate = (*current).clone();
+        let mut append = append.clone();
+        if append.receipts.is_empty() {
+            append.receipts =
+                current.step_receipts(append.run_id.as_ref(), append.step_id.as_str());
+        }
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
@@ -295,6 +367,7 @@ impl SessionRepository for CanonicalSessionRepository {
             append.step_id.as_str(),
             FinalizedOutcomeProjection {
                 finalize_cause: append.finalize_cause,
+                duration_ms: append.duration_ms,
                 messages: append.messages.clone().into(),
                 receipts: append.receipts.clone(),
                 api_input_tokens: append.api_input_tokens,
@@ -316,7 +389,7 @@ impl SessionRepository for CanonicalSessionRepository {
         let revision = SessionRevision::new(candidate.revision);
         self.publish_generation(&current, candidate)
             .map_err(ContextAppendError::Storage)?;
-        Ok(Self::receipt(append, revision))
+        Ok(Self::receipt(&append, revision))
     }
 
     async fn commit_compaction(

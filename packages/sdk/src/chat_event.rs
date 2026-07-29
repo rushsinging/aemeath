@@ -35,6 +35,13 @@ use crate::ChatMessage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum ResumedStepFinalizeCause {
+    Completed,
+    UserCancelledStep,
+    RunTerminated,
+}
+
 /// 会话恢复时由 Context 发布的完整用户可见 RunStep 历史投影。
 /// compact 仅影响 Runtime active context，不过滤此展示投影。
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -42,6 +49,10 @@ pub struct ResumedSessionStep {
     pub run_id: String,
     pub step_id: String,
     pub messages: Vec<ChatMessage>,
+    #[serde(default)]
+    pub finalize_cause: Option<ResumedStepFinalizeCause>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
 }
 
 /// 启动 `--resume` 已完成一次 backing 恢复后交给前端的历史投影。
@@ -343,6 +354,8 @@ pub enum ChatEvent {
     /// Chat 被取消（兼容旧 TUI 投影）。
     Cancelled {
         context: ChatEventContext,
+        /// 取消前该回合已经运行的耗时。
+        duration_ms: u64,
     },
     /// 实时 TPS。
     LiveTps(f64),

@@ -7,11 +7,18 @@ pub(crate) mod context_decision;
 mod context_decision_tests;
 pub mod session;
 pub(crate) mod token_budget;
+pub mod tool_receipt;
+#[cfg(test)]
+mod tool_receipt_tests;
 
 pub use compact::CompactStage;
 pub use token_budget::{
     autocompact_threshold, effective_context_window, estimate_message_tokens,
     estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens,
+};
+pub use tool_receipt::{
+    CleanupConfirmation, ToolCallIdentity, ToolCallReceipt, ToolCallState, ToolReceiptMutation,
+    ToolReceiptMutationError, ToolReceiptMutationReceipt, ToolTerminalReceipt,
 };
 
 use serde::ser::SerializeSeq;
@@ -370,7 +377,9 @@ pub enum ToolOutcomeKind {
     Failure,
     Denied,
     Cancelled,
+    TimedOut,
     CancellationUnconfirmed,
+    Suspended,
 }
 
 /// finalized Step 中可确定重放的 Tool/Agent receipt。
@@ -506,6 +515,7 @@ pub struct ContextAppend {
     pub step_id: RunStepId,
     pub source_request_id: ContextRequestId,
     pub finalize_cause: FinalizeCause,
+    pub duration_ms: Option<u64>,
     pub messages: Vec<ContextMessage>,
     pub receipts: Vec<StepReceipt>,
     pub api_input_tokens: Option<u64>,

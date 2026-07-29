@@ -222,19 +222,12 @@ impl<'a> SubAgentRun<'a> {
             self.agent.ctx.cancellation(),
             self.runtime_cancellation.clone(),
         );
-        let _binding = match tools::ToolExecutionContextBindingGuard::bind(
-            self.runtime_context.tool_context_binding(),
-            self.agent.ctx.clone(),
-        ) {
-            Ok(binding) => binding,
-            Err(error) => return AgentRunTerminal::Failed { error },
-        };
-
         let input = crate::application::run_launcher::RunLaunchInput {
             run_id: self.run_id.clone(),
             spec: self.run_spec.clone(),
             parent_run_id: self.parent_run_id.clone(),
             cancel: self.runtime_cancellation.clone(),
+            register: crate::application::run_launcher::ActiveRunRegistration::Addressable,
         };
         let active_run = self.active_run.clone();
 
@@ -577,7 +570,7 @@ impl<'a> SubAgentRun<'a> {
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
         calls: &[(crate::application::subagent::ToolCall, ToolGuardDecision)],
-        _cancel: &tokio_util::sync::CancellationToken,
+        cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
         let turn_number = self.turn_count;
         logging::within(
@@ -619,12 +612,18 @@ impl<'a> SubAgentRun<'a> {
                     sink.emit(build_tool_calls_progress_event(turn_number, &allowed_calls));
                 }
 
-                let cancellation = self.agent.ctx.cancellation();
+                let step_context = self.agent.ctx.with_cancellation(
+                    crate::application::runtime_context::tool_cancellation_signal(cancel.clone()),
+                );
                 let mut executed = tokio::select! {
-                    _ = cancellation.cancelled() => {
+                    _ = cancel.cancelled() => {
                         return Err(LoopEngineError::Cancelled);
                     }
-                    executed = self.agent.execute_prepared_tools(&executable) => executed,
+                    executed = self.agent.execute_prepared_tools_with_ctx(
+                        &executable,
+                        step_id,
+                        &step_context,
+                    ) => executed,
                 };
                 results.append(&mut executed);
                 let results = crate::application::tool_coordination::restore_tool_call_order(
@@ -843,6 +842,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                 step_id.clone(),
                 window.backing_revision,
                 crate::ports::FinalizeCause::Completed,
+                Some(self.start_time.elapsed().as_millis() as u64),
                 messages,
                 vec![],
                 self.runtime_context.usage().get(),
@@ -870,6 +870,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                 step_id.clone(),
                 window.backing_revision,
                 crate::ports::FinalizeCause::UserCancelledStep,
+                Some(self.start_time.elapsed().as_millis() as u64),
                 messages,
                 vec![],
                 self.runtime_context.usage().get(),
@@ -1057,18 +1058,25 @@ impl RunLoopPort for SubAgentRun<'_> {
                         current.as_ref().and_then(|ci| ci.approval_call.clone())
                     {
                         let call = &approval_call.call;
-                        let mut input = call.input.clone();
-                        tools::strip_runtime_meta(&mut input);
-                        let invocation = tools::ToolInvocation::new(
-                            call.name.as_str(),
-                            input,
-                            self.agent.ctx.scope().clone(),
-                        )
-                        .with_authorization(approval_call.authorization);
+                        let approval_step_id = self
+                            .context_request
+                            .as_ref()
+                            .map(|request| request.step_id.clone())
+                            .unwrap_or_else(sdk::RunStepId::new_v7);
                         let domain = self
                             .agent
-                            .execution
-                            .execute(invocation, self.agent.ctx.cancellation().as_ref())
+                            .execute_domain_with_ctx(
+                                &crate::application::subagent::ToolCall {
+                                    id: call.id.clone(),
+                                    provider_id: call.provider_id.clone(),
+                                    name: call.name.clone(),
+                                    index: call.index,
+                                    input: call.input.clone(),
+                                },
+                                &self.agent.ctx,
+                                approval_call.authorization,
+                                &approval_step_id,
+                            )
                             .await;
                         let outcome = crate::application::subagent::legacy_outcome(domain);
                         let execution = ToolExecution::from_parts(
@@ -1187,6 +1195,7 @@ mod tests {
                     run_id: run_id.clone(),
                     parent_run_id: parent_run_id.clone(),
                     result: "done".to_string(),
+                    user_cancelled_step: false,
                 },
                 Some(tools::AgentRunTerminal::Completed {
                     result: "done".to_string(),

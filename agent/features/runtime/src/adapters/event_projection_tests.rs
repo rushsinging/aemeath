@@ -5,12 +5,30 @@ use crate::application::main_loop::looping::{
 };
 
 #[test]
+fn cancelled_projection_preserves_elapsed_duration() {
+    let event = RuntimeStreamEvent::Cancelled {
+        context: RuntimeTurnContext::new(sdk::ChatId::new("chat"), sdk::ChatTurnId::new("turn")),
+        duration: std::time::Duration::from_millis(125_000),
+    };
+
+    assert!(matches!(
+        project_stream_event(event),
+        sdk::ChatEvent::Cancelled {
+            duration_ms: 125_000,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn session_resume_projection_preserves_context_run_step_boundaries() {
     let event = RuntimeStreamEvent::SessionResumed {
         steps: vec![RuntimeResumedSessionStep {
             run_id: "run-1".into(),
             step_id: "step-1".into(),
             messages: vec![share::message::Message::user("hello")],
+            finalize_cause: Some(context::domain::FinalizeCause::UserCancelledStep),
+            duration_ms: Some(7_325_000),
         }],
         session_id: "session-1".into(),
         created_at: 0,
@@ -21,9 +39,67 @@ fn session_resume_projection_preserves_context_run_step_boundaries() {
             assert_eq!(steps[0].run_id, "run-1");
             assert_eq!(steps[0].step_id, "step-1");
             assert_eq!(steps[0].messages[0].text_content(), "hello");
+            assert_eq!(
+                steps[0].finalize_cause,
+                Some(sdk::ResumedStepFinalizeCause::UserCancelledStep)
+            );
+            assert_eq!(steps[0].duration_ms, Some(7_325_000));
         }
         other => panic!("unexpected event: {other:?}"),
     }
+}
+
+#[test]
+fn session_resume_projection_preserves_reconstructed_tool_pair_and_termination() {
+    let event = RuntimeStreamEvent::SessionResumed {
+        steps: vec![RuntimeResumedSessionStep {
+            run_id: "run-terminated".into(),
+            step_id: "step-running-tool".into(),
+            messages: vec![
+                share::message::Message {
+                    role: share::message::Role::Assistant,
+                    content: vec![share::message::ContentBlock::ToolUse {
+                        id: "provider-call-1".into(),
+                        name: "Bash".into(),
+                        input: serde_json::json!({"command": "sleep 180"}),
+                    }],
+                    metadata: None,
+                },
+                share::message::Message {
+                    role: share::message::Role::User,
+                    content: vec![share::message::ContentBlock::ToolResult {
+                        tool_use_id: "provider-call-1".into(),
+                        content: serde_json::json!({"outcome": "CancellationUnconfirmed"}),
+                        is_error: true,
+                        text: Some("cleanup could not be confirmed".into()),
+                    }],
+                    metadata: None,
+                },
+            ],
+            finalize_cause: Some(context::domain::FinalizeCause::RunTerminated),
+            duration_ms: None,
+        }],
+        session_id: "session-1".into(),
+        created_at: 0,
+    };
+
+    let sdk::ChatEvent::SessionResumed { steps, .. } = project_stream_event(event) else {
+        panic!("应投影为 SessionResumed");
+    };
+    assert_eq!(
+        steps[0].finalize_cause,
+        Some(sdk::ResumedStepFinalizeCause::RunTerminated)
+    );
+    assert!(matches!(
+        &steps[0].messages[0].content[0],
+        sdk::ContentBlock::ToolUse { id, name, .. }
+            if id == "provider-call-1" && name == "Bash"
+    ));
+    assert!(matches!(
+        &steps[0].messages[1].content[0],
+        sdk::ContentBlock::ToolResult { tool_use_id, is_error: true, .. }
+            if tool_use_id == "provider-call-1"
+    ));
 }
 
 #[test]

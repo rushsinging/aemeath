@@ -1,7 +1,11 @@
 use super::render::content_area_for_scrollbar;
 use super::OutputArea;
-use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
-use crate::tui::render::output::status_line::live_status_spinner_fixture;
+use crate::tui::render::output::rendered::{
+    LineAnimation, RenderedBlock, RenderedDocument, RenderedLine,
+};
+use crate::tui::render::output::status_line::{
+    live_status_spinner_fixture, live_status_spinner_fixture_with_frame,
+};
 use crate::tui::render::output_area::selection::output_selection_view_for_test;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
 use crate::tui::render::performance::capture;
@@ -37,6 +41,37 @@ fn render_records_source_and_visible_document_lines() {
 }
 
 #[test]
+fn render_only_queries_visible_document_lines() {
+    let mut output = OutputArea::new();
+    output.replace_document(RenderedDocument::new(
+        (0..1_000)
+            .map(|index| RenderedBlock {
+                block_id: format!("block-{index}"),
+                lines: Rc::new(vec![RenderedLine::from_plain(format!("line {index}"))]),
+            })
+            .collect(),
+    ));
+    let rect = Rect::new(0, 0, 80, 20);
+    let view = OutputViewState {
+        last_visible_height: 20,
+        ..Default::default()
+    };
+    let mut buffer = Buffer::empty(rect);
+
+    output.render(rect, &mut buffer, &view, &no_live_status());
+
+    assert_eq!(output.last_document_line_visits(), 20);
+    assert_eq!(
+        output.screen_line_map.first().map(|entry| entry.0),
+        Some(980)
+    );
+    assert_eq!(
+        output.screen_line_map.last().map(|entry| entry.0),
+        Some(999)
+    );
+}
+
+#[test]
 fn test_render_reserves_scrollbar_column_and_wraps_long_lines() {
     let mut area = OutputArea::new();
     area.replace_document(RenderedDocument {
@@ -49,6 +84,7 @@ fn test_render_reserves_scrollbar_column_and_wraps_long_lines() {
             ]),
         }],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 6, 2);
     let view = OutputViewState {
@@ -92,6 +128,7 @@ fn test_render_document_paints_spans_and_overlays_selection() {
             lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("hello")])]),
         }],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 10, 3);
     let view = OutputViewState {
@@ -119,6 +156,7 @@ fn test_output_area_paints_fill_style_for_short_and_empty_lines() {
             ]),
         }],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 8, 3);
     let view = OutputViewState {
@@ -147,6 +185,7 @@ fn test_output_area_selection_overrides_fill_style_on_text_cells() {
             lines: Rc::new(vec![RenderedLine::from_plain("hello").with_fill_style(fill)]),
         }],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 8, 2);
     let view = OutputViewState {
@@ -178,6 +217,7 @@ fn test_render_document_with_gutter_offsets_selection_and_skips_gutter() {
             lines: Rc::new(vec![line]),
         }],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
     // 选中 plain 字符 [0,3) = "hel"
     let view = OutputViewState {
@@ -220,6 +260,7 @@ fn test_render_user_message_paints_full_visible_line_background() {
             lines: Rc::new(vec![line]),
         }],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 12, 2);
     let view = OutputViewState {
@@ -252,6 +293,7 @@ fn test_click_on_gutter_line_maps_to_content_char() {
             lines: Rc::new(vec![line]),
         }],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 12, 3);
     let view = OutputViewState {
@@ -294,6 +336,76 @@ fn test_click_on_gutter_line_maps_to_content_char() {
 }
 
 #[test]
+fn visible_running_tool_gutter_animates_without_replacing_document() {
+    let mut line = RenderedLine::with_plain(
+        vec![
+            Span::styled(
+                "● ",
+                ratatui::style::Style::default().fg(theme::TOOL_RUNNING),
+            ),
+            Span::raw("Bash"),
+        ],
+        "Bash".into(),
+    );
+    line.gutter_cols = 2;
+    line.animation = Some(LineAnimation::RunningToolMarker);
+    let mut area = OutputArea::new();
+    area.replace_document(RenderedDocument::new(vec![RenderedBlock {
+        block_id: "running-tool".into(),
+        lines: Rc::new(vec![line]),
+    }]));
+    let rect = Rect::new(0, 0, 12, 2);
+    let view = OutputViewState {
+        last_visible_height: 2,
+        ..Default::default()
+    };
+    let mut frame_zero = Buffer::empty(rect);
+    let mut frame_four = Buffer::empty(rect);
+    let live_zero = live_status_spinner_fixture_with_frame("Thinking", 0);
+    let live_four = live_status_spinner_fixture_with_frame("Thinking", 4);
+
+    area.render(rect, &mut frame_zero, &view, &live_zero);
+    area.render(rect, &mut frame_four, &view, &live_four);
+
+    assert_eq!(frame_zero[(0, 0)].symbol(), "●");
+    assert_eq!(frame_four[(0, 0)].symbol(), "○");
+    assert_eq!(area.document().total_lines(), 1);
+}
+
+#[test]
+fn visible_placeholder_header_animates_without_replacing_document() {
+    let mut line = RenderedLine::from_plain("Thinking.");
+    line.animation = Some(LineAnimation::ThinkingDots);
+    let mut area = OutputArea::new();
+    area.replace_document(RenderedDocument::new(vec![RenderedBlock {
+        block_id: "placeholder".into(),
+        lines: Rc::new(vec![line]),
+    }]));
+    let rect = Rect::new(0, 0, 16, 2);
+    let view = OutputViewState {
+        last_visible_height: 2,
+        ..Default::default()
+    };
+    let mut frame_zero = Buffer::empty(rect);
+    let mut frame_four = Buffer::empty(rect);
+    let live_zero = live_status_spinner_fixture_with_frame("Thinking", 0);
+    let live_four = live_status_spinner_fixture_with_frame("Thinking", 4);
+
+    area.render(rect, &mut frame_zero, &view, &live_zero);
+    area.render(rect, &mut frame_four, &view, &live_four);
+
+    let row_zero = (0..10)
+        .map(|x| frame_zero[(x, 0)].symbol())
+        .collect::<String>();
+    let row_four = (0..10)
+        .map(|x| frame_four[(x, 0)].symbol())
+        .collect::<String>();
+    assert!(row_zero.starts_with("Thinking."));
+    assert!(row_four.starts_with("Thinking.."));
+    assert_eq!(area.document().total_lines(), 1);
+}
+
+#[test]
 fn test_render_spinner_does_not_overflow_into_scrollbar_gap_narrow_terminal() {
     let mut area = OutputArea::new();
     // 文档 10 行 + visible=3 → needs_scrollbar=true → content_area.width=30-3=27
@@ -306,6 +418,7 @@ fn test_render_spinner_does_not_overflow_into_scrollbar_gap_narrow_terminal() {
             lines: Rc::new(doc_lines),
         }],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
     let area_rect = Rect::new(0, 0, 30, 3);
     let view = OutputViewState {
@@ -344,6 +457,7 @@ fn test_render_spinner_does_not_overflow_into_scrollbar_gap_very_narrow_terminal
             lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("doc")])]),
         }],
         root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
     });
     // 更窄：width=18，content_width=15
     let area_rect = Rect::new(0, 0, 18, 2);

@@ -74,8 +74,8 @@
 
 同步：
 
-- `specs/runtime.md`
-- `specs/storage.md`
+- `specs/3.4-runtime.md`
+- `specs/3.10-storage.md`
 - `docs/design/02-modules/context-management/README.md`
 - `docs/design/02-modules/context-management/01-session.md`
 - `docs/design/03-engineering/03-migration-governance.md`

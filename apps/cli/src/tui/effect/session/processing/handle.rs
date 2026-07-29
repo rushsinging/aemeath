@@ -17,16 +17,9 @@ pub(crate) struct SpawnContext {
     pub fallback_context: TuiTurnContext,
 }
 
-pub(crate) enum RunCancelState {
-    Idle,
-    AwaitingStart { cancel_requested: bool },
-    Active(sdk::RunId),
-}
-
 pub(crate) struct ProcessingHandle {
     pub(super) join: tokio::task::JoinHandle<()>,
     pub(super) agent_client: Arc<dyn sdk::AgentClient>,
-    pub(super) run_cancel_state: Arc<std::sync::Mutex<RunCancelState>>,
 }
 
 impl std::fmt::Debug for ProcessingHandle {
@@ -38,57 +31,24 @@ impl std::fmt::Debug for ProcessingHandle {
 }
 
 impl ProcessingHandle {
-    pub(crate) fn expect_run_start(&self) {
-        *self
-            .run_cancel_state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = RunCancelState::AwaitingStart {
-            cancel_requested: false,
-        };
-    }
-
-    pub(crate) fn cancel_current_run(&self) -> sdk::CancelRunOutcome {
-        let run_id = {
-            let mut state = self
-                .run_cancel_state
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            match &mut *state {
-                RunCancelState::Active(run_id) => Some(run_id.clone()),
-                RunCancelState::AwaitingStart { cancel_requested } => {
-                    *cancel_requested = true;
-                    None
-                }
-                RunCancelState::Idle => return sdk::CancelRunOutcome::NotFound,
-            }
-        };
-        run_id
-            .as_ref()
-            .map(|run_id| {
-                let deadline = sdk::ControlDeadline::from_unix_millis(
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64 + 10_000)
-                        .unwrap_or(0),
-                );
-                let outcome = self.agent_client.cancel_run_step(run_id, None, deadline);
-                match outcome {
-                    sdk::CancelRunStepOutcome::Accepted => sdk::CancelRunOutcome::Accepted,
-                    sdk::CancelRunStepOutcome::AlreadyCancelling => {
-                        sdk::CancelRunOutcome::AlreadyCancelling
-                    }
-                    sdk::CancelRunStepOutcome::RunTerminal
-                    | sdk::CancelRunStepOutcome::NotFound => sdk::CancelRunOutcome::NotFound,
-                    sdk::CancelRunStepOutcome::NoActiveStep
-                    | sdk::CancelRunStepOutcome::RunTerminating => {
-                        // #1247: Run is alive but no active Step (e.g. between
-                        // Steps). Fall back to legacy cancel_run to ensure the
-                        // Run stops; #879 will retire this fallback.
-                        self.agent_client.cancel_run(run_id)
-                    }
-                }
-            })
-            .unwrap_or(sdk::CancelRunOutcome::Accepted)
+    pub(crate) fn cancel_current_run(&self) -> sdk::CancelCurrentRunOutcome {
+        let deadline = sdk::ControlDeadline::from_unix_millis(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as u64 + 10_000)
+                .unwrap_or(0),
+        );
+        crate::tui::log_debug!(
+            "processing handle forwarding cancel_current_run: join_finished={} deadline_unix_ms={}",
+            self.join.is_finished(),
+            deadline.unix_millis()
+        );
+        let outcome = self.agent_client.cancel_current_run(deadline);
+        crate::tui::log_debug!(
+            "processing handle received cancel_current_run outcome: outcome={:?}",
+            outcome
+        );
+        outcome
     }
 
     pub(crate) fn abort(&self) {

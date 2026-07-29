@@ -287,8 +287,12 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::InteractionRequested { request } => {
             TuiRuntimeEvent::InteractionRequested(interaction_request(request))
         }
-        ChatEvent::Cancelled { context } => TuiRuntimeEvent::Cancelled {
+        ChatEvent::Cancelled {
+            context,
+            duration_ms,
+        } => TuiRuntimeEvent::Cancelled {
             context: turn_context(context),
+            duration_ms,
         },
         ChatEvent::LiveTps(tps) => TuiRuntimeEvent::LiveTps(tps),
         ChatEvent::TurnChanged(turn) | ChatEvent::CurrentTurnChanged(turn) => {
@@ -381,6 +385,18 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                     run_id: step.run_id,
                     step_id: step.step_id,
                     messages: step.messages.into_iter().map(chat_message).collect(),
+                    finalize_cause: step.finalize_cause.map(|cause| match cause {
+                        sdk::ResumedStepFinalizeCause::Completed => {
+                            super::runtime_view::TuiResumedStepFinalizeCause::Completed
+                        }
+                        sdk::ResumedStepFinalizeCause::UserCancelledStep => {
+                            super::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep
+                        }
+                        sdk::ResumedStepFinalizeCause::RunTerminated => {
+                            super::runtime_view::TuiResumedStepFinalizeCause::RunTerminated
+                        }
+                    }),
+                    duration_ms: step.duration_ms,
                 })
                 .collect(),
             session_id,

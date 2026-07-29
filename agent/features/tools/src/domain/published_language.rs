@@ -297,28 +297,14 @@ impl ToolDescriptor {
 
 /// 工具调用请求。
 ///
-/// 不携带 RuntimeContext、Registry、Session、Store 或 MCP 类型。
-#[derive(Clone)]
+/// 这是可序列化语义上的纯值描述：不携带 RuntimeContext、Registry、Session、
+/// Store、MCP client、token、channel 或 callback capability。
+#[derive(Debug, Clone)]
 pub struct ToolInvocation {
     pub tool_name: ToolName,
     pub input: serde_json::Value,
     pub execution_scope: ExecutionScope,
     pub authorization: crate::domain::AuthorizationContext,
-    /// Optional progress sink override. When set, ExecutionAdapter injects
-    /// it into the resolved ToolExecutionContext so the tool (e.g. Agent)
-    /// can emit progress events to the caller's channel.
-    pub progress: Option<std::sync::Arc<dyn crate::domain::ProgressSink>>,
-}
-
-impl std::fmt::Debug for ToolInvocation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ToolInvocation")
-            .field("tool_name", &self.tool_name)
-            .field("execution_scope", &self.execution_scope)
-            .field("authorization", &self.authorization)
-            .field("progress", &self.progress.as_ref().map(|_| "<set>"))
-            .finish()
-    }
 }
 
 impl ToolInvocation {
@@ -332,7 +318,6 @@ impl ToolInvocation {
             input,
             execution_scope,
             authorization: crate::domain::AuthorizationContext::STANDARD,
-            progress: None,
         }
     }
 
@@ -341,17 +326,6 @@ impl ToolInvocation {
         authorization: crate::domain::AuthorizationContext,
     ) -> Self {
         self.authorization = authorization;
-        self
-    }
-
-    /// Override the progress sink for this invocation. When set, the
-    /// execution adapter injects it into the resolved context, allowing
-    /// tools like Agent to emit progress events to the caller's channel.
-    pub fn with_progress(
-        mut self,
-        progress: Option<std::sync::Arc<dyn crate::domain::ProgressSink>>,
-    ) -> Self {
-        self.progress = progress;
         self
     }
 }
@@ -477,6 +451,34 @@ impl ToolCancelled {
     }
 }
 
+/// 底层清理确认状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CleanupConfirmation {
+    Confirmed,
+    Unconfirmed,
+    NotApplicable,
+}
+
+/// timeout / cancellation-unconfirmed 的安全终态详情。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolTerminalDetails {
+    pub safe_reason: String,
+    pub possible_side_effects: Vec<String>,
+    pub unfinished_call_ids: Vec<String>,
+    pub cleanup: CleanupConfirmation,
+}
+
+impl ToolTerminalDetails {
+    pub fn new(safe_reason: impl Into<String>, cleanup: CleanupConfirmation) -> Self {
+        Self {
+            safe_reason: safe_reason.into(),
+            possible_side_effects: Vec::new(),
+            unfinished_call_ids: Vec::new(),
+            cleanup,
+        }
+    }
+}
+
 /// 工具执行结果（领域结果）。
 ///
 /// 不依赖 SDK/TUI View。错误只公开可安全暴露的信息。
@@ -487,6 +489,8 @@ pub enum ToolOutcome {
     Success(ToolSuccess),
     Failure(ToolFailure),
     Cancelled(ToolCancelled),
+    TimedOut(ToolTerminalDetails),
+    CancellationUnconfirmed(ToolTerminalDetails),
     Suspended(ToolSuspension),
 }
 
@@ -501,6 +505,23 @@ impl ToolOutcome {
 
     pub fn cancelled(reason: impl Into<String>) -> Self {
         Self::Cancelled(ToolCancelled::new(reason))
+    }
+
+    pub fn timed_out(safe_reason: impl Into<String>, cleanup: CleanupConfirmation) -> Self {
+        Self::TimedOut(ToolTerminalDetails::new(safe_reason, cleanup))
+    }
+
+    pub fn cancellation_unconfirmed(
+        safe_reason: impl Into<String>,
+        possible_side_effects: Vec<String>,
+        unfinished_call_ids: Vec<String>,
+    ) -> Self {
+        Self::CancellationUnconfirmed(ToolTerminalDetails {
+            safe_reason: safe_reason.into(),
+            possible_side_effects,
+            unfinished_call_ids,
+            cleanup: CleanupConfirmation::Unconfirmed,
+        })
     }
 
     pub fn is_success(&self) -> bool {

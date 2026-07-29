@@ -13,14 +13,16 @@ use hook::{HookInvocation, HookPort, PreToolUseInput};
 use policy::PolicyPort;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
+use tools::ToolExecutionContext;
+#[cfg(test)]
+use tools::ToolExecutionPort;
 use tools::ToolOutcome;
-use tools::{ToolExecutionContext, ToolExecutionPort};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_agent_calls<S>(
     context: &RuntimeTurnContext,
     agent_approved: &[PreparedToolCall],
-    execution: &Arc<dyn ToolExecutionPort>,
+    agent: &crate::application::subagent::Agent,
     agent_ctx: &ToolExecutionContext,
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
@@ -44,7 +46,6 @@ where
             let authorization = prepared.authorization;
             let sink = sink.clone();
             let hook_port = hook_port.clone();
-            let execution_ref = execution.clone();
             let agent_semaphore = agent_semaphore.clone();
             let workspace_persist = workspace_persist.clone();
             let mut ag_ctx = agent_ctx.clone();
@@ -67,7 +68,7 @@ where
                     call,
                     sink,
                     hook_port,
-                    execution_ref,
+                    agent,
                     &mut ag_ctx,
                     &workspace_persist,
                     &workspace_root,
@@ -104,7 +105,7 @@ async fn execute_one_agent<S>(
     call: ToolCall,
     sink: S,
     hook_port: Arc<dyn HookPort>,
-    execution: Arc<dyn ToolExecutionPort>,
+    agent: &crate::application::subagent::Agent,
     ag_ctx: &mut ToolExecutionContext,
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
     workspace_root: &std::path::Path,
@@ -248,7 +249,7 @@ where
     );
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-    let prog_adapter = crate::adapters::tool_runtime::progress(prog_tx);
+    let prog_adapter = crate::application::runtime_context::tool_progress_sink(prog_tx);
     *ag_ctx = ag_ctx.with_progress(Some(prog_adapter.clone()));
     let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
@@ -273,18 +274,8 @@ where
         }
     });
 
-    let cancellation = ag_ctx.cancellation();
-    let outcome = execution
-        .execute(
-            tools::ToolInvocation::new(
-                "Agent",
-                effective_call.input.clone(),
-                ag_ctx.scope().clone(),
-            )
-            .with_authorization(effective_authorization)
-            .with_progress(Some(prog_adapter.clone())),
-            cancellation.as_ref(),
-        )
+    let outcome = agent
+        .execute_domain_with_ctx(&effective_call, ag_ctx, effective_authorization, step_id)
         .await;
     let workspace = workspace_persist.snapshot();
     let _ = sink
@@ -346,7 +337,7 @@ mod tests {
         async fn dispatch(
             &self,
             _invocation: HookInvocation,
-            _cancellation: &CancellationToken,
+            _cancellation: &dyn hook::CancellationSignal,
         ) -> hook::HookOutcome {
             hook::HookOutcome::proceed()
         }
@@ -474,10 +465,25 @@ mod tests {
                     authorization: tools::AuthorizationContext::STANDARD,
                 })
                 .collect::<Vec<_>>();
+            let agent = crate::application::subagent::Agent {
+                catalog: catalog.clone(),
+                execution,
+                ctx: ctx.clone(),
+                max_tool_concurrency: 1,
+                agent_semaphore: agent_semaphore.clone(),
+                workspace_persist: crate::application::testing::workspace_persist(&ctx),
+                context: Some(
+                    crate::application::context_coordination::ContextCoordinator::new(
+                        context::adapters::isolated_context("agent-call-test"),
+                    ),
+                ),
+                session_id: context::domain::SessionId::new("agent-call-test"),
+                runtime_cancellation: cancel.clone(),
+            };
             execute_agent_calls(
                 &RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn")),
                 &prepared,
-                &execution,
+                &agent,
                 &ctx,
                 &agent_semaphore,
                 &crate::application::testing::workspace_persist(&ctx),

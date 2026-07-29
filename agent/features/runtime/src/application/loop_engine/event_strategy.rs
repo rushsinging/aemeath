@@ -108,6 +108,7 @@ impl<'a> MainEventStrategy<'a> {
         self.sink
             .send_event(RuntimeStreamEvent::Cancelled {
                 context: self.turn_context.clone(),
+                duration: self.started_at.elapsed(),
             })
             .await;
     }
@@ -118,7 +119,18 @@ impl EventStrategy for MainEventStrategy<'_> {
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
         for event in events {
             match event {
-                RunDomainEvent::Completed { .. } => {
+                RunDomainEvent::Completed {
+                    user_cancelled_step: true,
+                    ..
+                } => {
+                    let outcome = self.outcome(AgentRunStatus::Cancelled);
+                    log_agent_outcome(&outcome, self.session_id);
+                    self.send_cancelled().await;
+                }
+                RunDomainEvent::Completed {
+                    user_cancelled_step: false,
+                    ..
+                } => {
                     self.project_done(AgentRunStatus::Completed).await;
                 }
                 RunDomainEvent::Failed { error, .. } => {

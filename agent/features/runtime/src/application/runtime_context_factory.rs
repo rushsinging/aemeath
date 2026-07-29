@@ -22,7 +22,7 @@ use crate::ports::PolicyPort;
 use hook::HookPort;
 use memory::api::ReflectionHistoryStore;
 use task::TaskAccess;
-use tools::{ToolCatalogPort, ToolExecutionContextBindingPort, ToolExecutionPort};
+use tools::{ToolCatalogPort, ToolExecutionPort};
 
 // ── Factory ──
 
@@ -44,7 +44,6 @@ impl RuntimeContextFactory {
     pub fn new(
         tool_catalog: Arc<dyn ToolCatalogPort>,
         tool_execution: Arc<dyn ToolExecutionPort>,
-        tool_context_binding: Arc<dyn ToolExecutionContextBindingPort>,
         policy: Arc<dyn PolicyPort>,
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
@@ -54,7 +53,6 @@ impl RuntimeContextFactory {
             services: RuntimeServices {
                 tool_catalog,
                 tool_execution,
-                tool_context_binding,
                 policy,
                 reflection_history,
                 task,
@@ -63,13 +61,24 @@ impl RuntimeContextFactory {
         }
     }
 
-    /// Read-only access to session-scoped [`RuntimeServices`].
-    ///
-    /// Used by TUI launch and other callers that need to project service
-    /// ports (tool catalog/execution, hooks) without duplicating them
-    /// on [`MainSessionShell`](super::client::MainSessionShell).
-    pub fn services(&self) -> &RuntimeServices {
-        &self.services
+    pub(crate) fn tool_catalog(&self) -> Arc<dyn ToolCatalogPort> {
+        self.services.tool_catalog.clone()
+    }
+
+    pub(crate) fn tool_execution(&self) -> Arc<dyn ToolExecutionPort> {
+        self.services.tool_execution.clone()
+    }
+
+    pub(crate) fn reflection_history(&self) -> Arc<dyn ReflectionHistoryStore> {
+        self.services.reflection_history.clone()
+    }
+
+    pub(crate) fn task(&self) -> Arc<dyn TaskAccess> {
+        self.services.task.clone()
+    }
+
+    pub(crate) fn hooks(&self) -> Arc<dyn HookPort> {
+        self.services.hooks.clone()
     }
 
     /// Assemble a [`RuntimeContext`] from capability-semantic decisions

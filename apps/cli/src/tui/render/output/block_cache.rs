@@ -1,7 +1,9 @@
 //! block 级渲染缓存：key=(block_version,width)，命中复用，未命中重渲。
 
+use crate::tui::render::output::bounded_lru::BoundedLruMap;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock};
-use std::collections::HashMap;
+
+pub(crate) const DEFAULT_RENDER_CACHE_CAPACITY: usize = 4_096;
 
 /// block cache key。`text_width` 与 `RenderCtx.text_width` 同义：
 /// 已扣除 gutter 的可用文本宽度（参见 #329 语义约定）。
@@ -17,12 +19,23 @@ struct CachedBlock {
     rendered: RenderedBlock,
 }
 
-#[derive(Default)]
 pub struct BlockCache {
-    map: HashMap<String, CachedBlock>,
+    map: BoundedLruMap<String, CachedBlock>,
+}
+
+impl Default for BlockCache {
+    fn default() -> Self {
+        Self::with_capacity(DEFAULT_RENDER_CACHE_CAPACITY)
+    }
 }
 
 impl BlockCache {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
+        Self {
+            map: BoundedLruMap::with_capacity(capacity),
+        }
+    }
+
     /// 命中(key 一致)直接返回缓存 clone；否则调用 `render` 重渲染并缓存。
     pub fn get_or_render(
         &mut self,
@@ -30,7 +43,8 @@ impl BlockCache {
         key: CacheKey,
         render: impl FnOnce(&RenderCtx) -> RenderedBlock,
     ) -> RenderedBlock {
-        if let Some(cached) = self.map.get(block_id) {
+        let block_id = block_id.to_string();
+        if let Some(cached) = self.map.get(&block_id) {
             if cached.key == key {
                 #[cfg(test)]
                 crate::tui::render::performance::record_block_cache_hit();
@@ -60,7 +74,7 @@ impl BlockCache {
         };
         let rendered = render(&ctx);
         self.map.insert(
-            block_id.to_string(),
+            block_id,
             CachedBlock {
                 key,
                 rendered: rendered.clone(),
@@ -73,13 +87,11 @@ impl BlockCache {
     /// 调用方应先将 live ids 收入 `HashSet<&str>`（O(n) 构建），
     /// 使此处每个条目的成员查询为 O(1)，整体 O(n) 而非 O(n²)。
     pub fn retain(&mut self, live_set: &std::collections::HashSet<&str>) {
+        let evicted = self.map.retain(|id, _| live_set.contains(id.as_str()));
         #[cfg(test)]
-        let before = self.map.len();
-        self.map.retain(|id, _| live_set.contains(id.as_str()));
-        #[cfg(test)]
-        crate::tui::render::performance::record_block_cache_retain_evictions(
-            before.saturating_sub(self.map.len()),
-        );
+        crate::tui::render::performance::record_block_cache_retain_evictions(evicted);
+        #[cfg(not(test))]
+        let _ = evicted;
     }
 
     #[cfg(test)]
@@ -88,7 +100,7 @@ impl BlockCache {
     }
 
     pub fn contains(&self, block_id: &str) -> bool {
-        self.map.contains_key(block_id)
+        self.map.peek(&block_id.to_string()).is_some()
     }
 }
 
@@ -166,17 +178,32 @@ mod tests {
     }
 
     #[test]
-    fn test_retain_evicts_absent_blocks() {
-        let mut cache = BlockCache::default();
+    fn cache_evicts_least_recently_used_entry_at_capacity() {
+        let mut cache = BlockCache::with_capacity(2);
         cache.get_or_render("a", key(1), |_| block("a", 1));
         cache.get_or_render("b", key(1), |_| block("b", 1));
-        let live_set: std::collections::HashSet<&str> = ["a"].into_iter().collect();
+        cache.get_or_render("a", key(1), |_| unreachable!("a should hit cache"));
+        cache.get_or_render("c", key(1), |_| block("c", 1));
+
+        assert!(cache.contains("a"), "命中必须刷新 a 的最近使用顺序");
+        assert!(!cache.contains("b"), "最久未使用的 b 应先被淘汰");
+        assert!(cache.contains("c"));
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn semantic_retain_removes_absent_entries_without_dropping_live_lru_entries() {
+        let mut cache = BlockCache::with_capacity(3);
+        cache.get_or_render("a", key(1), |_| block("a", 1));
+        cache.get_or_render("b", key(1), |_| block("b", 1));
+        cache.get_or_render("c", key(1), |_| block("c", 1));
+        let live_set: std::collections::HashSet<&str> = ["a", "c"].into_iter().collect();
+
         cache.retain(&live_set);
 
         assert!(cache.contains("a"));
-        assert!(
-            !cache.contains("b"),
-            "ViewModel 中不存在的 block 应被清除防泄漏"
-        );
+        assert!(!cache.contains("b"));
+        assert!(cache.contains("c"));
+        assert_eq!(cache.len(), 2);
     }
 }

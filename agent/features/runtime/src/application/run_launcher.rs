@@ -21,6 +21,13 @@ pub struct RunLaunchInput {
     pub spec: RunSpec,
     pub parent_run_id: Option<RunId>,
     pub cancel: CancellationToken,
+    pub register: ActiveRunRegistration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveRunRegistration {
+    CurrentMain,
+    Addressable,
 }
 
 /// launcher 返回的 typed 终态。
@@ -44,10 +51,18 @@ pub async fn launch<P>(
 where
     P: RunLoopPort,
 {
+    let register = input.register;
     let mut run = Run::with_id(input.run_id, input.spec, input.parent_run_id);
     let cancel = input.cancel;
     let run_id = run.id().clone();
-    active_run.activate(run_id.clone(), cancel.clone());
+    match register {
+        ActiveRunRegistration::CurrentMain => {
+            active_run.activate_main(run_id.clone(), cancel.clone());
+        }
+        ActiveRunRegistration::Addressable => {
+            active_run.activate(run_id.clone(), cancel.clone());
+        }
+    }
 
     let result = match run_loop(&mut run, &cancel, port).await {
         Ok(LoopDirective::Terminal) | Ok(LoopDirective::AwaitUser) => RunLaunchResult::Terminal,

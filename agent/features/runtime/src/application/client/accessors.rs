@@ -212,7 +212,6 @@ impl AgentClientImpl {
 
     pub fn tui_launch_context(&self) -> crate::adapters::tui_launch::TuiLaunchContext {
         let shell = &self.inner.shell;
-        let services = shell.runtime_context_factory.services();
         crate::adapters::tui_launch::TuiLaunchContext {
             session_id: shell.session_id.clone(),
             startup_resume: shell.startup_resume.clone(),
@@ -222,8 +221,8 @@ impl AgentClientImpl {
                 &shell.resolved_model.model.id,
             ),
             binding: shell.current_binding.read().unwrap().clone(),
-            tool_catalog: services.tool_catalog.clone(),
-            tool_execution: services.tool_execution.clone(),
+            tool_catalog: shell.runtime_context_factory.tool_catalog(),
+            tool_execution: shell.runtime_context_factory.tool_execution(),
             system_blocks: shell.system_blocks.clone(),
             system_prompt_text: shell.system_prompt_text.clone(),
             initial_git_context: shell.initial_git_context.clone(),
@@ -240,7 +239,7 @@ impl AgentClientImpl {
             skill_snapshot: super::mapping::skill_snapshot_to_sdk(
                 shell.initial_skill_snapshot.clone(),
             ),
-            hook_runner: services.hooks.clone(),
+            hook_runner: shell.runtime_context_factory.hooks(),
             session_reminders: Arc::new(std::sync::Mutex::new(tools::SessionReminders::new())),
             workspace_root: shell.cwd.clone(),
         }

@@ -1,4 +1,4 @@
-//! Tests for the dynamic Skill Published Language (Issue #1438).
+//! Tests for the dynamic Skill Published Language.
 
 use super::skill_pl::*;
 use std::collections::BTreeSet;

@@ -105,27 +105,22 @@ impl TestCatalogExecutionFactory {
             catalog,
             catalog_port: wiring.catalog(),
             execution: wiring.execution(),
-            binding: wiring.binding(),
         }
     }
 
-    pub fn build(&self, context: ToolExecutionContext) -> TestCatalogExecution {
-        let result = self.build_for_scope(
-            context.scope().registry_scope().clone(),
-            context.scope().profile().clone(),
-        );
-        result.binding.bind(context).expect("bind context");
-        result
+    pub fn build(&self, _context: ToolExecutionContext) -> TestCatalogExecution {
+        self.build_for_scope(
+            _context.scope().registry_scope().clone(),
+            _context.scope().profile().clone(),
+        )
     }
 }
 
-/// Built pair of ports and its catalog projection. Keeps wiring alive for the
-/// bound execution context.
+/// Built pair of ports and its catalog projection.
 pub struct TestCatalogExecution {
     catalog: ToolCatalogSnapshot,
     catalog_port: Arc<dyn ToolCatalogPort>,
     execution: Arc<dyn ToolExecutionPort>,
-    binding: Arc<dyn crate::domain::ToolExecutionContextBindingPort>,
 }
 
 impl TestCatalogExecution {
@@ -139,9 +134,5 @@ impl TestCatalogExecution {
 
     pub fn execution(&self) -> Arc<dyn ToolExecutionPort> {
         self.execution.clone()
-    }
-
-    pub fn binding(&self) -> Arc<dyn crate::domain::ToolExecutionContextBindingPort> {
-        self.binding.clone()
     }
 }

@@ -481,6 +481,33 @@ where
     }
 }
 
+async fn await_tool_settlement<F, T>(
+    run: &Run,
+    cancel: &CancellationToken,
+    future: F,
+) -> Interrupt<T>
+where
+    F: Future<Output = T>,
+{
+    let Some(remaining) = run.remaining_time(Instant::now()) else {
+        return Interrupt::Completed(future.await);
+    };
+    if remaining.is_zero() {
+        cancel.cancel();
+        return Interrupt::TimedOut;
+    }
+
+    tokio::pin!(future);
+    tokio::select! {
+        value = &mut future => Interrupt::Completed(value),
+        _ = tokio::time::sleep(remaining) => {
+            cancel.cancel();
+            let _ = future.await;
+            Interrupt::TimedOut
+        }
+    }
+}
+
 pub async fn run_loop<P>(
     run: &mut Run,
     cancel: &CancellationToken,
@@ -983,7 +1010,12 @@ where
                 guarded_calls.len(),
                 short(run.id()),
             );
-            let tool_step = match await_interruptible(
+            // Tool execution owns cancellation convergence. Once calls have entered the
+            // supervisor, dropping this future would prevent its bounded cleanup and
+            // terminal receipt mutation from becoming durable. The step token is still
+            // propagated into the port; execute_tools must return only after every call
+            // has reached Cancelled or CancellationUnconfirmed.
+            let tool_step = match await_tool_settlement(
                 run,
                 &step_cancel,
                 port.execute_tools(run.id(), &step_id, &guarded_calls, &step_cancel),
@@ -991,7 +1023,7 @@ where
             .await
             {
                 Interrupt::Completed(Ok(step)) => step,
-                Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
+                Interrupt::Completed(Err(LoopEngineError::Cancelled)) => {
                     handle_step_control(run, port).await?;
                     return Ok(());
                 }
@@ -1003,6 +1035,7 @@ where
                     timeout_run(run, port).await?;
                     return Ok(());
                 }
+                Interrupt::Cancelled => unreachable!("Tool settlement is not externally dropped"),
             };
             if handle_interrupt(run, cancel, port).await? {
                 return Ok(());

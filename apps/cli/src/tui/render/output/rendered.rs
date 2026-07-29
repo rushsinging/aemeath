@@ -3,6 +3,7 @@
 //! 不变式：每个 `RenderedLine` 的 `plain` 等于其 `spans` 可见文本拼接
 //! （见 primitives / blocks 各组件单测断言）。
 
+use std::ops::Range;
 use std::rc::Rc;
 
 use ratatui::style::Style;
@@ -46,6 +47,15 @@ pub struct LinkSpan {
     pub url: String,
 }
 
+/// 只在 viewport 绘制阶段解析的行级动画；不进入 `plain`，不改变选择/复制语义。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LineAnimation {
+    /// 运行中工具首行 gutter 在实心/空心圆之间切换。
+    RunningToolMarker,
+    /// 模型流占位首行的 Thinking 点号循环。
+    ThinkingDots,
+}
+
 /// 一行渲染产物。`spans` 用于显示（含 markdown/语法/theme 色），
 /// `plain` 是逻辑纯文本（选中/复制用）。
 ///
@@ -65,6 +75,8 @@ pub struct RenderedLine {
     pub fill_style: Option<Style>,
     /// 行内 link 的 (col_start, col_end, url) 列表（偏移与 plain 对齐）。
     pub links: Vec<LinkSpan>,
+    /// 仅在可视行绘制时按当前 frame 应用的动画元数据。
+    pub animation: Option<LineAnimation>,
 }
 
 impl RenderedLine {
@@ -81,6 +93,7 @@ impl RenderedLine {
             gutter_cols: 0,
             fill_style: None,
             links: Vec::new(),
+            animation: None,
         }
     }
 
@@ -99,6 +112,7 @@ impl RenderedLine {
             gutter_cols: 0,
             fill_style: None,
             links: Vec::new(),
+            animation: None,
         }
     }
 
@@ -111,6 +125,7 @@ impl RenderedLine {
             gutter_cols: 0,
             fill_style: None,
             links: Vec::new(),
+            animation: None,
         }
     }
 
@@ -127,6 +142,7 @@ impl RenderedLine {
             gutter_cols: 0,
             fill_style: None,
             links,
+            animation: None,
         }
     }
 
@@ -171,31 +187,121 @@ pub struct RenderedDocument {
     pub blocks: Vec<RenderedBlock>,
     /// 每个 root group 的 block 数；为空时兼容旧构造方式，每个 block 视为独立 group。
     pub root_group_block_counts: Vec<usize>,
+    /// 每个 block 结束后的累计逻辑行数。与 `blocks` 同长度，用于二分定位逻辑行。
+    pub(crate) block_line_ends: Vec<usize>,
 }
+
+pub struct RenderedLinesInRange<'a> {
+    document: &'a RenderedDocument,
+    next_index: usize,
+    end: usize,
+    block_index: usize,
+    line_index: usize,
+}
+
+impl<'a> Iterator for RenderedLinesInRange<'a> {
+    type Item = (usize, &'a RenderedLine);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next_index >= self.end {
+            return None;
+        }
+        while self.block_index < self.document.blocks.len() {
+            let block = &self.document.blocks[self.block_index];
+            if let Some(line) = block.lines.get(self.line_index) {
+                let index = self.next_index;
+                self.next_index += 1;
+                self.line_index += 1;
+                return Some((index, line));
+            }
+            self.block_index += 1;
+            self.line_index = 0;
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.end.saturating_sub(self.next_index);
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for RenderedLinesInRange<'_> {}
 
 impl RenderedDocument {
     pub fn new(blocks: Vec<RenderedBlock>) -> Self {
+        let block_line_ends = block_line_ends(&blocks);
         Self {
             blocks,
             root_group_block_counts: Vec::new(),
+            block_line_ends,
         }
     }
 
     pub fn with_root_groups(groups: Vec<Vec<RenderedBlock>>) -> Self {
         let root_group_block_counts = groups.iter().map(Vec::len).collect();
-        let blocks = groups.into_iter().flatten().collect();
+        let blocks = groups.into_iter().flatten().collect::<Vec<_>>();
+        let block_line_ends = block_line_ends(&blocks);
         Self {
             blocks,
             root_group_block_counts,
+            block_line_ends,
         }
     }
 
     pub fn total_lines(&self) -> usize {
-        self.blocks.iter().map(|block| block.lines.len()).sum()
+        self.block_line_ends.last().copied().unwrap_or(0)
     }
 
     pub fn iter_lines(&self) -> impl Iterator<Item = &RenderedLine> {
         self.blocks.iter().flat_map(|block| block.lines.iter())
+    }
+
+    /// 按文档逻辑行索引查询单行。通过 block 累计行结束索引二分定位，
+    /// 不展平或复制整份文档。
+    pub fn line_at(&self, index: usize) -> Option<&RenderedLine> {
+        let block_index = self.block_line_ends.partition_point(|end| *end <= index);
+        let block = self.blocks.get(block_index)?;
+        let block_start = block_index
+            .checked_sub(1)
+            .and_then(|previous| self.block_line_ends.get(previous))
+            .copied()
+            .unwrap_or(0);
+        block.lines.get(index - block_start)
+    }
+
+    /// 迭代逻辑行范围。每次单行查询通过累计行索引二分定位，
+    /// 只访问请求区间，不展平完整文档。
+    pub fn lines_in_range(&self, range: Range<usize>) -> RenderedLinesInRange<'_> {
+        let end = range.end.min(self.total_lines());
+        let start = range.start.min(end);
+        let (block_index, line_index) = self.locate_line(start).unwrap_or((self.blocks.len(), 0));
+        RenderedLinesInRange {
+            document: self,
+            next_index: start,
+            end,
+            block_index,
+            line_index,
+        }
+    }
+
+    fn locate_line(&self, index: usize) -> Option<(usize, usize)> {
+        let block_index = self.block_line_ends.partition_point(|end| *end <= index);
+        let block = self.blocks.get(block_index)?;
+        let block_start = block_index
+            .checked_sub(1)
+            .and_then(|previous| self.block_line_ends.get(previous))
+            .copied()
+            .unwrap_or(0);
+        if index.saturating_sub(block_start) < block.lines.len() {
+            Some((block_index, index - block_start))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn rebuild_line_index(&mut self) {
+        self.block_line_ends = block_line_ends(&self.blocks);
     }
 
     pub fn root_group_block_counts(&self) -> Vec<usize> {
@@ -205,6 +311,17 @@ impl RenderedDocument {
             self.root_group_block_counts.clone()
         }
     }
+}
+
+fn block_line_ends(blocks: &[RenderedBlock]) -> Vec<usize> {
+    let mut total = 0usize;
+    blocks
+        .iter()
+        .map(|block| {
+            total = total.saturating_add(block.lines.len());
+            total
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -252,21 +369,76 @@ mod tests {
 
     #[test]
     fn test_rendered_document_total_lines_sums_blocks() {
-        let doc = RenderedDocument {
-            blocks: vec![
-                RenderedBlock {
-                    block_id: "a".into(),
-                    lines: Rc::new(vec![RenderedLine::default(), RenderedLine::default()]),
-                },
-                RenderedBlock {
-                    block_id: "b".into(),
-                    lines: Rc::new(vec![RenderedLine::default()]),
-                },
-            ],
-            root_group_block_counts: Vec::new(),
-        };
+        let doc = RenderedDocument::new(vec![
+            RenderedBlock {
+                block_id: "a".into(),
+                lines: Rc::new(vec![RenderedLine::default(), RenderedLine::default()]),
+            },
+            RenderedBlock {
+                block_id: "b".into(),
+                lines: Rc::new(vec![RenderedLine::default()]),
+            },
+        ]);
 
         assert_eq!(doc.total_lines(), 3);
         assert_eq!(doc.iter_lines().count(), 3);
+    }
+
+    #[test]
+    fn line_at_crosses_empty_and_non_empty_blocks() {
+        let doc = RenderedDocument::new(vec![
+            RenderedBlock {
+                block_id: "empty".into(),
+                lines: Rc::new(Vec::new()),
+            },
+            RenderedBlock {
+                block_id: "first".into(),
+                lines: Rc::new(vec![
+                    RenderedLine::from_plain("zero"),
+                    RenderedLine::from_plain("one"),
+                ]),
+            },
+            RenderedBlock {
+                block_id: "second".into(),
+                lines: Rc::new(vec![RenderedLine::from_plain("two")]),
+            },
+        ]);
+
+        assert_eq!(doc.line_at(0).map(|line| line.plain.as_str()), Some("zero"));
+        assert_eq!(doc.line_at(1).map(|line| line.plain.as_str()), Some("one"));
+        assert_eq!(doc.line_at(2).map(|line| line.plain.as_str()), Some("two"));
+        assert_eq!(doc.line_at(3), None);
+    }
+
+    #[test]
+    fn lines_in_range_returns_global_indices_across_block_boundaries() {
+        let doc = RenderedDocument::new(vec![
+            RenderedBlock {
+                block_id: "first".into(),
+                lines: Rc::new(vec![
+                    RenderedLine::from_plain("zero"),
+                    RenderedLine::from_plain("one"),
+                ]),
+            },
+            RenderedBlock {
+                block_id: "empty".into(),
+                lines: Rc::new(Vec::new()),
+            },
+            RenderedBlock {
+                block_id: "second".into(),
+                lines: Rc::new(vec![
+                    RenderedLine::from_plain("two"),
+                    RenderedLine::from_plain("three"),
+                ]),
+            },
+        ]);
+
+        let selected = doc
+            .lines_in_range(1..3)
+            .map(|(index, line)| (index, line.plain.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(selected, vec![(1, "one"), (2, "two")]);
+        assert_eq!(doc.lines_in_range(9..12).count(), 0);
     }
 }

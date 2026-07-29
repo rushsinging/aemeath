@@ -95,7 +95,7 @@ EnterWorktree header 的目标选择顺序：
   path/base 边界。
 - `docs/design/02-modules/tools/01-domain-model.md`：输入描述无需复制具体工具 schema；
   核对 ToolInvocation/Outcome 边界后若现有通用规则已覆盖，仅在 Issue/PR 记录已对齐。
-- `specs/tui-cli.md`：补充 result-aware header 必须在 result 缺失时消费 input 的约束。
+- `specs/3.3-tui-cli.md`：补充 result-aware header 必须在 result 缺失时消费 input 的约束。
 
 ## 测试策略
 

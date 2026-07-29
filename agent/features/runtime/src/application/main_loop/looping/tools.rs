@@ -32,7 +32,7 @@ pub(crate) struct ToolRoundResult {
 pub(crate) async fn execute_tool_round<S>(
     context: &RuntimeTurnContext,
     tool_calls: &[ToolCall],
-    tool_execution: &Arc<dyn ToolExecutionPort>,
+    _tool_execution: &Arc<dyn ToolExecutionPort>,
     policy: &dyn policy::PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
@@ -85,15 +85,10 @@ where
         .filter(|prepared| prepared.call.name == "AskUserQuestion")
     {
         let call = &prepared.call;
-        let mut input = call.input.clone();
-        tools::strip_runtime_meta(&mut input);
-        let invocation =
-            tools::ToolInvocation::new(call.name.as_str(), input, agent.ctx.scope().clone())
-                .with_authorization(prepared.authorization);
-        match tool_execution
-            .execute(invocation, agent.ctx.cancellation().as_ref())
-            .await
-        {
+        let domain = agent
+            .execute_domain_with_ctx(call, &agent.ctx, prepared.authorization, step_id)
+            .await;
+        match domain {
             tools::ToolExecutionOutcome::Suspended(suspension) => {
                 let questions = match suspension {
                     ToolSuspension::UserInteraction(spec) => spec
@@ -133,7 +128,7 @@ where
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,
-        tool_execution,
+        agent,
         &agent.ctx,
         &agent.agent_semaphore,
         &agent.workspace_persist,
@@ -396,7 +391,6 @@ mod tests {
     use serde_json::Value;
     use share::message::ContentBlock;
     use std::sync::{Arc, Mutex};
-    use tokio_util::sync::CancellationToken;
     use tools::ToolOutcome;
     use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
@@ -408,7 +402,7 @@ mod tests {
         async fn dispatch(
             &self,
             _invocation: HookInvocation,
-            _cancellation: &CancellationToken,
+            _cancellation: &dyn hook::CancellationSignal,
         ) -> HookOutcome {
             HookOutcome::proceed()
         }

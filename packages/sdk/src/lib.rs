@@ -41,10 +41,10 @@ pub use chat::{
     HookExecutionResultView, HookMessageKindView, HookMessageView, OptionItem,
     ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
     ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep,
-    SkillRequest, ToolCallStatusView, ToolResultImage, UserInput, WorkspaceContextView,
-    WorkspaceStackEntryView,
+    ResumedStepFinalizeCause, SkillRequest, ToolCallStatusView, ToolResultImage, UserInput,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
-pub use client::AgentClient;
+pub use client::{AgentClient, RunControlClient};
 pub use commands::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
@@ -70,8 +70,8 @@ pub use interaction::{
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use run::{
-    CancelRunOutcome, CancelRunStepOutcome, ControlDeadline, RunTerminationReason,
-    TerminateRunOutcome,
+    CancelCurrentRunOutcome, CancelRunOutcome, CancelRunStepOutcome, ControlDeadline,
+    RunTerminationReason, TerminateRunOutcome,
 };
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, SessionSnapshot, SessionSummary,

@@ -158,8 +158,12 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             UiEvent::InteractionRequested { request }
         }
         sdk::ChatEvent::RunCancelled { .. } => UiEvent::RunCancelled,
-        sdk::ChatEvent::Cancelled { context } => UiEvent::Cancelled {
+        sdk::ChatEvent::Cancelled {
+            context,
+            duration_ms,
+        } => UiEvent::Cancelled {
             context: context.into(),
+            duration: std::time::Duration::from_millis(duration_ms),
         },
         sdk::ChatEvent::LiveTps(tps) => UiEvent::LiveTps(tps),
         sdk::ChatEvent::CurrentTurnChanged(turn) | sdk::ChatEvent::TurnChanged(turn) => {
@@ -248,6 +252,12 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
                         run_id: step.run_id,
                         step_id: step.step_id,
                         messages: step.messages.into_iter().map(chat_message).collect(),
+                        finalize_cause: step.finalize_cause.map(|cause| match cause {
+                            sdk::ResumedStepFinalizeCause::Completed => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed,
+                            sdk::ResumedStepFinalizeCause::UserCancelledStep => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep,
+                            sdk::ResumedStepFinalizeCause::RunTerminated => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated,
+                        }),
+                        duration_ms: step.duration_ms,
                     },
                 )
                 .collect(),

@@ -287,10 +287,6 @@ where
         self.runtime_context.tool_execution_ref()
     }
     #[inline]
-    fn tool_context_binding(&self) -> &Arc<dyn tools::ToolExecutionContextBindingPort> {
-        self.runtime_context.tool_context_binding_ref()
-    }
-    #[inline]
     fn policy(&self) -> &dyn policy::PolicyPort {
         self.runtime_context.policy_ref().as_ref()
     }
@@ -443,6 +439,7 @@ where
                 request.step_id.clone(),
                 window.backing_revision,
                 cause,
+                Some(self.started_at.elapsed().as_millis() as u64),
                 messages,
                 vec![],
                 self.runtime_context.usage().get(),
@@ -499,6 +496,7 @@ where
         max_tool_concurrency: usize,
         agent_semaphore: &Arc<tokio::sync::Semaphore>,
         session_id: &str,
+        context_port: Arc<dyn context::ports::ContextPort>,
         run_id: &sdk::RunId,
         tool_selection: &share::config::ToolSelection,
     ) -> Agent {
@@ -517,6 +515,8 @@ where
         Agent {
             catalog: catalog.clone(),
             execution: tool_execution.clone(),
+            context: Some(ContextCoordinator::new(context_port)),
+            session_id: context::domain::SessionId::new(session_id),
             ctx: tools::ToolExecutionContext::new(
                 tools::ExecutionScope::builder(
                     run_id.to_string(),
@@ -525,7 +525,7 @@ where
                 )
                 .build(),
                 tools::ToolExecutionPorts::new(
-                    crate::adapters::tool_runtime::cancellation(cancel.clone()),
+                    crate::application::runtime_context::tool_cancellation_signal(cancel.clone()),
                     crate::application::workspace_access::RuntimeWorkspaceAccess::new(
                         workspace.clone(),
                     )
@@ -811,20 +811,16 @@ where
             &self.run_config().config().skills().dirs,
             self.run_config().config().user_agent(),
             self.workspace,
-            &self.cancel_token(),
+            cancel,
             self.read_files,
             self.session_reminders,
             self.max_tool_concurrency,
             self.agent_semaphore,
             self.session_id,
+            self.runtime_context.context(),
             &self.run_id,
             self.run_config().tool_selection(),
         );
-        let _binding = tools::ToolExecutionContextBindingGuard::bind(
-            (*self.tool_context_binding()).clone(),
-            agent.ctx.clone(),
-        )
-        .map_err(LoopEngineError::Adapter)?;
         let sink = self.runtime_context.event_sink();
         let round_result = execute_tool_round(
             &self.turn_context,
@@ -1540,27 +1536,67 @@ where
                         current.as_ref().and_then(|ci| ci.approval_call.clone())
                     {
                         let call = &approval_call.call;
-                        let mut input = call.input.clone();
-                        tools::strip_runtime_meta(&mut input);
                         let ws_read = self.workspace.read();
-                        let scope = tools::ExecutionScope::builder(
-                            self.run_id.to_string(),
-                            ws_read.workspace_id(),
-                            ws_read.current_workspace_root(),
-                        )
-                        .build();
-                        let invocation =
-                            tools::ToolInvocation::new(call.name.as_str(), input, scope)
-                                .with_authorization(approval_call.authorization);
-                        let domain = self
-                            .tool_execution()
-                            .execute(
-                                invocation,
-                                &*crate::adapters::tool_runtime::cancellation(
-                                    self.runtime_context.cancel_ref().token().clone(),
-                                ),
+                        let approval_ctx = tools::ToolExecutionContext::new(
+                            tools::ExecutionScope::builder(
+                                self.run_id.to_string(),
+                                ws_read.workspace_id(),
+                                ws_read.current_workspace_root(),
                             )
-                            .await;
+                            .build(),
+                            tools::ToolExecutionPorts::new(
+                                crate::application::runtime_context::tool_cancellation_signal(
+                                    self.cancel_token(),
+                                ),
+                                crate::application::workspace_access::RuntimeWorkspaceAccess::new(
+                                    self.workspace.clone(),
+                                )
+                                .read_access(),
+                                Arc::new(tools::MutexReadSet(self.read_files.clone())),
+                                Arc::new(tools::FixedPlanMode(None)),
+                                self.memory().clone(),
+                                Arc::new(tools::FixedGuidance {
+                                    language: self.language.to_string(),
+                                }),
+                            ),
+                        );
+                        let approval_step_id = self
+                            .context_request
+                            .as_ref()
+                            .map(|request| request.step_id.clone())
+                            .unwrap_or_else(sdk::RunStepId::new_v7);
+                        let domain = Self::make_agent(
+                            self.tool_catalog(),
+                            self.tool_execution(),
+                            self.agent_runner,
+                            self.memory(),
+                            self.language,
+                            &self.run_config().config().skills().dirs,
+                            self.run_config().config().user_agent(),
+                            self.workspace,
+                            &self.cancel_token(),
+                            self.read_files,
+                            self.session_reminders,
+                            self.max_tool_concurrency,
+                            self.agent_semaphore,
+                            self.session_id,
+                            self.runtime_context.context(),
+                            &self.run_id,
+                            self.run_config().tool_selection(),
+                        )
+                        .execute_domain_with_ctx(
+                            &crate::application::subagent::ToolCall {
+                                id: call.id.clone(),
+                                provider_id: call.provider_id.clone(),
+                                name: call.name.clone(),
+                                index: call.index,
+                                input: call.input.clone(),
+                            },
+                            &approval_ctx,
+                            approval_call.authorization,
+                            &approval_step_id,
+                        )
+                        .await;
                         let outcome = crate::application::subagent::legacy_outcome(domain);
                         let execution = ToolExecution::from_parts(
                             id.clone(),

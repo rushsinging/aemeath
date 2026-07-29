@@ -12,6 +12,7 @@ use sdk::CharIdx;
 
 use super::OutputArea;
 use crate::tui::render::display::safe_text::str_display_width;
+use crate::tui::render::output::rendered::{LineAnimation, RenderedLine};
 use crate::tui::render::output::selection_overlay::apply_selection_overlay;
 use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::OutputViewState;
@@ -22,6 +23,39 @@ use selection::sel_range_for_line;
 pub(crate) use scrollbar::{content_area_for_scrollbar, SCROLLBAR_RESERVE_COLS};
 use scrollbar::{render_scrollbar, visible_range};
 pub(crate) use selection::sel_range_for_bounds;
+
+fn animate_visible_line(line: &RenderedLine, frame: u64) -> Option<RenderedLine> {
+    match line.animation? {
+        LineAnimation::RunningToolMarker => {
+            let mut animated = line.clone();
+            let glyph = if (frame / crate::tui::render::output::gutter::TOOL_MARKER_BLINK_DIVISOR)
+                .is_multiple_of(2)
+            {
+                "●"
+            } else {
+                "○"
+            };
+            let gutter = animated.spans.first_mut()?;
+            let mut chars = gutter.content.chars();
+            let prefix_len = line.gutter_cols.saturating_sub(2);
+            let prefix = chars.by_ref().take(prefix_len).collect::<String>();
+            gutter.content = format!("{prefix}{glyph} ").into();
+            Some(animated)
+        }
+        LineAnimation::ThinkingDots => {
+            let mut animated = line.clone();
+            let dots =
+                crate::tui::render::output::blocks::thinking_placeholder::animated_thinking_dots(
+                    frame,
+                );
+            let header = format!("Thinking{dots}");
+            let span = animated.spans.first_mut()?;
+            span.content = header.clone().into();
+            animated.plain = header;
+            Some(animated)
+        }
+    }
+}
 
 impl OutputArea {
     /// 渲染输出区域
@@ -60,31 +94,30 @@ impl OutputArea {
 
         clear_area(area, buf);
 
-        let document_lines = self.document.iter_lines().collect::<Vec<_>>();
-        let first_visible_doc_line_plain = document_lines
-            .get(start)
+        let first_visible_doc_line_plain = self
+            .document
+            .line_at(start)
             .map(|line| diagnostic_plain(&line.plain))
             .unwrap_or_default();
         let last_visible_doc_line_plain = end
             .checked_sub(1)
-            .and_then(|idx| document_lines.get(idx))
+            .and_then(|idx| self.document.line_at(idx))
             .map(|line| diagnostic_plain(&line.plain))
             .unwrap_or_default();
-        let last_doc_line_plain = document_lines
-            .last()
+        let last_doc_line_plain = total_lines
+            .checked_sub(1)
+            .and_then(|idx| self.document.line_at(idx))
             .map(|line| diagnostic_plain(&line.plain))
             .unwrap_or_default();
-        let visible_overwide_lines = document_lines
-            .get(start..end)
-            .unwrap_or(&[])
-            .iter()
-            .filter(|line| str_display_width(&line.plain) > content_area.width as usize)
+        let visible_overwide_lines = self
+            .document
+            .lines_in_range(start..end)
+            .filter(|(_, line)| str_display_width(&line.plain) > content_area.width as usize)
             .count();
-        let max_visible_line_width = document_lines
-            .get(start..end)
-            .unwrap_or(&[])
-            .iter()
-            .map(|line| str_display_width(&line.plain))
+        let max_visible_line_width = self
+            .document
+            .lines_in_range(start..end)
+            .map(|(_, line)| str_display_width(&line.plain))
             .max()
             .unwrap_or(0);
         let mut screen_map = Vec::new();
@@ -92,10 +125,15 @@ impl OutputArea {
         let mut display_lines = Vec::new();
         let mut line_fill_styles = Vec::new();
 
-        for idx in start..end {
-            let Some(line) = document_lines.get(idx) else {
-                continue;
-            };
+        #[cfg(test)]
+        {
+            self.last_document_line_visits = 0;
+        }
+        for (idx, line) in self.document.lines_in_range(start..end) {
+            #[cfg(test)]
+            {
+                self.last_document_line_visits += 1;
+            }
             let mut plain = line.plain.clone();
             if idx == start && plain.contains('│') {
                 plain = normalize_rendered_table_plain(&plain);
@@ -115,7 +153,16 @@ impl OutputArea {
             let char_end = CharIdx::new(plain.chars().count());
             screen_map.push((idx, CharIdx::ZERO, char_end));
             rendered_content.insert(idx, plain);
-            let spans = apply_selection_overlay(line, sel_range_for_line(view, line, idx));
+            let frame = live_status
+                .spinner
+                .as_ref()
+                .map(|spinner| spinner.frame)
+                .unwrap_or(0);
+            let animated_line = animate_visible_line(line, frame);
+            let spans = apply_selection_overlay(
+                animated_line.as_ref().unwrap_or(line),
+                sel_range_for_line(view, line, idx),
+            );
             line_fill_styles.push(line.fill_style);
             display_lines.push(Line::from(spans).style(line.style));
         }

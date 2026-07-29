@@ -30,6 +30,7 @@ impl ConversationUpdate for ResumeConversation {
             HistoryDisplayMessage,
         };
         use super::ids::{ChatId, ChatTurnId, ToolCallId};
+        use super::terminal::TerminalCause;
         use super::tool_call::ToolCallStatus;
 
         let mut all_changes = Vec::new();
@@ -171,6 +172,23 @@ impl ConversationUpdate for ResumeConversation {
                     }
                 }
             }
+            if let Some(finalize_cause) = step.finalize_cause {
+                let cause = match finalize_cause {
+                    crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed => {
+                        TerminalCause::Completed
+                    }
+                    crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep => {
+                        TerminalCause::UserCancelled
+                    }
+                    crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated => {
+                        TerminalCause::RunTerminated
+                    }
+                };
+                all_changes.extend(model.apply(TerminalNotice {
+                    cause,
+                    duration: step.duration_ms.map(std::time::Duration::from_millis),
+                }));
+            }
         }
         all_changes
     }
@@ -241,6 +259,13 @@ impl ConversationUpdate for ToolResult {
             self.is_error,
             self.image_count,
         )
+    }
+}
+
+impl ConversationUpdate for TerminalNotice {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        super::terminal::terminal_notice(self.cause, self.duration)
+            .map_or_else(Vec::new, |text| model.append_system_message(text))
     }
 }
 
@@ -684,6 +709,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::ToolCallStart(s) => s.update(model),
             Self::ToolCallUpdate(s) => s.update(model),
             Self::ToolResult(s) => s.update(model),
+            Self::TerminalNotice(s) => s.update(model),
             Self::AppendSystemMessage(s) => s.update(model),
             Self::UpsertModelStreamPlaceholder(s) => s.update(model),
             Self::ClearModelStreamPlaceholder(s) => s.update(model),
@@ -752,6 +778,7 @@ mod tests {
         TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiStopHookFeedback,
     };
     use crate::tui::model::conversation::block::HookNoticeKind;
+    use crate::tui::model::conversation::tool_call::ToolCallStatus;
     use crate::tui::model::output_timeline::OutputTimelineItem;
 
     fn ask_tool_use(id: &str, question: &str) -> TuiContentBlock {
@@ -778,12 +805,155 @@ mod tests {
     }
 
     #[test]
+    fn resume_projects_completed_step_terminal_notice_when_duration_is_known() {
+        let mut model = ConversationModel::default();
+
+        ResumeConversation {
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "completed-run".into(),
+                step_id: "completed-step".into(),
+                messages: vec![TuiChatMessage::user_text("completed question")],
+                finalize_cause: Some(
+                    crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed,
+                ),
+                duration_ms: Some(125_000),
+            }],
+        }
+        .update(&mut model);
+
+        assert!(model.timeline.items().iter().any(|item| matches!(
+            item,
+            OutputTimelineItem::System { text, .. }
+                if text.starts_with('✻') && text.ends_with("for 2m 5s")
+        )));
+    }
+
+    #[test]
+    fn resume_legacy_completed_step_without_duration_has_no_terminal_notice() {
+        let mut model = ConversationModel::default();
+
+        ResumeConversation {
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "legacy-completed-run".into(),
+                step_id: "legacy-completed-step".into(),
+                messages: vec![TuiChatMessage::user_text("legacy completed question")],
+                finalize_cause: Some(
+                    crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed,
+                ),
+                duration_ms: None,
+            }],
+        }
+        .update(&mut model);
+
+        assert!(!model.timeline.items().iter().any(|item| matches!(
+            item,
+            OutputTimelineItem::System { text, .. } if text.starts_with('✻')
+        )));
+    }
+
+    #[test]
+    fn resume_projects_cancelled_step_terminal_notice() {
+        let mut model = ConversationModel::default();
+
+        ResumeConversation {
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "cancelled-run".into(),
+                step_id: "cancelled-step".into(),
+                messages: vec![TuiChatMessage::user_text("cancelled question")],
+                finalize_cause: Some(
+                    crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep,
+                ),
+                duration_ms: Some(125_000),
+            }],
+        }
+        .update(&mut model);
+
+        assert!(model.timeline.items().iter().any(|item| matches!(
+            item,
+            OutputTimelineItem::System { text, .. }
+                if text == "✻ Cancelled, ran 2m 5s"
+        )));
+    }
+
+    #[test]
+    fn resume_projects_reconstructed_unfinished_bash_as_error_and_terminated_notice() {
+        let mut model = ConversationModel::default();
+        let assistant = TuiChatMessage {
+            role: "assistant".to_string(),
+            content: vec![TuiContentBlock::ToolUse {
+                id: "provider-call-1".to_string(),
+                name: "Bash".to_string(),
+                input: serde_json::json!({"command": "sleep 180"}),
+            }],
+            input_id: None,
+            source: TuiMessageSource::User,
+            stop_hook: None,
+        };
+        let result = TuiChatMessage {
+            role: "user".to_string(),
+            content: vec![TuiContentBlock::ToolResult {
+                tool_use_id: "provider-call-1".to_string(),
+                content: serde_json::json!({"outcome": "CancellationUnconfirmed"}),
+                is_error: true,
+                text: Some("cleanup could not be confirmed".to_string()),
+            }],
+            input_id: None,
+            source: TuiMessageSource::SystemGenerated,
+            stop_hook: None,
+        };
+
+        ResumeConversation {
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "terminated-run".into(),
+                step_id: "running-tool-step".into(),
+                messages: vec![assistant, result],
+                finalize_cause: Some(
+                    crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated,
+                ),
+                duration_ms: None,
+            }],
+        }
+        .update(&mut model);
+
+        let chat_id =
+            crate::tui::model::conversation::ids::ChatId::from_legacy_or_new("terminated-run");
+        let turn_id = crate::tui::model::conversation::ids::ChatTurnId::from_legacy_or_new(
+            "running-tool-step",
+        );
+        let turn = model
+            .chats
+            .iter()
+            .find(|chat| chat.id == chat_id)
+            .and_then(|chat| chat.turns.iter().find(|turn| turn.id == turn_id))
+            .expect("恢复后应存在终止 Step");
+        let call = turn.tool_calls.first().expect("恢复后应存在 Bash ToolCall");
+        assert_eq!(call.name, "Bash");
+        assert_eq!(call.status, ToolCallStatus::Error);
+        assert!(model
+            .timeline
+            .items()
+            .iter()
+            .any(|item| matches!(item, OutputTimelineItem::ToolCall { .. })));
+        assert!(model
+            .timeline
+            .items()
+            .iter()
+            .any(|item| matches!(item, OutputTimelineItem::ToolResult { .. })));
+        assert!(model.timeline.items().iter().any(|item| matches!(
+            item,
+            OutputTimelineItem::System { text, .. } if text == "此 Run 已终止"
+        )));
+    }
+
+    #[test]
     fn resume_conversation_equality_compares_step_identity_and_messages() {
         let first = ResumeConversation {
             steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
                 run_id: "run-1".into(),
                 step_id: "step-1".into(),
                 messages: vec![TuiChatMessage::user_text("first")],
+                finalize_cause: None,
+                duration_ms: None,
             }],
         };
         let different = ResumeConversation {
@@ -791,6 +961,8 @@ mod tests {
                 run_id: "run-2".into(),
                 step_id: "step-1".into(),
                 messages: vec![TuiChatMessage::user_text("second")],
+                finalize_cause: None,
+                duration_ms: None,
             }],
         };
 
@@ -825,6 +997,8 @@ mod tests {
                     assistant_two,
                     ask_result("ask-2", serde_json::json!("答案二")),
                 ],
+                finalize_cause: None,
+                duration_ms: None,
             }],
         }
         .update(&mut model);
@@ -873,6 +1047,8 @@ mod tests {
                 run_id: "history-run".into(),
                 step_id: "history-step".into(),
                 messages: vec![message],
+                finalize_cause: None,
+                duration_ms: None,
             }],
         }
         .update(&mut model);
@@ -913,6 +1089,8 @@ mod tests {
                 run_id: "history-run".into(),
                 step_id: "history-step".into(),
                 messages: vec![user, stop_hook, assistant],
+                finalize_cause: None,
+                duration_ms: None,
             }],
         }
         .update(&mut model);
