@@ -385,7 +385,8 @@ where
             while let Some(event) = prog_rx.recv().await {
                 let _ = stream_sink
                     .send_event(RuntimeStreamEvent::AgentProgress {
-                        context: stream_context.clone(),
+                        source_context: stream_context.clone(),
+                        attachment_context: stream_context.clone(),
                         tool_id: call_id.clone(),
                         event,
                     })

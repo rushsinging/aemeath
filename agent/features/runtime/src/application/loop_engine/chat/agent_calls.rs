@@ -259,14 +259,29 @@ where
         while let Some(event) = prog_rx.recv().await {
             log::debug!(
                 target: crate::LOG_TARGET,
-                "[agent_progress_forward] tool_id={} kind={} seq={}",
+                "[agent_progress_forward] tool_id={} kind={} seq={} source_chat_id={} source_turn_id={} attachment_chat_id={} attachment_turn_id={}",
                 call_id.as_str(),
                 format!("{:?}", event.kind).split('{').next().unwrap_or("?"),
                 event.sequence,
+                event.source_context.as_ref().map(|source| source.chat_id.as_str()).unwrap_or("<attachment>"),
+                event.source_context.as_ref().map(|source| source.turn_id.as_str()).unwrap_or("<attachment>"),
+                progress_context.chat_id,
+                progress_context.turn_id,
             );
+            let source_context = event
+                .source_context
+                .as_ref()
+                .map(|source| {
+                    RuntimeTurnContext::new(
+                        sdk::ChatId::from_legacy_or_new(&source.chat_id),
+                        sdk::ChatTurnId::from_legacy_or_new(&source.turn_id),
+                    )
+                })
+                .unwrap_or_else(|| progress_context.clone());
             let _ = ui_sink
                 .send_event(RuntimeStreamEvent::AgentProgress {
-                    context: progress_context.clone(),
+                    source_context,
+                    attachment_context: progress_context.clone(),
                     tool_id: call_id.clone(),
                     event,
                 })

@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use hook::HookDispatchContext;
 use std::sync::Arc;
 use std::time::Duration;
-use tools::{AgentProgressEvent, AgentProgressKind};
+use tools::{AgentProgressKind, AgentProgressSourceContext};
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
 // ── Sub-run derivation types ──
@@ -298,6 +298,10 @@ impl AgentRunner for CliAgentRunner {
                 None => system.to_string(),
             };
 
+            let source_context = AgentProgressSourceContext::new(
+                derived.session_id.clone(),
+                sdk::ChatTurnId::new_v7().to_string(),
+            );
             // Call SubagentStart hook — workspace root from derived workspace.
             let workspace_root = derived
                 .instance
@@ -320,12 +324,13 @@ impl AgentRunner for CliAgentRunner {
             for msg in &hook_outcome.messages {
                 if let hook::HookDisplayMessageKind::SystemMessage = msg.kind {
                     if let Some(ref sink) = progress_sink {
-                        sink.emit(AgentProgressEvent {
-                            sequence: 0,
-                            kind: AgentProgressKind::Message {
+                        sink.emit(super::progress::build_progress_event(
+                            source_context.clone(),
+                            0,
+                            AgentProgressKind::Message {
                                 text: format!("[hook] {}", msg.text),
                             },
-                        });
+                        ));
                     }
                 }
             }
@@ -426,13 +431,14 @@ impl AgentRunner for CliAgentRunner {
             };
 
             if let Some(ref sink) = progress_sink {
-                sink.emit(AgentProgressEvent {
-                    sequence: 0,
-                    kind: AgentProgressKind::Started {
+                sink.emit(super::progress::build_progress_event(
+                    source_context.clone(),
+                    0,
+                    AgentProgressKind::Started {
                         role: Some(role_name_for_log.clone()),
                         model: model_display.clone(),
                     },
-                });
+                ));
             }
             progress(
                 None,
@@ -474,6 +480,7 @@ impl AgentRunner for CliAgentRunner {
                 super::loop_run::DerivedModelObserver {
                     runtime_context: runtime_context.clone(),
                     progress_sink: progress_sink.clone(),
+                    source_context: source_context.clone(),
                     runtime_cancellation: runtime_token.clone(),
                     role_name: role_name_for_log.clone(),
                     model_name: model_name.clone(),
@@ -538,6 +545,7 @@ impl AgentRunner for CliAgentRunner {
                     tool_context,
                     super::loop_run::ProgressToolRoundObserver {
                         progress_sink: progress_sink.clone(),
+                        source_context: source_context.clone(),
                         progress: progress.clone(),
                         role_name: role_name_for_log.clone(),
                     },
@@ -555,8 +563,8 @@ impl AgentRunner for CliAgentRunner {
                 system: system.clone(),
                 model_spec: Some(model_display),
                 progress_sink,
+                source_context,
             };
-
             super::loop_run::launch_sub_run(
                 &mut derived.instance,
                 self.active_run.clone(),

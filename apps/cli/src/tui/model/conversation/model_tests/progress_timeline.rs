@@ -1,3 +1,58 @@
+#[test]
+fn concurrent_agent_progress_attaches_to_matching_parent_tool_blocks() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("parent-chat");
+    let turn_id = super::ids::ChatTurnId::new("parent-turn");
+    let first_tool_id = super::ids::ToolCallId::new("agent-first");
+    let second_tool_id = super::ids::ToolCallId::new("agent-second");
+
+    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    for (index, tool_id) in [first_tool_id.clone(), second_tool_id.clone()]
+        .into_iter()
+        .enumerate()
+    {
+        model.apply(ToolCallStart {
+            chat_id: chat_id.clone(),
+            turn_id: turn_id.clone(),
+            id: tool_id,
+            provider_id: None,
+            name: "Agent".to_string(),
+            index,
+        });
+    }
+
+    model.apply(RecordAgentProgress {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        tool_id: first_tool_id.clone(),
+        message: "first child activity".to_string(),
+    });
+    model.apply(RecordAgentProgress {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        tool_id: second_tool_id.clone(),
+        message: "second child activity".to_string(),
+    });
+
+    assert_eq!(
+        tool_call(&model, &chat_id, &turn_id, &first_tool_id)
+            .expect("first parent Agent ToolCall")
+            .activities,
+        vec!["first child activity"]
+    );
+    assert_eq!(
+        tool_call(&model, &chat_id, &turn_id, &second_tool_id)
+            .expect("second parent Agent ToolCall")
+            .activities,
+        vec!["second child activity"]
+    );
+    assert!(model
+        .timeline
+        .items()
+        .iter()
+        .all(|item| !matches!(item, OutputTimelineItem::AgentProgress { .. })));
+}
+
 /// timeline 镜像验证：完整回合（user / assistant / tool-call / tool-result）后
 /// timeline 应包含 UserMessage、AssistantText、ToolCall、ToolResult，
 /// 且 AgentProgress **不进 timeline**（进度通过 tool_calls[].activities 内联渲染）。

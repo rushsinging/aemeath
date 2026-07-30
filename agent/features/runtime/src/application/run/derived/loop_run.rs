@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use share::message::Message;
 use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
-use tools::{AgentProgressEvent, AgentProgressKind, AgentRunTerminal};
+use tools::{AgentProgressKind, AgentProgressSourceContext, AgentRunTerminal};
 
 use crate::application::loop_engine::chat::InvocationResponse;
 use crate::application::loop_engine::event_strategy::{ProgressTerminalObserver, RunEventObserver};
@@ -166,6 +166,7 @@ impl EventSinkPort for DerivedEventPort {
 pub(super) struct DerivedModelObserver {
     pub runtime_context: RuntimeContext,
     pub progress_sink: Option<Arc<dyn tools::ProgressSink>>,
+    pub source_context: AgentProgressSourceContext,
     pub runtime_cancellation: CancellationToken,
     pub role_name: String,
     pub model_name: String,
@@ -212,10 +213,11 @@ impl DerivedModelObserver {
         } else {
             trimmed.to_string()
         };
-        sink.emit(AgentProgressEvent {
-            sequence: turn,
-            kind: AgentProgressKind::Message { text },
-        });
+        sink.emit(super::progress::build_progress_event(
+            self.source_context.clone(),
+            turn,
+            AgentProgressKind::Message { text },
+        ));
     }
 }
 
@@ -344,6 +346,7 @@ impl ModelInvocationObserver for DerivedModelObserver {
 
 pub(super) struct ProgressToolRoundObserver {
     pub progress_sink: Option<Arc<dyn tools::ProgressSink>>,
+    pub source_context: AgentProgressSourceContext,
     pub progress: ProgressReporter,
     pub role_name: String,
 }
@@ -358,7 +361,11 @@ impl crate::application::tool::coordination::ToolRoundObserver for ProgressToolR
     ) {
         crate::application::loop_engine::llm_log::log_tool_calls(all_calls, &self.role_name);
         if let Some(sink) = self.progress_sink.as_ref() {
-            sink.emit(build_tool_calls_progress_event(turn, executable));
+            sink.emit(build_tool_calls_progress_event(
+                self.source_context.clone(),
+                turn,
+                executable,
+            ));
         }
     }
 
@@ -421,6 +428,7 @@ pub(super) struct SubRunFinalizer {
     pub system: String,
     pub model_spec: Option<String>,
     pub progress_sink: Option<Arc<dyn tools::ProgressSink>>,
+    pub source_context: AgentProgressSourceContext,
 }
 
 impl SubRunFinalizer {
@@ -440,6 +448,7 @@ impl SubRunFinalizer {
                 system: &self.system,
                 model_spec: self.model_spec.as_deref(),
                 progress_sink: self.progress_sink.as_ref(),
+                source_context: self.source_context,
             },
         )
         .finalize(execution, launch_result)

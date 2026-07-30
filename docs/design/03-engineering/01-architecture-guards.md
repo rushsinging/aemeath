@@ -236,7 +236,7 @@
 |---|---|---|
 | `agent/features/tools/src/business/mcp_manager/connection.rs` | `core` | MCP 连接触达 registry |
 
-- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：当前精确 `path + target layer` 例外中已删除不存在的 `application/interaction/ask_user.rs → adapters`；其余路径必须通过 stale 自检，禁止扩张。
+- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：当前精确 `path + target layer` 例外中已删除不存在的 `application/interaction/ask_user.rs → adapters` 与已退役的 `ports/legacy.rs → application`；其余路径必须通过 stale 自检，禁止扩张。
 
 - **#916 安全所有权规则（`check-context-architecture.sh` R8）**：Policy/Runtime 生产代码禁止恢复 `PathAccess` / `PathKind` / `path_accesses` / `requires_read_before_write` / Policy path helper；Bash safety 禁止与 `allow_all` 条件耦合。路径解析经 Project `WorkspaceRead`，read-before-write 与 Bash safety 留在 Tool adapter。规则无路径例外。
 
@@ -259,8 +259,7 @@
   - `ROOT_ACCESS_ALLOW.workflow = {adaptive_reasoning}`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` 是 crate-root 发布的 composition façade（返回 `Arc<dyn api::ReasoningPort>`），graph/node/config 不再作为 crate-root façade。
   - `ROOT_ACCESS_ALLOW.runtime`：Composition 仅可消费登记的 crate-root façade，包括 Client/bootstrap、Provider factory PL、RuntimeContextFactory、Tool Result/ActiveRun，以及 P4 初始模型装配所需的 `InitialProviderAssembly`、`ModelRuntimeSettings`、`resolve_model_runtime_settings`；禁止穿透 `runtime::application`。`UsageSink` 供 #931 bridge，实现细节仍私有。
   - `ROOT_ACCESS_ALLOW.context`：除既有 `compact/context_port/guidance/session/skill` 外，#871 登记 `MainSessionWiring`、gate/permit、`SessionResumeView`、production factory/dependencies 与结构化错误；内部 application/adapters 路径仍禁止穿透。  - `ROOT_ACCESS_ALLOW.memory`：#900 后生产消费只需 Memory-owned OHS/PL、project key、`DatasetMemoryOpener`、legacy source factory、Reflection history adapter 与稳定错误；concrete active dataset store、project opener 和 `MemoryService` 已收回 crate 内。脚本中的 stale 名称由 #982/#1022 统一收口，本 Issue 不修改 `.agents/hooks/**`。
-  - `ROOT_ACCESS_ALLOW.tools`：除最新统一授权与 Tool PL、`MemoryPortSource` 外，#912 登记 Skill-owned `PromptFragment`、Catalog/Materialization ports、query/snapshot/revision/source/cache/error PL；Context 与 Runtime 只能经 crate-root façade 消费，adapter 仍私有。
-  - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade加 `FileSystemBlobAdapter` / `FileSystemDatasetAdapter` 供唯一 Composition/Config production factory 装配；业务消费者仍只经 Storage OHS。
+  - `ROOT_ACCESS_ALLOW.tools`：除最新统一授权与 Tool PL、`MemoryPortSource` 外，#912 登记 Skill-owned `PromptFragment`、Catalog/Materialization ports、query/snapshot/revision/source/cache/error PL；Runtime 的 Agent progress 链路额外消费 crate-root 发布的 `AgentProgressSourceContext` 纯值身份，禁止穿透 Tools 内部模块；Context 与 Runtime 只能经 crate-root façade 消费，adapter 仍私有。  - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade加 `FileSystemBlobAdapter` / `FileSystemDatasetAdapter` 供唯一 Composition/Config production factory 装配；业务消费者仍只经 Storage OHS。
   - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities}`
   - `POLICY_FORBIDDEN_PATHS` 禁止 Policy 的 `api/business/contract/core/gateway/capabilities` 文件与目录恢复
 - **检查方式**：

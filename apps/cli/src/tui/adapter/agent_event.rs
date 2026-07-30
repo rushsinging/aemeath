@@ -203,14 +203,15 @@ where
             }))
         }
         UiEvent::AgentProgress {
-            context,
+            attachment_context,
             tool_id,
             event,
+            ..
         } => match &event.kind {
             sdk::AgentProgressKindView::Started { role, model } => {
                 conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
+                    chat_id: attachment_context.chat_id.clone(),
+                    turn_id: attachment_context.turn_id.clone(),
                     tool_id: ToolCallId::new(tool_id.as_str()),
                     role: role.clone(),
                     model: model.clone(),
@@ -229,8 +230,8 @@ where
                 );
                 conversation(ConversationIntent::RecordAgentProgress(
                     RecordAgentProgress {
-                        chat_id: context.chat_id.clone(),
-                        turn_id: context.turn_id.clone(),
+                        chat_id: attachment_context.chat_id.clone(),
+                        turn_id: attachment_context.turn_id.clone(),
                         tool_id: ToolCallId::new(tool_id.as_str()),
                         message,
                     },
@@ -669,15 +670,18 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             }
         }
         TuiRuntimeEvent::AgentProgress {
-            context,
+            attachment_context,
             tool_id,
             event,
+            ..
         } => match &event.kind {
             TuiAgentProgressKind::Started { role, model } => {
                 conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
+                        &attachment_context.chat_id,
+                    ),
                     turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &context.turn_id,
+                        &attachment_context.turn_id,
                     ),
                     tool_id: ToolCallId::new(tool_id),
                     role: role.clone(),
@@ -687,9 +691,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             TuiAgentProgressKind::ToolOutput { .. } => AgentEventMapping::default(),
             TuiAgentProgressKind::Message { text } => conversation(
                 ConversationIntent::RecordAgentProgress(RecordAgentProgress {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
+                        &attachment_context.chat_id,
+                    ),
                     turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &context.turn_id,
+                        &attachment_context.turn_id,
                     ),
                     tool_id: ToolCallId::new(tool_id),
                     message: format_agent_progress_text(text),
@@ -697,9 +703,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             ),
             TuiAgentProgressKind::ToolCalls { calls } => conversation(
                 ConversationIntent::RecordAgentProgress(RecordAgentProgress {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
+                        &attachment_context.chat_id,
+                    ),
                     turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &context.turn_id,
+                        &attachment_context.turn_id,
                     ),
                     tool_id: ToolCallId::new(tool_id),
                     message: format_agent_progress_calls(calls),

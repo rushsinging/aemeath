@@ -224,7 +224,8 @@ pub enum RuntimeStreamEvent {
         request: sdk::InteractionRequest,
     },
     AgentProgress {
-        context: RuntimeTurnContext,
+        source_context: RuntimeTurnContext,
+        attachment_context: RuntimeTurnContext,
         tool_id: ToolCallId,
         event: AgentProgressEvent,
     },

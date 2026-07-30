@@ -303,11 +303,13 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         // #944 5B: AskUserBatch legacy bridge removed.
         ChatEvent::AskUserBatch { .. } => return SdkEventMapping::Nop,
         ChatEvent::AgentProgress {
-            context,
+            source_context,
+            attachment_context,
             tool_id,
             event,
         } => TuiRuntimeEvent::AgentProgress {
-            context: turn_context(context),
+            source_context: turn_context(source_context),
+            attachment_context: turn_context(attachment_context),
             tool_id: tool_id.as_str().to_string(),
             event: agent_progress(event),
         },

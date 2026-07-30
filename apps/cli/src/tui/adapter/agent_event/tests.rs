@@ -369,7 +369,8 @@ mod started_tests {
 
     fn started_event(role: Option<&str>, model: &str) -> UiEvent {
         UiEvent::AgentProgress {
-            context: ctx(),
+            source_context: ctx(),
+            attachment_context: ctx(),
             tool_id: SdkToolCallId::new("tool-1"),
             event: AgentProgressEventView {
                 sequence: 0,
@@ -382,11 +383,53 @@ mod started_tests {
     }
 
     #[test]
+    fn agent_progress_uses_parent_attachment_context() {
+        let source_context = UiTurnContext {
+            chat_id: ChatId::new("child-chat"),
+            turn_id: ChatTurnId::new("child-turn"),
+        };
+        let attachment_context = UiTurnContext {
+            chat_id: ChatId::new("parent-chat"),
+            turn_id: ChatTurnId::new("parent-turn"),
+        };
+        let sdk_tool_id = SdkToolCallId::new("agent-tool");
+        let expected_tool_id = TuiToolCallId::new(sdk_tool_id.as_str());
+        let ev = UiEvent::AgentProgress {
+            source_context,
+            attachment_context: attachment_context.clone(),
+            tool_id: sdk_tool_id,
+            event: AgentProgressEventView {
+                sequence: 1,
+                kind: AgentProgressKindView::Message {
+                    text: "working".to_string(),
+                },
+            },
+        };
+
+        let mapping = map_agent_event(&ev);
+
+        match &mapping.conversation[0] {
+            ConversationIntent::RecordAgentProgress(RecordAgentProgress {
+                chat_id,
+                turn_id,
+                tool_id,
+                ..
+            }) => {
+                assert_eq!(chat_id, &attachment_context.chat_id);
+                assert_eq!(turn_id, &attachment_context.turn_id);
+                assert_eq!(tool_id, &expected_tool_id);
+            }
+            other => panic!("expected RecordAgentProgress, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_started_event_maps_to_update_agent_meta() {
         let sdk_tool_id = SdkToolCallId::new("tool-1");
         let expected_tool_id = TuiToolCallId::new(sdk_tool_id.as_str());
         let ev = UiEvent::AgentProgress {
-            context: ctx(),
+            source_context: ctx(),
+            attachment_context: ctx(),
             tool_id: sdk_tool_id,
             event: AgentProgressEventView {
                 sequence: 0,
@@ -429,7 +472,8 @@ mod started_tests {
     #[test]
     fn test_agent_progress_tool_calls_use_tool_display_headers() {
         let ev = UiEvent::AgentProgress {
-            context: ctx(),
+            source_context: ctx(),
+            attachment_context: ctx(),
             tool_id: SdkToolCallId::new("agent-tool"),
             event: AgentProgressEventView {
                 sequence: 1,
@@ -463,7 +507,8 @@ mod started_tests {
     #[test]
     fn test_agent_progress_tool_calls_keep_each_tool_on_separate_line() {
         let ev = UiEvent::AgentProgress {
-            context: ctx(),
+            source_context: ctx(),
+            attachment_context: ctx(),
             tool_id: SdkToolCallId::new("agent-tool"),
             event: AgentProgressEventView {
                 sequence: 1,
@@ -501,7 +546,8 @@ mod started_tests {
     #[test]
     fn test_agent_progress_unknown_tool_fallback_truncates_json_and_ends_with_newline() {
         let ev = UiEvent::AgentProgress {
-            context: ctx(),
+            source_context: ctx(),
+            attachment_context: ctx(),
             tool_id: SdkToolCallId::new("agent-tool"),
             event: AgentProgressEventView {
                 sequence: 1,
@@ -530,7 +576,8 @@ mod started_tests {
     #[test]
     fn test_non_started_event_maps_to_record_agent_progress() {
         let ev = UiEvent::AgentProgress {
-            context: ctx(),
+            source_context: ctx(),
+            attachment_context: ctx(),
             tool_id: SdkToolCallId::new("tool-1"),
             event: AgentProgressEventView {
                 sequence: 1,
@@ -551,7 +598,8 @@ mod started_tests {
     #[test]
     fn test_agent_progress_tool_output_is_not_rendered_as_activity() {
         let ev = UiEvent::AgentProgress {
-            context: ctx(),
+            source_context: ctx(),
+            attachment_context: ctx(),
             tool_id: SdkToolCallId::new("tool-1"),
             event: AgentProgressEventView {
                 sequence: 2,

@@ -61,7 +61,8 @@ PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW
 # Tools crate-root façade (#993): tools 已迁到 domain/adapters 六边形物理层，
 # 只经 crate 根发布 Published Language，禁止恢复 tools::api。
 TOOLS_DOMAIN_FACADE = {
-    "AgentDispatch", "AgentProgressEvent", "AgentProgressKind", "AgentRunRequest",
+    "AgentDispatch", "AgentProgressEvent", "AgentProgressKind", "AgentProgressSourceContext",
+    "AgentRunRequest",
     "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "AuthorizationContext",
     "CancellationDeclaration", "CleanupConfirmation",
     "CancellationSignal", "CatalogQuery", "ConcurrencyDeclaration", "ExecutionScope",

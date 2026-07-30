@@ -416,6 +416,20 @@ fn test_role_max_tokens_override() {
 }
 
 #[test]
+fn derived_progress_preserves_child_source_context() {
+    let source_context = tools::AgentProgressSourceContext::new("child-chat", "child-turn");
+    let calls = vec![test_tool_call(
+        "1",
+        "Read",
+        serde_json::json!({"file_path": "/repo/src/lib.rs"}),
+    )];
+
+    let event = build_tool_calls_progress_event(source_context.clone(), 2, &calls);
+
+    assert_eq!(event.source_context, Some(source_context));
+}
+
+#[test]
 fn test_build_tool_calls_progress_event_preserves_call_data_and_summaries() {
     let id1 = sdk::ids::ToolCallId::new_v7();
     let id2 = sdk::ids::ToolCallId::new_v7();
@@ -432,7 +446,11 @@ fn test_build_tool_calls_progress_event_preserves_call_data_and_summaries() {
         ),
     ];
 
-    let event = build_tool_calls_progress_event(2, &calls);
+    let event = build_tool_calls_progress_event(
+        tools::AgentProgressSourceContext::new("child-chat", "child-turn"),
+        2,
+        &calls,
+    );
 
     assert_eq!(event.sequence, 2);
     match event.kind {
@@ -465,7 +483,11 @@ fn test_build_tool_calls_progress_event_truncates_long_read_groups_at_summary_le
         serde_json::json!({"command": "cargo check -p aemeath-cli && cargo test"}),
     )];
 
-    let event = build_tool_calls_progress_event(1, &calls);
+    let event = build_tool_calls_progress_event(
+        tools::AgentProgressSourceContext::new("child-chat", "child-turn"),
+        1,
+        &calls,
+    );
 
     match event.kind {
         AgentProgressKind::ToolCalls { calls: _ } => {

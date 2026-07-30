@@ -77,7 +77,6 @@ LAYER_MIGRATION_EXCEPTIONS = set()
 # guard-registry:migration.runtime.legacy-port-to-application
 RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/runtime/src/application/client/accessors.rs", "adapters"),
-    ("agent/features/runtime/src/ports/legacy.rs", "application"),    # #1381: Runtime-owned types (hook_types, workspace_access) moved back to application.
     # Remaining adapter refs: tool_runtime cancellation, input_buffer,
     # tool_suspension_acl, sdk_event_sink, tui_launch — pending composition injection.
     ("agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs", "adapters"),

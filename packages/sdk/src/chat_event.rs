@@ -377,9 +377,10 @@ pub enum ChatEvent {
         /// 回传回答或显式取消。
         reply_tx: tokio::sync::oneshot::Sender<crate::AskUserReply>,
     },
-    /// Agent progress 事件投影。
+    /// Agent progress 事件，分别保留派生 Run 来源身份与父 ToolCall 挂载身份。
     AgentProgress {
-        context: ChatEventContext,
+        source_context: ChatEventContext,
+        attachment_context: ChatEventContext,
         tool_id: crate::ids::ToolCallId,
         event: AgentProgressEventView,
     },

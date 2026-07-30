@@ -594,6 +594,29 @@ Chat 与 Derived 是 ingress/topology 来源，不是完整 Runtime 类型。来
 
 确有外部边界价值的 seam 可以保留为窄 Port，例如 `InputPort`、`EventSink`、`UsageSink`、`ActiveRunRegistryPort`。Session 入口由 `SessionIngress` 统一接纳并分类，命令由 `CommandScheduler` 调度，interaction reply/cancel 由 `InteractionInbox` 定向完成。它们由 Runtime 定义、Composition 注入，不承载 Loop 流程。
 
+### 6.4 派生 Run 进度的来源身份与挂载身份
+
+派生 Run 的实时进度同时参与两个不同语义：事件归因和父级展示挂载。二者 **MUST** 使用不同字段表达，**NEVER** 为了让 TUI 找到父级 Agent ToolCall 而覆盖派生 Run 自己的 chat/turn identity。
+
+```text
+source_context
+  = 实际产生进度的派生 Run chat/turn
+
+attachment_context + tool_id
+  = 父 Run 中承载该派生 Run 的 Agent ToolCall
+```
+
+身份在各边界的所有权如下：
+
+1. 派生 Run 创建自己的 `source_context`；同一派生 Run 的 Started、Message、ToolCalls 和 ToolOutput 事件都保留该身份。
+2. 父 Run 执行 Agent ToolCall 时创建 `attachment_context + tool_id`；进度转发器只补充挂载信息，不得改写 `source_context`。
+3. Runtime 出站事件同时携带 `source_context` 与 `attachment_context`。SDK 和 Consumer Adapter 只做逐字段映射，禁止把二者折叠为单一 `context`。
+4. TUI adapter 只使用 `attachment_context + tool_id` 生成 `UpdateAgentMeta` / `RecordAgentProgress`，确保内容进入父 Agent ToolCall block；`source_context` 保留给日志、诊断及未来嵌套展示。
+5. Conversation Model 必须按显式 `attachment_context + tool_id` 定位 ToolCall，禁止按 active turn 或全局 `tool_id` 回退搜索。并发 Agent ToolCall 必须保持隔离。
+6. Agent progress 不进入根级 timeline；它只更新 Agent ToolCall 的 `agent_meta` 与 `activities`。工具完成后由既有 ToolResult 渲染规则接管。
+
+兼容读取旧事件时可以把旧单一 `context` 同时解释为来源和挂载身份，但新事件写入与运行时传递必须始终显式携带两套身份。兼容逻辑只允许存在于 wire/DTO 边界，不能进入 Runtime 或 TUI Model 的业务定位规则。
+
 ## 7. Composition 与 Runtime application 边界
 
 ### 7.1 Composition 负责

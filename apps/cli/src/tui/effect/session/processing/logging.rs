@@ -232,14 +232,17 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             crate::tui::log_trace!("{} ask_user_batch count={}", stage, items.len())
         }
         sdk::ChatEvent::AgentProgress {
-            context,
+            source_context,
+            attachment_context,
             tool_id,
             event,
         } => crate::tui::log_trace!(
-            "{} agent_progress chat_id={} turn_id={} tool_id={} seq={} kind={}",
+            "{} agent_progress source_chat_id={} source_turn_id={} attachment_chat_id={} attachment_turn_id={} tool_id={} seq={} kind={}",
             stage,
-            context.chat_id,
-            context.turn_id,
+            source_context.chat_id,
+            source_context.turn_id,
+            attachment_context.chat_id,
+            attachment_context.turn_id,
             tool_id,
             event.sequence,
             event

@@ -95,6 +95,20 @@ struct EventRouteSelection {
     sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
 }
 
+#[derive(Clone)]
+struct IsolatedRunEventSink;
+
+impl crate::application::loop_engine::chat::ChatEventSink for IsolatedRunEventSink {
+    fn send_event<'a>(
+        &'a self,
+        _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
+    ) -> crate::application::loop_engine::chat::EventFuture<'a> {
+        Box::pin(std::future::ready(()))
+    }
+
+    fn try_send_event(&self, _event: crate::application::loop_engine::chat::RuntimeStreamEvent) {}
+}
+
 struct LifecycleSelection {
     cancel: crate::application::run::context::RunCancellationScope,
     usage: crate::application::run::context::RunUsageTracker,
@@ -503,15 +517,15 @@ impl RuntimeContextFactory {
         &self,
         bindings: &RunCreationBindings,
     ) -> Result<EventRouteSelection, RunCreationError> {
-        let sink = bindings
-            .session()
-            .map(|session| session.event_sink().clone())
-            .or_else(|| {
-                bindings
-                    .parent()
-                    .map(|parent| parent.context().event_sink())
-            })
-            .ok_or(RunCreationError::ContextAssembly)?;
+        let sink = match bindings.session() {
+            Some(session) => session.event_sink().clone(),
+            None => {
+                bindings.parent().ok_or(RunCreationError::ContextAssembly)?;
+                crate::application::loop_engine::chat::ChatEventSinkHandle::new(
+                    IsolatedRunEventSink,
+                )
+            }
+        };
         Ok(EventRouteSelection { sink })
     }
 

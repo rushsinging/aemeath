@@ -429,11 +429,13 @@ pub(crate) fn map_stream_event(
             request,
         } => ChatEvent::InteractionRequested { request },
         crate::application::loop_engine::chat::RuntimeStreamEvent::AgentProgress {
-            context,
+            source_context,
+            attachment_context,
             tool_id,
             event,
         } => ChatEvent::AgentProgress {
-            context: turn_context_to_sdk(context),
+            source_context: turn_context_to_sdk(source_context),
+            attachment_context: turn_context_to_sdk(attachment_context),
             tool_id,
             event: project_agent_progress_event(event),
         },

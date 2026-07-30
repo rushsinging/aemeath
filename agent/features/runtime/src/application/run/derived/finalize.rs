@@ -1,6 +1,6 @@
 use hook::{HookDispatchContext, HookInvocation, HookPort, SubRunStopInput};
 use std::sync::Arc;
-use tools::{AgentProgressEvent, AgentProgressKind};
+use tools::{AgentProgressKind, AgentProgressSourceContext};
 
 pub use crate::application::loop_engine::run_finalization::{
     log_run_finalization as log_agent_outcome, RunFinalizationOutcome as AgentRunOutcome,
@@ -15,6 +15,7 @@ pub(crate) struct SubRunFinalizationObserver<'a> {
     pub system: &'a str,
     pub model_spec: Option<&'a str>,
     pub progress_sink: Option<&'a std::sync::Arc<dyn tools::ProgressSink>>,
+    pub source_context: AgentProgressSourceContext,
 }
 
 #[async_trait::async_trait]
@@ -52,12 +53,13 @@ impl crate::application::loop_engine::run_finalization::RunFinalizationObserver
         for msg in &outcome_dispatch.messages {
             if let hook::HookDisplayMessageKind::SystemMessage = msg.kind {
                 if let Some(sink) = self.progress_sink {
-                    sink.emit(AgentProgressEvent {
-                        sequence: outcome.turns,
-                        kind: AgentProgressKind::Message {
+                    sink.emit(super::progress::build_progress_event(
+                        self.source_context.clone(),
+                        outcome.turns,
+                        AgentProgressKind::Message {
                             text: format!("[hook] {}", msg.text),
                         },
-                    });
+                    ));
                 }
             }
         }

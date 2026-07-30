@@ -446,7 +446,8 @@ pub(crate) enum TuiRuntimeEvent {
     HookEvent(TuiHookEvent),
     HookMessage(TuiHookMessage),
     AgentProgress {
-        context: TuiTurnContext,
+        source_context: TuiTurnContext,
+        attachment_context: TuiTurnContext,
         tool_id: String,
         event: TuiAgentProgress,
     },

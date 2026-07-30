@@ -68,6 +68,6 @@ pub use skill_tool::SkillQuerySnapshot;
 pub use suspension::{ToolSuspension, UserInteractionSpec, UserOption, UserQuestion};
 pub use tool::{Tool, ToolListProvider, TypedTool, TypedToolAdapter, TypedToolResult};
 pub use tool_types::{
-    AgentProgressEvent, AgentProgressKind, AgentToolCallProgress, ImageData, SessionReminder,
-    SessionReminders, ToolOutcome, ToolResult,
+    AgentProgressEvent, AgentProgressKind, AgentProgressSourceContext, AgentToolCallProgress,
+    ImageData, SessionReminder, SessionReminders, ToolOutcome, ToolResult,
 };

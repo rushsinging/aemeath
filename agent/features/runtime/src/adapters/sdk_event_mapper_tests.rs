@@ -5,6 +5,50 @@ use crate::application::loop_engine::chat::{
 };
 
 #[test]
+fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
+    let source_context = RuntimeTurnContext::new(
+        sdk::ids::ChatId::new("child-chat"),
+        sdk::ids::ChatTurnId::new("child-turn"),
+    );
+    let attachment_context = RuntimeTurnContext::new(
+        sdk::ids::ChatId::new("parent-chat"),
+        sdk::ids::ChatTurnId::new("parent-turn"),
+    );
+    let expected_source = source_context.clone();
+    let expected_attachment = attachment_context.clone();
+    let tool_id = sdk::ids::ToolCallId::new("agent-tool");
+    let event = RuntimeStreamEvent::AgentProgress {
+        source_context,
+        attachment_context,
+        tool_id: tool_id.clone(),
+        event: tools::AgentProgressEvent {
+            source_context: None,
+            sequence: 7,
+            kind: tools::AgentProgressKind::Message {
+                text: "working".to_string(),
+            },
+        },
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::AgentProgress {
+            source_context,
+            attachment_context,
+            tool_id: mapped_tool_id,
+            event,
+        } => {
+            assert_eq!(source_context.chat_id, expected_source.chat_id);
+            assert_eq!(source_context.turn_id, expected_source.turn_id);
+            assert_eq!(attachment_context.chat_id, expected_attachment.chat_id);
+            assert_eq!(attachment_context.turn_id, expected_attachment.turn_id);
+            assert_eq!(mapped_tool_id, tool_id);
+            assert_eq!(event.sequence, 7);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
 fn session_resume_mapping_preserves_context_run_step_boundaries() {
     let event = RuntimeStreamEvent::SessionResumed {
         steps: vec![RuntimeResumedSessionStep {

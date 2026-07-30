@@ -232,6 +232,139 @@ fn assemble_parent_context(
         .expect("test parent context assembly")
 }
 
+#[derive(Clone, Default)]
+struct RecordingEventSink {
+    events: Arc<std::sync::Mutex<Vec<crate::application::loop_engine::chat::RuntimeStreamEvent>>>,
+}
+
+impl crate::application::loop_engine::chat::ChatEventSink for RecordingEventSink {
+    fn send_event<'a>(
+        &'a self,
+        event: crate::application::loop_engine::chat::RuntimeStreamEvent,
+    ) -> crate::application::loop_engine::chat::EventFuture<'a> {
+        self.events.lock().unwrap().push(event);
+        Box::pin(std::future::ready(()))
+    }
+
+    fn try_send_event(&self, event: crate::application::loop_engine::chat::RuntimeStreamEvent) {
+        self.events.lock().unwrap().push(event);
+    }
+}
+
+fn make_parent_context_with_event_sink(
+    event_sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
+) -> RuntimeContext {
+    let mut config = share::config::Config::default();
+    config.agents.roles.insert(
+        "coder".to_string(),
+        share::config::AgentRoleConfig {
+            model: "test-provider/test-model".to_string(),
+            ..Default::default()
+        },
+    );
+    config.models.default = "test-provider/test-model".to_string();
+    config.models.providers.insert(
+        "test-provider".to_string(),
+        share::config::models::ProviderModelsConfig {
+            driver: "openai".to_string(),
+            models: vec![share::config::models::ModelEntryConfig {
+                id: "test-model".to_string(),
+                context_window: 128_000,
+                max_tokens: 8192,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    );
+    let config =
+        RunConfigSnapshot::capture(share::config::domain::snapshot::ConfigSnapshot::new(config));
+    let provider_port: Arc<dyn ProviderPort> = Arc::new(FakeProvPort);
+    let binding = ProviderBinding {
+        provider: provider_port,
+        model: crate::ports::ModelId {
+            provider: "test-provider".into(),
+            model: "test-model".into(),
+        },
+        max_tokens: 8192,
+        requested_reasoning: provider::ReasoningLevel::Medium,
+        context_window: None,
+    };
+    let factory = RuntimeContextFactory::new(
+        Arc::new(FakeToolCat),
+        Arc::new(FakeToolExec),
+        Arc::new(FakePolicyPort),
+        Arc::new(FakeReflHist),
+        test_task_access(),
+        Arc::new(FakeHookPort),
+    );
+    factory
+        .create(
+            &RunSpec::main(),
+            RunCapabilityBindings {
+                model: ModelBindings {
+                    context: Arc::new(FakeCtxPort),
+                    provider: Arc::new(binding),
+                    interaction: Arc::new(InteractionBridge::new()),
+                    memory: Arc::new(memory::NoOpMemory),
+                    config,
+                    reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
+                    tool_catalog: None,
+                },
+                io: IoBindings {
+                    event_sink,
+                    input: RunInputBufferHandle::new(),
+                },
+                lifecycle: LifecycleBindings {
+                    cancel: RunCancellationScope::new(),
+                    usage: RunUsageTracker::new(),
+                },
+            },
+            None,
+        )
+        .expect("test parent context assembly")
+}
+
+#[tokio::test]
+async fn derived_context_does_not_publish_raw_child_events_to_parent_sink() {
+    use crate::application::loop_engine::chat::ChatEventSink as _;
+
+    let recording = RecordingEventSink::default();
+    let recorded_events = recording.events.clone();
+    let parent_context = make_parent_context_with_event_sink(
+        crate::application::loop_engine::chat::ChatEventSinkHandle::new(recording),
+    );
+    let derived = super::super::setup::derive_sub_run(
+        &RunSpec::main(),
+        &parent_context,
+        &make_parent_workspace(),
+        crate::domain::agent_run::RunId::new_v7(),
+        &super::super::setup::SubRunRequest {
+            role: "coder".to_string(),
+            timeout: Duration::from_secs(30),
+        },
+        Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
+        tools::composition::wire_skills().catalog(),
+        Arc::new(make_test_factory()),
+    )
+    .expect("derive_sub_run should succeed");
+
+    derived
+        .instance
+        .context()
+        .event_sink()
+        .send_event(
+            crate::application::loop_engine::chat::RuntimeStreamEvent::SystemMessage(
+                "child-raw-event".to_string(),
+            ),
+        )
+        .await;
+
+    assert!(
+        recorded_events.lock().unwrap().is_empty(),
+        "Derived Run 的原始事件不得直接进入父 Main UI sink"
+    );
+}
+
 pub(super) fn make_parent_context_with_catalog(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
