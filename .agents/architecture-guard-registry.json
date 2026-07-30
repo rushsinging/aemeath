@@ -169,22 +169,6 @@
       "status": "active"
     },
     {
-      "id": "migration.runtime.legacy-port-to-application",
-      "guard": "check-cola-layer-purity.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path",
-        "value": "agent/features/runtime/src/ports/legacy.rs"
-      },
-      "classification": "migration_exception",
-      "owner": "runtime",
-      "reason": "Legacy Runtime ports still reference application types during cutover",
-      "tracking_issue": 879,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "delete the legacy port module after production consumers switch",
-      "status": "active"
-    },
-    {
       "id": "migration.tui.tea-slash-dispatch",
       "guard": "check-tui-tea-purity.sh",
       "module": "tui",
