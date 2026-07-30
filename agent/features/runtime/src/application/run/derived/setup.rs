@@ -491,7 +491,6 @@ impl AgentRunner for CliAgentRunner {
                         system_prompt: &system,
                         model_id: &model_name,
                         language: &language,
-                        task_reminder: crate::ports::TaskReminderSnapshot::default(),
                         agent_roles,
                         config: runtime_context.config_ref(),
                         context_size,

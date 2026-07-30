@@ -712,7 +712,7 @@ impl TaskStoreState {
         Ok(!self.blocking_ids(id)?.is_empty())
     }
 
-    fn blocking_ids(&self, id: TaskId) -> Result<Vec<TaskId>, TaskCommandError> {
+    pub(crate) fn blocking_ids(&self, id: TaskId) -> Result<Vec<TaskId>, TaskCommandError> {
         let task = self
             .tasks
             .get(&id)
@@ -730,6 +730,93 @@ impl TaskStoreState {
                 })
             })
             .collect())
+    }
+
+    pub fn transition_with_progress(
+        &mut self,
+        id: TaskId,
+        to: TaskStatus,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<super::TaskProgressSnapshot>, TaskCommandError> {
+        if to == TaskStatus::InProgress {
+            let blocked_by = self.blocking_ids(id)?;
+            if !blocked_by.is_empty() {
+                return Err(TaskCommandError::TaskBlocked { id, blocked_by });
+            }
+        }
+        let current = self
+            .tasks
+            .get(&id)
+            .ok_or(TaskCommandError::TaskNotFound { id })?;
+        let batch_id = current.batch();
+        let mut dry_run = self.clone();
+        let task = dry_run
+            .tasks
+            .get_mut(&id)
+            .expect("validated task must exist");
+        let task_result = if task.status() == TaskStatus::Completed
+            && matches!(to, TaskStatus::Pending | TaskStatus::InProgress)
+        {
+            task.reopen_from_completed(to, updated_at)?
+        } else {
+            task.transition_to(to, updated_at)?
+        };
+
+        let mut auto_reopened = false;
+        let batch_status = dry_run
+            .batches
+            .get(&batch_id)
+            .ok_or(TaskCommandError::BatchNotFound { id: batch_id })?
+            .status();
+        if batch_status == BatchStatus::Archived
+            && matches!(to, TaskStatus::Pending | TaskStatus::InProgress)
+        {
+            if let Some(active) = dry_run.current_batch {
+                if active != batch_id {
+                    return Err(TaskCommandError::ActiveBatchConflict {
+                        active,
+                        requested: batch_id,
+                    });
+                }
+            }
+            dry_run
+                .batches
+                .get_mut(&batch_id)
+                .expect("validated batch must exist")
+                .reopen()?;
+            dry_run.current_batch = Some(batch_id);
+            auto_reopened = true;
+        }
+
+        let unfinished = dry_run.tasks.values().any(|task| {
+            task.batch() == batch_id
+                && matches!(task.status(), TaskStatus::Pending | TaskStatus::InProgress)
+        });
+        let mut auto_closed = false;
+        if !unfinished
+            && dry_run
+                .batches
+                .get(&batch_id)
+                .is_some_and(|batch| batch.status() == BatchStatus::Active)
+        {
+            dry_run
+                .batches
+                .get_mut(&batch_id)
+                .expect("validated batch must exist")
+                .transition_to(BatchStatus::Archived)?;
+            if dry_run.current_batch == Some(batch_id) {
+                dry_run.current_batch = None;
+            }
+            auto_closed = true;
+        }
+
+        let revision = self.reserve_revision()?;
+        let progress = dry_run
+            .progress_snapshot(batch_id, id, auto_closed, auto_reopened)
+            .expect("validated task and batch must produce progress");
+        let events = task_result.events;
+        *self = dry_run;
+        Ok(self.commit(TaskCommandResult::uncommitted(progress, events), revision))
     }
 
     pub fn transition(
@@ -758,6 +845,48 @@ impl TaskStoreState {
             .transition_to(to, updated_at)
             .expect("legality pre-validated above");
         Ok(self.commit(result, revision))
+    }
+
+    pub fn delete_with_progress(
+        &mut self,
+        id: TaskId,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<super::TaskProgressSnapshot>, TaskCommandError> {
+        let batch_id = self
+            .tasks
+            .get(&id)
+            .ok_or(TaskCommandError::TaskNotFound { id })?
+            .batch();
+        let revision = self.reserve_revision()?;
+        let mut dry_run = self.clone();
+        let task_result = dry_run.delete(id, updated_at)?;
+        let unfinished = dry_run.tasks.values().any(|task| {
+            task.batch() == batch_id
+                && matches!(task.status(), TaskStatus::Pending | TaskStatus::InProgress)
+        });
+        let mut auto_closed = false;
+        if !unfinished
+            && dry_run
+                .batches
+                .get(&batch_id)
+                .is_some_and(|batch| batch.status() == BatchStatus::Active)
+        {
+            dry_run
+                .batches
+                .get_mut(&batch_id)
+                .expect("validated batch must exist")
+                .transition_to(BatchStatus::Archived)?;
+            if dry_run.current_batch == Some(batch_id) {
+                dry_run.current_batch = None;
+            }
+            auto_closed = true;
+        }
+        let progress = dry_run
+            .progress_snapshot(batch_id, id, auto_closed, false)
+            .expect("validated task and batch must produce progress");
+        let events = task_result.events;
+        *self = dry_run;
+        Ok(self.commit(TaskCommandResult::uncommitted(progress, events), revision))
     }
 
     /// Removes all incoming/outgoing dependency edges and marks the Task

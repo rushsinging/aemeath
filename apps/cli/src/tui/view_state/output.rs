@@ -1,7 +1,8 @@
 use sdk::CharIdx;
 
 const INITIAL_RENDER_LINES: usize = 1_000;
-const HISTORY_LOAD_BATCH_LINES: usize = 500;
+const HISTORY_LOAD_PERCENT: usize = 60;
+const MIN_HISTORY_LOAD_BATCH_LINES: usize = 15;
 const MAX_RENDER_LINES: usize = 3_000;
 
 /// 选区锚点：`(逻辑行, plain CharIdx)`（#63 坐标系）。
@@ -21,7 +22,7 @@ pub struct OutputViewState {
     pub last_visible_height: usize,
     pub last_document_total_lines: usize,
     pub version: u64,
-    /// 当前允许渲染的历史行预算；达到顶部后按固定批次增长。
+    /// 当前允许渲染的历史行预算；达到加载阈值后按视口比例增长。
     pub(crate) render_line_limit: usize,
     /// 最近一次完整源文档的行数，用于判断是否还有更早历史并补偿流式增长。
     pub(crate) source_total_lines: usize,
@@ -54,6 +55,22 @@ impl Default for OutputViewState {
 }
 
 impl OutputViewState {
+    /// 将完整历史底部归一化为唯一状态：贴尾、默认窗口预算、无待处理历史加载。
+    fn normalize_latest_bottom(&mut self) {
+        self.auto_scroll = true;
+        self.render_line_limit = INITIAL_RENDER_LINES;
+        self.pending_load_older = false;
+    }
+
+    fn history_load_batch_lines(&self) -> usize {
+        self.last_visible_height
+            .saturating_mul(HISTORY_LOAD_PERCENT)
+            .saturating_add(99)
+            .checked_div(100)
+            .unwrap_or(usize::MAX)
+            .max(MIN_HISTORY_LOAD_BATCH_LINES)
+    }
+
     /// 向上滚动指定行数。
     ///
     /// view_state 是滚动真相；不持有 document，故总行数由调用方传入。
@@ -61,6 +78,8 @@ impl OutputViewState {
     /// - `max_offset == 0`（内容不超过可见高度）时复位 offset=0 并恢复 auto_scroll；
     /// - 否则关闭 auto_scroll，并将 offset 钳制到 `max_offset`。
     pub fn scroll_up(&mut self, amount: usize, total_lines: usize) {
+        let before_offset = self.scroll_offset;
+        let before_auto_scroll = self.auto_scroll;
         self.auto_scroll = false;
         let max_offset = total_lines.saturating_sub(self.last_visible_height);
         self.scroll_offset = self.scroll_offset.saturating_add(amount).min(max_offset);
@@ -68,23 +87,97 @@ impl OutputViewState {
             self.scroll_offset = 0;
             self.auto_scroll = true;
         }
+        crate::tui::log_debug!(
+            "tui.output.scroll_transition action=up amount={} total_lines={} visible_height={} max_offset={} before_offset={} after_offset={} before_auto_scroll={} after_auto_scroll={} render_limit={} source_total_lines={} tail_offset={}",
+            amount,
+            total_lines,
+            self.last_visible_height,
+            max_offset,
+            before_offset,
+            self.scroll_offset,
+            before_auto_scroll,
+            self.auto_scroll,
+            self.render_line_limit,
+            self.source_total_lines,
+            self.history_window_tail_offset
+        );
     }
 
-    /// 向下滚动指定行数。offset 归零时恢复 auto_scroll。
-    pub fn scroll_down(&mut self, amount: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(amount);
-        if self.scroll_offset == 0 {
-            self.auto_scroll = true;
+    /// 向下滚动指定行数。
+    ///
+    /// 先消费当前历史窗口内的 `scroll_offset`；到达窗口底部后，若窗口仍偏离
+    /// 最新历史，则按同一视口比例批量向最新方向滑动，并用新增的窗口尾部行数补偿
+    /// `scroll_offset`，使视口连续跨窗。仅在最新窗口底部恢复 `auto_scroll`。
+    /// 返回值表示历史窗口是否发生变化，调用方据此重建 document。
+    pub fn scroll_down(&mut self, amount: usize) -> bool {
+        let before_offset = self.scroll_offset;
+        let before_auto_scroll = self.auto_scroll;
+        let before_limit = self.render_line_limit;
+        let before_tail_offset = self.history_window_tail_offset;
+        let mut remaining = amount;
+        let within_window = remaining.min(self.scroll_offset);
+        self.scroll_offset -= within_window;
+        remaining -= within_window;
+
+        let mut window_changed = false;
+        while remaining > 0 && self.history_window_tail_offset > 0 {
+            let shifted_lines = self
+                .history_load_batch_lines()
+                .min(self.history_window_tail_offset);
+            self.history_window_tail_offset -= shifted_lines;
+            self.scroll_offset = shifted_lines;
+            window_changed = true;
+
+            let across_window = remaining.min(self.scroll_offset);
+            self.scroll_offset -= across_window;
+            remaining -= across_window;
         }
+
+        let reached_latest_bottom = self.scroll_offset == 0 && self.history_window_tail_offset == 0;
+        if reached_latest_bottom {
+            self.normalize_latest_bottom();
+        } else {
+            self.auto_scroll = false;
+        }
+        window_changed |= self.render_line_limit != before_limit;
+        crate::tui::log_debug!(
+            "tui.output.scroll_transition action=down amount={} remaining={} total_lines={} visible_height={} before_offset={} after_offset={} before_auto_scroll={} after_auto_scroll={} before_limit={} after_limit={} source_total_lines={} before_tail_offset={} after_tail_offset={} window_changed={}",
+            amount,
+            remaining,
+            self.last_document_total_lines,
+            self.last_visible_height,
+            before_offset,
+            self.scroll_offset,
+            before_auto_scroll,
+            self.auto_scroll,
+            before_limit,
+            self.render_line_limit,
+            self.source_total_lines,
+            before_tail_offset,
+            self.history_window_tail_offset,
+            window_changed
+        );
+        window_changed
     }
 
     /// 滚动到底部：offset 归零、恢复 auto_scroll，并恢复默认历史窗口预算。
     pub fn scroll_to_bottom(&mut self) {
+        let before_offset = self.scroll_offset;
+        let before_auto_scroll = self.auto_scroll;
+        let before_limit = self.render_line_limit;
+        let before_tail_offset = self.history_window_tail_offset;
         self.scroll_offset = 0;
-        self.auto_scroll = true;
-        self.render_line_limit = INITIAL_RENDER_LINES;
-        self.pending_load_older = false;
         self.history_window_tail_offset = 0;
+        self.normalize_latest_bottom();
+        crate::tui::log_debug!(
+            "tui.output.scroll_transition action=bottom before_offset={} after_offset=0 before_auto_scroll={} after_auto_scroll=true before_limit={} after_limit={} source_total_lines={} before_tail_offset={} after_tail_offset=0",
+            before_offset,
+            before_auto_scroll,
+            before_limit,
+            self.render_line_limit,
+            self.source_total_lines,
+            before_tail_offset
+        );
     }
 
     /// 滚动到当前已渲染文档顶部，并在仍有更早历史时请求一个批次。
@@ -93,49 +186,59 @@ impl OutputViewState {
         self.request_load_older_at_top()
     }
 
-    /// 到达当前已渲染文档顶部时请求一个更早历史批次。
-    pub fn try_load_older_at_top(&mut self, total_lines: usize) -> bool {
+    /// 接近当前已渲染文档顶部时预加载一个更早历史批次。
+    ///
+    /// 阈值与单批加载量一致，使新增历史在用户到顶前准备好；窗口仍有超过
+    /// 一个批次的可滚动内容时不重建 document。
+    pub fn try_load_older_near_top(&mut self, total_lines: usize) -> bool {
         let max_offset = total_lines.saturating_sub(self.last_visible_height);
-        self.scroll_offset >= max_offset && self.request_load_older_at_top()
+        let remaining_lines_above = max_offset.saturating_sub(self.scroll_offset);
+        remaining_lines_above <= self.history_load_batch_lines() && self.request_load_older_at_top()
     }
 
     pub fn request_load_older_at_top(&mut self) -> bool {
+        let before_limit = self.render_line_limit;
+        let before_tail_offset = self.history_window_tail_offset;
         if self.source_total_lines == 0 {
             self.pending_load_older = true;
             crate::tui::log_debug!(
-                "tui.history.request_older deferred source_total_lines=0 limit={} offset={} pending_load_older=true",
+                "tui.history.request_older deferred source_total_lines=0 limit={} offset={} tail_offset={} pending_load_older=true",
                 self.render_line_limit,
-                self.scroll_offset
+                self.scroll_offset,
+                self.history_window_tail_offset
             );
             return false;
         }
         let expanded = if self.render_line_limit < MAX_RENDER_LINES {
             self.load_older_batch()
         } else {
-            let before = self.history_window_tail_offset;
             let max_tail_offset = self
                 .source_total_lines
                 .saturating_sub(self.render_line_limit);
             self.history_window_tail_offset = self
                 .history_window_tail_offset
-                .saturating_add(HISTORY_LOAD_BATCH_LINES)
+                .saturating_add(self.history_load_batch_lines())
                 .min(max_tail_offset);
-            self.history_window_tail_offset > before
+            self.history_window_tail_offset > before_tail_offset
         };
         if expanded {
             crate::tui::log_debug!(
-                "tui.history.request_older source_total_lines={} expanded=true limit={} offset={} pending_load_older={}",
+                "tui.history.request_older source_total_lines={} expanded=true before_limit={} after_limit={} offset={} before_tail_offset={} after_tail_offset={} pending_load_older={}",
                 self.source_total_lines,
+                before_limit,
                 self.render_line_limit,
                 self.scroll_offset,
+                before_tail_offset,
+                self.history_window_tail_offset,
                 self.pending_load_older
             );
         } else {
             crate::tui::log_trace!(
-                "tui.history.request_older source_total_lines={} expanded=false limit={} offset={} pending_load_older={}",
+                "tui.history.request_older source_total_lines={} expanded=false limit={} offset={} tail_offset={} pending_load_older={}",
                 self.source_total_lines,
                 self.render_line_limit,
                 self.scroll_offset,
+                self.history_window_tail_offset,
                 self.pending_load_older
             );
         }
@@ -176,7 +279,7 @@ impl OutputViewState {
     fn load_older_batch(&mut self) -> bool {
         let next_limit = self
             .render_line_limit
-            .saturating_add(HISTORY_LOAD_BATCH_LINES)
+            .saturating_add(self.history_load_batch_lines())
             .min(self.source_total_lines)
             .min(MAX_RENDER_LINES);
         if next_limit <= self.render_line_limit {
@@ -186,6 +289,17 @@ impl OutputViewState {
         true
     }
 
+    /// 在历史窗口 document 重建完成后，立即将原可见首行锚定到相同屏幕位置。
+    ///
+    /// `anchor_line` 是同一语义行在新 document 中的逻辑行索引。同步更新
+    /// `last_document_total_lines`，避免随后同帧的 metrics 同步重复补偿增长。
+    pub fn pin_rebuilt_document_to_anchor(&mut self, total_lines: usize, anchor_line: usize) {
+        let max_offset = total_lines.saturating_sub(self.last_visible_height);
+        self.scroll_offset = max_offset.saturating_sub(anchor_line).min(max_offset);
+        self.last_document_total_lines = total_lines;
+        self.auto_scroll = false;
+    }
+
     /// 同步 document 指标并维护滚动真相。
     ///
     /// 每帧渲染前由 App 根据 Output document 与 layout/live-status 投影调用：
@@ -193,17 +307,46 @@ impl OutputViewState {
     /// - document 增长且 `auto_scroll=false` 时补偿 offset，保持视窗内容固定；
     /// - offset 钳制到当前最大可滚动范围；offset 归零时恢复贴尾。
     pub fn sync_document_metrics(&mut self, total_lines: usize, visible_height: usize) {
+        let before_visible_height = self.last_visible_height;
+        let before_total_lines = self.last_document_total_lines;
+        let before_offset = self.scroll_offset;
+        let before_auto_scroll = self.auto_scroll;
         self.last_visible_height = visible_height;
-        if !self.auto_scroll {
+        let growth = if !self.auto_scroll {
             let growth = total_lines.saturating_sub(self.last_document_total_lines);
             self.scroll_offset = self.scroll_offset.saturating_add(growth);
-        }
+            growth
+        } else {
+            0
+        };
         self.last_document_total_lines = total_lines;
 
         let max_offset = total_lines.saturating_sub(self.last_visible_height);
         self.scroll_offset = self.scroll_offset.min(max_offset);
-        if self.scroll_offset == 0 {
+        if self.scroll_offset == 0 && self.history_window_tail_offset == 0 {
             self.auto_scroll = true;
+        }
+        if before_visible_height != self.last_visible_height
+            || before_total_lines != self.last_document_total_lines
+            || before_offset != self.scroll_offset
+            || before_auto_scroll != self.auto_scroll
+        {
+            crate::tui::log_debug!(
+                "tui.output.document_metrics before_total_lines={} after_total_lines={} before_visible_height={} after_visible_height={} growth={} max_offset={} before_offset={} after_offset={} before_auto_scroll={} after_auto_scroll={} render_limit={} source_total_lines={} tail_offset={}",
+                before_total_lines,
+                self.last_document_total_lines,
+                before_visible_height,
+                self.last_visible_height,
+                growth,
+                max_offset,
+                before_offset,
+                self.scroll_offset,
+                before_auto_scroll,
+                self.auto_scroll,
+                self.render_line_limit,
+                self.source_total_lines,
+                self.history_window_tail_offset
+            );
         }
     }
 

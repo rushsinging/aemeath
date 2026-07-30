@@ -2,7 +2,7 @@ use super::execution_state::RunExecutionState;
 use crate::application::loop_engine::PendingInteractionWork;
 use crate::ports::{
     CompactionDecision, ContextRequest, ContextRequestId, ContextWindow, DecisionReason, Language,
-    SessionId, SessionRevision, SystemPromptSpec, TaskReminderSnapshot, TokenBudget, Urgency,
+    SessionId, SessionRevision, SystemPromptSpec, TokenBudget, Urgency,
 };
 use provider::ReasoningLevel;
 use sdk::{RunId, RunStepId};
@@ -22,7 +22,6 @@ fn context_request(step_id: &str) -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
@@ -39,7 +38,6 @@ fn context_window(revision: u64) -> ContextWindow {
         backing_revision: SessionRevision::new(revision),
         system_blocks: vec![],
         messages: vec![].into(),
-        invocation_reminder: None,
         tool_schemas: vec![],
         token_estimation: TokenBudget::default(),
         compaction_decision: CompactionDecision {

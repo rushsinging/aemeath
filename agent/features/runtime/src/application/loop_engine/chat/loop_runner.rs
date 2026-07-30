@@ -8,7 +8,6 @@ use crate::application::loop_engine::chat::idle_lifecycle::{
 };
 use crate::application::loop_engine::chat::input_gate::apply_gate;
 use crate::application::loop_engine::chat::loop_phases::handle_turn_boundary_config;
-use crate::application::loop_engine::chat::task_reminder::TaskReminderState;
 use crate::application::loop_engine::chat::{
     ChatEventSink, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
     QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
@@ -91,9 +90,8 @@ where
             // #1385 Task 12: last_total_tokens eliminated — usage tracker is per-Run via RuntimeContext.
             let mut turn_count = 0;
             let mut pending_input = PendingInputBuffer::default();
-            let task_reminder_state = TaskReminderState::new();
-            let tool_identity =
-                crate::application::tool::coordination::identity::ToolIdentityRegistry::new();
+                let tool_identity =
+                    crate::application::tool::coordination::identity::ToolIdentityRegistry::new();
             let mut config_snapshot =
                 crate::application::loop_engine::chat::config_reload::init_snapshot_registry(&cwd);
 
@@ -647,9 +645,6 @@ where
                         system_prompt: &cacheable_system_prompt,
                         model_id: &runtime_context.provider_ref().model.model,
                         language: &language,
-                        task_reminder: main_run_port::task_reminder_snapshot(
-                            runtime_context.task_ref().as_ref(),
-                        ),
                         agent_roles: std::collections::HashMap::new(),
                         config: runtime_context.config_ref(),
                         context_size,
@@ -685,7 +680,6 @@ where
                     reflection_tasks: reflection_tasks.clone(),
                     language: language.clone(),
                     turn_context: turn_context.clone(),
-                    task_reminder_state: task_reminder_state.clone(),
                     tool_identity: tool_identity.clone(),
                 };
                 let mut model =

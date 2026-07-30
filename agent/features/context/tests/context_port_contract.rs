@@ -6,8 +6,8 @@ use context::context_port::{
     CompactResult, CompactTrigger, CompactionDecision, ContentFingerprint, ContextAppend,
     ContextAppendError, ContextMessage, ContextPort, ContextPortError, ContextRequest,
     ContextRequestId, ContextWindow, DecisionReason, FinalizeCause, Language, ManualCompactRequest,
-    RunStepId, SessionId, SessionRevision, StepReceipt, SystemPromptSpec, TaskReminderSnapshot,
-    TokenBudget, ToolOutcomeKind, Urgency,
+    RunStepId, SessionId, SessionRevision, StepReceipt, SystemPromptSpec, TokenBudget,
+    ToolOutcomeKind, Urgency,
 };
 use provider::ReasoningLevel;
 use sdk::RunId;
@@ -37,7 +37,6 @@ fn request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
@@ -59,7 +58,6 @@ impl ContextPort for FakeContextPort {
             backing_revision: SessionRevision::new(3),
             system_blocks: vec![],
             messages: request.pending_messages.clone().into(),
-            invocation_reminder: None,
             tool_schemas: request.tool_schemas.clone(),
             token_estimation: TokenBudget::default(),
             compaction_decision: decision(),

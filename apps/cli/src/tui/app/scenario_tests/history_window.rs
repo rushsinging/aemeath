@@ -73,6 +73,28 @@ fn seed_edit(harness: &mut TuiScenarioHarness, index: usize, diff_lines: usize) 
     });
 }
 
+fn load_to_sliding_window(harness: &mut TuiScenarioHarness) {
+    while harness.app.view_state.output.render_line_limit() < 3_000 {
+        harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
+        harness.render();
+    }
+}
+
+fn load_to_oldest_history(harness: &mut TuiScenarioHarness) {
+    load_to_sliding_window(harness);
+    while harness.app.view_state.output.history_window_tail_offset
+        < harness
+            .app
+            .view_state
+            .output
+            .source_total_lines
+            .saturating_sub(harness.app.view_state.output.render_line_limit())
+    {
+        harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
+        harness.render();
+    }
+}
+
 fn assert_tool_groups_are_complete(harness: &TuiScenarioHarness) {
     let document = harness.app.output_area.document();
     let counts = document.root_group_block_counts();
@@ -265,10 +287,7 @@ fn resumed_history_window_reaches_oldest_history_without_folded_hint() {
     harness.render();
     assert!(harness.app.view_state.output.source_total_lines > 3_000);
 
-    for _ in 0..20 {
-        harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
-        harness.render();
-    }
+    load_to_oldest_history(&mut harness);
 
     assert_eq!(
         harness.app.view_state.output.history_window_tail_offset,
@@ -288,7 +307,56 @@ fn resumed_history_window_reaches_oldest_history_without_folded_hint() {
 }
 
 #[test]
-fn scrolling_to_top_loads_history_in_five_hundred_line_batches() {
+fn resumed_history_scrolls_from_oldest_window_back_to_latest() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    let steps = (0..1_200)
+        .map(|index| TuiResumedSessionStep {
+            run_id: "resume-round-trip-run".into(),
+            step_id: format!("resume-round-trip-step-{index}"),
+            messages: vec![TuiChatMessage::user_text(format!(
+                "ROUND-TRIP-QUESTION-{index:04}"
+            ))],
+            finalize_cause: None,
+            duration_ms: None,
+        })
+        .collect();
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps,
+        session_id: "resume-round-trip".into(),
+        created_at: 0,
+    });
+    harness.render();
+
+    load_to_oldest_history(&mut harness);
+    assert!(harness.app.view_state.output.history_window_tail_offset > 0);
+    assert!(harness.screen().contains("ROUND-TRIP-QUESTION-0000"));
+
+    let mut previous_tail_offset = harness.app.view_state.output.history_window_tail_offset;
+    while harness.app.view_state.output.history_window_tail_offset > 0 {
+        harness.key(input::press(KeyCode::PageDown, KeyModifiers::NONE));
+        harness.render();
+        let tail_offset = harness.app.view_state.output.history_window_tail_offset;
+        assert!(
+            tail_offset <= previous_tail_offset,
+            "向下滚动时历史窗口只能向最新方向移动"
+        );
+        previous_tail_offset = tail_offset;
+    }
+    while !harness.app.view_state.output.auto_scroll {
+        harness.key(input::press(KeyCode::PageDown, KeyModifiers::NONE));
+        harness.render();
+    }
+
+    assert_eq!(harness.app.view_state.output.history_window_tail_offset, 0);
+    assert_eq!(harness.app.view_state.output.scroll_offset, 0);
+    assert!(harness.app.view_state.output.auto_scroll);
+    assert_eq!(harness.app.view_state.output.render_line_limit(), 1_000);
+    assert!(harness.screen().contains("ROUND-TRIP-QUESTION-1199"));
+    assert!(!harness.screen().contains("ROUND-TRIP-QUESTION-0000"));
+}
+
+#[test]
+fn scrolling_to_top_loads_history_by_visible_height() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     seed_history(&mut harness, 1_300);
 
@@ -304,8 +372,8 @@ fn scrolling_to_top_loads_history_in_five_hundred_line_batches() {
     harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
     harness.render();
 
-    assert_eq!(harness.app.view_state.output.render_line_limit(), 1_500);
-    assert!(harness.app.output_area.document().total_lines() <= 1_501);
+    assert_eq!(harness.app.view_state.output.render_line_limit(), 1_015);
+    assert!(harness.app.output_area.document().total_lines() <= 1_016);
 }
 
 #[test]
@@ -335,11 +403,11 @@ fn resumed_large_history_loads_after_first_render_and_continues_in_batches() {
 
     harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
     harness.render();
-    assert_eq!(harness.app.view_state.output.render_line_limit(), 1_500);
+    assert_eq!(harness.app.view_state.output.render_line_limit(), 1_015);
 
     harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
     harness.render();
-    assert_eq!(harness.app.view_state.output.render_line_limit(), 2_000);
+    assert_eq!(harness.app.view_state.output.render_line_limit(), 1_030);
 }
 
 #[test]
@@ -363,10 +431,7 @@ fn resumed_history_window_can_continue_loading_older_blocks_after_cap() {
         created_at: 0,
     });
     harness.render();
-    for _ in 0..4 {
-        harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
-        harness.render();
-    }
+    load_to_sliding_window(&mut harness);
     assert_eq!(harness.app.view_state.output.render_line_limit(), 3_000);
 
     harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
@@ -398,11 +463,8 @@ fn resumed_history_window_stops_at_three_thousand_lines() {
     harness.render();
     assert!(harness.app.view_state.output.source_total_lines > 3_000);
 
-    for expected in [1_500, 2_000, 2_500, 3_000] {
-        harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
-        harness.render();
-        assert_eq!(harness.app.view_state.output.render_line_limit(), expected);
-    }
+    load_to_sliding_window(&mut harness);
+    assert_eq!(harness.app.view_state.output.render_line_limit(), 3_000);
     harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
     harness.render();
     assert_eq!(harness.app.view_state.output.render_line_limit(), 3_000);
@@ -433,7 +495,7 @@ fn top_request_before_first_resume_render_loads_after_source_is_observed() {
 
     assert_eq!(
         harness.app.view_state.output.render_line_limit(),
-        harness.app.view_state.output.source_total_lines.min(1_500)
+        harness.app.view_state.output.source_total_lines.min(1_015)
     );
 }
 
@@ -457,10 +519,7 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
         created_at: 0,
     });
     harness.render();
-    for _ in 0..20 {
-        harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
-        harness.render();
-    }
+    load_to_oldest_history(&mut harness);
     assert!(harness.app.view_state.output.history_window_tail_offset > 0);
     assert!(!harness.app.view_state.output.auto_scroll);
 
@@ -493,6 +552,53 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
     });
     harness.render();
     assert!(harness.screen().contains("RESUME-ADOPTED-NEXT-ASSISTANT"));
+}
+
+fn visible_rows_with_prefix(screen: &str, prefix: &str) -> Vec<(usize, String)> {
+    screen
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(prefix))
+        .map(|(row, line)| (row, line.to_owned()))
+        .collect()
+}
+
+#[test]
+fn sliding_window_rebuild_keeps_visible_history_rows_fixed_in_same_frame() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    let steps = (0..2_000)
+        .map(|index| TuiResumedSessionStep {
+            run_id: "resume-anchor-run".into(),
+            step_id: format!("resume-anchor-step-{index}"),
+            messages: vec![TuiChatMessage::user_text(format!(
+                "ANCHOR-QUESTION-{index:04}"
+            ))],
+            finalize_cause: None,
+            duration_ms: None,
+        })
+        .collect();
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps,
+        session_id: "resume-anchor".into(),
+        created_at: 0,
+    });
+    harness.render();
+    load_to_sliding_window(&mut harness);
+
+    let before_rows = visible_rows_with_prefix(&harness.screen(), "ANCHOR-QUESTION-");
+    assert!(!before_rows.is_empty());
+    let before_tail_offset = harness.app.view_state.output.history_window_tail_offset;
+
+    assert!(harness.app.view_state.output.request_load_older_at_top());
+    harness.app.mark_output_dirty();
+    harness.render();
+
+    assert!(harness.app.view_state.output.history_window_tail_offset > before_tail_offset);
+    assert_eq!(
+        visible_rows_with_prefix(&harness.screen(), "ANCHOR-QUESTION-"),
+        before_rows,
+        "历史窗口重建帧必须保持当前可见历史文字的屏幕行不变"
+    );
 }
 
 #[test]

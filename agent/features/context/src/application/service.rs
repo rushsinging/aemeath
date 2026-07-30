@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
     CompactRequest, CompactionDecision, ContextAppend, ContextAppendError, ContextPortError,
-    ContextRequest, ContextWindow, InvocationReminder, ManualCompactRequest, SessionId,
-    SystemBlock, ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt,
+    ContextRequest, ContextWindow, ManualCompactRequest, SessionId, SystemBlock,
+    ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
@@ -97,8 +97,6 @@ impl ContextApplicationService {
             last_cacheable.cache_break = true;
         }
         blocks.extend(prompt.uncached);
-        let invocation_reminder =
-            InvocationReminder::from_task_snapshot(&request.task_reminder, &request.language);
 
         #[cfg(test)]
         {
@@ -117,18 +115,9 @@ impl ContextApplicationService {
         }
         #[cfg(test)]
         let decision_started = std::time::Instant::now();
-        let token_estimation = crate::domain::context_decision::token_budget(
-            request,
-            &messages,
-            &blocks,
-            invocation_reminder.as_ref().map(InvocationReminder::as_str),
-        );
-        let decision = crate::domain::context_decision::calculate(
-            request,
-            &messages,
-            &blocks,
-            invocation_reminder.as_ref().map(InvocationReminder::as_str),
-        );
+        let token_estimation =
+            crate::domain::context_decision::token_budget(request, &messages, &blocks);
+        let decision = crate::domain::context_decision::calculate(request, &messages, &blocks);
         #[cfg(test)]
         crate::application::performance::record_decision(
             token_estimation.total_tokens,
@@ -141,7 +130,6 @@ impl ContextApplicationService {
             backing_revision: snapshot.revision,
             system_blocks: blocks,
             messages,
-            invocation_reminder,
             tool_schemas: request.tool_schemas.clone(),
             token_estimation,
             compaction_decision: decision,

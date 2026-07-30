@@ -6,7 +6,7 @@ use crate::application::run::config::RunConfigSnapshot;
 use crate::application::run::context::RuntimeContext;
 use crate::ports::{
     ContextRequest, ContextRequestId, Language, ModelToolSchema, RunStepId, SessionId,
-    SystemPromptSpec, TaskReminderSnapshot,
+    SystemPromptSpec,
 };
 
 /// Frozen values required to build one Step's Context request.
@@ -16,7 +16,6 @@ pub(crate) struct ContextRequestSource<'a> {
     pub system_prompt: &'a str,
     pub model_id: &'a str,
     pub language: &'a str,
-    pub task_reminder: TaskReminderSnapshot,
     pub agent_roles: HashMap<String, share::config::AgentRoleConfig>,
     pub config: &'a RunConfigSnapshot,
     pub context_size: usize,
@@ -66,7 +65,6 @@ impl<'a> ContextRequestCoordinator<'a> {
                 .reasoning_ref()
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()),
-            task_reminder: self.source.task_reminder.clone(),
             language: Language::new(self.source.language),
             agent_roles: self.source.agent_roles.clone(),
             config_snapshot: self.source.config.config().clone(),

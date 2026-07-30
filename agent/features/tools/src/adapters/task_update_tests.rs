@@ -50,6 +50,105 @@ async fn task_update_uses_task_access_and_direct_complete_is_one_commit() {
     assert_eq!(completed.status(), task::TaskStatus::Completed);
     assert_eq!(completed.started_at(), completed.completed_at());
     assert!(result.text.contains("Status: Completed"));
+    assert!(result.text.contains("automatically closed"));
+    let data = result
+        .data
+        .expect("status update must return structured data");
+    assert_eq!(data.status, "completed");
+    let progress = data.progress.expect("status update must include progress");
+    assert_eq!(progress.task_list.status, "archived");
+    assert!(progress.lifecycle.auto_closed);
+    assert_eq!(progress.recently_completed.len(), 1);
+    assert!(progress.in_progress.is_empty());
+    assert!(progress.ready.is_empty());
+}
+
+#[tokio::test]
+async fn completing_the_last_task_auto_closes_the_list() {
+    let (store, access, id) = setup();
+    let tool = TaskUpdateTool { access };
+
+    let completed = tool
+        .call(
+            serde_json::json!({"task_id": id.to_string(), "key": "status", "value": "completed"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(!completed.is_error, "{}", completed.text);
+    assert!(completed.text.contains("automatically closed"));
+    assert_eq!(store.current_batch(), None);
+    assert!(
+        completed
+            .data
+            .unwrap()
+            .progress
+            .unwrap()
+            .lifecycle
+            .auto_closed
+    );
+}
+
+#[tokio::test]
+async fn archived_task_list_can_be_reopened_by_explicit_list_id() {
+    let (store, access, id) = setup();
+    let tool = TaskUpdateTool {
+        access: access.clone(),
+    };
+    tool.call(
+        serde_json::json!({"task_id": id.to_string(), "key": "status", "value": "completed"}),
+        &test_ctx(),
+    )
+    .await;
+
+    let reopened = tool
+        .call(
+            serde_json::json!({"task_list_id": "1", "task_id": "1", "key": "status", "value": "pending"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(!reopened.is_error, "{}", reopened.text);
+    assert!(reopened.text.contains("automatically reopened"));
+    assert_eq!(store.current_batch(), Some(task::BatchId::new(1)));
+    assert!(
+        reopened
+            .data
+            .unwrap()
+            .progress
+            .unwrap()
+            .lifecycle
+            .auto_reopened
+    );
+}
+
+#[tokio::test]
+async fn archived_task_list_reopen_conflict_is_atomic() {
+    let (store, access, id) = setup();
+    let tool = TaskUpdateTool {
+        access: access.clone(),
+    };
+    tool.call(
+        serde_json::json!({"task_id": id.to_string(), "key": "status", "value": "completed"}),
+        &test_ctx(),
+    )
+    .await;
+    access
+        .create_batch(task::BatchCreateSpec::try_new("other".into()).unwrap(), 3)
+        .unwrap();
+    let revision = access.revision();
+
+    let conflict = tool
+        .call(
+            serde_json::json!({"task_list_id": "1", "task_id": "1", "key": "status", "value": "pending"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(conflict.is_error);
+    assert!(conflict.text.contains("已经 active"));
+    assert_eq!(access.revision(), revision);
+    assert_eq!(store.get(id).unwrap().status(), task::TaskStatus::Completed);
 }
 
 #[tokio::test]

@@ -76,6 +76,43 @@ fn v2_bytes(
 }
 
 #[test]
+fn restored_completed_at_orders_status_progress_like_live_state() {
+    let store = TaskStore::new();
+    let bytes = v2_bytes(
+        "3",
+        &[
+            task_json("1", "1", "completed", 1, 20, Some(10), Some(20), &[], &[]),
+            task_json("2", "1", "completed", 2, 30, Some(11), Some(30), &[], &[]),
+            task_json("3", "1", "pending", 3, 3, None, None, &[], &[]),
+        ],
+        "4",
+        "2",
+        Some("1"),
+        &[batch_json("1", "active", 1)],
+    );
+    let snapshot = TaskSnapshot::decode(&bytes).expect("legacy V2 fixture must decode");
+    let prepared = (&store as &dyn TaskPersist)
+        .prepare_restore(&snapshot)
+        .expect("legacy completed_at fixture must restore");
+    (&store as &dyn TaskPersist).commit_restore(prepared);
+
+    let progress = (&store as &dyn TaskAccess)
+        .transition_with_progress(TaskId::new(3), TaskStatus::InProgress, 40)
+        .expect("restored task status must update")
+        .value;
+
+    assert_eq!(
+        progress
+            .recently_completed
+            .iter()
+            .map(|item| (item.id, item.completed_at))
+            .collect::<Vec<_>>(),
+        vec![(TaskId::new(2), Some(30)), (TaskId::new(1), Some(20))]
+    );
+    assert_eq!(progress.in_progress[0].id, TaskId::new(3));
+}
+
+#[test]
 fn task_persist_contract_collect_prepare_commit_and_same_backing_views() {
     let store = TaskStore::new();
     let access: &dyn TaskAccess = &store;
@@ -248,10 +285,7 @@ fn install_snapshot_replaces_old_state_revision_counters_and_current_batch_whole
     assert_eq!(store.list().first().unwrap().id(), TaskId::new(9));
     assert_eq!(store.list_batches().len(), 1);
     assert_eq!(store.list_batches().first().unwrap().id(), BatchId::new(9));
-    assert_eq!(
-        store.reminder_snapshot().current_batch,
-        Some(BatchId::new(9))
-    );
+    assert_eq!(store.current_batch(), Some(BatchId::new(9)));
     assert!(store.get(TaskId::new(1)).is_none());
 }
 

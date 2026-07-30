@@ -252,7 +252,7 @@
   - `ROOT_ACCESS_ALLOW.policy = ∅`：#916 已删除全部 path façade；#917 只可随真实 Policy PL/AllowAll 消费增量登记。
   - `ROOT_ACCESS_ALLOW.context` 继续只登记 `guidance` 模块；purpose-specific assessment façade保持稳定。
   - `ROOT_ACCESS_ALLOW.audit`：#927 Usage PL/query、#928 AppendLog、#929 concrete sender/worker config/lifecycle/metrics 与 start factory；Runtime trait bridge仍归 #931。
-  - `ROOT_ACCESS_ALLOW.task`：#891 按 `task/src/lib.rs` 的真实 Published Language、`TaskAccess` / `TaskPersist` 与 composition wiring 建立精确 crate-root policy；跨 crate 的 `task::{domain,adapters,...}` 访问被拒绝。
+  - `ROOT_ACCESS_ALLOW.task`：#891 按 `task/src/lib.rs` 的真实 Published Language、`TaskAccess` / `TaskPersist` 与 composition wiring 建立精确 crate-root policy；#1456 新增 `TaskProgressItem` / `TaskProgressSnapshot` 供 Tools Adapter 消费 status mutation 原子结果，并移除已退役的 `TaskReminderItem` / `TaskReminderSnapshot`；跨 crate 的 `task::{domain,adapters,...}` 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.storage`：#883/#884 后仅登记 AtomicBlob/AtomicDataset、安全路径与 filesystem adapter 等通用持久化机制，不再包含 Task/Memory 业务 façade。
   - `ROOT_ACCESS_ALLOW.project`：Project 发布 `ProjectIdentity` / `WorkspaceId` / `WorktreeKind`、三类 workspace port、opaque restore token、结构化 init/control/restore/git 错误与 composition-only wiring；`WorkspaceService`、Git adapter/port 和内部 state **NEVER** 跨 crate 暴露。
   - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。

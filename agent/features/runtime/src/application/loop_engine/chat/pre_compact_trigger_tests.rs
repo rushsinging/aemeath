@@ -35,7 +35,7 @@ use crate::ports::{
     CompactOutcome, CompactRequest, CompactResult, CompactSkipReason, CompactionDecision,
     ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
     Language as ContextLanguage, SessionId, SessionRevision, SystemBlock, SystemPromptSpec,
-    TaskReminderSnapshot, TokenBudget, Urgency,
+    TokenBudget, Urgency,
 };
 
 /// `submit_complete` builds its own executor closure and ignores the
@@ -59,7 +59,6 @@ fn frozen_request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: provider::ReasoningLevel::Off,
-        task_reminder: TaskReminderSnapshot::default(),
         language: ContextLanguage::new("en"),
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
@@ -81,7 +80,6 @@ fn window_with(messages: Vec<Message>) -> ContextWindow {
             cache_break: true,
         }],
         messages: messages.into(),
-        invocation_reminder: None,
         tool_schemas: vec![],
         token_estimation: TokenBudget::default(),
         compaction_decision: CompactionDecision {

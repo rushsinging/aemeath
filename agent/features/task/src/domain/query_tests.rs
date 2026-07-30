@@ -100,7 +100,114 @@ fn batch_snapshots_scope_stats_and_tasks_to_each_batch() {
 }
 
 #[test]
-fn stats_and_reminder_are_deterministic_pure_values() {
+fn progress_snapshot_sorts_limits_and_classifies_current_batch_tasks() {
+    let mut state = TaskStoreState::empty();
+    state.create_batch(batch_spec("batch"), 1).unwrap();
+
+    let completed_oldest = state
+        .create_task(task_spec("completed oldest", TaskPriority::Normal), 2)
+        .unwrap()
+        .value
+        .id();
+    let completed_middle = state
+        .create_task(task_spec("completed middle", TaskPriority::Normal), 3)
+        .unwrap()
+        .value
+        .id();
+    let completed_latest = state
+        .create_task(task_spec("completed latest", TaskPriority::Normal), 4)
+        .unwrap()
+        .value
+        .id();
+    let doing = (0..3)
+        .map(|index| {
+            state
+                .create_task(
+                    task_spec(&format!("doing {index}"), TaskPriority::Normal),
+                    5 + index,
+                )
+                .unwrap()
+                .value
+                .id()
+        })
+        .collect::<Vec<_>>();
+    let ready = (0..3)
+        .map(|index| {
+            state
+                .create_task(
+                    task_spec(&format!("ready {index}"), TaskPriority::Normal),
+                    8 + index,
+                )
+                .unwrap()
+                .value
+                .id()
+        })
+        .collect::<Vec<_>>();
+    let blocked = (0..2)
+        .map(|index| {
+            state
+                .create_task(
+                    task_spec(&format!("blocked {index}"), TaskPriority::Normal),
+                    11 + index,
+                )
+                .unwrap()
+                .value
+                .id()
+        })
+        .collect::<Vec<_>>();
+
+    state
+        .transition(completed_oldest, TaskStatus::Completed, 20)
+        .unwrap();
+    state
+        .transition(completed_middle, TaskStatus::Completed, 21)
+        .unwrap();
+    state
+        .transition(completed_latest, TaskStatus::Completed, 22)
+        .unwrap();
+    for (offset, id) in doing.iter().enumerate() {
+        state
+            .transition(*id, TaskStatus::InProgress, 30 + offset as u64)
+            .unwrap();
+    }
+    state.add_dependency(blocked[0], doing[0], 40).unwrap();
+    state.add_dependency(blocked[1], doing[1], 41).unwrap();
+
+    let snapshot = state
+        .progress_snapshot(BatchId::new(1), completed_latest, false, false)
+        .unwrap();
+
+    assert_eq!(
+        snapshot
+            .recently_completed
+            .iter()
+            .map(|item| item.id)
+            .collect::<Vec<_>>(),
+        vec![completed_latest, completed_middle]
+    );
+    assert_eq!(
+        snapshot
+            .in_progress
+            .iter()
+            .map(|item| item.id)
+            .collect::<Vec<_>>(),
+        doing
+    );
+    assert_eq!(
+        snapshot
+            .ready
+            .iter()
+            .map(|item| item.id)
+            .collect::<Vec<_>>(),
+        ready[..2]
+    );
+    assert_eq!(snapshot.ready_omitted, 1);
+    assert_eq!(snapshot.blocked_count, 2);
+    assert_eq!(snapshot.updated.id, completed_latest);
+}
+
+#[test]
+fn stats_are_deterministic_pure_values() {
     let mut state = TaskStoreState::empty();
     state.create_batch(batch_spec("batch"), 1).unwrap();
     let pending = state
@@ -139,19 +246,6 @@ fn stats_and_reminder_are_deterministic_pure_values() {
     assert_eq!(stats.by_priority.low, 1);
     assert_eq!(stats.by_priority.urgent, 2);
     assert_eq!(stats.by_priority.high, 0); // deleted tasks are excluded from priority totals
-
-    let reminder = state.reminder_snapshot();
-    assert_eq!(reminder.current_batch, Some(BatchId::new(1)));
-    assert_eq!(
-        reminder
-            .items
-            .iter()
-            .map(|item| item.id)
-            .collect::<Vec<_>>(),
-        vec![pending, blocker, completed]
-    );
-    assert!(reminder.items[0].blocked);
-    assert_eq!(reminder.items[0].subject, "pending");
 }
 
 #[test]

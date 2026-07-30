@@ -12,7 +12,7 @@ use super::performance::{capture, percentiles_ns};
 use super::service::ContextApplicationService;
 use crate::domain::{
     ContextAppend, ContextMessages, ContextRequest, ContextRequestId, Language, RunStepId,
-    SessionId, SessionRevision, SystemBlock, SystemPromptSpec, TaskReminderSnapshot,
+    SessionId, SessionRevision, SystemBlock, SystemPromptSpec,
 };
 use crate::ports::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
@@ -119,7 +119,6 @@ fn request(last_api_total_tokens: Option<u64>) -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),

@@ -56,7 +56,6 @@ fn base_request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("base system prompt"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("en"),
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),

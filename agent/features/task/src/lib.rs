@@ -137,6 +137,6 @@ pub use domain::{
     BatchCreateSpec, BatchId, BatchStatus, InterruptedBatchInfo, PreparedTaskRestore,
     StaleBatchInfo, Task, TaskAccess, TaskBatchSnapshot, TaskBatchStats, TaskCommandError,
     TaskCommandResult, TaskCreateSpec, TaskEvent, TaskId, TaskIdParseError, TaskLifecycleSnapshot,
-    TaskPersist, TaskPriority, TaskPriorityStats, TaskReminderItem, TaskReminderSnapshot,
+    TaskPersist, TaskPriority, TaskPriorityStats, TaskProgressItem, TaskProgressSnapshot,
     TaskRevision, TaskSnapshot, TaskSnapshotValidationError, TaskStatus, TaskStoreStats, TaskView,
 };

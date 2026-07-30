@@ -1,6 +1,6 @@
 use crate::domain::{
     Batch, BatchCreateSpec, BatchId, Task, TaskBatchSnapshot, TaskCommandError, TaskCommandResult,
-    TaskCreateSpec, TaskId, TaskLifecycleSnapshot, TaskPriority, TaskReminderSnapshot,
+    TaskCreateSpec, TaskId, TaskLifecycleSnapshot, TaskPriority, TaskProgressSnapshot,
     TaskRevision, TaskStatus, TaskStoreStats,
 };
 
@@ -37,6 +37,12 @@ pub trait TaskAccess: Send + Sync {
         spec: TaskCreateSpec,
         timestamp: u64,
     ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    fn transition_with_progress(
+        &self,
+        id: TaskId,
+        to: TaskStatus,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<TaskProgressSnapshot>, TaskCommandError>;
     fn transition(
         &self,
         id: TaskId,
@@ -91,6 +97,11 @@ pub trait TaskAccess: Send + Sync {
         tag: &str,
         updated_at: u64,
     ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    fn delete_with_progress(
+        &self,
+        id: TaskId,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<TaskProgressSnapshot>, TaskCommandError>;
     fn delete(
         &self,
         id: TaskId,
@@ -105,7 +116,6 @@ pub trait TaskAccess: Send + Sync {
     fn list_batch_snapshots(&self) -> Vec<TaskBatchSnapshot>;
     fn current_batch(&self) -> Option<BatchId>;
     fn stats(&self) -> TaskStoreStats;
-    fn reminder_snapshot(&self) -> TaskReminderSnapshot;
     fn lifecycle_snapshot(&self, stale_after_silence_turns: u64) -> TaskLifecycleSnapshot;
     fn is_blocked(&self, id: TaskId) -> Result<bool, TaskCommandError>;
     fn would_create_cycle(&self, task_id: TaskId, blocked_by_id: TaskId) -> bool;

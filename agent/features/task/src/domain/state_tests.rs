@@ -27,6 +27,65 @@ fn state_with_tasks(count: usize) -> (TaskStoreState, Vec<TaskId>) {
 }
 
 #[test]
+fn deleting_last_unfinished_task_returns_progress_and_auto_closes_batch() {
+    let (mut state, ids) = state_with_tasks(1);
+
+    let deleted = state.delete_with_progress(ids[0], 10).unwrap();
+
+    assert!(deleted.value.auto_closed);
+    assert_eq!(deleted.value.updated.status, TaskStatus::Deleted);
+    assert_eq!(state.current_batch(), None);
+    assert_eq!(
+        state.batches()[&BatchId::new(1)].status(),
+        BatchStatus::Archived
+    );
+}
+
+#[test]
+fn status_progress_auto_closes_and_reopens_batch_atomically() {
+    let (mut state, ids) = state_with_tasks(1);
+    let batch_id = BatchId::new(1);
+
+    let completed = state
+        .transition_with_progress(ids[0], TaskStatus::Completed, 10)
+        .unwrap();
+    assert!(completed.value.auto_closed);
+    assert!(!completed.value.auto_reopened);
+    assert_eq!(state.current_batch(), None);
+    assert_eq!(state.batches()[&batch_id].status(), BatchStatus::Archived);
+
+    let reopened = state
+        .transition_with_progress(ids[0], TaskStatus::Pending, 11)
+        .unwrap();
+    assert!(!reopened.value.auto_closed);
+    assert!(reopened.value.auto_reopened);
+    assert_eq!(state.current_batch(), Some(batch_id));
+    assert_eq!(state.batches()[&batch_id].status(), BatchStatus::Active);
+    assert_eq!(state.tasks()[&ids[0]].status(), TaskStatus::Pending);
+}
+
+#[test]
+fn status_progress_reopen_conflict_leaves_aggregate_unchanged() {
+    let (mut state, ids) = state_with_tasks(1);
+    let archived = BatchId::new(1);
+    state
+        .transition_with_progress(ids[0], TaskStatus::Completed, 10)
+        .unwrap();
+    state.create_batch(batch_spec("current"), 11).unwrap();
+    let active = BatchId::new(2);
+    let before = state.clone();
+
+    assert_eq!(
+        state.transition_with_progress(ids[0], TaskStatus::Pending, 12),
+        Err(TaskCommandError::ActiveBatchConflict {
+            active,
+            requested: archived,
+        })
+    );
+    assert_eq!(state, before);
+}
+
+#[test]
 fn empty_state_has_canonical_initial_values() {
     let state = TaskStoreState::empty();
     assert!(state.tasks().is_empty());

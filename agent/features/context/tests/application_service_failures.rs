@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use context::application::ContextApplicationService;
 use context::domain::{
     ContextAppend, ContextRequest, ContextRequestId, Language, SessionId, SessionRevision,
-    SystemPromptSpec, TaskReminderSnapshot,
+    SystemPromptSpec,
 };
 use context::ports::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
@@ -100,7 +100,6 @@ fn request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),

@@ -82,17 +82,39 @@ pub struct TaskStoreStats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskReminderItem {
+pub struct TaskProgressItem {
     pub id: TaskId,
+    pub seq: u64,
     pub subject: String,
     pub status: TaskStatus,
-    pub blocked: bool,
+    pub completed_at: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TaskReminderSnapshot {
-    pub current_batch: Option<BatchId>,
-    pub items: Vec<TaskReminderItem>,
+impl From<&Task> for TaskProgressItem {
+    fn from(task: &Task) -> Self {
+        Self {
+            id: task.id(),
+            seq: task.seq(),
+            subject: task.subject().to_owned(),
+            status: task.status(),
+            completed_at: task.completed_at(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskProgressSnapshot {
+    pub task_list_id: BatchId,
+    pub summary: Option<String>,
+    pub task_list_status: super::BatchStatus,
+    pub updated: TaskProgressItem,
+    pub recently_completed: Vec<TaskProgressItem>,
+    pub in_progress: Vec<TaskProgressItem>,
+    pub ready: Vec<TaskProgressItem>,
+    pub ready_omitted: usize,
+    pub blocked_count: usize,
+    pub auto_closed: bool,
+    pub auto_reopened: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,26 +210,74 @@ impl TaskStoreState {
             })
     }
 
-    /// Produces Context input for the current Batch without rendering policy.
-    pub fn reminder_snapshot(&self) -> TaskReminderSnapshot {
-        let current_batch = self.current_batch();
-        let items = self
-            .list()
+    pub fn progress_snapshot(
+        &self,
+        batch_id: BatchId,
+        updated_id: TaskId,
+        auto_closed: bool,
+        auto_reopened: bool,
+    ) -> Option<TaskProgressSnapshot> {
+        const RECENT_LIMIT: usize = 2;
+        const READY_LIMIT: usize = 2;
+
+        let batch = self.batches().get(&batch_id)?;
+        let updated = self.tasks().get(&updated_id)?;
+        let mut tasks = self
+            .tasks()
+            .values()
+            .filter(|task| task.batch() == batch_id && task.status() != TaskStatus::Deleted)
+            .collect::<Vec<_>>();
+        tasks.sort_unstable_by_key(|task| task.id());
+
+        let mut recently_completed = tasks
+            .iter()
+            .copied()
+            .filter(|task| task.status() == TaskStatus::Completed)
+            .collect::<Vec<_>>();
+        recently_completed.sort_unstable_by(|left, right| {
+            right
+                .completed_at()
+                .cmp(&left.completed_at())
+                .then_with(|| right.id().cmp(&left.id()))
+        });
+        let recently_completed = recently_completed
             .into_iter()
-            .filter(|task| {
-                Some(task.batch()) == current_batch && task.status() != TaskStatus::Deleted
-            })
-            .map(|task| TaskReminderItem {
-                id: task.id(),
-                subject: task.subject().to_owned(),
-                status: task.status(),
-                blocked: self.is_blocked(task.id()).unwrap_or(false),
-            })
+            .take(RECENT_LIMIT)
+            .map(TaskProgressItem::from)
             .collect();
-        TaskReminderSnapshot {
-            current_batch,
-            items,
-        }
+
+        let in_progress = tasks
+            .iter()
+            .copied()
+            .filter(|task| task.status() == TaskStatus::InProgress)
+            .map(TaskProgressItem::from)
+            .collect();
+
+        let (ready, blocked): (Vec<_>, Vec<_>) = tasks
+            .iter()
+            .copied()
+            .filter(|task| task.status() == TaskStatus::Pending)
+            .partition(|task| self.blocking_ids(task.id()).is_ok_and(|ids| ids.is_empty()));
+        let ready_omitted = ready.len().saturating_sub(READY_LIMIT);
+        let ready = ready
+            .into_iter()
+            .take(READY_LIMIT)
+            .map(TaskProgressItem::from)
+            .collect();
+
+        Some(TaskProgressSnapshot {
+            task_list_id: batch_id,
+            summary: batch.summary().map(str::to_owned),
+            task_list_status: batch.status(),
+            updated: TaskProgressItem::from(updated),
+            recently_completed,
+            in_progress,
+            ready,
+            ready_omitted,
+            blocked_count: blocked.len(),
+            auto_closed,
+            auto_reopened,
+        })
     }
 
     /// Composes the existing pure lifecycle detectors over one deterministic

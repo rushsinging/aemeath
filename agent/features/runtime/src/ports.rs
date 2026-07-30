@@ -28,7 +28,7 @@ pub use context_port::{
     CompactRequest, CompactTrigger, ContentFingerprint, ContextAppend, ContextAppendError,
     ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, FinalizeCause,
     Language, ManualCompactRequest, RunStepId, SessionId, SessionRevision, StepReceipt,
-    SystemPromptSpec, TaskReminderSnapshot,
+    SystemPromptSpec,
 };
 #[cfg(test)]
 pub use context_port::{

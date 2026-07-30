@@ -31,15 +31,62 @@ impl crate::tui::app::App {
                 if point_in_rect(row, col, &output_area) {
                     // 滚动真相归 view_state；render 前由 App/layout/document projection 同步指标。
                     let total_lines = self.output_area.document().total_lines();
-                    self.view_state.output.scroll_up(3, total_lines);
-                    // 滚轮到顶也触发懒加载展开（App 据返回后 mark_output_dirty 重建 document）
-                    self.view_state.output.try_load_older_at_top(total_lines);
+                    let view = &mut self.view_state.output;
+                    let before_limit = view.render_line_limit();
+                    let before_offset = view.scroll_offset;
+                    let before_auto_scroll = view.auto_scroll;
+                    let before_tail_offset = view.history_window_tail_offset;
+                    view.scroll_up(3, total_lines);
+                    let expanded = view.try_load_older_near_top(total_lines);
+                    crate::tui::log_debug!(
+                        "tui.output.scroll_input source=mouse action=up amount=3 row={} col={} total_lines={} visible_height={} expanded={} before_limit={} after_limit={} before_offset={} after_offset={} before_auto_scroll={} after_auto_scroll={} before_tail_offset={} after_tail_offset={} source_total_lines={} pending_load_older={}",
+                        row,
+                        col,
+                        total_lines,
+                        view.last_visible_height,
+                        expanded,
+                        before_limit,                        view.render_line_limit(),
+                        before_offset,
+                        view.scroll_offset,
+                        before_auto_scroll,
+                        view.auto_scroll,
+                        before_tail_offset,
+                        view.history_window_tail_offset,
+                        view.source_total_lines,
+                        view.pending_load_older
+                    );
                 }
                 return Vec::new();
             }
             MouseEventKind::ScrollDown => {
                 if point_in_rect(row, col, &output_area) {
-                    self.view_state.output.scroll_down(3);
+                    let total_lines = self.output_area.document().total_lines();
+                    let view = &mut self.view_state.output;
+                    let before_offset = view.scroll_offset;
+                    let before_auto_scroll = view.auto_scroll;
+                    let before_tail_offset = view.history_window_tail_offset;
+                    let window_changed = view.scroll_down(3);
+                    crate::tui::log_debug!(
+                        "tui.output.scroll_input source=mouse action=down amount=3 row={} col={} total_lines={} visible_height={} window_changed={} before_offset={} after_offset={} before_auto_scroll={} after_auto_scroll={} before_tail_offset={} after_tail_offset={} source_total_lines={}",
+                        row,
+                        col,
+                        total_lines,
+                        view.last_visible_height,
+                        window_changed,
+                        before_offset,
+                        view.scroll_offset,
+                        before_auto_scroll,
+                        view.auto_scroll,
+                        before_tail_offset,
+                        view.history_window_tail_offset,
+                        view.source_total_lines
+                    );
+                    if window_changed {
+                        self.mark_output_dirty();
+                        crate::tui::log_debug!(
+                            "tui.output.scroll_dirty source=mouse action=down reason=history_window_changed dirty_output=true"
+                        );
+                    }
                 }
                 return Vec::new();
             }

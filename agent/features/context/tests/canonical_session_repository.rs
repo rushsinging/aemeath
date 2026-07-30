@@ -10,7 +10,7 @@ use context::domain::{
     AcceptedInputAppend, AcceptedInputError, CompactRequest, CompactTrigger, ContentFingerprint,
     ContextAppend, ContextAppendError, ContextRequest, ContextRequestId, FinalizeCause, Language,
     ManualCompactRequest, RunStepId, SessionId, SessionRevision, SystemPromptSpec,
-    TaskReminderSnapshot, ToolCallIdentity, ToolCallState, ToolReceiptMutation,
+    ToolCallIdentity, ToolCallState, ToolReceiptMutation,
 };
 use context::ports::SessionRepository;
 use project::{PreparedWorkspaceRestore, WorkspacePersist, WorkspaceRestoreError};
@@ -138,7 +138,6 @@ fn compact_request(session_id: SessionId) -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),

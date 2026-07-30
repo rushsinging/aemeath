@@ -75,21 +75,6 @@ impl SessionRevision {
     }
 }
 
-/// Task BC 提供给 Context 的稳定只读提醒投影。
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct TaskReminderSnapshot {
-    pub task_list_id: Option<String>,
-    pub summary: Option<String>,
-    pub pending: usize,
-    pub in_progress: usize,
-}
-
-impl TaskReminderSnapshot {
-    pub const fn has_unfinished(&self) -> bool {
-        self.pending > 0 || self.in_progress > 0
-    }
-}
-
 /// 构建 window 的不可变输入；历史由 Context backing 独占。
 #[derive(Debug, Clone)]
 pub struct ContextRequest {
@@ -101,7 +86,6 @@ pub struct ContextRequest {
     pub system_prompt: SystemPromptSpec,
     pub model_id: String,
     pub effective_reasoning: ReasoningLevel,
-    pub task_reminder: TaskReminderSnapshot,
     pub language: Language,
     pub agent_roles: HashMap<String, AgentRoleConfig>,
     pub config_snapshot: ConfigSnapshot,
@@ -132,39 +116,6 @@ pub struct TokenBudget {
     pub tool_schema_tokens: usize,
     pub message_tokens: usize,
     pub total_tokens: usize,
-}
-
-/// 仅在 Provider invocation 消息副本中投影的动态提醒；不属于 canonical 消息或 system blocks。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InvocationReminder(String);
-
-impl InvocationReminder {
-    pub fn from_task_snapshot(
-        snapshot: &TaskReminderSnapshot,
-        language: &Language,
-    ) -> Option<Self> {
-        if !snapshot.has_unfinished() {
-            return None;
-        }
-        let id = snapshot.task_list_id.as_deref().unwrap_or("?");
-        let summary = snapshot.summary.as_deref().unwrap_or("未命名");
-        let content = if language.as_str() == "zh" {
-            format!(
-                "<task-reminder>\n当前 task list #{id}「{summary}」仍有 {} pending、{} in_progress。若与最新用户请求相关，调用 TaskListGet 查看详情；否则优先处理最新请求。\n</task-reminder>",
-                snapshot.pending, snapshot.in_progress
-            )
-        } else {
-            format!(
-                "<task-reminder>\nCurrent task list #{id} \"{summary}\" has {} pending and {} in_progress tasks. If it is relevant to the latest user request, call TaskListGet for details; otherwise prioritize the latest request.\n</task-reminder>",
-                snapshot.pending, snapshot.in_progress
-            )
-        };
-        Some(Self(content))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -285,7 +236,6 @@ pub struct ContextWindow {
     pub backing_revision: SessionRevision,
     pub system_blocks: Vec<SystemBlock>,
     pub messages: ContextMessages,
-    pub invocation_reminder: Option<InvocationReminder>,
     pub tool_schemas: Vec<ModelToolSchema>,
     pub token_estimation: TokenBudget,
     pub compaction_decision: CompactionDecision,

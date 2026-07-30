@@ -59,13 +59,68 @@ fn test_scroll_down_decrements_and_reenables_auto_scroll_at_zero() {
         ..Default::default()
     };
     // 正常路径：递减但未归零，auto_scroll 保持关闭。
-    state.scroll_down(2);
+    assert!(!state.scroll_down(2));
     assert_eq!(state.scroll_offset, 3);
     assert!(!state.auto_scroll);
     // 边界：amount 超过当前 offset 时饱和归零并恢复 auto_scroll。
-    state.scroll_down(100);
+    assert!(!state.scroll_down(100));
     assert_eq!(state.scroll_offset, 0);
     assert!(state.auto_scroll);
+}
+
+#[test]
+fn scrolling_down_at_older_window_bottom_moves_window_toward_latest() {
+    let mut state = OutputViewState {
+        scroll_offset: 2,
+        auto_scroll: false,
+        render_line_limit: MAX_RENDER_LINES,
+        source_total_lines: 10_000,
+        history_window_tail_offset: 1_200,
+        ..Default::default()
+    };
+
+    let window_changed = state.scroll_down(3);
+
+    assert!(window_changed);
+    assert_eq!(state.history_window_tail_offset, 1_185);
+    assert_eq!(state.scroll_offset, 14);
+    assert!(!state.auto_scroll);
+}
+
+#[test]
+fn scrolling_down_across_final_older_window_waits_for_latest_viewport_bottom() {
+    let mut state = OutputViewState {
+        scroll_offset: 0,
+        auto_scroll: false,
+        render_line_limit: MAX_RENDER_LINES,
+        source_total_lines: 3_250,
+        history_window_tail_offset: 250,
+        ..Default::default()
+    };
+
+    assert!(state.scroll_down(10));
+    assert_eq!(state.history_window_tail_offset, 235);
+    assert_eq!(state.scroll_offset, 5);
+    assert!(!state.auto_scroll);
+    assert_eq!(state.render_line_limit(), MAX_RENDER_LINES);
+
+    for _ in 0..15 {
+        assert!(state.scroll_down(15));
+    }
+    assert_eq!(state.history_window_tail_offset, 10);
+    assert_eq!(state.scroll_offset, 5);
+    assert!(!state.auto_scroll);
+
+    assert!(!state.scroll_down(5));
+    assert_eq!(state.history_window_tail_offset, 10);
+    assert_eq!(state.scroll_offset, 0);
+    assert!(!state.auto_scroll);
+
+    assert!(state.scroll_down(10));
+    assert_eq!(state.history_window_tail_offset, 0);
+    assert_eq!(state.scroll_offset, 0);
+    assert!(state.auto_scroll);
+    assert_eq!(state.render_line_limit(), INITIAL_RENDER_LINES);
 }
 
 #[test]
@@ -104,7 +159,76 @@ fn test_scroll_to_top_jumps_to_max_offset() {
 }
 
 #[test]
-fn history_window_loads_older_lines_in_five_hundred_line_batches() {
+fn history_load_batch_is_sixty_percent_of_viewport_with_lower_bound_and_no_cap() {
+    let mut tiny = OutputViewState {
+        last_visible_height: 10,
+        ..Default::default()
+    };
+    let mut minimum = OutputViewState {
+        last_visible_height: 25,
+        ..Default::default()
+    };
+    let mut ordinary = OutputViewState {
+        last_visible_height: 50,
+        ..Default::default()
+    };
+    let mut tall = OutputViewState {
+        last_visible_height: 200,
+        ..Default::default()
+    };
+    let mut very_tall = OutputViewState {
+        last_visible_height: 400,
+        ..Default::default()
+    };
+
+    for state in [
+        &mut tiny,
+        &mut minimum,
+        &mut ordinary,
+        &mut tall,
+        &mut very_tall,
+    ] {
+        state.observe_source_document(5_000);
+        assert!(state.request_load_older_at_top());
+    }
+
+    assert_eq!(tiny.render_line_limit(), 1_015);
+    assert_eq!(minimum.render_line_limit(), 1_015);
+    assert_eq!(ordinary.render_line_limit(), 1_030);
+    assert_eq!(tall.render_line_limit(), 1_120);
+    assert_eq!(very_tall.render_line_limit(), 1_240);
+}
+
+#[test]
+fn history_window_preloads_when_remaining_lines_above_fit_next_batch() {
+    let mut state = OutputViewState {
+        last_visible_height: 50,
+        ..Default::default()
+    };
+    state.observe_source_document(5_000);
+    state.scroll_offset = 870;
+    state.auto_scroll = false;
+
+    assert!(state.try_load_older_near_top(950));
+    assert_eq!(state.render_line_limit(), 1_030);
+}
+
+#[test]
+fn history_window_does_not_preload_before_threshold() {
+    let mut state = OutputViewState {
+        last_visible_height: 50,
+        ..Default::default()
+    };
+    state.observe_source_document(5_000);
+    state.scroll_offset = 869;
+    state.auto_scroll = false;
+
+    assert!(!state.try_load_older_near_top(950));
+    assert_eq!(state.render_line_limit(), 1_000);
+}
+
+#[test]
+fn history_window_loads_older_lines_by_visible_height() {
     let mut state = OutputViewState {
         last_visible_height: 20,
         ..Default::default()
@@ -113,11 +237,11 @@ fn history_window_loads_older_lines_in_five_hundred_line_batches() {
     state.observe_source_document(1_800);
     assert_eq!(state.render_line_limit(), 1_000);
     state.scroll_to_top(1_000);
-    assert_eq!(state.render_line_limit(), 1_500);
+    assert_eq!(state.render_line_limit(), 1_015);
 
-    state.sync_document_metrics(1_500, 20);
-    assert!(state.try_load_older_at_top(1_500));
-    assert_eq!(state.render_line_limit(), 1_800);
+    state.sync_document_metrics(1_015, 20);
+    assert!(state.try_load_older_near_top(1_015));
+    assert_eq!(state.render_line_limit(), 1_030);
 }
 
 #[test]
@@ -127,11 +251,13 @@ fn history_window_stops_loading_when_all_source_lines_are_visible() {
         ..Default::default()
     };
     state.observe_source_document(1_240);
-    state.scroll_to_top(1_000);
+    for _ in 0..16 {
+        assert!(state.scroll_to_top(state.render_line_limit()));
+    }
 
     assert_eq!(state.render_line_limit(), 1_240);
     state.sync_document_metrics(1_240, 20);
-    assert!(!state.try_load_older_at_top(1_240));
+    assert!(!state.try_load_older_near_top(1_240));
 }
 
 #[test]
@@ -141,7 +267,7 @@ fn history_window_can_request_older_history_after_three_thousand_line_budget() {
         ..Default::default()
     };
     state.observe_source_document(6_000);
-    for _ in 0..4 {
+    for _ in 0..134 {
         assert!(state.scroll_to_top(state.render_line_limit()));
     }
     assert_eq!(state.render_line_limit(), 3_000);
@@ -156,14 +282,13 @@ fn history_window_stops_at_three_thousand_lines() {
     };
     state.observe_source_document(5_000);
 
-    for expected in [1_500, 2_000, 2_500, 3_000] {
-        assert!(state.scroll_to_top(expected - 500));
-        assert_eq!(state.render_line_limit(), expected);
+    for _ in 0..134 {
+        assert!(state.scroll_to_top(state.render_line_limit()));
     }
 
     assert_eq!(state.render_line_limit(), 3_000);
     state.sync_document_metrics(3_000, 20);
-    assert!(state.try_load_older_at_top(3_000));
+    assert!(state.try_load_older_near_top(3_000));
     assert_eq!(state.render_line_limit(), 3_000);
 }
 
@@ -208,11 +333,32 @@ fn returning_to_bottom_resets_history_window_budget() {
     };
     state.observe_source_document(2_000);
     state.scroll_to_top(1_000);
-    assert_eq!(state.render_line_limit(), 1_500);
+    assert_eq!(state.render_line_limit(), 1_015);
 
     state.scroll_to_bottom();
 
     assert_eq!(state.render_line_limit(), 1_000);
+}
+
+#[test]
+fn rebuilt_document_anchor_is_applied_before_next_metrics_sync() {
+    let mut state = OutputViewState {
+        last_visible_height: 30,
+        last_document_total_lines: 3_001,
+        scroll_offset: 0,
+        auto_scroll: false,
+        history_window_tail_offset: 30,
+        ..Default::default()
+    };
+
+    state.pin_rebuilt_document_to_anchor(3_001, 2_970);
+
+    assert_eq!(state.scroll_offset, 1);
+    assert_eq!(state.last_document_total_lines, 3_001);
+    assert!(!state.auto_scroll);
+
+    state.sync_document_metrics(3_001, 30);
+    assert_eq!(state.scroll_offset, 1);
 }
 
 #[test]
@@ -246,6 +392,21 @@ fn test_sync_document_metrics_clamps_stale_offset_and_reenables_auto_scroll() {
     assert_eq!(state.scroll_offset, 0);
     assert!(state.auto_scroll);
     assert_eq!(state.last_document_total_lines, 1);
+}
+
+#[test]
+fn sync_document_metrics_does_not_enable_auto_scroll_in_older_window() {
+    let mut state = OutputViewState {
+        scroll_offset: 100,
+        auto_scroll: false,
+        history_window_tail_offset: 500,
+        ..Default::default()
+    };
+
+    state.sync_document_metrics(1, 2);
+
+    assert_eq!(state.scroll_offset, 0);
+    assert!(!state.auto_scroll);
 }
 
 #[test]

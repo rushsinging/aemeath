@@ -24,8 +24,8 @@ pub use model::{
     TaskView,
 };
 pub use query::{
-    TaskBatchSnapshot, TaskBatchStats, TaskLifecycleSnapshot, TaskPriorityStats, TaskReminderItem,
-    TaskReminderSnapshot, TaskStoreStats,
+    TaskBatchSnapshot, TaskBatchStats, TaskLifecycleSnapshot, TaskPriorityStats, TaskProgressItem,
+    TaskProgressSnapshot, TaskStoreStats,
 };
 pub use snapshot::{PreparedTaskRestore, TaskSnapshot, TaskSnapshotValidationError};
 /// 聚合内部事务状态：仅 crate 内 `TaskStore` backing 可见，**NEVER** 进入

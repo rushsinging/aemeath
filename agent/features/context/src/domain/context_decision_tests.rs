@@ -8,7 +8,7 @@ use share::message::Message;
 
 use super::{
     context_decision, ContextRequest, ContextRequestId, DecisionReason, Language, SessionId,
-    SystemPromptSpec, TaskReminderSnapshot,
+    SystemPromptSpec,
 };
 
 fn request(last_api_total_tokens: Option<u64>) -> ContextRequest {
@@ -21,7 +21,6 @@ fn request(last_api_total_tokens: Option<u64>) -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
@@ -39,7 +38,6 @@ fn provider_total_is_used_without_projected_delta() {
         &request(Some(700)),
         &vec![Message::user("x".repeat(4_000))].into(),
         &[],
-        None,
     );
 
     assert_eq!(decision.decision_token_count, 700);
@@ -49,7 +47,7 @@ fn provider_total_is_used_without_projected_delta() {
 
 #[test]
 fn provider_total_above_threshold_triggers_compaction() {
-    let decision = context_decision::calculate(&request(Some(900)), &Vec::new().into(), &[], None);
+    let decision = context_decision::calculate(&request(Some(900)), &Vec::new().into(), &[]);
 
     assert!(decision.needed);
     assert_eq!(decision.reason, DecisionReason::ActualProviderUsage);
@@ -61,7 +59,6 @@ fn missing_provider_total_falls_back_to_complete_candidate_estimate() {
         &request(None),
         &vec![Message::user("x".repeat(4_000))].into(),
         &[],
-        None,
     );
 
     assert!(decision.needed);

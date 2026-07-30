@@ -21,6 +21,7 @@ use crate::tui::model::conversation::block::AskUserSlot;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
+use crate::tui::render::output::rendered::RenderedLineAnchor;
 use crate::tui::render::output::tool_display::format_subagent_tool_header;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
 use crate::tui::update::intent::AgentIntent;
@@ -207,6 +208,13 @@ impl App {
                 );
                 if history_window_after != history_window_before {
                     self.mark_output_dirty();
+                    crate::tui::log_debug!(
+                        "tui.output.scroll_dirty source=mouse_event reason=history_window_changed before_limit={} after_limit={} before_tail_offset={} after_tail_offset={} dirty_output=true",
+                        history_window_before.0,
+                        history_window_after.0,
+                        history_window_before.1,
+                        history_window_after.1
+                    );
                 }
                 UpdateResult {
                     effects,
@@ -297,6 +305,13 @@ impl App {
                 );
                 if history_window_after != history_window_before {
                     self.mark_output_dirty();
+                    crate::tui::log_debug!(
+                        "tui.output.scroll_dirty source=terminal_mouse reason=history_window_changed before_limit={} after_limit={} before_tail_offset={} after_tail_offset={} dirty_output=true",
+                        history_window_before.0,
+                        history_window_after.0,
+                        history_window_before.1,
+                        history_window_after.1
+                    );
                 }
                 UpdateResult {
                     effects,
@@ -599,6 +614,38 @@ impl App {
             line_limit: self.view_state.output.render_line_limit(),
             tail_offset: self.view_state.output.history_window_tail_offset,
         };
+        let rebuilt_anchor: Option<(RenderedLineAnchor, usize)> =
+            if !self.view_state.output.auto_scroll {
+                let old_total_lines = self.output_area.document().total_lines();
+                let old_max_start =
+                    old_total_lines.saturating_sub(self.view_state.output.last_visible_height);
+                let old_visible_start = old_max_start
+                    .saturating_sub(self.view_state.output.scroll_offset)
+                    .min(old_max_start);
+                let old_visible_end = old_visible_start
+                    .saturating_add(self.view_state.output.last_visible_height)
+                    .min(old_total_lines);
+                self.output_area
+                    .document()
+                    .stable_line_anchor_in_range(old_visible_start..old_visible_end)
+            } else {
+                None
+            };
+        crate::tui::log_debug!(
+            "tui.output.window_rebuild stage=request revision={} width={} term_width={} roots={} before_document_lines={} requested_line_limit={} requested_tail_offset={} scroll_offset={} auto_scroll={} visible_height={} source_total_lines={} need_view_model_rebuild={}",
+            revision,
+            width,
+            self.output_area.term_width,
+            root_count,
+            before_lines,
+            requested_window.line_limit,
+            requested_window.tail_offset,
+            self.view_state.output.scroll_offset,
+            self.view_state.output.auto_scroll,
+            self.view_state.output.last_visible_height,
+            self.view_state.output.source_total_lines,
+            need_rebuild
+        );
         let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.output_document_renderer.render_model_window(
                 &view_model,
@@ -618,15 +665,45 @@ impl App {
         let document = match render_result {
             Ok(result) => {
                 let source_total_lines = result.source_total_lines;
+                let result_document_lines = result.document.total_lines();
                 self.view_state
                     .output
                     .observe_source_document(source_total_lines);
-                if self.view_state.output.render_line_limit() != requested_window.line_limit
+                if let Some((anchor, screen_row)) = rebuilt_anchor.as_ref() {
+                    if let Some(anchor_line) = result.document.line_index_for_anchor(anchor) {
+                        self.view_state.output.pin_rebuilt_document_to_anchor(
+                            result_document_lines,
+                            anchor_line.saturating_sub(*screen_row),
+                        );
+                    } else {
+                        crate::tui::log_debug!(
+                            "tui.output.window_anchor matched=false result_document_lines={} scroll_offset={} tail_offset={}",
+                            result_document_lines,
+                            self.view_state.output.scroll_offset,
+                            self.view_state.output.history_window_tail_offset
+                        );
+                    }
+                }
+                let window_changed = self.view_state.output.render_line_limit()
+                    != requested_window.line_limit
                     || self.view_state.output.history_window_tail_offset
-                        != requested_window.tail_offset
-                {
+                        != requested_window.tail_offset;
+                if window_changed {
                     self.mark_output_dirty();
                 }
+                crate::tui::log_debug!(
+                    "tui.output.window_rebuild stage=result requested_line_limit={} requested_tail_offset={} source_total_lines={} result_document_lines={} after_line_limit={} after_tail_offset={} window_changed={} dirty_output={} scroll_offset={} auto_scroll={}",
+                    requested_window.line_limit,
+                    requested_window.tail_offset,
+                    source_total_lines,
+                    result_document_lines,
+                    self.view_state.output.render_line_limit(),
+                    self.view_state.output.history_window_tail_offset,
+                    window_changed,
+                    self.view_state.dirty.output,
+                    self.view_state.output.scroll_offset,
+                    self.view_state.output.auto_scroll
+                );
                 result.document
             }
             Err(_) => {
@@ -642,11 +719,14 @@ impl App {
             }
         };
         crate::tui::log_trace!(
-            "tui.output.history_metrics source_lines={} render_limit={} before_lines={} scroll_offset={} auto_scroll={} pending_load_older={}",
+            "tui.output.history_metrics source_lines={} render_limit={} tail_offset={} before_lines={} scroll_offset={} auto_scroll={} visible_height={} pending_load_older={}",
             self.view_state.output.source_total_lines,
-            self.view_state.output.render_line_limit(),            before_lines,
+            self.view_state.output.render_line_limit(),
+            self.view_state.output.history_window_tail_offset,
+            before_lines,
             self.view_state.output.scroll_offset,
             self.view_state.output.auto_scroll,
+            self.view_state.output.last_visible_height,
             self.view_state.output.pending_load_older
         );
         let after_lines = document.total_lines();

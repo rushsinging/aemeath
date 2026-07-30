@@ -10,7 +10,6 @@ use crate::application::loop_engine::chat::reflection::{
     maybe_submit_pre_compact_reflection, should_run_turn_reflection, submit_interval_reflection,
 };
 use crate::application::loop_engine::chat::stream_handler::InvocationEventReducer;
-use crate::application::loop_engine::chat::task_reminder::TaskReminderState;
 use crate::application::loop_engine::chat::{
     ChatEventSink, InputEventDrainPort, QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
@@ -23,7 +22,7 @@ use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::{Agent, ToolCall};
 use crate::domain::agent_run::RunDomainEvent;
-use crate::ports::{ContextRequest, TaskReminderSnapshot};
+use crate::ports::ContextRequest;
 
 fn request_context_size(request: Option<&ContextRequest>) -> usize {
     request.map_or(1, |request| request.context_size.max(1))
@@ -113,23 +112,6 @@ pub(crate) fn fixture_two_step_accepted(
     execution.freeze_step_input_messages(None, loop_input_messages(second_inputs));
     let second_accepted = execution.accepted_input_snapshot();
     (first_accepted, second_accepted)
-}
-
-pub(crate) fn task_reminder_snapshot(task: &dyn task::TaskAccess) -> TaskReminderSnapshot {
-    task.reminder_snapshot()
-        .current_batch
-        .and_then(|batch_id| {
-            task.batch_snapshot(batch_id).map(|snapshot| {
-                let stats = snapshot.stats();
-                TaskReminderSnapshot {
-                    task_list_id: Some(snapshot.batch().id().to_string()),
-                    summary: snapshot.batch().summary().map(str::to_owned),
-                    pending: stats.pending,
-                    in_progress: stats.in_progress,
-                }
-            })
-        })
-        .unwrap_or_default()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -382,7 +364,6 @@ where
     pub reflection_tasks: crate::application::reflection::ReflectionTaskAdapter,
     pub language: String,
     pub turn_context: RuntimeTurnContext,
-    pub task_reminder_state: TaskReminderState,
     pub tool_identity: crate::application::tool::coordination::identity::ToolIdentityRegistry,
 }
 
@@ -479,13 +460,6 @@ where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
-    async fn on_window(&mut self, execution: &RunExecutionState) {
-        if let Some(window) = execution.context_window() {
-            self.task_reminder_state
-                .update_from_messages(execution.turn_count() as u64, window.messages.iter());
-        }
-    }
-
     async fn pump_while_invoking<T: Send>(
         &mut self,
         invocation: impl std::future::Future<Output = T> + Send,
