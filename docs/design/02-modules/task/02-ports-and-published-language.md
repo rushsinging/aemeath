@@ -44,7 +44,8 @@ pub trait TaskAccess: Send + Sync {
     async fn list_batches(&self) -> Vec<Batch>;
     async fn lifecycle_snapshot(&self, stale_after_silence_turns: u64) -> TaskLifecycleSnapshot;
     async fn stats(&self) -> TaskStoreStats;
-    async fn reminder_snapshot(&self) -> TaskReminderSnapshot;
+    async fn progress_snapshot(&self, batch_id: &BatchId, updated_task_id: &TaskId)
+        -> Result<TaskProgressSnapshot, TaskCommandError>;
 
 }
 
@@ -123,7 +124,7 @@ impl<T> TaskCommandResult<T> {
 
 Batch lifecycle 命令全部按 id 且 fallible：`pause_batch(Active)` 原子变为 Paused 并清空 current；`resume_batch(Paused)` 仅在无其他 Active 时原子设为 Active/current；`archive_batch(Active|Paused)` 原子变为 Archived 并按需清空 current，重复 archive 幂等返回 Archived 实体。不存在、非法迁移或另一 Active 存在均返回 typed error 且不改 state。公开 Target **NEVER** 保留依赖隐式 current 的 `complete_batch()` shortcut。
 
-`TaskReminderSnapshot` 是 Task-owned 只读 PL，携带 current Batch 的 `BatchId`、summary 与 batch-local pending / in-progress 数量；不含 store handle、依赖图内部缓存或渲染文本。Runtime 只把该结构化纯值投影进 `ContextRequest`，Context Management 根据请求语言独占 reminder 的格式、位置与 token budget。Task BC 同时发布 `TaskBatchStats` / `TaskBatchSnapshot` 作为按 Batch 查询的唯一只读投影：snapshot 包含 Batch 元数据、batch-local live Task 统计与稳定排序任务；`TaskAccess::batch_snapshot(id)` 查询指定 Batch，`list_batch_snapshots()` 用于历史发现。Tools 与 Runtime **NEVER** 从全局 `stats()` 或原始 `list()` 重复计算 Batch 统计。
+`TaskProgressSnapshot` 是 Task-owned 原子 mutation result，随 `TaskUpdate(status)` 在同一 state transaction 中返回：包含目标 Batch 元数据、本次更新任务、最近最多 2 个已完成任务、全部 `in_progress`、最多 2 个未阻塞 `pending`、其余 ready/blocked 计数以及自动关闭/重开标记。最近完成项按 `completed_at` 倒序；完成任务重新进入非完成状态时清除时间，再次完成时重写。Tools Adapter 只负责按语言渲染并序列化 typed result，Runtime/Context **NEVER** 另查 Task 或注入独立 reminder。Task BC 同时发布 `TaskBatchStats` / `TaskBatchSnapshot` 作为按 Batch 查询的唯一只读投影：snapshot 包含 Batch 元数据、batch-local live Task 统计与稳定排序任务；`TaskAccess::batch_snapshot(id)` 查询指定 Batch，`list_batch_snapshots()` 用于历史发现。Tools 与 Runtime **NEVER** 从全局 `stats()` 或原始 `list()` 重复计算 Batch 统计。
 
 ### 1.2 恢复协议类型（#888 / #890，非 #887 范围）
 
@@ -203,7 +204,7 @@ Context Map §7 和 §10 决策：Task 类型是 Task BC 的 Published Language�
 | `TaskCommandError` | 日常命令的封闭结构化失败类型 | Runtime、TaskTool ACL |
 | `Batch` | `TaskStoreState` 聚合内的批次实体 | Runtime、TUI |
 | `BatchStatus` | 批次状态枚举（Active / Paused / Archived） | Runtime、TUI |
-| `TaskReminderSnapshot` | current Batch 的结构化提醒输入：ID、summary 与 batch-local 未完成统计；最终文案归 Context Management | Runtime → Context Management |
+| `TaskProgressSnapshot` | status mutation 的原子进度结果：更新项、最近完成、全部 doing、最多 2 个 ready、折叠计数与列表生命周期标记 | TaskUpdate Tool |
 | `TaskBatchStats` / `TaskBatchSnapshot` | 指定 Batch 的稳定只读查询投影；统一承载 Batch 元数据、局部 live Task 统计和任务，供按 ID 查询与历史发现复用 | Runtime、TaskTool |
 | `TaskLifecycleSnapshot` | 带显式 stale threshold 的 Batch lifecycle 纯值输入 | Runtime |
 | `TaskSnapshot` | 可持久化快照 | Context Management |

@@ -11,7 +11,6 @@ use crate::application::main_loop::looping::input_gate::apply_gate;
 use crate::application::main_loop::looping::loop_phases::{
     handle_turn_boundary_config, refresh_skill_catalog,
 };
-use crate::application::main_loop::looping::task_reminder::TaskReminderState;
 use crate::application::main_loop::looping::{
     ChatEventSink, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
     QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
@@ -98,7 +97,6 @@ where
             // #1385 Task 12: last_total_tokens eliminated — usage tracker is per-Run via RuntimeContext.
             let mut turn_count = 0;
             let mut pending_input = PendingInputBuffer::default();
-            let mut task_reminder_state = TaskReminderState::new();
             let tool_identity =
                 crate::application::tool_coordination::identity::ToolIdentityRegistry::new();
             let mut config_snapshot =
@@ -666,7 +664,6 @@ where
                     turn_count,
                     turn_context,
                     // #1385 Task 12: last_total_tokens eliminated — usage tracker from RuntimeContext.
-                    task_reminder_state: &mut task_reminder_state,
                     tool_identity: &tool_identity,
                     started_at,
                     plan_mode: false,

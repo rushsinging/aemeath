@@ -32,7 +32,6 @@ fn invocation_context_clone_shares_text_first_message_backing() {
         backing_revision: crate::ports::SessionRevision::new(1),
         system_blocks: Vec::new(),
         messages: vec![source].into(),
-        invocation_reminder: None,
         tool_schemas: Vec::new(),
         token_estimation: crate::ports::TokenBudget::default(),
         compaction_decision: crate::ports::CompactionDecision {

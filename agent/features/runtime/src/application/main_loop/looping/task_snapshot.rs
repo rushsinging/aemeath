@@ -19,7 +19,7 @@ use task::{Task, TaskAccess, TaskId, TaskStatus};
 /// #889：改为同步 low-privilege 读取并按 current batch 过滤 Task PL。
 /// 任务标题隐藏持久化 ID；任务自身和依赖均通过当前 batch 的稳定 `seq()` 显示。
 pub(crate) fn build_task_snapshot(access: &dyn TaskAccess) -> TaskStatusView {
-    let Some(current_batch) = access.reminder_snapshot().current_batch else {
+    let Some(current_batch) = access.current_batch() else {
         return TaskStatusView::default();
     };
     // `list()` 只返回 live（非 Deleted）Task；再按 current batch 收敛。

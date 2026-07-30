@@ -3,7 +3,7 @@ use std::sync::{Mutex, MutexGuard};
 use crate::domain::{
     Batch, BatchCreateSpec, BatchId, PreparedTaskRestore, Task, TaskBatchSnapshot,
     TaskCommandError, TaskCommandResult, TaskCreateSpec, TaskId, TaskLifecycleSnapshot,
-    TaskPriority, TaskReminderSnapshot, TaskRevision, TaskSnapshot, TaskSnapshotValidationError,
+    TaskPriority, TaskProgressSnapshot, TaskRevision, TaskSnapshot, TaskSnapshotValidationError,
     TaskStatus, TaskStoreState, TaskStoreStats,
 };
 use crate::{TaskAccess, TaskPersist};
@@ -120,6 +120,15 @@ impl TaskAccess for TaskStore {
         self.lock().create_task(spec, timestamp)
     }
 
+    fn transition_with_progress(
+        &self,
+        id: TaskId,
+        to: TaskStatus,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<TaskProgressSnapshot>, TaskCommandError> {
+        self.lock().transition_with_progress(id, to, updated_at)
+    }
+
     fn transition(
         &self,
         id: TaskId,
@@ -204,6 +213,14 @@ impl TaskAccess for TaskStore {
         self.lock().remove_tag(id, tag, updated_at)
     }
 
+    fn delete_with_progress(
+        &self,
+        id: TaskId,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<TaskProgressSnapshot>, TaskCommandError> {
+        self.lock().delete_with_progress(id, updated_at)
+    }
+
     fn delete(
         &self,
         id: TaskId,
@@ -242,10 +259,6 @@ impl TaskAccess for TaskStore {
 
     fn stats(&self) -> TaskStoreStats {
         self.lock().stats()
-    }
-
-    fn reminder_snapshot(&self) -> TaskReminderSnapshot {
-        self.lock().reminder_snapshot()
     }
 
     fn lifecycle_snapshot(&self, stale_after_silence_turns: u64) -> TaskLifecycleSnapshot {

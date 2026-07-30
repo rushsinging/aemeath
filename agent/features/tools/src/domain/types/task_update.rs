@@ -2,6 +2,43 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct TaskProgressItemResult {
+    pub task_id: String,
+    pub subject: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct TaskProgressListResult {
+    pub task_list_id: String,
+    pub summary: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct TaskProgressOmittedResult {
+    pub ready: usize,
+    pub blocked: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct TaskProgressLifecycleResult {
+    pub auto_closed: bool,
+    pub auto_reopened: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct TaskProgressResult {
+    pub task_list: TaskProgressListResult,
+    pub updated: TaskProgressItemResult,
+    pub recently_completed: Vec<TaskProgressItemResult>,
+    pub in_progress: Vec<TaskProgressItemResult>,
+    pub ready: Vec<TaskProgressItemResult>,
+    pub omitted: TaskProgressOmittedResult,
+    pub lifecycle: TaskProgressLifecycleResult,
+}
+
 /// Typed result returned by the `task_update` tool.
 ///
 /// 回填完整 task 状态，供 LLM 获得上下文、TUI 渲染 header 使用（#979）。
@@ -17,6 +54,8 @@ pub struct TaskUpdateResult {
     /// Current blocking task IDs, returned as display sequences
     #[serde(default)]
     pub blocked_by: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<TaskProgressResult>,
 }
 
 /// Typed input for the `task_update` tool.
@@ -28,6 +67,9 @@ pub struct TaskUpdateResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct TaskUpdateInput {
+    /// The task list containing the task. Required when updating a task from a historical list; omit to use the current active list.
+    #[serde(alias = "taskListId")]
+    pub task_list_id: Option<String>,
     /// The ID of the task to update
     #[serde(alias = "taskId")]
     pub task_id: String,

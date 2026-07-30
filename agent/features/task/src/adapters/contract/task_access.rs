@@ -84,7 +84,6 @@ pub(super) fn assert_task_access_contract(
     assert_eq!(access.list(), expected);
     assert_eq!(access.list_batches(), access.list_batches());
     assert_eq!(access.stats(), access.stats());
-    assert_eq!(access.reminder_snapshot(), access.reminder_snapshot());
     assert_eq!(access.lifecycle_snapshot(5), access.lifecycle_snapshot(5));
     assert!(!access.is_blocked(first.value.id()).expect("known task"));
     assert!(!access.would_create_cycle(first.value.id(), second.value.id()));

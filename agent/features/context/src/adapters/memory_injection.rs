@@ -178,7 +178,7 @@ mod tests {
     use share::message::Message;
 
     use super::*;
-    use crate::domain::{ContextRequestId, Language, SystemPromptSpec, TaskReminderSnapshot};
+    use crate::domain::{ContextRequestId, Language, SystemPromptSpec};
 
     struct FakeMemory {
         result: MemorySearchResult,
@@ -274,7 +274,6 @@ mod tests {
             system_prompt: SystemPromptSpec::new("system"),
             model_id: "fake/model".into(),
             effective_reasoning: ReasoningLevel::Off,
-            task_reminder: TaskReminderSnapshot::default(),
             language: Language::new("en"),
             agent_roles: HashMap::new(),
             config_snapshot: ConfigSnapshot::new(config),

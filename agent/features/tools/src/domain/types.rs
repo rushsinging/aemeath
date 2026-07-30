@@ -85,7 +85,10 @@ pub use task_list_complete::TaskListCompleteResult;
 pub use task_list_create::{TaskListCreateInput, TaskListCreateResult};
 pub use task_lists::{TaskListSummary, TaskListsInput, TaskListsResult};
 pub use task_stop::{TaskStopInput, TaskStopResult};
-pub use task_update::{TaskUpdateInput, TaskUpdateResult};
+pub use task_update::{
+    TaskProgressItemResult, TaskProgressLifecycleResult, TaskProgressListResult,
+    TaskProgressOmittedResult, TaskProgressResult, TaskUpdateInput, TaskUpdateResult,
+};
 pub use tool_search::{ToolInfo, ToolSearchInput, ToolSearchResult};
 pub use web_search::{WebSearchInput, WebSearchResult};
 

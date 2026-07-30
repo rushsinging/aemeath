@@ -23,7 +23,6 @@ use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
 use super::loop_runner::main_run_port::{MainRunPort, StepMessageOwnership};
-use super::task_reminder::TaskReminderState;
 use crate::application::context_coordination::ContextCoordinator;
 use crate::application::loop_engine::RunLoopPort;
 use crate::application::main_loop::looping::reflection::{
@@ -40,7 +39,7 @@ use crate::ports::{
     CompactOutcome, CompactRequest, CompactResult, CompactSkipReason, CompactionDecision,
     ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
     Language as ContextLanguage, SessionId, SessionRevision, SystemBlock, SystemPromptSpec,
-    TaskReminderSnapshot, TokenBudget, Urgency,
+    TokenBudget, Urgency,
 };
 
 /// `submit_complete` builds its own executor closure and ignores the
@@ -65,7 +64,6 @@ fn frozen_request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: provider::ReasoningLevel::Off,
-        task_reminder: TaskReminderSnapshot::default(),
         language: ContextLanguage::new("en"),
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
@@ -87,7 +85,6 @@ fn window_with(messages: Vec<Message>) -> ContextWindow {
             cache_break: true,
         }],
         messages: messages.into(),
-        invocation_reminder: None,
         tool_schemas: vec![],
         token_estimation: TokenBudget::default(),
         compaction_decision: CompactionDecision {
@@ -280,7 +277,6 @@ fn build_compact_test_port<'a>(
         turn_count: 1,
         turn_context: RuntimeTurnContext::new(ChatId::new_v7(), ChatTurnId::new_v7()),
         // #1385 Task 12: last_total_tokens eliminated.
-        task_reminder_state: &mut harness.task_reminder_state,
         tool_identity: &harness.tool_identity,
         started_at: Instant::now(),
         plan_mode: false,
@@ -318,7 +314,6 @@ struct CompactHarness {
     input_events: EmptyInputEventDrainPort,
     pending_input: PendingInputBuffer,
     // #1385 Task 12: sink and last_total_tokens eliminated — both from runtime_context.
-    task_reminder_state: TaskReminderState,
     tool_identity: crate::application::tool_coordination::identity::ToolIdentityRegistry,
     reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     runtime_context: crate::application::runtime_context::RuntimeContext,
@@ -432,7 +427,6 @@ impl CompactHarness {
             input_events: EmptyInputEventDrainPort,
             pending_input: PendingInputBuffer::default(),
             // #1385 Task 12: sink and last_total_tokens eliminated.
-            task_reminder_state: TaskReminderState::new(),
             tool_identity:
                 crate::application::tool_coordination::identity::ToolIdentityRegistry::new(),
             reasoning,

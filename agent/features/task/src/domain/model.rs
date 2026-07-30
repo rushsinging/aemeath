@@ -541,6 +541,31 @@ impl Task {
     pub fn completed_at(&self) -> Option<u64> {
         self.completed_at
     }
+    pub(crate) fn reopen_from_completed(
+        &mut self,
+        to: TaskStatus,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<Self>, TaskCommandError> {
+        let from = self.status;
+        if from != TaskStatus::Completed
+            || !matches!(to, TaskStatus::Pending | TaskStatus::InProgress)
+        {
+            return Err(TaskCommandError::IllegalTransition { from, to });
+        }
+        self.status = to;
+        self.updated_at = updated_at;
+        self.completed_at = None;
+        self.started_at = (to == TaskStatus::InProgress).then_some(updated_at);
+        Ok(TaskCommandResult::uncommitted(
+            self.clone(),
+            vec![TaskEvent::TaskStatusChanged {
+                task_id: self.id,
+                from,
+                to,
+            }],
+        ))
+    }
+
     pub(crate) fn transition_to(
         &mut self,
         to: TaskStatus,
@@ -724,6 +749,18 @@ impl Batch {
         }
         Ok(true)
     }
+    pub(crate) fn reopen(&mut self) -> Result<(), TaskCommandError> {
+        if self.status != BatchStatus::Archived {
+            return Err(TaskCommandError::IllegalBatchTransition {
+                id: self.id,
+                from: self.status,
+                to: BatchStatus::Active,
+            });
+        }
+        self.status = BatchStatus::Active;
+        Ok(())
+    }
+
     pub(crate) fn transition_to(&mut self, to: BatchStatus) -> Result<(), TaskCommandError> {
         let from = self.status;
         if !matches!(

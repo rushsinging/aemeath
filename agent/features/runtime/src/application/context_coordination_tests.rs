@@ -6,8 +6,8 @@ use crate::ports::{
     CompactRequest, CompactResult, CompactSkipReason, CompactionDecision, ContentFingerprint,
     ContextAppend, ContextAppendError, ContextPort, ContextPortError, ContextRequest,
     ContextRequestId, ContextWindow, DecisionReason, FinalizeCause, Language, ManualCompactRequest,
-    SessionId, SessionRevision, StepReceipt, SystemBlock, SystemPromptSpec, TaskReminderSnapshot,
-    TokenBudget, ToolOutcomeKind, Urgency,
+    SessionId, SessionRevision, StepReceipt, SystemBlock, SystemPromptSpec, TokenBudget,
+    ToolOutcomeKind, Urgency,
 };
 use async_trait::async_trait;
 use provider::ReasoningLevel;
@@ -42,7 +42,6 @@ impl ContextPort for RecordingPort {
                 cache_break: true,
             }],
             messages: request.pending_messages.clone().into(),
-            invocation_reminder: None,
             tool_schemas: request.tool_schemas.clone(),
             token_estimation: TokenBudget {
                 system_tokens: 2,
@@ -141,7 +140,6 @@ fn request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        task_reminder: TaskReminderSnapshot::default(),
         language: Language::new("zh"),
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),

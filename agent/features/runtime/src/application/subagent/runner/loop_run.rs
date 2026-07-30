@@ -197,7 +197,6 @@ impl<'a> SubAgentRun<'a> {
                 .reasoning_ref()
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()),
-            task_reminder: crate::ports::TaskReminderSnapshot::default(),
             language: crate::ports::Language::new(&self.language),
             agent_roles: self
                 .config_snapshot
