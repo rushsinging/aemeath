@@ -5,7 +5,7 @@ use context::adapters::CommittedMemoryRetrieveAdapter;
 use context::application::ContextApplicationService;
 use context::domain::{
     ContextAppend, ContextRequest, ContextRequestId, FinalizeCause, Language, RunStepId, SessionId,
-    SessionRevision, SystemBlock, SystemPromptSpec, TaskReminderSnapshot,
+    SessionRevision, SystemBlock, SystemPromptSpec,
 };
 use context::ports::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
@@ -120,12 +120,6 @@ fn request() -> ContextRequest {
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        task_reminder: TaskReminderSnapshot {
-            task_list_id: Some("1".into()),
-            summary: Some("测试任务".into()),
-            pending: 1,
-            in_progress: 0,
-        },
         language: Language::new("zh"),
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
@@ -211,13 +205,6 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
         .map(|block| block.kind.as_str())
         .collect();
     assert_eq!(cache_breaks, vec!["active_summary"]);
-    assert_eq!(
-        window
-            .invocation_reminder
-            .as_ref()
-            .map(context::domain::InvocationReminder::as_str),
-        Some("<task-reminder>\n当前 task list #1「测试任务」仍有 1 pending、0 in_progress。若与最新用户请求相关，调用 TaskListGet 查看详情；否则优先处理最新请求。\n</task-reminder>")
-    );
     assert!(matches!(
         &window.messages[1].content[0],
         ContentBlock::Text { text } if text == "pending"

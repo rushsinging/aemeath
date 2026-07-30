@@ -23,7 +23,6 @@ use crate::application::main_loop::looping::reflection::{
 use crate::application::main_loop::looping::stream_handler::{
     should_emit_model_stream_waiting, InvocationEventReducer,
 };
-use crate::application::main_loop::looping::task_reminder::TaskReminderState;
 use crate::application::main_loop::looping::tools::{execute_tool_round, tool_results_for_api};
 use crate::application::main_loop::looping::{
     ChatEventSink, InputEventDrainPort, QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
@@ -33,7 +32,7 @@ use crate::application::subagent::{Agent, ToolCall};
 use crate::domain::agent_run::{RunDomainEvent, ToolCallStatus};
 use crate::ports::{
     ContextRequest, ContextRequestId, Language as ContextLanguage, RunStepId, SessionId,
-    SystemPromptSpec, TaskReminderSnapshot,
+    SystemPromptSpec,
 };
 
 /// Aborts a spawned request companion task even when the invocation future is dropped.
@@ -243,7 +242,6 @@ where
     pub(crate) turn_context: RuntimeTurnContext,
     // #1385 Task 12: last_total_tokens eliminated — usage tracker is the
     // single source via runtime_context.usage().
-    pub(crate) task_reminder_state: &'a mut TaskReminderState,
     pub(crate) tool_identity:
         &'a crate::application::tool_coordination::identity::ToolIdentityRegistry,
     pub(crate) started_at: Instant,
@@ -365,20 +363,6 @@ where
         step_id: &RunStepId,
         pending_messages: Vec<Message>,
     ) -> ContextRequest {
-        let task_reminder = self
-            .task_access()
-            .current_batch()
-            .and_then(|id| self.task_access().batch_snapshot(id))
-            .map(|snapshot| {
-                let stats = snapshot.stats();
-                TaskReminderSnapshot {
-                    task_list_id: Some(snapshot.batch().id().to_string()),
-                    summary: snapshot.batch().summary().map(str::to_owned),
-                    pending: stats.pending,
-                    in_progress: stats.in_progress,
-                }
-            })
-            .unwrap_or_default();
         let raw_tool_schemas = self
             .tool_catalog()
             .snapshot_for_run(
@@ -407,7 +391,6 @@ where
             system_prompt: SystemPromptSpec::new(self.system_prompt_text),
             model_id: self.binding().model.model.clone(),
             effective_reasoning: self.reasoning(),
-            task_reminder,
             language: ContextLanguage::new(self.language),
             agent_roles: std::collections::HashMap::new(),
             config_snapshot: self.run_config().config().clone(),
@@ -574,8 +557,6 @@ where
             .context_window
             .clone()
             .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
-        self.task_reminder_state
-            .update_from_messages(self.turn_count as u64, window.messages.iter());
         let ctx =
             crate::application::loop_engine::llm_strategy::extract_invocation_context(&window);
         log_llm_input(

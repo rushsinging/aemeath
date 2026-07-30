@@ -34,7 +34,6 @@ pub(crate) mod stall;
 mod stream_handler;
 #[cfg(test)]
 mod stream_handler_tests;
-mod task_reminder;
 mod task_snapshot;
 mod tools;
 

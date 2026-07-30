@@ -53,7 +53,6 @@ struct ContextRequest {
     system_prompt: SystemPromptSpec,    // RunSpec.system_prompt 原值；不得在 Runtime 丢失
     model_id: String,                   // PromptPipeline 的 guidance 前缀选择
     effective_reasoning: ReasoningLevel,// Provider resolver 在 build 前冻结的最终纯值
-    task_reminder: TaskReminderSnapshot, // Task query 经 context_coordination 原样传入；空态由 PL 表达
     language: Language,
     agent_roles: HashMap<String, AgentRoleConfig>,
     config_snapshot: ConfigSnapshot,    // 本 Run shared lease 下的只读快照
@@ -72,8 +71,7 @@ impl ContextRequest {
 struct ContextWindow {
     backing_revision: SessionRevision, // 本 window 读取的稳定 backing revision，供 append CAS
     system_blocks: Vec<SystemBlock>,    // 稳定系统+memory+summary；全部位于 cacheable prefix
-    messages: Vec<Message>,             // canonical 原文窗口；不包含 task reminder
-    invocation_reminder: Option<InvocationReminder>,// 仅用于 Provider user-message 副本装饰
+    messages: Vec<Message>,             // canonical 原文窗口；包含已提交的普通 tool results
     tool_schemas: Vec<ModelToolSchema>, // req.tool_schemas 原样透传；Context 不重拉 Catalog
     token_estimation: TokenBudget,      // 预算快照
     compaction_decision: CompactionDecision, // build_window 内计算，替代独立 needs_compaction
@@ -137,7 +135,7 @@ struct AppendReceipt {
     fingerprint: ContentFingerprint,
 }
 ```
-`ContextRequest` 只承载一次 window build 的不可变输入。Runtime 的 `context_coordination` 从 `TaskAccess::reminder_snapshot` 读取 Task-owned PL 后原样传入；Context Management 独占 reminder 文本与 message token budget，并产出 invocation-only decoration。Runtime 仅装饰 Provider 消息副本，**NEVER** 修改 canonical session、SDK/TUI 事件或持久化 JSON。PromptPipeline **NEVER** 读取 Task，Context Management 也 **NEVER** 因 reminder 获得 Task mutation / restore authority。日期、工作区变化与 commit guidance 不进入 `ContextRequest` 或 LLM 上下文。
+`ContextRequest` 只承载一次 window build 的不可变输入。Task 进度通过 `TaskUpdate(status)` 的普通 tool result 进入 canonical history；Runtime/Context **NEVER** 额外查询 Task、构造 reminder 或装饰 Provider user message。PromptPipeline **NEVER** 读取 Task，Context Management 也不获得 Task mutation / restore authority。日期、工作区变化与 commit guidance 不进入 `ContextRequest` 或 LLM 上下文。
 Runtime **NEVER** 把 Session 历史塞回 request：Context implementation 从自身稳定 backing 读取已提交历史，再在本次 candidate 尾部拼接 `pending_messages`。每个 finalized RunStep 恰好调用一次 `append_and_persist`；finalized projection 由 Runtime 唯一 `StepFinalizer` 在 `Completed | UserCancelledStep | RunTerminated` 三种原因下生成。实现以 `(run_id, step_id)` 幂等，重复相同 append 返回成功，内容冲突的重复键返回 typed error。
 普通完成路径必须在 model response 与全部 Tool suspension/approval 收敛为 final result 后提交。控制路径可提交 finalizer 明确冻结的 partial assistant 与 deterministic Tool/Agent receipts，并为 deadline 内未确认停止的工作保存 `CancellationUnconfirmed`；这类内容已是协议完整的 finalized partial，而不是 Run checkpoint。`ContextAppend` **NEVER** 携带 RunStatus、RunStepStatus、活跃 future、Sub 完整消息链或 cancellation scope。
 `ContextRequest → PromptRequest` 的映射是 Context-owned 纯函数，字段不得旁路重取：
@@ -157,8 +155,8 @@ cacheable_prefix:
   4 skills                5 agent_roles           6 user_guidance
   7 memory_context        8 active_summary
 cache breakpoint
-invocation messages:
-  task reminder → Provider 副本中最后一条真实 user message 的 text
+ordinary messages:
+  TaskUpdate(status) tool result → 按事件携带 Task 原子进度摘要
 ```
 Git 首次快照不属于 `ContextWindow.system_blocks`：Runtime 仅在 session 首个 Run 作为普通系统生成消息投递一次。
 ## 3. 五级管线总览

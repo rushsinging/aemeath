@@ -67,20 +67,10 @@ pub fn task_get(lang: &str) -> &'static str {
 pub fn task_list(lang: &str) -> &'static str {
     match lang {
         "zh" => {
-            r#"列出所有任务及其状态。用于发现可用工作。
-
-寻找 pending 且无未解决 blocked_by 依赖的任务——这些已就绪可执行。可以直接处理，或为可并行的任务启动 Agent。
-
-完成一个任务后调用此工具查找下一个要处理的任务。"#
+            r#"列出所有任务及其状态。仅当最近一次 TaskUpdate(status) 返回的进度摘要不足以决定下一步，或用户明确要求查看完整任务列表时使用。不要仅因存在 pending/in_progress 任务就调用本工具。"#
         }
         _ => {
-            r#"List all tasks and their status. Use to discover available work.
-
-Look for tasks that are pending with no unresolved blocked_by dependencies —
-these are ready to execute. You can work on them directly or launch Agent
-for tasks that can run in parallel.
-
-Call this after completing a task to find the next one to work on."#
+            r#"List all tasks and their status. Use only when the latest TaskUpdate(status) progress summary is insufficient to choose the next step, or when the user explicitly requests the full task list. Do not call this tool merely because pending/in_progress tasks exist."#
         }
     }
 }
@@ -106,10 +96,8 @@ pub fn task_update(lang: &str) -> &'static str {
 - subject / description: 字符串
 - priority: 优先级（low / medium / high）
 
-状态工作流：pending → in_progress → completed。用 'deleted' 删除。
-标记任务为 completed 时，系统会显示哪些下游任务已解除阻塞、可执行。据此决定下一步处理什么。
-
-完成任务后，检查解除阻塞列表或调用 TaskListGet 查找下一个可用任务。"#
+状态工作流：pending → in_progress → completed。`task_list_id` 可指定历史任务列表；省略时使用当前 active 列表。删除任务使用 TaskStop。
+TaskUpdate(status) 会直接返回最近完成、全部进行中及最多两个可执行任务的进度摘要；优先使用该摘要决定下一步，仅当摘要不足时才调用 TaskListGet。"#
         }
         _ => {
             r#"Update a **single** field on a task. Each call changes exactly one field. Value is always a string.
@@ -121,11 +109,8 @@ Valid keys:
 - subject / description: string
 - priority: priority (low / medium / high)
 
-Status workflow: pending → in_progress → completed. Use 'deleted' to remove.
-When you mark a task as completed, the system will show which downstream tasks
-are now unblocked and ready to execute. Use this to decide what to work on next.
-
-After completing a task, check the unblocked list or call TaskListGet to find the next available task."#
+Status workflow: pending → in_progress → completed. Set `task_list_id` to target a historical task list; omit it to use the current active list. Use TaskStop to delete a task.
+TaskUpdate(status) directly returns a progress summary with recent completions, all in-progress tasks, and up to two ready tasks. Prefer this summary when choosing the next step; call TaskListGet only when the summary is insufficient."#
         }
     }
 }

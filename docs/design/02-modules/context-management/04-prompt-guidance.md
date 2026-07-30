@@ -81,7 +81,7 @@ struct GuidanceDocument {
 }
 ```
 
-`ContextPort::build_window` **MUST** 等待 base system prompt、model guidance、user guidance 完成，并同步取得所属 Run Step 冻结的 Skill metadata snapshot，才能产生窗口；任一必需供应失败都返回 typed error，**NEVER** 静默使用部分 prompt。Context 只读取 descriptor，不调用 `SkillLoadPort`，因此 Skill 正文不会在 build_window 阶段进入系统提示。文件 adapter **MAY** 按 mtime 缓存 guidance，但对 PromptPipeline 只暴露内容与单调 `revision`；这使同一管线无需同步 / 异步两套实现。Memory 与 active summary 不是 Prompt 素材：它们由 `build_window` 在 PromptPipeline 返回后编排。Task reminder 同样不是 Prompt 素材或 SystemBlock；Context 从 `TaskReminderSnapshot` 生成 typed invocation-only decoration，Runtime 仅在 Provider 消息副本上投影。Git 首次快照由 Runtime session bootstrap 以普通系统生成消息投递，不通过 PromptPipeline。
+`ContextPort::build_window` **MUST** 等待 base system prompt、model guidance、user guidance 完成，并同步取得所属 Run Step 冻结的 Skill metadata snapshot，才能产生窗口；任一必需供应失败都返回 typed error，**NEVER** 静默使用部分 prompt。Context 只读取 descriptor，不调用 `SkillLoadPort`，因此 Skill 正文不会在 build_window 阶段进入系统提示。文件 adapter **MAY** 按 mtime 缓存 guidance，但对 PromptPipeline 只暴露内容与单调 `revision`；这使同一管线无需同步 / 异步两套实现。Memory 与 active summary 不是 Prompt 素材：它们由 `build_window` 在 PromptPipeline 返回后编排。Task 进度不属于 Context：Task BC 随 status mutation 返回原子快照，Tools Adapter 把它渲染为 tool result；Runtime/Context 不另查 Task，也不装饰 Provider 消息。Git 首次快照由 Runtime session bootstrap 以普通系统生成消息投递，不通过 PromptPipeline。
 
 ## 3. 系统提示组装管线
 
@@ -103,7 +103,7 @@ PromptPipeline 只输出稳定的 cacheable prefix；Context Window assembler �
   ↓ cache_control 断点（仅 Anthropic wire adapter 消费）
 ┌─ ordinary_messages ─────────────────────────────┐
 │ 9. initial_git_context（仅 session 首个 Run）   │
-│10. task reminder（仅 Provider user 消息副本）   │
+│10. tool results（含按事件返回的 Task 进度）       │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -123,7 +123,7 @@ PromptPipeline 只输出稳定的 cacheable prefix；Context Window assembler �
 | memory_context | 中（reflection 写入时变） | Context assembler 的 entry fingerprint | 是（非 PromptRequest） |
 | active_summary | 低（compact 时才变） | Context assembler 的 summary hash | 是（非 PromptRequest） |
 | initial_git_context | session 启动时一次 | 普通用户消息；后续由工具按需获取 | 否 |
-| task reminder | 每轮可能变 | Provider invocation 中最后一条真实 user message 的副本 | 否（不属于 SystemBlock） |
+| Task 进度 | status mutation 时变化 | `TaskUpdate` tool result | 否（不属于 Context/SystemBlock） |
 | 日期 / 工作区 / commit guidance | 每轮可能变 | **不注入 LLM** | 不适用 |
 
 > **关键**：user_guidance、skills、memory 不是“动态所以不 cache”，而是“变化频率低，不变时 cache，变化时 miss 重算”。Memory / summary 的最终分段由 Context assembler 完成，不因此扩张 PromptRequest。
@@ -141,8 +141,7 @@ let mut blocks = parts.cacheable;
 blocks.extend(memory);
 blocks.extend(summary);
 mark_cache_breakpoint(&mut blocks);       // 唯一 breakpoint
-let invocation_reminder = render_task_reminder(&context_request.task_reminder);
-// Runtime 从 canonical messages 构造 Provider 副本后再投影 invocation_reminder。
+// Task 进度不参与窗口组装；TaskUpdate(status) 的 tool result 已携带权威摘要。
 ```
 
 - Provider ACL 只为 Anthropic Messages API 将该逻辑 breakpoint 映射为 `cache_control`；OpenAI Chat Completions、Responses、OpenAI-compatible 与 Ollama **NEVER** 接收该私有字段。
@@ -453,14 +452,14 @@ User guidance 归入 `cacheable_prefix`——变化频率低（用户偶尔编�
 | memory 变化 | 中（reflection 写入时变） | Context-owned cacheable extension | entry fingerprint |
 | active_summary 变化 | 低（compact 时才变） | Context-owned cacheable extension | summary hash |
 | initial_git_context | session 启动时一次 | 普通系统生成消息；后续由工具按需获取 | 否 |
-| task reminder | 每轮可能变 | Provider user-message 副本 | request value fingerprint |
+| Task 进度 | status mutation 时变化 | 普通 `TaskUpdate` tool result | 无独立缓存指纹 |
 | 日期 / 工作区 / commit guidance | 每轮可能变 | **不注入 LLM** | 不适用 |
 
 ### 9.2 缓存策略
 
 - **Prompt parts**：PromptPipeline 只负责 RunSpec system prompt / execution discipline / guidance / skills / roles / date / git 的物化与 fingerprint，**NEVER** 缓存完整 Context Window。
 - **Context-owned cacheable extension**：Memory 与 active summary 由 Context assembler 插在 Prompt cacheable parts 之后，并把 entry fingerprint / summary hash 纳入最终 window fingerprint；变化时 miss 一次，之后恢复命中。
-- **Invocation-only decoration**：Task reminder 不属于 SystemBlock。Context 生成带 `<task-reminder>` 标签的 typed decoration；Runtime 每次从 canonical 原文构造 Provider 消息副本，将其追加到最后一条真实 user message。无真实 user message 时不伪造，retry/工具续轮不会重复追加。
+- **Task 进度**：不属于 Prompt/Context decoration；Task BC 随 status mutation 返回原子快照，Tools Adapter 将其写入普通 tool result。Context/Runtime 不维护额外提醒状态或缓存指纹。
 
 ### 9.3 模型切换时的缓存失效
 

@@ -29,14 +29,12 @@ fn new_store_starts_at_empty_revision_zero() {
     assert_eq!(store.revision(), TaskRevision::new(0));
     assert!(store.list().is_empty());
     assert!(store.list_batches().is_empty());
-    assert_eq!(store.reminder_snapshot().current_batch, None);
 }
 
 #[test]
 fn default_store_matches_new() {
     let store = TaskStore::default();
     assert_eq!(store.revision(), TaskRevision::new(0));
-    assert_eq!(store.reminder_snapshot().current_batch, None);
 }
 
 #[test]
@@ -103,7 +101,6 @@ fn query_methods_never_advance_revision() {
     let _ = store.list();
     let _ = store.list_batches();
     let _ = store.stats();
-    let _ = store.reminder_snapshot();
     let _ = store.lifecycle_snapshot(10);
     let _ = store.is_blocked(id).unwrap();
     let _ = store.would_create_cycle(id, id);
@@ -211,22 +208,14 @@ fn lifecycle_transition_and_batch_commands_delegate_and_commit_revision_in_order
 
     let paused = store.pause_batch(batch.id()).unwrap();
     assert_eq!(paused.revision(), Some(TaskRevision::new(8)));
-    assert_eq!(store.reminder_snapshot().current_batch, None);
 
     let resumed = store.resume_batch(batch.id()).unwrap();
     assert_eq!(resumed.revision(), Some(TaskRevision::new(9)));
-    assert_eq!(store.reminder_snapshot().current_batch, Some(batch.id()));
 
     let archived = store.archive_batch(batch.id()).unwrap();
     assert_eq!(archived.revision(), Some(TaskRevision::new(10)));
-    assert_eq!(store.reminder_snapshot().current_batch, None);
 
     assert_eq!(store.revision(), TaskRevision::new(10));
-
-    let reminder = store.reminder_snapshot();
-    assert_eq!(reminder.current_batch, None);
-    let snapshot = store.lifecycle_snapshot(1_000);
-    assert_eq!(snapshot.current_batch, None);
 }
 
 // ---- 并发下同一锁槽保证 revision 唯一且不丢更新 ----
