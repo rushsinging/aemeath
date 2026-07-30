@@ -27,7 +27,6 @@ Thumbs.db
 .env_*
 
 # AI tools
-.claude/
 .gstack/
 .serena/
 .worktrees/
@@ -40,6 +39,9 @@ Thumbs.db
 !.agents/dead-code-baseline.json
 !.agents/flaky-debt.json
 !.agents/hooks/
+!.agents/skills/
+!.agents/skills/**
+.agents/worktrees/
 
 # Build artifacts
 *.exe
