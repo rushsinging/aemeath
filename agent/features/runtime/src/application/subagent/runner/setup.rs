@@ -582,6 +582,7 @@ impl AgentRunner for CliAgentRunner {
                     derived.context.context(),
                 )),
                 session_id: context::domain::SessionId::new(&derived.session_id),
+                tool_result_materializer: self.tool_result_materializer.clone(),
                 ctx: sub_ctx,
                 max_tool_concurrency: self.max_tool_concurrency,
                 agent_semaphore: self.agent_semaphore.clone(),

@@ -479,6 +479,9 @@ where
         max_tool_concurrency: usize,
         agent_semaphore: &Arc<tokio::sync::Semaphore>,
         session_id: &str,
+        tool_result_materializer: Arc<
+            crate::application::tool_result_materialization::ToolResultMaterializer,
+        >,
         context_port: Arc<dyn context::ports::ContextPort>,
         run_id: &sdk::RunId,
         tool_selection: &share::config::ToolSelection,
@@ -500,6 +503,7 @@ where
             execution: tool_execution.clone(),
             context: Some(ContextCoordinator::new(context_port)),
             session_id: context::domain::SessionId::new(session_id),
+            tool_result_materializer,
             ctx: tools::ToolExecutionContext::new(
                 tools::ExecutionScope::builder(
                     run_id.to_string(),
@@ -798,6 +802,7 @@ where
             self.max_tool_concurrency,
             self.agent_semaphore,
             self.session_id,
+            Arc::new(self.tool_result_materializer.clone()),
             self.runtime_context.context(),
             &self.run_id,
             self.run_config().tool_selection(),
@@ -1561,6 +1566,7 @@ where
                             self.max_tool_concurrency,
                             self.agent_semaphore,
                             self.session_id,
+                            Arc::new(self.tool_result_materializer.clone()),
                             self.runtime_context.context(),
                             &self.run_id,
                             self.run_config().tool_selection(),
