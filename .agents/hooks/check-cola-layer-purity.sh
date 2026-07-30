@@ -74,7 +74,6 @@ RUNTIME_PROVIDER_TOOLS_OLD_PATHS = [
 # reaches the registry until the registry port is split.
 LAYER_MIGRATION_EXCEPTIONS = set()
 # guard-registry:migration.runtime.application-accessors-to-adapters
-# guard-registry:migration.runtime.legacy-port-to-application
 RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/runtime/src/application/client/accessors.rs", "adapters"),
     # Remaining adapter refs: tool_runtime cancellation, input_buffer,
