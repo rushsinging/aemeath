@@ -172,3 +172,71 @@ async fn provider_text_and_session_content_share_one_bounded_projection() {
         Some(15)
     );
 }
+
+#[tokio::test]
+async fn display_and_session_consumers_share_the_same_projection() {
+    let display_blobs = Arc::new(FakeBlobPort::default());
+    let session_blobs = Arc::new(FakeBlobPort::default());
+    let policy = ToolResultMaterializationPolicy::new(4, 2, 1);
+    let display = ToolResultMaterializer::new(display_blobs, policy);
+    let session = ToolResultMaterializer::new(session_blobs, policy);
+    let original = "甲乙丙丁戊";
+    let original_content = serde_json::json!({"text": original});
+
+    let (display_output, display_content) = display
+        .materialize_display_result("session", "tool", original, &original_content)
+        .await;
+    let message = session
+        .materialize_provider_results(
+            "session",
+            vec![(
+                "tool".to_string(),
+                original.to_string(),
+                original_content,
+                false,
+                Vec::new(),
+            )],
+        )
+        .await;
+    let [share::message::ContentBlock::ToolResult { content, text, .. }] =
+        message.content.as_slice()
+    else {
+        panic!("expected one tool result");
+    };
+
+    assert_eq!(text.as_deref(), Some(display_output.as_str()));
+    assert_eq!(content, &display_content);
+    assert!(!display_output.contains(original));
+    assert!(!display_content.to_string().contains(original));
+}
+
+#[tokio::test]
+async fn main_and_sub_paths_share_the_same_tool_result_projection() {
+    let main_blobs = Arc::new(FakeBlobPort::default());
+    let sub_blobs = Arc::new(FakeBlobPort::default());
+    let policy = ToolResultMaterializationPolicy::new(4, 2, 1);
+    let main = ToolResultMaterializer::new(main_blobs, policy);
+    let sub = ToolResultMaterializer::new(sub_blobs, policy);
+    let result = (
+        "tool".to_string(),
+        "甲乙丙丁戊".to_string(),
+        serde_json::json!({"text": "甲乙丙丁戊"}),
+        false,
+        Vec::new(),
+    );
+
+    let main_message = main
+        .materialize_provider_results("session", vec![result.clone()])
+        .await;
+    let sub_message = sub
+        .materialize_provider_results("session", vec![result])
+        .await;
+
+    assert_eq!(
+        serde_json::to_value(&main_message).unwrap(),
+        serde_json::to_value(&sub_message).unwrap()
+    );
+    let encoded = serde_json::to_string(&main_message).unwrap();
+    assert!(!encoded.contains("甲乙丙丁戊"));
+    assert!(encoded.contains("tool-result://session/tool"));
+}

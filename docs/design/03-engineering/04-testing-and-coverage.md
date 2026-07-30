@@ -557,12 +557,13 @@ TUI completion 的 idle/busy 回归应作为首个真实场景验收：Esc 在�
 
 Memory active+archive 与 legacy key migration 的跨 BC 场景不属于 #983；该 integration deferred 至 [#896](https://github.com/rushsinging/aemeath/issues/896)，届时补 Memory 相邻层与场景证据。
 
-### 11.7 #884 Tool Result materialization 覆盖证据
+### 11.7 #884 / #1421 Tool Result materialization 覆盖证据
 
-- **L1**：Config default/partial patch/invalid policy normalization，以及 Runtime materializer 的阈值边界、Unicode char preview、opaque locator 和写失败保留完整 inline。
-- **L3**：`tool_result_blob_contract.rs` 以 fake `AtomicBlobPort` 验证 `StorageNamespace::ToolResult` key 映射、ProcessCrashSafe、write-once 幂等、同 ID 内容冲突与非法 segment fail-closed。
-- **L4**：Main/Sub 两条生产路径均注入同一 materializer，现有 provider-id 与 oversized-result 场景证明输出一致；Storage 旧 helper/常量零引用由 crate API guard 证明。
-- **兼容边界**：旧 session 中已持久化的 `.txt` 绝对引用仍是普通文本且不被迁移或删除；新 AtomicBlob locator 不承诺复用旧物理布局。
+- **L1 / L2**：Config default/partial patch/invalid policy normalization，以及 Runtime materializer 的阈值边界、Unicode char preview、原始 char/byte/omitted metadata、opaque locator、Blob 写失败仍保持 hard limit、provider text / Session content / 实时 display 共用同一有界 projection。
+- **L3**：`tool_result_blob_contract.rs` 以 fake `AtomicBlobPort` 验证 `StorageNamespace::ToolResult` key 映射、ProcessCrashSafe、write-once 幂等、同 ID 内容冲突不覆盖已有 bytes、非法 segment fail-closed，以及 write failure 不产生 locator 或残留 value。
+- **L3 / L4**：Main/Sub 两条生产路径均注入同一 materializer，provider-id、oversized-result 与 cancel 场景证明无重复 ToolResult；Runtime → SDK → TUI 透传同一 bounded `output/content`，TUI 场景显示 persisted/unavailable 语义且不持有完整 payload。
+- **落盘 / Resume**：`session_envelope_codec.rs` 与 `session_recovery_scenarios.rs` 验证 persisted/unavailable projection、locator/reason 和 text 在 canonical envelope round-trip / Resume 后无损，完整 payload sentinel 不进入 Session bytes。
+- **兼容边界**：短 ToolResult 保持既有 typed content；旧 session 无 projection metadata 仍按 legacy content 读取；已有 `.txt` 绝对引用仍是普通文本且不被迁移或删除，新 AtomicBlob locator 不承诺复用旧物理布局。
 
 ### 11.8 #1062 Policy L0–L5 覆盖证据
 

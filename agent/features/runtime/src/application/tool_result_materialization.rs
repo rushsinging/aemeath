@@ -4,68 +4,6 @@ use crate::ports::ToolResultBlobPort;
 use share::message::Message;
 use tools::ImageData;
 
-pub(crate) const TOOL_RESULT_DISPLAY_LIMIT_BYTES: usize = 16 * 1024;
-const TOOL_RESULT_DISPLAY_METADATA_ALLOWANCE_BYTES: usize = 256;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ToolResultDisplayPreview {
-    output: String,
-    content: serde_json::Value,
-}
-
-impl ToolResultDisplayPreview {
-    pub(crate) fn new(output: &str, content: &serde_json::Value) -> Self {
-        Self {
-            output: bounded_display_text(output, "tool result"),
-            content: bounded_display_content(content),
-        }
-    }
-
-    pub(crate) fn output(&self) -> &str {
-        &self.output
-    }
-
-    pub(crate) fn content(&self) -> &serde_json::Value {
-        &self.content
-    }
-}
-
-fn bounded_display_content(content: &serde_json::Value) -> serde_json::Value {
-    let encoded = content.to_string();
-    if encoded.len() <= TOOL_RESULT_DISPLAY_LIMIT_BYTES {
-        return content.clone();
-    }
-    serde_json::json!({
-        "preview": bounded_display_text(&encoded, "structured tool result"),
-        "truncated": true,
-        "original_bytes": encoded.len(),
-    })
-}
-
-fn bounded_display_text(text: &str, label: &str) -> String {
-    if text.len() <= TOOL_RESULT_DISPLAY_LIMIT_BYTES {
-        return text.to_string();
-    }
-    let prefix = utf8_prefix(text, TOOL_RESULT_DISPLAY_LIMIT_BYTES);
-    let suffix = format!(
-        "\n... [truncated {label}; original size: {} bytes]",
-        text.len()
-    );
-    debug_assert!(suffix.len() <= TOOL_RESULT_DISPLAY_METADATA_ALLOWANCE_BYTES);
-    format!("{prefix}{suffix}")
-}
-
-fn utf8_prefix(text: &str, limit: usize) -> &str {
-    if text.len() <= limit {
-        return text;
-    }
-    let mut end = limit;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ToolResultMaterializationPolicy {
     threshold_chars: usize,
@@ -162,6 +100,7 @@ impl ToolResultMaterialization {
     }
 }
 
+#[derive(Clone)]
 pub struct ToolResultMaterializer {
     blobs: Arc<dyn ToolResultBlobPort>,
     policy: ToolResultMaterializationPolicy,
@@ -173,6 +112,29 @@ impl ToolResultMaterializer {
         policy: ToolResultMaterializationPolicy,
     ) -> Self {
         Self { blobs, policy }
+    }
+
+    pub(crate) async fn materialize_display_result(
+        &self,
+        session_id: &str,
+        tool_use_id: &str,
+        output: &str,
+        content: &serde_json::Value,
+    ) -> (String, serde_json::Value) {
+        let result = self.materialize(session_id, tool_use_id, output).await;
+        if let Some(warning) = result.warning() {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "tool result blob persistence failed: {warning}"
+            );
+        }
+        let output = result.text().to_string();
+        let content = if result.omitted_chars() > 0 {
+            result.content_projection()
+        } else {
+            content.clone()
+        };
+        (output, content)
     }
 
     pub async fn materialize_provider_results(
