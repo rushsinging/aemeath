@@ -63,12 +63,13 @@ where
         hook_port,
         cancel,
         workspace_root,
+        agent,
     )
     .await;
     let fuse_bypassed = prepared.fuse_bypassed.clone();
     let approved = prepared.executable;
     let fused_results =
-        publish_guard_blocked(prepared.guard_blocked, tool_calls, sink, context).await;
+        publish_guard_blocked(prepared.guard_blocked, tool_calls, sink, context, agent).await;
 
     let (agent_approved, non_agent_approved): (Vec<_>, Vec<_>) = approved
         .into_iter()
@@ -174,6 +175,7 @@ async fn publish_guard_blocked<S>(
     calls: &[ToolCall],
     sink: &S,
     context: &RuntimeTurnContext,
+    agent: &Agent,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -184,7 +186,14 @@ where
         };
         send_tool_call_status(sink, context, call, RuntimeToolCallStatus::Ready).await;
         send_tool_call_status(sink, context, call, RuntimeToolCallStatus::Running).await;
-        send_tool_result(sink, context, execution).await;
+        send_tool_result(
+            sink,
+            context,
+            execution,
+            agent.tool_result_materializer.as_ref(),
+            agent.session_id.as_ref(),
+        )
+        .await;
     }
     blocked
 }
@@ -196,6 +205,7 @@ async fn deny_tool_calls<S>(
     hook_port: &Arc<dyn HookPort>,
     cancel: &CancellationToken,
     workspace_root: &std::path::Path,
+    agent: &Agent,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -249,7 +259,14 @@ where
             call.call.name.clone(),
             outcome,
         );
-        send_tool_result(sink, context, &execution).await;
+        send_tool_result(
+            sink,
+            context,
+            &execution,
+            agent.tool_result_materializer.as_ref(),
+            agent.session_id.as_ref(),
+        )
+        .await;
         denied_results.push(execution);
     }
     denied_results
@@ -324,21 +341,27 @@ pub(crate) async fn send_tool_result<S>(
     sink: &S,
     context: &RuntimeTurnContext,
     execution: &ToolExecution,
+    materializer: &crate::application::tool_result_materialization::ToolResultMaterializer,
+    session_id: &str,
 ) where
     S: ChatEventSink,
 {
-    let preview = crate::application::tool_result_materialization::ToolResultDisplayPreview::new(
-        &execution.outcome.text,
-        &execution.outcome.data,
-    );
+    let (output, content) = materializer
+        .materialize_display_result(
+            session_id,
+            &execution.provider_id,
+            &execution.outcome.text,
+            &execution.outcome.data,
+        )
+        .await;
     let _ = sink
         .send_event(RuntimeStreamEvent::ToolResult {
             context: context.clone(),
             id: execution.call_id.clone(),
             provider_id: execution.provider_id.clone(),
             tool_name: execution.tool_name.clone(),
-            output: preview.output().to_string(),
-            content: preview.content().clone(),
+            output,
+            content,
             is_error: execution.outcome.is_error,
             images: execution.outcome.images.clone(),
         })
@@ -594,10 +617,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oversized_tool_result_event_uses_bounded_display_payload() {
-        const DISPLAY_LIMIT: usize = 16 * 1024;
-        let oversized = "界".repeat(DISPLAY_LIMIT);
-        assert!(oversized.len() > DISPLAY_LIMIT);
+    async fn oversized_tool_result_event_uses_materialized_projection() {
+        const THRESHOLD: usize = 50_000;
+        let oversized = "界".repeat(THRESHOLD + 1);
+        assert!(oversized.chars().count() > THRESHOLD);
         let execution = ToolExecution::from_parts(
             ToolCallId::new_v7(),
             "provider-oversized".to_string(),
@@ -610,8 +633,16 @@ mod tests {
         );
         let sink = RecordingSink::default();
         let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let materializer = crate::application::testing::test_tool_result_materializer();
 
-        send_tool_result(&sink, &context, &execution).await;
+        send_tool_result(
+            &sink,
+            &context,
+            &execution,
+            materializer.as_ref(),
+            "event-session",
+        )
+        .await;
 
         let events = sink.events.lock().unwrap();
         let [RuntimeStreamEvent::ToolResult {
@@ -620,12 +651,20 @@ mod tests {
         else {
             panic!("expected one tool result event");
         };
-        assert!(output.len() <= DISPLAY_LIMIT + 256);
-        assert!(output.contains("truncated"));
-        assert!(output.contains(&format!("{} bytes", execution.outcome.text.len())));
-        let encoded_content = content.to_string();
-        assert!(encoded_content.len() <= DISPLAY_LIMIT + 256);
-        assert!(encoded_content.contains("truncated"));
+        assert!(!output.contains(&oversized));
+        assert_eq!(
+            content.get("text").and_then(Value::as_str),
+            Some(output.as_str())
+        );
+        assert_eq!(
+            content.pointer("/blob/status").and_then(Value::as_str),
+            Some("persisted")
+        );
+        assert_eq!(
+            content.pointer("/blob/locator").and_then(Value::as_str),
+            Some("tool-result://event-session/provider-oversized")
+        );
+        assert!(!content.to_string().contains(&oversized));
     }
 
     #[tokio::test]

@@ -1,77 +1,8 @@
 use std::sync::Arc;
 
-#[cfg(test)]
-use async_trait::async_trait;
-#[cfg(test)]
-use std::sync::Mutex;
-
 use crate::ports::ToolResultBlobPort;
-#[cfg(test)]
-use crate::ports::{ToolResultBlobError, ToolResultBlobRef};
 use share::message::Message;
 use tools::ImageData;
-
-pub(crate) const TOOL_RESULT_DISPLAY_LIMIT_BYTES: usize = 16 * 1024;
-const TOOL_RESULT_DISPLAY_METADATA_ALLOWANCE_BYTES: usize = 256;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ToolResultDisplayPreview {
-    output: String,
-    content: serde_json::Value,
-}
-
-impl ToolResultDisplayPreview {
-    pub(crate) fn new(output: &str, content: &serde_json::Value) -> Self {
-        Self {
-            output: bounded_display_text(output, "tool result"),
-            content: bounded_display_content(content),
-        }
-    }
-
-    pub(crate) fn output(&self) -> &str {
-        &self.output
-    }
-
-    pub(crate) fn content(&self) -> &serde_json::Value {
-        &self.content
-    }
-}
-
-fn bounded_display_content(content: &serde_json::Value) -> serde_json::Value {
-    let encoded = content.to_string();
-    if encoded.len() <= TOOL_RESULT_DISPLAY_LIMIT_BYTES {
-        return content.clone();
-    }
-    serde_json::json!({
-        "preview": bounded_display_text(&encoded, "structured tool result"),
-        "truncated": true,
-        "original_bytes": encoded.len(),
-    })
-}
-
-fn bounded_display_text(text: &str, label: &str) -> String {
-    if text.len() <= TOOL_RESULT_DISPLAY_LIMIT_BYTES {
-        return text.to_string();
-    }
-    let prefix = utf8_prefix(text, TOOL_RESULT_DISPLAY_LIMIT_BYTES);
-    let suffix = format!(
-        "\n... [truncated {label}; original size: {} bytes]",
-        text.len()
-    );
-    debug_assert!(suffix.len() <= TOOL_RESULT_DISPLAY_METADATA_ALLOWANCE_BYTES);
-    format!("{prefix}{suffix}")
-}
-
-fn utf8_prefix(text: &str, limit: usize) -> &str {
-    if text.len() <= limit {
-        return text;
-    }
-    let mut end = limit;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ToolResultMaterializationPolicy {
@@ -105,6 +36,11 @@ impl ToolResultMaterializationPolicy {
 pub struct ToolResultMaterialization {
     text: String,
     persisted: bool,
+    original_chars: usize,
+    original_bytes: usize,
+    omitted_chars: usize,
+    blob_locator: Option<String>,
+    degradation_reason: Option<&'static str>,
     warning: Option<String>,
 }
 
@@ -117,11 +53,54 @@ impl ToolResultMaterialization {
         self.persisted
     }
 
+    pub fn original_chars(&self) -> usize {
+        self.original_chars
+    }
+
+    pub fn original_bytes(&self) -> usize {
+        self.original_bytes
+    }
+
+    pub fn omitted_chars(&self) -> usize {
+        self.omitted_chars
+    }
+
+    pub fn blob_locator(&self) -> Option<&str> {
+        self.blob_locator.as_deref()
+    }
+
+    pub fn degradation_reason(&self) -> Option<&str> {
+        self.degradation_reason
+    }
+
     pub fn warning(&self) -> Option<&str> {
         self.warning.as_deref()
     }
+
+    fn content_projection(&self) -> serde_json::Value {
+        let blob = match (&self.blob_locator, self.degradation_reason) {
+            (Some(locator), _) => serde_json::json!({
+                "status": "persisted",
+                "locator": locator,
+            }),
+            (None, Some(reason)) => serde_json::json!({
+                "status": "unavailable",
+                "reason": reason,
+            }),
+            (None, None) => serde_json::Value::Null,
+        };
+        serde_json::json!({
+            "text": self.text,
+            "truncated": self.omitted_chars > 0,
+            "original_chars": self.original_chars,
+            "original_bytes": self.original_bytes,
+            "omitted_chars": self.omitted_chars,
+            "blob": blob,
+        })
+    }
 }
 
+#[derive(Clone)]
 pub struct ToolResultMaterializer {
     blobs: Arc<dyn ToolResultBlobPort>,
     policy: ToolResultMaterializationPolicy,
@@ -133,6 +112,29 @@ impl ToolResultMaterializer {
         policy: ToolResultMaterializationPolicy,
     ) -> Self {
         Self { blobs, policy }
+    }
+
+    pub(crate) async fn materialize_display_result(
+        &self,
+        session_id: &str,
+        tool_use_id: &str,
+        output: &str,
+        content: &serde_json::Value,
+    ) -> (String, serde_json::Value) {
+        let result = self.materialize(session_id, tool_use_id, output).await;
+        if let Some(warning) = result.warning() {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "tool result blob persistence failed: {warning}"
+            );
+        }
+        let output = result.text().to_string();
+        let content = if result.omitted_chars() > 0 {
+            result.content_projection()
+        } else {
+            content.clone()
+        };
+        (output, content)
     }
 
     pub async fn materialize_provider_results(
@@ -150,8 +152,8 @@ impl ToolResultMaterializer {
                 );
             }
             let text = result.text().to_string();
-            if result.persisted() {
-                content = serde_json::json!({ "text": text, "persisted": true });
+            if result.omitted_chars() > 0 {
+                content = result.content_projection();
             }
             materialized.push((tool_use_id, text, content, is_error, images));
         }
@@ -169,6 +171,11 @@ impl ToolResultMaterializer {
             return ToolResultMaterialization {
                 text: output.to_string(),
                 persisted: false,
+                original_chars: character_count,
+                original_bytes: output.len(),
+                omitted_chars: 0,
+                blob_locator: None,
+                degradation_reason: None,
                 warning: None,
             };
         }
@@ -180,128 +187,63 @@ impl ToolResultMaterializer {
         {
             Ok(blob) => blob,
             Err(error) => {
+                let text = bounded_tool_result_text(output, character_count, self.policy, None);
                 return ToolResultMaterialization {
-                    text: output.to_string(),
+                    text,
                     persisted: false,
+                    original_chars: character_count,
+                    original_bytes: output.len(),
+                    omitted_chars: omitted_chars(character_count, self.policy),
+                    blob_locator: None,
+                    degradation_reason: Some("write_failed"),
                     warning: Some(error.to_string()),
                 };
             }
         };
-        let head: String = output
-            .chars()
-            .take(self.policy.preview_head_chars)
-            .collect();
-        let tail: String = output
-            .chars()
-            .skip(character_count - self.policy.preview_tail_chars)
-            .collect();
-        let omitted = character_count - head.chars().count() - tail.chars().count();
-        let text = format!(
-            "<persisted-output>\nOutput too large. Full output saved to: {}\n\n--- head ({} chars) ---\n{}\n\n[... {} chars omitted ...]\n\n--- tail ({} chars) ---\n{}\n</persisted-output>",
-            blob.locator(),
-            head.chars().count(),
-            head,
-            omitted,
-            tail.chars().count(),
-            tail,
-        );
+        let text =
+            bounded_tool_result_text(output, character_count, self.policy, Some(blob.locator()));
         ToolResultMaterialization {
             text,
             persisted: true,
+            original_chars: character_count,
+            original_bytes: output.len(),
+            omitted_chars: omitted_chars(character_count, self.policy),
+            blob_locator: Some(blob.locator().to_string()),
+            degradation_reason: None,
             warning: None,
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Default)]
-    struct FakeBlobPort {
-        writes: Mutex<Vec<(String, String, Vec<u8>)>>,
-        failure: Mutex<Option<ToolResultBlobError>>,
-    }
-
-    #[async_trait]
-    impl ToolResultBlobPort for FakeBlobPort {
-        async fn write_once(
-            &self,
-            session_id: &str,
-            tool_use_id: &str,
-            bytes: &[u8],
-        ) -> Result<ToolResultBlobRef, ToolResultBlobError> {
-            if let Some(error) = self.failure.lock().unwrap().clone() {
-                return Err(error);
-            }
-            self.writes.lock().unwrap().push((
-                session_id.to_string(),
-                tool_use_id.to_string(),
-                bytes.to_vec(),
-            ));
-            Ok(ToolResultBlobRef::new(format!(
-                "tool-result://{session_id}/{tool_use_id}"
-            )))
-        }
-    }
-
-    #[tokio::test]
-    async fn output_at_threshold_remains_inline_without_blob_write() {
-        let blobs = Arc::new(FakeBlobPort::default());
-        let materializer = ToolResultMaterializer::new(
-            blobs.clone(),
-            ToolResultMaterializationPolicy::new(4, 2, 1),
-        );
-
-        let output = materializer
-            .materialize("session", "tool", "四个字符")
-            .await;
-
-        assert_eq!(output.text(), "四个字符");
-        assert!(!output.persisted());
-        assert!(blobs.writes.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn oversized_unicode_output_writes_full_bytes_and_formats_character_preview() {
-        let blobs = Arc::new(FakeBlobPort::default());
-        let materializer = ToolResultMaterializer::new(
-            blobs.clone(),
-            ToolResultMaterializationPolicy::new(4, 2, 1),
-        );
-
-        let output = materializer
-            .materialize("session", "tool", "甲乙丙丁戊")
-            .await;
-
-        assert!(output.persisted());
-        assert!(output.text().contains("甲乙"));
-        assert!(output.text().contains("戊"));
-        assert!(output.text().contains("2 chars omitted"));
-        assert!(output.text().contains("tool-result://session/tool"));
-        assert_eq!(
-            blobs.writes.lock().unwrap().as_slice(),
-            &[(
-                "session".into(),
-                "tool".into(),
-                "甲乙丙丁戊".as_bytes().to_vec()
-            )]
-        );
-    }
-
-    #[tokio::test]
-    async fn blob_failure_keeps_complete_output_inline() {
-        let blobs = Arc::new(FakeBlobPort::default());
-        *blobs.failure.lock().unwrap() = Some(ToolResultBlobError::write("磁盘不可写"));
-        let materializer =
-            ToolResultMaterializer::new(blobs, ToolResultMaterializationPolicy::new(4, 2, 1));
-
-        let output = materializer
-            .materialize("session", "tool", "甲乙丙丁戊")
-            .await;
-
-        assert_eq!(output.text(), "甲乙丙丁戊");
-        assert!(!output.persisted());
-        assert!(output.warning().is_some());
-    }
+fn omitted_chars(character_count: usize, policy: ToolResultMaterializationPolicy) -> usize {
+    character_count - policy.preview_head_chars - policy.preview_tail_chars
 }
+
+fn bounded_tool_result_text(
+    output: &str,
+    character_count: usize,
+    policy: ToolResultMaterializationPolicy,
+    locator: Option<&str>,
+) -> String {
+    let head: String = output.chars().take(policy.preview_head_chars).collect();
+    let tail: String = output
+        .chars()
+        .skip(character_count - policy.preview_tail_chars)
+        .collect();
+    let omitted = omitted_chars(character_count, policy);
+    let location = locator
+        .map(|value| format!("Full output saved to: {value}"))
+        .unwrap_or_else(|| "Full output unavailable because persistence failed.".to_string());
+    format!(
+        "<persisted-output>\nOutput too large. {location}\n\n--- head ({} chars) ---\n{}\n\n[... {} chars omitted ...]\n\n--- tail ({} chars) ---\n{}\n</persisted-output>",
+        head.chars().count(),
+        head,
+        omitted,
+        tail.chars().count(),
+        tail,
+    )
+}
+
+#[cfg(test)]
+#[path = "tool_result_materialization_tests.rs"]
+mod tests;

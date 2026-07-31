@@ -25,6 +25,8 @@ pub(crate) async fn ask_user<S>(
     suspended_calls: &[(&ToolCall, ToolSuspension, tools::AuthorizationContext)],
     cancel: &tokio_util::sync::CancellationToken,
     workspace_root: &std::path::Path,
+    materializer: &crate::application::tool_result_materialization::ToolResultMaterializer,
+    session_id: &str,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -123,7 +125,7 @@ where
                     Vec::new(),
                 );
                 let execution = ToolExecution::new(call, outcome);
-                send_tool_result(sink, context, &execution).await;
+                send_tool_result(sink, context, &execution, materializer, session_id).await;
                 results.push(execution);
             }
         }
@@ -222,6 +224,8 @@ mod tests {
             &[],
             &cancel,
             std::path::Path::new("."),
+            crate::application::testing::test_tool_result_materializer().as_ref(),
+            "ask-user-test",
         )
         .await;
         assert!(results.is_empty());
@@ -247,6 +251,8 @@ mod tests {
             &calls,
             &cancel,
             std::path::Path::new("."),
+            crate::application::testing::test_tool_result_materializer().as_ref(),
+            "ask-user-test",
         )
         .await;
 
@@ -275,6 +281,8 @@ mod tests {
             &calls,
             &cancel,
             std::path::Path::new("."),
+            crate::application::testing::test_tool_result_materializer().as_ref(),
+            "ask-user-test",
         )
         .await;
     }
@@ -302,6 +310,8 @@ mod tests {
             &calls,
             &cancel,
             std::path::Path::new("."),
+            crate::application::testing::test_tool_result_materializer().as_ref(),
+            "ask-user-test",
         )
         .await;
     }
