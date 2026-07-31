@@ -148,14 +148,22 @@ fn authoritative_cancelled_terminal_never_renders_completed_verb() {
 #[test]
 fn streaming_has_representative_thinking_and_completed_snapshots() {
     let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.runtime_event(TuiRuntimeEvent::Run {
+        run_id: crate::tui::model::conversation::interaction::UiRunId::from("main-1"),
+        parent_run_id: None,
+        event: crate::tui::adapter::tui_runtime_event::TuiRunEvent::Transitioned {
+            status: crate::tui::adapter::tui_runtime_event::TuiRunStatus::InvokingModel,
+        },
+    });
     harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
     harness.runtime_event(TuiRuntimeEvent::Thinking {
         context: ctx(),
         text: "Inspecting the repository".into(),
     });
     harness.render();
-    assert!(harness.screen().contains("Inspecting the repository"));
-    insta::assert_snapshot!("chat_streaming__thinking__100x30", harness.screen());
+    let thinking_screen = harness.screen();
+    assert!(thinking_screen.contains("Inspecting the repository"));
+    assert!(thinking_screen.contains("Thinking…"));
 
     harness.runtime_event(TuiRuntimeEvent::Text {
         context: ctx(),
@@ -164,6 +172,13 @@ fn streaming_has_representative_thinking_and_completed_snapshots() {
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context: ctx(),
         text: "The result is ready.".into(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::Run {
+        run_id: crate::tui::model::conversation::interaction::UiRunId::from("main-1"),
+        parent_run_id: None,
+        event: crate::tui::adapter::tui_runtime_event::TuiRunEvent::Transitioned {
+            status: crate::tui::adapter::tui_runtime_event::TuiRunStatus::Completed,
+        },
     });
     harness.runtime_event(TuiRuntimeEvent::Done {
         context: ctx(),

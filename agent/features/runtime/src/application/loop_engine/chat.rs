@@ -48,6 +48,4 @@ pub use input_gate::{
 pub use input_log::logged_input_messages;
 pub use loop_context::ChatLoopContext;
 pub use loop_runner::process_chat_loop;
-pub(crate) use stream_handler::{
-    should_emit_model_stream_waiting, InvocationEventReducer, InvocationResponse,
-};
+pub(crate) use stream_handler::{InvocationEventReducer, InvocationResponse};

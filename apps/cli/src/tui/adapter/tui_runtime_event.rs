@@ -402,11 +402,6 @@ pub(crate) enum TuiRuntimeEvent {
         images: Vec<TuiToolResultImage>,
     },
     SystemMessage(String),
-    ModelStreamWaiting {
-        context: TuiTurnContext,
-        elapsed_secs: u64,
-        phase: String,
-    },
     ModelInvocationRetrying {
         context: TuiTurnContext,
         attempt: u32,

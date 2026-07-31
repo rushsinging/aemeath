@@ -3,25 +3,13 @@ use std::time::{Duration, Instant};
 
 const MODEL_SILENCE_THRESHOLD: Duration = Duration::from_secs(10);
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RunActivityState {
     main_run_id: Option<UiRunId>,
     invoking_model_silence_started_at: Option<Instant>,
     silence_interval: u64,
     pub frame: u64,
     pub verb: String,
-}
-
-impl Default for RunActivityState {
-    fn default() -> Self {
-        Self {
-            main_run_id: None,
-            invoking_model_silence_started_at: None,
-            silence_interval: 0,
-            frame: 0,
-            verb: String::new(),
-        }
-    }
 }
 
 impl RunActivityState {

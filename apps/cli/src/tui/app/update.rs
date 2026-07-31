@@ -80,7 +80,6 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::LiveTps(_) => "LiveTps",
         UiEvent::ClipboardImage(_) => "ClipboardImage",
         UiEvent::SystemMessage(_) => "SystemMessage",
-        UiEvent::ModelStreamWaiting { .. } => "ModelStreamWaiting",
         UiEvent::SessionSaved { .. } => "SessionSaved",
         UiEvent::ReflectionHistory { .. } => "ReflectionHistory",
         UiEvent::InteractionRequested { .. } => "InteractionRequested",

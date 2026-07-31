@@ -84,10 +84,6 @@ impl App {
                     name: "system_message".to_string(),
                 });
             }
-            UiEvent::ModelStreamWaiting { .. } => {
-                // Transient placeholder 已由 map_agent_event 注入 ConversationModel。
-                self.mark_output_dirty();
-            }
             UiEvent::SessionSaved { id } => {
                 self.append_system_notice(format!("[session saved: {id}]"));
             }

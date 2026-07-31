@@ -88,14 +88,14 @@ where
     match event {
         // ── Runtime observations → ConversationIntent (inlined from ToolFlowProjector) ──
         UiEvent::Text { context, text } => {
-            clear_placeholder_then(ConversationIntent::AssistantText(AssistantText {
+            conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 text: text.clone(),
             }))
         }
         UiEvent::Thinking { context, text } => {
-            clear_placeholder_then(ConversationIntent::ThinkingText(ThinkingText {
+            conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 text: text.clone(),
@@ -123,7 +123,7 @@ where
                 name,
                 index,
             );
-            clear_placeholder_then(ConversationIntent::ToolCallStart(ToolCallStart {
+            conversation(ConversationIntent::ToolCallStart(ToolCallStart {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 id: ToolCallId::new(id.as_str()),
@@ -155,7 +155,7 @@ where
                 index,
                 args.as_ref().map(|s| s.len()).unwrap_or(0),
             );
-            clear_placeholder_then(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+            conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 id: ToolCallId::new(id.as_str()),
@@ -190,7 +190,7 @@ where
                 is_error,
                 images.len(),
             );
-            clear_placeholder_then(ConversationIntent::ToolResult(ToolResult {
+            conversation(ConversationIntent::ToolResult(ToolResult {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 id: ToolCallId::new(id.as_str()),
@@ -304,19 +304,6 @@ where
                 AppendSystemMessage { text: text.clone() },
             ))
         }
-        UiEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => conversation(ConversationIntent::UpsertModelStreamPlaceholder(
-            UpsertModelStreamPlaceholder {
-                placeholder: crate::tui::app::event::ModelStreamWaitingView {
-                    context: context.clone(),
-                    elapsed_secs: *elapsed_secs,
-                    phase: phase.clone(),
-                },
-            },
-        )),
         UiEvent::TurnStarted { messages }
         | UiEvent::MicrocompactDone { messages, .. }
         | UiEvent::PostToolExecutionSync { messages }
@@ -374,14 +361,14 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
     match event {
         TuiRuntimeEvent::SkillsUpdated { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::Text { context, text } => {
-            clear_placeholder_then(ConversationIntent::AssistantText(AssistantText {
+            conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
                 text: text.clone(),
             }))
         }
         TuiRuntimeEvent::Thinking { context, text } => {
-            clear_placeholder_then(ConversationIntent::ThinkingText(ThinkingText {
+            conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
                 text: text.clone(),
@@ -399,7 +386,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             provider_id,
             name,
             index,
-        } => clear_placeholder_then(ConversationIntent::ToolCallStart(ToolCallStart {
+        } => conversation(ConversationIntent::ToolCallStart(ToolCallStart {
             chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
             turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
             id: ToolCallId::new(id),
@@ -420,7 +407,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             let args = arguments_delta
                 .clone()
                 .or_else(|| arguments.as_ref().map(ToString::to_string));
-            clear_placeholder_then(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+            conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
                 id: ToolCallId::new(id),
@@ -446,7 +433,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             content,
             is_error,
             images,
-        } => clear_placeholder_then(ConversationIntent::ToolResult(ToolResult {
+        } => conversation(ConversationIntent::ToolResult(ToolResult {
             chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
             turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
             id: ToolCallId::new(id),
@@ -504,26 +491,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 ))
             }
         }
-        TuiRuntimeEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => conversation(ConversationIntent::UpsertModelStreamPlaceholder(
-            UpsertModelStreamPlaceholder {
-                placeholder: crate::tui::app::event::ModelStreamWaitingView {
-                    context: crate::tui::app::event::UiTurnContext {
-                        chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                            &context.chat_id,
-                        ),
-                        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                            &context.turn_id,
-                        ),
-                    },
-                    elapsed_secs: *elapsed_secs,
-                    phase: phase.clone(),
-                },
-            },
-        )),
         TuiRuntimeEvent::TurnStarted { messages }
         | TuiRuntimeEvent::MicrocompactDone { messages, .. }
         | TuiRuntimeEvent::PostToolExecutionSync { messages }
@@ -941,16 +908,6 @@ fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
 // ════════════════════════════════════════════════════════════════════
 //  Helpers — AgentEventMapping constructors
 // ════════════════════════════════════════════════════════════════════
-
-fn clear_placeholder_then(intent: ConversationIntent) -> AgentEventMapping {
-    AgentEventMapping {
-        conversation: vec![
-            ConversationIntent::ClearModelStreamPlaceholder(ClearModelStreamPlaceholder),
-            intent,
-        ],
-        ..AgentEventMapping::default()
-    }
-}
 
 fn conversation(intent: ConversationIntent) -> AgentEventMapping {
     AgentEventMapping {

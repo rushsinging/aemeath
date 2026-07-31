@@ -108,15 +108,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             images: images.into_iter().map(tool_image).collect(),
         },
         ChatEvent::SystemMessage(message) => TuiRuntimeEvent::SystemMessage(message),
-        ChatEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => TuiRuntimeEvent::ModelStreamWaiting {
-            context: turn_context(context),
-            elapsed_secs,
-            phase,
-        },
         ChatEvent::ModelInvocationRetrying {
             context,
             attempt,

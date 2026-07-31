@@ -11,64 +11,6 @@ use sdk::{
     HookMessageView, RunStatusView, ToolCallStatusView, ToolResultImage,
 };
 
-#[cfg(test)]
-mod run_status_mapping_tests {
-    use super::map_domain_event;
-    use crate::domain::agent_run::{RunDomainEvent, RunStatus, RunTransitionReason};
-    use sdk::{ChatEvent, RunStatusView};
-
-    #[test]
-    fn transitioned_status_maps_every_runtime_variant() {
-        let statuses = [
-            (RunStatus::Created, RunStatusView::Created),
-            (RunStatus::DrainingInput, RunStatusView::DrainingInput),
-            (RunStatus::PreparingContext, RunStatusView::PreparingContext),
-            (RunStatus::InvokingModel, RunStatusView::InvokingModel),
-            (RunStatus::ApplyingResponse, RunStatusView::ApplyingResponse),
-            (
-                RunStatus::AwaitingToolApproval,
-                RunStatusView::AwaitingToolApproval,
-            ),
-            (RunStatus::ExecutingTools, RunStatusView::ExecutingTools),
-            (RunStatus::AwaitingUser, RunStatusView::AwaitingUser),
-            (RunStatus::Compacting, RunStatusView::Compacting),
-            (RunStatus::CancellingStep, RunStatusView::CancellingStep),
-            (RunStatus::FinalizingStep, RunStatusView::FinalizingStep),
-            (RunStatus::Cancelling, RunStatusView::Cancelling),
-            (RunStatus::Terminating, RunStatusView::Terminating),
-            (RunStatus::Completed, RunStatusView::Completed),
-            (RunStatus::Failed, RunStatusView::Failed),
-            (RunStatus::Cancelled, RunStatusView::Cancelled),
-            (RunStatus::Terminated, RunStatusView::Terminated),
-        ];
-
-        for (runtime_status, expected_status) in statuses {
-            let run_id = sdk::RunId::new_v7();
-            let parent_run_id = sdk::RunId::new_v7();
-            let event = RunDomainEvent::Transitioned {
-                run_id: run_id.clone(),
-                parent_run_id: Some(parent_run_id.clone()),
-                from: RunStatus::Created,
-                to: runtime_status,
-                reason: RunTransitionReason::DrainStarted,
-            };
-
-            match map_domain_event(event) {
-                ChatEvent::RunTransitioned {
-                    run_id: mapped_run_id,
-                    parent_run_id: mapped_parent_run_id,
-                    status,
-                } => {
-                    assert_eq!(mapped_run_id, run_id);
-                    assert_eq!(mapped_parent_run_id, Some(parent_run_id));
-                    assert_eq!(status, expected_status);
-                }
-                other => panic!("expected RunTransitioned, got {other:?}"),
-            }
-        }
-    }
-}
-
 pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
     match event {
         RunDomainEvent::Started {
@@ -338,15 +280,6 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::SystemMessage(msg) => {
             ChatEvent::SystemMessage(msg)
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => ChatEvent::ModelStreamWaiting {
-            context: turn_context_to_sdk(context),
-            elapsed_secs,
-            phase,
-        },
         crate::application::loop_engine::chat::RuntimeStreamEvent::ModelInvocationRetrying {
             context,
             attempt,
@@ -712,5 +645,63 @@ pub(crate) fn project_agent_progress_event(
     AgentProgressEventView {
         sequence: event.sequence,
         kind,
+    }
+}
+
+#[cfg(test)]
+mod run_status_mapping_tests {
+    use super::map_domain_event;
+    use crate::domain::agent_run::{RunDomainEvent, RunStatus, RunTransitionReason};
+    use sdk::{ChatEvent, RunStatusView};
+
+    #[test]
+    fn transitioned_status_maps_every_runtime_variant() {
+        let statuses = [
+            (RunStatus::Created, RunStatusView::Created),
+            (RunStatus::DrainingInput, RunStatusView::DrainingInput),
+            (RunStatus::PreparingContext, RunStatusView::PreparingContext),
+            (RunStatus::InvokingModel, RunStatusView::InvokingModel),
+            (RunStatus::ApplyingResponse, RunStatusView::ApplyingResponse),
+            (
+                RunStatus::AwaitingToolApproval,
+                RunStatusView::AwaitingToolApproval,
+            ),
+            (RunStatus::ExecutingTools, RunStatusView::ExecutingTools),
+            (RunStatus::AwaitingUser, RunStatusView::AwaitingUser),
+            (RunStatus::Compacting, RunStatusView::Compacting),
+            (RunStatus::CancellingStep, RunStatusView::CancellingStep),
+            (RunStatus::FinalizingStep, RunStatusView::FinalizingStep),
+            (RunStatus::Cancelling, RunStatusView::Cancelling),
+            (RunStatus::Terminating, RunStatusView::Terminating),
+            (RunStatus::Completed, RunStatusView::Completed),
+            (RunStatus::Failed, RunStatusView::Failed),
+            (RunStatus::Cancelled, RunStatusView::Cancelled),
+            (RunStatus::Terminated, RunStatusView::Terminated),
+        ];
+
+        for (runtime_status, expected_status) in statuses {
+            let run_id = sdk::RunId::new_v7();
+            let parent_run_id = sdk::RunId::new_v7();
+            let event = RunDomainEvent::Transitioned {
+                run_id: run_id.clone(),
+                parent_run_id: Some(parent_run_id.clone()),
+                from: RunStatus::Created,
+                to: runtime_status,
+                reason: RunTransitionReason::DrainStarted,
+            };
+
+            match map_domain_event(event) {
+                ChatEvent::RunTransitioned {
+                    run_id: mapped_run_id,
+                    parent_run_id: mapped_parent_run_id,
+                    status,
+                } => {
+                    assert_eq!(mapped_run_id, run_id);
+                    assert_eq!(mapped_parent_run_id, Some(parent_run_id));
+                    assert_eq!(status, expected_status);
+                }
+                other => panic!("expected RunTransitioned, got {other:?}"),
+            }
+        }
     }
 }

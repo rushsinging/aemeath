@@ -12,7 +12,6 @@ use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
 use crate::tui::adapter::tui_runtime_event::TuiRunStatus;
-use crate::tui::app::event::ModelStreamWaitingView;
 use std::time::Instant;
 
 // ════════════════════════════════════════════════════════════════════
@@ -106,14 +105,6 @@ pub struct TerminalNotice {
 pub struct AppendSystemMessage {
     pub text: String,
 }
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UpsertModelStreamPlaceholder {
-    pub placeholder: ModelStreamWaitingView,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClearModelStreamPlaceholder;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppendHookNotice {
@@ -435,8 +426,6 @@ pub enum ConversationIntent {
     ToolResult(ToolResult),
     TerminalNotice(TerminalNotice),
     AppendSystemMessage(AppendSystemMessage),
-    UpsertModelStreamPlaceholder(UpsertModelStreamPlaceholder),
-    ClearModelStreamPlaceholder(ClearModelStreamPlaceholder),
     AppendHookNotice(AppendHookNotice),
     AppendError(AppendError),
     QueueSubmission(QueueSubmission),

@@ -304,9 +304,17 @@ fn test_spinner_tick_active_requests_redraw_without_marking_output_dirty() {
     use crate::tui::effect::session::processing::SpawnContextRefs;
     use crate::tui::update::msg::TuiMsg;
     let mut app = make_app();
-    app.model.conversation.runtime.spinner.chat_active = true;
-    app.model.conversation.runtime.spinner.phase =
-        Some(crate::tui::model::conversation::spinner::SpinnerPhase::Thinking);
+    let run_id = crate::tui::model::conversation::interaction::UiRunId::from("main-1");
+    app.model
+        .conversation
+        .apply(crate::tui::model::conversation::intent::ObserveRunStatus {
+            run_id: run_id.clone(),
+            parent_run_id: None,
+            status: crate::tui::adapter::tui_runtime_event::TuiRunStatus::InvokingModel,
+        });
+    app.view_state
+        .run_activity
+        .sync_main_run(Some(&run_id), true, std::time::Instant::now());
     app.view_state.dirty.clear_output();
     let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(8);
     let spawn_refs = SpawnContextRefs { agent_client: None };

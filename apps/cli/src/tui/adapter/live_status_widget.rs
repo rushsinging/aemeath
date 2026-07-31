@@ -6,17 +6,21 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::tui::adapter::tui_runtime_event::TuiRunStatus;
     use crate::tui::model::conversation::intent::*;
+    use crate::tui::model::conversation::interaction::UiRunId;
     use crate::tui::model::conversation::model::ConversationModel;
-    use crate::tui::model::conversation::spinner::SpinnerPhase;
     use crate::tui::view_assembler::live_status::LiveStatusAssembler;
-    use crate::tui::view_state::SpinnerAnim;
+    use crate::tui::view_state::{RunActivityState, SpinnerAnim};
 
     #[test]
     fn live_status_projection_includes_spinner_task_and_queued_lines() {
         let mut model = ConversationModel::default();
-        model.runtime.spinner.chat_active = true;
-        model.runtime.spinner.phase = Some(SpinnerPhase::Thinking);
+        model.apply(ObserveRunStatus {
+            run_id: UiRunId::from("main-1"),
+            parent_run_id: None,
+            status: TuiRunStatus::InvokingModel,
+        });
         model.apply(UpdateTaskLines(vec![
             "━━ Tasks: 1/2 ━━".to_string(),
             "✓ #1 done".to_string(),
@@ -24,24 +28,21 @@ mod tests {
         let anim = SpinnerAnim {
             frame: 12,
             phase_frame: 4,
-            phase: Some(SpinnerPhase::Thinking),
+            phase: None,
             verb: "Forging".to_string(),
         };
         let queued = vec!["queued input".to_string()];
 
-        let vm = LiveStatusAssembler::assemble(
-            &model,
-            &crate::tui::view_state::RunActivityState::default(),
-            &anim,
-            &queued,
-        );
-
+        let now = std::time::Instant::now();
+        let mut activity = RunActivityState::default();
+        activity.sync_main_run(Some(&UiRunId::from("main-1")), true, now);
+        let vm = LiveStatusAssembler::assemble(&model, &activity, &anim, &queued);
         let spinner = vm.spinner.expect("spinner projected");
         assert_eq!(spinner.frame, 12);
         assert_eq!(spinner.verb, "Forging");
-        assert_eq!(spinner.elapsed_secs, 1);
+        assert_eq!(spinner.elapsed_secs, 0);
         assert_eq!(spinner.phase_elapsed_secs, 0);
-        assert_eq!(spinner.phase_text.as_deref(), Some("Thinking..."));
+        assert_eq!(spinner.phase_text.as_deref(), Some("Thinking…"));
         assert_eq!(vm.task_lines, vec!["━━ Tasks: 1/2 ━━", "✓ #1 done"]);
         assert_eq!(vm.queued_lines, vec!["> queued input"]);
     }

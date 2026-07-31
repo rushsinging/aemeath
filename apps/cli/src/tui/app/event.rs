@@ -39,13 +39,6 @@ pub struct WorkspaceMetadataResolved {
     pub kind: WorktreeKind,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ModelStreamWaitingView {
-    pub context: UiTurnContext,
-    pub elapsed_secs: u64,
-    pub phase: String,
-}
-
 /// Events sent from background task to UI
 #[derive(Debug)]
 pub enum AppEvent {
@@ -155,11 +148,6 @@ pub enum AppEvent {
     LiveTps(f64),
     ClipboardImage(sdk::ClipboardImageView),
     SystemMessage(String),
-    ModelStreamWaiting {
-        context: UiTurnContext,
-        elapsed_secs: u64,
-        phase: String,
-    },
     /// /save 命令保存成功后回传（携带 session id），用于推送 `[session saved: id]` 反馈行。
     SessionSaved {
         id: String,

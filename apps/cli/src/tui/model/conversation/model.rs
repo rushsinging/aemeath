@@ -8,7 +8,6 @@ use super::queued_submission::QueuedSubmission;
 use super::run_state::{is_terminal, RunStateSnapshot};
 use super::runtime_state::RuntimeState;
 use super::update::ConversationUpdate;
-use crate::tui::app::event::ModelStreamWaitingView;
 use crate::tui::model::output_timeline::{OutputTimelineItem, OutputTimelineModel};
 use std::time::Instant;
 
@@ -44,7 +43,6 @@ pub struct ConversationModel {
     pub(super) active_text_context: Option<(ChatId, ChatTurnId)>,
     pub(super) active_thinking_block_id: Option<String>,
     pub(super) active_thinking_context: Option<(ChatId, ChatTurnId)>,
-    pub model_stream_placeholder: Option<ModelStreamWaitingView>,
     pub(super) active_interaction: Option<InteractionState>,
     pub(super) agent_runs: Vec<AgentRunState>,
     run_state_snapshots: Vec<RunStateSnapshot>,
@@ -69,7 +67,6 @@ impl Default for ConversationModel {
             active_text_context: None,
             active_thinking_block_id: None,
             active_thinking_context: None,
-            model_stream_placeholder: None,
             active_interaction: None,
             agent_runs: Vec::new(),
             run_state_snapshots: Vec::new(),
@@ -242,35 +239,6 @@ impl ConversationModel {
             .is_some_and(|run| run.complete_step(step_id))
     }
 
-    pub(super) fn clear_model_stream_placeholder(&mut self) -> Vec<ConversationChange> {
-        if let Some(placeholder) = self.model_stream_placeholder.take() {
-            crate::tui::log_debug!(
-                "clear model_stream_placeholder chat_id={} turn_id={} elapsed_secs={} phase={}",
-                placeholder.context.chat_id,
-                placeholder.context.turn_id,
-                placeholder.elapsed_secs,
-                placeholder.phase,
-            );
-            vec![ConversationChange::OutputDirty]
-        } else {
-            Vec::new()
-        }
-    }
-
-    pub(super) fn upsert_model_stream_placeholder(
-        &mut self,
-        placeholder: ModelStreamWaitingView,
-    ) -> Vec<ConversationChange> {
-        crate::tui::log_debug!(
-            "upsert model_stream_placeholder chat_id={} turn_id={} elapsed_secs={} phase={}",
-            placeholder.context.chat_id,
-            placeholder.context.turn_id,
-            placeholder.elapsed_secs,
-            placeholder.phase,
-        );
-        self.model_stream_placeholder = Some(placeholder);
-        vec![ConversationChange::OutputDirty]
-    }
     pub(super) fn start_chat(&mut self, submission: String) -> Vec<ConversationChange> {
         self.next_chat_sequence += 1;
         let chat_id = ChatId::new_v7();

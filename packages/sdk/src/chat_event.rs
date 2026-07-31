@@ -271,12 +271,6 @@ pub enum ChatEvent {
     },
     /// 系统消息。
     SystemMessage(String),
-    /// Stream is alive but no user-visible model delta has arrived yet.
-    ModelStreamWaiting {
-        context: ChatEventContext,
-        elapsed_secs: u64,
-        phase: String,
-    },
     /// Runtime 将在延迟后发起新的模型调用 attempt。
     ModelInvocationRetrying {
         context: ChatEventContext,

@@ -439,15 +439,6 @@ where
         )
     }
 
-    fn waiting_event_context(
-        &self,
-    ) -> Option<(
-        crate::application::loop_engine::chat::ChatEventSinkHandle,
-        RuntimeTurnContext,
-    )> {
-        Some((self.runtime_context.event_sink(), self.turn_context.clone()))
-    }
-
     fn extract_tool_calls(
         &self,
         response: &crate::application::loop_engine::chat::InvocationResponse,

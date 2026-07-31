@@ -69,15 +69,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             images,
         },
         sdk::ChatEvent::SystemMessage(msg) => UiEvent::SystemMessage(msg),
-        sdk::ChatEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => UiEvent::ModelStreamWaiting {
-            context: context.into(),
-            elapsed_secs,
-            phase,
-        },
         sdk::ChatEvent::ModelInvocationRetrying { attempt, delay, .. } => {
             UiEvent::SystemMessage(format!(
                 "Retrying model invocation (attempt {attempt}) in {:.1}s.",

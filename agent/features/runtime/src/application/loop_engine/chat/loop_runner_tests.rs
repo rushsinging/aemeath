@@ -454,7 +454,7 @@ fn main_logging_path_uses_scopes_and_no_legacy_setters() {
     assert!(runner_source.contains("session_id: logging::FieldPatch::Set"));
     assert!(runner_source.contains("chat_id: logging::FieldPatch::Set"));
     assert!(runner_source.contains("turn: logging::FieldPatch::Set(turn_count)"));
-    assert!(invocation_source.contains("logging::spawn_instrumented("));
+    assert!(invocation_source.contains("logging::instrument(request_context"));
     for source in [chat_source, runner_source, port_source, invocation_source] {
         assert!(!source.contains("logging::set_current_"));
         assert!(!source.contains("logging::set_session_id"));
