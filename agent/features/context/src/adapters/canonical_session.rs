@@ -301,6 +301,43 @@ impl SessionRepository for CanonicalSessionRepository {
         })
     }
 
+    async fn compare_and_record_skill_load(
+        &self,
+        mutation: tools::SkillLoadMutation,
+    ) -> Result<tools::SkillLoadDecision, tools::SkillLoadStateError> {
+        let _mutation_guard = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| tools::SkillLoadStateError::Storage(error.to_string()))?
+            .clone();
+        if current.id != mutation.session_id() {
+            return Err(tools::SkillLoadStateError::SessionNotFound(
+                mutation.session_id().to_string(),
+            ));
+        }
+        let mut candidate = (*current).clone();
+        let decision = candidate.compare_and_record_skill(
+            mutation.scope(),
+            mutation.skill_name(),
+            mutation.revision(),
+        );
+        if decision == tools::SkillLoadDecision::AlreadyLoaded {
+            return Ok(decision);
+        }
+        candidate.revision += 1;
+        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        self.writer
+            .save(&candidate)
+            .await
+            .map_err(tools::SkillLoadStateError::Storage)?;
+        self.publish_generation(&current, candidate)
+            .map_err(tools::SkillLoadStateError::Storage)?;
+        Ok(decision)
+    }
+
     async fn append_finalized(
         &self,
         append: &ContextAppend,
@@ -540,6 +577,7 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.compact = None;
         candidate.run_slices.clear();
         candidate.committed_steps.clear();
+        candidate.skill_load_records.clear();
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());

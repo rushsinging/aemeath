@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::domain::{
-    CancellationDeclaration, SkillError, SkillLoadPort, SkillLoadQuery, ToolExecutionContext,
-    TypedTool, TypedToolResult,
+    CancellationDeclaration, SkillError, SkillLoadDecision, SkillLoadMutation, SkillLoadPort,
+    SkillLoadQuery, SkillLoadStateError, ToolExecutionContext, TypedTool, TypedToolResult,
 };
 
 #[derive(Debug, Deserialize)]
@@ -90,15 +90,61 @@ impl TypedTool for SkillTool {
             Err(error) => return TypedToolResult::error(safe_error(error)),
         };
         match self.loader.load(query).await {
-            Ok(loaded) => TypedToolResult::success(
-                loaded.content().to_string(),
-                SkillLoadResult {
-                    name: loaded.name().to_string(),
-                    revision: loaded.revision().to_string(),
-                },
-            ),
+            Ok(loaded) => {
+                let Some(session_id) = ctx.parent_session_id() else {
+                    return TypedToolResult::error("Skill 加载状态未绑定 Session".to_string());
+                };
+                let Some(scope) = ctx.skill_load_scope().cloned() else {
+                    return TypedToolResult::error("Skill 加载状态未绑定 Agent 作用域".to_string());
+                };
+                let Some(state) = ctx.skill_load_state() else {
+                    return TypedToolResult::error("Skill 加载状态服务不可用".to_string());
+                };
+                let mutation = match SkillLoadMutation::new(
+                    session_id,
+                    scope,
+                    loaded.name(),
+                    loaded.revision(),
+                ) {
+                    Ok(mutation) => mutation,
+                    Err(error) => return TypedToolResult::error(safe_state_error(error)),
+                };
+                match state.compare_and_record(mutation).await {
+                    Ok(decision) => {
+                        let content = match decision {
+                            SkillLoadDecision::Fresh | SkillLoadDecision::Updated => {
+                                loaded.content().to_string()
+                            }
+                            SkillLoadDecision::AlreadyLoaded => format!(
+                                "Skill {} 已加载，内容未更新（revision: {}）。请继续使用已有指令。",
+                                loaded.name(),
+                                loaded.revision()
+                            ),
+                        };
+                        TypedToolResult::success(
+                            content,
+                            SkillLoadResult {
+                                name: loaded.name().to_string(),
+                                revision: loaded.revision().to_string(),
+                            },
+                        )
+                    }
+                    Err(error) => TypedToolResult::error(safe_state_error(error)),
+                }
+            }
             Err(error) => TypedToolResult::error(safe_error(error)),
         }
+    }
+}
+
+fn safe_state_error(error: SkillLoadStateError) -> String {
+    match error {
+        SkillLoadStateError::InvalidSessionId
+        | SkillLoadStateError::InvalidInstanceId
+        | SkillLoadStateError::InvalidSkillName
+        | SkillLoadStateError::InvalidRevision => "Skill 加载状态无效".to_string(),
+        SkillLoadStateError::SessionNotFound(_) => "Skill 加载 Session 不存在".to_string(),
+        SkillLoadStateError::Storage(_) => "保存 Skill 加载状态失败".to_string(),
     }
 }
 

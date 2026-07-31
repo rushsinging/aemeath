@@ -275,6 +275,7 @@ pub struct RunCapabilityBindings {
     pub model: ModelBindings,
     pub io: IoBindings,
     pub lifecycle: LifecycleBindings,
+    pub skill_load_session_id: String,
 }
 
 #[derive(Clone)]
@@ -335,6 +336,8 @@ pub struct RuntimeContext {
     reflection_history: Arc<dyn ReflectionHistoryStore>,
     task: Arc<dyn TaskAccess>,
     hooks: Arc<dyn HookPort>,
+    skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
+    skill_load_session_id: String,
     reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
     config: RunConfigSnapshot,
     cancel: RunCancellationScope,
@@ -380,6 +383,7 @@ impl RuntimeContext {
     pub(super) fn new(
         services: RuntimeServices,
         bindings: impl Into<RunCapabilityBindings>,
+        skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
         _token: RuntimeContextAssemblyToken,
     ) -> Self {
         let bindings = bindings.into();
@@ -394,6 +398,8 @@ impl RuntimeContext {
             reflection_history: services.reflection_history,
             task: services.task,
             hooks: services.hooks,
+            skill_load_state,
+            skill_load_session_id: bindings.skill_load_session_id,
             reasoning: bindings.model.reasoning,
             config: bindings.model.config,
             cancel: bindings.lifecycle.cancel,
@@ -451,12 +457,18 @@ impl RuntimeContext {
     pub fn hooks(&self) -> Arc<dyn HookPort> {
         self.hooks.clone()
     }
+    /// Skill 加载状态端口，Sub-run 继承父级的 Context-owned durable backing。
+    pub fn skill_load_state(&self) -> Arc<dyn tools::SkillLoadStatePort> {
+        self.skill_load_state.clone()
+    }
+    /// Skill 状态所属的 Main Session identity。
+    pub fn skill_load_session_id(&self) -> &str {
+        &self.skill_load_session_id
+    }
     /// Reasoning 端口，`Arc` clone。
     pub fn reasoning(&self) -> Arc<Mutex<share::reasoning::ReasoningLevel>> {
         self.reasoning.clone()
-    }
-
-    // ── 借用 accessor（Clone 类型） ──
+    } // ── 借用 accessor（Clone 类型） ──
 
     /// Run 级配置快照。
     pub fn config(&self) -> &RunConfigSnapshot {

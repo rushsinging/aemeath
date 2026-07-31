@@ -114,6 +114,11 @@ struct LifecycleSelection {
     usage: crate::application::run::context::RunUsageTracker,
 }
 
+struct SkillLoadSelection {
+    state: Arc<dyn tools::SkillLoadStatePort>,
+    session_id: String,
+}
+
 struct RunCreationResources {
     session: SessionResolution,
     workspace: WorkspaceSelection,
@@ -219,6 +224,7 @@ impl RuntimeContextFactory {
         let reasoning = self.select_reasoning_port(bindings, parent.as_deref())?;
         let event_route = self.select_event_route(bindings)?;
         let lifecycle = self.select_lifecycle(request, parent.as_deref())?;
+        let skill_load = self.select_skill_load(&context, parent.as_deref(), &session);
         let bindings = RunCapabilityBindings {
             model: crate::application::run::context::ModelBindings {
                 context: context.port,
@@ -239,14 +245,21 @@ impl RuntimeContextFactory {
                 cancel: lifecycle.cancel,
                 usage: lifecycle.usage,
             },
+            skill_load_session_id: skill_load.session_id,
         };
-        self.bind_runtime_context(bindings, hook, RunCreationResources { session, workspace })
+        self.bind_runtime_context(
+            bindings,
+            hook,
+            skill_load.state,
+            RunCreationResources { session, workspace },
+        )
     }
 
     fn bind_runtime_context(
         &self,
         bindings: RunCapabilityBindings,
         hook: HookSelection,
+        skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
         resources: RunCreationResources,
     ) -> Result<
         (
@@ -265,7 +278,12 @@ impl RuntimeContextFactory {
             hooks: hook.port,
             ..self.services.clone()
         };
-        let context = RuntimeContext::new(services, bindings, RuntimeContextAssemblyToken::new());
+        let context = RuntimeContext::new(
+            services,
+            bindings,
+            skill_load_state,
+            RuntimeContextAssemblyToken::new(),
+        );
         let context = match resources.session.lease {
             Some(lease) => context.hold_session_lease(lease),
             None => context,
@@ -542,6 +560,28 @@ impl RuntimeContextFactory {
         })
     }
 
+    fn select_skill_load(
+        &self,
+        context: &ContextSelection,
+        parent: Option<&RuntimeContext>,
+        session: &SessionResolution,
+    ) -> SkillLoadSelection {
+        match parent {
+            Some(parent) => SkillLoadSelection {
+                state: parent.skill_load_state(),
+                session_id: parent.skill_load_session_id().to_string(),
+            },
+            None => SkillLoadSelection {
+                state: Arc::new(
+                    crate::application::context::skill_load_state::ContextSkillLoadState::new(
+                        context.port.clone(),
+                    ),
+                ),
+                session_id: session.snapshot.session_id().to_string(),
+            },
+        }
+    }
+
     fn resolve_derived_role<'a>(
         &self,
         request: &'a RunCreationRequest,
@@ -612,7 +652,12 @@ impl RuntimeContextFactory {
         };
         Ok(RuntimeContext::new(
             services,
-            bindings,
+            bindings.clone(),
+            Arc::new(
+                crate::application::context::skill_load_state::ContextSkillLoadState::new(
+                    bindings.model.context.clone(),
+                ),
+            ),
             RuntimeContextAssemblyToken::new(),
         ))
     }

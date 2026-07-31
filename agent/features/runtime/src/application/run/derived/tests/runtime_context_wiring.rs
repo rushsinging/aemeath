@@ -190,6 +190,7 @@ fn assemble_test_context(
             cancel: RunCancellationScope::new(),
             usage: RunUsageTracker::new(),
         },
+        skill_load_session_id: "session".to_string(),
     };
     let ctx = factory
         .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)

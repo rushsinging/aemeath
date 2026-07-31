@@ -10,7 +10,7 @@ use crate::domain::{FinalizeCause, StepReceipt, ToolCallReceipt, ToolReceiptMuta
 
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
 
-pub const CURRENT_SESSION_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SESSION_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", content = "value", rename_all = "snake_case")]
@@ -217,6 +217,13 @@ fn step_messages(step: &CommittedRunStep) -> Vec<Message> {
         .collect()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillLoadRecord {
+    pub scope: tools::SkillLoadScope,
+    pub skill_name: String,
+    pub revision: String,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CanonicalSession {
     pub id: String,
@@ -241,6 +248,8 @@ pub struct CanonicalSession {
     pub run_slices: Vec<CommittedRunSlice>,
     #[serde(default)]
     pub committed_steps: Vec<CommittedStep>,
+    #[serde(default)]
+    pub skill_load_records: Vec<SkillLoadRecord>,
 }
 
 impl std::fmt::Debug for CanonicalSession {
@@ -261,6 +270,45 @@ impl PartialEq for CanonicalSession {
 impl Eq for CanonicalSession {}
 
 impl CanonicalSession {
+    pub fn loaded_skill_revision(
+        &self,
+        scope: &tools::SkillLoadScope,
+        skill_name: &str,
+    ) -> Option<&str> {
+        self.skill_load_records
+            .iter()
+            .find(|record| &record.scope == scope && record.skill_name == skill_name)
+            .map(|record| record.revision.as_str())
+    }
+
+    pub fn compare_and_record_skill(
+        &mut self,
+        scope: &tools::SkillLoadScope,
+        skill_name: &str,
+        revision: &str,
+    ) -> tools::SkillLoadDecision {
+        if let Some(record) = self
+            .skill_load_records
+            .iter_mut()
+            .find(|record| &record.scope == scope && record.skill_name == skill_name)
+        {
+            if record.revision == revision {
+                return tools::SkillLoadDecision::AlreadyLoaded;
+            }
+            record.revision = revision.to_string();
+            return tools::SkillLoadDecision::Updated;
+        }
+        self.skill_load_records.push(SkillLoadRecord {
+            scope: scope.clone(),
+            skill_name: skill_name.to_string(),
+            revision: revision.to_string(),
+        });
+        self.skill_load_records.sort_by(|left, right| {
+            (&left.scope, &left.skill_name).cmp(&(&right.scope, &right.skill_name))
+        });
+        tools::SkillLoadDecision::Fresh
+    }
+
     pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<StepReceipt> {
         let mut receipts = self
             .run_slices
@@ -547,6 +595,7 @@ impl CanonicalSession {
             compact: None,
             run_slices: Vec::new(),
             committed_steps: Vec::new(),
+            skill_load_records: Vec::new(),
         }
     }
 }
@@ -638,6 +687,7 @@ impl From<V2CanonicalSession> for CanonicalSession {
                 })
                 .collect(),
             committed_steps: session.committed_steps,
+            skill_load_records: Vec::new(),
         }
     }
 }
@@ -837,7 +887,7 @@ impl SessionCodec {
                     upgraded_from_legacy: false,
                 })
             }
-            Some(4) | Some(3) => {
+            Some(5) | Some(4) | Some(3) => {
                 let envelope: VersionedEnvelope = serde_json::from_value(value)
                     .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))?;
                 Ok(DecodedSession {
@@ -871,6 +921,7 @@ impl SessionCodec {
                         compact,
                         run_slices,
                         committed_steps: legacy.committed_steps,
+                        skill_load_records: Vec::new(),
                     },
                     upgraded_from_legacy: true,
                 })
@@ -966,6 +1017,7 @@ impl SessionCodec {
                 compact,
                 run_slices,
                 committed_steps: Vec::new(),
+                skill_load_records: Vec::new(),
             },
             upgraded_from_legacy: true,
         })

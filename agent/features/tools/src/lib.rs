@@ -32,14 +32,15 @@ pub use domain::{
     FixedPlanMode, Guidance, ImageData, InputSafetyDeclaration, InvocationSource, LoadedSkill,
     MemoryPortSource, MutexReadSet, ParsedArguments, PlanModeState, ProfileExpansionError,
     ProgressSink, ReadSet, RegistryScopeName, SessionReminder, SessionReminders, SkillCatalogPort,
-    SkillCatalogSnapshot, SkillDescriptor, SkillError, SkillLoadPort, SkillLoadQuery, SkillQuery,
-    SkillQuerySnapshot, SkillRequestCommand, SkillSlashRoute, SkillSource, SkillSourceKind,
-    SlashInput, SnapshotQueryCommand, SnapshotQueryTarget, Tool, ToolCapabilities, ToolCapability,
-    ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind,
-    ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort, ToolExecutionPorts,
-    ToolInvocation, ToolListProvider, ToolName, ToolOutcome, ToolProfile, ToolProfileName,
-    ToolResult, ToolSuspension, ToolTerminalDetails, TypedTool, TypedToolAdapter, TypedToolResult,
-    UserInteractionSpec, UserOption, UserQuestion, WorkspaceReadAccess,
+    SkillCatalogSnapshot, SkillDescriptor, SkillError, SkillLoadDecision, SkillLoadMutation,
+    SkillLoadPort, SkillLoadQuery, SkillLoadScope, SkillLoadStateError, SkillLoadStatePort,
+    SkillQuery, SkillQuerySnapshot, SkillRequestCommand, SkillSlashRoute, SkillSource,
+    SkillSourceKind, SlashInput, SnapshotQueryCommand, SnapshotQueryTarget, Tool, ToolCapabilities,
+    ToolCapability, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolDescriptor,
+    ToolErrorKind, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
+    ToolExecutionPorts, ToolInvocation, ToolListProvider, ToolName, ToolOutcome, ToolProfile,
+    ToolProfileName, ToolResult, ToolSuspension, ToolTerminalDetails, TypedTool, TypedToolAdapter,
+    TypedToolResult, UserInteractionSpec, UserOption, UserQuestion, WorkspaceReadAccess,
 };
 
 // Schema validator (moved from runtime).

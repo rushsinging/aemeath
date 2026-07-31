@@ -11,7 +11,8 @@ use crate::composition::{wire_builtin_catalog_execution, wire_skills};
 use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::{
     CancellationSignal, ExecutionScope, FixedGuidance, FixedPlanMode, MutexReadSet,
-    RegistryScopeName, SkillQuerySnapshot, ToolExecutionContext, ToolExecutionPorts,
+    RegistryScopeName, SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError,
+    SkillLoadStatePort, SkillQuerySnapshot, ToolExecutionContext, ToolExecutionPorts,
     ToolInvocation, ToolName, ToolProfileName, WorkspaceReadAccess,
 };
 
@@ -26,6 +27,30 @@ impl CancellationSignal for NeverCancelled {
     }
     fn child_signal(&self) -> Arc<dyn CancellationSignal> {
         Arc::new(Self)
+    }
+}
+
+struct FixedSkillState(Result<SkillLoadDecision, SkillLoadStateError>);
+
+#[async_trait]
+impl SkillLoadStatePort for FixedSkillState {
+    async fn compare_and_record(
+        &self,
+        _mutation: SkillLoadMutation,
+    ) -> Result<SkillLoadDecision, SkillLoadStateError> {
+        self.0.clone()
+    }
+}
+
+struct FreshSkillState;
+
+#[async_trait]
+impl SkillLoadStatePort for FreshSkillState {
+    async fn compare_and_record(
+        &self,
+        _mutation: SkillLoadMutation,
+    ) -> Result<SkillLoadDecision, SkillLoadStateError> {
+        Ok(SkillLoadDecision::Fresh)
     }
 }
 
@@ -111,7 +136,16 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
             .with_skill_query(SkillQuerySnapshot {
                 extra_dirs: Vec::<PathBuf>::new(),
                 available_tools: BTreeSet::from(["Skill".to_string()]),
-            }),
+            })
+            .with_memory_context(Some("session".to_string()), None)
+            .with_skill_load_state(
+                if scope == "main" {
+                    SkillLoadScope::main()
+                } else {
+                    SkillLoadScope::subagent("sub-agent-instance").unwrap()
+                },
+                Arc::new(FreshSkillState),
+            ),
         );
         let outcome = wiring
             .execution()
@@ -129,6 +163,75 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
             }
             other => panic!("expected success, got {other:?}"),
         }
+    }
+}
+
+#[tokio::test]
+async fn skill_state_decision_controls_body_without_leaking_on_failure() {
+    for (decision, expected_body, expected_hint, expect_success) in [
+        (Ok(SkillLoadDecision::Updated), true, false, true),
+        (Ok(SkillLoadDecision::AlreadyLoaded), false, true, true),
+        (
+            Err(SkillLoadStateError::Storage("disk full".to_string())),
+            false,
+            false,
+            false,
+        ),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        write_skill(temp.path(), "review", "BODY_SENTINEL");
+        let workspace = project::wire_production_workspace(temp.path().to_path_buf())
+            .unwrap()
+            .into_views();
+        let skill = wire_skills();
+        let wiring = wire_builtin_catalog_execution(
+            Arc::new(task::TaskStore::new()),
+            memory_source(),
+            workspace.control(),
+            skill.loader(),
+        )
+        .unwrap();
+        let scope = ExecutionScope::builder(
+            "run",
+            workspace.read().workspace_id(),
+            temp.path().to_path_buf(),
+        )
+        .build();
+        let ctx = ToolExecutionContext::new(
+            scope.clone(),
+            ToolExecutionPorts::new(
+                Arc::new(NeverCancelled),
+                WorkspaceReadAccess::new(workspace.read()),
+                Arc::new(MutexReadSet(Arc::new(Mutex::new(HashSet::new())))),
+                Arc::new(FixedPlanMode(None)),
+                Arc::new(memory::NoOpMemory),
+                Arc::new(FixedGuidance {
+                    language: "zh".into(),
+                }),
+            )
+            .with_memory_context(Some("session".to_string()), None)
+            .with_skill_load_state(SkillLoadScope::main(), Arc::new(FixedSkillState(decision))),
+        );
+        let outcome = wiring
+            .execution()
+            .execute(
+                ToolInvocation::new("Skill", json!({"skill": "review"}), scope),
+                &ctx,
+            )
+            .await;
+        let text = match &outcome {
+            crate::domain::ToolExecutionOutcome::Success(success) => {
+                assert!(expect_success);
+                success.content[0].text.as_str()
+            }
+            crate::domain::ToolExecutionOutcome::Failure(failure) => {
+                assert!(!expect_success);
+                failure.content[0].text.as_str()
+            }
+            other => panic!("unexpected outcome: {other:?}"),
+        };
+        assert_eq!(text.contains("BODY_SENTINEL"), expected_body);
+        assert_eq!(text.contains("已加载"), expected_hint);
     }
 }
 

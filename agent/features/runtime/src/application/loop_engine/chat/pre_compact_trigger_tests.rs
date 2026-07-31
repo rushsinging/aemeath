@@ -323,6 +323,7 @@ impl CompactHarness {
                     cancel: RunCancellationScope::new(),
                     usage: RunUsageTracker::new(),
                 },
+                skill_load_session_id: "session".to_string(),
             };
             factory
                 .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)

@@ -965,6 +965,7 @@ mod tests {
                     cancel: crate::application::run::context::RunCancellationScope::new(),
                     usage: crate::application::run::context::RunUsageTracker::new(),
                 },
+                skill_load_session_id: "session".to_string(),
             }
         };
 
@@ -1028,6 +1029,7 @@ mod tests {
                     cancel: crate::application::run::context::RunCancellationScope::new(),
                     usage: crate::application::run::context::RunUsageTracker::new(),
                 },
+                skill_load_session_id: "session".to_string(),
             }
         };
 
