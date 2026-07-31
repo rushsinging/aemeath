@@ -761,7 +761,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         TuiRuntimeEvent::SessionList { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::ProjectInfo { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::CostUpdate { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::Run { run_id, event, .. } => match event {
+        TuiRuntimeEvent::Run {
+            run_id,
+            parent_run_id,
+            event,
+        } => match event {
             TuiRunEvent::Started => conversation(ConversationIntent::RunStarted(RunStarted {
                 run_id: run_id.clone(),
             })),
@@ -796,10 +800,16 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     text: reason.clone(),
                 }))
             }
+            TuiRunEvent::Transitioned { status } => {
+                conversation(ConversationIntent::ObserveRunStatus(ObserveRunStatus {
+                    run_id: run_id.clone(),
+                    parent_run_id: parent_run_id.clone(),
+                    status: *status,
+                }))
+            }
             TuiRunEvent::DrainingInput
             | TuiRunEvent::TerminationRequested { .. }
-            | TuiRunEvent::Terminated { .. }
-            | TuiRunEvent::Transitioned { .. } => AgentEventMapping::default(),
+            | TuiRunEvent::Terminated { .. } => AgentEventMapping::default(),
         },
         TuiRuntimeEvent::RunStep {
             run_id,

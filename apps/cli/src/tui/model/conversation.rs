@@ -30,6 +30,10 @@ mod resume_performance_tests;
 #[cfg(test)]
 #[path = "conversation/retained_state_tests.rs"]
 mod retained_state_tests;
+pub mod run_state;
+#[cfg(test)]
+#[path = "conversation/run_state_tests.rs"]
+mod run_state_tests;
 pub mod runtime_state;
 pub mod spinner;
 pub mod status_notice;

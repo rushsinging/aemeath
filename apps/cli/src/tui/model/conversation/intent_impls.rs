@@ -666,6 +666,12 @@ impl_run_transition!(RunCancelled, super::interaction::AgentRunPhase::Cancelled)
 impl_run_transition!(RunCompleted, super::interaction::AgentRunPhase::Completed);
 impl_run_transition!(RunFailed, super::interaction::AgentRunPhase::Failed);
 
+impl ConversationUpdate for ObserveRunStatus {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.observe_run_status(self.run_id, self.parent_run_id, self.status)
+    }
+}
+
 impl ConversationUpdate for RunStepStarted {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         if model.start_agent_run_step(&self.run_id, self.step_id.clone(), self.tool_reference) {
@@ -749,6 +755,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::RunCancelled(s) => s.update(model),
             Self::RunCompleted(s) => s.update(model),
             Self::RunFailed(s) => s.update(model),
+            Self::ObserveRunStatus(s) => s.update(model),
             Self::RunStepStarted(s) => s.update(model),
             Self::RunStepCompleted(s) => s.update(model),
             Self::CompleteChat(s) => s.update(model),

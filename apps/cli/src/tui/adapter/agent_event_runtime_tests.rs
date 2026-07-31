@@ -1,10 +1,10 @@
 use super::map_runtime_event;
 use crate::tui::adapter::tui_runtime_event::{
-    TuiInteractionBody, TuiInteractionRequest, TuiRunEvent, TuiRunStepEvent, TuiRuntimeEvent,
-    TuiToolApprovalPrompt, TuiWorkspaceSnapshot,
+    TuiInteractionBody, TuiInteractionRequest, TuiRunEvent, TuiRunStatus, TuiRunStepEvent,
+    TuiRuntimeEvent, TuiToolApprovalPrompt, TuiWorkspaceSnapshot,
 };
 use crate::tui::model::conversation::intent::{
-    ConversationIntent, RunCancelling, RunStepStarted, ShowInteraction,
+    ConversationIntent, ObserveRunStatus, RunCancelling, RunStepStarted, ShowInteraction,
 };
 use crate::tui::model::conversation::interaction::{
     UiInteractionRequestId, UiRiskLevel, UiRunId, UiRunStepId,
@@ -34,6 +34,28 @@ fn runtime_run_and_step_lifecycle_maps_to_existing_conversation_intents() {
         mapping.conversation.as_slice(),
         [ConversationIntent::RunStepStarted(RunStepStarted { run_id: actual, step_id, .. })]
             if actual == &run_id && step_id.as_str() == "step-1"
+    ));
+}
+
+#[test]
+fn transitioned_run_maps_to_status_observation() {
+    let run_id = UiRunId::from("run-1");
+    let parent_run_id = UiRunId::from("parent-1");
+    let mapping = map_runtime_event(&TuiRuntimeEvent::Run {
+        run_id: run_id.clone(),
+        parent_run_id: Some(parent_run_id.clone()),
+        event: TuiRunEvent::Transitioned {
+            status: TuiRunStatus::InvokingModel,
+        },
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::ObserveRunStatus(ObserveRunStatus {
+            run_id: actual_run_id,
+            parent_run_id: Some(actual_parent_run_id),
+            status: TuiRunStatus::InvokingModel,
+        })] if actual_run_id == &run_id && actual_parent_run_id == &parent_run_id
     ));
 }
 

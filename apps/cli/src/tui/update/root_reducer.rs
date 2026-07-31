@@ -231,6 +231,7 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::InteractionCompleted { .. }
             | ConversationChange::InteractionCommandRejected { .. }
             | ConversationChange::InteractionConflict { .. }
+            | ConversationChange::RunStatusObserved { .. }
             | ConversationChange::AgentRunChanged { .. }
             | ConversationChange::AgentRunStepChanged { .. } => {
                 ModelChange::output_and_status_dirty()
