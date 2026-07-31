@@ -10,12 +10,33 @@ use syntect::highlighting::{
     Color as SyntectColor, FontStyle, StyleModifier, Theme as SyntectTheme, ThemeItem,
     ThemeSettings,
 };
+use syntect::parsing::SyntaxDefinition;
 use syntect::parsing::SyntaxSet;
 
 use crate::tui::render::{output_area::SpanPart, theme};
 
-/// 全局语法集（懒加载，只加载一次）
-static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(SyntaxSet::load_defaults_newlines);
+/// 全局语法集（懒加载，只加载一次）。
+///
+/// 在 syntect 默认语法集基础上合并内置的 TypeScript / TSX 语法（默认集不含 TS，
+/// 资产由 microsoft/TypeScript-TmLanguage 转换而来，见 `assets/syntaxes/`）。
+static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(|| {
+    let mut builder = SyntaxSet::load_defaults_newlines().into_builder();
+    for (asset_name, source) in [
+        (
+            "TypeScript.sublime-syntax",
+            include_str!("../../../assets/syntaxes/TypeScript.sublime-syntax"),
+        ),
+        (
+            "TSX.sublime-syntax",
+            include_str!("../../../assets/syntaxes/TSX.sublime-syntax"),
+        ),
+    ] {
+        let definition = SyntaxDefinition::load_from_str(source, true, None)
+            .unwrap_or_else(|error| panic!("内置语法资产 {asset_name} 加载失败: {error}"));
+        builder.add(definition);
+    }
+    builder.build()
+});
 
 /// 全局主题集，使用 Catppuccin Macchiato，与 TUI palette 保持一致。
 static THEME: Lazy<SyntectTheme> = Lazy::new(catppuccin_macchiato_theme);
@@ -221,13 +242,26 @@ pub fn language_by_extension(ext: &str) -> Option<syntect::parsing::SyntaxRefere
 /// 从 Markdown fenced code info string 推断 syntect 语言。
 ///
 /// Info string 常用语言名（如 `rust`），不一定是文件扩展名（如 `rs`）。
+/// TS 生态（`ts`/`tsx`/`typescript`/`mts`/`cts`）优先解析为内置 TypeScript 语法；
+/// 语法缺失时回退到 JavaScript，保证 TS 代码至少获得 JS 级高亮。
 pub fn language_by_fence_info(info: &str) -> Option<syntect::parsing::SyntaxReference> {
     let lang = info.split_whitespace().next()?.to_ascii_lowercase();
     let ext = match lang.as_str() {
         "rust" => "rs",
+        "typescript" => "ts",
+        "tsx" => "tsx",
+        "mts" | "cts" => "ts",
         _ => lang.as_str(),
     };
-    language_by_extension(ext).or_else(|| SYNTAX_SET.find_syntax_by_name(&lang).cloned())
+    language_by_extension(ext)
+        .or_else(|| {
+            if matches!(lang.as_str(), "ts" | "tsx" | "typescript" | "mts" | "cts") {
+                language_by_extension("js")
+            } else {
+                None
+            }
+        })
+        .or_else(|| SYNTAX_SET.find_syntax_by_name(&lang).cloned())
 }
 
 /// 一段同语言代码的有状态语法高亮会话。
