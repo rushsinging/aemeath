@@ -26,15 +26,25 @@
 
 ### Run 状态机（内存态）
 
-```
-Created → PreparingContext → InvokingModel → ApplyingResponse
-        → AwaitingToolApproval → ExecutingTools → (下一 Run Step)
-        → AwaitingUser（可恢复暂停，内存存活，不落盘）→ 原 continuation
-        → Compacting → Finishing → Completed / Failed
-任意非终态（除 Cancelling）→ Cancelling → Cancelled
+```text
+Idle → DrainingInput ⇄ AwaitingInput
+              │ Ready / InternalContinuation
+              ▼
+      PreparingContext ⇄ Compacting
+              │
+              ▼
+        InvokingModel → ApplyingResponse
+                              ├─ tool calls → AwaitingToolApproval → ExecutingTools
+                              ├─ interaction → AwaitingInteraction → typed continuation
+                              └─ end turn → FinalizingStep → DrainingInput
+
+CancelRunStep: active Step → CancellingStep → FinalizingStep → DrainingInput
+TerminateRun: 任意非终态 → Terminating → Terminated
+失败: fatal invocation / unavailable interaction / finalization error → Failed
+唯一终态: Completed / Failed / Terminated
 ```
 
-> 崩溃后不恢复中间状态；用户重新发起即新建 Run。
+> 崩溃后不恢复中间状态；用户重新发起即新建 Run。迁移期 `Cancelling → Cancelled` 仅是兼容输入，不属于目标状态机；交付层可以无损接纳兼容状态事实，但不得据此复制另一套执行生命周期或用户可见终态。
 
 ## 2. Workflow（支撑域）
 

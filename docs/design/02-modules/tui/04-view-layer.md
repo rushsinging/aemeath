@@ -160,10 +160,10 @@ ConversationModel.timeline().items()
   │   ├─ AgentProgress → owning ToolCall 下的 SystemNotice child
   │   └─ Interaction → InteractionBlockView（穷尽四种 body）
   │
-  ├─ ConversationModel.model_stream_placeholder() → TextBlockView (placeholder)
+  ├─ Main Run 连续 `InvokingModel` 静默达到 10 秒
+  │   └─ 从 RunActivityState 派生稳定 identity 的临时 Thinking block
   │
-  ├─ 组装 OutputBlockView 树（按嵌套规则）
-  │
+  ├─ 组装 OutputBlockView 树（按嵌套规则）  │
   └─ 产出 OutputViewModel { roots: Vec<OutputBlockView> }
 ```
 
@@ -207,11 +207,13 @@ struct StatusLineViewModel {
 }
 
 struct LiveStatusViewModel {
-    spinner: Option<SpinnerViewModel>,    // verb + phase
-    task_lines: Vec<TaskLineViewModel>,   // 当前任务进度
+    run_activity: Option<RunActivityView>, // typed Run 状态派生的单帧活动行
+    task_lines: Vec<TaskLineViewModel>,    // 当前任务进度
     compact_progress: Option<CompactProgressView>,
 }
 ```
+
+`RunActivityView` 包含稳定 block identity、活动 kind、单行文案、动画 frame、verb 与 Main `InvokingModel` 静默占位标志。它是 ViewAssembler 输出，不是 Model 或 ViewState 的副本；Render 不读取 `RunStatus`。
 
 ## 4. ViewState 状态机
 
@@ -263,17 +265,23 @@ ArrowDown           → scroll_offset += 1（未到尾）；follow_tail = true�
 Esc / 新输入         → 清除选区
 ```
 
-### 4.2 SpinnerAnim
+### 4.2 RunActivityState
 
 ```rust
-struct SpinnerAnim {
-    frame: usize,                       // 当前帧（0-10，11 帧呼吸周期）
+struct RunActivityState {
+    main_run_id: Option<RunId>,
+    invoking_model_silence_started_at: Option<MonotonicInstant>,
+    frame: u64,
+    verb: String,
 }
 ```
 
-- 90ms tick 推进 `frame`，到达 11 后归零
-- `SpinnerPhase` 与 verb 由 StatusViewAssembler 从 ConversationModel 只读 projection 派生并放入 `LiveStatusViewModel`
-- ViewState 只持 animation frame；**NEVER** 持 phase、verb、run_active 或可见性副本
+- 既有 90ms Tick 推进 `frame`，同时检查 10 秒静默边界，不新增异步 timer。
+- `main_run_id` 只用于隔离本地展示计时；权威 Main 身份仍来自 Model 中 `parent_run_id == None` 的 snapshot。
+- 进入 Main `InvokingModel` 时记录可注入单调时间；离态立即清除；再次进入重新计时。
+- 非空 Text / Thinking、ToolCallStart、参数实际变化的 ToolCallUpdate 重置静默时间；空 delta、Usage、重复状态、控制、诊断和 Sub Run 事件不重置。
+- `verb` 在同一活动区间稳定，`frame` 只用于动画；两者均不表达业务 phase。
+- ViewState **NEVER** 持有 `RunStatus`、业务 phase、`run_active` 或可见性副本。
 
 ### 4.3 ViewModelDirty bitfield
 
@@ -510,7 +518,7 @@ Effect 是 Model Change 的副作用反馈分支，与 ViewAssembler 渲染分�
 4. `QueuedUserMessage` 必须组装成带 `Queued` semantic 的 UserMessage；所有 timeline variant 都有显式 assembler 分支。
 5. BlockCache 与 GuttedCache 必须 bounded；所有影响可见输出的 ToolResult data / style 字段必须进入 `cache_version()`。
 6. `follow_tail` 只在 OutputViewState 定义一次；**NEVER** 存在常量 hint、无消费字段、no-op event / effect、无调用 production module 或全局 `allow(dead_code)`。
-7. ViewState 只持 scroll / selection / collapse / animation / cache 等瞬时状态；Run、Interaction、spinner phase / verb 与 input buffer 只从 Model / ViewModel 读取。
+7. ViewState 只持 scroll / selection / collapse / animation / cache / 本地单调展示时间等瞬时状态；Run status、Interaction 与 input buffer 只在 Model，活动文案与可见性只在 ViewModel。
 
 ## 10. 相关文档
 
