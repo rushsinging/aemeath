@@ -75,10 +75,7 @@ impl Dispatcher {
     /// 任一 subscription 配置非法（如 Stop 配 failure_policy、非前置闸门配 Block）
     /// 即返回全部错误——与设计 §4「非法组合在 Config 校验阶段拒绝，而非运行时
     /// 静默忽略」一致。**NEVER** 静默丢弃非法 subscription。
-    pub fn try_new(
-        subscriptions: Vec<HookSubscription>,
-        _legacy_env: HashMap<String, String>,
-    ) -> Result<Self, Vec<SubscriptionError>> {
+    pub fn try_new(subscriptions: Vec<HookSubscription>) -> Result<Self, Vec<SubscriptionError>> {
         Self::build(
             subscriptions,
             Box::new(ProcessDriverExecutor::new(

@@ -257,12 +257,9 @@ impl CompactHarness {
             crate::application::run::config::RunConfigSnapshot::capture(config_snapshot.clone());
         let hook_events = HashMap::new();
         let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-            hook::build_dispatcher(
-                &share::config::hooks::HooksConfig {
-                    events: hook_events,
-                },
-                std::collections::HashMap::new(),
-            )
+            hook::build_dispatcher(&share::config::hooks::HooksConfig {
+                events: hook_events,
+            })
             .unwrap(),
         );
         let tool_catalog =
