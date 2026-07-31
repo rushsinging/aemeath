@@ -41,6 +41,27 @@ pub(crate) enum TuiRunTerminationReason {
     ParentStepCancelled,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiRunStatus {
+    Created,
+    DrainingInput,
+    PreparingContext,
+    InvokingModel,
+    ApplyingResponse,
+    AwaitingToolApproval,
+    ExecutingTools,
+    AwaitingUser,
+    Compacting,
+    CancellingStep,
+    FinalizingStep,
+    Cancelling,
+    Terminating,
+    Completed,
+    Failed,
+    Cancelled,
+    Terminated,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum TuiRunEvent {
     Started,
@@ -66,7 +87,7 @@ pub(crate) enum TuiRunEvent {
         reason: TuiRunTerminationReason,
     },
     Transitioned {
-        status: String,
+        status: TuiRunStatus,
     },
 }
 

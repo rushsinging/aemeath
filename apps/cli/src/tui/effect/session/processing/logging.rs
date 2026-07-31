@@ -190,7 +190,7 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::RunCompleted { run_id, .. } => crate::tui::log_trace!("{} run_completed run_id={}", stage, run_id),
         sdk::ChatEvent::RunFailed { run_id, .. } => crate::tui::log_trace!("{} run_failed run_id={}", stage, run_id),
         sdk::ChatEvent::RunStuckDetected { run_id, .. } => crate::tui::log_trace!("{} run_stuck_detected run_id={}", stage, run_id),
-        sdk::ChatEvent::RunTransitioned { run_id, status, .. } => crate::tui::log_trace!("{} run_transitioned run_id={} status={}", stage, run_id, status),
+        sdk::ChatEvent::RunTransitioned { run_id, status, .. } => crate::tui::log_trace!("{} run_transitioned run_id={} status={:?}", stage, run_id, status),
         sdk::ChatEvent::RunAwaitingUser { run_id, .. } => crate::tui::log_trace!("{} run_awaiting_user run_id={}", stage, run_id),
         sdk::ChatEvent::RunResumed { run_id, .. } => crate::tui::log_trace!("{} run_resumed run_id={}", stage, run_id),
         sdk::ChatEvent::InteractionRequested { request } => crate::tui::log_trace!("{} interaction_requested request_id={} run_id={}", stage, request.id, request.run_id),

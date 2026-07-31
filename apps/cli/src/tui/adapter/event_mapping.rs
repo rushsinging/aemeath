@@ -218,7 +218,13 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             run_id,
             parent_run_id,
             status,
-        } => run_event(run_id, parent_run_id, TuiRunEvent::Transitioned { status }),
+        } => run_event(
+            run_id,
+            parent_run_id,
+            TuiRunEvent::Transitioned {
+                status: run_status(status),
+            },
+        ),
         ChatEvent::RunTerminationRequested {
             run_id,
             parent_run_id,
@@ -496,6 +502,28 @@ fn run_id(value: sdk::RunId) -> UiRunId {
 fn parent_run_id(value: Option<sdk::RunId>) -> Option<UiRunId> {
     value.as_ref().map(|id| UiRunId::from(id.as_str()))
 }
+fn run_status(value: sdk::RunStatusView) -> TuiRunStatus {
+    match value {
+        sdk::RunStatusView::Created => TuiRunStatus::Created,
+        sdk::RunStatusView::DrainingInput => TuiRunStatus::DrainingInput,
+        sdk::RunStatusView::PreparingContext => TuiRunStatus::PreparingContext,
+        sdk::RunStatusView::InvokingModel => TuiRunStatus::InvokingModel,
+        sdk::RunStatusView::ApplyingResponse => TuiRunStatus::ApplyingResponse,
+        sdk::RunStatusView::AwaitingToolApproval => TuiRunStatus::AwaitingToolApproval,
+        sdk::RunStatusView::ExecutingTools => TuiRunStatus::ExecutingTools,
+        sdk::RunStatusView::AwaitingUser => TuiRunStatus::AwaitingUser,
+        sdk::RunStatusView::Compacting => TuiRunStatus::Compacting,
+        sdk::RunStatusView::CancellingStep => TuiRunStatus::CancellingStep,
+        sdk::RunStatusView::FinalizingStep => TuiRunStatus::FinalizingStep,
+        sdk::RunStatusView::Cancelling => TuiRunStatus::Cancelling,
+        sdk::RunStatusView::Terminating => TuiRunStatus::Terminating,
+        sdk::RunStatusView::Completed => TuiRunStatus::Completed,
+        sdk::RunStatusView::Failed => TuiRunStatus::Failed,
+        sdk::RunStatusView::Cancelled => TuiRunStatus::Cancelled,
+        sdk::RunStatusView::Terminated => TuiRunStatus::Terminated,
+    }
+}
+
 fn run_event(
     run_id_value: sdk::RunId,
     parent: Option<sdk::RunId>,

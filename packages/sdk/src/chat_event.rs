@@ -35,6 +35,58 @@ use crate::ChatMessage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+mod run_status_view_tests {
+    use super::{ChatEvent, RunStatusView};
+    use serde_json::json;
+
+    #[test]
+    fn run_status_view_serializes_all_variants() {
+        let statuses = [
+            (RunStatusView::Created, "created"),
+            (RunStatusView::DrainingInput, "draining_input"),
+            (RunStatusView::PreparingContext, "preparing_context"),
+            (RunStatusView::InvokingModel, "invoking_model"),
+            (RunStatusView::ApplyingResponse, "applying_response"),
+            (
+                RunStatusView::AwaitingToolApproval,
+                "awaiting_tool_approval",
+            ),
+            (RunStatusView::ExecutingTools, "executing_tools"),
+            (RunStatusView::AwaitingUser, "awaiting_user"),
+            (RunStatusView::Compacting, "compacting"),
+            (RunStatusView::CancellingStep, "cancelling_step"),
+            (RunStatusView::FinalizingStep, "finalizing_step"),
+            (RunStatusView::Cancelling, "cancelling"),
+            (RunStatusView::Terminating, "terminating"),
+            (RunStatusView::Completed, "completed"),
+            (RunStatusView::Failed, "failed"),
+            (RunStatusView::Cancelled, "cancelled"),
+            (RunStatusView::Terminated, "terminated"),
+        ];
+
+        for (status, expected) in statuses {
+            assert_eq!(serde_json::to_value(status).unwrap(), json!(expected));
+        }
+    }
+
+    #[test]
+    fn run_transitioned_uses_typed_status() {
+        let event = ChatEvent::RunTransitioned {
+            run_id: crate::RunId::new_v7(),
+            parent_run_id: None,
+            status: RunStatusView::InvokingModel,
+        };
+
+        match event {
+            ChatEvent::RunTransitioned { status, .. } => {
+                assert_eq!(status, RunStatusView::InvokingModel);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum ResumedStepFinalizeCause {
     Completed,
@@ -74,6 +126,28 @@ impl ChatEventContext {
     pub fn new(chat_id: crate::ids::ChatId, turn_id: crate::ids::ChatTurnId) -> Self {
         Self { chat_id, turn_id }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunStatusView {
+    Created,
+    DrainingInput,
+    PreparingContext,
+    InvokingModel,
+    ApplyingResponse,
+    AwaitingToolApproval,
+    ExecutingTools,
+    AwaitingUser,
+    Compacting,
+    CancellingStep,
+    FinalizingStep,
+    Cancelling,
+    Terminating,
+    Completed,
+    Failed,
+    Cancelled,
+    Terminated,
 }
 
 /// 工具调用的中间状态。
@@ -333,7 +407,7 @@ pub enum ChatEvent {
     RunTransitioned {
         run_id: crate::RunId,
         parent_run_id: Option<crate::RunId>,
-        status: String,
+        status: RunStatusView,
     },
     RunAwaitingUser {
         run_id: crate::RunId,

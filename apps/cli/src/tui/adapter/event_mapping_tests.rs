@@ -1,5 +1,75 @@
 use super::{sdk_event_to_tui_event, SdkEventMapping};
-use crate::tui::adapter::tui_runtime_event::{TuiHookStatus, TuiRunEvent, TuiRuntimeEvent};
+use crate::tui::adapter::tui_runtime_event::{
+    TuiHookStatus, TuiRunEvent, TuiRunStatus, TuiRuntimeEvent,
+};
+
+#[test]
+fn run_status_view_maps_without_string_erasure() {
+    let statuses = [
+        (sdk::RunStatusView::Created, TuiRunStatus::Created),
+        (
+            sdk::RunStatusView::DrainingInput,
+            TuiRunStatus::DrainingInput,
+        ),
+        (
+            sdk::RunStatusView::PreparingContext,
+            TuiRunStatus::PreparingContext,
+        ),
+        (
+            sdk::RunStatusView::InvokingModel,
+            TuiRunStatus::InvokingModel,
+        ),
+        (
+            sdk::RunStatusView::ApplyingResponse,
+            TuiRunStatus::ApplyingResponse,
+        ),
+        (
+            sdk::RunStatusView::AwaitingToolApproval,
+            TuiRunStatus::AwaitingToolApproval,
+        ),
+        (
+            sdk::RunStatusView::ExecutingTools,
+            TuiRunStatus::ExecutingTools,
+        ),
+        (sdk::RunStatusView::AwaitingUser, TuiRunStatus::AwaitingUser),
+        (sdk::RunStatusView::Compacting, TuiRunStatus::Compacting),
+        (
+            sdk::RunStatusView::CancellingStep,
+            TuiRunStatus::CancellingStep,
+        ),
+        (
+            sdk::RunStatusView::FinalizingStep,
+            TuiRunStatus::FinalizingStep,
+        ),
+        (sdk::RunStatusView::Cancelling, TuiRunStatus::Cancelling),
+        (sdk::RunStatusView::Terminating, TuiRunStatus::Terminating),
+        (sdk::RunStatusView::Completed, TuiRunStatus::Completed),
+        (sdk::RunStatusView::Failed, TuiRunStatus::Failed),
+        (sdk::RunStatusView::Cancelled, TuiRunStatus::Cancelled),
+        (sdk::RunStatusView::Terminated, TuiRunStatus::Terminated),
+    ];
+
+    for (sdk_status, expected_status) in statuses {
+        let run_id = sdk::RunId::new_v7();
+        let parent_run_id = sdk::RunId::new_v7();
+        let mapped = sdk_event_to_tui_event(sdk::ChatEvent::RunTransitioned {
+            run_id: run_id.clone(),
+            parent_run_id: Some(parent_run_id.clone()),
+            status: sdk_status,
+        });
+
+        assert!(matches!(
+            mapped,
+            SdkEventMapping::Runtime(TuiRuntimeEvent::Run {
+                run_id: mapped_run_id,
+                parent_run_id: Some(mapped_parent_run_id),
+                event: TuiRunEvent::Transitioned { status },
+            }) if mapped_run_id.as_str() == run_id.as_str()
+                && mapped_parent_run_id.as_str() == parent_run_id.as_str()
+                && status == expected_status
+        ));
+    }
+}
 
 #[test]
 fn tool_result_projection_keeps_bounded_payload_and_blob_reason() {
