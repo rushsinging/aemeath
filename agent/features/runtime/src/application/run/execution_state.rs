@@ -8,6 +8,15 @@ use crate::application::loop_engine::PendingInteractionWork;
 use tools::AgentRunTerminal;
 
 use crate::ports::{ContextRequest, ContextWindow};
+
+pub(crate) struct ActiveInteractionReceiver {
+    pub(crate) metadata: InteractionRequestMetadata,
+    pub(crate) receiver: tokio::sync::oneshot::Receiver<InteractionCompletion>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ActiveInteractionAlreadyRegistered;
+
 /// 产生和替换的消息、Context 投影、turn 计数与 continuation 工作集。
 #[derive(Default)]
 pub struct RunExecutionState {
@@ -23,10 +32,7 @@ pub struct RunExecutionState {
     terminal: Option<AgentRunTerminal>,
     pending_interaction_work: Option<PendingInteractionWork>,
     adopted_input: Vec<(sdk::InputId, Message)>,
-    interaction_receivers: Vec<(
-        InteractionRequestMetadata,
-        tokio::sync::oneshot::Receiver<InteractionCompletion>,
-    )>,
+    active_interaction: Option<ActiveInteractionReceiver>,
 }
 
 impl RunExecutionState {
@@ -229,37 +235,33 @@ impl RunExecutionState {
 
     #[cfg(test)]
     pub(crate) fn interaction_metadata(&self) -> Vec<InteractionRequestMetadata> {
-        self.interaction_receivers
-            .iter()
-            .map(|(metadata, _)| metadata.clone())
+        self.active_interaction_metadata()
+            .cloned()
+            .into_iter()
             .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_interaction_metadata(&self) -> Option<&InteractionRequestMetadata> {
+        self.active_interaction
+            .as_ref()
+            .map(|active| &active.metadata)
     }
 
     pub(crate) fn store_interaction_receiver(
         &mut self,
         metadata: InteractionRequestMetadata,
         receiver: tokio::sync::oneshot::Receiver<InteractionCompletion>,
-    ) {
-        self.interaction_receivers.push((metadata, receiver));
+    ) -> Result<(), ActiveInteractionAlreadyRegistered> {
+        if self.active_interaction.is_some() {
+            return Err(ActiveInteractionAlreadyRegistered);
+        }
+        self.active_interaction = Some(ActiveInteractionReceiver { metadata, receiver });
+        Ok(())
     }
 
-    pub(crate) fn take_interaction_receivers(
-        &mut self,
-    ) -> Vec<(
-        InteractionRequestMetadata,
-        tokio::sync::oneshot::Receiver<InteractionCompletion>,
-    )> {
-        std::mem::take(&mut self.interaction_receivers)
-    }
-
-    pub(crate) fn replace_interaction_receivers(
-        &mut self,
-        receivers: Vec<(
-            InteractionRequestMetadata,
-            tokio::sync::oneshot::Receiver<InteractionCompletion>,
-        )>,
-    ) {
-        self.interaction_receivers = receivers;
+    pub(crate) fn take_active_interaction(&mut self) -> Option<ActiveInteractionReceiver> {
+        self.active_interaction.take()
     }
 
     #[cfg(test)]

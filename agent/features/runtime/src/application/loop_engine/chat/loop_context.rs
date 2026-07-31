@@ -9,8 +9,7 @@
 //! assembled via `shell.runtime_context_factory.create()`.
 
 use crate::application::loop_engine::chat::events::ChatEventSink;
-use crate::application::loop_engine::chat::input_gate::InputEventDrainPort;
-use crate::application::loop_engine::chat::queue::QueueDrainPort;
+use crate::application::loop_engine::input_strategy::SessionInputPort;
 use std::sync::Arc;
 
 /// 模型切换构建器类型（#567）：接受 selection 字符串，async 返回
@@ -44,25 +43,19 @@ pub type SwitchClientFn = Arc<
 /// Remaining fields are I/O channels, the session shell, initial user messages,
 /// and per-session mutable bookkeeping.
 #[allow(clippy::type_complexity)]
-pub struct ChatLoopContext<S, Q, I>
+pub struct ChatLoopContext<S, I>
 where
     S: ChatEventSink,
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
+    I: SessionInputPort,
 {
     /// I/O channels
     pub sink: S,
-    pub queue: Q,
     pub input_events: I,
 
     /// #1385: Session shell — single source for all session-level state.
     /// Non-Option; tests must construct a real `SessionRuntime` via the
     /// test helper or provide a minimal fixture.
     pub shell: crate::application::client::SessionRuntime,
-
-    /// 本轮 chat loop 的初始消息（来自 user_input）。Runtime 不再持有/回写
-    /// 会话链；历史由 Context backing 提供。
-    pub initial_messages: Vec<share::message::Message>,
 
     /// Per-session read file tracking.
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,

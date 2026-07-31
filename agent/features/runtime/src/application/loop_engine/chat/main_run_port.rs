@@ -11,11 +11,11 @@ use crate::application::loop_engine::chat::reflection::{
 };
 use crate::application::loop_engine::chat::stream_handler::InvocationEventReducer;
 use crate::application::loop_engine::chat::{
-    ChatEventSink, InputEventDrainPort, QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
+    ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext,
 };
 use crate::application::loop_engine::event_strategy::{ChatStreamEventObserver, RunEventObserver};
 use crate::application::loop_engine::input_strategy::{
-    BufferedInputAdapter, InputContinuationState,
+    BufferedInputAdapter, InputContinuationState, SessionInputPort,
 };
 use crate::application::loop_engine::{EventSinkPort, LoopEngineError, ModelStep};
 use crate::application::run::context::RuntimeContext;
@@ -352,13 +352,12 @@ impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRound
     }
 }
 
-pub(crate) struct ChatModelObserver<Q, I>
+pub(crate) struct ChatModelObserver<I>
 where
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
+    I: SessionInputPort,
 {
     pub runtime_context: RuntimeContext,
-    pub input: BufferedInputAdapter<Q, I>,
+    pub input: BufferedInputAdapter<I>,
     pub system_prompt: String,
     pub context_size: usize,
     pub reflection_tasks: crate::application::reflection::ReflectionTaskAdapter,
@@ -367,10 +366,9 @@ where
     pub tool_identity: crate::application::tool::coordination::identity::ToolIdentityRegistry,
 }
 
-impl<Q, I> ChatModelObserver<Q, I>
+impl<I> ChatModelObserver<I>
 where
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
+    I: SessionInputPort,
 {
     async fn queue_busy_event(&mut self, event: sdk::ChatInputEvent) {
         match event {
@@ -390,10 +388,9 @@ where
     }
 }
 
-impl<Q, I> crate::application::model::invocation::ModelInvocationSource for ChatModelObserver<Q, I>
+impl<I> crate::application::model::invocation::ModelInvocationSource for ChatModelObserver<I>
 where
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
+    I: SessionInputPort,
 {
     fn runtime_context(&self) -> &RuntimeContext {
         &self.runtime_context
@@ -454,11 +451,9 @@ where
 }
 
 #[async_trait]
-impl<Q, I> crate::application::model::invocation::ModelInvocationObserver
-    for ChatModelObserver<Q, I>
+impl<I> crate::application::model::invocation::ModelInvocationObserver for ChatModelObserver<I>
 where
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
+    I: SessionInputPort,
 {
     async fn pump_while_invoking<T: Send>(
         &mut self,
@@ -493,11 +488,8 @@ where
         response: &crate::application::loop_engine::chat::InvocationResponse,
         elapsed_secs: f64,
     ) {
-        if let Some(queued) = self.input.queue.drain_queued_input().await {
-            for text in queued {
-                self.queue_busy_event(sdk::ChatInputEvent::classify_text(text, Vec::new()))
-                    .await;
-            }
+        for event in self.input.input_events.drain_input_events().await {
+            self.queue_busy_event(event).await;
         }
         self.runtime_context
             .event_sink()

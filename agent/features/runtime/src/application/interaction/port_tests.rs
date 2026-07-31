@@ -12,6 +12,7 @@ fn question_request() -> InteractionRequest {
     InteractionRequest {
         id: sdk::InteractionRequestId::new_v7(),
         run_id: RunId::new_v7(),
+        tool_call_id: None,
         body: InteractionRequestBody::UserQuestions(vec![UserQuestion {
             prompt: "继续？".to_string(),
             options: vec!["是".to_string()],
@@ -208,6 +209,7 @@ fn bridge_as_trait_object_drain_run_cancels_pending() {
     let r1 = InteractionRequest {
         id: sdk::InteractionRequestId::new_v7(),
         run_id: run_id.clone(),
+        tool_call_id: None,
         body: InteractionRequestBody::HardPause(sdk::StuckDiagnostic {
             reason: "stuck".into(),
             recent_actions: vec![],
@@ -215,7 +217,8 @@ fn bridge_as_trait_object_drain_run_cancels_pending() {
     };
     let r2 = InteractionRequest {
         id: sdk::InteractionRequestId::new_v7(),
-        run_id: RunId::new_v7(), // different run
+        run_id: RunId::new_v7(),
+        tool_call_id: None, // different run
         body: InteractionRequestBody::HardPause(sdk::StuckDiagnostic {
             reason: "other".into(),
             recent_actions: vec![],

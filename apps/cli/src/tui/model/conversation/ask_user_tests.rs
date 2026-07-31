@@ -1,6 +1,7 @@
 use super::*;
 use crate::tui::model::conversation::block::AskUserSlot;
 use crate::tui::model::conversation::intent::*;
+use crate::tui::model::conversation::interaction::UiInteractionRequestId;
 
 fn make_slot(id: &str, question: &str, options: &[&str]) -> AskUserSlot {
     let llm_count = options.len();
@@ -24,7 +25,14 @@ fn make_slot(id: &str, question: &str, options: &[&str]) -> AskUserSlot {
 }
 
 fn show_batch(model: &mut ConversationModel, slots: Vec<AskUserSlot>) {
-    model.apply(ShowAskUserBatch { slots });
+    let request_id = slots
+        .first()
+        .map(|slot| slot.id.as_str())
+        .unwrap_or("empty-request");
+    model.apply(ShowAskUserBatch {
+        request_id: UiInteractionRequestId::from(request_id),
+        slots,
+    });
 }
 
 fn timeline_item(model: &ConversationModel) -> &OutputTimelineItem {
@@ -438,6 +446,31 @@ fn navigate_back_to_no_option_slot_activates_chat_input() {
             .ask_user_snapshot()
             .expect("active Ask batch")
             .chat_input_active
+    );
+}
+
+#[test]
+fn ask_user_answers_are_selected_by_interaction_request_identity() {
+    let mut model = ConversationModel::default();
+    model.restore_answered_ask_user_batch(vec![AskUserSlot {
+        answer: Some("中餐".to_string()),
+        ..make_slot("history", "之前想吃什么？", &[])
+    }]);
+    show_batch(
+        &mut model,
+        vec![make_slot("current", "明天想吃什么？", &["日料"])],
+    );
+    model.apply(AnswerCurrentAskUser {
+        answer: "日料".to_string(),
+    });
+
+    assert_eq!(
+        model.ask_user_batch_answers(&UiInteractionRequestId::from("current")),
+        Some(vec!["日料".to_string()])
+    );
+    assert_eq!(
+        model.ask_user_batch_answers(&UiInteractionRequestId::from("history")),
+        None
     );
 }
 

@@ -875,6 +875,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 request: InteractionRequest {
                     request_id: request.request_id.clone(),
                     run_id: request.run_id.clone(),
+                    tool_call_id: request.tool_call_id.clone(),
                     body,
                 },
             }))

@@ -12,7 +12,7 @@ mod trait_reflection;
 mod trait_session;
 
 #[cfg(test)]
-pub(crate) use accessors::{InputPortPair, SessionModelState};
+pub(crate) use accessors::SessionModelState;
 pub(crate) use accessors::{RuntimeContextAssemblyError, SessionRuntime};
 pub(crate) use mapping::{
     map_finalize_cause_to_sdk, message_to_sdk, skill_snapshot_to_sdk, workspace_context_to_sdk,

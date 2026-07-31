@@ -336,7 +336,7 @@ impl ConversationUpdate for UpdateAgentMeta {
 
 impl ConversationUpdate for ShowAskUserBatch {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.show_ask_user_batch(self.slots)
+        model.show_ask_user_batch(self.request_id, self.slots)
     }
 }
 

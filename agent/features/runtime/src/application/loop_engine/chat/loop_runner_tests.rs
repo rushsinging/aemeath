@@ -344,13 +344,8 @@ fn test_shell() -> crate::application::client::SessionRuntime {
                 crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
             )
         }),
-        input_port_factory: Arc::new(|queue, input_events| {
-            crate::application::client::InputPortPair {
-                queue: crate::adapters::input_buffer::RuntimeQueueDrainPort::new(queue),
-                input_events: crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(
-                    input_events,
-                ),
-            }
+        input_port_factory: Arc::new(|ingress| {
+            crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(ingress)
         }),
         session_reminders: Arc::new(std::sync::RwLock::new(
             share::memory::SessionReminders::default(),
@@ -395,23 +390,19 @@ fn test_session_query_port() -> Arc<dyn crate::ports::SessionQueryPort> {
 }
 
 /// #1385: Shorthand for constructing a [`ChatLoopContext`] from a test shell.
-fn test_chat_loop_ctx<S, Q, I>(
+fn test_chat_loop_ctx<S, I>(
     sink: S,
-    queue: Q,
     input_events: I,
     shell: crate::application::client::SessionRuntime,
-) -> ChatLoopContext<S, Q, I>
+) -> ChatLoopContext<S, I>
 where
     S: ChatEventSink,
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
+    I: crate::application::loop_engine::input_strategy::SessionInputPort,
 {
     ChatLoopContext {
         sink,
-        queue,
         input_events,
         shell,
-        initial_messages: vec![],
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         session_queries: test_session_query_port(),
@@ -511,25 +502,6 @@ fn each_request_attempt_has_complete_fresh_context() {
         first.request_id, retry.request_id,
         "retry must get a new request_id"
     );
-}
-
-#[derive(Clone)]
-struct SequenceQueueDrainPort {
-    responses: Arc<Mutex<VecDeque<Option<Vec<String>>>>>,
-}
-
-impl SequenceQueueDrainPort {
-    fn new(responses: Vec<Option<Vec<String>>>) -> Self {
-        Self {
-            responses: Arc::new(Mutex::new(VecDeque::from(responses))),
-        }
-    }
-}
-
-impl QueueDrainPort for SequenceQueueDrainPort {
-    fn drain_queued_input<'a>(&'a self) -> crate::application::loop_engine::chat::QueueFuture<'a> {
-        Box::pin(async move { self.responses.lock().unwrap().pop_front().flatten() })
-    }
 }
 
 #[derive(Clone, Default)]
@@ -784,7 +756,7 @@ fn retry_main_context(
     provider: Arc<ScriptedInvocationProvider>,
     sink: RecordingSink,
     input_events: ChannelInputEvents,
-) -> ChatLoopContext<RecordingSink, SequenceQueueDrainPort, ChannelInputEvents> {
+) -> ChatLoopContext<RecordingSink, ChannelInputEvents> {
     retry_main_context_with_wiring(provider, sink, input_events).0
 }
 
@@ -793,7 +765,7 @@ fn retry_main_context_with_wiring(
     sink: RecordingSink,
     input_events: ChannelInputEvents,
 ) -> (
-    ChatLoopContext<RecordingSink, SequenceQueueDrainPort, ChannelInputEvents>,
+    ChatLoopContext<RecordingSink, ChannelInputEvents>,
     Arc<context::MainSessionWiring>,
 ) {
     let shell = test_shell();
@@ -802,15 +774,7 @@ fn retry_main_context_with_wiring(
         crate::application::model::test_support::binding_from_llm_provider(provider),
     );
     shell.set_test_session_id("test-main-terminal-retry");
-    (
-        test_chat_loop_ctx(
-            sink,
-            SequenceQueueDrainPort::new(Vec::new()),
-            input_events,
-            shell,
-        ),
-        wiring,
-    )
+    (test_chat_loop_ctx(sink, input_events, shell), wiring)
 }
 
 async fn wait_for_retry_test_condition(description: &str, condition: impl Fn() -> bool) {
@@ -1120,12 +1084,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
             .with_hooks(blocking_then_success_hook_port(&flag_path)),
     );
     shell.set_test_session_id("test-stop-hook-blocked");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1249,12 +1208,7 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
             .with_hooks(delayed_blocking_then_success_hook_port(&flag_path)),
     );
     shell.set_test_session_id("test-stop-hook-follow-up");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1357,12 +1311,7 @@ async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
             .with_hooks(blocking_then_success_hook_port(&flag_path)),
     );
     shell.set_test_session_id("test-stop-hook-metadata");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1523,12 +1472,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap(),
     )));
     shell.set_test_session_id("test-worktree-stop-hook-env");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1559,16 +1503,24 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         ))
         .unwrap();
 
-    // queue 仍在 mid-turn gate 中被 drain（idle 门不消费 queue）。
-    let queue = SequenceQueueDrainPort::new(vec![
-        None,
-        Some(vec!["stop-hook input".to_string()]),
-        None,
-        None,
-    ]);
-
     let driver_sink = sink.clone();
     let driver = tokio::spawn(async move {
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .any(|event| event == "Text:initial final response")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        input_tx
+            .send(sdk::ChatInputEvent::user_message(
+                "stop-hook input".to_string(),
+                Vec::new(),
+            ))
+            .unwrap();
         loop {
             if driver_sink
                 .events()
@@ -1593,7 +1545,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-session");
-    let ctx = test_chat_loop_ctx(sink.clone(), queue, input_events, shell);
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1742,12 +1694,7 @@ async fn test_continue_false_json_treated_as_block() {
             .with_hooks(continue_false_then_allow_hook_port(&flag_path)),
     );
     shell.set_test_session_id("test-continue-false");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1842,12 +1789,7 @@ async fn test_stall_triggers_stop_hook_check() {
             .with_hooks(block_n_times_hook_port(&counter_path, 3)),
     );
     shell.set_test_session_id("test-stall-hook");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -1886,6 +1828,7 @@ async fn test_stall_triggers_stop_hook_check() {
 #[derive(Clone)]
 struct ChannelInputEvents {
     rx: Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<sdk::ChatInputEvent>>>,
+    deferred: Arc<Mutex<VecDeque<sdk::ChatInputEvent>>>,
 }
 
 impl ChannelInputEvents {
@@ -1898,8 +1841,15 @@ impl ChannelInputEvents {
             tx,
             Self {
                 rx: Arc::new(tokio::sync::Mutex::new(rx)),
+                deferred: Arc::new(Mutex::new(VecDeque::new())),
             },
         )
+    }
+}
+
+impl crate::application::loop_engine::input_strategy::SessionInputPort for ChannelInputEvents {
+    fn defer(&self, event: sdk::ChatInputEvent) {
+        self.deferred.lock().unwrap().push_back(event);
     }
 }
 
@@ -1908,8 +1858,8 @@ impl InputEventDrainPort for ChannelInputEvents {
         &'a self,
     ) -> crate::application::loop_engine::chat::InputEventFuture<'a> {
         Box::pin(async move {
+            let mut events: Vec<_> = self.deferred.lock().unwrap().drain(..).collect();
             let mut rx = self.rx.lock().await;
-            let mut events = Vec::new();
             while let Ok(event) = rx.try_recv() {
                 events.push(event);
             }
@@ -1921,6 +1871,9 @@ impl InputEventDrainPort for ChannelInputEvents {
         &'a self,
     ) -> crate::application::loop_engine::chat::InputEventOptFuture<'a> {
         Box::pin(async move {
+            if let Some(event) = self.deferred.lock().unwrap().pop_front() {
+                return Some(event);
+            }
             let mut rx = self.rx.lock().await;
             rx.recv().await
         })
@@ -1982,12 +1935,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-persistent-loop");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     // timeout 包裹：若 loop 在 shutdown 后未返回（hang），测试失败而非永久阻塞。
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -2120,12 +2068,7 @@ async fn test_stall_detector_resets_across_user_turns() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-stall-reset-across-turns");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -2292,12 +2235,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-idle-control-command");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -2389,12 +2327,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-idle-pending-save");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -2466,12 +2399,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-idle-pending-list-reminders");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -2525,12 +2453,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
             .with_hooks(always_blocking_hook_port()),
     );
     shell.set_test_session_id("test-block-limit");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
     tokio::time::timeout(std::time::Duration::from_secs(30), process_chat_loop(ctx))
         .await
         .expect("process_chat_loop should complete after shutdown");
@@ -2687,12 +2610,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-cancel-then-idle");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -2878,12 +2796,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-cancel-preserves-prior-turns");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     // timeout 包裹：未 shutdown（hang）则测试失败而非永久阻塞。
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -3036,12 +2949,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-idle-until-first-input");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -3135,12 +3043,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-no-turn-signal-before-first-input");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -3205,12 +3108,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-resume-skip-pending");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -3255,12 +3153,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-user-tail-idle");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![None]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -3375,12 +3268,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-api-error-finalize");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
         .await
@@ -3903,12 +3791,7 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-per-turn-drain-seal");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     let driver_sink = sink.clone();
     let driver_after_first = after_first.clone();
@@ -4034,12 +3917,7 @@ async fn per_turn_drain_seal_input_id_preserved_when_run_returns_tool_results_wi
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-per-turn-drain-seal-2");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     let driver_sink = sink.clone();
     let driver_after_first = after_first.clone();
@@ -4131,12 +4009,7 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
     shell.runtime_context_factory =
         Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-per-turn-drain-seal-single");
-    let ctx = test_chat_loop_ctx(
-        sink.clone(),
-        SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        shell,
-    );
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
     let driver_sink = sink.clone();
     let driver_after = after_response.clone();

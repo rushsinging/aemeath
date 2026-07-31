@@ -1,6 +1,4 @@
 use crate::application::loop_engine::chat::events::{ChatEventSink, RuntimeStreamEvent};
-#[cfg(test)]
-use crate::application::loop_engine::chat::queue::{QueueDrainPort, QueueFuture};
 use sdk::ChatInputEvent;
 use share::message::Message;
 use std::collections::VecDeque;
@@ -164,6 +162,13 @@ impl PendingInputBuffer {
             .is_empty()
     }
 
+    pub(crate) fn pop_front(&self) -> Option<ChatInputEvent> {
+        self.events
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .pop_front()
+    }
+
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.events
@@ -184,39 +189,28 @@ impl PendingInputBuffer {
 }
 
 #[cfg(test)]
-#[allow(clippy::too_many_arguments)]
-pub async fn run_loop_gate<Q, I, S>(
+pub async fn run_loop_gate<I, S>(
     kind: GateKind,
     buffer: &PendingInputBuffer,
-    queue: &Q,
     input_events: &I,
     sink: &S,
     task_access: &dyn task::TaskAccess,
     is_idle: bool,
 ) -> GateOutcome
 where
-    Q: QueueDrainPort,
     I: InputEventDrainPort,
     S: ChatEventSink,
 {
-    drain_sources(buffer, queue, input_events).await;
+    drain_source(buffer, input_events).await;
     apply_gate(kind, buffer, sink, task_access, is_idle).await
 }
 
 #[cfg(test)]
-pub async fn drain_sources<Q, I>(buffer: &PendingInputBuffer, queue: &Q, input_events: &I)
+pub async fn drain_source<I>(buffer: &PendingInputBuffer, input_events: &I)
 where
-    Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
     buffer.extend(input_events.drain_input_events().await);
-    if let Some(queued) = queue.drain_queued_input().await {
-        buffer.extend(
-            queued
-                .into_iter()
-                .map(|text| ChatInputEvent::classify_text(text, Vec::new())),
-        );
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -552,15 +546,4 @@ pub(crate) fn user_message_with_images(text: String, images: Vec<sdk::ChatInputI
             .map(|img| (img.id, img.base64, img.media_type))
             .collect(),
     )
-}
-
-#[cfg(test)]
-#[derive(Clone, Default)]
-pub struct EmptyQueueDrainPort;
-
-#[cfg(test)]
-impl QueueDrainPort for EmptyQueueDrainPort {
-    fn drain_queued_input<'a>(&'a self) -> QueueFuture<'a> {
-        Box::pin(async { None })
-    }
 }

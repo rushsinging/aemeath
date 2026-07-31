@@ -238,8 +238,18 @@ impl InteractionPort for InteractionBridge {
         &self,
         request: InteractionRequest,
     ) -> Result<oneshot::Receiver<InteractionCompletion>, InteractionPortError> {
+        let request_id = request.id.clone();
+        let run_id = request.run_id.clone();
         let mut state = self.state.lock().expect("interaction bridge poisoned");
         if state.pending.contains_key(&request.id) || state.completed.contains(&request.id) {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[interaction_bridge] register rejected request_id={} run_id={} pending_count={} completed_count={}",
+                request_id,
+                run_id,
+                state.pending.len(),
+                state.completed.len(),
+            );
             return Err(InteractionPortError::AlreadyRegistered);
         }
         let (completion, receiver) = oneshot::channel();
@@ -249,6 +259,13 @@ impl InteractionPort for InteractionBridge {
                 request,
                 completion,
             },
+        );
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[interaction_bridge] registered request_id={} run_id={} pending_count={}",
+            request_id,
+            run_id,
+            state.pending.len(),
         );
         Ok(receiver)
     }
@@ -268,20 +285,55 @@ impl InteractionPort for InteractionBridge {
     ) -> InteractionCommandOutcome {
         let mut state = self.state.lock().expect("interaction bridge poisoned");
         let Some(waiter) = state.pending.get(request_id) else {
-            return completed_or_not_found(&state, request_id);
+            let outcome = completed_or_not_found(&state, request_id);
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[interaction_bridge] reply missing request_id={} outcome={outcome:?} pending_count={} completed_count={}",
+                request_id,
+                state.pending.len(),
+                state.completed.len(),
+            );
+            return outcome;
         };
+        let run_id = waiter.request.run_id.clone();
         if let Err(error) = validate_reply(&waiter.request.body, &reply) {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[interaction_bridge] reply invalid request_id={} run_id={} error={error:?}",
+                request_id,
+                run_id,
+            );
             return InteractionCommandOutcome::InvalidReply(error);
         }
         let waiter = state.pending.remove(request_id).expect("checked above");
         state.completed.insert(request_id.clone());
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[interaction_bridge] reply delivering request_id={} run_id={} receiver_closed={} pending_count={}",
+            request_id,
+            run_id,
+            waiter.completion.is_closed(),
+            state.pending.len(),
+        );
         if waiter
             .completion
             .send(InteractionCompletion::Replied(reply))
             .is_err()
         {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[interaction_bridge] reply delivery failed request_id={} run_id={} reason=receiver_closed",
+                request_id,
+                run_id,
+            );
             return InteractionCommandOutcome::RunCancelling;
         }
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[interaction_bridge] reply delivered request_id={} run_id={} outcome=Accepted",
+            request_id,
+            run_id,
+        );
         InteractionCommandOutcome::Accepted
     }
 
@@ -292,16 +344,45 @@ impl InteractionPort for InteractionBridge {
     ) -> InteractionCommandOutcome {
         let mut state = self.state.lock().expect("interaction bridge poisoned");
         let Some(waiter) = state.pending.remove(request_id) else {
-            return completed_or_not_found(&state, request_id);
+            let outcome = completed_or_not_found(&state, request_id);
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[interaction_bridge] cancel missing request_id={} outcome={outcome:?} pending_count={} completed_count={}",
+                request_id,
+                state.pending.len(),
+                state.completed.len(),
+            );
+            return outcome;
         };
+        let run_id = waiter.request.run_id.clone();
         state.completed.insert(request_id.clone());
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[interaction_bridge] cancel delivering request_id={} run_id={} receiver_closed={} reason={reason:?} pending_count={}",
+            request_id,
+            run_id,
+            waiter.completion.is_closed(),
+            state.pending.len(),
+        );
         if waiter
             .completion
             .send(InteractionCompletion::Cancelled(reason))
             .is_err()
         {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[interaction_bridge] cancel delivery failed request_id={} run_id={} reason=receiver_closed",
+                request_id,
+                run_id,
+            );
             return InteractionCommandOutcome::RunCancelling;
         }
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[interaction_bridge] cancel delivered request_id={} run_id={} outcome=Accepted",
+            request_id,
+            run_id,
+        );
         InteractionCommandOutcome::Accepted
     }
 

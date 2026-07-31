@@ -524,6 +524,38 @@ enum InputDrainOutcome {
     TimedOut,
 }
 
+enum AwaitingRunIngress {
+    Input(InputDrainOutcome),
+    Interaction(crate::application::interaction::port::InteractionResolution),
+}
+
+fn drain_outcome_kind(outcome: &DrainOutcome) -> &'static str {
+    match outcome {
+        DrainOutcome::Ready { .. } => "ready",
+        DrainOutcome::InternalContinuation { .. } => "internal_continuation",
+        DrainOutcome::EmptyAndSealed { .. } => "empty_and_sealed",
+        DrainOutcome::NoInput { .. } => "no_input",
+    }
+}
+
+fn interaction_resolution_kind(
+    resolution: &crate::application::interaction::port::InteractionResolution,
+) -> &'static str {
+    use crate::application::interaction::port::{InteractionCompletion, InteractionResolution};
+
+    match resolution {
+        InteractionResolution::Resolved {
+            completion: InteractionCompletion::Replied(_),
+            ..
+        } => "replied",
+        InteractionResolution::Resolved {
+            completion: InteractionCompletion::Cancelled(_),
+            ..
+        } => "cancelled",
+        InteractionResolution::Closed { .. } => "closed",
+    }
+}
+
 async fn run_input_drain_phase<P>(
     run: &Run,
     awaiting_user: bool,
@@ -543,6 +575,73 @@ where
         Interrupt::Completed(result) => result.map(InputDrainOutcome::Drained),
         Interrupt::Cancelled => Ok(InputDrainOutcome::Cancelled),
         Interrupt::TimedOut => Ok(InputDrainOutcome::TimedOut),
+    }
+}
+
+async fn await_run_ingress<P>(
+    run: &Run,
+    execution: &mut RunExecutionState,
+    expected_epoch: DrainEpoch,
+    cancel: &CancellationToken,
+    input: &mut P,
+) -> Result<AwaitingRunIngress, LoopEngineError>
+where
+    P: InputPort + ?Sized,
+{
+    let Some(mut active_interaction) = execution.take_active_interaction() else {
+        return Err(LoopEngineError::Adapter(
+            "Run 处于 AwaitingUser 且声明 pending interaction，但 interaction mailbox 为空"
+                .to_string(),
+        ));
+    };
+    let run_id = active_interaction.metadata.run_id.clone();
+    let request_id = active_interaction.metadata.request_id.clone();
+    let input_future = run_input_drain_phase(run, true, expected_epoch, cancel, input);
+    tokio::pin!(input_future);
+
+    tokio::select! {
+        biased;
+        completion = &mut active_interaction.receiver => {
+            let resolution = match completion {
+                Ok(completion) => {
+                    crate::application::interaction::port::InteractionResolution::Resolved {
+                        metadata: active_interaction.metadata,
+                        completion,
+                    }
+                }
+                Err(_) => crate::application::interaction::port::InteractionResolution::Closed {
+                    metadata: active_interaction.metadata,
+                },
+            };
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[run_loop] unified ingress woke by interaction run_id={} request_id={} resolution={}",
+                run_id,
+                request_id,
+                interaction_resolution_kind(&resolution),
+            );
+            Ok(AwaitingRunIngress::Interaction(resolution))
+        }
+        input_outcome = &mut input_future => {
+            let input_outcome = input_outcome?;
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[run_loop] unified ingress woke by session input run_id={} request_id={}",
+                run_id,
+                request_id,
+            );
+            crate::application::interaction::coordinator::InteractionCoordinator::store_mailbox_receiver(
+                execution,
+                active_interaction.metadata,
+                active_interaction.receiver,
+            )
+            .map_err(|error| {
+                LoopEngineError::Adapter(format!(
+                    "interaction mailbox restore failed: {error:?}"
+                ))
+            })?;
+            Ok(AwaitingRunIngress::Input(input_outcome))
+        }
     }
 }
 
@@ -768,49 +867,121 @@ pub async fn run_loop(
             return Ok(LoopDirective::Terminal);
         }
 
-        // #1248 Task 5: Poll for resolved interactions.
-        // When the Run is in AwaitingUser with a pending interaction, check
-        // if the interaction has been resolved (reply or cancel).  If yes,
-        // complete it and continue the loop; if not, proceed to drain.
-        if run.status() == RunStatus::AwaitingUser && run.pending_interaction().is_some() {
-            if let Some(completion) =
-                crate::application::interaction::coordinator::InteractionCoordinator::poll_mailbox(
-                    execution,
-                )
-            {
-                handle_interaction_completion(run, execution, port, cancel, completion).await?;
-                continue;
-            }
-        }
-
-        // ---- drain phase ----
-        // #1272: When AwaitingUser, use await_user_input which never
-        // seals the input buffer on empty — the buffer stays receptive
-        // to future user input in the same Run.
+        // AwaitingUser with an active Interaction has two legitimate ingress
+        // sources. Wait for both in one select so either source can wake the
+        // Run; never park exclusively on the Session input mailbox.
         let awaiting_user = run.status() == RunStatus::AwaitingUser;
-        let outcome = match run_input_drain_phase(
-            run,
-            awaiting_user,
-            expected_epoch,
-            cancel,
-            port.input_mut(),
-        )
-        .await?
-        {
-            InputDrainOutcome::Drained(outcome) => outcome,
-            InputDrainOutcome::Cancelled => {
-                if let Some(control) = handle_pending_control(run, execution, port).await? {
-                    return Ok(match control {
-                        ControlDirective::Continue => LoopDirective::AwaitUser,
-                        ControlDirective::Terminal => LoopDirective::Terminal,
-                    });
+        let outcome = if awaiting_user && run.pending_interaction().is_some() {
+            let pending = run
+                .pending_interaction()
+                .expect("checked pending interaction above");
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[run_loop] awaiting unified ingress run_id={} request_id={} continuation={:?}",
+                run.id(),
+                pending.request_id,
+                pending.continuation,
+            );
+            match await_run_ingress(run, execution, expected_epoch, cancel, port.input_mut())
+                .await?
+            {
+                AwaitingRunIngress::Interaction(completion) => {
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[run_loop] interaction completion observed run_id={} request_id={} resolution={}",
+                        run.id(),
+                        completion.metadata().request_id,
+                        interaction_resolution_kind(&completion),
+                    );
+                    handle_interaction_completion(run, execution, port, cancel, completion).await?;
+                    continue;
                 }
-                cancel_run(run, execution, port).await?;
-                return Ok(LoopDirective::Terminal);
+                AwaitingRunIngress::Input(input_outcome) => match input_outcome {
+                    InputDrainOutcome::Drained(outcome) => {
+                        log::debug!(
+                            target: crate::LOG_TARGET,
+                            "[run_loop] input drain completed run_id={} status={:?} pending_interaction={} outcome={}",
+                            run.id(),
+                            run.status(),
+                            run.pending_interaction().is_some(),
+                            drain_outcome_kind(&outcome),
+                        );
+                        outcome
+                    }
+                    InputDrainOutcome::Cancelled => {
+                        if let Some(control) = handle_pending_control(run, execution, port).await? {
+                            return Ok(match control {
+                                ControlDirective::Continue => LoopDirective::AwaitUser,
+                                ControlDirective::Terminal => LoopDirective::Terminal,
+                            });
+                        }
+                        cancel_run(run, execution, port).await?;
+                        return Ok(LoopDirective::Terminal);
+                    }
+                    InputDrainOutcome::TimedOut => {
+                        timeout_run(run, execution, port).await?;
+                        return Ok(LoopDirective::Terminal);
+                    }
+                },
             }
-            InputDrainOutcome::TimedOut => {
-                timeout_run(run, execution, port).await?;
-                return Ok(LoopDirective::Terminal);
+        } else {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[run_loop] input drain starting run_id={} status={:?} awaiting_user={} pending_interaction={} epoch={:?}",
+                run.id(),
+                run.status(),
+                awaiting_user,
+                run.pending_interaction().is_some(),
+                expected_epoch,
+            );
+            match run_input_drain_phase(
+                run,
+                awaiting_user,
+                expected_epoch,
+                cancel,
+                port.input_mut(),
+            )
+            .await?
+            {
+                InputDrainOutcome::Drained(outcome) => {
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[run_loop] input drain completed run_id={} status={:?} pending_interaction={} outcome={}",
+                        run.id(),
+                        run.status(),
+                        run.pending_interaction().is_some(),
+                        drain_outcome_kind(&outcome),
+                    );
+                    outcome
+                }
+                InputDrainOutcome::Cancelled => {
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[run_loop] input drain interrupted run_id={} result=cancelled status={:?} pending_interaction={}",
+                        run.id(),
+                        run.status(),
+                        run.pending_interaction().is_some(),
+                    );
+                    if let Some(control) = handle_pending_control(run, execution, port).await? {
+                        return Ok(match control {
+                            ControlDirective::Continue => LoopDirective::AwaitUser,
+                            ControlDirective::Terminal => LoopDirective::Terminal,
+                        });
+                    }
+                    cancel_run(run, execution, port).await?;
+                    return Ok(LoopDirective::Terminal);
+                }
+                InputDrainOutcome::TimedOut => {
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[run_loop] input drain interrupted run_id={} result=timed_out status={:?} pending_interaction={}",
+                        run.id(),
+                        run.status(),
+                        run.pending_interaction().is_some(),
+                    );
+                    timeout_run(run, execution, port).await?;
+                    return Ok(LoopDirective::Terminal);
+                }
             }
         };
 
@@ -1523,6 +1694,7 @@ async fn handle_suspensions(
         let request = sdk::InteractionRequest {
             id: first_request_id.clone(),
             run_id: run_id.clone(),
+            tool_call_id: Some(first.call.id.to_string()),
             body: body.clone(),
         };
         port.publish_interaction(execution, &request).await?;
@@ -1535,7 +1707,12 @@ async fn handle_suspensions(
         );
         crate::application::interaction::coordinator::InteractionCoordinator::store_mailbox_receiver(
             execution, metadata, receiver,
-        );
+        )
+        .map_err(|error| {
+            LoopEngineError::Adapter(format!(
+                "interaction mailbox registration failed: {error:?}"
+            ))
+        })?;
 
         log::debug!(
             target: crate::LOG_TARGET,
@@ -1634,6 +1811,7 @@ async fn handle_tool_approvals(
         let request = sdk::InteractionRequest {
             id: first_request_id.clone(),
             run_id: run_id.clone(),
+            tool_call_id: None,
             body: body.clone(),
         };
         port.publish_interaction(execution, &request).await?;
@@ -1645,7 +1823,12 @@ async fn handle_tool_approvals(
         );
         crate::application::interaction::coordinator::InteractionCoordinator::store_mailbox_receiver(
             execution, metadata, receiver,
-        );
+        )
+        .map_err(|error| {
+            LoopEngineError::Adapter(format!(
+                "interaction mailbox registration failed: {error:?}"
+            ))
+        })?;
     }
 
     emit_events(run, execution, port).await?;
@@ -1729,6 +1912,7 @@ async fn handle_interaction_completion(
             );
             let _ = InteractionCoordinator::cancel_and_drain(
                 run,
+                execution,
                 port.interaction_port(),
                 &run_id,
                 sdk::InteractionCancelReason::RunCancelled,
@@ -1795,6 +1979,7 @@ async fn dispatch_continuation(
             ) {
                 let _ = InteractionCoordinator::cancel_and_drain(
                     run,
+                    execution,
                     port.interaction_port(),
                     &metadata.run_id,
                     sdk::InteractionCancelReason::UserCancelled,
@@ -1921,6 +2106,7 @@ async fn handle_interaction_outcome(
                     let request = sdk::InteractionRequest {
                         id: next.request_id.clone(),
                         run_id: run_id.clone(),
+                        tool_call_id: Some(suspended.call.id.to_string()),
                         body: body.clone(),
                     };
                     port.publish_interaction(execution, &request).await?;
@@ -1933,7 +2119,12 @@ async fn handle_interaction_outcome(
                         );
                     crate::application::interaction::coordinator::InteractionCoordinator::store_mailbox_receiver(
             execution, metadata, receiver,
-        );
+        )
+        .map_err(|error| {
+            LoopEngineError::Adapter(format!(
+                "interaction mailbox registration failed: {error:?}"
+            ))
+        })?;
                     log::debug!(
                         target: crate::LOG_TARGET,
                         "[handle_interaction_outcome] queued UserQuestions rid={:?}",
@@ -1964,6 +2155,7 @@ async fn handle_interaction_outcome(
                     let request = sdk::InteractionRequest {
                         id: next.request_id.clone(),
                         run_id: run_id.clone(),
+                        tool_call_id: None,
                         body: body.clone(),
                     };
                     port.publish_interaction(execution, &request).await?;
@@ -1976,7 +2168,12 @@ async fn handle_interaction_outcome(
                         );
                     crate::application::interaction::coordinator::InteractionCoordinator::store_mailbox_receiver(
             execution, metadata, receiver,
-        );
+        )
+        .map_err(|error| {
+            LoopEngineError::Adapter(format!(
+                "interaction mailbox registration failed: {error:?}"
+            ))
+        })?;
                 }
 
                 // Update the port: new current = the now-started item,
@@ -2038,6 +2235,7 @@ async fn handle_hard_pause(
     let request = sdk::InteractionRequest {
         id: request_id.clone(),
         run_id: run_id.clone(),
+        tool_call_id: None,
         body: body.clone(),
     };
     port.publish_interaction(execution, &request).await?;
@@ -2049,7 +2247,12 @@ async fn handle_hard_pause(
     );
     crate::application::interaction::coordinator::InteractionCoordinator::store_mailbox_receiver(
         execution, metadata, receiver,
-    );
+    )
+    .map_err(|error| {
+        LoopEngineError::Adapter(format!(
+            "interaction mailbox registration failed: {error:?}"
+        ))
+    })?;
 
     // Complete step and transition to AwaitingUser
     run.complete_step(step_id)?;
@@ -2102,6 +2305,7 @@ async fn handle_plan_approval(
     let request = sdk::InteractionRequest {
         id: request_id.clone(),
         run_id: run_id.clone(),
+        tool_call_id: None,
         body: body.clone(),
     };
     port.publish_interaction(execution, &request).await?;
@@ -2113,7 +2317,12 @@ async fn handle_plan_approval(
     );
     crate::application::interaction::coordinator::InteractionCoordinator::store_mailbox_receiver(
         execution, metadata, receiver,
-    );
+    )
+    .map_err(|error| {
+        LoopEngineError::Adapter(format!(
+            "interaction mailbox registration failed: {error:?}"
+        ))
+    })?;
 
     run.complete_step(step_id)?;
     run_step_finalization_phase(

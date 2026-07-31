@@ -525,6 +525,7 @@ fn interaction_request(value: sdk::InteractionRequest) -> TuiInteractionRequest 
     TuiInteractionRequest {
         request_id: UiInteractionRequestId::from(value.id.as_str()),
         run_id: UiRunId::from(value.run_id.as_str()),
+        tool_call_id: value.tool_call_id,
         body: match value.body {
             sdk::InteractionRequestBody::UserQuestions(questions) => {
                 TuiInteractionBody::UserQuestions(

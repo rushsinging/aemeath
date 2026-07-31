@@ -1,0 +1,357 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Aemeath Runtime Agent 与统一入站架构",
+    "subtitle": "唯一 typed ingress 经 Session mailbox 接纳输入；每个 Run 拥有独立 input buffer，interaction reply/cancel 走正交定向通道",
+    "output": "01-runtime-agent-loop.html",
+    "quality_profile": "showcase",
+    "visual_preset": "blueprint",
+    "animation": "none",
+    "viewBox": [
+      1680,
+      900
+    ],
+    "views": [
+      {
+        "id": "typed-input-path",
+        "label": "Typed input 主链路",
+        "focus": [
+          "chatRequest",
+          "inputSource",
+          "sessionMailbox",
+          "sessionActor",
+          "runFactory",
+          "runBuffer",
+          "runLauncher",
+          "loopEngine"
+        ],
+        "note": "首条输入、后续输入、Skill 与控制命令都从同一个 typed ingress 进入 Session mailbox。"
+      },
+      {
+        "id": "late-input-path",
+        "label": "Late input 回流",
+        "focus": [
+          "sessionMailbox",
+          "sessionActor",
+          "runBuffer"
+        ],
+        "note": "sealed Run 拒绝的用户输入回到 Session deferred FIFO，并在下一 Run 中优先消费。"
+      },
+      {
+        "id": "interaction-path",
+        "label": "Interaction 定向恢复",
+        "focus": [
+          "interactionClient",
+          "sessionIngress",
+          "interactionPort",
+          "loopEngine"
+        ],
+        "note": "reply/cancel 只按 request identity 恢复唯一 pending interaction，不伪装成普通输入。"
+      },
+      {
+        "id": "shared-execution",
+        "label": "统一执行内核",
+        "focus": [
+          "runFactory",
+          "runBuffer",
+          "runLauncher",
+          "loopEngine",
+          "stepPipeline"
+        ],
+        "note": "输入来源不同不产生第二套 Loop；RunLauncher 与 Loop Engine 保持唯一。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "chatRequest",
+      "type": "frontend",
+      "label": "ChatRequest.ingress",
+      "sublabel": "唯一、非可选 typed ingress",
+      "tag": "SDK boundary",
+      "pos": [
+        40,
+        190
+      ],
+      "size": [
+        210,
+        74
+      ]
+    },
+    {
+      "id": "inputSource",
+      "type": "messagebus",
+      "label": "ChatInputEventPort",
+      "sublabel": "UserMessage · Skill · Control",
+      "pos": [
+        320,
+        190
+      ],
+      "size": [
+        220,
+        74
+      ]
+    },
+    {
+      "id": "sessionMailbox",
+      "type": "database",
+      "label": "SessionInputMailbox",
+      "sublabel": "source + deferred FIFO + closed",
+      "tag": "唯一 source reader",
+      "pos": [
+        620,
+        190
+      ],
+      "size": [
+        240,
+        80
+      ]
+    },
+    {
+      "id": "sessionActor",
+      "type": "backend",
+      "label": "Session Actor",
+      "sublabel": "idle gate · command · Run boundary",
+      "tag": "Session owner",
+      "pos": [
+        950,
+        190
+      ],
+      "size": [
+        230,
+        80
+      ]
+    },
+    {
+      "id": "runFactory",
+      "type": "backend",
+      "label": "RunFactory",
+      "sublabel": "创建完整 RunInstance",
+      "tag": "唯一 Run 创建入口",
+      "pos": [
+        1270,
+        190
+      ],
+      "size": [
+        220,
+        78
+      ]
+    },
+    {
+      "id": "runBuffer",
+      "type": "database",
+      "label": "RunInputBuffer",
+      "sublabel": "FIFO · DrainEpoch · seal",
+      "tag": "per Run",
+      "pos": [
+        620,
+        440
+      ],
+      "size": [
+        240,
+        80
+      ]
+    },
+    {
+      "id": "runLauncher",
+      "type": "backend",
+      "label": "RunLauncher",
+      "sublabel": "注册 · 执行 · 清理",
+      "pos": [
+        950,
+        440
+      ],
+      "size": [
+        220,
+        78
+      ]
+    },
+    {
+      "id": "loopEngine",
+      "type": "backend",
+      "label": "Loop Engine",
+      "sublabel": "唯一 Run 状态机",
+      "tag": "authoritative",
+      "pos": [
+        1270,
+        440
+      ],
+      "size": [
+        220,
+        78
+      ]
+    },
+    {
+      "id": "stepPipeline",
+      "type": "backend",
+      "label": "Step Pipeline",
+      "sublabel": "context → model → tools → finalize",
+      "pos": [
+        1270,
+        670
+      ],
+      "size": [
+        230,
+        78
+      ]
+    },
+    {
+      "id": "interactionClient",
+      "type": "external",
+      "label": "Interaction Client",
+      "sublabel": "typed reply / cancel",
+      "pos": [
+        40,
+        670
+      ],
+      "size": [
+        210,
+        72
+      ]
+    },
+    {
+      "id": "sessionIngress",
+      "type": "security",
+      "label": "SessionIngress",
+      "sublabel": "定向 dispatch_interaction",
+      "tag": "不读普通输入",
+      "pos": [
+        320,
+        670
+      ],
+      "size": [
+        220,
+        74
+      ]
+    },
+    {
+      "id": "interactionPort",
+      "type": "messagebus",
+      "label": "InteractionPort",
+      "sublabel": "request waiter · one-shot completion",
+      "tag": "按 request identity",
+      "pos": [
+        620,
+        670
+      ],
+      "size": [
+        240,
+        78
+      ]
+    }
+  ],
+  "boundaries": [],
+  "connections": [
+    {
+      "id": "requestToSource",
+      "from": "chatRequest",
+      "to": "inputSource",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sourceToMailbox",
+      "from": "inputSource",
+      "to": "sessionMailbox",
+      "variant": "emphasis"
+    },
+    {
+      "id": "mailboxToSession",
+      "from": "sessionMailbox",
+      "to": "sessionActor",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sessionToFactory",
+      "from": "sessionActor",
+      "to": "runFactory",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sessionToBuffer",
+      "from": "sessionActor",
+      "to": "runBuffer",
+      "variant": "emphasis"
+    },
+    {
+      "id": "bufferDeferred",
+      "from": "runBuffer",
+      "to": "sessionMailbox",
+      "label": "sealed → defer",
+      "variant": "dashed"
+    },
+    {
+      "id": "factoryToLauncher",
+      "from": "runFactory",
+      "to": "runLauncher",
+      "variant": "emphasis"
+    },
+    {
+      "id": "bufferToLauncher",
+      "from": "runBuffer",
+      "to": "runLauncher"
+    },
+    {
+      "id": "launcherToEngine",
+      "from": "runLauncher",
+      "to": "loopEngine",
+      "variant": "emphasis"
+    },
+    {
+      "id": "engineToStep",
+      "from": "loopEngine",
+      "to": "stepPipeline",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [[1380, 590], [1405, 590], [1405, 640], [1385, 640]]
+    },
+    {
+      "id": "interactionToIngress",
+      "from": "interactionClient",
+      "to": "sessionIngress",
+      "variant": "security"
+    },
+    {
+      "id": "ingressToInteraction",
+      "from": "sessionIngress",
+      "to": "interactionPort",
+      "variant": "security"
+    },
+    {
+      "id": "interactionToEngine",
+      "from": "interactionPort",
+      "to": "loopEngine",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "唯一输入来源",
+      "items": [
+        "ChatRequest 只携带非可选 ingress",
+        "SessionInputMailbox 是唯一 source reader",
+        "首条与后续输入没有协议特例"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "跨 Run 输入安全",
+      "items": [
+        "每个 RuntimeContext 绑定独立 RunInputBuffer",
+        "DrainEpoch 线性化 drain 与 seal",
+        "sealed Run 拒绝的 late input 回流到 Session deferred FIFO"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Interaction 正交",
+      "items": [
+        "reply/cancel 不进入普通输入 mailbox",
+        "单 Run 同时最多一个 PendingInteraction",
+        "端口内多 waiter 只用于隔离并发 Run"
+      ]
+    }
+  ]
+}

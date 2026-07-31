@@ -714,6 +714,13 @@
         },
         "run_id": {
           "$ref": "#/$defs/RunId"
+        },
+        "tool_call_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

@@ -22,7 +22,6 @@ mod non_agent;
 mod post_batch;
 #[cfg(test)]
 mod pre_compact_trigger_tests;
-mod queue;
 pub(crate) mod reflection;
 #[cfg(test)]
 mod reflection_trigger_tests;
@@ -47,7 +46,6 @@ pub use input_gate::{
 pub use input_log::logged_input_messages;
 pub use loop_context::ChatLoopContext;
 pub use loop_runner::process_chat_loop;
-pub use queue::{QueueDrainPort, QueueFuture};
 pub(crate) use stream_handler::{
     should_emit_model_stream_waiting, InvocationEventReducer, InvocationResponse,
 };

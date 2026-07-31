@@ -10,19 +10,12 @@ use share::config::models::ResolvedModel;
 use share::config::MemoryConfig;
 use tools::AgentRunner;
 
-pub(crate) type InputPortFactory = dyn Fn(
-        Option<Arc<dyn sdk::QueueDrainPort>>,
-        Option<Arc<dyn sdk::ChatInputEventPort>>,
-    ) -> InputPortPair
-    + Send
-    + Sync;
-
-/// #1381: Composition-injected input port pair.
-/// Application receives this without importing adapter modules.
-pub struct InputPortPair {
-    pub queue: crate::adapters::input_buffer::RuntimeQueueDrainPort,
-    pub input_events: crate::adapters::input_buffer::RuntimeInputEventDrainPort,
-}
+pub(crate) type InputPortFactory =
+    dyn Fn(
+            Arc<dyn sdk::ChatInputEventPort>,
+        ) -> crate::adapters::input_buffer::RuntimeInputEventDrainPort
+        + Send
+        + Sync;
 
 #[derive(Clone)]
 pub struct SessionModelState {
@@ -221,11 +214,8 @@ impl SessionRuntime {
                     crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
                 )
             }),
-            input_port_factory: Arc::new(|queue, events| InputPortPair {
-                queue: crate::adapters::input_buffer::RuntimeQueueDrainPort::new(queue),
-                input_events: crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(
-                    events,
-                ),
+            input_port_factory: Arc::new(|ingress| {
+                crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(ingress)
             }),
             session_reminders: Arc::new(std::sync::RwLock::new(
                 share::memory::SessionReminders::new(),

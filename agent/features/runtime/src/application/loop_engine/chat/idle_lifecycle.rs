@@ -57,7 +57,11 @@ async fn await_idle_input<I: InputEventDrainPort>(
     input_events: &I,
     pending: &mut PendingInputBuffer,
 ) -> IdleResult {
-    match input_events.recv_next_input().await {
+    let event = match pending.pop_front() {
+        Some(event) => Some(event),
+        None => input_events.recv_next_input().await,
+    };
+    match event {
         Some(event) => {
             log::debug!(
                 target: crate::LOG_TARGET,

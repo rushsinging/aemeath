@@ -1,5 +1,7 @@
 use super::change::ConversationChange;
 use super::model::ConversationModel;
+use super::tool_call::ToolCallStatus;
+use super::tool_result_payload::ToolResultPayload;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct UiInteractionRequestId(String);
@@ -35,6 +37,7 @@ impl UiRunId {
 pub(crate) struct InteractionRequest {
     pub(crate) request_id: UiInteractionRequestId,
     pub(crate) run_id: UiRunId,
+    pub(crate) tool_call_id: Option<String>,
     pub(crate) body: InteractionBody,
 }
 
@@ -541,6 +544,11 @@ impl ConversationModel {
         &mut self,
         request_id: &UiInteractionRequestId,
     ) -> Vec<ConversationChange> {
+        let tool_call_id = self
+            .active_interaction
+            .as_ref()
+            .filter(|interaction| interaction.request_id() == request_id)
+            .and_then(|interaction| interaction.request.tool_call_id.clone());
         let Some(interaction) = self.active_interaction.as_ref() else {
             return Vec::new();
         };
@@ -548,9 +556,66 @@ impl ConversationModel {
             return Vec::new();
         }
         self.active_interaction = None;
+        self.complete_ask_user_tool_for_request(request_id, tool_call_id.as_deref());
         vec![ConversationChange::InteractionCompleted {
             request_id: request_id.clone(),
         }]
+    }
+
+    fn complete_ask_user_tool_for_request(
+        &mut self,
+        request_id: &UiInteractionRequestId,
+        interaction_tool_call_id: Option<&str>,
+    ) -> bool {
+        let timeline_tool_call_ids = self.timeline.items().iter().find_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::AskUserBatch {
+                request_id: Some(batch_request_id),
+                slots,
+                ..
+            } if batch_request_id == request_id => Some(
+                slots
+                    .iter()
+                    .map(|slot| slot.id.as_str())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        });
+        let mut tool_call_ids = timeline_tool_call_ids.unwrap_or_default();
+        if let Some(tool_call_id) = interaction_tool_call_id {
+            tool_call_ids.push(tool_call_id);
+        }
+        if tool_call_ids.is_empty() {
+            return false;
+        }
+        let mut completed = false;
+        for chat in &mut self.chats {
+            for turn in &mut chat.turns {
+                for call in &mut turn.tool_calls {
+                    if call.name == "AskUserQuestion"
+                        && call
+                            .id
+                            .as_ref()
+                            .is_some_and(|id| tool_call_ids.contains(&id.as_str()))
+                        && !matches!(
+                            call.status,
+                            ToolCallStatus::Success
+                                | ToolCallStatus::Error
+                                | ToolCallStatus::Cancelled
+                                | ToolCallStatus::Orphaned
+                        )
+                    {
+                        call.complete(ToolResultPayload::new(
+                            String::new(),
+                            serde_json::Value::Null,
+                            false,
+                            0,
+                        ));
+                        completed = true;
+                    }
+                }
+            }
+        }
+        completed
     }
 
     pub(super) fn reject_interaction_reply(

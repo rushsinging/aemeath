@@ -1,7 +1,8 @@
 # Agent Runtime · 运行时所有权与统一装配
 
 > 层级：02-modules / runtime（模块战术设计）  
-> 状态：Target（目标设计）｜对应 Issue：[#1385](https://github.com/rushsinging/aemeath/issues/1385)、[#1397](https://github.com/rushsinging/aemeath/issues/1397)、[#1248](https://github.com/rushsinging/aemeath/issues/1248)\
+> 状态：Target（目标设计）
+>
 > 本文记录 Runtime 的最终所有权、控制反转与装配边界。它只描述终态，不记录实现进度。任何按 Main/Sub 分类的生产类型、调用方手填的 `RunContextBindings`、fat `RunLoopPort` 或 Runtime 内第二 Composition Root 都不属于目标模型。
 
 ## 1. 决策摘要
@@ -78,8 +79,8 @@ Composition adapters ──implements──▶ Runtime-owned factory/port contra
 4. Runtime application 拥有 factory/port 抽象、能力选择规则、状态转换与快照时机；Composition 只实现并连接这些抽象。
 5. Loop Engine 拥有完整执行流程，不通过 fat port 把流程控制权反向交给 adapter。
 6. `Run` 与 `RunExecutionState` 必须各有唯一状态所有权，不得复制同一事实。
-7. Session Runtime 只有一个 `SessionIngress`；`UserMessage`、`Command` 与 `InteractionCommand` 分类后分别进入 Run InputQueue、CommandScheduler 与 InteractionInbox。
-8. `AwaitingInput` 与 `AwaitingInteraction` 必须分离；普通输入和结构化 interaction reply 不得共享 queue 或恢复路径。
+7. Session Runtime 只有一个 typed `ChatRequest.ingress`；`SessionInputMailbox` 独占外部输入 source，`SessionIngress` 独占 interaction reply/cancel 路由，普通输入只进入每 Run 的 `RunInputBuffer`。
+8. 普通输入等待与 Interaction 等待必须分离；前者消费 Session mailbox 并推进 Run buffer，后者只恢复唯一 `PendingInteraction`，不得共享 queue 或恢复路径。
 9. 类型、trait 与模块必须按单一职责命名。`Projection` 不作为架构角色名；跨边界转换使用能说明目标或用途的 mapper/view/record 名称，职责混合的抽象必须先拆分。
 
 ### 1.1 命名与职责拆分
@@ -207,69 +208,81 @@ Run 创建时捕获窄的 session snapshot。Factory 不长期借用动态 `Sess
 
 `Run` 不持有消息窗口、Provider/Tool Port、流式进度或 UI terminal view。
 
-### 4.3.1 Session ingress、Run mailbox 与输入分类
+### 4.3.1 Session ingress、Session mailbox 与 Run input buffer
 
-Session Runtime 对外只有一个入站边界。`ChatRequest` 的 `user_input`、legacy `queue_drain` 与 typed `input_events` 只是迁移期来源适配，不属于终态领域模型；它们必须先被归一化为一个纯值 `SessionInput`，再由 Session Runtime 分类和路由。
+Session Runtime 对外只有一个 typed ingress。`ChatRequest` 只携带非可选 `ingress`；Composition 将它适配为 `ChatInputEventPort`，Session 级 `SessionInputMailbox` 是唯一允许读取该 source 的 Runtime owner。首条输入、后续输入、Skill 和控制命令均为同一 `ChatInputEvent` 协议，不存在 `user_input`、`initial_messages`、独立 seed 或额外 queue drain 旁路。
 
 ```rust
-enum SessionInput {
-    UserMessage(UserMessage),
-    Command(Command),
-    Interaction(InteractionCommand),
+struct ChatRequest {
+    ingress: ChatIngress,
 }
 
 struct SessionRuntime {
-    ingress: SessionIngress,
-    command_scheduler: CommandScheduler,
+    input_mailbox: SessionInputMailbox,
+    interaction_ingress: SessionIngress,
     active_run: Option<RunHandle>,
 }
 
-struct RunMailbox {
-    input: InputQueue<UserMessage>,
-    interaction: InteractionInbox,
+struct SessionInputMailbox {
+    source: Arc<dyn ChatInputEventPort>,
+    deferred: VecDeque<ChatInputEvent>,
+    source_closed: bool,
+}
+
+struct RuntimeContext {
+    input: RunInputBufferHandle,
 }
 ```
 
-分类后的边界必须保持正交：
+入站所有权必须保持单向：
 
-- `UserMessage` 进入当前 Run 的 `InputQueue`；没有可接收的 Run 时，Session 创建 Idle Run 后再投递。首条输入与后续输入走同一条路径，禁止 `initial_input`、`initial_messages` 或特殊 seed 流程。
-- `InteractionCommand` 不进入普通输入队列，按 `run_id + request_id` 直接 resolve 当前 Run 的 `InteractionInbox`；陈旧、重复或不匹配的 ID 返回结构化错误。
-- `Command` 进入 `CommandScheduler`，但不把所有命令当作普通用户消息。立即控制命令（cancel/terminate/quit）可抢占处理；Run 边界命令（compact/switch/reset/resume）在安全边界执行；Session query 命令直接由 Session Runtime 处理。
+1. `SessionInputMailbox` 先读取 deferred，再读取外部 source，因而跨 Run 保持 producer identity 与 FIFO；任何其他 Runtime 类型都不得直接 poll `ChatInputEventPort`。
+2. Session idle gate 对事件分类：可接纳的 `UserMessage` / `SkillRequest` 激活一个 Run；控制命令留在 Session 边界执行或调度；输入 source 关闭触发 Session shutdown。
+3. 每个 `RuntimeContext` 拥有独立 `RunInputBufferHandle`。Session 将已接纳的原始事件推入当前 Run buffer；首条与后续输入走同一 `push_or_reject` 路径，保留 `InputId`、文本和图片。
+4. Run buffer 以 `DrainEpoch` 线性化 drain/seal。Run 进入 sealed 后到达的用户输入不会丢弃或串入旧 Run，而是退回 `SessionInputMailbox::defer`，供下一 Run 优先消费。
+5. Run 结束时，尚未归属该 Run 的控制事件同样退回 Session mailbox；Run buffer 不执行 Session 命令。
 
-`InputQueue` 只管理输入接纳生命周期，不复制 Run 状态机：
+`RunInputBuffer` 只管理当前 Run 的输入接纳生命周期，不复制 Run 状态机：
 
 ```rust
-enum InputQueueState { Open, Sealed, Closed }
-
-struct InputQueue<T> {
-    state: InputQueueState,
-    items: VecDeque<T>,
-    epoch: DrainEpoch,
+enum BufferDrain {
+    Ready { batch: Vec<LoopInput>, epoch: DrainEpoch },
+    Empty { epoch: DrainEpoch },
+    EmptyAndSealed { epoch: DrainEpoch },
+    AlreadySealed { epoch: DrainEpoch },
+    EpochMismatch { expected: DrainEpoch, actual: DrainEpoch },
 }
 ```
 
-`Open → Sealed → Closed` 以及 FIFO、batch drain、epoch 和 late-input 规则属于 InputQueue；`Idle → DrainingInput → ...` 属于 Run。InputQueue **MUST NOT** 再定义 PreparingContext、ExecutingTools 或 AwaitingInteraction 等业务状态。
+FIFO、batch drain、epoch、seal 和 late-input defer 属于 `RunInputBuffer`；`Created → DrainingInput → ...` 属于 `Run`。Run buffer **MUST NOT** 定义 PreparingContext、ExecutingTools 或 Interaction 等业务状态。
 
-Interaction 不需要可撤回的用户队列。它需要的是按 identity 定位的 pending inbox，以及用于串行启动多个 interaction-worthy work item 的内部调度队列：
+Interaction reply/cancel 与普通输入完全正交：`SessionIngress` 只把 typed `InteractionCommand` 定向交给 `InteractionPort`。`Run` 持有唯一 `Option<PendingInteraction>`，因此单个 Run 同一时刻最多存在一个 active interaction continuation；`InteractionPort::register` 返回的唯一 oneshot receiver 仅等待该 request 的 reply/cancel。端口内部可按 request identity 保存多个 waiter，是为了隔离多个并发 Run，不表示单个 Run 可以同时等待多个 interaction。
 
 ```rust
-struct InteractionInbox {
-    active: Option<ActiveInteraction>,
-    waiters: HashMap<InteractionRequestId, InteractionWaiter>,
-    pending_work: VecDeque<PendingInteractionItem>,
+struct Run {
+    pending_interaction: Option<PendingInteraction>,
+}
+
+struct PendingInteraction {
+    request_id: InteractionRequestId,
+    continuation: InteractionContinuation,
+}
+
+struct InteractionBridge {
+    pending_by_request: HashMap<InteractionRequestId, PendingWaiter>,
 }
 ```
 
-`pending_work` 不是用户可撤回队列，而是保持同一 RunStep 的 ToolCall 顺序；Run teardown 仍必须支持按 Run 清理所有 waiter。普通输入与交互回复不得互相伪装：前者驱动 InputQueue，后者只恢复匹配的 continuation。
+reply/cancel 必须匹配 request identity；重复、陈旧或不匹配的命令返回 typed outcome。Run cancel、terminate、timeout、parent disconnect 或 Session shutdown 必须先清理该 Run 的 waiter 与 execution-side pending work，再进入用户可见终态。
 
-### 4.3.2 Run 等待状态必须区分
+### 4.3.2 普通输入等待与 Interaction 等待语义
 
-`AwaitingUser` 在当前实现中同时承载普通输入等待和 Interaction 等待，终态应拆为两个正交状态：
+普通输入等待与 Interaction 等待不得共享 mailbox 或 continuation：
 
-- `AwaitingInput`：等待 `InputQueue` 的 `UserMessage`，输入到达后进入 `DrainingInput`；
-- `AwaitingInteraction { request_id }`：等待 `InteractionInbox` 的匹配 reply/cancel，完成后按 typed continuation 恢复。
+- **普通输入等待**：Session/Run 输入策略等待 `SessionInputMailbox` 的下一条 typed event；用户输入被接纳进当前 Run buffer 后，由 drain epoch 推进下一 Step。这是输入策略行为，不创建 `PendingInteraction`。
+- **Interaction 等待**：领域状态当前由 `RunStatus::AwaitingUser + pending_interaction.is_some()` 表达；只有匹配 request 的 reply/cancel 才能按 typed continuation 恢复。这条路径不读取 `SessionInputMailbox`，也不把 reply 伪装成用户消息。
 
-两者不得使用同一个“先 poll interaction、再 await user input”的混合分支。Interaction reply/cancel 没有撤回语义，但必须支持 request-level cancel、run-level drain、timeout、parent disconnect 和 session shutdown。
+目标状态机应把当前组合条件显式命名为 `AwaitingInteraction { request_id }`。若未来需要让同一 Run 在 Step 之间等待普通用户输入，应另设 `AwaitingInput`，禁止恢复“先 poll interaction、再 await user input”的混合分支。
 
 ### 4.4 `RunExecutionState`：Loop 工作集
 
@@ -572,9 +585,9 @@ RunLoop
 
 Engine 负责：
 
-- input drain/await、epoch 校验与 Step 创建；普通输入只从 InputQueue 进入；
+- input drain/await、epoch 校验与 Step 创建；普通输入只从 `SessionInputMailbox` 进入每 Run 的 `RunInputBuffer`；
 - command scheduling：ImmediateControl 立即生效，AtRunBoundary 在安全边界执行，SessionQuery 不污染 Run 输入；
-- interaction continuation：reply/cancel 只按 `run_id + request_id` 完成 pending interaction，不经过 InputQueue；
+- interaction continuation：reply/cancel 只按 request identity 完成该 Run 唯一 `PendingInteraction`，不经过 Session mailbox 或 Run input buffer；
 - 按阶段调用 context/compact、model invocation、Tool coordination 与 Hook coordination owner；
 - control/cancellation、Step finalization 和 terminal mutation；
 - 每次领域 mutation 后立即 drain event 并交给 `EventSink`。
@@ -592,7 +605,7 @@ Chat 与 Derived 是 ingress/topology 来源，不是完整 Runtime 类型。来
 
 来源目录不得拥有或重新装配模型调用、工具轮次、Context/Compaction、Interaction、Step 持久化、Hook 或 Run finalization 主流程。Input 差异由绑定后的 `InputPort` 表达；Event 差异由 `EventSink`/窄 observer 表达；Provider、Tool、Hook 与 Interaction 差异由 `RuntimeContextFactory` 绑定的 capability 表达。任何差异都不得重新形成来源型大 adapter 或完整能力 bundle。
 
-确有外部边界价值的 seam 可以保留为窄 Port，例如 `InputPort`、`EventSink`、`UsageSink`、`ActiveRunRegistryPort`。Session 入口由 `SessionIngress` 统一接纳并分类，命令由 `CommandScheduler` 调度，interaction reply/cancel 由 `InteractionInbox` 定向完成。它们由 Runtime 定义、Composition 注入，不承载 Loop 流程。
+确有外部边界价值的 seam 可以保留为窄 Port，例如 `ChatInputEventPort`、`EventSink`、`UsageSink`、`ActiveRunRegistryPort`。`SessionInputMailbox` 独占普通输入 source 与跨 Run deferred FIFO；`SessionIngress` 仅定向分发 interaction reply/cancel；每个 `RuntimeContext` 绑定独立 `RunInputBuffer`。这些边界由 Runtime 定义、Composition 注入，不承载 Loop 流程。
 
 ### 6.4 派生 Run 进度的来源身份与挂载身份
 
@@ -638,8 +651,9 @@ Runtime application 回答“何时发生什么业务动作”：
 - 读取 committed snapshot 的时机；
 - 初始化和更新 `SessionState`；
 - 解析本次会话或 Run 的模型选择；
-- 接纳统一 `SessionIngress`，分类 `UserMessage` / `Command` / `InteractionCommand`；
-- 根据目标 Run、command scope 与 interaction identity 分发到 InputQueue、CommandScheduler 或 InteractionInbox；
+- 接纳唯一 typed `ChatRequest.ingress`，由 `SessionInputMailbox` 独占读取 `ChatInputEventPort`；
+- 将可接纳输入送入当前 `RunInputBuffer`，将 sealed Run 拒绝的 late input defer 回 Session mailbox；
+- 在 Session 边界执行或调度控制命令，并由独立 `SessionIngress` 定向分发 interaction reply/cancel；
 - 创建 `RunSpec` 与 `RunCreationRequest`；
 - 在 Run 创建点调用 `RunFactory::create` 取得 `RunInstance`；
 - 驱动 Loop 和领域状态迁移。

@@ -1,4 +1,4 @@
-use super::{interaction_failure_from_sdk, interaction_reply_to_sdk};
+use super::{interaction_failure_from_sdk, interaction_reply_summary, interaction_reply_to_sdk};
 use crate::tui::app::App;
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::{
@@ -47,6 +47,18 @@ fn reply_conversion_preserves_each_typed_reply() {
         interaction_reply_to_sdk(UiInteractionReply::ContinueHardPause),
         sdk::InteractionReply::HardPauseContinue
     ));
+}
+
+#[test]
+fn reply_summary_records_shape_without_answer_content() {
+    let summary = interaction_reply_summary(&UiInteractionReply::UserAnswers(vec![
+        "日料".to_string(),
+        "寿司".to_string(),
+    ]));
+
+    assert_eq!(summary, "user_answers count=2 lengths=[2, 2]");
+    assert!(!summary.contains("日料"));
+    assert!(!summary.contains("寿司"));
 }
 
 #[test]
@@ -103,6 +115,7 @@ fn install_hard_pause_interaction(app: &mut App, request_id: UiInteractionReques
         request: InteractionRequest {
             request_id,
             run_id: UiRunId::from("run-1"),
+            tool_call_id: None,
             body: InteractionBody::HardPause(UiStuckDiagnostic {
                 reason: "等待确认".to_string(),
                 recent_actions: Vec::new(),
@@ -117,6 +130,7 @@ fn install_plan_approval_interaction(app: &mut App, request_id: UiInteractionReq
         request: InteractionRequest {
             request_id,
             run_id: UiRunId::from("run-1"),
+            tool_call_id: None,
             body: InteractionBody::PlanApproval(UiPlanApprovalPrompt {
                 title: "迁移计划".to_string(),
                 steps: vec!["执行".to_string()],

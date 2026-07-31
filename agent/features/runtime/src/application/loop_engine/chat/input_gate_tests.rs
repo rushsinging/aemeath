@@ -4,7 +4,6 @@ use super::input_gate::*;
 use crate::application::loop_engine::chat::events::{
     ChatEventSink, EventFuture, RuntimeStreamEvent,
 };
-use crate::application::loop_engine::chat::queue::{QueueDrainPort, QueueFuture};
 use sdk::ChatInputEvent;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -94,25 +93,6 @@ impl InputEventDrainPort for TestInputEventPort {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct TestQueuePort {
-    queued: Arc<Mutex<Option<Vec<String>>>>,
-}
-
-impl TestQueuePort {
-    pub(super) fn new(queued: Option<Vec<String>>) -> Self {
-        Self {
-            queued: Arc::new(Mutex::new(queued)),
-        }
-    }
-}
-
-impl QueueDrainPort for TestQueuePort {
-    fn drain_queued_input<'a>(&'a self) -> QueueFuture<'a> {
-        Box::pin(async move { self.queued.lock().unwrap().take() })
-    }
-}
-
 #[derive(Clone, Default)]
 pub(super) struct TestSink {
     pub(super) events: Arc<Mutex<Vec<RuntimeStreamEvent>>>,
@@ -133,14 +113,12 @@ impl ChatEventSink for TestSink {
 #[tokio::test]
 async fn test_run_loop_gate_before_finish_continues_on_user_message() {
     let buffer = PendingInputBuffer::default();
-    let queue = EmptyQueueDrainPort;
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message("继续", Vec::new())]);
     let sink = TestSink::default();
 
     let outcome = run_loop_gate(
         GateKind::BeforeFinish,
         &buffer,
-        &queue,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -180,7 +158,6 @@ async fn test_user_message_with_images_assembles_image_block() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -243,7 +220,6 @@ async fn test_user_message_with_multiple_images_interleaves_by_placeholder() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -282,7 +258,6 @@ async fn query_reflection_history_is_buffered_while_gate_is_busy() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -310,7 +285,6 @@ async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
     let outcome = run_loop_gate(
         GateKind::AfterBlockingBoundary,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -339,7 +313,6 @@ async fn test_run_loop_gate_preserves_side_effect_command_order() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -370,7 +343,6 @@ async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
     let outcome = run_loop_gate(
         GateKind::BeforeFinish,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -397,7 +369,6 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -420,17 +391,18 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
 }
 
 #[tokio::test]
-async fn test_run_loop_gate_no_dedup_push_and_pull_same_text() {
-    // 设计 §8：不去重。queue 和 input 各来一条相同文本，两条都 append。
+async fn test_run_loop_gate_preserves_duplicate_typed_events() {
+    // 同一 typed ingress 中的两条相同文本具有不同 InputId，均必须被采用。
     let buffer = PendingInputBuffer::default();
-    let queue = TestQueuePort::new(Some(vec!["same".to_string()]));
-    let input = TestInputEventPort::new(vec![ChatInputEvent::user_message("same", Vec::new())]);
+    let input = TestInputEventPort::new(vec![
+        ChatInputEvent::user_message("same", Vec::new()),
+        ChatInputEvent::user_message("same", Vec::new()),
+    ]);
     let sink = TestSink::default();
 
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &queue,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -478,7 +450,6 @@ async fn test_apply_gate_adopted_events_preserve_input_id_and_images() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -533,7 +504,6 @@ async fn test_apply_gate_no_premature_adopted_emission() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),

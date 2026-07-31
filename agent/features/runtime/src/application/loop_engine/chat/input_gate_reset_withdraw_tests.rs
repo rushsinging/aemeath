@@ -5,7 +5,7 @@
 use super::input_gate_tests::{TestInputEventPort, TestSink};
 use crate::application::loop_engine::chat::events::RuntimeStreamEvent;
 use crate::application::loop_engine::chat::input_gate::{
-    run_loop_gate, EmptyQueueDrainPort, GateDecision, GateKind, PendingInputBuffer,
+    run_loop_gate, GateDecision, GateKind, PendingInputBuffer,
 };
 use sdk::ChatInputEvent;
 use task::TaskAccess;
@@ -36,7 +36,6 @@ async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task_access,
@@ -75,7 +74,6 @@ async fn test_busy_gate_reset_defers_to_buffer() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -128,7 +126,6 @@ async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task_access,
@@ -174,7 +171,6 @@ async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task_access,
@@ -210,7 +206,6 @@ async fn test_withdraw_all_empty_buffer_is_noop() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),
@@ -242,7 +237,6 @@ async fn test_busy_gate_withdraw_all_executes_immediately() {
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &buffer,
-        &EmptyQueueDrainPort,
         &input,
         &sink,
         &task::TaskStore::new(),

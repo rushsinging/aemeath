@@ -448,6 +448,7 @@ struct ScriptedState {
     terminate_when_compact_starts: bool,
     cancelled_during_model: bool,
     block_model_forever: bool,
+    block_await_user_input_forever: bool,
     block_compact_until_cancelled: bool,
     fail_accept_input: bool,
     needs_compaction: bool,
@@ -470,6 +471,7 @@ impl Default for ScriptedState {
             terminate_when_compact_starts: false,
             cancelled_during_model: false,
             block_model_forever: false,
+            block_await_user_input_forever: false,
             block_compact_until_cancelled: false,
             fail_accept_input: false,
             needs_compaction: false,
@@ -553,6 +555,7 @@ struct ScriptedScenario {
     drain_epoch: DrainEpoch,
     cancelled_during_model: bool,
     block_model_forever: bool,
+    block_await_user_input_forever: bool,
     block_compact_until_cancelled: bool,
     fail_accept_input: bool,
     needs_compaction: bool,
@@ -593,6 +596,7 @@ impl Default for ScriptedScenario {
             drain_epoch: DrainEpoch(0),
             cancelled_during_model: false,
             block_model_forever: false,
+            block_await_user_input_forever: false,
             block_compact_until_cancelled: false,
             fail_accept_input: false,
             needs_compaction: false,
@@ -620,6 +624,7 @@ impl ScriptedScenario {
                 terminate_when_compact_starts: self.terminate_when_compact_starts,
                 cancelled_during_model: self.cancelled_during_model,
                 block_model_forever: self.block_model_forever,
+                block_await_user_input_forever: self.block_await_user_input_forever,
                 block_compact_until_cancelled: self.block_compact_until_cancelled,
                 fail_accept_input: self.fail_accept_input,
                 needs_compaction: self.needs_compaction,
@@ -768,14 +773,22 @@ impl InputPort for InputFake {
         &mut self,
         expected_epoch: DrainEpoch,
     ) -> Result<DrainOutcome, LoopEngineError> {
-        let mut state = self.0.lock().unwrap();
-        state.observations.calls.push("await_input");
-        if expected_epoch != state.drain_epoch {
-            return Err(LoopEngineError::Adapter(format!(
-                "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                expected_epoch, state.drain_epoch,
-            )));
+        let block_forever = {
+            let mut state = self.0.lock().unwrap();
+            state.observations.calls.push("await_input");
+            if expected_epoch != state.drain_epoch {
+                return Err(LoopEngineError::Adapter(format!(
+                    "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                    expected_epoch, state.drain_epoch,
+                )));
+            }
+            state.block_await_user_input_forever
+        };
+        if block_forever {
+            std::future::pending::<()>().await;
+            unreachable!("pending future must not complete");
         }
+        let mut state = self.0.lock().unwrap();
         let epoch = state.drain_epoch;
         let outcome = state
             .drain_outcomes
@@ -3128,6 +3141,84 @@ mod interaction_routing {
     }
 
     // ── UserQuestions: single question full roundtrip ──
+
+    /// Interaction reply must wake a Run that is concurrently parked on the
+    /// Session input mailbox. This reproduces the production deadlock where
+    /// the oneshot completed but `await_user_input` never returned.
+    #[tokio::test]
+    async fn interaction_reply_wakes_run_while_session_input_is_pending() {
+        let mut run = Run::new(RunSpec::main(), None);
+        let cancel = CancellationToken::new();
+        let call = call("AskUserQuestion", json!({"question": "continue?"}));
+        let call_id = call.id.clone();
+        let suspended = SuspendedToolCall {
+            call: call.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "continue?".to_string(),
+                options: vec!["yes".to_string(), "no".to_string()],
+                allow_multi: false,
+            }],
+        };
+        let mut port = ScriptedScenario {
+            model_steps: VecDeque::from([ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call],
+            }]),
+            tool_steps: VecDeque::from([ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended],
+            }]),
+            block_await_user_input_forever: true,
+            ..Default::default()
+        };
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+
+        let bridge = Arc::clone(&port.interaction_bridge);
+        let published = Arc::clone(&port.published_interactions);
+        let reply_task = tokio::spawn(async move {
+            loop {
+                let request_id = published
+                    .lock()
+                    .unwrap()
+                    .first()
+                    .map(|request| request.id.clone());
+                if let Some(request_id) = request_id {
+                    return bridge.reply(
+                        &request_id,
+                        sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer(
+                            "yes".to_string(),
+                        )]),
+                    );
+                }
+                tokio::task::yield_now().await;
+            }
+        });
+
+        let directive = tokio::time::timeout(
+            Duration::from_millis(200),
+            run_loop(
+                &mut run,
+                &mut execution,
+                &cancel,
+                &mut scripted_run_loop(&mut port),
+            ),
+        )
+        .await
+        .expect("interaction reply must wake the Run without Session input")
+        .unwrap();
+        assert_eq!(
+            reply_task.await.unwrap(),
+            sdk::InteractionCommandOutcome::Accepted
+        );
+        assert_eq!(directive, LoopDirective::Terminal);
+        assert_eq!(run.status(), RunStatus::Completed);
+        assert_eq!(run.steps()[0].tool_calls()[0].id(), &call_id);
+        assert_eq!(
+            run.steps()[0].tool_calls()[0].status(),
+            ToolCallStatus::Success
+        );
+    }
 
     /// Full engine roundtrip for a single UserQuestions interaction:
     /// run_loop → AwaitUser, reply via bridge, re-enter → Success.

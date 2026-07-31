@@ -1,9 +1,14 @@
-# #1397 Runtime：以 RunExecutionState + RuntimeContext 统一 Main/Sub Loop adapter 实施计划
+# Runtime IoC 与统一入站协议实施计划
 
-> 对应 Issue：[#1397](https://github.com/rushsinging/aemeath/issues/1397)
-> 设计基线：[07-runtime-ownership-and-assembly.md](../../design/02-modules/runtime/07-runtime-ownership-and-assembly.md)
-> 前置：[#1382](https://github.com/rushsinging/aemeath/issues/1382)、[#1385](https://github.com/rushsinging/aemeath/issues/1385)、[#1248](https://github.com/rushsinging/aemeath/issues/1248)
-> 计划状态：P0-P7 已全部完成。P6.9 已完成 `RunKind`、双 Context Resolver、fat Loop adapter、完整 Runtime 测试替身与双装配结构退役；P6.12 已完成终态 façade 白名单、结构 Guard、sanity fixtures 与全仓验证；P7 已完成 Issue #1397 checklist、PR #1413 Test plan、最终提交与推送回写。
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 以 `RunExecutionState + RuntimeContext` 统一 Runtime，并将首条/后续用户输入、legacy queue 与 Interaction mailbox 收口为 Session 唯一输入入口和单 Run 单 Interaction。
+
+**Architecture:** Session 是外部 `ChatInputEvent` mailbox 的唯一 owner，负责按生命周期将 typed 输入路由给 active Run 的 `RunInputBuffer` 或保留到下一 Run；Run 不直接拥有外部输入 source。InteractionBridge 可跨 Run 保存 waiter，但每个 `RunExecutionState` 只允许一个 active Interaction receiver，后续交互工作留在明确的工作队列中。
+
+**Tech Stack:** Rust、Tokio mpsc/oneshot、SDK Published Language、Runtime 六边形端口、CLI/TUI TEA、Cargo L0-L4 验证。
+
+---
 
 ## 1. 目标与实施原则
 
@@ -563,6 +568,240 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
 - GitHub Issue #1397 与实施 PR
 
 **完成证据**：Issue 全部完成定义逐项有链接或命令证据；所有 Guard、测试、构建和 clippy 通过；PR review 可独立复核。
+
+### P8：统一 Session 入站协议并退役 legacy queue
+
+**目的**：补齐此前“首次和后续输入同路径”的未完成实现，使 Session 成为底层输入 source 的唯一消费者，并让单个 Run 只持有一个 active Interaction receiver。
+
+**文件结构与职责**：
+
+- `packages/sdk/src/chat.rs`：`ChatRequest` 只携带唯一 typed ingress，不携带业务输入或 legacy queue。
+- `packages/sdk/src/tui.rs`：保留唯一 `ChatInputEventPort`，物理删除 `QueueDrainPort` / `QueueFuture`。
+- `agent/features/runtime/src/application/session/ingress.rs`：承载 Session-owned mailbox、关闭状态与 deferred typed events。
+- `agent/features/runtime/src/application/loop_engine/chat/input_gate.rs`：只消费 Session ingress 已路由的 typed events，不再合流文本 queue。
+- `agent/features/runtime/src/application/loop_engine/chat/run_input_buffer.rs`：仅负责 active Run 的 epoch、seal、withdraw 与 Step batching。
+- `agent/features/runtime/src/application/run/execution_state.rs`：用单槽保存 active Interaction receiver。
+- `agent/features/runtime/src/application/interaction/coordinator.rs`：注册、轮询、完成和清理单个 active Interaction。
+- `apps/cli/src/tui/**`、`apps/cli/src/chat/no_tui.rs`、`apps/cli/src/subcommand/*.rs`：所有首条和后续输入都先生成 typed `ChatInputEvent`，再写入同一 ingress。
+
+#### Task 1：冻结单 Run 单 Interaction 领域不变量
+
+**Files:**
+- Modify: `agent/features/runtime/src/application/interaction/coordinator_tests.rs`
+- Modify: `agent/features/runtime/src/application/run/execution_state.rs`
+- Modify: `agent/features/runtime/src/application/interaction/coordinator.rs`
+
+- [x] **Step 1: 写入失败测试**
+
+新增测试，构造两个不同 metadata/receiver，第一次注册成功，第二次注册必须返回 `ActiveInteractionAlreadyRegistered`，并断言原 receiver 的 request identity 未被覆盖。
+
+- [x] **Step 2: 运行 RED**
+
+Run: `cargo test -p runtime application::interaction::coordinator::tests::execution_rejects_second_active_interaction -- --exact`
+
+Expected: FAIL，当前 `store_mailbox_receiver` 返回 `()` 且 `Vec` 接受第二项。
+
+- [x] **Step 3: 实现单槽**
+
+将 `RunExecutionState.interaction_receivers: Vec<_>` 改为 `active_interaction: Option<ActiveInteractionReceiver>`；注册返回 typed result；轮询只处理该单槽的 `Empty / Resolved / Closed`，删除 `take_interaction_receivers`、`replace_interaction_receivers`、multiple-completion warning 和 oneshot 重包装。
+
+- [x] **Step 4: 运行 GREEN**
+
+Run: `cargo test -p runtime application::interaction::coordinator::tests -- --nocapture`
+
+Expected: PASS，且 coordinator 测试无失败。
+
+#### Task 2：冻结唯一 typed ingress 与 legacy queue 退役契约
+
+**Files:**
+- Modify: `packages/sdk/src/chat_tests.rs` 或现有同级 SDK 测试文件
+- Modify: `agent/features/runtime/src/application/loop_engine/chat/input_gate_tests.rs`
+- Modify: `agent/features/runtime/src/application/loop_engine/chat/input_gate_reset_withdraw_tests.rs`
+
+- [x] **Step 1: 写入 SDK 失败契约**
+
+断言 `ChatRequest` 只接受 `Arc<dyn ChatInputEventPort>`，且 SDK crate 不再导出 `QueueDrainPort` / `QueueFuture`、不再定义 `UserInput` 启动字段。
+
+- [x] **Step 2: 写入 Runtime 失败契约**
+
+将 input gate 测试改为只传 typed input source；断言 UserMessage 的 `InputId`、text 和 images 原样进入 adopted event，不存在 queue text 的二次 `classify_text`。
+
+- [x] **Step 3: 运行 RED**
+
+Run: `cargo test -p sdk && cargo test -p runtime application::loop_engine::chat::input_gate::tests -- --nocapture`
+
+Expected: FAIL，当前公开面仍包含 `user_input`、`queue_drain`，Runtime gate 仍要求 queue 参数。
+
+#### Task 3：建立 Session-owned ingress mailbox
+
+**Files:**
+- Create: `agent/features/runtime/src/application/session/ingress.rs`
+- Create: `agent/features/runtime/src/application/session/ingress_tests.rs`
+- Modify: `agent/features/runtime/src/application/session.rs`
+- Modify: `agent/features/runtime/src/application/loop_engine/chat/idle_lifecycle.rs`
+- Modify: `agent/features/runtime/src/application/loop_engine/input_strategy.rs`
+
+- [x] **Step 1: 写 mailbox 状态转换失败测试**
+
+覆盖 `recv_next`、`drain_available`、`defer`、source close；证明 idle 输入可创建 Run、active 输入可进入当前 Run、sealed 输入保留给下一 Run、控制事件不会被当作模型消息。
+
+- [x] **Step 2: 运行 RED**
+
+Run: `cargo test -p runtime application::session::ingress::tests -- --nocapture`
+
+Expected: FAIL，`SessionInputMailbox` 尚不存在。
+
+- [x] **Step 3: 实现最小 mailbox**
+
+`SessionInputMailbox` 独占 `Arc<dyn ChatInputEventPort>` 和 deferred `VecDeque<ChatInputEvent>`；底层 source 只由该类型读取。Loop 获得已路由事件或 `RunInputBufferHandle`，不保存 source clone。
+
+- [x] **Step 4: 运行 GREEN**
+
+Run: `cargo test -p runtime application::session::ingress::tests -- --nocapture`
+
+Expected: PASS。
+
+#### Task 4：迁移 Runtime chat 与 input gate
+
+**Files:**
+- Modify: `agent/features/runtime/src/application/client/trait_chat.rs`
+- Modify: `agent/features/runtime/src/application/client/accessors.rs`
+- Modify: `agent/features/runtime/src/adapters/input_buffer.rs`
+- Modify: `agent/features/runtime/src/application/loop_engine/chat/loop_context.rs`
+- Modify: `agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs`
+- Modify: `agent/features/runtime/src/application/loop_engine/chat/input_gate.rs`
+- Delete: `agent/features/runtime/src/application/loop_engine/chat/queue.rs`
+
+- [x] **Step 1: 让 Runtime 相邻测试保持 RED**
+
+运行 Task 2/3 测试，确认失败仍由旧 queue/双 source 形状导致。
+
+- [x] **Step 2: 删除 Runtime queue 合流**
+
+删除 `RuntimeQueueDrainPort`、Queue generic、`drain_sources` 的文本分支、`EmptyQueueDrainPort` / `SequenceQueueDrainPort`；`apply_gate` 只处理 mailbox 已提供的 typed events。
+
+- [x] **Step 3: 删除 initial_messages**
+
+删除 `trait_chat.rs` 局部变量、`ChatLoopContext.initial_messages`、loop runner 解构和消息初始化旁路；首条消息只能来自 ingress → RunInputBuffer。
+
+- [x] **Step 4: 验证 Runtime**
+
+Run: `cargo test -p runtime --lib`
+
+Expected: PASS。
+
+#### Task 5：收窄 SDK ChatRequest 并迁移全部 producer
+
+**Files:**
+- Modify: `packages/sdk/src/chat.rs`
+- Modify: `packages/sdk/src/tui.rs`
+- Modify: `packages/sdk/src/lib.rs`
+- Modify: `apps/cli/src/tui/effect/session/processing.rs`
+- Modify: `apps/cli/src/chat/no_tui.rs`
+- Modify: `apps/cli/src/subcommand/model_selection.rs`
+- Modify: `apps/cli/src/subcommand/sessions_command.rs`
+
+- [x] **Step 1: 收窄 SDK Published Language**
+
+`ChatRequest` 只保留非可选的唯一 `ingress: Arc<dyn ChatInputEventPort>`；删除 `UserInput`、`queue_drain`、`input_events` 多源字段和 Queue re-export。
+
+- [x] **Step 2: 迁移 TUI**
+
+TUI 建立一次 input channel 后将 receiver 作为 `ChatRequest.ingress`；首条、busy 插话、SkillRequest 和命令继续通过同一 sender，保持 producer 创建的 `InputId`。
+
+- [x] **Step 3: 迁移 no-TUI 与子命令**
+
+每个入口先创建 channel，再发送 typed UserMessage / SkillRequest / Query event，随后传唯一 ingress；不得把 text 再交给 Runtime 分类。
+
+- [x] **Step 4: 验证 SDK/CLI 相邻层**
+
+Run: `cargo test -p sdk && cargo test -p cli tui::effect::session::processing -- --nocapture`
+
+Expected: PASS。
+
+#### Task 6：补齐完整 Session/Run/Interaction 场景
+
+**Files:**
+- Modify: `agent/features/runtime/src/application/loop_engine/chat/loop_runner_tests.rs`
+- Modify: `agent/features/runtime/src/application/loop_engine/tests.rs`
+- Modify: `agent/features/runtime/tests/interaction_routing.rs`
+- Modify: `apps/cli/src/tui/scenario_tests.rs` 或现有 chat 场景 owner
+
+- [x] **Step 1: 首条与追加输入同轨场景**
+
+发送 A 创建 Run，等待下一输入后发送 B；断言二者都从同一 ingress 到达，`InputId` 不变且没有重复 adopt。
+
+- [x] **Step 2: sealed 转交场景**
+
+Run seal 后发送 B；断言 B 不进入旧 Run，当前 Run 完成后由下一 Run 接纳。
+
+- [x] **Step 3: 多 Run Interaction 场景**
+
+两个 Derived Run 各自注册一个 Interaction，分别回复；断言只恢复对应 Run。单个 Run 注册第二个 active receiver 必须失败且不覆盖首项。
+
+- [x] **Step 4: 终止清理场景**
+
+Run 在 AwaitingUser 时 terminate；断言 Bridge waiter、active receiver、Domain pending 和 queued work 全部清空，且不会启动下一项。
+
+- [x] **Step 5: 运行 L4 场景**
+
+Run: `cargo test -p runtime --test interaction_routing && cargo test -p cli scenario_tests -- --nocapture`
+
+Expected: PASS。
+
+#### Task 7：退役审计与最终验证
+
+**Files:**
+- Modify: `.agents/hooks/check-shared-run-loop.sh` 或当前对应 Runtime ingress guard
+- Modify: `docs/superpowers/plans/2026-07-25-issue-1397-runtime-ioc-unification.md`
+
+- [x] **Step 1: 旧符号零匹配**
+
+Run: `rg 'QueueDrainPort|QueueFuture|RuntimeQueueDrainPort|queue_drain|initial_messages|interaction_receivers|take_interaction_receivers|replace_interaction_receivers' packages agent apps`
+
+Expected: 0 matches；测试中的退役断言若需保留，必须限定为明确字符串契约。
+
+- [x] **Step 2: 生产可达性与格式**
+
+Run: `cargo run -p xtask -- production-reachability . && cargo fmt --all -- --check && git diff --check`
+
+Expected: PASS。
+
+- [x] **Step 3: 全量 Rust 门禁**
+
+Run: `cargo test --workspace && cargo clippy --workspace --all-targets --all-features -- -D warnings`
+
+Expected: PASS。
+
+- [x] **Step 4: 架构守卫**
+
+Run: `.agents/hooks/check-architecture-guards.sh --full`
+
+Expected: PASS。
+
+- [x] **Step 5: 回写完成证据**
+
+只在所有对应 RED/GREEN、相邻契约、L4 场景和全量门禁通过后勾选 P8；记录首次失败，不使用重跑成功覆盖首次失败。
+
+**验证证据**：
+
+- `cargo test --workspace`：通过。
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`：通过。
+- `cargo run -p xtask -- production-reachability .`：通过。
+- `.agents/hooks/check-architecture-guards.sh --full`：通过。
+- `cargo fmt --all -- --check`、`git diff --check` 与旧符号零匹配审计：通过。
+- 首次 Runtime 全量验证暴露 Interaction receiver 被 `try_recv` 二次消费与既有双输入测试时序问题；根因修复后 Runtime 668 个单元测试及所有集成测试通过。
+
+**完成定义**：
+
+- [x] SDK/Runtime/CLI 全仓不存在 legacy Queue contract 或 adapter。
+- [x] `ChatRequest` 不携带业务输入旁路，只绑定唯一 typed ingress。
+- [x] `initial_messages` 物理删除。
+- [x] Session 是底层 input source 唯一消费者，Run 只消费 `RunInputBuffer`。
+- [x] 首条、后续、Skill 和命令输入保持 producer 生成的 identity 与字段。
+- [x] 单 Run 最多一个 active Interaction receiver；多 Run 可并发且不串线。
+- [x] cancel/terminate/timeout 能清理 active receiver、Bridge、Domain pending 和 queued work。
+- [x] L1-L4 相邻测试、production reachability、workspace test/clippy 和 architecture guards 全部通过。
 
 ## 5. 测试策略矩阵
 

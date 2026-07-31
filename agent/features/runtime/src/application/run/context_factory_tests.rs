@@ -705,6 +705,7 @@ fn assemble_main_ctx_has_client_interaction() {
     let request = sdk::InteractionRequest {
         id: sdk::InteractionRequestId::new_v7(),
         run_id: sdk::RunId::new_v7(),
+        tool_call_id: None,
         body: sdk::InteractionRequestBody::UserQuestions(vec![sdk::UserQuestion {
             prompt: "test".into(),
             options: vec![],
@@ -741,6 +742,7 @@ fn parent_mediated_interaction_is_child_scoped_and_not_parent_arc() {
     let request = sdk::InteractionRequest {
         id: request_id.clone(),
         run_id: child_run.clone(),
+        tool_call_id: None,
         body: sdk::InteractionRequestBody::HardPause(sdk::StuckDiagnostic {
             reason: "pause".into(),
             recent_actions: vec![],
@@ -767,6 +769,7 @@ fn parent_mediated_interaction_is_child_scoped_and_not_parent_arc() {
     let foreign_request = sdk::InteractionRequest {
         id: sdk::InteractionRequestId::new_v7(),
         run_id: sdk::RunId::new_v7(),
+        tool_call_id: None,
         body: sdk::InteractionRequestBody::HardPause(sdk::StuckDiagnostic {
             reason: "foreign".into(),
             recent_actions: vec![],

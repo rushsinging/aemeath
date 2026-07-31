@@ -3,8 +3,13 @@ use sdk::{
     UserAnswer, UserQuestion,
 };
 
-use crate::application::interaction::coordinator::{CoordinationError, InteractionCoordinator};
-use crate::application::interaction::port::{validate_reply, InteractionBridge, InteractionPort};
+use crate::application::interaction::coordinator::{
+    ActiveInteractionAlreadyRegistered, CoordinationError, InteractionCoordinator,
+};
+use crate::application::interaction::port::{
+    validate_reply, InteractionBridge, InteractionPort, InteractionRequestMetadata,
+};
+use crate::application::run::execution_state::RunExecutionState;
 
 #[test]
 fn p6_5_interaction_mailbox_and_completion_have_single_application_owner() {
@@ -13,7 +18,8 @@ fn p6_5_interaction_mailbox_and_completion_have_single_application_owner() {
     let sub_adapter = include_str!("../run/derived/loop_run.rs");
     let engine = include_str!("../loop_engine/engine.rs");
 
-    assert!(coordinator.contains("pub fn poll_mailbox"));
+    assert!(!coordinator.contains("pub fn poll_mailbox"));
+    assert!(!coordinator.contains("fn wait_mailbox"));
     assert!(coordinator.contains("pub(crate) async fn complete_tool_interaction"));
     for adapter in [main_adapter, sub_adapter] {
         assert!(!adapter.contains("async fn poll_interaction("));
@@ -61,6 +67,42 @@ fn question_body() -> (sdk::InteractionRequestBody, InteractionContinuation) {
             "test-call",
         )),
     )
+}
+
+fn interaction_metadata(request_id: InteractionRequestId) -> InteractionRequestMetadata {
+    let (body, continuation) = question_body();
+    InteractionRequestMetadata::new(request_id, RunId::new_v7(), body, continuation)
+}
+
+#[test]
+fn execution_rejects_second_active_interaction() {
+    let mut execution = RunExecutionState::new();
+    let first_request_id = InteractionRequestId::new_v7();
+    let second_request_id = InteractionRequestId::new_v7();
+    let (_first_sender, first_receiver) = tokio::sync::oneshot::channel();
+    let (_second_sender, second_receiver) = tokio::sync::oneshot::channel();
+
+    InteractionCoordinator::store_mailbox_receiver(
+        &mut execution,
+        interaction_metadata(first_request_id.clone()),
+        first_receiver,
+    )
+    .unwrap();
+
+    let error = InteractionCoordinator::store_mailbox_receiver(
+        &mut execution,
+        interaction_metadata(second_request_id),
+        second_receiver,
+    )
+    .unwrap_err();
+
+    assert_eq!(error, ActiveInteractionAlreadyRegistered);
+    assert_eq!(
+        execution
+            .active_interaction_metadata()
+            .map(|metadata| metadata.request_id.clone()),
+        Some(first_request_id)
+    );
 }
 
 // ── Begin tests ──
@@ -145,6 +187,7 @@ async fn coordinator_begin_fails_on_duplicate_registration() {
     let req = sdk::InteractionRequest {
         id: request2_id.clone(),
         run_id: RunId::new_v7(),
+        tool_call_id: None,
         body: body2.clone(),
     };
     let _pre_reg = port.register(req).unwrap();
@@ -399,6 +442,7 @@ fn coordinator_cancel_and_drain_transitions_run_to_cancelling() {
     // Cancel and drain — full disconnect
     InteractionCoordinator::cancel_and_drain(
         &mut run,
+        &mut RunExecutionState::new(),
         &port,
         &run_id,
         InteractionCancelReason::RunCancelled,
@@ -433,6 +477,7 @@ fn coordinator_cancel_and_drain_idempotent_on_terminal_run() {
     // First cancel
     InteractionCoordinator::cancel_and_drain(
         &mut run,
+        &mut RunExecutionState::new(),
         &port,
         &run_id,
         InteractionCancelReason::RunCancelled,
@@ -447,6 +492,7 @@ fn coordinator_cancel_and_drain_idempotent_on_terminal_run() {
     // Second cancel_and_drain on already-terminal Run — must not panic
     let result = InteractionCoordinator::cancel_and_drain(
         &mut run,
+        &mut RunExecutionState::new(),
         &port,
         &run_id,
         InteractionCancelReason::RunCancelled,
@@ -478,6 +524,7 @@ fn coordinator_cancel_and_drain_does_not_leave_awaiting_user_without_pending() {
 
     InteractionCoordinator::cancel_and_drain(
         &mut run,
+        &mut RunExecutionState::new(),
         &port,
         &run_id,
         InteractionCancelReason::RunCancelled,
@@ -493,6 +540,46 @@ fn coordinator_cancel_and_drain_does_not_leave_awaiting_user_without_pending() {
     }
     // Should be Cancelling
     assert_eq!(run.status(), RunStatus::Cancelling);
+    assert!(run.pending_interaction().is_none());
+}
+
+#[test]
+fn cancel_and_drain_clears_execution_mailbox_and_queued_work() {
+    let mut run = run_in_executing_tools();
+    let port = InteractionBridge::new();
+    let (body, continuation) = question_body();
+    let request_id = InteractionRequestId::new_v7();
+    let run_id = run.id().clone();
+    let (_, receiver) = InteractionCoordinator::begin(
+        &mut run,
+        &port,
+        request_id.clone(),
+        run_id.clone(),
+        body.clone(),
+        continuation.clone(),
+    )
+    .unwrap();
+    let mut execution = RunExecutionState::new();
+    InteractionCoordinator::store_mailbox_receiver(
+        &mut execution,
+        InteractionRequestMetadata::new(request_id.clone(), run_id.clone(), body, continuation),
+        receiver,
+    )
+    .unwrap();
+    execution.set_pending_interaction_work(Default::default());
+
+    InteractionCoordinator::cancel_and_drain(
+        &mut run,
+        &mut execution,
+        &port,
+        &run_id,
+        InteractionCancelReason::RunCancelled,
+    )
+    .unwrap();
+
+    assert!(execution.active_interaction_metadata().is_none());
+    assert!(execution.pending_interaction_work().is_none());
+    assert!(!port.contains(&request_id));
     assert!(run.pending_interaction().is_none());
 }
 
@@ -538,6 +625,7 @@ async fn parent_adapter_drop_via_coordinator_does_not_hang_run() {
     // Now cancel_and_drain via coordinator to clean up Run
     InteractionCoordinator::cancel_and_drain(
         &mut run,
+        &mut RunExecutionState::new(),
         &*parent_port,
         &run_id,
         InteractionCancelReason::RunCancelled,
@@ -591,6 +679,7 @@ async fn parent_adapter_drop_does_not_hang_run_with_full_coordinator_api() {
     let run_id = RunId::new_v7();
     InteractionCoordinator::cancel_and_drain(
         &mut run,
+        &mut RunExecutionState::new(),
         &port,
         &run_id,
         InteractionCancelReason::RunCancelled,

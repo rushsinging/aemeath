@@ -11,8 +11,7 @@ use share::message::Message;
 
 use crate::application::loop_engine::chat::run_input_buffer::BufferDrain;
 use crate::application::loop_engine::chat::{
-    ChatEventSink, ChatEventSinkHandle, InputEventDrainPort, PendingInputBuffer, QueueDrainPort,
-    RuntimeStreamEvent,
+    ChatEventSink, ChatEventSinkHandle, InputEventDrainPort, PendingInputBuffer, RuntimeStreamEvent,
 };
 use crate::application::loop_engine::{
     DrainEpoch, DrainOutcome, InternalContinuationKind, LoopEngineError,
@@ -65,6 +64,19 @@ impl InputContinuationState {
     }
 }
 
+pub(crate) trait SessionInputPort: InputEventDrainPort {
+    fn defer(&self, event: ChatInputEvent);
+}
+
+fn chat_input_event_kind(event: &ChatInputEvent) -> &'static str {
+    match event {
+        ChatInputEvent::UserMessage { .. } => "user_message",
+        ChatInputEvent::SkillRequest(_) => "skill_request",
+        ChatInputEvent::WithdrawAll => "withdraw_all",
+        _ => "control",
+    }
+}
+
 /// Common interface for input-source strategies.
 ///
 /// Each adapter holds a concrete strategy and delegates [`drain_input`] and
@@ -97,16 +109,14 @@ pub(crate) trait InputStrategy {
 /// [`RuntimeContext`]) instead of a generic `&S`.  This eliminates the `S`
 /// generic parameter.
 #[derive(Clone)]
-pub(crate) struct BufferedInputAdapter<Q, I>
+pub(crate) struct BufferedInputAdapter<I>
 where
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
+    I: SessionInputPort,
 {
     pub input_events: I,
     /// #1385 Task 12: Canonical event sink from RuntimeContext, not a separate
     /// sink reference.  This is Clone and implements ChatEventSink directly.
     pub sink: ChatEventSinkHandle,
-    pub queue: Q,
     /// Non-user-message events (controls) are forwarded here for the
     /// session idle gate to process after the Run ends.
     pub pending_input: PendingInputBuffer,
@@ -120,10 +130,9 @@ where
     pub run_id: sdk::RunId,
 }
 
-impl<Q, I> BufferedInputAdapter<Q, I>
+impl<I> BufferedInputAdapter<I>
 where
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
+    I: SessionInputPort,
 {
     pub(crate) fn drain_remaining_events(&mut self) {
         let sealed = self.run_input_buffer.is_sealed();
@@ -132,10 +141,13 @@ where
             if matches!(event, ChatInputEvent::UserMessage { .. }) && sealed {
                 log::warn!(
                     target: crate::LOG_TARGET,
-                    "BufferedInputAdapter: sealed buffer contained unconsumed UserMessage; routing to pending input"
+                    "BufferedInputAdapter: sealed buffer contained unconsumed UserMessage; routing to Session mailbox"
                 );
             }
-            self.pending_input.push(event);
+            self.input_events.defer(event);
+        }
+        for event in self.pending_input.drain_all() {
+            self.input_events.defer(event);
         }
     }
 
@@ -168,7 +180,7 @@ where
                     self.run_id,
                     rejected_id,
                 );
-                self.pending_input.push(rejected);
+                self.input_events.defer(rejected);
             }
             None => {
                 let queued_ids: Vec<_> = queued
@@ -197,14 +209,7 @@ where
         &mut self,
         expected_epoch: DrainEpoch,
     ) -> Result<Option<DrainOutcome>, LoopEngineError> {
-        let mut events = self.input_events.drain_input_events().await;
-        if let Some(queued) = self.queue.drain_queued_input().await {
-            events.extend(
-                queued
-                    .into_iter()
-                    .map(|text| ChatInputEvent::classify_text(text, Vec::new())),
-            );
-        }
+        let events = self.input_events.drain_input_events().await;
         for event in events {
             match event {
                 ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_) => {
@@ -323,10 +328,9 @@ where
 }
 
 #[async_trait::async_trait]
-impl<Q, I> InputStrategy for BufferedInputAdapter<Q, I>
+impl<I> InputStrategy for BufferedInputAdapter<I>
 where
-    Q: QueueDrainPort + Send,
-    I: InputEventDrainPort + Send,
+    I: SessionInputPort + Send,
 {
     async fn drain_input(
         &mut self,
@@ -429,7 +433,20 @@ where
         // Async park: wait for the next input event from the channel.
         // engine's await_interruptible wraps this future — cancel/timeout
         // will drop it automatically.
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[input_strategy] awaiting session input run_id={} epoch={:?}",
+            self.run_id,
+            expected_epoch,
+        );
         let event = self.input_events.recv_next_input().await;
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[input_strategy] session input wait completed run_id={} epoch={:?} event_kind={}",
+            self.run_id,
+            expected_epoch,
+            event.as_ref().map(chat_input_event_kind).unwrap_or("source_closed"),
+        );
         match event {
             None => {
                 // Channel closed — seal.
@@ -471,10 +488,9 @@ where
 }
 
 #[async_trait::async_trait]
-impl<Q, I> crate::application::loop_engine::InputPort for BufferedInputAdapter<Q, I>
+impl<I> crate::application::loop_engine::InputPort for BufferedInputAdapter<I>
 where
-    Q: QueueDrainPort + Send,
-    I: InputEventDrainPort + Send,
+    I: SessionInputPort + Send,
 {
     async fn drain_input(
         &mut self,

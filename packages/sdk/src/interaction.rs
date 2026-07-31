@@ -7,6 +7,8 @@ use crate::{InteractionRequestId, RunId};
 pub struct InteractionRequest {
     pub id: InteractionRequestId,
     pub run_id: RunId,
+    #[serde(default)]
+    pub tool_call_id: Option<String>,
     pub body: InteractionRequestBody,
 }
 

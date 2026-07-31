@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "统一 Run 创建与装配",
+    "subtitle": "纯值请求与 live binding 在 Factory 内汇合，输出完整可执行 Run",
+    "output": "index.html",
+    "animation": "none",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "viewBox": [1400, 720],
+    "views": [
+      { "id": "value-contract", "label": "纯值契约", "focus": ["snapshot", "request", "parent"], "note": "请求只携带 RunSpec、SessionSnapshot 与可选 ParentRunFacts。" },
+      { "id": "factory-assembly", "label": "Factory 装配", "focus": ["request", "resolve", "selectors", "context"], "note": "Factory 按职责选择能力，并在唯一位置构造 RuntimeContext。" },
+      { "id": "single-output", "label": "统一产物", "focus": ["context", "run_launch"], "note": "Main 与 Derived 最终都形成完整 RunInstance 并交给 RunLauncher。" }
+    ]
+  },
+  "lanes": [
+    { "id": "values", "label": "Frozen Values" },
+    { "id": "assembly", "label": "Run Factory" },
+    { "id": "bindings", "label": "Live Bindings" },
+    { "id": "output", "label": "Execution" }
+  ],
+  "phases": [
+    { "id": "contract", "label": "Contract", "fromCol": 0, "toCol": 1 },
+    { "id": "selection", "label": "Selection", "fromCol": 2, "toCol": 4, "variant": "emphasis" },
+    { "id": "product", "label": "Product", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": ["snapshot", "request", "resolve", "selectors", "context", "run_launch"],
+  "nodes": [
+    { "id": "snapshot", "lane": "values", "col": 0, "type": "database", "label": "Snapshot", "sublabel": "session facts", "tag": "pure value" },
+    { "id": "parent", "lane": "values", "col": 1, "type": "database", "label": "Parent Facts", "sublabel": "optional ceiling" },
+    { "id": "request", "lane": "assembly", "col": 1, "type": "backend", "label": "Request", "sublabel": "spec", "tag": "pure", "width": 48 },
+    { "id": "resolve", "lane": "assembly", "col": 2, "type": "security", "label": "Resolve", "sublabel": "lease", "width": 48 },
+    { "id": "bindings", "lane": "bindings", "col": 2, "type": "cloud", "label": "Bindings", "sublabel": "session / parent", "tag": "crate private" },
+    { "id": "selectors", "lane": "assembly", "col": 3, "type": "backend", "label": "Select", "sublabel": "ports", "width": 48 },
+    { "id": "context", "lane": "assembly", "col": 4, "type": "backend", "label": "Context", "sublabel": "bound", "tag": "single", "width": 48 },
+    { "id": "run_launch", "lane": "output", "col": 5, "type": "backend", "label": "Run + Launch", "sublabel": "instance to loop", "tag": "unified" }
+  ],
+  "edges": [
+    { "id": "snapshot_request", "from": "snapshot", "to": "request", "variant": "emphasis" },
+    { "id": "parent_request", "from": "parent", "to": "request", "role": "branch", "variant": "dashed" },
+    { "id": "request_resolve", "from": "request", "to": "resolve", "variant": "emphasis" },
+    { "id": "bindings_resolve", "from": "bindings", "to": "resolve", "role": "branch" },
+    { "id": "resolve_selectors", "from": "resolve", "to": "selectors", "variant": "emphasis", "route": "straight", "fromSide": "right", "toSide": "left" },
+    { "id": "bindings_selectors", "from": "bindings", "to": "selectors", "role": "branch" },
+    { "id": "selectors_context", "from": "selectors", "to": "context", "variant": "emphasis", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+    { "id": "context_output", "from": "context", "to": "run_launch", "variant": "emphasis" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "输入边界", "items": ["SessionState 在 Run 边界生成冻结快照", "ParentRunFacts 只提供父 identity 与 capability ceiling", "用户消息不进入装配契约"] },
+    { "dot": "emerald", "title": "Factory 收口", "items": ["live binding 仅在 Factory 内可见", "职责型 selector 分别选择 workspace、provider、context、tool、hook 等能力", "RuntimeContext 只有一条生产构造路径"] },
+    { "dot": "violet", "title": "执行收口", "items": ["RunInstance 组合 Run、execution、snapshot 与 context", "RunLauncher 统一管理 ActiveRun 注册和释放", "Main 与 Derived 进入同一个 shared run_loop"] }
+  ]
+}

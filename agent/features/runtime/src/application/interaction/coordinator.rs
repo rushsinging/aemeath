@@ -21,11 +21,12 @@ use sdk::{
 
 use crate::application::interaction::port::{
     validate_reply, InteractionCompletion, InteractionPort, InteractionPortError,
-    InteractionRequestMetadata, InteractionResolution,
+    InteractionRequestMetadata,
 };
 use crate::application::loop_engine::{
     ApprovalRequiredCall, InteractionWorkOutcome, LoopEngineError,
 };
+pub(crate) use crate::application::run::execution_state::ActiveInteractionAlreadyRegistered;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolExecution;
 use crate::domain::agent_run::ToolCallStatus;
@@ -133,6 +134,12 @@ impl InteractionCoordinator {
         let request = InteractionRequest {
             id: request_id.clone(),
             run_id,
+            tool_call_id: match &continuation {
+                InteractionContinuation::CompleteToolCall(tool_call_id) => {
+                    Some(tool_call_id.to_string())
+                }
+                _ => None,
+            },
             body,
         };
 
@@ -157,50 +164,12 @@ impl InteractionCoordinator {
         receiver.await.map_err(|_| CoordinationError::WaiterDropped)
     }
 
-    pub fn poll_mailbox(execution: &mut RunExecutionState) -> Option<InteractionResolution> {
-        let mut resolution = None;
-        let mut remaining = Vec::new();
-        for (metadata, mut receiver) in execution.take_interaction_receivers() {
-            match receiver.try_recv() {
-                Ok(completion) if resolution.is_none() => {
-                    resolution = Some(InteractionResolution::Resolved {
-                        metadata,
-                        completion,
-                    });
-                }
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) if resolution.is_none() => {
-                    resolution = Some(InteractionResolution::Closed { metadata });
-                }
-                Ok(completion) => {
-                    log::warn!(
-                        target: crate::LOG_TARGET,
-                        "interaction mailbox 同轮出现多个已完成请求，保留后续请求等待下轮处理：{}",
-                        metadata.request_id,
-                    );
-                    let (sender, receiver) = tokio::sync::oneshot::channel();
-                    let _ = sender.send(completion);
-                    remaining.push((metadata, receiver));
-                }
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                    let (sender, receiver) = tokio::sync::oneshot::channel();
-                    drop(sender);
-                    remaining.push((metadata, receiver));
-                }
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
-                    remaining.push((metadata, receiver));
-                }
-            }
-        }
-        execution.replace_interaction_receivers(remaining);
-        resolution
-    }
-
     pub fn store_mailbox_receiver(
         execution: &mut RunExecutionState,
         metadata: InteractionRequestMetadata,
         receiver: tokio::sync::oneshot::Receiver<InteractionCompletion>,
-    ) {
-        execution.store_interaction_receiver(metadata, receiver);
+    ) -> Result<(), ActiveInteractionAlreadyRegistered> {
+        execution.store_interaction_receiver(metadata, receiver)
     }
 
     pub(crate) async fn complete_tool_interaction(
@@ -355,12 +324,14 @@ impl InteractionCoordinator {
     ///   already in a terminal state (no-op — still safe).
     pub fn cancel_and_drain(
         run: &mut Run,
+        execution: &mut RunExecutionState,
         port: &dyn InteractionPort,
         run_id: &RunId,
         reason: InteractionCancelReason,
     ) -> Result<(), CoordinationError> {
-        // Drain the port for this run — cancels all pending waiters.
         port.drain_run(run_id, reason);
+        execution.take_active_interaction();
+        execution.take_pending_interaction_work();
 
         // Transition the Run to Cancelling.  This clears pending_interaction
         // and sets the state to Cancelling.

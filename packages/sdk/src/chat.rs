@@ -1,6 +1,6 @@
 //! Chat 输入 / 请求类型与重导出。
 
-use crate::{ChatInputEventPort, QueueDrainPort};
+use crate::ChatInputEventPort;
 
 pub use crate::chat_event::{
     ChatEvent, ChatEventContext, ReflectionApplyStatusView, ReflectionErrorCategoryView,
@@ -174,23 +174,11 @@ impl ChatInputEvent {
     }
 }
 
-/// 初始用户输入（首次 `chat()` 时传入）。
-///
-/// 常驻 loop 后续用户输入走 `ChatInputEvent::UserMessage`，
-/// 不再通过 `ChatRequest` 传递全量历史。
-#[derive(Debug, Clone)]
-pub struct UserInput {
-    pub text: String,
-    pub images: Vec<ChatInputImage>,
-}
-
 /// TUI 发起的一次 Chat 请求。
 #[derive(Clone)]
 pub struct ChatRequest {
-    /// 初始 user input（首次 chat 时传入；常驻 loop 后续走 input_events）。
-    pub user_input: Option<UserInput>,
-    pub queue_drain: Option<std::sync::Arc<dyn QueueDrainPort>>,
-    pub input_events: Option<std::sync::Arc<dyn ChatInputEventPort>>,
+    /// Session 唯一 typed ingress；首次、后续、命令和 Skill 输入均走此端口。
+    pub ingress: std::sync::Arc<dyn ChatInputEventPort>,
 }
 
 #[cfg(test)]
@@ -217,20 +205,26 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct ClosedInputPort;
+
+    impl crate::ChatInputEventPort for ClosedInputPort {
+        fn drain_input_events<'a>(&'a self) -> crate::InputEventFuture<'a> {
+            Box::pin(async { Vec::new() })
+        }
+
+        fn recv_next<'a>(&'a self) -> crate::InputEventOptFuture<'a> {
+            Box::pin(async { None })
+        }
+    }
+
     #[test]
-    fn test_chat_request_carries_user_input() {
+    fn chat_request_requires_single_typed_ingress() {
         let request = ChatRequest {
-            user_input: Some(UserInput {
-                text: "hello".to_string(),
-                images: Vec::new(),
-            }),
-            queue_drain: None,
-            input_events: None,
+            ingress: std::sync::Arc::new(ClosedInputPort),
         };
 
-        assert_eq!(request.user_input.as_ref().unwrap().text, "hello");
-        assert!(request.queue_drain.is_none());
-        assert!(request.input_events.is_none());
+        let _ingress = request.ingress;
     }
 
     #[test]

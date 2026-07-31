@@ -83,6 +83,7 @@ pub(crate) enum TuiRunStepEvent {
 pub(crate) struct TuiInteractionRequest {
     pub(crate) request_id: UiInteractionRequestId,
     pub(crate) run_id: UiRunId,
+    pub(crate) tool_call_id: Option<String>,
     pub(crate) body: TuiInteractionBody,
 }
 

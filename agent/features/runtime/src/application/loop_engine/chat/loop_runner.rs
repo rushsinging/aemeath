@@ -9,8 +9,8 @@ use crate::application::loop_engine::chat::idle_lifecycle::{
 use crate::application::loop_engine::chat::input_gate::apply_gate;
 use crate::application::loop_engine::chat::loop_phases::handle_turn_boundary_config;
 use crate::application::loop_engine::chat::{
-    ChatEventSink, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
-    QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
+    ChatEventSink, GateKind, PendingCommand, PendingInputBuffer, RuntimeStreamEvent,
+    RuntimeTurnContext,
 };
 use crate::domain::agent_run::RunSpec;
 
@@ -22,11 +22,10 @@ pub(crate) mod main_run_port;
 /// Session actor for Main chat. The session itself only idles, accepts one real user input,
 /// creates one fresh `Run`, drives it to a terminal state through the shared engine, then idles
 /// again. `Run` is the only production state machine inside an active turn.
-pub async fn process_chat_loop<S, Q, I>(ctx: ChatLoopContext<S, Q, I>)
+pub async fn process_chat_loop<S, I>(ctx: ChatLoopContext<S, I>)
 where
     S: ChatEventSink,
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
+    I: crate::application::loop_engine::input_strategy::SessionInputPort,
 {
     let session_id_for_scope = ctx.shell.session_snapshot().session_id().to_string();
     let chat_id = ChatId::new_v7();
@@ -39,12 +38,9 @@ where
         async move {
             let ChatLoopContext {
                 sink,
-                queue,
                 input_events,
                 shell,
-                initial_messages,
-                read_files,
-                session_reminders,
+                read_files,                session_reminders,
                 session_queries,
             } = ctx;
 
@@ -78,8 +74,7 @@ where
             let session_snapshot = shell.session_snapshot();
             let mut context_size = shell.context_size;
             let mut session_id = session_snapshot.session_id().to_string();
-            let mut messages = initial_messages;
-            let mut initial_git_context = (!initial_git_context.is_empty())
+            let mut messages = Vec::new();            let mut initial_git_context = (!initial_git_context.is_empty())
                 .then_some(Message::system_generated_user(initial_git_context));
             // Interval and PreCompact share this single session-scoped slot.
             let reflection_tasks =
@@ -594,9 +589,7 @@ where
                     crate::application::loop_engine::input_strategy::BufferedInputAdapter {
                         input_events: input_events.clone(),
                         sink: runtime_context.event_sink(),
-                        queue: queue.clone(),
-                        pending_input: pending_input.clone(),
-                        run_input_buffer: runtime_context.input(),
+                        pending_input: pending_input.clone(),                        run_input_buffer: runtime_context.input(),
                         continuation: input_continuation.clone(),
                         run_id: run_id.clone(),
                     };
