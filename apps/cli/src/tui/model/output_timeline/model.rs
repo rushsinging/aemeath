@@ -254,8 +254,6 @@ mod tests {
     #[test]
     fn orphan_ids_index_tracks_pushed_and_retained_items() {
         let mut model = OutputTimelineModel::default();
-        let chat = ChatId::new("chat-1");
-        let turn = ChatTurnId::new("turn-1");
 
         model.push(OutputTimelineItem::OrphanToolResult {
             id: "orphan-1".to_string(),
