@@ -1,7 +1,8 @@
 use super::sdk_event_mapper::map_stream_event;
+use crate::application::loop_engine::chat::events::RuntimeHookExecutionResult;
 use crate::application::loop_engine::chat::{
-    RuntimeHookMessage, RuntimeHookMessageKind, RuntimeResumedSessionStep, RuntimeStreamEvent,
-    RuntimeTurnContext,
+    RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookMessage, RuntimeHookMessageKind,
+    RuntimeResumedSessionStep, RuntimeStreamEvent, RuntimeTurnContext,
 };
 
 #[test]
@@ -87,6 +88,39 @@ fn tool_call_mapping_preserves_canonical_name() {
 
     match map_stream_event(event) {
         sdk::ChatEvent::ToolCallStart { name, .. } => assert_eq!(name, "Grep"),
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn hook_event_mapping_preserves_authoritative_status_and_final_diagnostics() {
+    let event = RuntimeStreamEvent::HookEvent(RuntimeHookEvent {
+        hook_name: "Stop".to_string(),
+        status: RuntimeHookEventStatus::Succeeded,
+        matcher: Some("*".to_string()),
+        command: Some("check-agent-stop.sh".to_string()),
+        result: Some(RuntimeHookExecutionResult {
+            exit_code: Some(0),
+            stdout: "ok".to_string(),
+            stderr: String::new(),
+            decision: Some("continue".to_string()),
+            reason: None,
+            additional_context: None,
+        }),
+    });
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::HookEvent(view) => {
+            assert_eq!(view.status, sdk::HookEventStatus::Succeeded);
+            assert_eq!(view.matcher.as_deref(), Some("*"));
+            assert_eq!(view.command.as_deref(), Some("check-agent-stop.sh"));
+            let result = view.result.expect("hook result");
+            assert_eq!(result.exit_code, Some(0));
+            assert_eq!(result.stdout, "ok");
+            assert!(result.stderr.is_empty());
+            assert_eq!(result.decision.as_deref(), Some("continue"));
+            assert!(result.reason.is_none());
+        }
         other => panic!("unexpected event: {other:?}"),
     }
 }

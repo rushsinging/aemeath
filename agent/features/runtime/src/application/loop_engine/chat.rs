@@ -5,6 +5,8 @@ pub(crate) mod events;
 mod events_tests;
 pub(crate) mod finalize;
 mod hook_ui;
+#[cfg(test)]
+mod hook_ui_tests;
 mod idle_commands;
 mod idle_lifecycle;
 mod input_gate;
@@ -36,8 +38,8 @@ pub(crate) mod tools;
 
 pub use events::{
     ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeHookEvent, RuntimeHookEventStatus,
-    RuntimeHookMessage, RuntimeHookMessageKind, RuntimeResumedSessionStep, RuntimeStreamEvent,
-    RuntimeToolCallStatus, RuntimeTurnContext,
+    RuntimeHookExecutionResult, RuntimeHookMessage, RuntimeHookMessageKind,
+    RuntimeResumedSessionStep, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
 pub use input_gate::{
     apply_gate, GateKind, InputEventDrainPort, InputEventFuture, InputEventOptFuture,

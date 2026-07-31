@@ -1,5 +1,5 @@
 use super::{sdk_event_to_tui_event, SdkEventMapping};
-use crate::tui::adapter::tui_runtime_event::{TuiRunEvent, TuiRuntimeEvent};
+use crate::tui::adapter::tui_runtime_event::{TuiHookStatus, TuiRunEvent, TuiRuntimeEvent};
 
 #[test]
 fn session_resume_keeps_context_run_step_boundaries() {
@@ -61,6 +61,38 @@ fn run_cancelling_keeps_identity_instead_of_becoming_empty_message() {
             parent_run_id: None,
             event: TuiRunEvent::Cancelling,
         }) if actual.as_str() == run_id.as_str()
+    ));
+}
+
+#[test]
+fn hook_event_preserves_authoritative_status_and_final_diagnostics() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::HookEvent(sdk::HookEventView {
+        hook_name: "Stop".to_string(),
+        status: sdk::HookEventStatus::Succeeded,
+        matcher: Some("*".to_string()),
+        command: Some("check-agent-stop.sh".to_string()),
+        result: Some(sdk::HookExecutionResultView {
+            exit_code: Some(0),
+            stdout: "ok".to_string(),
+            stderr: String::new(),
+            decision: Some("continue".to_string()),
+            reason: None,
+            additional_context: None,
+        }),
+    }));
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::HookEvent(event))
+            if event.status == TuiHookStatus::Succeeded
+                && event.matcher.as_deref() == Some("*")
+                && event.command.as_deref() == Some("check-agent-stop.sh")
+                && event.result.as_ref().is_some_and(|result|
+                    result.exit_code == Some(0)
+                        && result.stdout == "ok"
+                        && result.stderr.is_empty()
+                        && result.decision.as_deref() == Some("continue")
+                        && result.reason.is_none())
     ));
 }
 
