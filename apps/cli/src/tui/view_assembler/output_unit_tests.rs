@@ -33,9 +33,9 @@ fn tool_status_view(status: ToolCallStatus) -> crate::tui::view_model::ToolCallB
 
     let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
     vm.roots
-        .into_iter()
-        .find_map(|block| match block.kind {
-            OutputBlockKind::ToolCall(tool) => Some(tool),
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool.clone()),
             _ => None,
         })
         .expect("tool block")

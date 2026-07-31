@@ -40,12 +40,10 @@ const RSS_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 use event::StatusContextUpdate;
 pub use event::UiEvent;
 
-/// `refresh_output_document_from_model` 的 assemble 产物 memo。
-pub(crate) struct OutputViewCache {
-    pub(crate) revision: u64,
-    /// memo key 第二维：workspace_root 变化时强制重 assemble，使工具标题路径立即刷新。
-    pub(crate) workspace_root: Option<String>,
-    pub(crate) view_model: crate::tui::view_model::OutputViewModel,
+/// `refresh_output_document_from_model` 的增量装配结果 owner。
+#[derive(Default)]
+pub(crate) struct OutputViewState {
+    pub(crate) retained: crate::tui::view_assembler::retained_output_view::RetainedOutputView,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -115,7 +113,7 @@ pub struct App {
     pub(crate) output_document_renderer: OutputDocumentRenderer,
     /// memo：缓存上次 assemble 的 (revision, view_model)。revision 不变即复用，
     /// 跳过 `assemble_from_conversation` 的全量遍历+clone（大会话伪卡死根治）。
-    pub(crate) output_view_cache: Option<OutputViewCache>,
+    pub(crate) output_view: OutputViewState,
     frame_diagnostics: FrameDiagnostics,
     process_memory: ProcessMemoryBaseline,
     started_at: Instant,
@@ -226,7 +224,7 @@ impl App {
             input_area: InputArea::new(),
             status_bar,
             output_document_renderer: OutputDocumentRenderer::default(),
-            output_view_cache: None,
+            output_view: OutputViewState::default(),
             frame_diagnostics: FrameDiagnostics::new(SLOW_FRAME_THRESHOLD, SLOW_FRAME_LOG_COOLDOWN),
             process_memory: ProcessMemoryBaseline::new(RSS_SAMPLE_INTERVAL),
             started_at: Instant::now(),
@@ -426,10 +424,7 @@ impl App {
             output_dirty,
             revision: self.model.conversation.revision(),
             timeline_items: self.model.conversation.timeline.items().len(),
-            output_roots: self
-                .output_view_cache
-                .as_ref()
-                .map_or(0, |cache| cache.view_model.roots.len()),
+            output_roots: self.output_view.retained.view_model().roots.len(),
             document_lines: self.output_area.document().total_lines(),
             assemble_calls: 0,
         }

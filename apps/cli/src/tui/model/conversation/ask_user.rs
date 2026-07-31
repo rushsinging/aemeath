@@ -505,9 +505,19 @@ impl ConversationModel {
 
     /// 移除 AskUserBatch 交互块。
     pub(super) fn dismiss_ask_user_batch(&mut self) -> Vec<ConversationChange> {
+        let id = self.timeline.items().iter().find_map(|item| match item {
+            OutputTimelineItem::AskUserBatch {
+                id,
+                confirmed: false,
+                ..
+            } => Some(id.clone()),
+            _ => None,
+        });
         if self.remove_active_ask_user_block() {
             return vec![
-                ConversationChange::AskUserDismissed,
+                ConversationChange::AskUserDismissed {
+                    id: id.expect("removed active AskUserBatch must have identity"),
+                },
                 ConversationChange::OutputDirty,
             ];
         }

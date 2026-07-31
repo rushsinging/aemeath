@@ -11,6 +11,10 @@ impl OutputTimelineModel {
         &self.items
     }
 
+    pub fn item(&self, id: &str) -> Option<&OutputTimelineItem> {
+        self.items.iter().find(|item| item.id() == id)
+    }
+
     pub fn items_mut(&mut self) -> &mut Vec<OutputTimelineItem> {
         &mut self.items
     }

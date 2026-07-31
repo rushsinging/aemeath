@@ -1,12 +1,24 @@
 use super::conversation::tool_result_payload::ToolResultPayload;
 use super::style::SemanticStyle;
 use std::hash::Hash;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputViewModel {
-    pub roots: Vec<BlockNode>,
+    pub roots: Vec<Arc<BlockNode>>,
     pub version: u64,
     pub follow_tail_hint: bool,
+}
+
+impl OutputViewModel {
+    #[cfg(test)]
+    pub fn from_roots(roots: Vec<BlockNode>, version: u64, follow_tail_hint: bool) -> Self {
+        Self {
+            roots: roots.into_iter().map(Arc::new).collect(),
+            version,
+            follow_tail_hint,
+        }
+    }
 }
 
 impl Default for OutputViewModel {

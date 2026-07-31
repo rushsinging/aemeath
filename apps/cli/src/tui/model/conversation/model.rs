@@ -139,10 +139,17 @@ impl ConversationModel {
         let after_item_ids = self.timeline_item_ids();
         if before_item_ids != after_item_ids.as_slice() {
             if after_item_ids.starts_with(before_item_ids) {
-                for item_id in after_item_ids.iter().skip(before_item_ids.len()) {
+                let appended = after_item_ids.iter().skip(before_item_ids.len());
+                for item_id in appended {
                     self.output_view_journal.publish(OutputViewChange::Append {
                         item_id: item_id.clone(),
                     });
+                }
+                for item_id in changes.iter().filter_map(output_view_item_id_for_change) {
+                    if before_item_ids.iter().any(|existing| existing == &item_id) {
+                        self.output_view_journal
+                            .publish(OutputViewChange::Update { item_id });
+                    }
                 }
             } else if before_item_ids.starts_with(&after_item_ids) {
                 for item_id in before_item_ids.iter().skip(after_item_ids.len()) {
@@ -150,6 +157,12 @@ impl ConversationModel {
                         item_id: item_id.clone(),
                     });
                 }
+            } else if let Some(item_id) = changes.iter().find_map(|change| match change {
+                ConversationChange::AskUserDismissed { id } => Some(id.clone()),
+                _ => None,
+            }) {
+                self.output_view_journal
+                    .publish(OutputViewChange::Remove { item_id });
             } else {
                 self.output_view_journal.publish(OutputViewChange::Reset);
             }
@@ -484,12 +497,27 @@ fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String>
         | ConversationChange::AskUserShown { id: block_id }
         | ConversationChange::AskUserUpdated { id: block_id }
         | ConversationChange::OrphanToolResultObserved { id: block_id } => Some(block_id.clone()),
-        ConversationChange::ToolCallBound { id, .. }
-        | ConversationChange::ToolCallCompleted { id, .. }
-        | ConversationChange::AgentMetaUpdated { tool_id: id }
-        | ConversationChange::AgentProgressRecorded { tool_id: id, .. } => {
-            Some(format!("tool-call-{id}"))
+        ConversationChange::AskUserDismissed { .. } => None,
+        ConversationChange::ToolCallObserved { .. } => None,
+        ConversationChange::OutputDirty => None,
+        ConversationChange::ToolCallBound {
+            chat_id,
+            turn_id,
+            id,
+            ..
         }
+        | ConversationChange::ToolCallCompleted {
+            chat_id,
+            turn_id,
+            id,
+            ..
+        }
+        | ConversationChange::AgentMetaUpdated {
+            chat_id,
+            turn_id,
+            tool_id: id,
+        } => Some(format!("tool-call-{chat_id}/{turn_id}/{id}")),
+        ConversationChange::AgentProgressRecorded { .. } => None,
         _ => None,
     }
 }

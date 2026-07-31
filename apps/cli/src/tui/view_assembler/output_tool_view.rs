@@ -4,10 +4,10 @@ use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload
 use crate::tui::view_model::tool_name::tool_display_name;
 use crate::tui::view_model::{AgentMetaView, SemanticStyle, ToolCallBlockView, ToolSemanticStatus};
 
-use crate::tui::view_assembler::output::ToolIndex;
+use crate::tui::view_assembler::output_tool_lookup::ToolCallLookup;
 
 pub(super) fn tool_result_is_embedded(
-    index: &ToolIndex<'_>,
+    index: &impl ToolCallLookup,
     chat_id: &ChatId,
     turn_id: &ChatTurnId,
     tool_id: &ToolCallId,
@@ -36,7 +36,7 @@ pub(super) fn summarize_non_embedded_result(
 }
 
 pub(super) fn find_tool_view(
-    index: &ToolIndex<'_>,
+    index: &impl ToolCallLookup,
     chat_id: &ChatId,
     turn_id: &ChatTurnId,
     tool_id: &ToolCallId,
@@ -121,7 +121,7 @@ pub(super) fn find_tool_view(
 }
 
 pub(super) fn find_tool_call<'a>(
-    index: &ToolIndex<'a>,
+    index: &'a impl ToolCallLookup,
     chat_id: &ChatId,
     turn_id: &ChatTurnId,
     tool_id: &ToolCallId,

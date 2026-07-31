@@ -150,6 +150,7 @@ run_guard fast "$HOOKS_DIR/check-tui-effect-boundary.sh"
 run_guard fast "$HOOKS_DIR/check-tui-model-view-boundaries.sh"
 run_guard fast run_tui_single_source_structure_guard
 run_guard fast "$HOOKS_DIR/check-tui-output-legacy-guards.sh"
+run_guard fast "$HOOKS_DIR/check-tui-retained-output-view.sh"
 run_guard fast "$HOOKS_DIR/check-tui-block-nesting.sh"
 run_guard fast "$HOOKS_DIR/check-render-pure.sh"
 run_guard fast "$HOOKS_DIR/check-render-isolation.sh"

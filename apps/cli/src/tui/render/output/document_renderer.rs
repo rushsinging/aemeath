@@ -670,7 +670,7 @@ fn estimate_wrapped_line_count(line: &str, width: usize) -> usize {
     str_display_width(line).max(1).div_ceil(width)
 }
 
-fn collect_semantic_block_ids(roots: &[BlockNode]) -> HashSet<&str> {
+fn collect_semantic_block_ids(roots: &[std::sync::Arc<BlockNode>]) -> HashSet<&str> {
     fn collect<'a>(node: &'a BlockNode, ids: &mut HashSet<&'a str>) {
         ids.insert(node.block_id.as_str());
         for child in &node.children {

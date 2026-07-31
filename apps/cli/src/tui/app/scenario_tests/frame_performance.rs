@@ -41,6 +41,29 @@ fn draw_frame(
 }
 
 #[test]
+fn appending_after_cold_frame_touches_only_the_new_root() {
+    let mut app = frame_app(5_000);
+    let mut terminal = Terminal::new(InstrumentedBackend::new(TestBackend::new(WIDTH, HEIGHT)))
+        .expect("test terminal");
+    let _ = draw_frame(&mut app, &mut terminal);
+    let prior_roots = app.output_view.retained.view_model().roots.len();
+
+    app.model.conversation.apply(AppendUserMessage {
+        text: "incremental".to_string(),
+    });
+    app.view_state.dirty.mark_output();
+    let update = draw_frame(&mut app, &mut terminal);
+
+    assert_eq!(update.assemble_calls, 0);
+    assert_eq!(update.retained_view_touched_roots, 1);
+    assert_eq!(update.retained_view_created_roots, 1);
+    assert_eq!(
+        update.retained_view_reused_roots,
+        u64::try_from(prior_roots).unwrap()
+    );
+}
+
+#[test]
 fn frame_pipeline_reports_cold_spinner_and_resize_phase_work() {
     let mut app = frame_app(100);
     let mut terminal = Terminal::new(InstrumentedBackend::new(TestBackend::new(WIDTH, HEIGHT)))
@@ -48,8 +71,10 @@ fn frame_pipeline_reports_cold_spinner_and_resize_phase_work() {
 
     let cold = draw_frame(&mut app, &mut terminal);
     let expected_items = u64::try_from(app.model.conversation.timeline.items().len()).unwrap();
-    assert_eq!(cold.assemble_calls, 1);
-    assert_eq!(cold.assemble_source_items, expected_items);
+    assert_eq!(cold.assemble_calls, 0);
+    assert_eq!(cold.retained_view_sync_calls, 1);
+    assert_eq!(cold.retained_view_rebuilt_roots, expected_items);
+    assert_eq!(cold.retained_view_created_roots, expected_items);
     assert_eq!(cold.viewport_render_calls, 1);
     assert_eq!(
         cold.viewport_source_lines,
@@ -63,6 +88,8 @@ fn frame_pipeline_reports_cold_spinner_and_resize_phase_work() {
 
     let warm = draw_frame(&mut app, &mut terminal);
     assert_eq!(warm.assemble_calls, 0);
+    assert_eq!(warm.retained_view_sync_calls, 0);
+    assert_eq!(warm.retained_view_touched_roots, 0);
     assert_eq!(warm.viewport_render_calls, 1);
     assert_eq!(warm.terminal_diff_calls, 1);
     assert!(warm.terminal_diff_cells <= cold.terminal_diff_cells);
@@ -74,7 +101,8 @@ fn frame_pipeline_reports_cold_spinner_and_resize_phase_work() {
         .expect("resize terminal buffers");
     app.handle_resize(120, HEIGHT);
     let resized = draw_frame(&mut app, &mut terminal);
-    assert_eq!(resized.assemble_calls, 0, "revision 不变应复用 view model");
+    assert_eq!(resized.assemble_calls, 0, "revision 不变不应完整装配");
+    assert_eq!(resized.retained_view_touched_roots, 0);
     assert_eq!(
         resized.document_render_calls, 1,
         "resize 应按新宽度重建 document"

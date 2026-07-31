@@ -57,11 +57,7 @@ mod tests {
             kind,
             children: Vec::new(),
         };
-        let model = OutputViewModel {
-            roots: vec![node],
-            version: 1,
-            follow_tail_hint: true,
-        };
+        let model = OutputViewModel::from_roots(vec![node], 1, true);
         assert_eq!(model.roots.len(), 1);
     }
 }

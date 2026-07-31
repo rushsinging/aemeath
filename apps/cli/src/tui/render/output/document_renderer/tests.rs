@@ -44,11 +44,7 @@ fn node(id: &str, text: &str, children: Vec<BlockNode>) -> BlockNode {
 }
 
 fn vm_with_roots(roots: Vec<BlockNode>) -> OutputViewModel {
-    OutputViewModel {
-        roots,
-        version: 1,
-        follow_tail_hint: true,
-    }
+    OutputViewModel::from_roots(roots, 1, true)
 }
 
 fn placeholder_node() -> BlockNode {
@@ -832,16 +828,16 @@ fn spacing_policy_change_invalidates_content_and_gutted_caches() {
         text: "one\n\ntwo".into(),
         style: SemanticStyle::Normal,
     });
-    let vm = OutputViewModel {
-        version: 1,
-        follow_tail_hint: false,
-        roots: vec![BlockNode {
+    let vm = OutputViewModel::from_roots(
+        vec![BlockNode {
             block_id: "assistant".into(),
             block_version: kind.cache_version(),
             kind,
             children: vec![],
         }],
-    };
+        1,
+        false,
+    );
     let mut renderer = OutputDocumentRenderer::default();
 
     let normal = renderer.render_model_document(&vm, 80, 80, 0, MarkdownSpacingPolicy::normal());
@@ -873,11 +869,7 @@ fn test_gutted_cache_reuses_static_block_across_frames() {
         kind,
         children: Vec::new(),
     };
-    let vm = OutputViewModel {
-        roots: vec![node],
-        version: 1,
-        follow_tail_hint: true,
-    };
+    let vm = OutputViewModel::from_roots(vec![node], 1, true);
     let mut r = OutputDocumentRenderer::default();
     let _ = r.render_model_document(
         &vm,
@@ -986,7 +978,8 @@ fn unrelated_new_root_does_not_rehighlight_windowed_static_edits() {
     let _ = renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal());
 
     vm.version += 1;
-    vm.roots.push(node("unrelated", "无关的新消息", vec![]));
+    vm.roots
+        .push(node("unrelated", "无关的新消息", vec![]).into());
     let (_, revised) = crate::tui::render::performance::capture(|| {
         renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
     });
