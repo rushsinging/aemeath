@@ -77,9 +77,14 @@ impl Dispatcher {
     /// 静默忽略」一致。**NEVER** 静默丢弃非法 subscription。
     pub fn try_new(
         subscriptions: Vec<HookSubscription>,
-        env: HashMap<String, String>,
+        _legacy_env: HashMap<String, String>,
     ) -> Result<Self, Vec<SubscriptionError>> {
-        Self::build(subscriptions, Box::new(ProcessDriverExecutor::new(env)))
+        Self::build(
+            subscriptions,
+            Box::new(ProcessDriverExecutor::new(
+                crate::adapters::environment::capture_basic_environment(),
+            )),
+        )
     }
 
     /// 共用装配：严格校验全部 subscription 后装配执行器。
