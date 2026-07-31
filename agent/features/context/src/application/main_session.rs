@@ -428,6 +428,11 @@ impl MainSessionWiring {
         Arc::clone(&self.committed_session.read().unwrap())
     }
 
+    /// Returns the currently committed Context port.
+    pub fn committed_context(&self) -> Arc<dyn ContextPort> {
+        Arc::clone(&self.context)
+    }
+
     /// Returns the currently committed memory port.
     pub fn committed_memory(&self) -> Arc<dyn MemoryPort> {
         Arc::clone(&self.committed_memory.read().unwrap())

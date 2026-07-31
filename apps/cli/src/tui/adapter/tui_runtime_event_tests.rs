@@ -28,6 +28,7 @@ fn interaction_request_maps_all_body_fields_without_sdk_payload() {
     let request = sdk::InteractionRequest {
         id: request_id,
         run_id,
+        tool_call_id: None,
         body: sdk::InteractionRequestBody::ToolApproval(sdk::ToolApprovalPrompt {
             tool_name: "Bash".to_string(),
             args_summary: "rm -rf target".to_string(),

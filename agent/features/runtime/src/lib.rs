@@ -1,30 +1,45 @@
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:runtime";
 
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量.
-pub mod adapters;
-pub mod application;
-pub mod domain;
-pub mod ports;
+pub(crate) mod adapters;
+pub(crate) mod application;
+pub(crate) mod domain;
+pub(crate) mod ports;
 
+pub use adapters::sdk_event_mapper::map_domain_event;
 pub use adapters::tool_result_blob::AtomicBlobToolResultStore;
-pub use application::active_run::ActiveRunRegistry;
-pub use application::tool_result_materialization::{
+pub use application::run::active_registry::ActiveRunRegistry;
+pub use application::tool::tool_result_materializer::{
     ToolResultMaterializationPolicy, ToolResultMaterializer,
 };
 
 pub use application::client::{
-    config_snapshot_to_sdk, from_args_with_workspace, resume_session_to_backing, AgentClientImpl,
-    ResumeError, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
-    RuntimeToolAssemblyDependencies,
+    build_agent_runner, config_snapshot_to_sdk, from_args_with_workspace,
+    resolve_concurrency_limits, resolve_model_runtime_settings, resume_session_to_backing,
+    AgentClientImpl, AgentRunnerAssembly, InitialProviderAssembly, ModelRuntimeSettings,
+    PromptAssembly, ResumeError, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
+    RuntimeToolAssemblyDependencies, SessionBootstrapAssembly, SkillBootstrapAssembly,
 };
 // #1248 Task 3: RuntimeContextFactory is the narrow crate-root construction
 // entry.  RuntimeServices stays internal; callers construct via
 // RuntimeContextFactory::new(…).
-pub use application::runtime_context_factory::RuntimeContextFactory;
-pub use ports::{ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort};
+pub use application::prompt::build::{build_system_prompt_parts, PromptContext};
+pub use application::prompt::prompt_build_ext::build_static_prompt;
+pub use application::reflection::{
+    CompleteReflectionResult, ReflectionError, ReflectionTaskAdapter, ReflectionTaskCompletion,
+    ReflectionTaskCompletionStatus, ReflectionTaskMetadata, ReflectionTaskRequest,
+    ReflectionTaskSubmitOutcome, ReflectionTaskTrigger,
+};
+pub use application::run::context::ParentRunContextSource;
+pub use application::run::context_factory::RuntimeContextFactory;
+pub use domain::agent_run::RunDomainEvent;
+pub use ports::{
+    ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort, ToolResultBlobError,
+    ToolResultBlobPort, ToolResultBlobRef,
+};
 pub use sdk::{
     AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ProjectContext,
-    SessionSnapshot, TaskSummary,
+    TaskSummary,
 };
 
 #[cfg(test)]
@@ -32,13 +47,47 @@ mod boundary_tests {
     use std::path::Path;
 
     #[test]
-    fn runtime_context_factory_does_not_expose_service_bag() {
-        let source = std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("src/application/runtime_context_factory.rs"),
-        )
-        .expect("read RuntimeContextFactory source");
-        assert!(!source.contains("pub fn services("));
+    fn application_top_level_modules_have_stable_owners() {
+        let application = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application");
+        let allowed = [
+            "client",
+            "context",
+            "hook",
+            "interaction",
+            "loop_engine",
+            "model",
+            "prompt",
+            "reflection",
+            "run",
+            "session",
+            "tool",
+        ];
+        let mut unexpected = std::fs::read_dir(&application)
+            .expect("read Runtime application directory")
+            .filter_map(|entry| {
+                let path = entry.expect("read Runtime application entry").path();
+                let file_name = path.file_name()?.to_str()?;
+                let module_name = if path.is_dir() {
+                    file_name
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    let stem = path.file_stem()?.to_str()?;
+                    if stem.ends_with("_tests") {
+                        return None;
+                    }
+                    stem
+                } else {
+                    return None;
+                };
+                (!allowed.contains(&module_name)).then(|| file_name.to_string())
+            })
+            .collect::<Vec<_>>();
+        unexpected.sort();
+
+        assert_eq!(
+            unexpected,
+            Vec::<String>::new(),
+            "Runtime application modules must belong to a stable capability owner"
+        );
     }
 
     #[test]

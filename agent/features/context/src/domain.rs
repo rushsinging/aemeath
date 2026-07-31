@@ -251,7 +251,7 @@ pub enum Urgency {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecisionReason {
-    /// Provider-reported normalized total tokens used directly (no heuristic projection).
+    /// Provider-reported normalized total tokens used directly (no heuristic view).
     ActualProviderUsage,
     /// No provider usage available; full candidate heuristic estimate used.
     HeuristicFallback,
@@ -312,7 +312,7 @@ pub enum CompactOutcome {
     Skipped(CompactSkipReason),
 }
 
-/// finalized projection 的收口原因。
+/// finalized view 的收口原因。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FinalizeCause {
     Completed,

@@ -1,8 +1,9 @@
-pub mod runner;
+mod execution;
+mod task;
 
-pub use runner::{
-    run_complete_reflection, CompleteReflectionResult, ReflectionError, ReflectionResult,
-    ReflectionRunMode, ReflectionTaskAdapter, ReflectionTaskCompletion,
-    ReflectionTaskCompletionStatus, ReflectionTaskMetadata, ReflectionTaskRequest,
-    ReflectionTaskSubmitOutcome, ReflectionTaskTrigger,
+pub use execution::{CompleteReflectionResult, ReflectionExecutionError as ReflectionError};
+pub use task::{
+    ReflectionTaskAdapter, ReflectionTaskCompletion, ReflectionTaskCompletionStatus,
+    ReflectionTaskMetadata, ReflectionTaskRequest, ReflectionTaskSubmitOutcome,
+    ReflectionTaskTrigger,
 };

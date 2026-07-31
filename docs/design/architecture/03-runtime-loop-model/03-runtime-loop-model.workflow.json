@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Runtime 两层 Loop 模型",
+    "subtitle": "Session Loop 管理 turn 边界；Shared Run Loop 独占活动 Run 状态",
+    "output": "index.html",
+    "animation": "none",
+    "visual_preset": "editorial",
+    "quality_profile": "showcase",
+    "viewBox": [1400, 680],
+    "views": [
+      { "id": "session-layer", "label": "Session 层", "focus": ["idle", "freeze", "launch", "command"], "note": "Session 层等待输入、处理空闲命令，并为每个 turn 创建一个新 Run。" },
+      { "id": "run-layer", "label": "Run 层", "focus": ["launch", "drain", "context", "model", "response", "finalize"], "note": "活动 turn 的领域状态只由 Shared Run Loop 推进。" },
+      { "id": "tool-branch", "label": "Tool 分支", "focus": ["response", "tools", "finalize"], "note": "Tool 编排是共享 Loop 的阶段，不是第二套 Agent Loop。" }
+    ]
+  },
+  "lanes": [
+    { "id": "session", "label": "Session Loop" },
+    { "id": "run", "label": "Shared Run Loop" },
+    { "id": "branch", "label": "Side Branch" }
+  ],
+  "phases": [
+    { "id": "session_phase", "label": "Session boundary", "fromCol": 0, "toCol": 1 },
+    { "id": "run_phase", "label": "Run step", "fromCol": 2, "toCol": 5, "variant": "emphasis" }
+  ],
+  "mainPath": ["idle", "freeze", "launch", "drain", "context", "model", "response", "finalize"],
+  "nodes": [
+    { "id": "idle", "lane": "session", "col": 0, "type": "frontend", "label": "Idle", "sublabel": "await input", "tag": "session" },
+    { "id": "command", "lane": "branch", "col": 0, "type": "frontend", "label": "Idle Command", "sublabel": "resume / reset" },
+    { "id": "freeze", "lane": "session", "col": 1, "type": "security", "label": "Freeze", "sublabel": "snapshot", "width": 48 },
+    { "id": "launch", "lane": "session", "col": 2, "type": "backend", "label": "Launch", "sublabel": "Run", "width": 48 },
+    { "id": "drain", "lane": "run", "col": 2, "type": "messagebus", "label": "Drain Input", "sublabel": "adopt events" },
+    { "id": "context", "lane": "run", "col": 3, "type": "database", "label": "Context", "sublabel": "window", "width": 48 },
+    { "id": "model", "lane": "run", "col": 4, "type": "external", "label": "Model", "sublabel": "stream", "width": 48 },
+    { "id": "response", "lane": "run", "col": 5, "type": "backend", "label": "Apply", "sublabel": "text or tools" },
+    { "id": "tools", "lane": "branch", "col": 4, "type": "security", "label": "Tool Round", "sublabel": "supervised" },
+    { "id": "finalize", "lane": "branch", "col": 5, "type": "database", "label": "Finalize", "sublabel": "persist + terminal" }
+  ],
+  "edges": [
+    { "id": "idle_freeze", "from": "idle", "to": "freeze", "variant": "emphasis" },
+    { "id": "idle_command", "from": "idle", "to": "command", "role": "branch" },
+    { "id": "freeze_launch", "from": "freeze", "to": "launch", "variant": "emphasis" },
+    { "id": "launch_drain", "from": "launch", "to": "drain", "variant": "emphasis" },
+    { "id": "drain_context", "from": "drain", "to": "context", "variant": "emphasis" },
+    { "id": "context_model", "from": "context", "to": "model", "variant": "emphasis", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+    { "id": "model_response", "from": "model", "to": "response", "variant": "emphasis", "route": "straight", "fromSide": "right", "toSide": "left" },
+    { "id": "response_tools", "from": "response", "to": "tools", "role": "branch", "variant": "security" },
+    { "id": "tools_finalize", "from": "tools", "to": "finalize", "route": "straight", "fromSide": "right", "toSide": "left" },
+    { "id": "response_finalize", "from": "response", "to": "finalize", "variant": "emphasis" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Session Loop", "items": ["只在活动 Run 外等待真实用户输入", "处理 idle command 与 turn 边界配置", "每个 turn 创建一个新 Run"] },
+    { "dot": "emerald", "title": "Shared Run Loop", "items": ["Main 与 Derived 使用同一执行引擎", "Context、Model、Tool 和 Persistence 都是执行阶段", "Run 是活动 turn 内唯一生产状态机"] },
+    { "dot": "amber", "title": "Continuation", "items": ["Tool 结果持久化后调度 internal continuation", "下一 Step 仍在同一 Shared Run Loop 内", "终态后 Launcher 清理 ActiveRun，Session 再次 idle"] }
+  ]
+}

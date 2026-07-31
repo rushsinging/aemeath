@@ -6,48 +6,74 @@ ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 ENGINE="agent/features/runtime/src/application/loop_engine/engine.rs"
-MAIN="agent/features/runtime/src/application/main_loop/looping/loop_runner.rs"
-SUB="agent/features/runtime/src/application/subagent/runner/loop_run.rs"
-LAUNCHER="agent/features/runtime/src/application/run_launcher.rs"
-MAIN_PORT="agent/features/runtime/src/application/main_loop/looping/main_run_port.rs"
-CONTEXT_COORDINATION="agent/features/runtime/src/application/context_coordination.rs"
-OLD_FSM="agent/features/runtime/src/application/main_loop/looping/state.rs"
+MAIN="agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs"
+SUB="agent/features/runtime/src/application/run/derived/loop_run.rs"
+LAUNCHER="agent/features/runtime/src/application/run/launcher.rs"
+MAIN_PORT="agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs"
+STEP_PERSISTENCE="agent/features/runtime/src/application/loop_engine/step_persistence.rs"
+INTERACTION_COORDINATOR="agent/features/runtime/src/application/interaction/coordinator.rs"
+STOP_HOOK_COORDINATOR="agent/features/runtime/src/application/hook/stop_coordination.rs"
+CONTEXT_COORDINATION="agent/features/runtime/src/application/context/coordination.rs"
+OLD_FSM="agent/features/runtime/src/application/loop_engine/chat/state.rs"
 
-for path in "$ENGINE" "$MAIN" "$MAIN_PORT" "$SUB" "$LAUNCHER" "$CONTEXT_COORDINATION"; do
+for path in "$ENGINE" "$MAIN" "$MAIN_PORT" "$SUB" "$LAUNCHER" "$STEP_PERSISTENCE" "$INTERACTION_COORDINATOR" "$STOP_HOOK_COORDINATOR" "$CONTEXT_COORDINATION"; do
   if [ ! -f "$path" ]; then
     echo "{\"decision\":\"block\",\"reason\":\"共享 Loop Engine 守卫缺少文件：$path\"}"
     exit 2
   fi
 done
 
+if grep -RInF '#![allow(dead_code)]' \
+    agent/features/runtime/src/application --include='*.rs'; then
+  echo '{"decision":"block","reason":"Runtime application 禁止模块级 dead_code 豁免；必须分类接线、cfg(test) 或物理删除。"}'
+  exit 2
+fi
+
 if [ -e "$OLD_FSM" ]; then
   echo "{\"decision\":\"block\",\"reason\":\"旧 ChatLoopState FSM 禁止恢复：$OLD_FSM\"}"
   exit 2
 fi
 
-engine_defs=$(grep -RInE 'pub[[:space:]]+async[[:space:]]+fn[[:space:]]+run_loop[[:space:]]*<' \
+engine_defs=$(grep -RInE 'pub([[:space:]]*\([^)]*\))?[[:space:]]+async[[:space:]]+fn[[:space:]]+run_loop([[:space:]]*<[^>]+>)?[[:space:]]*\(' \
   agent/features/runtime/src/application --include='*.rs' --exclude='*_tests.rs' | wc -l | tr -d ' ') # guard-registry:scope.runtime.shared-loop-tests
 if [ "$engine_defs" -ne 1 ]; then
-  echo "{\"decision\":\"block\",\"reason\":\"生产代码必须恰有一个泛型共享 run_loop 定义，当前数量：$engine_defs\"}"
+  echo "{\"decision\":\"block\",\"reason\":\"生产代码必须恰有一个共享 run_loop 定义，当前数量：$engine_defs\"}"
   exit 2
 fi
 
-# #1280: Main/Sub may call run_launcher::launch / reenter_run_loop instead of
-# calling run_loop directly. The launcher itself must call run_loop.
-if ! grep -q 'run_loop(' "$LAUNCHER"; then
-  echo '{"decision":"block","reason":"RunLauncher 未调用共享 loop_engine::run_loop。"}'
+# #1397: Main/Derived must call the single RunInstance launcher; the launcher
+# owns the execute_prepared_loop entry and all legacy launch bridges are retired.
+if ! grep -q 'execute_prepared_loop(' "$LAUNCHER"; then
+  echo '{"decision":"block","reason":"RunLauncher 未调用统一 execute_prepared_loop 入口。"}'
+  exit 2
+fi
+if ! grep -q 'pub async fn launch(' "$LAUNCHER" ||
+   ! grep -q 'instance: &mut RunInstance' "$LAUNCHER"; then
+  echo '{"decision":"block","reason":"RunLauncher 必须以 launch 动词入口消费完整 RunInstance。"}'
+  exit 2
+fi
+if grep -q 'pub async fn launch<' "$LAUNCHER" ||
+   grep -q 'pub async fn launch_prepared' "$LAUNCHER"; then
+  echo '{"decision":"block","reason":"RunLauncher 禁止恢复旧 launch 泛型入口或 launch_prepared 兼容入口。"}'
   exit 2
 fi
 
-# Main: accept either direct run_loop or via run_launcher.
-if ! grep -qE 'run_loop\(&mut run, &cancel, &mut port\)|run_launcher::(launch|reenter_run_loop)' "$MAIN"; then
-  echo '{"decision":"block","reason":"Main Run 未调用共享 loop_engine::run_loop 或 RunLauncher。"}'
+# Main/Derived both enter through launch and pass a complete RunInstance.
+if ! grep -q 'run::launcher::launch(' "$MAIN" ||
+   ! grep -q '&mut run_instance' "$MAIN"; then
+  echo '{"decision":"block","reason":"Main Run 未将完整 RunInstance 交给统一 launch 入口。"}'
   exit 2
 fi
 
-# Sub: accept either direct shared_run_loop or via run_launcher.
-if ! grep -qE 'shared_run_loop\(&mut run, &cancel, &mut self\)\.await|run_launcher::launch' "$SUB"; then
-  echo '{"decision":"block","reason":"Sub Run 未调用共享 loop_engine::run_loop 或 RunLauncher。"}'
+if ! grep -q 'run::launcher::launch(' "$SUB" ||
+   ! grep -q 'instance' "$SUB"; then
+  echo '{"decision":"block","reason":"Derived Run 未将完整 RunInstance 交给统一 launch 入口。"}'
+  exit 2
+fi
+
+if grep -q 'run_instance\.into_parts()' "$MAIN" ||
+   grep -q 'run_instance\.into_parts()' "$SUB"; then
+  echo '{"decision":"block","reason":"Run 来源禁止在启动前拆散 RunInstance。"}'
   exit 2
 fi
 
@@ -57,8 +83,35 @@ if grep -RInE 'context::session::|\bChatChain\b|\bChatSegment\b|save_chain|curre
   exit 2
 fi
 
-if ! grep -q 'append_finalized' "$MAIN_PORT" || ! grep -q 'append_finalized' "$SUB"; then
-  echo '{"decision":"block","reason":"Main/Sub execution path 必须各自接入唯一 finalized Step append。"}'
+if ! grep -q 'append_finalized' "$STEP_PERSISTENCE"; then
+  echo '{"decision":"block","reason":"无角色 Step persistence owner 必须接入唯一 finalized Step append。"}'
+  exit 2
+fi
+if grep -q 'append_finalized' "$MAIN_PORT" || grep -q 'append_finalized' "$SUB"; then
+  echo '{"decision":"block","reason":"Main/Sub adapter 禁止各自保留 finalized Step append 算法。"}'
+  exit 2
+fi
+
+if ! grep -q 'struct InteractionCompletionContext' "$INTERACTION_COORDINATOR" ||
+   ! grep -q 'complete_tool_interaction' "$INTERACTION_COORDINATOR"; then
+  echo '{"decision":"block","reason":"Interaction completion 必须由无角色 InteractionCoordinator 统一拥有。"}'
+  exit 2
+fi
+if grep -q 'trait InteractionCompletionPort' "$ENGINE" ||
+   grep -Eiq 'fn interaction_(execution_scope|tool_execution|materializer|session_id|cancellation)\(' "$MAIN_PORT" "$SUB"; then
+  echo '{"decision":"block","reason":"Main/Sub adapter 禁止恢复 Interaction completion fat port 或角色 completion 方法。"}'
+  exit 2
+fi
+
+if ! grep -q 'struct StopHookExecutionContext' "$STOP_HOOK_COORDINATOR" ||
+   ! grep -q 'trait StopHookObserver' "$STOP_HOOK_COORDINATOR" ||
+   ! grep -q 'coordinate_stop_hook' "$STOP_HOOK_COORDINATOR"; then
+  echo '{"decision":"block","reason":"Stop Hook 必须由无角色 stop coordinator 统一执行并应用结果。"}'
+  exit 2
+fi
+if grep -q 'trait StopHookPort' "$ENGINE" ||
+   grep -Eiq 'fn (stop_hook_context|project_stop_hook_outcome)\(' "$MAIN_PORT" "$SUB"; then
+  echo '{"decision":"block","reason":"Main/Sub adapter 禁止恢复 Stop Hook fat port 或角色化执行方法。"}'
   exit 2
 fi
 

@@ -12,6 +12,28 @@ use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::update::intent::AgentIntent;
 use tokio::sync::mpsc;
 
+fn interaction_reply_summary(reply: &UiInteractionReply) -> String {
+    match reply {
+        UiInteractionReply::UserAnswers(answers) => {
+            let answer_lengths: Vec<usize> = answers
+                .iter()
+                .map(|answer| answer.chars().count())
+                .collect();
+            format!(
+                "user_answers count={} lengths={answer_lengths:?}",
+                answers.len()
+            )
+        }
+        UiInteractionReply::ToolApproval { approved, .. } => {
+            format!("tool_approval approved={approved}")
+        }
+        UiInteractionReply::PlanApproval { approved, .. } => {
+            format!("plan_approval approved={approved}")
+        }
+        UiInteractionReply::ContinueHardPause => "continue_hard_pause".to_string(),
+    }
+}
+
 fn interaction_reply_to_sdk(reply: UiInteractionReply) -> sdk::InteractionReply {
     match reply {
         UiInteractionReply::UserAnswers(answers) => {
@@ -172,6 +194,11 @@ impl App {
                 return;
             }
         };
+        let reply_summary = interaction_reply_summary(&reply);
+        crate::tui::log_debug!(
+            "reply_interaction effect dispatching: request_id={} reply={reply_summary}",
+            request_id.as_str()
+        );
         let outcome = match self.agent_client.as_ref() {
             Some(client) => {
                 client.reply_interaction(&sdk_request_id, interaction_reply_to_sdk(reply))
@@ -184,6 +211,10 @@ impl App {
                 return;
             }
         };
+        crate::tui::log_debug!(
+            "reply_interaction effect completed: request_id={} outcome={outcome:?}",
+            request_id.as_str()
+        );
         self.apply_interaction_outcome(request_id, outcome, false);
     }
 

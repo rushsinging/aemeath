@@ -61,7 +61,8 @@ PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW
 # Tools crate-root façade (#993): tools 已迁到 domain/adapters 六边形物理层，
 # 只经 crate 根发布 Published Language，禁止恢复 tools::api。
 TOOLS_DOMAIN_FACADE = {
-    "AgentDispatch", "AgentProgressEvent", "AgentProgressKind", "AgentRunRequest",
+    "AgentDispatch", "AgentProgressEvent", "AgentProgressKind", "AgentProgressSourceContext",
+    "AgentRunRequest",
     "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "AuthorizationContext",
     "CancellationDeclaration", "CleanupConfirmation",
     "CancellationSignal", "CatalogQuery", "ConcurrencyDeclaration", "ExecutionScope",
@@ -175,9 +176,7 @@ ROOT_ACCESS_ALLOW = {
         "ProviderBuildSpec",
         "ProviderFactory",
         "ProviderPort",
-        "RuntimeBootstrapDependencies", "RuntimeToolAssemblyDependencies",
-        "ToolResultMaterializer", "ToolResultMaterializationPolicy", "ActiveRunRegistry",
-        "AtomicBlobToolResultStore",
+        "InitialProviderAssembly", "SessionBootstrapAssembly", "PromptAssembly", "SkillBootstrapAssembly", "ModelRuntimeSettings", "resolve_model_runtime_settings",        "PromptContext", "build_system_prompt_parts", "build_static_prompt",        "AgentRunnerAssembly", "ParentRunContextSource", "build_agent_runner", "resolve_concurrency_limits",        "RuntimeBootstrapDependencies", "RuntimeToolAssemblyDependencies",        "ToolResultMaterializer", "ToolResultMaterializationPolicy", "ActiveRunRegistry",        "AtomicBlobToolResultStore",
         "UsageSink",
         "config_snapshot_to_sdk",
         "from_args_with_workspace",
@@ -191,7 +190,7 @@ ROOT_ACCESS_ALLOW = {
     # guard-registry:policy.hook.crate-root-facade
     "hook": {
         "Dispatcher", "MAX_ATTEMPTS", "classify_directive", "ClassifyError", "HookClass",
-        "HookCommand", "HookDispatchContext", "HookDirective",
+        "HookCommand", "HookDispatchContext", "HookDirective", "CancellationSignal",
         "HookDisplayMessage", "HookDisplayMessageKind", "HookExecution",
         "HookExecutionStatus", "HookFailurePolicy", "HookInvocation", "HookMatcher",
         "HookOutcome", "HookPoint", "HookPointMetadata", "HookPort", "HookReason",
@@ -206,7 +205,7 @@ ROOT_ACCESS_ALLOW = {
     "context": {
         "compact", "context_port", "domain", "guidance", "session", "skill",
         "isolated_context", "SessionManagementPort", "SessionListEntry",
-        "SessionManagementError", "SessionMetadataUpdate", "SessionResumeProjection",
+        "SessionManagementError", "SessionMetadataUpdate", "SessionResumeView",
         "ProductionMainContextFactory", "NoOpCanonicalSessionWriter",
         "test_support", "wire_main_session", "BoundMainRun", "MainSessionDependencies",
         "MainSessionError", "MainSessionWiring", "MainSessionWiringBuilder",

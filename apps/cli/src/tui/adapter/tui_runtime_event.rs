@@ -83,6 +83,7 @@ pub(crate) enum TuiRunStepEvent {
 pub(crate) struct TuiInteractionRequest {
     pub(crate) request_id: UiInteractionRequestId,
     pub(crate) run_id: UiRunId,
+    pub(crate) tool_call_id: Option<String>,
     pub(crate) body: TuiInteractionBody,
 }
 
@@ -446,7 +447,8 @@ pub(crate) enum TuiRuntimeEvent {
     HookEvent(TuiHookEvent),
     HookMessage(TuiHookMessage),
     AgentProgress {
-        context: TuiTurnContext,
+        source_context: TuiTurnContext,
+        attachment_context: TuiTurnContext,
         tool_id: String,
         event: TuiAgentProgress,
     },

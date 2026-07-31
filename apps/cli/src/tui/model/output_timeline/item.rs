@@ -83,6 +83,7 @@ pub enum OutputTimelineItem {
     },
     AskUserBatch {
         id: String,
+        request_id: Option<crate::tui::model::conversation::interaction::UiInteractionRequestId>,
         slots: Vec<crate::tui::model::conversation::block::AskUserSlot>,
         active_index: usize,
         phase: crate::tui::model::conversation::block::AskUserPhase,

@@ -36,11 +36,5 @@ impl AgentRunTerminal {
 #[async_trait]
 pub trait AgentDispatch: Send + Sync {
     async fn run_agent(&self, request: AgentRunRequest<'_>) -> AgentRunTerminal;
-    async fn complete(
-        &self,
-        prompt: &str,
-        system: &str,
-        cancellation: Arc<dyn CancellationSignal>,
-    ) -> String;
 }
 pub use AgentDispatch as AgentRunner;

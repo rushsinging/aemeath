@@ -43,6 +43,7 @@ fn runtime_interaction_maps_to_sender_free_show_interaction() {
         TuiInteractionRequest {
             request_id: UiInteractionRequestId::from("request-1"),
             run_id: UiRunId::from("run-1"),
+            tool_call_id: None,
             body: TuiInteractionBody::ToolApproval(TuiToolApprovalPrompt {
                 tool_name: "Bash".to_string(),
                 args_summary: "rm -rf target".to_string(),

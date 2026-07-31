@@ -169,38 +169,6 @@
       "status": "active"
     },
     {
-      "id": "migration.runtime.application-from-args-to-adapters",
-      "guard": "check-cola-layer-purity.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path",
-        "value": "agent/features/runtime/src/application/client/from_args.rs"
-      },
-      "classification": "migration_exception",
-      "owner": "runtime",
-      "reason": "Runtime bootstrap remains in application while adapter wiring is moved to Composition",
-      "tracking_issue": 879,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove when production bootstrap is available only through Composition",
-      "status": "active"
-    },
-    {
-      "id": "migration.runtime.legacy-port-to-application",
-      "guard": "check-cola-layer-purity.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path",
-        "value": "agent/features/runtime/src/ports/legacy.rs"
-      },
-      "classification": "migration_exception",
-      "owner": "runtime",
-      "reason": "Legacy Runtime ports still reference application types during cutover",
-      "tracking_issue": 879,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "delete the legacy port module after production consumers switch",
-      "status": "active"
-    },
-    {
       "id": "migration.tui.tea-slash-dispatch",
       "guard": "check-tui-tea-purity.sh",
       "module": "tui",
@@ -690,7 +658,7 @@
       },
       "classification": "target_capability_policy",
       "owner": "runtime",
-      "reason": "RuntimeContextFactory is the sole production constructor; RunKind does not drive control flow; retired symbols are absent; stop hook block count lives on Run; Interaction/Reasoning/Hook binding modes are exhaustively wired",
+      "reason": "RuntimeContextFactory is the sole production constructor; RunKind does not drive control flow; retired symbols are absent; stop hook block count lives on Run; Interaction/Reasoning/Hook binding modes are exhaustively wired; broad Projection naming cannot hide mixed Runtime responsibilities",
       "tracking_issue": 1248,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent Runtime capability assembly policy",

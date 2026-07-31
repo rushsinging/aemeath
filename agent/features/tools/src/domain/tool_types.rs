@@ -183,6 +183,7 @@ mod tests {
     #[test]
     fn test_agent_progress_started_with_role() {
         let ev = AgentProgressEvent {
+            source_context: None,
             sequence: 0,
             kind: AgentProgressKind::Started {
                 role: Some("coder".into()),
@@ -201,6 +202,7 @@ mod tests {
     #[test]
     fn test_agent_progress_started_without_role() {
         let ev = AgentProgressEvent {
+            source_context: None,
             sequence: 0,
             kind: AgentProgressKind::Started {
                 role: None,
@@ -248,6 +250,7 @@ mod tests {
     #[test]
     fn test_agent_progress_tool_output_carries_tool_name_and_text() {
         let ev = AgentProgressEvent {
+            source_context: None,
             sequence: 1,
             kind: AgentProgressKind::ToolOutput {
                 tool_name: "Bash".into(),
@@ -264,8 +267,24 @@ mod tests {
         }
     }
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentProgressSourceContext {
+    pub chat_id: String,
+    pub turn_id: String,
+}
+
+impl AgentProgressSourceContext {
+    pub fn new(chat_id: impl Into<String>, turn_id: impl Into<String>) -> Self {
+        Self {
+            chat_id: chat_id.into(),
+            turn_id: turn_id.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentProgressEvent {
+    pub source_context: Option<AgentProgressSourceContext>,
     /// Monotonic sequence for internal ordering/replacement. UI does not display it by default.
     pub sequence: usize,
     pub kind: AgentProgressKind,

@@ -1,59 +1,374 @@
 use super::*;
-use crate::application::interaction::{InteractionBridge, InteractionPort};
-use crate::application::loop_engine::llm_strategy::extract_invocation_context;
-use crate::application::subagent::ToolCall;
-use sdk::{ChatInputEvent, InteractionRequest};
+use crate::application::interaction::port::{InteractionBridge, InteractionPort};
+use crate::application::tool::agent::ToolCall;
+use sdk::InteractionRequest;
 use serde_json::json;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+
+#[test]
+fn execution_state_is_owned_by_engine_and_not_exposed_as_a_port() {
+    let engine_source = include_str!("engine.rs");
+    let main_source = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub_source = include_str!("../run/derived/loop_run.rs");
+
+    assert!(!engine_source.contains("pub trait ExecutionStatePort"));
+    assert!(!engine_source.contains("execution_state_mut"));
+    assert!(!engine_source.contains("std::mem::swap"));
+    assert!(!engine_source.contains("pub trait RunLoopPort"));
+    assert!(!main_source
+        .contains("pub execution: crate::application::run::execution_state::RunExecutionState"));
+    assert!(!sub_source.contains("pub(super) struct SubRunCapabilities<'a> {\n    pub execution:"));
+}
+
+#[test]
+fn production_engine_owns_step_state_reset() {
+    let source = include_str!("engine.rs");
+    assert!(source.contains("execution.begin_step()"));
+    assert!(source.contains("run_loop(run, execution, cancel, loop_context)"));
+
+    let main_source = include_str!("../loop_engine/chat/loop_runner.rs");
+    let sub_source = include_str!("../run/derived/loop_run.rs");
+    assert!(main_source.contains("crate::application::run::launcher::launch("));
+    assert!(sub_source.contains("crate::application::run::launcher::launch("));
+    assert!(!main_source.contains("loop_engine::run_loop("));
+    assert!(!sub_source.contains("loop_engine::run_loop("));
+}
+
+#[test]
+fn production_engine_entry_uses_supplied_execution_and_context() {
+    let source = include_str!("engine.rs");
+    assert!(!source.contains("let _ = (execution, context)"));
+    assert!(source.contains("run_loop(run, execution, cancel, loop_context)"));
+    assert!(source.contains("context.event_sink()") || source.contains("context.input()"));
+}
 
 use crate::application::loop_engine::{
     DrainEpoch, DrainOutcome, InternalContinuationKind, LoopInput,
 };
+
+#[test]
+fn p6_9_7_runtime_tests_use_independent_capability_fakes() {
+    let source = include_str!("tests.rs")
+        .split_once("#[derive(Default)]\nstruct ScriptedObservations")
+        .map(|(_, fixtures)| fixtures)
+        .expect("test fixture marker must exist");
+
+    for forbidden in [
+        "impl InputPort for ScriptedScenario",
+        "impl EventSinkPort for ScriptedScenario",
+        "impl RunControlPort for ScriptedScenario",
+        "impl ModelInvocationPort for ScriptedScenario",
+        "struct DrainOnlyPort",
+        "impl EventSinkPort for DrainOnlyPort",
+        "impl ModelInvocationPort for DrainOnlyPort",
+        "unsafe {\n        RunLoop::new(",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "Runtime test retains fat capability fake: {forbidden}"
+        );
+    }
+
+    assert!(source.contains("struct ScriptedScenario"));
+    assert!(source.contains("struct ScriptedPorts"));
+    assert!(source.contains("struct DrainInputFake"));
+}
+
+#[test]
+fn p6_9_engine_has_no_fat_capability_aggregation_trait() {
+    let engine = include_str!("engine.rs");
+    let launcher = include_str!("../run/launcher.rs");
+    let main = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub = include_str!("../run/derived/loop_run.rs");
+    let sub_setup = include_str!("../run/derived/setup.rs");
+
+    assert!(
+        !engine.contains("pub trait LoopEnginePort"),
+        "narrow stage capabilities must not be re-aggregated into LoopEnginePort"
+    );
+    assert!(!launcher.contains("LoopEnginePort"));
+    for retired in [
+        "MainRunPort",
+        "SubAgentRun",
+        "SubAgentLaunch",
+        "DerivedSubRun",
+        "MainRunCapabilities",
+        "SubRunCapabilities",
+        "MainEventStrategy",
+        "SubEventStrategy",
+        "SubAgentEventSink",
+    ] {
+        assert!(
+            !main.contains(retired) && !sub.contains(retired) && !sub_setup.contains(retired),
+            "retired role-shaped execution shell remains: {retired}"
+        );
+    }
+    assert!(sub.contains("async fn launch_sub_run("));
+}
+
+#[test]
+fn p6_9_4_source_directories_expose_only_source_observer_topology_and_mapping() {
+    let chat = include_str!("../loop_engine/chat/main_run_port.rs");
+    let derived = include_str!("../run/derived/loop_run.rs");
+
+    let chat_topology = include_str!("../loop_engine/chat/loop_runner.rs");
+    let derived_topology = include_str!("../run/derived/setup.rs");
+
+    for (name, source) in [("Chat", chat), ("Derived", derived)] {
+        for forbidden in [
+            "async fn invoke_model_impl(",
+            "provider.invoke(",
+            "ModelInvocationCoordinator::new()",
+            "async fn execute_tools_impl(",
+            "prepare_tool_round(",
+            "execute_tool_round(",
+            "HookInvocation::Stop",
+            "ContextRequest {",
+            "async fn finalize_sub_agent(",
+            "impl crate::application::loop_engine::ModelInvocationPort",
+            "impl crate::application::loop_engine::ToolOrchestrationPort",
+            "impl crate::application::loop_engine::CompactionPort",
+            "impl crate::application::interaction::coordinator::InteractionCompletionContextProvider",
+            "impl crate::application::loop_engine::StepPersistencePort",
+            "impl crate::application::loop_engine::RunLifecyclePort",
+            "RuntimeStepPersistence::new(",
+            "RuntimeCompaction::new(",
+            "RuntimeInteraction::new(",
+            "RuntimeModelInvocation::new(",
+            "RuntimeStopHook::new(",
+            "RuntimeToolOrchestration::new(",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{name} source directory retains workflow ownership: {forbidden}"
+            );
+        }
+    }
+
+    assert!(chat.contains("BufferedInputAdapter"));
+    assert!(chat.contains("ChatStreamEventObserver"));
+    assert!(derived.contains("ProgressTerminalObserver"));
+    for topology in [chat_topology, derived_topology] {
+        assert!(topology.contains("RuntimeStepPersistence::new("));
+        assert!(topology.contains("RuntimeCompaction::new("));
+        assert!(topology.contains("RuntimeInteraction::new("));
+        assert!(topology.contains("RuntimeModelInvocation::new("));
+        assert!(topology.contains("RuntimeStopHook::new("));
+        assert!(topology.contains("RuntimeToolOrchestration::new("));
+    }
+}
+
+#[test]
+fn p6_9_6_engine_expresses_context_model_and_tool_as_typed_narrow_phases() {
+    let engine = include_str!("engine.rs");
+
+    for required in [
+        "enum InputDrainOutcome",
+        "async fn run_input_drain_phase<P>(",
+        "enum StepInputOutcome",
+        "async fn run_step_input_phase<P>(",
+        "enum StepFinalizationOutcome",
+        "async fn run_step_finalization_phase<P>(",
+        "enum ContextCompactionOutcome",
+        "async fn run_context_compaction_phase<P>(",
+        "enum ModelInvocationOutcome",
+        "async fn run_model_invocation_phase<P>(",
+        "enum ToolRoundPhaseOutcome",
+        "async fn run_tool_round_phase<P>(",
+    ] {
+        assert!(
+            engine.contains(required),
+            "Engine is missing typed narrow phase: {required}"
+        );
+    }
+
+    assert!(engine.contains("P: InputPort + ?Sized"));
+    assert!(engine.contains("P: StepPersistencePort + ?Sized"));
+    assert!(engine.contains("P: CompactionPort + ?Sized"));
+    assert!(engine.contains("P: ModelInvocationPort + ?Sized"));
+    assert!(engine.contains("P: ToolOrchestrationPort + ?Sized"));
+}
+
+#[test]
+fn p6_9_7_engine_entry_has_no_fat_loop_adapter() {
+    let engine = include_str!("engine.rs");
+    let launcher = include_str!("../run/launcher.rs");
+    let main = include_str!("../loop_engine/chat/main_run_port.rs");
+    let derived = include_str!("../run/derived/loop_run.rs");
+
+    for retired in [
+        "LoopCapabilityAdapter",
+        "ChatLoopCapabilityAdapter",
+        "DerivedLoopCapabilityAdapter",
+    ] {
+        assert!(
+            !engine.contains(retired)
+                && !launcher.contains(retired)
+                && !main.contains(retired)
+                && !derived.contains(retired),
+            "fat Loop adapter remains in production: {retired}"
+        );
+    }
+    for fat_bound in [
+        "P: InputPort\n        + EventSinkPort",
+        "P: crate::application::loop_engine::InputPort\n        + crate::application::loop_engine::EventSinkPort",
+    ] {
+        assert!(
+            !engine.contains(fat_bound) && !launcher.contains(fat_bound),
+            "fat Loop adapter was mechanically expanded into one generic capability intersection: {fat_bound}"
+        );
+    }
+    assert!(engine.contains("pub async fn execute_prepared_loop("));
+    assert!(launcher.contains("pub async fn launch("));
+}
+
+#[test]
+fn stop_hook_has_one_application_owner_and_narrow_observer() {
+    let engine = include_str!("engine.rs");
+    let coordinator = include_str!("../hook/stop_coordination.rs");
+    let services = include_str!("run_services.rs");
+    let main = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub = include_str!("../run/derived/loop_run.rs");
+
+    assert!(coordinator.contains("pub struct StopHookExecutionContext"));
+    assert!(coordinator.contains("pub trait StopHookObserver"));
+    assert!(coordinator.contains("pub async fn coordinate_stop_hook"));
+    assert!(coordinator.contains("execution.record_step_message"));
+    assert!(coordinator.contains("execution.append_message"));
+
+    assert!(!engine.contains("pub trait StopHookPort"));
+    assert!(services.contains("impl<O> StopHookObserver for RuntimeStopHook<O>"));
+    assert!(main.contains("ChatStopHookObserver"));
+    assert!(main.contains("stop_coordination::StopHookObserver"));
+    assert!(sub.contains("NoopStopHookObserver"));
+    for (name, observer) in [("Main", main), ("Sub", sub)] {
+        for retired in [
+            "impl crate::application::loop_engine::StopHookPort",
+            "fn stop_hook_context",
+            "fn project_stop_hook_outcome",
+        ] {
+            assert!(
+                !observer.contains(retired),
+                "{name} retains role-specific Stop Hook orchestration seam: {retired}"
+            );
+        }
+    }
+}
+
+#[test]
+fn p6_3_model_invocation_has_one_shared_orchestration() {
+    let coordinator = include_str!("../model/invocation.rs");
+    let main = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub = include_str!("../run/derived/loop_run.rs");
+
+    assert!(
+        coordinator.contains("pub(crate) async fn orchestrate_model_invocation"),
+        "model coordinator must own the complete invocation orchestration"
+    );
+    assert_eq!(
+        coordinator.matches("async fn invoke_model_impl(").count(),
+        1,
+        "the shared coordinator must contain the only invoke_model_impl"
+    );
+    for (name, source) in [("Main", main), ("Sub", sub)] {
+        assert!(
+            !source.contains("async fn invoke_model_impl"),
+            "{name} must not retain a role-specific model invocation algorithm"
+        );
+        assert!(
+            !source.contains("ModelInvocationCoordinator::new()"),
+            "{name} must not drive retry/stream orchestration directly"
+        );
+        assert!(
+            !source.contains("provider.invoke("),
+            "{name} must not invoke the provider directly"
+        );
+    }
+}
+
+#[test]
+fn p6_8_agent_dispatch_has_no_direct_completion_bypass() {
+    let dispatch = include_str!("../../../../tools/src/domain/agent_port.rs");
+    let sub_runner = include_str!("../run/derived/setup.rs");
+    let sub_type = include_str!("../run/derived.rs");
+
+    assert!(dispatch.contains("async fn run_agent("));
+    assert!(
+        !dispatch.contains("async fn complete("),
+        "AgentDispatch must not expose an agentless completion path"
+    );
+    assert!(
+        !sub_runner.contains("binding.provider.invoke("),
+        "Sub runner must not invoke a provider outside the shared Run Engine"
+    );
+    assert!(
+        !sub_type.contains("pub config_reader:"),
+        "CliAgentRunner must not retain config state solely for direct completion"
+    );
+}
+
+#[test]
+fn p6_6_step_transaction_calculation_has_single_engine_owner() {
+    let engine = include_str!("engine.rs");
+    let main_adapter = include_str!("../loop_engine/chat/main_run_port.rs");
+    let sub_adapter = include_str!("../run/derived/loop_run.rs");
+
+    assert!(engine.contains("struct StepCommit"));
+    assert!(engine.contains("fn prepare_step_commit"));
+    for adapter in [main_adapter, sub_adapter] {
+        assert!(!adapter.contains("committed_message_count() + execution.accepted_input_len()"));
+        assert!(!adapter.contains("execution.commit_all_messages()"));
+        assert!(!adapter.contains("execution.commit_step_messages()"));
+    }
+}
+
+#[test]
+fn p6_9_3_shared_run_services_delegate_to_role_neutral_owners() {
+    let services = include_str!("run_services.rs");
+    let main_topology = include_str!("../loop_engine/chat/loop_runner.rs");
+    let sub_topology = include_str!("../run/derived/setup.rs");
+
+    for owner in [
+        "ContextRequestCoordinator::new(",
+        "StepPersistenceCoordinator::from_context(",
+        "CompactionCoordinator::from_context(",
+        "InteractionCompletionContext::new(",
+        "orchestrate_model_invocation(",
+        "ToolRoundCoordinator::new(",
+    ] {
+        assert!(
+            services.contains(owner),
+            "共享 Run 服务必须委托职责明确的 application owner：{owner}"
+        );
+    }
+
+    for topology in [main_topology, sub_topology] {
+        for service in [
+            "RuntimeStepPersistence::new(",
+            "RuntimeCompaction::new(",
+            "RuntimeInteraction::new(",
+            "RuntimeModelInvocation::new(",
+            "RuntimeStopHook::new(",
+            "RuntimeToolOrchestration::new(",
+        ] {
+            assert!(
+                topology.contains(service),
+                "Main/Derived topology 必须装配同一职责型窄服务：{service}"
+            );
+        }
+    }
+
+    assert!(!services.contains("LoopCapabilityAdapter"));
+    assert!(!services.contains("ChatLoopCapabilityAdapter"));
+    assert!(!services.contains("DerivedLoopCapabilityAdapter"));
+}
+
 use crate::domain::agent_run::{
     InteractionContinuation, Run, RunControl, RunDomainEvent, RunSpec, RunStatus, ToolCallStatus,
 };
-
-#[test]
-fn invocation_context_clone_shares_text_first_message_backing() {
-    let source = share::message::Message {
-        role: share::message::Role::User,
-        content: vec![share::message::ContentBlock::ToolResult {
-            tool_use_id: "tool-1".to_string(),
-            content: serde_json::json!({"large": "structured"}),
-            is_error: false,
-            text: Some("compact text".to_string()),
-        }],
-        metadata: None,
-    };
-    let window = crate::ports::ContextWindow {
-        backing_revision: crate::ports::SessionRevision::new(1),
-        system_blocks: Vec::new(),
-        messages: vec![source].into(),
-        tool_schemas: Vec::new(),
-        token_estimation: crate::ports::TokenBudget::default(),
-        compaction_decision: crate::ports::CompactionDecision {
-            needed: false,
-            urgency: crate::ports::Urgency::None,
-            decision_token_count: 0,
-            threshold: 1,
-            reason: crate::ports::DecisionReason::HeuristicFallback,
-        },
-    };
-
-    let context = extract_invocation_context(&window);
-    let cloned = Arc::clone(&context.messages_for_api);
-
-    assert_eq!(context.messages_for_api.as_ptr(), cloned.as_ptr());
-    let share::message::ContentBlock::ToolResult { content, text, .. } = &cloned[0].content[0]
-    else {
-        panic!("expected tool result")
-    };
-    assert_eq!(content, &serde_json::json!("compact text"));
-    assert!(text.is_none());
-}
 
 /// #1248: Fake ToolExecutionPort that counts execute calls and returns configurable results.
 /// Used for production-level tests of the approval flow through the full engine roundtrip.
@@ -95,8 +410,9 @@ impl tools::ToolExecutionPort for FakeToolExecutionPort {
     async fn execute(
         &self,
         invocation: tools::ToolInvocation,
-        _context: &tools::ToolExecutionContext,
+        context: &tools::ToolExecutionContext,
     ) -> tools::ToolExecutionOutcome {
+        let _ = context;
         self.execute_count
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         self.recorded_invocations.lock().unwrap().push(invocation);
@@ -111,63 +427,148 @@ impl tools::ToolExecutionPort for FakeToolExecutionPort {
     }
 }
 
-struct ScriptedPort {
-    model_steps: VecDeque<ModelStep>,
-    model_errors: VecDeque<LoopEngineError>,
-    tool_steps: VecDeque<ToolStep>,
-    controls: std::sync::Mutex<VecDeque<RunControl>>,
-    registered_step: std::sync::Mutex<Option<sdk::RunStepId>>,
-    cancel_when_compact_starts: bool,
-    cancel_when_model_starts: bool,
-    cancel_when_tools_starts: bool,
-    settle_tools_after_cancel: bool,
-    tools_settled_after_cancel: bool,
-    terminate_when_compact_starts: bool,
-    step_cancel: std::sync::Arc<std::sync::Mutex<Option<CancellationToken>>>,
+#[derive(Default)]
+struct ScriptedObservations {
     calls: Vec<&'static str>,
     events: Vec<RunDomainEvent>,
     guarded_calls: Vec<Vec<ToolGuardDecision>>,
-    drain_outcomes: VecDeque<DrainOutcome>,
-    /// #1272: ScriptedPort tracks its own drain epoch for validation.
-    /// On each `drain_input` call, validates the engine's expected_epoch
-    /// against this counter and advances it after a successful drain.
-    drain_epoch: DrainEpoch,
-    cancelled_during_model: bool,
-    block_model_forever: bool,
-    block_compact_until_cancelled: bool,
     cancelled_steps: Vec<sdk::RunStepId>,
     finalized_steps: Vec<sdk::RunStepId>,
     frozen_steps: Vec<sdk::RunStepId>,
+}
+
+struct ScriptedState {
+    model_steps: VecDeque<ModelStep>,
+    model_errors: VecDeque<LoopEngineError>,
+    tool_steps: VecDeque<ToolStep>,
+    registered_step: Option<sdk::RunStepId>,
+    cancel_when_compact_starts: bool,
+    cancel_when_model_starts: bool,
+    cancel_when_tools_starts: bool,
+    terminate_when_compact_starts: bool,
+    cancelled_during_model: bool,
+    block_model_forever: bool,
+    block_await_user_input_forever: bool,
+    block_compact_until_cancelled: bool,
     fail_accept_input: bool,
     needs_compaction: bool,
     fail_emit_once: bool,
-    /// #1248 Task 5: Test interaction bridge used by `interaction_port()`.
+    drain_outcomes: VecDeque<DrainOutcome>,
+    drain_epoch: DrainEpoch,
+    observations: ScriptedObservations,
+}
+
+impl Default for ScriptedState {
+    fn default() -> Self {
+        Self {
+            model_steps: VecDeque::new(),
+            model_errors: VecDeque::new(),
+            tool_steps: VecDeque::new(),
+            registered_step: None,
+            cancel_when_compact_starts: false,
+            cancel_when_model_starts: false,
+            cancel_when_tools_starts: false,
+            terminate_when_compact_starts: false,
+            cancelled_during_model: false,
+            block_model_forever: false,
+            block_await_user_input_forever: false,
+            block_compact_until_cancelled: false,
+            fail_accept_input: false,
+            needs_compaction: false,
+            fail_emit_once: false,
+            drain_outcomes: VecDeque::new(),
+            drain_epoch: DrainEpoch(0),
+            observations: ScriptedObservations::default(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct InputFake(Arc<std::sync::Mutex<ScriptedState>>);
+#[derive(Clone)]
+struct EventSinkFake(Arc<std::sync::Mutex<ScriptedState>>);
+#[derive(Clone)]
+struct RunControlFake {
+    state: Arc<std::sync::Mutex<ScriptedState>>,
+    controls: Arc<std::sync::Mutex<VecDeque<RunControl>>>,
+}
+#[derive(Clone)]
+struct RunLifecycleFake {
+    state: Arc<std::sync::Mutex<ScriptedState>>,
+    step_cancel: Arc<std::sync::Mutex<Option<CancellationToken>>>,
+}
+#[derive(Clone)]
+struct StepPersistenceFake(Arc<std::sync::Mutex<ScriptedState>>);
+#[derive(Clone)]
+struct CompactionFake {
+    state: Arc<std::sync::Mutex<ScriptedState>>,
+    controls: Arc<std::sync::Mutex<VecDeque<RunControl>>>,
+}
+#[derive(Clone)]
+struct ModelInvocationFake {
+    state: Arc<std::sync::Mutex<ScriptedState>>,
+    controls: Arc<std::sync::Mutex<VecDeque<RunControl>>>,
+}
+#[derive(Clone)]
+struct ToolOrchestrationFake {
+    state: Arc<std::sync::Mutex<ScriptedState>>,
+    controls: Arc<std::sync::Mutex<VecDeque<RunControl>>>,
+}
+#[derive(Clone)]
+struct StuckHandlingFake(Arc<std::sync::Mutex<ScriptedState>>);
+struct StopHookFake;
+struct PlanApprovalFake;
+struct InteractionMailboxFake {
+    state: Arc<std::sync::Mutex<ScriptedState>>,
     interaction_bridge: Arc<InteractionBridge>,
-    /// #1248 Task 5: Records published interaction requests.
     published_interactions: Arc<std::sync::Mutex<Vec<InteractionRequest>>>,
-    /// #1248 Task 5: Stored interaction receivers.
-    stored_receivers: std::sync::Mutex<
-        VecDeque<
-            tokio::sync::oneshot::Receiver<crate::application::interaction::InteractionCompletion>,
-        >,
-    >,
-    /// #1248: Pending interaction work stored by the engine.
-    pending_work: std::sync::Mutex<Option<super::engine::PendingInteractionWork>>,
-    /// #1248: Stored interaction metadata alongside receivers for full roundtrip tests.
-    stored_metadata:
-        std::sync::Mutex<VecDeque<crate::application::interaction::InteractionRequestMetadata>>,
-    /// #1425: When true, mirror Main's blocking AwaitingUser path by waiting
-    /// for the interaction receiver instead of returning a scripted drain outcome.
-    await_interaction_completion: bool,
-    /// Interaction resolutions consumed by the blocking waiter and handed back
-    /// through `poll_interaction` on the same loop invocation.
-    resolved_interactions:
-        std::sync::Mutex<VecDeque<crate::application::interaction::InteractionResolution>>,
-    /// #1248: Fake tool execution port for counting/tracking approvals.
+    pending_work: Arc<std::sync::Mutex<Option<super::engine::PendingInteractionWork>>>,
     fake_tool_port: Option<Arc<FakeToolExecutionPort>>,
 }
 
-impl Default for ScriptedPort {
+struct ScriptedPorts {
+    input: InputFake,
+    events: EventSinkFake,
+    control: RunControlFake,
+    lifecycle: RunLifecycleFake,
+    interaction: InteractionMailboxFake,
+    persistence: StepPersistenceFake,
+    compaction: CompactionFake,
+    model: ModelInvocationFake,
+    stop_hook: StopHookFake,
+    tools: ToolOrchestrationFake,
+    stuck: StuckHandlingFake,
+    plan_approval: PlanApprovalFake,
+}
+
+struct ScriptedScenario {
+    model_steps: VecDeque<ModelStep>,
+    model_errors: VecDeque<LoopEngineError>,
+    tool_steps: VecDeque<ToolStep>,
+    controls: Arc<std::sync::Mutex<VecDeque<RunControl>>>,
+    cancel_when_compact_starts: bool,
+    cancel_when_model_starts: bool,
+    cancel_when_tools_starts: bool,
+    terminate_when_compact_starts: bool,
+    step_cancel: Arc<std::sync::Mutex<Option<CancellationToken>>>,
+    drain_outcomes: VecDeque<DrainOutcome>,
+    drain_epoch: DrainEpoch,
+    cancelled_during_model: bool,
+    block_model_forever: bool,
+    block_await_user_input_forever: bool,
+    block_compact_until_cancelled: bool,
+    fail_accept_input: bool,
+    needs_compaction: bool,
+    fail_emit_once: bool,
+    interaction_bridge: Arc<InteractionBridge>,
+    published_interactions: Arc<std::sync::Mutex<Vec<InteractionRequest>>>,
+    pending_work: Arc<std::sync::Mutex<Option<super::engine::PendingInteractionWork>>>,
+    fake_tool_port: Option<Arc<FakeToolExecutionPort>>,
+    state: Arc<std::sync::Mutex<ScriptedState>>,
+    ports: Option<ScriptedPorts>,
+}
+
+impl Default for ScriptedScenario {
     fn default() -> Self {
         let mut drain_outcomes = VecDeque::new();
         drain_outcomes.push_back(DrainOutcome::ready(
@@ -182,159 +583,301 @@ impl Default for ScriptedPort {
             epoch: DrainEpoch(1),
         });
         Self {
-            model_steps: Default::default(),
-            model_errors: Default::default(),
-            tool_steps: Default::default(),
-            controls: Default::default(),
-            registered_step: Default::default(),
+            model_steps: VecDeque::new(),
+            model_errors: VecDeque::new(),
+            tool_steps: VecDeque::new(),
+            controls: Arc::new(std::sync::Mutex::new(VecDeque::new())),
             cancel_when_compact_starts: false,
             cancel_when_model_starts: false,
             cancel_when_tools_starts: false,
-            settle_tools_after_cancel: false,
-            tools_settled_after_cancel: false,
             terminate_when_compact_starts: false,
-            step_cancel: Default::default(),
-            calls: Default::default(),
-            events: Default::default(),
-            guarded_calls: Default::default(),
+            step_cancel: Arc::new(std::sync::Mutex::new(None)),
             drain_outcomes,
             drain_epoch: DrainEpoch(0),
             cancelled_during_model: false,
             block_model_forever: false,
+            block_await_user_input_forever: false,
             block_compact_until_cancelled: false,
-            cancelled_steps: Default::default(),
-            finalized_steps: Default::default(),
-            frozen_steps: Default::default(),
             fail_accept_input: false,
             needs_compaction: false,
             fail_emit_once: false,
             interaction_bridge: Arc::new(InteractionBridge::new()),
             published_interactions: Arc::new(std::sync::Mutex::new(Vec::new())),
-            stored_receivers: std::sync::Mutex::new(VecDeque::new()),
-            pending_work: std::sync::Mutex::new(None),
-            stored_metadata: std::sync::Mutex::new(VecDeque::new()),
-            await_interaction_completion: false,
-            resolved_interactions: std::sync::Mutex::new(VecDeque::new()),
+            pending_work: Arc::new(std::sync::Mutex::new(None)),
             fake_tool_port: None,
+            state: Arc::new(std::sync::Mutex::new(ScriptedState::default())),
+            ports: None,
         }
     }
 }
 
+impl ScriptedScenario {
+    fn ports(&mut self) -> &mut ScriptedPorts {
+        if self.ports.is_none() {
+            let state = ScriptedState {
+                model_steps: std::mem::take(&mut self.model_steps),
+                model_errors: std::mem::take(&mut self.model_errors),
+                tool_steps: std::mem::take(&mut self.tool_steps),
+                cancel_when_compact_starts: self.cancel_when_compact_starts,
+                cancel_when_model_starts: self.cancel_when_model_starts,
+                cancel_when_tools_starts: self.cancel_when_tools_starts,
+                terminate_when_compact_starts: self.terminate_when_compact_starts,
+                cancelled_during_model: self.cancelled_during_model,
+                block_model_forever: self.block_model_forever,
+                block_await_user_input_forever: self.block_await_user_input_forever,
+                block_compact_until_cancelled: self.block_compact_until_cancelled,
+                fail_accept_input: self.fail_accept_input,
+                needs_compaction: self.needs_compaction,
+                fail_emit_once: self.fail_emit_once,
+                drain_outcomes: std::mem::take(&mut self.drain_outcomes),
+                drain_epoch: self.drain_epoch,
+                ..ScriptedState::default()
+            };
+            self.state = Arc::new(std::sync::Mutex::new(state));
+            let state = Arc::clone(&self.state);
+            let controls = Arc::clone(&self.controls);
+            self.ports = Some(ScriptedPorts {
+                input: InputFake(Arc::clone(&state)),
+                events: EventSinkFake(Arc::clone(&state)),
+                control: RunControlFake {
+                    state: Arc::clone(&state),
+                    controls: Arc::clone(&controls),
+                },
+                lifecycle: RunLifecycleFake {
+                    state: Arc::clone(&state),
+                    step_cancel: Arc::clone(&self.step_cancel),
+                },
+                interaction: InteractionMailboxFake {
+                    state: Arc::clone(&state),
+                    interaction_bridge: Arc::clone(&self.interaction_bridge),
+                    published_interactions: Arc::clone(&self.published_interactions),
+                    pending_work: Arc::clone(&self.pending_work),
+                    fake_tool_port: self.fake_tool_port.clone(),
+                },
+                persistence: StepPersistenceFake(Arc::clone(&state)),
+                compaction: CompactionFake {
+                    state: Arc::clone(&state),
+                    controls: Arc::clone(&controls),
+                },
+                model: ModelInvocationFake {
+                    state: Arc::clone(&state),
+                    controls: Arc::clone(&controls),
+                },
+                stop_hook: StopHookFake,
+                tools: ToolOrchestrationFake {
+                    state: Arc::clone(&state),
+                    controls,
+                },
+                stuck: StuckHandlingFake(state),
+                plan_approval: PlanApprovalFake,
+            });
+        }
+        self.ports.as_mut().expect("scripted ports must exist")
+    }
+
+    fn sync_inputs(&mut self) {
+        let mut state = self.state.lock().unwrap();
+        if !self.drain_outcomes.is_empty() {
+            state.drain_outcomes = std::mem::take(&mut self.drain_outcomes);
+        }
+        if !self.model_steps.is_empty() {
+            state.model_steps = std::mem::take(&mut self.model_steps);
+        }
+    }
+
+    fn calls(&self) -> Vec<&'static str> {
+        self.state.lock().unwrap().observations.calls.clone()
+    }
+
+    fn events(&self) -> Vec<RunDomainEvent> {
+        self.state.lock().unwrap().observations.events.clone()
+    }
+
+    fn guarded_calls(&self) -> Vec<Vec<ToolGuardDecision>> {
+        self.state
+            .lock()
+            .unwrap()
+            .observations
+            .guarded_calls
+            .clone()
+    }
+
+    fn cancelled_steps(&self) -> Vec<sdk::RunStepId> {
+        self.state
+            .lock()
+            .unwrap()
+            .observations
+            .cancelled_steps
+            .clone()
+    }
+
+    fn finalized_steps(&self) -> Vec<sdk::RunStepId> {
+        self.state
+            .lock()
+            .unwrap()
+            .observations
+            .finalized_steps
+            .clone()
+    }
+
+    fn frozen_steps(&self) -> Vec<sdk::RunStepId> {
+        self.state.lock().unwrap().observations.frozen_steps.clone()
+    }
+}
+
+impl ScriptedPorts {
+    fn run_loop(&mut self) -> RunLoop<'_> {
+        RunLoop::new(
+            &mut self.input,
+            &mut self.events,
+            &self.control,
+            &self.lifecycle,
+            &mut self.interaction,
+            &mut self.persistence,
+            &mut self.compaction,
+            &mut self.model,
+            &mut self.stop_hook,
+            &mut self.tools,
+            &mut self.stuck,
+            &self.plan_approval,
+        )
+    }
+}
+
 #[async_trait::async_trait]
-impl RunLoopPort for ScriptedPort {
+impl InputPort for InputFake {
     async fn drain_input(
         &mut self,
         expected_epoch: DrainEpoch,
     ) -> Result<DrainOutcome, LoopEngineError> {
-        self.calls.push("input");
-        // #1272: validate the engine's expected epoch against the
-        // port's own tracked epoch before consuming any outcome.
-        if expected_epoch != self.drain_epoch {
+        let mut state = self.0.lock().unwrap();
+        state.observations.calls.push("input");
+        if expected_epoch != state.drain_epoch {
             return Err(LoopEngineError::Adapter(format!(
                 "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                expected_epoch, self.drain_epoch,
+                expected_epoch, state.drain_epoch,
             )));
         }
-        let outcome =
-            self.drain_outcomes
-                .pop_front()
-                .unwrap_or_else(|| DrainOutcome::EmptyAndSealed {
-                    epoch: self.drain_epoch,
-                });
-        // #1272: Only advance epoch for outcomes that consumed input.
-        // NoInput means no input was consumed — epoch stays the same.
-        match &outcome {
-            DrainOutcome::NoInput { .. } => {}
-            _ => {
-                self.drain_epoch = self.drain_epoch.next();
-            }
+        let epoch = state.drain_epoch;
+        let outcome = state
+            .drain_outcomes
+            .pop_front()
+            .unwrap_or(DrainOutcome::EmptyAndSealed { epoch });
+        if !matches!(&outcome, DrainOutcome::NoInput { .. }) {
+            state.drain_epoch = state.drain_epoch.next();
         }
         Ok(outcome)
     }
 
-    /// #1272: For ScriptedPort, await_user_input does NOT delegate to
-    /// drain_input because the epoch advancement rules differ:
-    /// - drain_input always advances epoch
-    /// - await_user_input advances for Ready and InternalContinuation
-    ///   but NOT for EmptyAndSealed or NoInput (the engine won't either)
     async fn await_user_input(
         &mut self,
         expected_epoch: DrainEpoch,
     ) -> Result<DrainOutcome, LoopEngineError> {
-        self.calls.push("await_input");
-        if expected_epoch != self.drain_epoch {
-            return Err(LoopEngineError::Adapter(format!(
-                "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                expected_epoch, self.drain_epoch,
-            )));
+        let block_forever = {
+            let mut state = self.0.lock().unwrap();
+            state.observations.calls.push("await_input");
+            if expected_epoch != state.drain_epoch {
+                return Err(LoopEngineError::Adapter(format!(
+                    "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                    expected_epoch, state.drain_epoch,
+                )));
+            }
+            state.block_await_user_input_forever
+        };
+        if block_forever {
+            std::future::pending::<()>().await;
+            unreachable!("pending future must not complete");
         }
-        let outcome = self
+        let mut state = self.0.lock().unwrap();
+        let epoch = state.drain_epoch;
+        let outcome = state
             .drain_outcomes
             .pop_front()
-            .unwrap_or_else(|| DrainOutcome::NoInput {
-                epoch: self.drain_epoch,
-            });
-        // #1272: Don't advance epoch for outcomes that the engine won't advance for
-        match &outcome {
-            DrainOutcome::EmptyAndSealed { .. } | DrainOutcome::NoInput { .. } => {}
-            _ => {
-                self.drain_epoch = self.drain_epoch.next();
-            }
+            .unwrap_or(DrainOutcome::NoInput { epoch });
+        if !matches!(
+            &outcome,
+            DrainOutcome::EmptyAndSealed { .. } | DrainOutcome::NoInput { .. }
+        ) {
+            state.drain_epoch = state.drain_epoch.next();
         }
         Ok(outcome)
     }
+}
 
-    async fn await_user_wakeup(
+#[async_trait::async_trait]
+impl EventSinkPort for EventSinkFake {
+    async fn emit(
         &mut self,
-        expected_epoch: DrainEpoch,
-    ) -> Result<DrainOutcome, LoopEngineError> {
-        if self.await_interaction_completion {
-            self.calls.push("await_interaction");
-            let receiver = self
-                .stored_receivers
-                .lock()
-                .unwrap()
-                .pop_front()
-                .expect("pending interaction receiver");
-            let metadata = self
-                .stored_metadata
-                .lock()
-                .unwrap()
-                .pop_front()
-                .expect("pending interaction metadata");
-            let resolution = match receiver.await {
-                Ok(completion) => {
-                    crate::application::interaction::InteractionResolution::Resolved {
-                        metadata,
-                        completion,
-                    }
-                }
-                Err(_) => {
-                    crate::application::interaction::InteractionResolution::Closed { metadata }
-                }
-            };
-            self.resolved_interactions
-                .lock()
-                .unwrap()
-                .push_back(resolution);
-            return Ok(DrainOutcome::NoInput {
-                epoch: expected_epoch,
-            });
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
+        events: Vec<RunDomainEvent>,
+    ) -> Result<(), LoopEngineError> {
+        let mut state = self.0.lock().unwrap();
+        state.observations.calls.push("emit");
+        if state.fail_emit_once {
+            state.fail_emit_once = false;
+            return Err(LoopEngineError::Adapter("emit failed".to_string()));
         }
-        self.await_user_input(expected_epoch).await
+        state.observations.events.extend(events);
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl RunControlPort for RunControlFake {
+    fn take_control(&self, _run_id: &sdk::RunId) -> Option<RunControl> {
+        let _ = &self.state;
+        self.controls.lock().unwrap().pop_front()
+    }
+}
+
+#[async_trait::async_trait]
+impl RunLifecyclePort for RunLifecycleFake {
+    fn claim_terminal(&self, _run_id: &sdk::RunId) -> bool {
+        true
     }
 
-    fn freeze_step(&mut self, step_id: &sdk::RunStepId, _inputs: &[LoopInput]) {
-        self.calls.push("freeze_step");
-        self.frozen_steps.push(step_id.clone());
+    fn claim_cancellation(&self, _run_id: &sdk::RunId) -> bool {
+        true
+    }
+
+    fn register_step_scope(
+        &self,
+        run_id: &sdk::RunId,
+        step_id: sdk::RunStepId,
+        cancel: CancellationToken,
+    ) {
+        let _ = run_id;
+        self.state.lock().unwrap().registered_step = Some(step_id);
+        *self.step_cancel.lock().unwrap() = Some(cancel);
+    }
+}
+
+#[async_trait::async_trait]
+impl StepPersistencePort for StepPersistenceFake {
+    fn observe_step_frozen(&mut self, step_id: &sdk::RunStepId) {
+        let mut state = self.0.lock().unwrap();
+        state.observations.calls.push("freeze_step");
+        state.observations.frozen_steps.push(step_id.clone());
+    }
+
+    fn build_context_request(
+        &self,
+        _execution: &crate::application::run::execution_state::RunExecutionState,
+        _run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+    ) -> Option<crate::ports::ContextRequest> {
+        let _ = step_id;
+        None
     }
 
     async fn accept_step_input(
         &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
         _step_id: &sdk::RunStepId,
     ) -> Result<(), LoopEngineError> {
-        self.calls.push("accept_step_input");
-        if self.fail_accept_input {
+        let mut state = self.0.lock().unwrap();
+        state.observations.calls.push("accept_step_input");
+        if state.fail_accept_input {
             return Err(LoopEngineError::Adapter(
                 "accepted input durable write failed".to_string(),
             ));
@@ -342,20 +885,60 @@ impl RunLoopPort for ScriptedPort {
         Ok(())
     }
 
-    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-        self.calls.push("needs_compaction");
-        Ok(self.needs_compaction)
+    async fn persist_step_commit(
+        &mut self,
+        commit: &super::engine::StepCommit,
+    ) -> Result<(), LoopEngineError> {
+        let mut state = self.0.lock().unwrap();
+        match commit.cause {
+            crate::ports::FinalizeCause::Completed => {
+                state.observations.calls.push("finalize_step");
+                state
+                    .observations
+                    .finalized_steps
+                    .push(commit.step_id.clone());
+            }
+            crate::ports::FinalizeCause::UserCancelledStep
+            | crate::ports::FinalizeCause::RunTerminated => {
+                state.observations.calls.push("finalize_cancelled_step");
+                state
+                    .observations
+                    .cancelled_steps
+                    .push(commit.step_id.clone());
+            }
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl CompactionPort for CompactionFake {
+    async fn needs_compaction(
+        &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
+    ) -> Result<bool, LoopEngineError> {
+        let mut state = self.state.lock().unwrap();
+        state.observations.calls.push("needs_compaction");
+        Ok(state.needs_compaction)
     }
 
-    async fn compact(&mut self, cancel: &CancellationToken) -> Result<(), LoopEngineError> {
-        self.calls.push("compact");
-        if self.cancel_when_compact_starts {
-            let step_id = self
-                .registered_step
-                .lock()
-                .unwrap()
-                .clone()
-                .expect("step scope must be registered before compact");
+    async fn compact(
+        &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
+        cancel: &CancellationToken,
+    ) -> Result<(), LoopEngineError> {
+        let (registered_step, cancel_step, terminate_run, block_until_cancelled) = {
+            let mut state = self.state.lock().unwrap();
+            state.observations.calls.push("compact");
+            (
+                state.registered_step.clone(),
+                state.cancel_when_compact_starts,
+                state.terminate_when_compact_starts,
+                state.block_compact_until_cancelled,
+            )
+        };
+        if cancel_step {
+            let step_id = registered_step.expect("step scope must be registered before compact");
             self.controls
                 .lock()
                 .unwrap()
@@ -365,7 +948,7 @@ impl RunLoopPort for ScriptedPort {
                 });
             cancel.cancel();
         }
-        if self.terminate_when_compact_starts {
+        if terminate_run {
             self.controls
                 .lock()
                 .unwrap()
@@ -375,25 +958,34 @@ impl RunLoopPort for ScriptedPort {
                 });
             cancel.cancel();
         }
-        if self.block_compact_until_cancelled {
+        if block_until_cancelled {
             cancel.cancelled().await;
             return Err(LoopEngineError::Cancelled);
         }
         Ok(())
     }
+}
 
+#[async_trait::async_trait]
+impl ModelInvocationPort for ModelInvocationFake {
     async fn invoke_model(
         &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
-        self.calls.push("model");
-        if self.cancel_when_model_starts {
-            let step_id = self
-                .registered_step
-                .lock()
-                .unwrap()
-                .clone()
-                .expect("step scope must be registered before model");
+        let (registered_step, cancel_model, block_forever, cancelled_during_model, error) = {
+            let mut state = self.state.lock().unwrap();
+            state.observations.calls.push("model");
+            (
+                state.registered_step.clone(),
+                state.cancel_when_model_starts,
+                state.block_model_forever,
+                state.cancelled_during_model,
+                state.model_errors.pop_front(),
+            )
+        };
+        if cancel_model {
+            let step_id = registered_step.expect("step scope must be registered before model");
             self.controls
                 .lock()
                 .unwrap()
@@ -404,54 +996,54 @@ impl RunLoopPort for ScriptedPort {
             cancel.cancel();
             return Err(LoopEngineError::Cancelled);
         }
-        if self.block_model_forever {
+        if block_forever {
             std::future::pending::<()>().await;
         }
-        if self.cancelled_during_model {
+        if cancelled_during_model {
             cancel.cancelled().await;
             return Err(LoopEngineError::Cancelled);
         }
-        if let Some(error) = self.model_errors.pop_front() {
+        if let Some(error) = error {
             return Err(error);
         }
-        self.model_steps
+        self.state
+            .lock()
+            .unwrap()
+            .model_steps
             .pop_front()
             .map(|step| (step, StepTokenUsage::default()))
             .ok_or_else(|| LoopEngineError::Adapter("missing model step".to_string()))
     }
+}
 
-    async fn finalize_step(&mut self, step_id: &sdk::RunStepId) -> Result<(), LoopEngineError> {
-        self.calls.push("finalize_step");
-        self.finalized_steps.push(step_id.clone());
-        Ok(())
-    }
+#[async_trait::async_trait]
+impl crate::application::hook::stop_coordination::StopHookObserver for StopHookFake {}
 
-    async fn finalize_cancelled_step(
-        &mut self,
-        step_id: &sdk::RunStepId,
-    ) -> Result<(), LoopEngineError> {
-        self.calls.push("finalize_cancelled_step");
-        self.cancelled_steps.push(step_id.clone());
-        Ok(())
-    }
-
+#[async_trait::async_trait]
+impl ToolOrchestrationPort for ToolOrchestrationFake {
     async fn execute_tools(
         &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
         calls: &[(ToolCall, ToolGuardDecision)],
         cancel: &CancellationToken,
-    ) -> Result<ToolStep, LoopEngineError> {
-        self.calls.push("tools");
-        self.guarded_calls
-            .push(calls.iter().map(|(_, decision)| decision.clone()).collect());
-        if self.cancel_when_tools_starts {
-            let step_id = self
-                .registered_step
-                .lock()
-                .unwrap()
-                .clone()
-                .expect("step scope must be registered before tools");
+    ) -> Result<crate::application::tool::coordination::ToolRoundOutcome, LoopEngineError> {
+        let (registered_step, cancel_tools, step) = {
+            let mut state = self.state.lock().unwrap();
+            state.observations.calls.push("tools");
+            state
+                .observations
+                .guarded_calls
+                .push(calls.iter().map(|(_, decision)| decision.clone()).collect());
+            (
+                state.registered_step.clone(),
+                state.cancel_when_tools_starts,
+                state.tool_steps.pop_front(),
+            )
+        };
+        if cancel_tools {
+            let step_id = registered_step.expect("step scope must be registered before tools");
             self.controls
                 .lock()
                 .unwrap()
@@ -460,42 +1052,91 @@ impl RunLoopPort for ScriptedPort {
                     deadline: sdk::ControlDeadline::from_unix_millis(1_725_000_000_123),
                 });
             cancel.cancel();
-            if self.settle_tools_after_cancel {
-                tokio::task::yield_now().await;
-                self.tools_settled_after_cancel = true;
-            } else {
-                return Err(LoopEngineError::Cancelled);
-            }
+            return Err(LoopEngineError::Cancelled);
         }
-        let step = self
-            .tool_steps
-            .pop_front()
-            .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))?;
-        if cancel.is_cancelled() {
-            Err(LoopEngineError::Cancelled)
-        } else {
-            Ok(step)
-        }
+        step.map(
+            |step| crate::application::tool::coordination::ToolRoundOutcome {
+                continuation: if matches!(
+                    step,
+                    ToolStep::Continue | ToolStep::ContinueWithFuseBypass(_)
+                ) {
+                    crate::application::tool::coordination::ToolRoundContinuation::ToolResults
+                } else {
+                    crate::application::tool::coordination::ToolRoundContinuation::None
+                },
+                step,
+            },
+        )
+        .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))
     }
+}
 
-    async fn on_stuck(&mut self, _decision: &StuckDecision) -> Result<(), LoopEngineError> {
-        self.calls.push("stuck");
+#[async_trait::async_trait]
+impl StuckHandlingPort for StuckHandlingFake {
+    async fn on_stuck(
+        &mut self,
+        _execution: &crate::application::run::execution_state::RunExecutionState,
+        _decision: &StuckDecision,
+    ) -> Result<(), LoopEngineError> {
+        self.0.lock().unwrap().observations.calls.push("stuck");
         Ok(())
     }
+}
 
-    fn take_control(&self, _run_id: &sdk::RunId) -> Option<RunControl> {
-        self.controls.lock().unwrap().pop_front()
+impl PlanApprovalPort for PlanApprovalFake {}
+
+impl crate::application::interaction::coordinator::InteractionCompletionContextProvider
+    for InteractionMailboxFake
+{
+    fn interaction_completion_context(
+        &self,
+        step_cancel: CancellationToken,
+    ) -> crate::application::interaction::coordinator::InteractionCompletionContext<'_> {
+        static MATERIALIZER: std::sync::OnceLock<
+            std::sync::Arc<
+                crate::application::tool::tool_result_materializer::ToolResultMaterializer,
+            >,
+        > = std::sync::OnceLock::new();
+        let materializer = MATERIALIZER
+            .get_or_init(crate::application::tool::test_support::test_tool_result_materializer)
+            .as_ref();
+        static UNUSED_TOOL_EXECUTION: std::sync::LazyLock<FakeToolExecutionPort> =
+            std::sync::LazyLock::new(FakeToolExecutionPort::new);
+        let tool_execution = self.fake_tool_port.as_deref().map_or(
+            &*UNUSED_TOOL_EXECUTION as &dyn tools::ToolExecutionPort,
+            |port| port,
+        );
+        let tool_context =
+            crate::application::run::workspace_test_support::test_tool_execution_context(
+                std::path::PathBuf::from("/tmp"),
+                step_cancel,
+            );
+        crate::application::interaction::coordinator::InteractionCompletionContext::new(
+            tool_context,
+            tool_execution,
+            materializer,
+            "test-session",
+        )
     }
+}
 
+#[async_trait::async_trait]
+impl InteractionMailboxPort for InteractionMailboxFake {
     fn interaction_port(&self) -> &dyn InteractionPort {
         self.interaction_bridge.as_ref()
     }
 
     async fn publish_interaction(
         &mut self,
+        _execution: &crate::application::run::execution_state::RunExecutionState,
         request: &InteractionRequest,
     ) -> Result<(), LoopEngineError> {
-        self.calls.push("publish_interaction");
+        self.state
+            .lock()
+            .unwrap()
+            .observations
+            .calls
+            .push("publish_interaction");
         self.published_interactions
             .lock()
             .unwrap()
@@ -503,159 +1144,28 @@ impl RunLoopPort for ScriptedPort {
         Ok(())
     }
 
-    fn store_interaction(
+    fn set_pending_interaction_work(
         &mut self,
-        metadata: crate::application::interaction::InteractionRequestMetadata,
-        receiver: tokio::sync::oneshot::Receiver<
-            crate::application::interaction::InteractionCompletion,
-        >,
-    ) -> Result<(), LoopEngineError> {
-        self.calls.push("store_interaction");
-        self.stored_metadata.lock().unwrap().push_back(metadata);
-        self.stored_receivers.lock().unwrap().push_back(receiver);
-        Ok(())
-    }
-
-    async fn poll_interaction(
-        &mut self,
-    ) -> Result<Option<crate::application::interaction::InteractionResolution>, LoopEngineError>
-    {
-        self.calls.push("poll_interaction");
-        if let Some(resolution) = self.resolved_interactions.lock().unwrap().pop_front() {
-            return Ok(Some(resolution));
-        }
-        let mut receivers = self.stored_receivers.lock().unwrap();
-        let mut metas = self.stored_metadata.lock().unwrap();
-        match (receivers.pop_front(), metas.pop_front()) {
-            (Some(mut receiver), Some(metadata)) => match receiver.try_recv() {
-                Ok(completion) => Ok(Some(
-                    crate::application::interaction::InteractionResolution::Resolved {
-                        metadata,
-                        completion,
-                    },
-                )),
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
-                    receivers.push_front(receiver);
-                    metas.push_front(metadata);
-                    Ok(None)
-                }
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => Ok(Some(
-                    crate::application::interaction::InteractionResolution::Closed { metadata },
-                )),
-            },
-            _ => Ok(None),
-        }
-    }
-
-    fn set_pending_interaction_work(&mut self, work: super::engine::PendingInteractionWork) {
-        self.calls.push("set_pending_interaction_work");
-        *self.pending_work.lock().unwrap() = Some(work);
-    }
-
-    async fn finish_interaction_work(
-        &mut self,
-        metadata: &crate::application::interaction::InteractionRequestMetadata,
-        completion: &crate::application::interaction::InteractionCompletion,
-        _cancel: &CancellationToken,
-    ) -> Result<super::engine::InteractionWorkOutcome, LoopEngineError> {
-        self.calls.push("finish_interaction_work");
-        use crate::application::interaction::InteractionCompletion;
-        use crate::domain::agent_run::InteractionContinuation;
-
-        let work = self.pending_work.lock().unwrap().take();
-        let current = work.as_ref().and_then(|w| w.current.clone());
-        let remaining_queue: Vec<_> = work.as_ref().map(|w| w.queue.clone()).unwrap_or_default();
-
-        let (call_id, status) = match &metadata.continuation {
-            InteractionContinuation::CompleteToolCall(id) => {
-                let status = match completion {
-                    InteractionCompletion::Replied(_) => ToolCallStatus::Success,
-                    InteractionCompletion::Cancelled(_) => ToolCallStatus::Cancelled,
-                };
-                (id.clone(), status)
-            }
-            InteractionContinuation::ContinueToolApproval(id) => {
-                let status = match completion {
-                    InteractionCompletion::Replied(reply) => {
-                        if matches!(
-                            reply,
-                            sdk::InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve)
-                        ) {
-                            // Execute via fake_tool_port if available (counts invocations)
-                            if let Some(ref fake) = self.fake_tool_port {
-                                if let Some(approval_call) =
-                                    current.as_ref().and_then(|ci| ci.approval_call.clone())
-                                {
-                                    let call = &approval_call.call;
-                                    let mut input = call.input.clone();
-                                    tools::strip_runtime_meta(&mut input);
-                                    let context =
-                                        crate::application::testing::test_tool_execution_context(
-                                            std::path::PathBuf::from("/tmp"),
-                                            CancellationToken::new(),
-                                        );
-                                    let invocation = tools::ToolInvocation::new(
-                                        call.name.as_str(),
-                                        input,
-                                        context.scope().clone(),
-                                    )
-                                    .with_authorization(approval_call.authorization);
-                                    let _ = tools::ToolExecutionPort::execute(
-                                        fake.as_ref(),
-                                        invocation,
-                                        &context,
-                                    )
-                                    .await;
-                                }
-                            }
-                            ToolCallStatus::Success
-                        } else {
-                            ToolCallStatus::Cancelled
-                        }
-                    }
-                    InteractionCompletion::Cancelled(_) => ToolCallStatus::Cancelled,
-                };
-                (id.clone(), status)
-            }
-            _ => {
-                return Ok(super::engine::InteractionWorkOutcome::Completed {
-                    call_id: sdk::ToolCallId::new_v7(),
-                    status: ToolCallStatus::Success,
-                    remaining_queue,
-                });
-            }
-        };
-
-        Ok(super::engine::InteractionWorkOutcome::Completed {
-            call_id,
-            status,
-            remaining_queue,
-        })
-    }
-
-    fn register_step_scope(
-        &self,
-        _run_id: &sdk::RunId,
-        step_id: sdk::RunStepId,
-        cancel: CancellationToken,
+        execution: &mut crate::application::run::execution_state::RunExecutionState,
+        work: super::engine::PendingInteractionWork,
     ) {
-        *self.registered_step.lock().unwrap() = Some(step_id);
-        *self.step_cancel.lock().unwrap() = Some(cancel);
-    }
-
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
-        self.calls.push("emit");
-        if self.fail_emit_once {
-            self.fail_emit_once = false;
-            return Err(LoopEngineError::Adapter("sink failed".to_string()));
-        }
-        self.events.extend(events);
-        Ok(())
+        self.state
+            .lock()
+            .unwrap()
+            .observations
+            .calls
+            .push("set_pending_interaction_work");
+        execution.set_pending_interaction_work(work.clone());
+        *self.pending_work.lock().unwrap() = Some(work);
     }
 }
 
+fn scripted_run_loop(scenario: &mut ScriptedScenario) -> RunLoop<'_> {
+    scenario.ports().run_loop()
+}
+
 fn new_run(timeout: Duration) -> Run {
-    Run::new(RunSpec::new("test", timeout), None)
+    Run::new(RunSpec::main().with_timeout(timeout).unwrap(), None)
 }
 
 fn call(name: &str, input: serde_json::Value) -> ToolCall {
@@ -669,44 +1179,19 @@ fn call(name: &str, input: serde_json::Value) -> ToolCall {
 }
 
 #[test]
-fn input_split_keeps_user_content_and_controls_separate() {
-    let batch = split_input_events(vec![
-        ChatInputEvent::user_message("follow up", Vec::new()),
-        ChatInputEvent::ControlCommand {
-            raw: "/save".to_string(),
-        },
-        ChatInputEvent::Reset,
-    ]);
-
-    assert_eq!(batch.user_inputs.len(), 1);
-    assert_eq!(batch.user_inputs[0].text, "follow up");
-    assert_eq!(
-        batch.controls,
-        vec![
-            RuntimeControl::Command("/save".to_string()),
-            RuntimeControl::Reset,
-        ]
-    );
-}
-
-#[test]
-fn stuck_guard_detects_repeated_text_for_every_run_kind() {
-    for mut guard in [
-        StuckGuard::new(Duration::ZERO),
-        StuckGuard::new(Duration::from_secs(30)),
-    ] {
-        assert_eq!(guard.inspect_text("same"), StuckDecision::Allow);
-        assert_eq!(guard.inspect_text("same"), StuckDecision::Allow);
-        assert!(matches!(
-            guard.inspect_text("same"),
-            StuckDecision::SoftBlock { .. }
-        ));
-    }
+fn stuck_guard_detects_repeated_text() {
+    let mut guard = StuckGuard::new();
+    assert_eq!(guard.inspect_text("same"), StuckDecision::Allow);
+    assert_eq!(guard.inspect_text("same"), StuckDecision::Allow);
+    assert!(matches!(
+        guard.inspect_text("same"),
+        StuckDecision::SoftBlock { .. }
+    ));
 }
 
 #[test]
 fn stuck_guard_detects_tool_loops_and_escalates() {
-    let mut guard = StuckGuard::new(Duration::ZERO);
+    let mut guard = StuckGuard::new();
     let repeated = call("Read", json!({"file_path": "a.rs"}));
 
     assert_eq!(guard.inspect_tool(&repeated), StuckDecision::Allow);
@@ -722,22 +1207,6 @@ fn stuck_guard_detects_tool_loops_and_escalates() {
     ));
 }
 
-#[test]
-fn timeout_zero_is_unlimited_and_positive_timeout_fails() {
-    let now = Instant::now();
-    let unlimited = StuckGuard::with_started_at(Duration::ZERO, now);
-    let finite = StuckGuard::with_started_at(Duration::from_secs(5), now);
-
-    assert_eq!(
-        unlimited.inspect_timeout(now + Duration::from_secs(60)),
-        StuckDecision::Allow
-    );
-    assert!(matches!(
-        finite.inspect_timeout(now + Duration::from_secs(5)),
-        StuckDecision::Fail { .. }
-    ));
-}
-
 // #1248 Task 6: Stop hook block counting moved to Run domain.
 // The following test is removed because record_stop_hook_block no longer
 // exists on StuckGuard. Equivalent coverage is in domain/agent_run/tests.rs
@@ -747,19 +1216,26 @@ fn timeout_zero_is_unlimited_and_positive_timeout_fails() {
 async fn engine_completes_text_only_run_through_the_run_fsm() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         model_steps: VecDeque::from([ModelStep::Complete {
             text: "done".to_string(),
         }]),
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
-    assert_eq!(port.frozen_steps.len(), 1);
-    assert_eq!(port.finalized_steps, port.frozen_steps);
-    assert_eq!(run.steps()[0].id(), &port.frozen_steps[0]);
+    assert_eq!(port.frozen_steps().len(), 1);
+    assert_eq!(port.finalized_steps(), port.frozen_steps());
+    assert_eq!(run.steps()[0].id(), &port.frozen_steps()[0]);
     assert_eq!(run.steps().len(), 1);
     assert_eq!(
         run.steps()[0].invocation().unwrap().response(),
@@ -767,7 +1243,7 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
         "the shared engine must record the model invocation in the Run aggregate"
     );
     assert_eq!(
-        port.calls,
+        port.calls(),
         vec![
             "emit",
             "input",
@@ -782,7 +1258,7 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
         ]
     );
     assert!(port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Completed { .. })));
 }
@@ -791,22 +1267,29 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
 async fn engine_accepts_input_before_building_context() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         model_steps: VecDeque::from([ModelStep::Complete {
             text: "done".to_string(),
         }]),
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     let accepted = port
-        .calls
+        .calls()
         .iter()
         .position(|call| *call == "accept_step_input")
         .unwrap();
     let context = port
-        .calls
+        .calls()
         .iter()
         .position(|call| *call == "needs_compaction")
         .unwrap();
@@ -817,24 +1300,31 @@ async fn engine_accepts_input_before_building_context() {
 async fn engine_stops_before_context_when_accepted_input_durable_write_fails() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         fail_accept_input: true,
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Failed);
-    assert!(port.calls.contains(&"accept_step_input"));
-    assert!(!port.calls.contains(&"needs_compaction"));
-    assert!(!port.calls.contains(&"model"));
+    assert!(port.calls().contains(&"accept_step_input"));
+    assert!(!port.calls().contains(&"needs_compaction"));
+    assert!(!port.calls().contains(&"model"));
 }
 
 #[tokio::test]
 async fn engine_executes_tools_then_reenters_the_same_loop() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             DrainOutcome::ready(
                 vec![LoopInput {
@@ -869,15 +1359,22 @@ async fn engine_executes_tools_then_reenters_the_same_loop() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     assert_eq!(
-        port.calls.iter().filter(|call| **call == "model").count(),
+        port.calls().iter().filter(|call| **call == "model").count(),
         2
     );
     assert_eq!(
-        port.calls.iter().filter(|call| **call == "tools").count(),
+        port.calls().iter().filter(|call| **call == "tools").count(),
         1
     );
     let first_step = &run.steps()[0];
@@ -893,7 +1390,7 @@ async fn engine_executes_tools_then_reenters_the_same_loop() {
 async fn engine_pauses_for_user_without_completing_the_run() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         model_steps: VecDeque::from([ModelStep::Tools {
             text: "question".to_string(),
             calls: vec![call("AskUserQuestion", json!({}))],
@@ -902,7 +1399,14 @@ async fn engine_pauses_for_user_without_completing_the_run() {
         ..Default::default()
     };
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
@@ -912,7 +1416,7 @@ async fn engine_pauses_for_user_without_completing_the_run() {
 async fn provider_context_too_long_compacts_then_rebuilds_before_reinvoking() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         model_steps: VecDeque::from([ModelStep::Complete {
             text: "done".to_string(),
         }]),
@@ -922,11 +1426,18 @@ async fn provider_context_too_long_compacts_then_rebuilds_before_reinvoking() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     assert_eq!(
-        port.calls,
+        port.calls(),
         vec![
             "emit",
             "input",
@@ -948,7 +1459,7 @@ async fn provider_context_too_long_compacts_then_rebuilds_before_reinvoking() {
 async fn provider_context_too_long_after_compaction_fails_without_looping() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         model_errors: VecDeque::from([
             LoopEngineError::NeedsCompaction("first".to_string()),
             LoopEngineError::NeedsCompaction("second".to_string()),
@@ -956,15 +1467,25 @@ async fn provider_context_too_long_after_compaction_fails_without_looping() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Failed);
     assert_eq!(
-        port.calls.iter().filter(|call| **call == "compact").count(),
+        port.calls()
+            .iter()
+            .filter(|call| **call == "compact")
+            .count(),
         1
     );
     assert_eq!(
-        port.calls.iter().filter(|call| **call == "model").count(),
+        port.calls().iter().filter(|call| **call == "model").count(),
         2
     );
 }
@@ -973,25 +1494,32 @@ async fn provider_context_too_long_after_compaction_fails_without_looping() {
 async fn cancel_step_during_compaction_finalizes_then_returns_to_drain() {
     let mut run = new_run(Duration::ZERO);
     let root = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         needs_compaction: true,
         block_compact_until_cancelled: true,
         cancel_when_compact_starts: true,
         ..Default::default()
     };
 
-    run_loop(&mut run, &root, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
-    assert_eq!(port.cancelled_steps, port.frozen_steps);
-    assert!(port.calls.contains(&"compact"));
-    assert!(!port.calls.contains(&"model"));
+    assert_eq!(port.cancelled_steps(), port.frozen_steps());
+    assert!(port.calls().contains(&"compact"));
+    assert!(!port.calls().contains(&"model"));
     assert!(!port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
     assert!(port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
 }
@@ -999,7 +1527,7 @@ async fn cancel_step_during_compaction_finalizes_then_returns_to_drain() {
 async fn engine_cancels_in_flight_compaction_and_emits_terminal_ack() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         needs_compaction: true,
         block_compact_until_cancelled: true,
         ..Default::default()
@@ -1010,24 +1538,31 @@ async fn engine_cancels_in_flight_compaction_and_emits_terminal_ack() {
         cancel_for_task.cancel();
     });
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
     canceller.await.unwrap();
 
     assert_eq!(directive, LoopDirective::Terminal);
     assert_eq!(run.status(), RunStatus::Cancelled);
-    assert!(port.calls.contains(&"compact"));
+    assert!(port.calls().contains(&"compact"));
     assert!(port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
-    assert!(!port.calls.contains(&"model"));
+    assert!(!port.calls().contains(&"model"));
 }
 
 #[tokio::test]
 async fn engine_cancels_in_flight_model_and_emits_terminal_ack() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         cancelled_during_model: true,
         ..Default::default()
     };
@@ -1037,18 +1572,25 @@ async fn engine_cancels_in_flight_model_and_emits_terminal_ack() {
         cancel_for_task.cancel();
     });
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
     canceller.await.unwrap();
 
     assert_eq!(directive, LoopDirective::Terminal);
     assert_eq!(run.status(), RunStatus::Cancelled);
-    assert_eq!(port.cancelled_steps, port.frozen_steps);
+    assert_eq!(port.cancelled_steps(), port.frozen_steps());
     assert!(port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::CancellationRequested { .. })));
     assert!(port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
 }
@@ -1058,7 +1600,7 @@ async fn engine_passes_soft_block_decision_to_the_single_tool_adapter() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
     let repeated = call("Read", json!({"file_path": "a.rs"}));
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             DrainOutcome::ready(
                 vec![LoopInput {
@@ -1117,13 +1659,20 @@ async fn engine_passes_soft_block_decision_to_the_single_tool_adapter() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
-    assert_eq!(port.guarded_calls.len(), 3);
-    assert_eq!(port.guarded_calls[0], vec![ToolGuardDecision::Allow]);
-    assert_eq!(port.guarded_calls[1], vec![ToolGuardDecision::Allow]);
+    assert_eq!(port.guarded_calls().len(), 3);
+    assert_eq!(port.guarded_calls()[0], vec![ToolGuardDecision::Allow]);
+    assert_eq!(port.guarded_calls()[1], vec![ToolGuardDecision::Allow]);
     assert!(matches!(
-        port.guarded_calls[2].as_slice(),
+        port.guarded_calls()[2].as_slice(),
         [ToolGuardDecision::SoftBlock { .. }]
     ));
 }
@@ -1132,14 +1681,19 @@ async fn engine_passes_soft_block_decision_to_the_single_tool_adapter() {
 async fn engine_timeout_interrupts_a_blocked_model_call() {
     let mut run = new_run(Duration::from_millis(10));
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         block_model_forever: true,
         ..Default::default()
     };
 
     tokio::time::timeout(
         Duration::from_secs(1),
-        run_loop(&mut run, &cancel, &mut port),
+        run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        ),
     )
     .await
     .expect("deadline must interrupt blocked model")
@@ -1152,7 +1706,7 @@ async fn engine_timeout_interrupts_a_blocked_model_call() {
 async fn awaiting_user_does_not_resume_without_input() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         model_steps: VecDeque::from([ModelStep::Tools {
             text: "question".to_string(),
             calls: vec![call("AskUserQuestion", json!({}))],
@@ -1161,18 +1715,32 @@ async fn awaiting_user_does_not_resume_without_input() {
         ..Default::default()
     };
     assert_eq!(
-        run_loop(&mut run, &cancel, &mut port).await.unwrap(),
+        run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &cancel,
+            &mut scripted_run_loop(&mut port)
+        )
+        .await
+        .unwrap(),
         LoopDirective::AwaitUser
     );
-    let model_calls = port.calls.iter().filter(|call| **call == "model").count();
+    let model_calls = port.calls().iter().filter(|call| **call == "model").count();
 
     assert_eq!(
-        run_loop(&mut run, &cancel, &mut port).await.unwrap(),
+        run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &cancel,
+            &mut scripted_run_loop(&mut port)
+        )
+        .await
+        .unwrap(),
         LoopDirective::AwaitUser
     );
     assert_eq!(run.status(), RunStatus::AwaitingUser);
     assert_eq!(
-        port.calls.iter().filter(|call| **call == "model").count(),
+        port.calls().iter().filter(|call| **call == "model").count(),
         model_calls
     );
 }
@@ -1181,12 +1749,19 @@ async fn awaiting_user_does_not_resume_without_input() {
 async fn failed_event_delivery_is_restored_to_the_run_outbox() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         fail_emit_once: true,
         ..Default::default()
     };
 
-    let error = run_loop(&mut run, &cancel, &mut port).await.unwrap_err();
+    let error = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap_err();
 
     assert!(matches!(error, LoopEngineError::Adapter(_)));
     assert!(matches!(
@@ -1203,13 +1778,20 @@ async fn failed_event_delivery_is_restored_to_the_run_outbox() {
 async fn engine_timeout_fails_before_starting_new_work() {
     let mut run = new_run(Duration::from_nanos(1));
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort::default();
+    let mut port = ScriptedScenario::default();
 
     tokio::time::sleep(Duration::from_millis(1)).await;
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Failed);
-    assert!(!port.calls.contains(&"model"));
+    assert!(!port.calls().contains(&"model"));
 }
 
 // ── #1272 Drain outcome tests ──────────────────────────────────────────
@@ -1220,7 +1802,7 @@ async fn engine_timeout_fails_before_starting_new_work() {
 async fn engine_processes_internal_continuation() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             DrainOutcome::InternalContinuation {
                 kind: InternalContinuationKind::ToolResults,
@@ -1237,14 +1819,21 @@ async fn engine_processes_internal_continuation() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     // drain_input + freeze + accept + compaction check + emit + model + finalize + emit
-    assert!(port.calls.contains(&"freeze_step"));
-    assert!(port.calls.contains(&"model"));
+    assert!(port.calls().contains(&"freeze_step"));
+    assert!(port.calls().contains(&"model"));
     assert!(port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Completed { .. })));
 }
@@ -1257,7 +1846,7 @@ async fn internal_continuation_while_awaiting_user_without_input_stays_awaiting(
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
     // First call: model → Tools → AwaitUser → EmptyAndSealed → AwaitUser
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             DrainOutcome::ready(
                 vec![LoopInput {
@@ -1279,10 +1868,17 @@ async fn internal_continuation_while_awaiting_user_without_input_stays_awaiting(
         ..Default::default()
     };
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
-    let calls_before_second_loop = port.calls.len();
+    let calls_before_second_loop = port.calls().len();
 
     // Simulate: before user responds, a stop-hook fires.
     // The main adapter would produce InternalContinuation with empty batch.
@@ -1302,8 +1898,16 @@ async fn internal_continuation_while_awaiting_user_without_input_stays_awaiting(
             epoch: DrainEpoch(2),
         },
     ]);
+    port.sync_inputs();
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         directive,
         LoopDirective::AwaitUser,
@@ -1313,12 +1917,12 @@ async fn internal_continuation_while_awaiting_user_without_input_stays_awaiting(
     // Only drain was called (no step processing). When AwaitingUser,
     // the engine calls await_user_input, which pushes "await_input".
     assert_eq!(
-        port.calls.len(),
+        port.calls().len(),
         calls_before_second_loop + 1,
         "Only one drain call should have been made, not step processing"
     );
     assert!(
-        port.calls.last() == Some(&"await_input") || port.calls.last() == Some(&"input"),
+        port.calls().last() == Some(&"await_input") || port.calls().last() == Some(&"input"),
         "Last call should be a drain call"
     );
 }
@@ -1329,7 +1933,7 @@ async fn internal_continuation_while_awaiting_user_without_input_stays_awaiting(
 async fn internal_continuation_while_awaiting_user_with_input_resumes() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             DrainOutcome::ready(
                 vec![LoopInput {
@@ -1356,10 +1960,17 @@ async fn internal_continuation_while_awaiting_user_with_input_resumes() {
         ..Default::default()
     };
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
-    let calls_before = port.calls.len();
+    let calls_before = port.calls().len();
 
     // User input arrives + stop hook fires simultaneously.
     // InternalContinuation carries the user input in batch.
@@ -1382,16 +1993,24 @@ async fn internal_continuation_while_awaiting_user_with_input_resumes() {
             epoch: DrainEpoch(2),
         },
     ]);
+    port.sync_inputs();
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
     assert_eq!(run.status(), RunStatus::Completed);
     // New calls were made (step frozen, model invoked, etc.)
     assert!(
-        port.calls.len() > calls_before,
+        port.calls().len() > calls_before,
         "Should have made new calls after resuming"
     );
-    assert!(port.calls.contains(&"freeze_step"));
-    assert!(port.calls.contains(&"model"));
+    assert!(port.calls().contains(&"freeze_step"));
+    assert!(port.calls().contains(&"model"));
 }
 
 // ── #1272 terminal text persistence ──────────────────────────────────
@@ -1403,19 +2022,26 @@ async fn internal_continuation_while_awaiting_user_with_input_resumes() {
 async fn engine_completed_event_carries_last_assistant_text() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         model_steps: VecDeque::from([ModelStep::Complete {
             text: "final answer".to_string(),
         }]),
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     // The Completed event must carry the assistant text from the model step.
     let completed = port
-        .events
+        .events()
         .iter()
         .find_map(|event| match event {
             RunDomainEvent::Completed { result, .. } => Some(result.clone()),
@@ -1434,7 +2060,7 @@ async fn engine_completed_event_carries_last_assistant_text() {
 async fn engine_terminal_text_is_the_last_assistant_text_not_the_first() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             DrainOutcome::ready(
                 vec![LoopInput {
@@ -1467,11 +2093,18 @@ async fn engine_terminal_text_is_the_last_assistant_text_not_the_first() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
     let completed = port
-        .events
+        .events()
         .iter()
         .find_map(|event| match event {
             RunDomainEvent::Completed { result, .. } => Some(result.clone()),
@@ -1496,7 +2129,7 @@ async fn engine_rejects_wrong_epoch() {
     // Default drain_outcomes: Ready(epoch 0) then EmptyAndSealed(epoch 1).
     // This matches the engine's expected sequence: 0→1.
     // We override the first outcome to have epoch 5 — a clear mismatch.
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             DrainOutcome::ready(
                 vec![LoopInput {
@@ -1513,7 +2146,14 @@ async fn engine_rejects_wrong_epoch() {
         ..Default::default()
     };
 
-    let err = run_loop(&mut run, &cancel, &mut port).await.unwrap_err();
+    let err = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap_err();
     assert!(
         matches!(&err, LoopEngineError::Adapter(msg) if msg.contains("drain epoch 不匹配")),
         "Expected Chinese epoch mismatch error, got: {err:?}"
@@ -1530,7 +2170,7 @@ async fn await_user_input_empty_preserves_run_epoch() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
     // First call: Ready(epoch 0) → model → Tools → AwaitUser
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             DrainOutcome::ready(
                 vec![LoopInput {
@@ -1552,7 +2192,14 @@ async fn await_user_input_empty_preserves_run_epoch() {
         ..Default::default()
     };
 
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
 
@@ -1574,7 +2221,7 @@ async fn await_user_input_empty_preserves_run_epoch() {
 async fn await_user_input_empty_then_input_same_epoch_reenter() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             DrainOutcome::ready(
                 vec![LoopInput {
@@ -1585,7 +2232,7 @@ async fn await_user_input_empty_then_input_same_epoch_reenter() {
                 DrainEpoch(0),
             ),
             // This EmptyAndSealed will be consumed during AwaitingUser
-            // (the legacy path for ScriptedPort). Epoch stays at 1.
+            // (the legacy path for ScriptedScenario). Epoch stays at 1.
             DrainOutcome::EmptyAndSealed {
                 epoch: DrainEpoch(1),
             },
@@ -1600,7 +2247,14 @@ async fn await_user_input_empty_then_input_same_epoch_reenter() {
 
     // First run_loop: consumes Ready(0), executes step → AwaitUser,
     // then consumes EmptyAndSealed(1) during AwaitingUser → returns AwaitUser.
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.next_drain_epoch(), 1);
 
@@ -1618,12 +2272,21 @@ async fn await_user_input_empty_then_input_same_epoch_reenter() {
             epoch: DrainEpoch(2),
         },
     ]);
+    port.sync_inputs();
     port.model_steps = VecDeque::from([ModelStep::Complete {
         text: "final answer".to_string(),
     }]);
+    port.sync_inputs();
 
     // Re-enter: same epoch (1), user input consumed, run completes.
-    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::Terminal);
     assert_eq!(run.status(), RunStatus::Completed);
     // Epoch advanced: Ready(1) → 2, EmptyAndSealed(2) → 3
@@ -1637,7 +2300,7 @@ async fn await_user_input_empty_then_input_same_epoch_reenter() {
 async fn drain_input_epoch_mismatch_does_not_advance_run_epoch() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             // This outcome has epoch 5 but the port's drain_epoch starts at 0
             DrainOutcome::ready(
@@ -1653,7 +2316,13 @@ async fn drain_input_epoch_mismatch_does_not_advance_run_epoch() {
     };
 
     let epoch_before = run.next_drain_epoch();
-    let result = run_loop(&mut run, &cancel, &mut port).await;
+    let result = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await;
     assert!(result.is_err(), "should return epoch mismatch error");
     // The Run's drain epoch must NOT have advanced
     assert_eq!(
@@ -1684,7 +2353,7 @@ fn drain_outcome_ready_empty_does_not_panic() {
 async fn run_loop_empty_ready_returns_err_without_executing_step() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         // First (and only) drain returns an empty Ready batch.
         drain_outcomes: VecDeque::from([DrainOutcome::Ready {
             batch: vec![],
@@ -1698,7 +2367,13 @@ async fn run_loop_empty_ready_returns_err_without_executing_step() {
     };
 
     let epoch_before = run.next_drain_epoch();
-    let result = run_loop(&mut run, &cancel, &mut port).await;
+    let result = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await;
 
     let err = result.expect_err("empty Ready must produce an error");
     assert!(
@@ -1719,87 +2394,45 @@ async fn run_loop_empty_ready_returns_err_without_executing_step() {
     );
     // freeze_step / model must NOT have been called.
     assert!(
-        !port.calls.contains(&"freeze_step"),
+        !port.calls().contains(&"freeze_step"),
         "freeze_step must not be called for empty Ready"
     );
     assert!(
-        !port.calls.contains(&"model"),
+        !port.calls().contains(&"model"),
         "invoke_model must not be called for empty Ready"
     );
 }
 
-// ── DrainOnlyPort: implements only drain_input (no await_user_input) ──
+// ── DrainInputFake: only the input seam omits await_user_input ──
 
-/// A minimal port that implements `drain_input` but does NOT override
-/// `await_user_input`, relying on the trait default. Used to verify that
-/// entering `AwaitingUser` with the default impl returns an Adapter error
-/// instead of delegating to `drain_input` (which could seal the buffer).
-struct DrainOnlyPort {
-    drain_outcomes: VecDeque<DrainOutcome>,
-    drain_epoch: DrainEpoch,
-    model_steps: VecDeque<ModelStep>,
-    tool_steps: VecDeque<ToolStep>,
-    events: Vec<RunDomainEvent>,
-    calls: Vec<&'static str>,
+/// A minimal input fake that implements `drain_input` but does NOT override
+/// `await_user_input`, relying on the trait default. Other capabilities remain
+/// independent narrow fakes from `ScriptedPorts`.
+struct DrainInputFake {
+    state: Arc<std::sync::Mutex<ScriptedState>>,
 }
 
 #[async_trait::async_trait]
-impl RunLoopPort for DrainOnlyPort {
+impl InputPort for DrainInputFake {
     async fn drain_input(
         &mut self,
         expected_epoch: DrainEpoch,
     ) -> Result<DrainOutcome, LoopEngineError> {
-        self.calls.push("drain_input");
-        if expected_epoch != self.drain_epoch {
+        let mut state = self.state.lock().unwrap();
+        state.observations.calls.push("drain_input");
+        if expected_epoch != state.drain_epoch {
             return Err(LoopEngineError::Adapter(format!(
                 "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                expected_epoch, self.drain_epoch,
+                expected_epoch, state.drain_epoch,
             )));
         }
-        let outcome =
-            self.drain_outcomes
-                .pop_front()
-                .unwrap_or_else(|| DrainOutcome::EmptyAndSealed {
-                    epoch: self.drain_epoch,
-                });
-        self.drain_epoch = self.drain_epoch.next();
+        let epoch = state.drain_epoch;
+        let outcome = state
+            .drain_outcomes
+            .pop_front()
+            .unwrap_or(DrainOutcome::EmptyAndSealed { epoch });
+        state.drain_epoch = state.drain_epoch.next();
         Ok(outcome)
-    }
-    // await_user_input: NOT overridden — uses the default impl.
-    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-        Ok(false)
-    }
-    async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {
-        Ok(())
-    }
-    async fn invoke_model(
-        &mut self,
-        _cancel: &CancellationToken,
-    ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
-        self.calls.push("model");
-        self.model_steps
-            .pop_front()
-            .map(|step| (step, StepTokenUsage::default()))
-            .ok_or_else(|| LoopEngineError::Adapter("missing model step".to_string()))
-    }
-    async fn execute_tools(
-        &mut self,
-        _run_id: &sdk::RunId,
-        _step_id: &sdk::RunStepId,
-        _calls: &[(ToolCall, ToolGuardDecision)],
-        _cancel: &CancellationToken,
-    ) -> Result<ToolStep, LoopEngineError> {
-        self.calls.push("tools");
-        self.tool_steps
-            .pop_front()
-            .ok_or_else(|| LoopEngineError::Adapter("missing tool step".to_string()))
-    }
-    async fn on_stuck(&mut self, _decision: &StuckDecision) -> Result<(), LoopEngineError> {
-        Ok(())
-    }
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
-        self.events.extend(events);
-        Ok(())
     }
 }
 
@@ -1810,7 +2443,7 @@ impl RunLoopPort for DrainOnlyPort {
 async fn default_await_user_input_returns_error_not_delegating_to_drain() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
-    let mut port = DrainOnlyPort {
+    let mut scenario = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             DrainOutcome::ready(
                 vec![LoopInput {
@@ -1832,11 +2465,36 @@ async fn default_await_user_input_returns_error_not_delegating_to_drain() {
             calls: vec![call("AskUserQuestion", json!({}))],
         }]),
         tool_steps: VecDeque::from([ToolStep::AwaitUser]),
-        events: Vec::new(),
-        calls: Vec::new(),
+        ..Default::default()
     };
+    scenario.ports();
+    let state = Arc::clone(&scenario.state);
+    let mut drain_input = DrainInputFake {
+        state: Arc::clone(&state),
+    };
+    let ports = scenario.ports.as_mut().expect("scripted ports must exist");
+    let mut loop_context = RunLoop::new(
+        &mut drain_input,
+        &mut ports.events,
+        &ports.control,
+        &ports.lifecycle,
+        &mut ports.interaction,
+        &mut ports.persistence,
+        &mut ports.compaction,
+        &mut ports.model,
+        &mut ports.stop_hook,
+        &mut ports.tools,
+        &mut ports.stuck,
+        &ports.plan_approval,
+    );
 
-    let result = run_loop(&mut run, &cancel, &mut port).await;
+    let result = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut loop_context,
+    )
+    .await;
     let err = result.expect_err("default await_user_input must return Err");
 
     assert!(
@@ -1845,17 +2503,13 @@ async fn default_await_user_input_returns_error_not_delegating_to_drain() {
         "Expected Chinese 'not overridden' Adapter error, got: {err:?}"
     );
 
-    // drain_input was called exactly once (for the first Ready).
-    // It must NOT have been called a second time when AwaitingUser
-    // triggered await_user_input.
-    let drain_count = port.calls.iter().filter(|&&c| c == "drain_input").count();
+    let calls = &state.lock().unwrap().observations.calls;
+    let drain_count = calls.iter().filter(|&&call| call == "drain_input").count();
     assert_eq!(
         drain_count, 1,
         "drain_input must be called exactly once (first Ready), \
          NOT delegated to by await_user_input"
     );
-    // Run must be in AwaitingUser (the step produced AwaitUser before
-    // the error interrupted the loop).
     assert_eq!(run.status(), RunStatus::AwaitingUser);
 }
 
@@ -1865,25 +2519,32 @@ async fn default_await_user_input_returns_error_not_delegating_to_drain() {
 async fn terminate_run_during_compaction_finishes_as_terminated() {
     let mut run = new_run(Duration::ZERO);
     let root = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         needs_compaction: true,
         block_compact_until_cancelled: true,
         terminate_when_compact_starts: true,
         ..Default::default()
     };
 
-    let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(directive, LoopDirective::Terminal);
     assert_eq!(run.status(), RunStatus::Terminated);
-    assert!(port.calls.contains(&"compact"));
-    assert!(!port.calls.contains(&"model"));
+    assert!(port.calls().contains(&"compact"));
+    assert!(!port.calls().contains(&"model"));
     assert!(!port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
     assert!(port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
 }
@@ -1892,7 +2553,7 @@ async fn terminate_run_during_compaction_finishes_as_terminated() {
 async fn cancel_step_during_model_finalizes_then_returns_to_drain() {
     let mut run = new_run(Duration::ZERO);
     let root = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         cancel_when_model_starts: true,
         model_steps: VecDeque::from([ModelStep::Complete {
             text: "should-not-complete".to_string(),
@@ -1900,17 +2561,24 @@ async fn cancel_step_during_model_finalizes_then_returns_to_drain() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &root, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
-    assert!(port.calls.contains(&"model"));
-    assert_eq!(port.cancelled_steps, port.frozen_steps);
+    assert!(port.calls().contains(&"model"));
+    assert_eq!(port.cancelled_steps(), port.frozen_steps());
     assert!(!port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
     assert!(port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
 }
@@ -1919,7 +2587,7 @@ async fn cancel_step_during_model_finalizes_then_returns_to_drain() {
 async fn cancel_step_during_tools_finalizes_then_returns_to_drain() {
     let mut run = new_run(Duration::ZERO);
     let root = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         cancel_when_tools_starts: true,
         model_steps: VecDeque::from([ModelStep::Tools {
             text: "calling".to_string(),
@@ -1929,162 +2597,33 @@ async fn cancel_step_during_tools_finalizes_then_returns_to_drain() {
         ..Default::default()
     };
 
-    run_loop(&mut run, &root, &mut port).await.unwrap();
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
-    assert!(port.calls.contains(&"tools"));
-    assert_eq!(port.cancelled_steps, port.frozen_steps);
+    assert!(port.calls().contains(&"tools"));
+    assert_eq!(port.cancelled_steps(), port.frozen_steps());
     assert!(!port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
     assert!(port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
-}
-
-#[tokio::test]
-async fn cancel_step_during_tools_projects_user_cancelled_turn_instead_of_completed_turn() {
-    let mut run = new_run(Duration::ZERO);
-    let root = CancellationToken::new();
-    let mut port = ScriptedPort {
-        cancel_when_tools_starts: true,
-        model_steps: VecDeque::from([ModelStep::Tools {
-            text: "calling".to_string(),
-            calls: vec![call("Bash", json!({"command": "sleep 180"}))],
-        }]),
-        tool_steps: VecDeque::from([ToolStep::Continue]),
-        ..Default::default()
-    };
-
-    run_loop(&mut run, &root, &mut port).await.unwrap();
-
-    assert_eq!(run.status(), RunStatus::Completed);
-    let events = &port.events;
-    assert!(events
-        .iter()
-        .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        RunDomainEvent::Completed {
-            user_cancelled_step: true,
-            ..
-        }
-    )));
-    assert!(!events.iter().any(|event| matches!(
-        event,
-        RunDomainEvent::Completed {
-            user_cancelled_step: false,
-            ..
-        }
-    )));
-}
-
-#[tokio::test]
-async fn main_event_strategy_projects_cancelled_step_completion_as_cancelled_terminal_only() {
-    use crate::application::loop_engine::event_strategy::{EventStrategy, MainEventStrategy};
-    use crate::application::main_loop::looping::{
-        ChatEventSink, ChatEventSinkHandle, RuntimeStreamEvent, RuntimeTurnContext,
-    };
-    use std::sync::{Arc, Mutex};
-
-    #[derive(Clone, Default)]
-    struct Sink {
-        terminal_events: Arc<Mutex<Vec<&'static str>>>,
-    }
-
-    impl ChatEventSink for Sink {
-        fn send_event<'a>(
-            &'a self,
-            event: RuntimeStreamEvent,
-        ) -> crate::application::main_loop::looping::EventFuture<'a> {
-            Box::pin(async move {
-                match event {
-                    RuntimeStreamEvent::Cancelled { .. } => {
-                        self.terminal_events.lock().unwrap().push("Cancelled")
-                    }
-                    RuntimeStreamEvent::DoneWithDuration { .. } => self
-                        .terminal_events
-                        .lock()
-                        .unwrap()
-                        .push("DoneWithDuration"),
-                    _ => {}
-                }
-            })
-        }
-
-        fn try_send_event(&self, _event: RuntimeStreamEvent) {}
-    }
-
-    let sink = Sink::default();
-    let task_access = crate::application::testing::test_task_access();
-    let mut strategy = MainEventStrategy {
-        sink: ChatEventSinkHandle::new(sink.clone()),
-        session_id: "session",
-        turn_context: &RuntimeTurnContext::new(
-            sdk::ChatId::new("chat"),
-            sdk::ChatTurnId::new("turn"),
-        ),
-        task_access: &task_access,
-        model: "test-model",
-        started_at: std::time::Instant::now(),
-        turn_count: 1,
-        messages_snapshot: Vec::new(),
-    };
-
-    strategy
-        .emit(vec![RunDomainEvent::Completed {
-            run_id: sdk::RunId::new("run"),
-            parent_run_id: None,
-            result: String::new(),
-            user_cancelled_step: true,
-        }])
-        .await
-        .unwrap();
-
-    assert_eq!(
-        sink.terminal_events.lock().unwrap().as_slice(),
-        ["Cancelled"]
-    );
-}
-
-#[tokio::test]
-async fn cancel_step_during_tools_waits_for_tool_settlement_before_finalizing() {
-    let mut run = new_run(Duration::ZERO);
-    let root = CancellationToken::new();
-    let mut port = ScriptedPort {
-        cancel_when_tools_starts: true,
-        settle_tools_after_cancel: true,
-        model_steps: VecDeque::from([ModelStep::Tools {
-            text: "calling".to_string(),
-            calls: vec![call("Bash", json!({"command": "sleep 180"}))],
-        }]),
-        tool_steps: VecDeque::from([ToolStep::Continue]),
-        ..Default::default()
-    };
-
-    run_loop(&mut run, &root, &mut port).await.unwrap();
-
-    assert!(
-        port.tools_settled_after_cancel,
-        "Tool phase 必须在 Step finalize 前完成取消收敛"
-    );
-    let tools_index = port.calls.iter().position(|call| *call == "tools").unwrap();
-    let finalize_index = port
-        .calls
-        .iter()
-        .position(|call| *call == "finalize_cancelled_step")
-        .unwrap();
-    assert!(tools_index < finalize_index);
-    assert_eq!(port.cancelled_steps, port.frozen_steps);
 }
 
 #[tokio::test]
 async fn terminate_while_awaiting_user_finishes_as_terminated() {
     let mut run = new_run(Duration::ZERO);
     let root = CancellationToken::new();
-    let mut port = ScriptedPort {
+    let mut port = ScriptedScenario {
         model_steps: VecDeque::from([ModelStep::Tools {
             text: "question".to_string(),
             calls: vec![call("AskUserQuestion", json!({}))],
@@ -2094,14 +2633,21 @@ async fn terminate_while_awaiting_user_finishes_as_terminated() {
     };
 
     // First run_loop: enters AwaitingUser.
-    let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
 
     // AwaitUser 前的 step outcome 必须已被 finalize（持久化）。
     // 否则 Terminate 时 active_step 为 None，step 的模型回复会永久丢失。
     assert_eq!(
-        port.finalized_steps.len(),
+        port.finalized_steps().len(),
         1,
         "AwaitUser 前的 step 必须已 finalize，否则 Terminate 时 outcome 丢失"
     );
@@ -2116,15 +2662,22 @@ async fn terminate_while_awaiting_user_finishes_as_terminated() {
         });
     root.cancel();
 
-    let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
     assert_eq!(directive, LoopDirective::Terminal);
     assert_eq!(run.status(), RunStatus::Terminated);
     assert!(!port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
     assert!(port
-        .events
+        .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
 }
@@ -2143,7 +2696,7 @@ mod interaction_routing {
     fn setup_tool_run(
         model_step: ModelStep,
         tool_step: ToolStep,
-    ) -> (Run, CancellationToken, ScriptedPort) {
+    ) -> (Run, CancellationToken, ScriptedScenario) {
         let run = Run::new(RunSpec::main(), None);
         let root = CancellationToken::new();
         let mut drain_q = VecDeque::new();
@@ -2159,7 +2712,7 @@ mod interaction_routing {
             epoch: DrainEpoch(1),
         });
 
-        let port = ScriptedPort {
+        let port = ScriptedScenario {
             model_steps: VecDeque::from([model_step]),
             tool_steps: VecDeque::from([tool_step]),
             drain_outcomes: drain_q,
@@ -2196,19 +2749,21 @@ mod interaction_routing {
             },
         );
 
-        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        let directive = run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &root,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
         assert!(run.pending_interaction().is_some());
         assert!(
-            port.calls.contains(&"publish_interaction"),
+            port.calls().contains(&"publish_interaction"),
             "should have published: {:?}",
-            port.calls
-        );
-        assert!(
-            port.calls.contains(&"store_interaction"),
-            "should have stored receiver: {:?}",
-            port.calls
+            port.calls()
         );
     }
 
@@ -2248,7 +2803,14 @@ mod interaction_routing {
             },
         );
 
-        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        let directive = run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &root,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
 
         let pending = run
@@ -2295,7 +2857,14 @@ mod interaction_routing {
             },
         );
 
-        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        let directive = run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &root,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert!(run.pending_interaction().is_some());
         let pending = run.pending_interaction().unwrap();
@@ -2342,7 +2911,14 @@ mod interaction_routing {
             },
         );
 
-        let directive = run_loop(&mut run, &root, &mut port).await.unwrap();
+        let directive = run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &root,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert!(run.pending_interaction().is_some());
         // Only one interaction was started; the second is queued on the port
@@ -2353,10 +2929,6 @@ mod interaction_routing {
         );
         let work = pending_work.as_ref().unwrap();
         assert_eq!(work.queue.len(), 1, "one item should be in the queue");
-        assert!(
-            work.active_step_id.is_some(),
-            "active step should be preserved"
-        );
     }
 
     // ── RequireApproval: full engine roundtrip approve ──
@@ -2387,7 +2959,7 @@ mod interaction_routing {
             epoch: DrainEpoch(1),
         });
 
-        let mut port = ScriptedPort {
+        let mut port = ScriptedScenario {
             model_steps: VecDeque::from([ModelStep::Tools {
                 text: String::new(),
                 calls: vec![call.clone()],
@@ -2408,16 +2980,25 @@ mod interaction_routing {
         };
 
         // First run_loop: engine creates ToolApproval intent → AwaitUser
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
 
-        // Get the request_id from stored metadata
-        let request_id = {
-            let metas = port.stored_metadata.lock().unwrap();
-            let meta = metas.front().expect("should have stored metadata");
-            meta.request_id.clone()
-        };
+        // Get the request_id from execution-owned mailbox metadata
+        let request_id = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
 
         // Reply approve via the interaction bridge
         let reply = sdk::InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve);
@@ -2428,9 +3009,17 @@ mod interaction_routing {
         port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
             epoch: DrainEpoch(1),
         }]);
+        port.sync_inputs();
 
         // Second run_loop: polls resolved interaction, finishes work, completes
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::Terminal);
         assert_eq!(run.status(), RunStatus::Completed);
 
@@ -2452,9 +3041,6 @@ mod interaction_routing {
         assert_eq!(step.tool_calls().len(), 1);
         assert_eq!(step.tool_calls()[0].status(), ToolCallStatus::Success);
         assert_eq!(step.tool_calls()[0].id(), &call_id);
-
-        // Verify finish_interaction_work was called
-        assert!(port.calls.contains(&"finish_interaction_work"));
     }
 
     // ── RequireApproval: full engine roundtrip deny ──
@@ -2484,7 +3070,7 @@ mod interaction_routing {
             epoch: DrainEpoch(1),
         });
 
-        let mut port = ScriptedPort {
+        let mut port = ScriptedScenario {
             model_steps: VecDeque::from([ModelStep::Tools {
                 text: String::new(),
                 calls: vec![call.clone()],
@@ -2505,14 +3091,24 @@ mod interaction_routing {
         };
 
         // First run_loop → AwaitUser
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
 
         // Reply deny via the interaction bridge
-        let request_id = {
-            let metas = port.stored_metadata.lock().unwrap();
-            metas.front().unwrap().request_id.clone()
-        };
+        let request_id = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
         let reply =
             sdk::InteractionReply::ToolApproval(sdk::ApprovalDecision::Deny { reason: None });
         let outcome = port.interaction_bridge.reply(&request_id, reply);
@@ -2522,7 +3118,15 @@ mod interaction_routing {
         port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
             epoch: DrainEpoch(1),
         }]);
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        port.sync_inputs();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::Terminal);
         assert_eq!(run.status(), RunStatus::Completed);
 
@@ -2534,11 +3138,87 @@ mod interaction_routing {
         assert_eq!(step.tool_calls().len(), 1);
         assert_eq!(step.tool_calls()[0].status(), ToolCallStatus::Cancelled);
         assert_eq!(step.tool_calls()[0].id(), &call_id);
-
-        assert!(port.calls.contains(&"finish_interaction_work"));
     }
 
     // ── UserQuestions: single question full roundtrip ──
+
+    /// Interaction reply must wake a Run that is concurrently parked on the
+    /// Session input mailbox. This reproduces the production deadlock where
+    /// the oneshot completed but `await_user_input` never returned.
+    #[tokio::test]
+    async fn interaction_reply_wakes_run_while_session_input_is_pending() {
+        let mut run = Run::new(RunSpec::main(), None);
+        let cancel = CancellationToken::new();
+        let call = call("AskUserQuestion", json!({"question": "continue?"}));
+        let call_id = call.id.clone();
+        let suspended = SuspendedToolCall {
+            call: call.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "continue?".to_string(),
+                options: vec!["yes".to_string(), "no".to_string()],
+                allow_multi: false,
+            }],
+        };
+        let mut port = ScriptedScenario {
+            model_steps: VecDeque::from([ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call],
+            }]),
+            tool_steps: VecDeque::from([ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended],
+            }]),
+            block_await_user_input_forever: true,
+            ..Default::default()
+        };
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+
+        let bridge = Arc::clone(&port.interaction_bridge);
+        let published = Arc::clone(&port.published_interactions);
+        let reply_task = tokio::spawn(async move {
+            loop {
+                let request_id = published
+                    .lock()
+                    .unwrap()
+                    .first()
+                    .map(|request| request.id.clone());
+                if let Some(request_id) = request_id {
+                    return bridge.reply(
+                        &request_id,
+                        sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer(
+                            "yes".to_string(),
+                        )]),
+                    );
+                }
+                tokio::task::yield_now().await;
+            }
+        });
+
+        let directive = tokio::time::timeout(
+            Duration::from_millis(200),
+            run_loop(
+                &mut run,
+                &mut execution,
+                &cancel,
+                &mut scripted_run_loop(&mut port),
+            ),
+        )
+        .await
+        .expect("interaction reply must wake the Run without Session input")
+        .unwrap();
+        assert_eq!(
+            reply_task.await.unwrap(),
+            sdk::InteractionCommandOutcome::Accepted
+        );
+        assert_eq!(directive, LoopDirective::Terminal);
+        assert_eq!(run.status(), RunStatus::Completed);
+        assert_eq!(run.steps()[0].tool_calls()[0].id(), &call_id);
+        assert_eq!(
+            run.steps()[0].tool_calls()[0].status(),
+            ToolCallStatus::Success
+        );
+    }
 
     /// Full engine roundtrip for a single UserQuestions interaction:
     /// run_loop → AwaitUser, reply via bridge, re-enter → Success.
@@ -2571,7 +3251,7 @@ mod interaction_routing {
             epoch: DrainEpoch(1),
         });
 
-        let mut port = ScriptedPort {
+        let mut port = ScriptedScenario {
             model_steps: VecDeque::from([ModelStep::Tools {
                 text: String::new(),
                 calls: vec![call.clone()],
@@ -2586,15 +3266,25 @@ mod interaction_routing {
         };
 
         // First run_loop → AwaitUser
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
 
         // Reply via bridge
-        let request_id = {
-            let metas = port.stored_metadata.lock().unwrap();
-            metas.front().unwrap().request_id.clone()
-        };
+        let request_id = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
         let reply = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("yes".to_string())]);
         let outcome = port.interaction_bridge.reply(&request_id, reply);
         assert_eq!(outcome, sdk::InteractionCommandOutcome::Accepted);
@@ -2603,7 +3293,15 @@ mod interaction_routing {
         port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
             epoch: DrainEpoch(1),
         }]);
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        port.sync_inputs();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::Terminal);
         assert_eq!(run.status(), RunStatus::Completed);
 
@@ -2612,89 +3310,6 @@ mod interaction_routing {
         assert_eq!(step.tool_calls().len(), 1);
         assert_eq!(step.tool_calls()[0].status(), ToolCallStatus::Success);
         assert_eq!(step.tool_calls()[0].id(), &call_id);
-
-        assert!(port.calls.contains(&"finish_interaction_work"));
-    }
-
-    #[tokio::test]
-    async fn user_questions_reply_wakes_blocked_awaiting_user_without_extra_input() {
-        let mut run = Run::new(RunSpec::main(), None);
-        let cancel = CancellationToken::new();
-        let bridge = Arc::new(InteractionBridge::new());
-
-        let call = call("AskUserQuestion", json!({"question": "continue?"}));
-        let call_id = call.id.clone();
-        let suspended = SuspendedToolCall {
-            call: call.clone(),
-            questions: vec![SuspendedQuestion {
-                prompt: "continue?".to_string(),
-                options: vec!["yes".to_string(), "no".to_string()],
-                allow_multi: false,
-            }],
-        };
-        let mut port = ScriptedPort {
-            model_steps: VecDeque::from([ModelStep::Tools {
-                text: String::new(),
-                calls: vec![call],
-            }]),
-            tool_steps: VecDeque::from([ToolStep::InteractionSuspended {
-                completed_results: Vec::new(),
-                fuse_bypassed: Vec::new(),
-                suspended: vec![suspended],
-            }]),
-            drain_outcomes: VecDeque::from([
-                DrainOutcome::ready(
-                    vec![LoopInput {
-                        text: "ask question".to_string(),
-                        input_id: None,
-                        images: Vec::new(),
-                    }],
-                    DrainEpoch(0),
-                ),
-                DrainOutcome::EmptyAndSealed {
-                    epoch: DrainEpoch(1),
-                },
-            ]),
-            interaction_bridge: bridge.clone(),
-            await_interaction_completion: true,
-            ..Default::default()
-        };
-        let published = port.published_interactions.clone();
-
-        let reply_task = tokio::spawn(async move {
-            loop {
-                if let Some(request) = published.lock().unwrap().first().cloned() {
-                    assert_eq!(
-                        bridge.reply(
-                            &request.id,
-                            sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer(
-                                "yes".to_string(),
-                            )]),
-                        ),
-                        sdk::InteractionCommandOutcome::Accepted
-                    );
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        });
-
-        let directive = tokio::time::timeout(
-            Duration::from_secs(1),
-            run_loop(&mut run, &cancel, &mut port),
-        )
-        .await
-        .expect("interaction reply should wake the blocked Run without extra input")
-        .unwrap();
-        reply_task.await.unwrap();
-
-        assert_eq!(directive, LoopDirective::Terminal);
-        assert_eq!(run.status(), RunStatus::Completed);
-        assert_eq!(run.steps()[0].tool_calls()[0].id(), &call_id);
-        assert_eq!(
-            run.steps()[0].tool_calls()[0].status(),
-            ToolCallStatus::Success
-        );
     }
 
     // ── UserQuestions: two questions serial roundtrip ──
@@ -2741,7 +3356,7 @@ mod interaction_routing {
             epoch: DrainEpoch(1),
         });
 
-        let mut port = ScriptedPort {
+        let mut port = ScriptedScenario {
             model_steps: VecDeque::from([ModelStep::Tools {
                 text: String::new(),
                 calls: vec![call1.clone(), call2.clone()],
@@ -2756,15 +3371,25 @@ mod interaction_routing {
         };
 
         // First run_loop: first question active, second queued → AwaitUser
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
 
         // Reply to first question via bridge
-        let request_id1 = {
-            let metas = port.stored_metadata.lock().unwrap();
-            metas.front().unwrap().request_id.clone()
-        };
+        let request_id1 = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
         let reply1 = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("a".to_string())]);
         assert_eq!(
             port.interaction_bridge.reply(&request_id1, reply1),
@@ -2775,7 +3400,15 @@ mod interaction_routing {
         port.drain_outcomes = VecDeque::from([DrainOutcome::NoInput {
             epoch: DrainEpoch(1),
         }]);
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        port.sync_inputs();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
 
@@ -2793,10 +3426,12 @@ mod interaction_routing {
         );
 
         // Reply to second question via bridge
-        let request_id2 = {
-            let metas = port.stored_metadata.lock().unwrap();
-            metas.front().unwrap().request_id.clone()
-        };
+        let request_id2 = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
         let reply2 = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("b".to_string())]);
         assert_eq!(
             port.interaction_bridge.reply(&request_id2, reply2),
@@ -2807,7 +3442,15 @@ mod interaction_routing {
         port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
             epoch: DrainEpoch(1),
         }]);
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        port.sync_inputs();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::Terminal);
         assert_eq!(run.status(), RunStatus::Completed);
 
@@ -2829,14 +3472,6 @@ mod interaction_routing {
             run.active_step_id().is_none(),
             "step should be completed after all interactions resolve"
         );
-
-        // finish_interaction_work called twice
-        let finish_count = port
-            .calls
-            .iter()
-            .filter(|&&c| c == "finish_interaction_work")
-            .count();
-        assert_eq!(finish_count, 2);
     }
 
     // ── Mixed: completed_results + suspended roundtrip ──
@@ -2876,7 +3511,7 @@ mod interaction_routing {
             epoch: DrainEpoch(1),
         });
 
-        let mut port = ScriptedPort {
+        let mut port = ScriptedScenario {
             model_steps: VecDeque::from([ModelStep::Tools {
                 text: String::new(),
                 calls: vec![bash_call.clone(), question_call.clone()],
@@ -2891,7 +3526,15 @@ mod interaction_routing {
         };
 
         // First run_loop: non-interaction → Success, suspension → AwaitUser
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::AwaitUser);
         assert_eq!(run.status(), RunStatus::AwaitingUser);
 
@@ -2909,10 +3552,12 @@ mod interaction_routing {
         );
 
         // Reply to the question via bridge
-        let request_id = {
-            let metas = port.stored_metadata.lock().unwrap();
-            metas.front().unwrap().request_id.clone()
-        };
+        let request_id = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
         let reply = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("yes".to_string())]);
         assert_eq!(
             port.interaction_bridge.reply(&request_id, reply),
@@ -2923,7 +3568,15 @@ mod interaction_routing {
         port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
             epoch: DrainEpoch(1),
         }]);
-        let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+        port.sync_inputs();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
         assert_eq!(directive, LoopDirective::Terminal);
         assert_eq!(run.status(), RunStatus::Completed);
 
@@ -2941,7 +3594,5 @@ mod interaction_routing {
             .unwrap();
         assert_eq!(bash_tc.status(), ToolCallStatus::Success);
         assert_eq!(question_tc.status(), ToolCallStatus::Success);
-
-        assert!(port.calls.contains(&"finish_interaction_work"));
     }
 }

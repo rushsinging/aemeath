@@ -23,9 +23,7 @@ pub(crate) async fn run_sessions_command(
         crate::tui::effect::session::processing::TuiInputEventPort::channel();
     let mut stream = client
         .chat(sdk::ChatRequest {
-            user_input: None,
-            queue_drain: None,
-            input_events: Some(std::sync::Arc::new(input_port)),
+            ingress: std::sync::Arc::new(input_port),
         })
         .await
         .unwrap_or_else(|e| {

@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 struct TestProviderFactory;
 
-impl runtime::ports::ProviderFactory for TestProviderFactory {
+impl runtime::ProviderFactory for TestProviderFactory {
     fn build(
         &self,
-        spec: runtime::ports::ProviderBuildSpec,
-    ) -> Result<runtime::ports::ProviderBinding, provider::ProviderError> {
+        spec: runtime::ProviderBuildSpec,
+    ) -> Result<runtime::ProviderBinding, provider::ProviderError> {
         struct UnusedPort;
         #[async_trait::async_trait]
-        impl runtime::ports::ProviderPort for UnusedPort {
+        impl runtime::ProviderPort for UnusedPort {
             fn capabilities(
                 &self,
                 _model: &provider::ModelId,
@@ -32,13 +32,86 @@ impl runtime::ports::ProviderFactory for TestProviderFactory {
                 ))
             }
         }
-        Ok(runtime::ports::ProviderBinding {
+        Ok(runtime::ProviderBinding {
             provider: Arc::new(UnusedPort),
             model: spec.model,
             max_tokens: spec.max_tokens,
             requested_reasoning: spec.requested_reasoning,
             context_window: spec.context_window,
         })
+    }
+}
+
+fn initial_provider_assembly() -> runtime::InitialProviderAssembly {
+    let spec = runtime::ProviderBuildSpec {
+        driver: "test".to_string(),
+        source_key: "test".to_string(),
+        api_style: None,
+        api_key: "test-key".to_string(),
+        base_url: None,
+        model: provider::ModelId {
+            provider: "test".to_string(),
+            model: "test-model".to_string(),
+        },
+        max_tokens: 8192,
+        requested_reasoning: provider::ReasoningLevel::Off,
+        context_window: Some(8192),
+        timeout: std::time::Duration::from_secs(30),
+        user_agent: "aemeath-test".to_string(),
+    };
+    let binding = runtime::ProviderFactory::build(&TestProviderFactory, spec)
+        .expect("build test provider binding");
+    runtime::InitialProviderAssembly::new(
+        binding,
+        share::config::models::ResolvedModel {
+            source_key: "test".to_string(),
+            source_config: share::config::models::ProviderModelsConfig::default(),
+            model: share::config::models::ModelEntryConfig {
+                id: "test-model".to_string(),
+                context_window: 8192,
+                max_tokens: 8192,
+                ..Default::default()
+            },
+            driver: "test".to_string(),
+        },
+        runtime::ModelRuntimeSettings {
+            max_tokens: 8192,
+            reasoning: false,
+            reasoning_effort: None,
+        },
+    )
+}
+
+struct NoopAgentRunner;
+
+#[async_trait::async_trait]
+impl tools::AgentRunner for NoopAgentRunner {
+    async fn run_agent(&self, _request: tools::AgentRunRequest<'_>) -> tools::AgentRunTerminal {
+        tools::AgentRunTerminal::Completed {
+            result: String::new(),
+        }
+    }
+}
+
+fn test_prompt_assembly() -> runtime::PromptAssembly {
+    runtime::PromptAssembly::new(Vec::new(), String::new(), String::new())
+}
+
+fn test_session_bootstrap_assembly(root: &std::path::Path) -> runtime::SessionBootstrapAssembly {
+    runtime::SessionBootstrapAssembly::new(root.to_path_buf(), 8192, true, false, None)
+}
+
+fn test_skill_bootstrap_assembly() -> runtime::SkillBootstrapAssembly {
+    runtime::SkillBootstrapAssembly::new(tools::SkillCatalogSnapshot::from_descriptors(Vec::new()))
+}
+
+fn test_agent_runner_assembly() -> runtime::AgentRunnerAssembly {
+    runtime::AgentRunnerAssembly {
+        runner: Arc::new(NoopAgentRunner),
+        parent_context_source: runtime::ParentRunContextSource::new(),
+        max_tool_concurrency: 10,
+        max_agent_concurrency: 4,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
     }
 }
 
@@ -166,7 +239,6 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let tools = tools::composition::TestCatalogExecutionFactory::empty();
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
-    let skill_loader = skill_wiring.loader();
     let tool_result_materializer = Arc::new(runtime::ToolResultMaterializer::new(
         Arc::new(runtime::AtomicBlobToolResultStore::new(
             Arc::new(storage::FileSystemBlobAdapter::new(temp.path()).unwrap()),
@@ -189,20 +261,19 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
             workspace,
             wiring,
             Arc::new(TestProviderFactory),
-            history.clone(),
-            Arc::new(policy::AllowAllPolicy),
-            access.clone(),
             session_management.clone(),
-            hook_runner.clone(),
         ),
         runtime::RuntimeToolAssemblyDependencies::new(
             tools.catalog_port(),
-            tools.execution(),
             skill_catalog,
-            skill_loader.clone(),
             tool_result_materializer.clone(),
             active_run.clone(),
         ),
+        initial_provider_assembly(),
+        test_session_bootstrap_assembly(temp.path()),
+        test_prompt_assembly(),
+        test_skill_bootstrap_assembly(),
+        test_agent_runner_assembly(),
         {
             Arc::new(runtime::RuntimeContextFactory::new(
                 tools.catalog_port(),
@@ -215,21 +286,18 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         },
     );
 
-    // ── Arc identity: Core dependencies ──
+    // Core dependencies that also live in RuntimeServices are intentionally
+    // not projected again by RuntimeBootstrapDependencies.
     assert!(Arc::ptr_eq(
         &dependencies.session_management(),
         &session_management
     ));
-    assert!(Arc::ptr_eq(&dependencies.reflection_history(), &history));
-    assert!(Arc::ptr_eq(&dependencies.task_access(), &access));
-    assert!(Arc::ptr_eq(&dependencies.hook_runner(), &hook_runner));
     assert!(
         Arc::ptr_eq(&dependencies.wiring(), &wiring_clone),
         "wiring Arc identity preserved"
     );
 
     // ── Arc identity: Tool assembly dependencies ──
-    assert!(Arc::ptr_eq(&dependencies.skill_loader(), &skill_loader));
     assert!(Arc::ptr_eq(
         &dependencies.tool_result_materializer(),
         &tool_result_materializer

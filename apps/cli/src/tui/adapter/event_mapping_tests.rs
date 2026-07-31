@@ -1,5 +1,5 @@
 use super::{sdk_event_to_tui_event, SdkEventMapping};
-use crate::tui::adapter::tui_runtime_event::{TuiRunEvent, TuiRuntimeEvent};
+use crate::tui::adapter::tui_runtime_event::{TuiHookStatus, TuiRunEvent, TuiRuntimeEvent};
 
 #[test]
 fn tool_result_projection_keeps_bounded_payload_and_blob_reason() {
@@ -105,6 +105,38 @@ fn run_cancelling_keeps_identity_instead_of_becoming_empty_message() {
 }
 
 #[test]
+fn hook_event_preserves_authoritative_status_and_final_diagnostics() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::HookEvent(sdk::HookEventView {
+        hook_name: "Stop".to_string(),
+        status: sdk::HookEventStatus::Succeeded,
+        matcher: Some("*".to_string()),
+        command: Some("check-agent-stop.sh".to_string()),
+        result: Some(sdk::HookExecutionResultView {
+            exit_code: Some(0),
+            stdout: "ok".to_string(),
+            stderr: String::new(),
+            decision: Some("continue".to_string()),
+            reason: None,
+            additional_context: None,
+        }),
+    }));
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::HookEvent(event))
+            if event.status == TuiHookStatus::Succeeded
+                && event.matcher.as_deref() == Some("*")
+                && event.command.as_deref() == Some("check-agent-stop.sh")
+                && event.result.as_ref().is_some_and(|result|
+                    result.exit_code == Some(0)
+                        && result.stdout == "ok"
+                        && result.stderr.is_empty()
+                        && result.decision.as_deref() == Some("continue")
+                        && result.reason.is_none())
+    ));
+}
+
+#[test]
 fn interaction_request_keeps_request_run_and_body_identity() {
     let request_id = sdk::InteractionRequestId::new("request-1");
     let run_id = sdk::RunId::new("run-1");
@@ -113,6 +145,7 @@ fn interaction_request_keeps_request_run_and_body_identity() {
     let request = sdk::InteractionRequest {
         id: request_id,
         run_id,
+        tool_call_id: None,
         body: sdk::InteractionRequestBody::ToolApproval(sdk::ToolApprovalPrompt {
             tool_name: "Bash".to_string(),
             args_summary: "rm -rf target".to_string(),

@@ -52,6 +52,7 @@ fn interaction_command_result_does_not_resume_or_cancel_agent_run() {
             request: InteractionRequest {
                 request_id: request_id.clone(),
                 run_id: run_id.clone(),
+                tool_call_id: None,
                 body: InteractionBody::HardPause(UiStuckDiagnostic {
                     reason: "等待继续".to_string(),
                     recent_actions: Vec::new(),

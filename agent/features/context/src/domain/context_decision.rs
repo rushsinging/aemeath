@@ -28,7 +28,7 @@ pub(crate) fn token_budget(
 ///
 /// Two paths, in priority order:
 /// 1. **ActualProviderUsage** — when `last_api_total_tokens` is `Some`, the
-///    provider-reported total is used directly.  No heuristic projection or
+///    provider-reported total is used directly.  No heuristic view or
 ///    delta is applied; the API-reported number already reflects the last
 ///    turn's real context consumption.
 /// 2. **HeuristicFallback** — when no provider usage is available (first turn,

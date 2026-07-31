@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+mod agent_progress;
 mod chat;
 mod completion;
 mod config_status;

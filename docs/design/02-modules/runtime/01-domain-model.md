@@ -16,9 +16,122 @@
 
 层级对齐：`Session → Run → Run Step`（≈ OpenAI Thread / Run / Run Step）。
 
-**#1248 已落地**：唯一 `RuntimeContextFactory` 是 `RuntimeContext` 的唯一生产构造入口，按 `RunSpec` 的 `InteractionBindingMode` / `HookBindingMode` / `ReasoningBindingMode` 穷举装配；不再存在 `RuntimeContextParts`、`assemble_main_runtime_context` 等多路径手工填充 context。Main/Sub 不是生产类型，差异由 `RunSpec` + 父子拓扑表达，Loop Engine 零分支。
+### 1.1 模块架构图
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                         Session Runtime                      │
+│                                                              │
+│  SDK / CLI / TUI                                             │
+│          │                                                   │
+│          ▼                                                   │
+│  ┌──────────────────┐                                        │
+│  │  SessionIngress  │  唯一入站入口                          │
+│  └────────┬─────────┘                                        │
+│           │ 分类                                             │
+│     ┌─────┼──────────────┐                                   │
+│     ▼     ▼              ▼                                   │
+│ UserMessage  Command     InteractionCommand                  │
+│     │       │              │                                 │
+│     ▼       ▼              ▼                                 │
+│ InputQueue  Command        InteractionInbox                   │
+│             Scheduler       run_id + request_id              │
+│     │       │              │                                 │
+│     └───────┴──────┬───────┘                                 │
+│                    ▼                                         │
+│             ┌──────────────┐                                 │
+│             │  Loop Engine │                                 │
+│             └──────┬───────┘                                 │
+│                    │                                         │
+│       ┌────────────┼────────────┐                            │
+│       ▼            ▼            ▼                            │
+│     Run     RunExecutionState  RuntimeContext                │
+│   状态机       Loop 工作集      冻结能力绑定                  │
+│                                    │                         │
+│                                    ▼                         │
+│                 Provider / Context / Tool / Hook / Event     │
+└──────────────────────────────────────────────────────────────┘
+
+RuntimeServices ───────▶ RuntimeContextFactory ──▶ RuntimeContext
+SessionState ──snapshot─┐
+RunSpec + ParentCapabilities ─┴──▶ RunFactory
+RuntimeContextFactory ───────────▶ RunFactory
+
+RunFactory
+      │
+      ▼
+RunInstance = Run + RunExecutionState + RuntimeContext
+```
+
+架构图只表达运行时的主控制流，不展开每个 Port 的实现细节：
+
+1. `SessionIngress` 是唯一入站边界，先分类再分发；普通输入、命令和 interaction reply 不共享 mailbox。
+2. `RuntimeContextFactory` 位于能力装配边界，只接收 `RuntimeServices`、`SessionSnapshot`、`RunSpec` 和父能力上限，并且只创建 `RuntimeContext`；`RunFactory` 协调它与 `Run`、`RunExecutionState` 的一致创建，产出 `RunInstance`。
+3. `Loop Engine` 是执行流程唯一 owner，直接编排 `Run`、`RunExecutionState` 和 `RuntimeContext`。
+4. `RuntimeContext` 向下连接 Provider、Context、Tool、Hook 和 Event 等外部能力；这些能力不能反向决定 Run 状态。
+5. Root/child、交互/后台等差异由 purpose、父子拓扑和 capability mode 表达，Main/Sub 不构成生产类型。
+
+
+**终态装配**：唯一 `RuntimeContextFactory` 是 `RuntimeContext` 的唯一生产构造入口，其产物严格是 `RuntimeContext`。所有 Run 来源只提交 `RunCreationRequest`，由 `RunFactory` 调用 factory，并按父 capability ceiling 协调产生 `RunInstance { Run, RuntimeContext, RunExecutionState }`；不存在 `RuntimeContextParts`、`RunContextBindings` 或多路径手工填充。Main/Sub 不是生产类型，差异由 `RunSpec`、父子拓扑和已绑定 capability adapter 表达，Loop Engine 零来源分支。
 
 ## 2. Run 聚合
+
+### 2.1 Run 状态机转换图
+
+```text
+[*] → Idle → DrainingInput ── Ready / InternalContinuation ──▶ PreparingContext
+               │                                                    ▲   │
+               ├─ Open + NoInput ──▶ AwaitingInput ── UserMessage ──┘   │
+               └─ EmptyAndSealed ──▶ Completed                         │
+                                                                        │
+                                      ┌──── needs_compaction ──────┐     │
+                                      ▼                            │     │
+                                  Compacting ── compact 完成 ──────┘     │
+                                                                        ▼
+                                                                InvokingModel
+                                                                  │   ▲   │
+                                         retryable error / backoff ┘   │   │ completion
+                                                  context exceeded ─────┘   ▼
+                                                               ApplyingResponse
+                                                                  │    │    │
+                                                     tool calls ───┘    │    └─ end turn
+                                                                  ▼    ▼             │
+                                                       AwaitingTool   Awaiting        │
+                                                         Approval    Interaction     │
+                                                          │    │       ▲    │         │
+                                           auto approved ─┘    └─ ask ┘    │         │
+                                                          ▼               │         │
+                                                     ExecutingTools ─ ask ┘         │
+                                                          │                         │
+                                                          └─ tool round 完成 ───────┤
+                                                                                    ▼
+                                                                             FinalizingStep
+                                                                                    │
+                                                                                    ▼
+                                                                              DrainingInput
+
+CancelRunStep
+  active Step ──▶ CancellingStep ── deterministic receipts / deadline ──▶ FinalizingStep
+
+TerminateRun
+  任意非终态 ──▶ Terminating ── StepFinalizer + Session flush ──▶ Terminated
+
+失败
+  fatal invocation / unavailable interaction / finalization error ──▶ Failed
+
+唯一终态：Completed / Failed / Terminated → [*]
+```
+
+图中状态分为四组：
+
+- **输入生命周期**：`Idle → DrainingInput ↔ AwaitingInput`；只消费 InputQueue，不处理 interaction reply。
+- **Step 主流程**：`PreparingContext → Compacting / InvokingModel → ApplyingResponse → Tool / Interaction → FinalizingStep`。
+- **结构化交互暂停**：`AwaitingInteraction { request_id }` 只由匹配 `run_id + request_id` 的 reply/cancel 恢复，并按保存的 typed continuation 回到原工作阶段。
+- **控制旁路**：`CancelRunStep` 收口当前 Step 后回到 `DrainingInput`；`TerminateRun` 从任意非终态进入 `Terminating`，最终只能到 `Terminated`。
+
+`Completed`、`Failed`、`Terminated` 是唯一终态。所有领域 mutation 后必须立即发布对应事件；图中的边表示 Run 聚合允许的转换，不表示 Port 或 adapter 可以自行迁移状态。
+
+### 2.2 聚合结构
 
 ```rust
 // —— 聚合根 ——
@@ -28,7 +141,7 @@ struct Run {
     parent: Option<RunId>,     // Sub Run 指向父 Run（结果/事件回传）
     status: RunStatus,         // 唯一状态机；目标终态仅 Completed / Failed / Terminated
     termination: Option<RunTermination>, // TerminateRun 接受后的 reason + absolute deadline
-    pending_interaction: Option<PendingInteraction>, // 与 AwaitingUser 同步存活，不持久化
+    pending_interaction: Option<PendingInteraction>, // 与 AwaitingInteraction 同步存活，不持久化
     steps: Vec<RunStep>,       // 内部实体序列
     started_at: Instant,
 }
@@ -103,7 +216,7 @@ enum StopHookBlockResult {
 
 **实体 vs VO**：Run（聚合根）/ Run Step / Tool Call = 实体；Model Invocation = VO；`RunId/RunStepId/ToolCallId`、各 `*Status`、`UsageSnapshot`、`ToolCallArgs`、`ToolResult`、`ReasoningLevel` = VO。
 
-### 2.1 Usage 标准化边界
+### 2.3 Usage 标准化边界
 
 Provider ACL **MUST** 在 `InvocationResponse` 进入 Runtime 前完成 token 口径归一化：
 
@@ -123,20 +236,20 @@ Provider ACL **MUST** 在 `InvocationResponse` 进入 Runtime 前完成 token �
 6. `AwaitingToolApproval` 未决时，不可进入 `ExecutingTools`
 7. **timeout > 0 时**，墙钟超时强制迁移到 `Failed`（timeout=0 表示无限，见 §5）
 8. 每个 Run **必须独占**一个 cancellation scope；子 Run 从父 scope 派生，NEVER 共享可替换的 Session 级 token 槽
-9. `AwaitingUser` 与唯一 `PendingInteraction` **MUST** 同时存活；reply / cancel 必须匹配 `request_id`，每个 continuation 至多完成一次
+9. `AwaitingInteraction` 与唯一 `PendingInteraction` **MUST** 同时存活；reply / cancel 必须匹配 `run_id + request_id`，每个 continuation 至多完成一次。普通 `UserMessage` 只能进入 InputQueue，**NEVER** 完成 interaction continuation
 10. 一个 Run 任一时刻至多一个 PendingInteraction；并发 Tool suspension 必须按原 RunStep 的 ToolCall 顺序串行 resolve，**NEVER** 为同一 Run 同时注册多个 waiter
 11. 一个完成的 RunStep 恰好产生一次 `ContextAppend`；assistant 与全部最终 Tool result 按协议顺序一起提交，**NEVER** 逐 suspension 持久化半成品
 12. `ContextAppend` **MUST** 携带稳定 `RunId + RunStepId`，Context Management **MUST** 保存 Step 与其 messages 的结构关系；`Vec<Message>` 扁平化只允许发生在最终 `ContextWindow → InvocationRequest` 投影，**NEVER** 作为 compact recent-tail 切分输入
 
-## 4. 领域事件（→ Event Projection → SDK ChatEvent）
+## 4. 领域事件（→ SDK Event Mapping → SDK ChatEvent）
 
-`RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser{request_id}/Resumed{request_id} · CompactionStarted/Completed · StuckDetected · RunStepCancellationRequested · RunStepFinalizationStarted · RunStepCancelled{confirmed} · RunDrainingInput · RunTerminationRequested{reason,deadline} · RunCompleted/Failed/Terminated{reason}`
+`RunStarted · RunDrainingInput · RunAwaitingInput/RunInputResumed · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunInteractionRequested{request_id}/RunInteractionResumed{request_id} · CompactionStarted/Completed · StuckDetected · RunStepCancellationRequested · RunStepFinalizationStarted · RunStepCancelled{confirmed} · RunTerminationRequested{reason,deadline} · RunCompleted/Failed/Terminated{reason}`
 
 > **Step 取消与 Run 终止分离**：`RunStepCancellationRequested` 在同步入口接受 `CancelRunStep` 时产生；`RunStepFinalizationStarted` / `RunStepCancelled` 描述确定性收口，随后 `RunDrainingInput`。`RunTerminationRequested` 在接受 `TerminateRun` 时产生，最终只有 `RunTerminated`。迁移期旧 `RunCancellationRequested/RunCancelled` 只用于现有生产兼容路径，必须由 #878/#879 与旧 `cancel_run` 一并退役。
 
 > **终态事实与业务返回分离**：目标终态 `RunCompleted { result }` / `RunFailed { error }` / `RunTerminated { reason }` 是 Run 聚合产生并经 `EventSink` 投影的权威领域事件；同时 `run_loop` / `derive_sub_run` 直接返回 typed `AgentRunTerminal`。Main 使用事件通知 TUI；Sub 的父 Run **MUST** 消费 typed return 继续业务编排，**NEVER** 反向订阅 EventSink 或遍历 message 提取结果。事件载荷与 typed return 来自同一次终态 mutation，必须一致。
 
-> Event Projection adapter 按 Main/Sub scope 路由与命名：Main terminal/event stream → TUI；Sub event 仅作父级诊断投影，业务 completion 走 typed `AgentRunTerminal` return（详见 #612）。
+> SDK Event Mapping adapter 按 Main/Sub scope 路由与命名：Main terminal/event stream → TUI；Sub event 仅作父级诊断事件映射，业务 completion 走 typed `AgentRunTerminal` return（详见 #612）。
 
 ## 5. RunSpec —— 声明式规格
 
@@ -203,7 +316,7 @@ enum TaskMode      { Shared, Isolated }
 /// #1248: InteractionBindingMode 驱动 factory 的 InteractionPort 选择。
 enum InteractionBindingMode {
     Client,             // 直接绑定 SDK/TUI InteractionBridge
-    ParentMediated,     // 复用父 context 的 InteractionPort（需 parent）
+    ParentMediated,     // 独立 child-scoped adapter，经父边界路由（需 parent）
     Unavailable,        // typed unavailable，不悬挂
 }
 
@@ -215,10 +328,10 @@ enum ReasoningBindingMode {
     NoOp,               // 所有写操作无副作用
 }
 
-/// #1248: HookBindingMode 驱动 factory 的 HookPort 验证。
+/// HookBindingMode 驱动 factory 装配受限 Hook capability adapter。
 enum HookBindingMode {
     Full,               // per-tool hook dispatch
-    BoundaryOnly,       // 仅 start/stop（Sub 需 parent）
+    BoundaryOnly,       // 仅 start/stop（需 parent capability）
 }
 ```
 
@@ -238,14 +351,14 @@ struct RuntimeContext {
     policy:    Arc<dyn PolicyPort>,     // v0.1.0: AllowAllPolicy
     interaction: Arc<dyn InteractionPort>, // Runtime-owned 等待 / reply seam
     memory:    Arc<dyn MemoryPort>,     // Sub(Disabled): NoOpMemory
-    reflection: Arc<dyn ReflectionPromptPort>, // 纯 prompt / parse / format；apply 仍走同一 memory Arc
+    reflection: Arc<dyn ReflectionWorkflowPort>, // Memory-owned prompt/parse/apply/history workflow；Provider 调用仍归 Runtime
     task:      Arc<dyn TaskAccess>,     // Sub: 独立实例；NEVER 暴露 TaskPersist
-    hooks:     Arc<dyn HookPort>,       // Sub: BoundaryOnly
+    hooks:     Arc<dyn HookPort>,       // Full / BoundaryOnly capability adapter
     reasoning: Arc<dyn ReasoningPort>,  // 发布 requested level；Sub: EffortOnly/Inherit
     usage:     Arc<dyn UsageSink>,      // 非阻塞；Audit MVP 只记录 metadata
     config:    ConfigSnapshot,          // Main/Sub 共享
     clock:     Arc<dyn Clock>,          // request builder 冻结 CalendarDate；Prompt 不读全局时钟
-    input:     Arc<dyn InputBuffer>,    // 入站：Main=TUI通道+忙期buffer; Sub=固定初始队列
+    input:     Arc<dyn InputPort>,      // 统一 Run 输入队列；首次/后续/派生任务输入同一路径
     events:    Arc<dyn EventSink>,      // 出站纯投影：Main→TUI；Sub→父级诊断（业务结果走 typed return）
     cancel:    RunCancellationScope,    // per-Run；Provider/Tool/Compact/Hook 共享或派生
 }
@@ -324,7 +437,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | InteractionBindingMode | Main | Sub（parent 可达）| Sub（无 parent）|
 |---|---|---|---|
 | `Client` | ✅ TUI/SDK InteractionBridge | ✅ 可装配 | ❌ 不可用 |
-| `ParentMediated` | ❌（Main 无父）| ✅ 复用父 context InteractionPort | ❌ → `InteractionUnavailable` |
+| `ParentMediated` | ❌（无父 capability）| ✅ 创建 child-scoped mediated adapter | ❌ → `InteractionUnavailable` |
 | `Unavailable` | ❌ | ✅ typed unavailable（不悬挂）| ✅ typed unavailable |
 
 四种 `InteractionContinuation`（UserQuestions、ToolApproval、PlanApproval、HardPause）均由统一 `InteractionCoordinator` 驱动 Run continuation；`reply` / `cancel` 均经 `InteractionPort` 分派。parent-mediated 复用父 context 的同一 Arc<dyn InteractionPort>——identity 与 reply/cancel 语义不变。
@@ -342,7 +455,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 
 ### 8.3 退役边界
 
-- `MainRunPort`、`SubAgentRun`、fat `RunLoopPort`：由 #1397/#1399 收口，本 Issue 不删除。
+- `MainRunPort`、`SubAgentRun`、fat `RunLoopPort`、Main/Sub strategies 均不属于终态；Loop Engine 直接编排 `Run + RuntimeContext + RunExecutionState`。
 - `run_launcher` / `reenter_run_loop` / `RunLauncher::launch` 已统一 Main/Sub 启动入口；#1280 已合并。
 
 ## 9. 相关文档
@@ -363,7 +476,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-11 | 初稿：Run 聚合 + RunSpec + RuntimeContext 三元组、不变量、领域事件、控制权矩阵、安全铁律、差异矩阵 | #761 |
-| 2026-07-11 | RuntimeContext 补入站端口 input（InputBuffer）；澄清 result 不进 RuntimeContext | #761 |
+| 2026-07-11 | RuntimeContext 补入站 Port（InputQueue）；澄清 result 不进 RuntimeContext | #761 |
 | 2026-07-11 | output/result 定案：统一经 EventSink，result 为 RunCompleted 载荷（无独立 RunResult），靠终态事件识别 | #761 |
 | 2026-07-11 | 领域事件补终态族对称载荷（RunFailed{error} / RunCancelled）+ ModelInvocationRetrying | #761 |
 | 2026-07-12 | 取消语义收敛：per-Run cancellation scope、Cancelling 不变量、取消请求/完成双事件 | #700 |

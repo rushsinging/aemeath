@@ -4,10 +4,12 @@ use crate::tui::adapter::runtime_view::{
     TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiResumedSessionStep,
 };
 use crate::tui::adapter::tui_runtime_event::{
-    TuiInteractionBody, TuiInteractionRequest, TuiRuntimeEvent, TuiUserQuestion,
+    TuiInteractionBody, TuiInteractionRequest, TuiRuntimeEvent, TuiToolCallStatus, TuiTurnContext,
+    TuiUserQuestion,
 };
 use crate::tui::app::event::UiEvent;
 use crate::tui::model::conversation::interaction::UiInteractionRequestId;
+use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::update::msg::TuiMsg;
 
 use super::super::testing::{input, ExpectedEffect, TuiScenarioHarness};
@@ -257,6 +259,100 @@ fn resume_restores_all_answered_ask_batches() {
 }
 
 #[test]
+fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.app.chat.start_processing();
+    let request_id = UiInteractionRequestId::from("test-ask-completed-gutter");
+    let context = TuiTurnContext {
+        chat_id: "ask-chat".to_string(),
+        turn_id: "ask-turn".to_string(),
+    };
+    let tool_call_id = crate::tui::model::conversation::ids::ToolCallId::new("ask-tool-call");
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+        context: context.clone(),
+        id: tool_call_id.as_str().to_string(),
+        provider_id: Some(tool_call_id.as_str().to_string()),
+        name: "AskUserQuestion".to_string(),
+        index: 0,
+    });
+    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+        context,
+        id: tool_call_id.as_str().to_string(),
+        provider_id: Some(tool_call_id.as_str().to_string()),
+        name: "AskUserQuestion".to_string(),
+        index: 0,
+        arguments_delta: None,
+        arguments: Some(serde_json::json!({ "question": "明天想吃什么？", "options": ["日料"] })),
+        status: TuiToolCallStatus::Running,
+    });
+    harness.runtime_event(TuiRuntimeEvent::InteractionRequested(
+        TuiInteractionRequest {
+            request_id: request_id.clone(),
+            run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+            tool_call_id: Some(tool_call_id.as_str().to_string()),
+            body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
+                prompt: "明天想吃什么？".to_string(),
+                options: vec!["日料".to_string()],
+                allow_multi: false,
+            }]),
+        },
+    ));
+    harness.expect_effect(ExpectedEffect::ReplyInteraction {
+        request_id: Some(request_id.as_str().to_string()),
+        reply: Some(
+            crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(vec![
+                "日料".to_string(),
+            ]),
+        ),
+        replies: Vec::new(),
+    });
+
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    harness.app.model.conversation.apply(
+        crate::tui::model::conversation::intent::ConversationIntent::InteractionReplyAccepted(
+            crate::tui::model::conversation::intent::InteractionReplyAccepted {
+                request_id: request_id.clone(),
+            },
+        ),
+    );
+    harness.app.mark_output_dirty();
+    harness.render();
+
+    assert!(harness
+        .app
+        .model
+        .conversation
+        .active_interaction()
+        .is_none());
+    let ask_tool = harness
+        .app
+        .model
+        .conversation
+        .chats
+        .iter()
+        .flat_map(|chat| &chat.turns)
+        .flat_map(|turn| &turn.tool_calls)
+        .find(|call| call.id.as_ref() == Some(&tool_call_id))
+        .expect("AskUserQuestion tool call should exist");
+    assert_eq!(ask_tool.status, ToolCallStatus::Success);
+    let screen = harness.screen();
+    assert!(
+        screen
+            .lines()
+            .any(|line| line.contains('✓') && line.contains("Ask")),
+        "Accepted 后成功 gutter 应位于 Ask 工具调用行\n{screen}"
+    );
+    assert!(
+        screen
+            .lines()
+            .filter(|line| line.contains("已回答"))
+            .all(|line| !line.contains('✓')),
+        "已回答摘要前不应显示成功 gutter\n{screen}"
+    );
+    harness.assert_idle();
+}
+
+#[test]
 fn ask_user_confirm_emits_reply_interaction_effect() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.app.chat.start_processing();
@@ -267,6 +363,7 @@ fn ask_user_confirm_emits_reply_interaction_effect() {
         TuiInteractionRequest {
             request_id: request_id.clone(),
             run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+            tool_call_id: None,
             body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
                 prompt: "中午吃什么?".to_string(),
                 options: vec!["饺子".to_string(), "拉面".to_string(), "盖浇饭".to_string()],
@@ -281,6 +378,12 @@ fn ask_user_confirm_emits_reply_interaction_effect() {
 
     // Script the expected ReplyInteraction effect
     harness.expect_effect(ExpectedEffect::ReplyInteraction {
+        request_id: Some("test-ask-1".to_string()),
+        reply: Some(
+            crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(vec![
+                "饺子".to_string(),
+            ]),
+        ),
         replies: vec![TuiMsg::Ui(UiEvent::SystemMessage("answered".into()))],
     });
 
@@ -296,6 +399,130 @@ fn ask_user_confirm_emits_reply_interaction_effect() {
 }
 
 #[test]
+fn ask_user_free_text_confirmation_emits_reply_interaction_effect() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.app.chat.start_processing();
+
+    let request_id = UiInteractionRequestId::from("test-ask-free-text");
+    harness.runtime_event(TuiRuntimeEvent::InteractionRequested(
+        TuiInteractionRequest {
+            request_id,
+            run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+            tool_call_id: None,
+            body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
+                prompt: "中午吃什么?".to_string(),
+                options: vec!["饺子".to_string(), "拉面".to_string()],
+                allow_multi: false,
+            }]),
+        },
+    ));
+
+    harness.expect_effect(ExpectedEffect::ReplyInteraction {
+        request_id: Some("test-ask-free-text".to_string()),
+        reply: Some(
+            crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(vec![
+                "日料".to_string(),
+            ]),
+        ),
+        replies: vec![TuiMsg::Ui(UiEvent::SystemMessage("answered".into()))],
+    });
+
+    harness.key(input::press(KeyCode::Down, KeyModifiers::NONE));
+    harness.key(input::press(KeyCode::Down, KeyModifiers::NONE));
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    for ch in "日料".chars() {
+        harness.key(input::press(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(harness.effects().iter().any(|effect| matches!(
+        effect,
+        crate::tui::effect::effect::Effect::ReplyInteraction {
+            reply: crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(answers),
+            ..
+        } if answers == &vec!["日料".to_string()]
+    )));
+    harness.assert_idle();
+}
+
+#[test]
+fn ask_user_current_interaction_does_not_reply_with_resumed_history_answer() {
+    fn ask_tool_use(id: &str, question: &str) -> TuiContentBlock {
+        TuiContentBlock::ToolUse {
+            id: id.to_string(),
+            name: "AskUserQuestion".to_string(),
+            input: serde_json::json!({ "question": question }),
+        }
+    }
+
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.app.model.conversation.apply(
+        crate::tui::model::conversation::intent::ResumeConversation {
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "history-run".into(),
+                step_id: "history-step".into(),
+                messages: vec![
+                    TuiChatMessage {
+                        role: "assistant".to_string(),
+                        content: vec![ask_tool_use("history-ask", "之前想吃什么？")],
+                        input_id: None,
+                        source: TuiMessageSource::User,
+                        stop_hook: None,
+                    },
+                    TuiChatMessage {
+                        role: "user".to_string(),
+                        content: vec![TuiContentBlock::ToolResult {
+                            tool_use_id: "history-ask".to_string(),
+                            content: serde_json::json!({ "answer": "中餐" }),
+                            is_error: false,
+                            text: None,
+                        }],
+                        input_id: None,
+                        source: TuiMessageSource::User,
+                        stop_hook: None,
+                    },
+                ],
+                finalize_cause: None,
+                duration_ms: None,
+            }],
+        },
+    );
+    harness.app.chat.start_processing();
+    harness.runtime_event(TuiRuntimeEvent::InteractionRequested(
+        TuiInteractionRequest {
+            request_id: UiInteractionRequestId::from("current-ask"),
+            run_id: crate::tui::model::conversation::interaction::UiRunId::from("current-run"),
+            tool_call_id: None,
+            body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
+                prompt: "明天想吃什么？".to_string(),
+                options: vec!["日料".to_string(), "西餐".to_string()],
+                allow_multi: false,
+            }]),
+        },
+    ));
+    harness.expect_effect(ExpectedEffect::ReplyInteraction {
+        request_id: Some("current-ask".to_string()),
+        reply: Some(
+            crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(vec![
+                "日料".to_string(),
+            ]),
+        ),
+        replies: vec![TuiMsg::Ui(UiEvent::SystemMessage("answered".into()))],
+    });
+
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(harness.effects().iter().any(|effect| matches!(
+        effect,
+        crate::tui::effect::effect::Effect::ReplyInteraction {
+            request_id,
+            reply: crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(answers),
+        } if request_id.as_str() == "current-ask" && answers == &vec!["日料".to_string()]
+    )));
+    harness.assert_idle();
+}
+
+#[test]
 fn ask_user_cancel_emits_cancel_interaction_effect() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.app.chat.start_processing();
@@ -305,6 +532,7 @@ fn ask_user_cancel_emits_cancel_interaction_effect() {
         TuiInteractionRequest {
             request_id: request_id.clone(),
             run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+            tool_call_id: None,
             body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
                 prompt: "确认删除?".to_string(),
                 options: vec!["是".to_string(), "否".to_string()],
@@ -340,6 +568,7 @@ fn ask_user_esc_during_chat_input_exits_chat_mode_not_cancel() {
         TuiInteractionRequest {
             request_id,
             run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+            tool_call_id: None,
             body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
                 prompt: "自由输入".to_string(),
                 options: vec!["选项A".to_string(), "选项B".to_string()],

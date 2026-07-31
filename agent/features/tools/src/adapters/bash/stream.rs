@@ -32,6 +32,7 @@ pub(super) async fn read_stdout(
                 $seq += 1;
                 // Best-effort: drop chunks if channel is full/closed.
                 $tx.emit(AgentProgressEvent {
+                    source_context: None,
                     sequence: $seq,
                     kind: AgentProgressKind::ToolOutput {
                         tool_name: "Bash".to_string(),

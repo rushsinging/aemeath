@@ -5,6 +5,7 @@
 
 use super::block::{AskUserPhase, AskUserSlot};
 use super::change::ConversationChange;
+use super::interaction::UiInteractionRequestId;
 use super::model::ConversationModel;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
@@ -60,11 +61,25 @@ impl ConversationModel {
         })
     }
 
-    /// 收集当前 AskUserBatch 块各 slot 的答案（含已完成块）。
-    pub fn ask_user_batch_answers(&self) -> Option<Vec<String>> {
+    /// 按 Interaction request identity 收集对应 AskUserBatch 的全部答案。
+    pub fn ask_user_batch_answers(
+        &self,
+        request_id: &UiInteractionRequestId,
+    ) -> Option<Vec<String>> {
         self.timeline.items().iter().find_map(|item| {
-            if let OutputTimelineItem::AskUserBatch { slots, .. } = item {
-                let answers: Vec<String> = slots.iter().filter_map(|s| s.answer.clone()).collect();
+            if let OutputTimelineItem::AskUserBatch {
+                request_id: Some(batch_request_id),
+                slots,
+                ..
+            } = item
+            {
+                if batch_request_id != request_id {
+                    return None;
+                }
+                let answers: Vec<String> = slots
+                    .iter()
+                    .filter_map(|slot| slot.answer.clone())
+                    .collect();
                 if answers.len() == slots.len() {
                     Some(answers)
                 } else {
@@ -151,10 +166,9 @@ impl ConversationModel {
     }
 
     /// 显示 AskUserBatch 交互块；若已存在则替换。
-    /// #944 5B: dead code after AskUserBatch reply_tx retirement.
-    #[allow(dead_code)]
     pub(super) fn show_ask_user_batch(
         &mut self,
+        request_id: UiInteractionRequestId,
         slots: Vec<AskUserSlot>,
     ) -> Vec<ConversationChange> {
         let id = ask_user_block_id(&slots);
@@ -165,6 +179,7 @@ impl ConversationModel {
         let n = slots.len();
         self.timeline.push(OutputTimelineItem::AskUserBatch {
             id: id.clone(),
+            request_id: Some(request_id),
             slots,
             active_index: 0,
             phase: AskUserPhase::Answering,
@@ -515,6 +530,7 @@ impl ConversationModel {
     }
 
     /// 追加一个仅用于历史展示的已完成 AskUserBatch。
+    /// 历史块不对应当前可回复 Interaction，因此不保存 request identity。
     pub(crate) fn restore_answered_ask_user_batch(
         &mut self,
         slots: Vec<AskUserSlot>,
@@ -526,6 +542,7 @@ impl ConversationModel {
         let n = slots.len();
         self.timeline.push(OutputTimelineItem::AskUserBatch {
             id: id.clone(),
+            request_id: None,
             slots,
             active_index: 0,
             phase: AskUserPhase::Answering,

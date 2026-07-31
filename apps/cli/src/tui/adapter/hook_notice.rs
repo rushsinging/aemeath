@@ -16,7 +16,7 @@ pub fn hook_event_notice(event: &TuiHookEvent) -> Option<HookNoticeContent> {
         TuiHookStatus::Failed => Some(HookNoticeContent {
             kind: HookNoticeKind::Failed,
             title: format!("Hook failed: {}", event.hook_name),
-            body: "Hook execution failed.".to_string(),
+            body: hook_failure_body(event),
             details: hook_summary_details(event),
         }),
         TuiHookStatus::Running | TuiHookStatus::Succeeded => None,
@@ -61,6 +61,14 @@ pub fn hook_spinner_phase(
         detail: hook_spinner_detail(event),
         outcome,
     }
+}
+
+fn hook_failure_body(event: &TuiHookEvent) -> String {
+    event
+        .result
+        .as_ref()
+        .and_then(|result| result.reason.as_deref().and_then(non_empty))
+        .unwrap_or_else(|| "Hook execution failed.".to_string())
 }
 
 fn hook_summary_details(event: &TuiHookEvent) -> Option<String> {
@@ -199,14 +207,15 @@ mod tests {
     }
 
     #[test]
-    fn failed_event_uses_summary_without_stderr() {
+    fn failed_event_uses_structured_reason_as_body_without_raw_stderr() {
         let mut result = result();
-        result.reason = None;
+        result.reason = Some("最终执行失败".to_string());
+        result.stderr = "raw stderr".to_string();
         let notice = hook_event_notice(&event(TuiHookStatus::Failed, result)).unwrap();
         assert_eq!(notice.kind, HookNoticeKind::Failed);
         assert_eq!(notice.title, "Hook failed: Stop");
-        assert_eq!(notice.body, "Hook execution failed.");
-        assert!(!notice.details.unwrap().contains("err"));
+        assert_eq!(notice.body, "最终执行失败");
+        assert!(!notice.details.unwrap().contains("raw stderr"));
     }
 
     #[test]

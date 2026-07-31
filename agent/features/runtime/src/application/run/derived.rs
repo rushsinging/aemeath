@@ -1,0 +1,41 @@
+use std::sync::Arc;
+
+use crate::application::run::context::ParentRunContextSource;
+use crate::application::run::context_factory::RuntimeContextFactory;
+use crate::ports::ProviderFactory;
+
+mod finalize;
+pub(crate) mod loop_run;
+pub(crate) mod progress;
+pub(super) mod setup;
+#[cfg(test)]
+mod tests;
+
+pub struct CliAgentRunner {
+    /// Provider factory for building sub-agent bindings from model specs.
+    pub factory: Arc<dyn ProviderFactory>,
+    /// Shared per-Run registry used by Main and every Sub Run.
+    pub active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
+    pub max_tool_concurrency: usize,
+    pub agent_semaphore: Arc<tokio::sync::Semaphore>,
+    pub tool_result_materializer:
+        Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
+    /// Runtime-owned workspace source used to derive isolated sub-run views.
+    pub workspace: crate::application::run::workspace::RuntimeWorkspaceAccess,
+    /// Skill metadata catalog shared with sub-run isolated contexts.
+    /// Skill bodies remain call-time Tool-owned loads.
+    pub skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+    /// #1385 Task 6: Injectable parent context source — set by the Main Run
+    /// loop before tool execution so sub-agent runs can derive from it.
+    pub parent_context: ParentRunContextSource,
+    /// #1248 Task 3: RuntimeContextFactory — same instance as SessionRuntime's.
+    /// Used for sub-run RuntimeContext assembly without a separate factory.
+    pub runtime_context_factory: Arc<RuntimeContextFactory>,
+}
+
+impl CliAgentRunner {
+    #[cfg(test)]
+    fn role_max_tokens_override(role: &share::config::AgentRoleConfig) -> Option<u32> {
+        role.max_tokens.filter(|tokens| *tokens > 0)
+    }
+}

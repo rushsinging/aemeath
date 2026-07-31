@@ -19,10 +19,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             let mut stream = match ctx
                 .agent_client
                 .chat(sdk::ChatRequest {
-                    user_input: None,
-                    // 文本队列已断开（#390 A3）：统一走 input_events 事件通道。
-                    queue_drain: None,
-                    input_events: Some(Arc::new(ctx.input_event_port.clone())),
+                    ingress: Arc::new(ctx.input_event_port.clone()),
                 })
                 .await
             {
@@ -135,9 +132,13 @@ mod tests {
     fn sdk_event_to_tui_runtime_event_preserves_agent_progress_identity() {
         let expected_tool_id = sdk::ids::ToolCallId::new("tool-1");
         let event = sdk_event_to_tui_event(sdk::ChatEvent::AgentProgress {
-            context: sdk::ChatEventContext::new(
-                sdk::ids::ChatId::new("chat-progress"),
-                sdk::ids::ChatTurnId::new("turn-progress"),
+            source_context: sdk::ChatEventContext::new(
+                sdk::ids::ChatId::new("child-chat"),
+                sdk::ids::ChatTurnId::new("child-turn"),
+            ),
+            attachment_context: sdk::ChatEventContext::new(
+                sdk::ids::ChatId::new("parent-chat"),
+                sdk::ids::ChatTurnId::new("parent-turn"),
             ),
             tool_id: expected_tool_id.clone(),
             event: sdk::AgentProgressEventView {
@@ -151,11 +152,14 @@ mod tests {
         assert!(matches!(
             event,
             SdkEventMapping::Runtime(TuiRuntimeEvent::AgentProgress {
-                context,
+                source_context,
+                attachment_context,
                 tool_id,
                 ..
-            }) if context.chat_id == sdk::ids::ChatId::new("chat-progress").as_str()
-                && context.turn_id == sdk::ids::ChatTurnId::new("turn-progress").as_str()
+            }) if source_context.chat_id == sdk::ids::ChatId::new("child-chat").as_str()
+                && source_context.turn_id == sdk::ids::ChatTurnId::new("child-turn").as_str()
+                && attachment_context.chat_id == sdk::ids::ChatId::new("parent-chat").as_str()
+                && attachment_context.turn_id == sdk::ids::ChatTurnId::new("parent-turn").as_str()
                 && tool_id == expected_tool_id.as_str()
         ));
     }

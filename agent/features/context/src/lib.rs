@@ -13,7 +13,7 @@ pub use adapters::{isolated_context, isolated_context_with_skill};
 pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
 pub use domain::session::{
     SessionListEntry, SessionManagementError, SessionMetadataUpdate, SessionRestoreStep,
-    SessionResumeProjection,
+    SessionResumeView,
 };
 pub use ports::SessionManagementPort;
 

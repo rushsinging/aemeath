@@ -3,7 +3,7 @@ use sdk::InteractionRequestId;
 use std::time::Duration;
 
 fn run() -> Run {
-    Run::new(RunSpec::new("main", Duration::ZERO), None)
+    Run::new(RunSpec::main(), None)
 }
 
 fn tool_continuation(provider_id: &str) -> InteractionContinuation {
@@ -327,7 +327,7 @@ fn run_follows_the_happy_path_to_completed() {
         .unwrap();
     run.transition(RunTransition::ContextPrepared).unwrap();
     let step_id = run.begin_step().unwrap();
-    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+    run.record_model_invocation(&step_id, ModelInvocation::new("response"))
         .unwrap();
     run.transition(RunTransition::ModelInvoked).unwrap();
     run.transition(RunTransition::ContinueAfterResponse)
@@ -538,7 +538,7 @@ fn terminal_run_rejects_new_steps() {
 fn parent_identity_is_carried_by_every_domain_event() {
     let parent = RunId::new_v7();
     let mut run = Run::new(
-        RunSpec::new("sub", Duration::from_secs(30)),
+        RunSpec::sub("derived", Duration::from_secs(30)),
         Some(parent.clone()),
     );
 
@@ -597,7 +597,7 @@ const ALL_RUN_TRANSITIONS: [RunTransition; 19] = [
 fn invoke_to_applying(run: &mut Run) -> RunStepId {
     run.transition(RunTransition::ContextPrepared).unwrap();
     let step_id = run.begin_step().unwrap();
-    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+    run.record_model_invocation(&step_id, ModelInvocation::new("response"))
         .unwrap();
     run.transition(RunTransition::ModelInvoked).unwrap();
     step_id
@@ -744,7 +744,7 @@ fn run_transition_matrix_exhaustively_accepts_only_documented_edges() {
             let mut run = run_at_status(from);
             if from == RunStatus::InvokingModel && transition == RunTransition::ModelInvoked {
                 let step_id = run.begin_step().unwrap();
-                run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+                run.record_model_invocation(&step_id, ModelInvocation::new("response"))
                     .unwrap();
             }
             let result = run.transition(transition);
@@ -786,7 +786,7 @@ fn model_invoked_requires_recorded_invocation_on_active_step() {
         run.transition(RunTransition::ModelInvoked),
         Err(RunTransitionError::StepIncomplete)
     );
-    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+    run.record_model_invocation(&step_id, ModelInvocation::new("response"))
         .unwrap();
     assert_eq!(
         run.transition(RunTransition::ModelInvoked),
@@ -813,7 +813,7 @@ fn run_rejects_second_active_step_and_incomplete_step_completion() {
 fn run_step_accepts_at_most_one_model_invocation() {
     let mut run = run_at_status(RunStatus::InvokingModel);
     let step_id = run.begin_step().unwrap();
-    let invocation = ModelInvocation::new("request", "response");
+    let invocation = ModelInvocation::new("response");
 
     run.record_model_invocation(&step_id, invocation.clone())
         .unwrap();
@@ -829,7 +829,7 @@ fn run_step_accepts_at_most_one_model_invocation() {
 fn tool_call_is_owned_by_a_run_step_and_advances_monotonically() {
     let mut run = run_at_status(RunStatus::InvokingModel);
     let step_id = run.begin_step().unwrap();
-    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+    run.record_model_invocation(&step_id, ModelInvocation::new("response"))
         .unwrap();
     run.transition(RunTransition::ModelInvoked).unwrap();
     let call = tool_call("provider-call-1");
@@ -879,7 +879,6 @@ fn tool_call_cannot_be_added_to_another_or_inactive_step() {
 fn main_run_spec_uses_shared_interactive_unlimited_defaults() {
     let spec = RunSpec::main();
 
-    assert_eq!(spec.kind, RunKind::Main);
     assert_eq!(spec.timeout, Duration::ZERO);
     assert_eq!(spec.input, InputMode::SessionQueue);
     assert_eq!(spec.interaction, InteractionMode::Interactive);
@@ -891,10 +890,9 @@ fn main_run_spec_uses_shared_interactive_unlimited_defaults() {
 }
 
 #[test]
-fn sub_run_spec_is_isolated_noninteractive_and_parent_routed() {
+fn restricted_run_spec_is_isolated_noninteractive_and_parent_routed() {
     let spec = RunSpec::sub("reviewer", Duration::from_secs(60));
 
-    assert_eq!(spec.kind, RunKind::Sub);
     assert_eq!(spec.name, "reviewer");
     assert_eq!(spec.timeout, Duration::from_secs(60));
     assert_eq!(spec.input, InputMode::Fixed);
@@ -904,6 +902,128 @@ fn sub_run_spec_is_isolated_noninteractive_and_parent_routed() {
     assert_eq!(spec.workspace, ResourceMode::Isolated);
     assert_eq!(spec.memory, MemoryMode::Disabled);
     assert_eq!(spec.tools, ToolScope::Restricted);
+}
+
+#[test]
+fn standalone_restricted_spec_applies_explicit_capability_policy() {
+    let spec = RunSpec::sub("restricted", Duration::from_secs(30));
+
+    assert_eq!(
+        spec.clone().with_input(InputMode::SessionQueue),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        spec.clone().with_interaction(InteractionMode::Interactive),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        spec.clone().with_events(EventRoute::Client),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        spec.clone().with_context(ResourceMode::Shared),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        spec.clone().with_workspace(ResourceMode::Shared),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        spec.clone().with_memory_mode(MemoryMode::Enabled),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        spec.with_tool_scope(ToolScope::Full),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+}
+
+#[test]
+fn standalone_full_spec_allows_capability_reconfiguration_without_parent_ceiling() {
+    let spec = RunSpec::main()
+        .with_input(InputMode::Fixed)
+        .unwrap()
+        .with_interaction(InteractionMode::NonInteractive)
+        .unwrap()
+        .with_events(EventRoute::ParentRun)
+        .unwrap()
+        .with_context(ResourceMode::Isolated)
+        .unwrap()
+        .with_workspace(ResourceMode::Isolated)
+        .unwrap()
+        .with_memory_mode(MemoryMode::Disabled)
+        .unwrap()
+        .with_tool_scope(ToolScope::Restricted)
+        .unwrap();
+
+    assert_eq!(spec.input, InputMode::Fixed);
+    assert_eq!(spec.interaction, InteractionMode::NonInteractive);
+    assert_eq!(spec.events, EventRoute::ParentRun);
+    assert_eq!(spec.context, ResourceMode::Isolated);
+    assert_eq!(spec.workspace, ResourceMode::Isolated);
+    assert_eq!(spec.memory, MemoryMode::Disabled);
+    assert_eq!(spec.tools, ToolScope::Restricted);
+}
+
+#[test]
+fn derived_run_uses_parent_ceiling_for_relaxation_and_escalation() {
+    let parent = RunSpec::main()
+        .with_memory_mode(MemoryMode::Disabled)
+        .unwrap()
+        .with_interaction_kind(InteractionBindingMode::ParentMediated)
+        .unwrap();
+    let derived = parent
+        .derive_sub("derived", Duration::from_secs(30))
+        .unwrap();
+
+    assert_eq!(
+        derived.clone().with_memory_mode(MemoryMode::Enabled),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert_eq!(
+        derived
+            .clone()
+            .with_interaction_kind(InteractionBindingMode::Client),
+        Err(RunSpecError::CapabilityEscalation)
+    );
+    assert!(derived
+        .with_interaction_kind(InteractionBindingMode::Unavailable)
+        .is_ok());
+}
+
+#[test]
+fn validate_against_depends_only_on_effective_capabilities() {
+    let parent = RunSpec::main()
+        .with_memory_mode(MemoryMode::Disabled)
+        .unwrap()
+        .with_hooks(HookBindingMode::BoundaryOnly)
+        .unwrap();
+    let valid = RunSpec::sub("valid", Duration::from_secs(30))
+        .with_hooks(HookBindingMode::BoundaryOnly)
+        .unwrap();
+    let elevated_memory = RunSpec::main()
+        .with_timeout(Duration::from_secs(30))
+        .unwrap()
+        .with_input(InputMode::Fixed)
+        .unwrap()
+        .with_interaction(InteractionMode::NonInteractive)
+        .unwrap()
+        .with_events(EventRoute::ParentRun)
+        .unwrap()
+        .with_context(ResourceMode::Isolated)
+        .unwrap()
+        .with_workspace(ResourceMode::Isolated)
+        .unwrap()
+        .with_tool_scope(ToolScope::Restricted)
+        .unwrap()
+        .with_hooks(HookBindingMode::BoundaryOnly)
+        .unwrap();
+
+    assert_eq!(valid.validate_against(&parent), Ok(()));
+    assert_eq!(
+        elevated_memory.validate_against(&parent),
+        Err(RunSpecError::CapabilityEscalation)
+    );
 }
 
 #[test]
@@ -949,7 +1069,7 @@ fn derive_sub_from_main_can_relax_memory_only() {
 }
 
 #[test]
-fn standalone_sub_rejects_fixed_profile_relaxation() {
+fn standalone_restricted_spec_rejects_fixed_profile_relaxation() {
     // Standalone sub (ceiling=None) must also respect the fixed sub profile.
     let sub = RunSpec::sub("r", Duration::from_secs(30));
     assert_eq!(
@@ -979,7 +1099,7 @@ fn standalone_sub_rejects_fixed_profile_relaxation() {
 }
 
 #[test]
-fn standalone_sub_rejects_memory_enabled() {
+fn standalone_restricted_spec_rejects_memory_enabled() {
     // Standalone sub has no ceiling → memory must stay Disabled.
     assert_eq!(
         RunSpec::sub("r", Duration::from_secs(30)).with_memory_mode(MemoryMode::Enabled),
@@ -988,7 +1108,7 @@ fn standalone_sub_rejects_memory_enabled() {
 }
 
 #[test]
-fn standalone_sub_allows_memory_disabled() {
+fn standalone_restricted_spec_allows_memory_disabled() {
     // Staying at the default (Disabled) is always allowed.
     assert!(RunSpec::sub("r", Duration::from_secs(30))
         .with_memory_mode(MemoryMode::Disabled)
@@ -996,7 +1116,7 @@ fn standalone_sub_allows_memory_disabled() {
 }
 
 #[test]
-fn derived_sub_can_relax_memory_when_parent_allows() {
+fn derived_run_can_relax_memory_when_parent_allows() {
     let parent = RunSpec::main(); // memory = Enabled
     let sub = parent.derive_sub("child", Duration::from_secs(10)).unwrap();
     // Memory can relax up to parent ceiling.
@@ -1169,7 +1289,7 @@ fn capability_tools_monotonic_contraction() {
 }
 
 #[test]
-fn nested_sub_cannot_restore_capabilities() {
+fn nested_derived_run_cannot_restore_capabilities() {
     // main → sub1 (disable memory, restrict tools) → sub2
     let parent = RunSpec::main();
     let sub1 = parent
@@ -1194,7 +1314,7 @@ fn nested_sub_cannot_restore_capabilities() {
 }
 
 #[test]
-fn nested_sub_can_further_restrict() {
+fn nested_derived_run_can_further_restrict() {
     let parent = RunSpec::main();
     let sub1 = parent
         .derive_sub("sub1", Duration::from_secs(60))
@@ -1268,11 +1388,10 @@ fn with_timeout_respects_parent_ceiling() {
 }
 
 #[test]
-fn derive_sub_defaults_keep_sub_profile() {
+fn derive_sub_defaults_keep_restricted_profile() {
     let parent = RunSpec::main();
     let sub = parent.derive_sub("child", Duration::from_secs(10)).unwrap();
 
-    assert_eq!(sub.kind, RunKind::Sub);
     assert_eq!(sub.input, InputMode::Fixed);
     assert_eq!(sub.interaction, InteractionMode::NonInteractive);
     assert_eq!(sub.events, EventRoute::ParentRun);
@@ -1326,7 +1445,7 @@ fn finishing_transition_and_run_complete_bypass_are_not_in_the_machine() {
             let mut run = run_at_status(from);
             if from == RunStatus::InvokingModel && transition == RunTransition::ModelInvoked {
                 let step_id = run.begin_step().unwrap();
-                run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+                run.record_model_invocation(&step_id, ModelInvocation::new("response"))
                     .unwrap();
             }
             let next = try_transition(&mut run, transition);
@@ -1349,7 +1468,7 @@ fn completed_only_via_draining_input_and_empty_and_sealed() {
             let mut run = run_at_status(from);
             if from == RunStatus::InvokingModel && transition == RunTransition::ModelInvoked {
                 let step_id = run.begin_step().unwrap();
-                run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+                run.record_model_invocation(&step_id, ModelInvocation::new("response"))
                     .unwrap();
             }
             let next = try_transition(&mut run, transition);
@@ -1555,7 +1674,7 @@ fn drain_epoch_persists_across_run_operations() {
         .unwrap();
     run.transition(RunTransition::ContextPrepared).unwrap();
     let step_id = run.begin_step().unwrap();
-    run.record_model_invocation(&step_id, ModelInvocation::new("request", "response"))
+    run.record_model_invocation(&step_id, ModelInvocation::new("response"))
         .unwrap();
     run.transition(RunTransition::ModelInvoked).unwrap();
     run.transition(RunTransition::ContinueAfterResponse)
@@ -1621,7 +1740,7 @@ fn main_spec_has_client_interaction_full_hook_adaptive_reasoning() {
 }
 
 #[test]
-fn sub_spec_has_parent_mediated_interaction_boundary_hook_inherit_reasoning() {
+fn standalone_restricted_spec_has_parent_mediated_interaction_boundary_hook_inherit_reasoning() {
     let spec = RunSpec::sub("reviewer", Duration::from_secs(60));
     assert_eq!(
         spec.interaction_binding(),
@@ -1715,17 +1834,15 @@ fn derive_sub_rejects_reasoning_escalation() {
 }
 
 #[test]
-fn standalone_sub_can_relax_interaction_to_client() {
-    // Standalone sub (no ceiling) can use any interaction mode
+fn standalone_restricted_spec_can_relax_unpinned_interaction_capability() {
     let spec = RunSpec::sub("r", Duration::from_secs(30))
         .with_interaction_kind(InteractionBindingMode::Client)
         .unwrap();
     assert_eq!(spec.interaction_binding(), InteractionBindingMode::Client);
-    assert_eq!(spec.kind, RunKind::Sub);
 }
 
 #[test]
-fn standalone_sub_can_set_interaction_unavailable() {
+fn standalone_restricted_spec_can_set_interaction_unavailable() {
     let spec = RunSpec::sub("r", Duration::from_secs(30))
         .with_interaction_kind(InteractionBindingMode::Unavailable)
         .unwrap();
@@ -1736,7 +1853,7 @@ fn standalone_sub_can_set_interaction_unavailable() {
 }
 
 #[test]
-fn nested_sub_can_further_restrict_interaction() {
+fn nested_derived_run_can_further_restrict_interaction() {
     let parent = RunSpec::main(); // InteractionBindingMode::Client
     let sub1 = parent
         .derive_sub("sub1", Duration::from_secs(60))

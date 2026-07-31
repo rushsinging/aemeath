@@ -20,11 +20,15 @@ use futures::Stream;
 // 通过 provider::api（API facade）访问，不直接引用 published_language 模块。
 // 新 PL StopReason 通过别名 ProviderStopReason 导出，此处还原为 StopReason。
 pub use provider::{
-    CancellationSignal, InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest,
-    ModelCapability, ModelId, ModelToolSchema, ProviderCompletion, ProviderContentBlock,
-    ProviderError, ProviderErrorKind, ProviderStopReason as StopReason, ProviderToolCall,
-    ProviderToolCallId, RawUsageSnapshot, ReasoningCapability, ReasoningMappingKind,
+    CancellationSignal, InvocationEvent, InvocationOptions, InvocationRequest, ModelCapability,
+    ModelId, ModelToolSchema, ProviderError, ProviderStopReason as StopReason, RawUsageSnapshot,
     RequestSystemBlock,
+};
+
+#[cfg(test)]
+pub use provider::{
+    InvocationDelta, ProviderCompletion, ProviderContentBlock, ProviderErrorKind,
+    ReasoningCapability, ReasoningMappingKind,
 };
 
 // ReasoningLevel 已由 provider crate 从 core::provider re-export。

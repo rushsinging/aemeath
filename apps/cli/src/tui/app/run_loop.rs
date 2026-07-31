@@ -66,7 +66,7 @@ impl App {
     /// #390 A1：建立常驻 chat() 处理回路（启动一次 + `/clear` 后自愈重建）。
     ///
     /// 经 `build_spawn_context` 建一条新的 input_events 通道（sender 存入
-    /// `chat.input_event_tx`，port 随 `ChatRequest.input_events` 传给 runtime），
+    /// `chat.input_event_tx`，port 随 `ChatRequest.ingress` 传给 runtime），
     /// 以当前历史 `messages` 调一次 `chat()` 并 spawn 长生命周期流消费任务。
     /// 已存在通道（`input_event_tx` 为 Some）时为 no-op，调用安全幂等。
     fn ensure_persistent_processing(

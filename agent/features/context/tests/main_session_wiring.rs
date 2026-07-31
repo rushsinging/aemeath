@@ -946,8 +946,8 @@ async fn successful_resume_clears_pending_session_restart_revision() {
 
 // ─── Resume publishes only the canonical committed session ───────────
 //
-// `SessionProjectionParticipant` has been retired: `resume_prepared` no longer
-// maintains a separate second projection backing.  The single source of truth
+// `SessionViewParticipant` has been retired: `resume_prepared` no longer
+// maintains a separate second view backing.  The single source of truth
 // is the canonical committed session held by `MainSessionWiring`.  These
 // tests assert that contract directly:
 //
@@ -955,7 +955,7 @@ async fn successful_resume_clears_pending_session_restart_revision() {
 //   * a bound run created *after* resume observes that exact session.
 
 /// `resume_prepared` publishes only the canonical committed session and a
-/// `bind_main_run` issued afterwards observes it.  No second projection
+/// `bind_main_run` issued afterwards observes it.  No second view
 /// backing is consulted.
 #[tokio::test]
 async fn resume_publishes_only_canonical_committed_session_visible_after_bind() {
@@ -965,14 +965,14 @@ async fn resume_publishes_only_canonical_committed_session_visible_after_bind() 
     // Capture pre-resume committed session identity.
     let pre_session_id = h.wiring.committed_session().id.clone();
 
-    // Do NOT register any projection participant — there is no such API now.
+    // Do NOT register any view participant — there is no such API now.
     let ws = h.workspace_persist.snapshot();
     let session = session_with_workspace(&ws, SnapshotState::Missing);
 
     h.wiring
         .resume_prepared(session)
         .await
-        .expect("resume should succeed without any projection participant");
+        .expect("resume should succeed without any view participant");
 
     // 1. The committed session is exactly the canonical one we resumed from.
     let committed = h.wiring.committed_session();
@@ -981,7 +981,7 @@ async fn resume_publishes_only_canonical_committed_session_visible_after_bind() 
 
     // 2. resume publishes *only* the canonical committed session — a freshly
     //    bound run must observe the same session identity, with no stale or
-    //    intermediate projection state.
+    //    intermediate view state.
     let bound = h
         .wiring
         .bind_main_run()

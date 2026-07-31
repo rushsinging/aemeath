@@ -84,10 +84,11 @@ impl App {
     /// 显示 AskUserBatch 交互块（批量问题 + 选项），作为渲染单一真相进入 ConversationModel。
     pub(crate) fn show_ask_user_batch(
         &mut self,
+        request_id: crate::tui::model::conversation::interaction::UiInteractionRequestId,
         slots: Vec<crate::tui::model::conversation::block::AskUserSlot>,
     ) {
         self.apply_agent_intent(AgentIntent::Conversation(
-            ConversationIntent::ShowAskUserBatch(ShowAskUserBatch { slots }),
+            ConversationIntent::ShowAskUserBatch(ShowAskUserBatch { request_id, slots }),
         ));
     }
 
