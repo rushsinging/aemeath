@@ -40,6 +40,7 @@ fn session() -> CanonicalSession {
             ),
         ],
         committed_steps: vec![],
+        skill_load_records: Vec::new(),
     }
 }
 

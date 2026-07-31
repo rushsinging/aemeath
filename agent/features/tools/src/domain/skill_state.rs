@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "instance_id", rename_all = "snake_case")]
 pub enum SkillLoadScope {
     Main,
@@ -13,6 +13,10 @@ pub enum SkillLoadScope {
 impl SkillLoadScope {
     pub const fn main() -> Self {
         Self::Main
+    }
+
+    pub fn new_subagent_instance() -> Self {
+        Self::Subagent(uuid::Uuid::now_v7().to_string())
     }
 
     pub fn subagent(value: impl Into<String>) -> Result<Self, SkillLoadStateError> {

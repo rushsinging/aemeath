@@ -204,6 +204,7 @@ fn assemble_parent_context(
 
     let bindings = RunContextBindings {
         context: Arc::new(FakeCtxPort),
+        skill_load_session_id: "session".to_string(),
         provider: Arc::new(binding),
         interaction: Arc::new(InteractionBridge::new()),
         memory: Arc::new(memory::NoOpMemory),
@@ -359,6 +360,7 @@ fn make_parent_context_with_factory(
     };
     let bindings = RunContextBindings {
         context: Arc::new(FakeCtxPort),
+        skill_load_session_id: "session".to_string(),
         provider: Arc::new(binding),
         interaction: Arc::new(InteractionBridge::new()),
         memory: Arc::new(memory::NoOpMemory),

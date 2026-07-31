@@ -236,6 +236,7 @@ fn make_bindings() -> RunContextBindings {
 
     RunContextBindings {
         context: Arc::new(FakeContextPort),
+        skill_load_session_id: "session".to_string(),
         provider: Arc::new(binding),
         interaction: Arc::new(InteractionBridge::new()),
         memory: Arc::new(memory::NoOpMemory),
@@ -259,9 +260,13 @@ fn make_parent_context() -> RuntimeContext {
     let bindings = make_bindings();
     // #1248 Task 3: Use the test-only token — production code must go
     // through RuntimeContextFactory::assemble().
+    let skill_load_state = Arc::new(
+        crate::application::skill_load_state::ContextSkillLoadState::new(bindings.context.clone()),
+    );
     RuntimeContext::new(
         services,
         bindings,
+        skill_load_state,
         crate::application::runtime_context::RuntimeContextAssemblyToken::new_for_test(),
     )
 }
@@ -448,6 +453,26 @@ fn assemble_sub_with_parent_succeeds() {
     let bindings = make_bindings();
     let result = f.assemble(&spec, bindings, Some(&parent_ctx));
     assert!(result.is_ok(), "expected Ok, got {:?}", result.err());
+}
+
+#[test]
+fn sub_context_inherits_parent_skill_load_state_backing() {
+    let f = factory();
+    let parent_ctx = make_parent_context();
+    let parent_state = parent_ctx.skill_load_state();
+    let child_context = Arc::new(FakeContextPort);
+    let mut bindings = make_bindings();
+    bindings.context = child_context;
+    let child = f
+        .assemble(&sub_spec(), bindings, Some(&parent_ctx))
+        .expect("assemble sub context");
+    let child_state = child.skill_load_state();
+
+    assert!(Arc::ptr_eq(&parent_state, &child_state));
+    assert_eq!(
+        child.skill_load_session_id(),
+        parent_ctx.skill_load_session_id()
+    );
 }
 
 #[test]

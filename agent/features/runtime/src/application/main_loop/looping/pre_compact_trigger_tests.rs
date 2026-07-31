@@ -370,6 +370,7 @@ impl CompactHarness {
             );
             let bindings = RunContextBindings {
                 context: stub.clone(),
+                skill_load_session_id: "session".to_string(),
                 provider: binding.clone(),
                 interaction: Arc::new(crate::application::interaction::InteractionBridge::new()),
                 memory: memory.clone(),

@@ -20,6 +20,7 @@ struct SessionState {
     accepted_steps: HashMap<(String, String), AcceptedInputProjection>,
     committed_steps: HashMap<(String, String), FinalizedOutcomeProjection>,
     tool_receipts: HashMap<String, ToolCallReceipt>,
+    skill_load_records: HashMap<(tools::SkillLoadScope, String), String>,
 }
 
 /// #870 的确定性内存 backing；durable Envelope/AtomicBlob 由 #869/#880 替换。
@@ -52,6 +53,7 @@ impl InMemorySessionRepository {
                     accepted_steps: HashMap::new(),
                     committed_steps: HashMap::new(),
                     tool_receipts: HashMap::new(),
+                    skill_load_records: HashMap::new(),
                 },
             );
     }
@@ -168,6 +170,37 @@ impl SessionRepository for InMemorySessionRepository {
         Ok(advanced)
     }
 
+    async fn compare_and_record_skill_load(
+        &self,
+        mutation: tools::SkillLoadMutation,
+    ) -> Result<tools::SkillLoadDecision, tools::SkillLoadStateError> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|error| tools::SkillLoadStateError::Storage(error.to_string()))?;
+        let state = sessions.get_mut(mutation.session_id()).ok_or_else(|| {
+            tools::SkillLoadStateError::SessionNotFound(mutation.session_id().to_string())
+        })?;
+        let key = (mutation.scope().clone(), mutation.skill_name().to_string());
+        match state.skill_load_records.get_mut(&key) {
+            Some(revision) if revision == mutation.revision() => {
+                Ok(tools::SkillLoadDecision::AlreadyLoaded)
+            }
+            Some(revision) => {
+                *revision = mutation.revision().to_string();
+                state.revision += 1;
+                Ok(tools::SkillLoadDecision::Updated)
+            }
+            None => {
+                state
+                    .skill_load_records
+                    .insert(key, mutation.revision().to_string());
+                state.revision += 1;
+                Ok(tools::SkillLoadDecision::Fresh)
+            }
+        }
+    }
+
     async fn append_finalized(
         &self,
         append: &ContextAppend,
@@ -254,6 +287,7 @@ impl SessionRepository for InMemorySessionRepository {
         state.accepted_steps.clear();
         state.committed_steps.clear();
         state.tool_receipts.clear();
+        state.skill_load_records.clear();
         state.revision += 1;
         Ok(())
     }

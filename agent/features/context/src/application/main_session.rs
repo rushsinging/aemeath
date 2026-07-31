@@ -226,6 +226,7 @@ pub async fn wire_main_session(
         compact: None,
         run_slices: Vec::new(),
         committed_steps: Vec::new(),
+        skill_load_records: Vec::new(),
     };
 
     // Bootstrap the initial config location from the verified workspace
