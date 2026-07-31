@@ -202,13 +202,6 @@ impl ContextPort for ContextApplicationService {
         self.session.advance_tool_receipt(mutation).await
     }
 
-    async fn compare_and_record_skill_load(
-        &self,
-        mutation: tools::SkillLoadMutation,
-    ) -> Result<tools::SkillLoadDecision, tools::SkillLoadStateError> {
-        self.session.compare_and_record_skill_load(mutation).await
-    }
-
     async fn append_and_persist(
         &self,
         append: &ContextAppend,

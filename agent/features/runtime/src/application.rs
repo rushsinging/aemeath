@@ -22,7 +22,6 @@ pub mod runtime_context_factory;
 mod runtime_context_factory_tests;
 pub mod scheduler;
 pub mod service;
-pub(crate) mod skill_load_state;
 pub mod startup;
 pub mod stop_hook_coordination;
 pub mod subagent;

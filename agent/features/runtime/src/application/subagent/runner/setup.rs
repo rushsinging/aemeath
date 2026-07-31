@@ -59,8 +59,6 @@ pub struct DerivedSubRun {
     pub reasoning_level: provider::ReasoningLevel,
     /// Session ID for the isolated context (used as SubAgentRun.session_id).
     pub session_id: String,
-    /// Stable Skill 去重作用域，绑定当前 Sub-agent instance，不使用 run_id。
-    pub skill_load_scope: tools::SkillLoadScope,
 }
 
 // ── Restricted tool catalog wrapper ──
@@ -270,7 +268,6 @@ pub fn derive_sub_run(
     // query factory.  This is the final port stored in RuntimeContext;
     // run_agent uses `derived.context.context()` directly.
     let isolated_session_id = sdk::SessionId::new_v7().to_string();
-    let skill_load_scope = tools::SkillLoadScope::new_subagent_instance();
     let skills_context_port: Arc<dyn crate::ports::ContextPort> =
         context::isolated_context_with_skill(
             &isolated_session_id,
@@ -288,7 +285,6 @@ pub fn derive_sub_run(
     let cancel = parent_context.cancel().child_scope();
     let bindings = RunContextBindings {
         context: skills_context_port,
-        skill_load_session_id: parent_context.skill_load_session_id().to_string(),
         provider: Arc::new(sub_binding.clone()),
         interaction: Arc::new(UnavailableInteractionPort),
         memory: Arc::new(memory::NoOpMemory),
@@ -322,7 +318,6 @@ pub fn derive_sub_run(
         max_tokens,
         reasoning_level,
         session_id: isolated_session_id,
-        skill_load_scope,
     })
 }
 
@@ -578,14 +573,6 @@ impl AgentRunner for CliAgentRunner {
                 .with_user_agent(derived.context.config_ref().config().user_agent())
                 .with_progress(progress_sink.clone())
                 .with_catalog(Some(Arc::new(sub_catalog.clone())))
-                .with_memory_context(
-                    Some(derived.context.skill_load_session_id().to_string()),
-                    None,
-                )
-                .with_skill_load_state(
-                    derived.skill_load_scope.clone(),
-                    derived.context.skill_load_state(),
-                )
                 .with_selection(derived.context.config_ref().tool_selection().clone()),
             );
             let agent = Agent {

@@ -151,30 +151,14 @@ impl RuntimeContextFactory {
             self.services.clone()
         };
 
-        let (skill_load_state, skill_load_session_id) = match parent {
-            Some(parent) => (
-                parent.skill_load_state(),
-                parent.skill_load_session_id().to_string(),
-            ),
-            None => (
-                Arc::new(
-                    crate::application::skill_load_state::ContextSkillLoadState::new(
-                        bindings.context.clone(),
-                    ),
-                ) as Arc<dyn tools::SkillLoadStatePort>,
-                bindings.skill_load_session_id.clone(),
-            ),
-        };
         let final_bindings = RunContextBindings {
             interaction,
-            skill_load_session_id,
             ..bindings
         };
 
         Ok(RuntimeContext::new(
             services,
             final_bindings,
-            skill_load_state,
             RuntimeContextAssemblyToken::new(),
         ))
     }

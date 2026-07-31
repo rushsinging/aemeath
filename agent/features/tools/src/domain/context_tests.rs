@@ -1,5 +1,4 @@
 use super::*;
-use crate::{SkillLoadDecision, SkillLoadMutation, SkillLoadStateError, SkillLoadStatePort};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
@@ -125,29 +124,4 @@ fn tool_execution_context_read_set_records_evidence_through_port() {
     assert!(!ctx.read_set().contains("src/lib.rs"));
     ctx.read_set().record("src/lib.rs");
     assert!(ctx.read_set().contains("src/lib.rs"));
-}
-
-#[test]
-fn tool_execution_context_exposes_skill_load_scope_and_state_port() {
-    struct State;
-
-    #[async_trait::async_trait]
-    impl SkillLoadStatePort for State {
-        async fn compare_and_record(
-            &self,
-            _mutation: SkillLoadMutation,
-        ) -> Result<SkillLoadDecision, SkillLoadStateError> {
-            Ok(SkillLoadDecision::Fresh)
-        }
-    }
-
-    let expected_scope = SkillLoadScope::subagent("agent-1").unwrap();
-    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(PathBuf::from(
-        "/workspace",
-    ))
-    .build();
-    let ctx = ctx.with_skill_load_state(expected_scope.clone(), std::sync::Arc::new(State));
-
-    assert_eq!(ctx.skill_load_scope(), Some(&expected_scope));
-    assert!(ctx.skill_load_state().is_some());
 }

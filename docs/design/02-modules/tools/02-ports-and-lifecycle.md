@@ -191,8 +191,6 @@ trait SkillLoadPort: Send + Sync {
 
 `SkillLoadPort` 每次调用重新执行当前 workspace 下的发现、优先级、解析与能力过滤，只返回一个 `LoadedSkill`。它不缓存启动期正文，也不生成全量正文快照。所属 Run 的 extra dirs/tool names 保持冻结，workspace root 在调用时经 ToolExecutionContext 的 live `WorkspaceRead` 取得。
 
-Tools 同时发布 `SkillLoadStatePort::compare_and_record`，但不拥有状态 backing。Skill Tool 在读取当前正文和内容 revision 后，以 Main Session identity、稳定 Agent scope、canonical skill name 和 revision 发起原子判定：`Fresh` / `Updated` 返回完整正文；`AlreadyLoaded` 只返回“已加载、内容未更新”提示，不重复返回正文。状态端口缺失或持久化失败时 fail-closed，不泄漏刚读取的正文。Main scope 跨 Run 稳定；Sub-agent scope 按 instance 隔离，禁止使用 run identity。
-
 文件系统 adapter 的入口契约：
 
 - 标准 Skill 只识别 `<skill-dir>/SKILL.md`；同目录其他 Markdown 是资源，不参与 Catalog、单 Skill Load 或 metadata revision；

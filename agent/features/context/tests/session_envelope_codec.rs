@@ -9,39 +9,6 @@ use serde_json::json;
 use share::message::{ContentBlock, Message, Role};
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
 
-use tools::{SkillLoadDecision, SkillLoadScope};
-
-#[test]
-fn current_envelope_round_trips_skill_load_records() {
-    let mut session = CanonicalSession::fixture("skill-state");
-    assert_eq!(
-        session.compare_and_record_skill(&SkillLoadScope::main(), "review", "r1"),
-        SkillLoadDecision::Fresh
-    );
-
-    let decoded = decode_session(&SessionCodec::encode(&session).unwrap()).unwrap();
-
-    assert_eq!(
-        decoded.session.skill_load_records,
-        session.skill_load_records
-    );
-}
-
-#[test]
-fn v5_session_upgrades_with_empty_skill_load_records() {
-    let mut value: serde_json::Value = serde_json::from_slice(
-        &SessionCodec::encode(&CanonicalSession::fixture("v5-upgrade")).unwrap(),
-    )
-    .unwrap();
-    value["schema_version"] = json!(5);
-    value.as_object_mut().unwrap().remove("skill_load_records");
-
-    let decoded = decode_session(&serde_json::to_vec(&value).unwrap()).unwrap();
-
-    assert!(decoded.upgraded_from_legacy);
-    assert!(decoded.session.skill_load_records.is_empty());
-}
-
 #[test]
 fn committed_step_messages_clone_shares_the_same_backing() {
     let messages = CommittedStepMessages::from(vec![Message::user("shared")]);
