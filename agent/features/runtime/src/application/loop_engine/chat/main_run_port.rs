@@ -165,6 +165,10 @@ pub(crate) fn make_agent(
             )
             .with_user_agent(runtime_context.config_ref().config().user_agent())
             .with_memory_context(Some(session_id.to_string()), Some(session_reminders))
+            .with_skill_load_state(
+                tools::SkillLoadScope::main(),
+                runtime_context.skill_load_state(),
+            )
             .with_agent(agent_runner),
         ),
         max_tool_concurrency,

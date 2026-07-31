@@ -20,6 +20,7 @@ pub mod scope_profile;
 pub mod shell_safety;
 pub mod skill_pl;
 pub mod skill_ports;
+pub mod skill_state;
 pub mod skill_tool;
 pub mod suspension;
 #[cfg(test)]
@@ -34,6 +35,8 @@ mod command_pl_tests;
 mod scope_profile_tests;
 #[cfg(test)]
 mod skill_pl_tests;
+#[cfg(test)]
+mod skill_state_tests;
 
 pub use agent_port::{AgentDispatch, AgentRunRequest, AgentRunTerminal, AgentRunner};
 pub use command_pl::{
@@ -64,6 +67,9 @@ pub use skill_pl::{
     SkillSlashRoute, SkillSource, SkillSourceKind,
 };
 pub use skill_ports::{SkillCatalogPort, SkillLoadPort};
+pub use skill_state::{
+    SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError, SkillLoadStatePort,
+};
 pub use skill_tool::SkillQuerySnapshot;
 pub use suspension::{ToolSuspension, UserInteractionSpec, UserOption, UserQuestion};
 pub use tool::{Tool, ToolListProvider, TypedTool, TypedToolAdapter, TypedToolResult};

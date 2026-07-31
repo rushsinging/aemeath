@@ -45,6 +45,8 @@ pub struct DerivedRun {
     pub reasoning_level: provider::ReasoningLevel,
     /// Session ID for the isolated context.
     pub session_id: String,
+    /// Stable Skill 去重作用域，绑定当前 Sub-agent instance，不使用 run_id。
+    pub skill_load_scope: tools::SkillLoadScope,
 }
 
 /// #1385: Combined cancellation signal — wraps an external signal (from the
@@ -179,6 +181,7 @@ pub fn derive_sub_run(
         model_name,
         max_tokens,
         reasoning_level,
+        skill_load_scope: tools::SkillLoadScope::new_subagent_instance(),
     })
 }
 
@@ -408,6 +411,14 @@ impl AgentRunner for CliAgentRunner {
                         .config_ref()
                         .config()
                         .user_agent(),
+                )
+                .with_memory_context(
+                    Some(parent_frame.context.skill_load_session_id().to_string()),
+                    None,
+                )
+                .with_skill_load_state(
+                    derived.skill_load_scope.clone(),
+                    derived.instance.context().skill_load_state(),
                 )
                 .with_progress(progress_sink.clone()),
             );

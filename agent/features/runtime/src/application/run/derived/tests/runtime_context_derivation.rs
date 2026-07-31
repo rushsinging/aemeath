@@ -225,8 +225,8 @@ fn assemble_parent_context(
             cancel: RunCancellationScope::new(),
             usage: RunUsageTracker::new(),
         },
+        skill_load_session_id: "session".to_string(),
     };
-
     factory
         .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)
         .expect("test parent context assembly")
@@ -318,6 +318,7 @@ fn make_parent_context_with_event_sink(
                     cancel: RunCancellationScope::new(),
                     usage: RunUsageTracker::new(),
                 },
+                skill_load_session_id: "session".to_string(),
             },
             None,
         )
@@ -519,6 +520,7 @@ fn make_parent_context_with_factory(
             cancel: RunCancellationScope::new(),
             usage: RunUsageTracker::new(),
         },
+        skill_load_session_id: "session".to_string(),
     };
     factory
         .create(&RunSpec::main(), bindings, None)

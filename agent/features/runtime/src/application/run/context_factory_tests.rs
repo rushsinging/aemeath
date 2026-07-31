@@ -266,6 +266,7 @@ fn make_bindings() -> RunCapabilityBindings {
             cancel: RunCancellationScope::new(),
             usage: RunUsageTracker::new(),
         },
+        skill_load_session_id: "session".to_string(),
     }
 }
 
@@ -277,6 +278,11 @@ fn make_parent_context() -> RuntimeContext {
     RuntimeContext::new(
         services,
         bindings,
+        Arc::new(
+            crate::application::context::skill_load_state::ContextSkillLoadState::new(Arc::new(
+                FakeContextPort,
+            )),
+        ),
         crate::application::run::context::RuntimeContextAssemblyToken::new_for_test(),
     )
 }
