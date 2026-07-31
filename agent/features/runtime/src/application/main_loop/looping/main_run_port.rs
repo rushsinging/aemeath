@@ -483,6 +483,7 @@ where
             crate::application::tool_result_materialization::ToolResultMaterializer,
         >,
         context_port: Arc<dyn context::ports::ContextPort>,
+        skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
         run_id: &sdk::RunId,
         tool_selection: &share::config::ToolSelection,
     ) -> Agent {
@@ -534,6 +535,7 @@ where
                     Some(session_id.to_string()),
                     Some(session_reminders.clone()),
                 )
+                .with_skill_load_state(tools::SkillLoadScope::main(), skill_load_state)
                 .with_agent(agent_runner.clone())
                 .with_selection(tool_selection.clone()),
             ),
@@ -804,6 +806,7 @@ where
             self.session_id,
             Arc::new(self.tool_result_materializer.clone()),
             self.runtime_context.context(),
+            self.runtime_context.skill_load_state(),
             &self.run_id,
             self.run_config().tool_selection(),
         );
@@ -1568,6 +1571,7 @@ where
                             self.session_id,
                             Arc::new(self.tool_result_materializer.clone()),
                             self.runtime_context.context(),
+                            self.runtime_context.skill_load_state(),
                             &self.run_id,
                             self.run_config().tool_selection(),
                         )

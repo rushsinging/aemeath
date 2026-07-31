@@ -115,6 +115,8 @@ Runtime 启动时接收 Composition 已按当前 workspace、已提交配置和 
 
 该刷新位于 Run admission 边界，而不是 Tool 调用边界。模型真正调用唯一 `Skill` Tool 时，`SkillLoadPort` 仍结合所属 Run 冻结的 dirs/tool names 与 live workspace root 按 identity 加载正文；刷新与正文加载不得合并。
 
+正文去重状态不以 Run 为生命周期。RuntimeContextFactory 在 Main 装配 Context-owned `SkillLoadStatePort` 与 Main Session identity；后续 Main Run 使用 `SkillLoadScope::Main`。每次 `derive_sub_run` 生成一次独立 Sub-agent instance scope，同一 instance 的所有 Tool round 复用它；Sub RuntimeContext 继承父 state port 和 Main Session identity，而不是使用 isolated Context backing。`run_id` 只属于执行生命周期，禁止作为 Skill 去重键。
+
 ### 2.2 Step/Run 控制与持久化原则
 
 Loop 在**每个** `.await` 返回后 **MUST** 检查当前 Step scope 与 Run root scope：

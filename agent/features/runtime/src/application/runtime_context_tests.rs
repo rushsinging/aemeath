@@ -219,6 +219,7 @@ fn make_bindings() -> RunContextBindings {
 
     RunContextBindings {
         context: Arc::new(FakeContextPort),
+        skill_load_session_id: "session".to_string(),
         provider: Arc::new(binding),
         interaction: Arc::new(InteractionBridge::new()),
         memory: Arc::new(memory::NoOpMemory),
@@ -275,6 +276,7 @@ fn main_runtime_context_preserves_injected_port_identity() {
     );
     let bindings = RunContextBindings {
         context: context_arc.clone(),
+        skill_load_session_id: "session".to_string(),
         provider: provider_arc.clone(),
         interaction: interaction_arc.clone(),
         memory: memory_arc.clone(),

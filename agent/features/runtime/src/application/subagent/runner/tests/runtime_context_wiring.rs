@@ -181,6 +181,7 @@ fn assemble_test_context(
     );
     let bindings = RunContextBindings {
         context: Arc::new(LocalFakeCtxPort),
+        skill_load_session_id: "session".to_string(),
         provider: Arc::new(binding),
         interaction: Arc::new(InteractionBridge::new()),
         memory: Arc::new(memory::NoOpMemory),
