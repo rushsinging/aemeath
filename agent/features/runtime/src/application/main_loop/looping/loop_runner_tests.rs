@@ -183,7 +183,6 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
                 compact: None,
                 run_slices: Vec::new(),
                 committed_steps: Vec::new(),
-                skill_load_records: Vec::new(),
             },
             initial_memory: Arc::new(memory::api::NoOpMemory),
             context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(

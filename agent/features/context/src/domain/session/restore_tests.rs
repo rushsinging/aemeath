@@ -69,7 +69,6 @@ fn unfinished_tool_session_with_outcome(
             }],
         )],
         committed_steps: vec![],
-        skill_load_records: Vec::new(),
     }
 }
 
@@ -98,7 +97,6 @@ fn two_step_session() -> CanonicalSession {
             ],
         )],
         committed_steps: vec![],
-        skill_load_records: Vec::new(),
     }
 }
 
@@ -307,7 +305,6 @@ fn restore_reads_only_steps_from_active_marker() {
             ),
         ],
         committed_steps: vec![],
-        skill_load_records: Vec::new(),
     };
 
     let restore = SessionRestore::from_canonical(&session);

@@ -16,7 +16,6 @@ struct Session {                       // 聚合根（可序列化，持久化�
     metadata: SessionMetadata,
     tasks: TaskSnapshot,
     workspace: PersistedWorkspaceContext,
-    skill_load_records: Vec<SkillLoadRecord>, // Main Session 内按 Agent scope 持久化正文 revision
     created_at: Timestamp,
     updated_at: Timestamp,
 }
@@ -69,7 +68,6 @@ Session（对话历史容器，跨多次输入）
 - **一个 Session 含多个 Run 的结构化事实**；compact marker 只改变活跃读取起点，不创建第二条历史链
 - **Run 读写 Session**：在 `freeze_step` 绑定 user input 后、首次 `build_window` 前，Runtime 经 `append_accepted_input` 将仅包含 accepted user facts 的 `AcceptedInputProjection` durable 写入；同一 Step 后续由 `StepFinalizer` 经 `ContextAppend` 只补充 outcome。accepted append 在 Context mutation gate 内自行读取当前 revision、检查 `(run_id, step_id, fingerprint)` 幂等/冲突、durable save 后再 publish；它**不**要求 Runtime 提供 CAS。finalized outcome 发生在 window 构建后，仍以 `ContextWindow.backing_revision` 作为 `expected_revision` 做 CAS。
 - Run 是内存态执行；Session 是持久化数据——两者生命周期不同（Run 短、Session 长）
-- `skill_load_records` 以 `(SkillLoadScope, canonical skill name)` 为唯一键保存最后成功发布给该 Agent 主体的内容 revision。Main scope 跨 Main Run 复用；Sub-agent instance scope 相互隔离但记录仍进入父 Main Session 的 canonical backing。compare-and-record 与对话 mutation 共用 gate：相同 revision 幂等且不增加 Session revision，首次/更新先 durable save 再 publish；compact 保留，clear 清空，Resume 恢复。当前 writer 为 schema v6，v1-v5 升级为空记录，unknown future version fail-closed。
 ## 6. RunStep 持久化边界
 Session 采用两阶段 per-RunStep 持久化：`freeze_step` 已绑定的 user input 首先形成不可变 `AcceptedInputProjection` 并立刻 durable；后续普通完成、`CancelRunStep` 或 `TerminateRun` 仅由 Runtime 唯一 `StepFinalizer` 形成 outcome projection，补充同一 `CommittedRunStep` 而**不重复** accepted input。Runtime 用显式 `StepMessageOwnership` 把尚未绑定的用户输入 move 到 active Step，并在模型/Tool 产出时逐条记录；**NEVER** 根据消息数组长度、位置、历史数量或 `projection_start_index` 一类索引推断消息归属。Context Management 以 `(run_id, step_id, fingerprint)` 为 accepted-input 幂等键，在 mutation gate 内完成 current revision 读取、写入、跨 BC snapshot 收集、原子落盘与 publish；同键不同 payload 返回 typed conflict。outcome 仍使用 `ContextWindow.backing_revision` CAS，避免以过期 Context Window 覆盖新历史。`FinalizeCause` 只允许 `Completed | UserCancelledStep | RunTerminated`；它描述 outcome 为何收口，不把 Run 状态机迁入 Session。
 `FinalizedOutcomeProjection` 只补充同一 Step 的 finalized facts：`FinalizeCause`、assistant/partial assistant、原序 Tool terminal results、`StepReceipt`、usage、outcome fingerprint 与 committed revision；它**不重复或覆盖** `AcceptedInputProjection`。同键 outcome 重试以 `(run_id, step_id, fingerprint)` 幂等，内容不同返回 typed conflict。v2 compatibility vector 升级为单一 `Completed` projection，receipt/usage 缺失保持显式缺失，**NEVER** 根据 role 或 ToolUse/ToolResult 顺序猜测历史边界或伪造 receipt。

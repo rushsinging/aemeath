@@ -209,7 +209,6 @@ fn build_harness() -> Harness {
         compact: None,
         run_slices: vec![],
         committed_steps: vec![],
-        skill_load_records: Vec::new(),
     };
 
     let builder = MainSessionWiringBuilder {
@@ -262,7 +261,6 @@ fn session_with_workspace(
         compact: None,
         run_slices: vec![],
         committed_steps: vec![],
-        skill_load_records: Vec::new(),
     }
 }
 
@@ -774,7 +772,6 @@ async fn workspace_missing_returns_typed_error() {
         compact: None,
         run_slices: vec![],
         committed_steps: vec![],
-        skill_load_records: Vec::new(),
     };
 
     let result = h.wiring.resume_prepared(session).await;
@@ -808,7 +805,6 @@ async fn workspace_captured_empty_returns_typed_error() {
         compact: None,
         run_slices: vec![],
         committed_steps: vec![],
-        skill_load_records: Vec::new(),
     };
 
     let result = h.wiring.resume_prepared(session).await;

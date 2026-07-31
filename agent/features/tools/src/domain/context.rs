@@ -4,8 +4,8 @@ mod tests;
 
 use crate::domain::CatalogQuery;
 use crate::domain::{
-    AgentDispatch, AgentProgressEvent, RegistryScopeName, SessionReminders, SkillLoadScope,
-    SkillLoadStatePort, SkillQuerySnapshot, ToolProfileName,
+    AgentDispatch, AgentProgressEvent, RegistryScopeName, SessionReminders, SkillQuerySnapshot,
+    ToolProfileName,
 };
 use async_trait::async_trait;
 use project::{WorkspaceId, WorkspaceRead};
@@ -177,8 +177,6 @@ pub struct ToolExecutionPorts {
     user_agent: String,
     authorization: AuthorizationContext,
     skill_query: SkillQuerySnapshot,
-    skill_load_scope: Option<SkillLoadScope>,
-    skill_load_state: Option<Arc<dyn SkillLoadStatePort>>,
     selection: share::config::ToolSelection,
 }
 impl ToolExecutionPorts {
@@ -205,8 +203,6 @@ impl ToolExecutionPorts {
             user_agent: share::config::Config::default().api.user_agent,
             authorization: AuthorizationContext::STANDARD,
             skill_query: SkillQuerySnapshot::default(),
-            skill_load_scope: None,
-            skill_load_state: None,
             selection: share::config::ToolSelection::default(),
         }
     }
@@ -229,16 +225,6 @@ impl ToolExecutionPorts {
 
     pub fn with_skill_query(mut self, skill_query: SkillQuerySnapshot) -> Self {
         self.skill_query = skill_query;
-        self
-    }
-
-    pub fn with_skill_load_state(
-        mut self,
-        scope: SkillLoadScope,
-        state: Arc<dyn SkillLoadStatePort>,
-    ) -> Self {
-        self.skill_load_scope = Some(scope);
-        self.skill_load_state = Some(state);
         self
     }
 
@@ -302,12 +288,6 @@ impl ToolExecutionContext {
     pub fn skill_query(&self) -> &SkillQuerySnapshot {
         &self.ports.skill_query
     }
-    pub fn skill_load_scope(&self) -> Option<&SkillLoadScope> {
-        self.ports.skill_load_scope.as_ref()
-    }
-    pub fn skill_load_state(&self) -> Option<Arc<dyn SkillLoadStatePort>> {
-        self.ports.skill_load_state.clone()
-    }
     pub fn parent_session_id(&self) -> Option<String> {
         self.ports.parent_session_id.clone()
     }
@@ -337,17 +317,6 @@ impl ToolExecutionContext {
         let mut n = self.clone();
         n.ports.progress = p;
         n
-    }
-
-    pub fn with_skill_load_state(
-        &self,
-        scope: SkillLoadScope,
-        state: Arc<dyn SkillLoadStatePort>,
-    ) -> Self {
-        let mut next = self.clone();
-        next.ports.skill_load_scope = Some(scope);
-        next.ports.skill_load_state = Some(state);
-        next
     }
 }
 pub struct MutexReadSet(pub Arc<Mutex<HashSet<String>>>);

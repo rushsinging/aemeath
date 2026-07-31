@@ -588,7 +588,6 @@ where
                 let binding = shell.current_binding.read().unwrap().clone();
                 let bindings = RunContextBindings {
                     context: bound_main_run.context(),
-                    skill_load_session_id: bound_main_run.session().id.clone(),
                     provider: binding,
                     interaction: shell.interaction_bridge.clone(),
                     memory: run_memory.clone(),

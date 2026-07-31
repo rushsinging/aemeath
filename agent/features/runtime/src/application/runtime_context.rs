@@ -298,8 +298,6 @@ pub struct RuntimeServices {
 pub struct RunContextBindings {
     /// Context Management BC 出站端口。
     pub context: Arc<dyn ContextPort>,
-    /// Skill 状态所属的 Main Session identity；Sub-run 继承父值。
-    pub skill_load_session_id: String,
     /// Provider 绑定（含 `Arc<dyn ProviderPort>` 与调用冻结属性）。
     pub provider: Arc<ProviderBinding>,
     /// 交互桥（ask_user / permission gate）。
@@ -359,8 +357,6 @@ pub struct RuntimeContext {
     reflection_history: Arc<dyn ReflectionHistoryStore>,
     task: Arc<dyn TaskAccess>,
     hooks: Arc<dyn HookPort>,
-    skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
-    skill_load_session_id: String,
     reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
     config: RunConfigSnapshot,
     cancel: RunCancellationScope,
@@ -404,7 +400,6 @@ impl RuntimeContext {
     pub fn new(
         services: RuntimeServices,
         bindings: RunContextBindings,
-        skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
         _token: RuntimeContextAssemblyToken,
     ) -> Self {
         Self {
@@ -418,8 +413,6 @@ impl RuntimeContext {
             reflection_history: services.reflection_history,
             task: services.task,
             hooks: services.hooks,
-            skill_load_state,
-            skill_load_session_id: bindings.skill_load_session_id,
             reasoning: bindings.reasoning,
             config: bindings.config,
             cancel: bindings.cancel,
@@ -470,14 +463,6 @@ impl RuntimeContext {
     /// Hook 端口，`Arc` clone。
     pub fn hooks(&self) -> Arc<dyn HookPort> {
         self.hooks.clone()
-    }
-    /// Skill 加载状态端口，Sub-run 继承父级的 Context-owned durable backing。
-    pub fn skill_load_state(&self) -> Arc<dyn tools::SkillLoadStatePort> {
-        self.skill_load_state.clone()
-    }
-    /// Skill 状态所属的 Main Session identity。
-    pub fn skill_load_session_id(&self) -> &str {
-        &self.skill_load_session_id
     }
     /// Reasoning 端口，`Arc` clone。
     pub fn reasoning(&self) -> Arc<Mutex<share::reasoning::ReasoningLevel>> {

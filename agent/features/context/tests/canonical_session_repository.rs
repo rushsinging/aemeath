@@ -22,8 +22,6 @@ use share::message::Message;
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
 use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidationError};
 
-use tools::{SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError};
-
 #[derive(Default)]
 struct RecordingWriter {
     saved: Mutex<Vec<CanonicalSession>>,
@@ -192,7 +190,6 @@ fn repository(
             compact: None,
             run_slices: vec![],
             committed_steps: vec![],
-            skill_load_records: Vec::new(),
         },
     )
 }
@@ -228,7 +225,6 @@ fn ten_step_session(
         compact: None,
         run_slices: ten_step_slices(),
         committed_steps: vec![],
-        skill_load_records: Vec::new(),
     }
 }
 
@@ -247,201 +243,6 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
         outcome,
         context::domain::CompactOutcome::Committed(_)
     ));
-}
-
-#[tokio::test]
-async fn skill_load_revision_is_atomic_idempotent_and_failure_safe() {
-    let writer = Arc::new(RecordingWriter::default());
-    let (repository_under_test, holder) = repository(writer.clone());
-    let session_id = holder.read().unwrap().id.clone();
-    let mutation = SkillLoadMutation::new(
-        session_id,
-        SkillLoadScope::main(),
-        "superpowers:brainstorming",
-        "r1",
-    )
-    .unwrap();
-
-    assert_eq!(
-        repository_under_test
-            .compare_and_record_skill_load(mutation.clone())
-            .await
-            .unwrap(),
-        SkillLoadDecision::Fresh
-    );
-    assert_eq!(holder.read().unwrap().revision, 1);
-    assert_eq!(writer.saved.lock().unwrap().len(), 1);
-
-    assert_eq!(
-        repository_under_test
-            .compare_and_record_skill_load(mutation)
-            .await
-            .unwrap(),
-        SkillLoadDecision::AlreadyLoaded
-    );
-    assert_eq!(holder.read().unwrap().revision, 1);
-    assert_eq!(writer.saved.lock().unwrap().len(), 1);
-
-    let updated = SkillLoadMutation::new(
-        holder.read().unwrap().id.clone(),
-        SkillLoadScope::main(),
-        "superpowers:brainstorming",
-        "r2",
-    )
-    .unwrap();
-    assert_eq!(
-        repository_under_test
-            .compare_and_record_skill_load(updated)
-            .await
-            .unwrap(),
-        SkillLoadDecision::Updated
-    );
-    assert_eq!(holder.read().unwrap().revision, 2);
-    assert_eq!(
-        holder
-            .read()
-            .unwrap()
-            .loaded_skill_revision(&SkillLoadScope::main(), "superpowers:brainstorming"),
-        Some("r2")
-    );
-
-    let failing_writer = Arc::new(RecordingWriter {
-        saved: Mutex::new(Vec::new()),
-        fail: true,
-    });
-    let (failing, failing_holder) = repository(failing_writer);
-    let failing_session_id = failing_holder.read().unwrap().id.clone();
-    let failed = failing
-        .compare_and_record_skill_load(
-            SkillLoadMutation::new(failing_session_id, SkillLoadScope::main(), "review", "r1")
-                .unwrap(),
-        )
-        .await;
-    assert!(matches!(
-        failed,
-        Err(SkillLoadStateError::Storage(message)) if message == "disk full"
-    ));
-    assert_eq!(failing_holder.read().unwrap().revision, 0);
-    assert!(failing_holder.read().unwrap().skill_load_records.is_empty());
-}
-
-#[tokio::test]
-async fn skill_load_rejects_foreign_session_identity() {
-    let writer = Arc::new(RecordingWriter::default());
-    let (repository, holder) = repository(writer);
-    let error = repository
-        .compare_and_record_skill_load(
-            SkillLoadMutation::new("foreign", SkillLoadScope::main(), "review", "r1").unwrap(),
-        )
-        .await
-        .unwrap_err();
-
-    assert_eq!(
-        error,
-        SkillLoadStateError::SessionNotFound("foreign".to_string())
-    );
-    assert!(holder.read().unwrap().skill_load_records.is_empty());
-}
-
-#[tokio::test]
-async fn clear_removes_persisted_skill_load_records() {
-    let writer = Arc::new(RecordingWriter::default());
-    let (repository, holder) = repository(writer);
-    let session_id = holder.read().unwrap().id.clone();
-    repository
-        .compare_and_record_skill_load(
-            SkillLoadMutation::new(session_id.clone(), SkillLoadScope::main(), "review", "r1")
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    repository
-        .clear(&SessionId::new(&session_id))
-        .await
-        .unwrap();
-
-    assert!(holder.read().unwrap().skill_load_records.is_empty());
-}
-
-#[tokio::test]
-async fn compaction_preserves_skill_load_records() {
-    let writer = Arc::new(RecordingWriter::default());
-    let (repository, holder) = repository(writer);
-    let session_id = holder.read().unwrap().id.clone();
-    repository
-        .compare_and_record_skill_load(
-            SkillLoadMutation::new(session_id.clone(), SkillLoadScope::main(), "review", "r1")
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    repository
-        .commit_compaction(&CompactRequest {
-            run_id: RunId::new("run"),
-            source_revision: SessionRevision::new(1),
-            source: compact_request(SessionId::new(&session_id)),
-            trigger: CompactTrigger::Automatic,
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(
-        holder
-            .read()
-            .unwrap()
-            .loaded_skill_revision(&SkillLoadScope::main(), "review"),
-        Some("r1")
-    );
-}
-
-#[tokio::test]
-async fn concurrent_skill_load_records_return_one_fresh_decision() {
-    let writer = Arc::new(RecordingWriter::default());
-    let (repository, holder) = repository(writer);
-    let repository = Arc::new(repository);
-    let mutation = SkillLoadMutation::new(
-        holder.read().unwrap().id.clone(),
-        SkillLoadScope::main(),
-        "review",
-        "r1",
-    )
-    .unwrap();
-    let first = {
-        let repository = repository.clone();
-        let mutation = mutation.clone();
-        tokio::spawn(async move {
-            repository
-                .compare_and_record_skill_load(mutation)
-                .await
-                .unwrap()
-        })
-    };
-    let second = {
-        let repository = repository.clone();
-        tokio::spawn(async move {
-            repository
-                .compare_and_record_skill_load(mutation)
-                .await
-                .unwrap()
-        })
-    };
-    let decisions = [first.await.unwrap(), second.await.unwrap()];
-
-    assert_eq!(
-        decisions
-            .iter()
-            .filter(|decision| **decision == SkillLoadDecision::Fresh)
-            .count(),
-        1
-    );
-    assert_eq!(
-        decisions
-            .iter()
-            .filter(|decision| **decision == SkillLoadDecision::AlreadyLoaded)
-            .count(),
-        1
-    );
 }
 
 #[cfg(feature = "dev")]
@@ -481,7 +282,6 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
             fingerprint: "outcome".to_string(),
             committed_revision: revision,
         }],
-        skill_load_records: Vec::new(),
     }
 }
 
@@ -638,7 +438,6 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
             compact: None,
             run_slices,
             committed_steps: vec![],
-            skill_load_records: Vec::new(),
         };
         let (repository, _) = repository_with_session(writer, session);
         let mut appended = append("tail");
@@ -880,7 +679,6 @@ async fn snapshot_reads_structured_projection_not_legacy_chats() {
             )],
         )],
         committed_steps: vec![],
-        skill_load_records: Vec::new(),
     };
     let (repository, _) = repository_with_session(writer, session);
 
