@@ -2,6 +2,46 @@ use super::{sdk_event_to_tui_event, SdkEventMapping};
 use crate::tui::adapter::tui_runtime_event::{TuiHookStatus, TuiRunEvent, TuiRuntimeEvent};
 
 #[test]
+fn tool_result_projection_keeps_bounded_payload_and_blob_reason() {
+    let content = serde_json::json!({
+        "text": "bounded preview",
+        "truncated": true,
+        "original_chars": 50_001,
+        "original_bytes": 50_001,
+        "omitted_chars": 47_501,
+        "blob": {
+            "status": "unavailable",
+            "reason": "write_failed"
+        }
+    });
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ToolResult {
+        context: sdk::ChatEventContext::new(
+            sdk::ChatId::new("chat-tool-result"),
+            sdk::ChatTurnId::new("turn-tool-result"),
+        ),
+        id: sdk::ToolCallId::new("runtime-call"),
+        provider_id: "provider-call".to_string(),
+        tool_name: "Bash".to_string(),
+        output: "bounded preview".to_string(),
+        content: content.clone(),
+        is_error: false,
+        images: Vec::new(),
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolResult {
+            output,
+            content: projected,
+            ..
+        }) if output == "bounded preview"
+            && projected == content
+            && projected.pointer("/blob/reason").and_then(serde_json::Value::as_str)
+                == Some("write_failed")
+    ));
+}
+
+#[test]
 fn session_resume_keeps_context_run_step_boundaries() {
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::SessionResumed {
         steps: vec![sdk::ResumedSessionStep {

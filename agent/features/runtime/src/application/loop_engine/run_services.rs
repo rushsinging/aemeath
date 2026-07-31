@@ -27,7 +27,7 @@ use crate::application::loop_engine::{
 };
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
-use crate::application::tool::result_materialization::ToolResultMaterializer;
+use crate::application::tool::tool_result_materializer::ToolResultMaterializer;
 use crate::ports::{ContextRequest, RunStepId};
 
 pub(crate) struct ContextRequestData<'a> {

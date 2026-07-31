@@ -127,6 +127,9 @@ pub(crate) fn make_agent(
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     session_id: &str,
     run_id: &sdk::RunId,
+    tool_result_materializer: Arc<
+        crate::application::tool::tool_result_materializer::ToolResultMaterializer,
+    >,
 ) -> Agent {
     let catalog = runtime_context
         .tool_catalog_ref()
@@ -167,6 +170,7 @@ pub(crate) fn make_agent(
         max_tool_concurrency,
         agent_semaphore,
         workspace_persist: workspace.persist(),
+        tool_result_materializer,
         runtime_cancellation: cancel.clone(),
     }
 }

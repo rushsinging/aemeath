@@ -13,7 +13,7 @@ pub struct RuntimeToolAssemblyDependencies {
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     tool_result_materializer:
-        Arc<crate::application::tool::result_materialization::ToolResultMaterializer>,
+        Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
 }
 
@@ -22,7 +22,7 @@ impl RuntimeToolAssemblyDependencies {
         tool_catalog: Arc<dyn tools::ToolCatalogPort>,
         skill_catalog: Arc<dyn tools::SkillCatalogPort>,
         tool_result_materializer: Arc<
-            crate::application::tool::result_materialization::ToolResultMaterializer,
+            crate::application::tool::tool_result_materializer::ToolResultMaterializer,
         >,
         active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
     ) -> Self {
@@ -167,7 +167,7 @@ pub struct RuntimeBootstrapDependencies {
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     tool_result_materializer:
-        Arc<crate::application::tool::result_materialization::ToolResultMaterializer>,
+        Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
     initial_provider: InitialProviderAssembly,
     session_bootstrap: SessionBootstrapAssembly,
@@ -260,7 +260,7 @@ impl RuntimeBootstrapDependencies {
 
     pub fn tool_result_materializer(
         &self,
-    ) -> Arc<crate::application::tool::result_materialization::ToolResultMaterializer> {
+    ) -> Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer> {
         self.tool_result_materializer.clone()
     }
 

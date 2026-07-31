@@ -166,7 +166,14 @@ where
             stderr
         };
         let result = ToolExecution::new(&call, ToolOutcome::error(error_detail));
-        send_tool_result(&sink, context, &result).await;
+        send_tool_result(
+            &sink,
+            context,
+            &result,
+            agent.tool_result_materializer.as_ref(),
+            agent.session_id.as_ref(),
+        )
+        .await;
         return vec![result];
     }
     // Apply the hook directive through the canonical re-validation path (#926).
@@ -198,25 +205,53 @@ where
         HookDirectiveOutcome::InvalidInput { error, .. } => {
             let msg = format!("PreToolUse hook returned invalid input: {error}");
             let result = ToolExecution::new(&call, ToolOutcome::error(msg));
-            send_tool_result(&sink, context, &result).await;
+            send_tool_result(
+                &sink,
+                context,
+                &result,
+                agent.tool_result_materializer.as_ref(),
+                agent.session_id.as_ref(),
+            )
+            .await;
             return vec![result];
         }
         HookDirectiveOutcome::Denied { reason, .. } => {
             let msg = format!("Denied by PreToolUse hook re-evaluation: {reason}");
             let result = ToolExecution::new(&call, ToolOutcome::error(msg));
-            send_tool_result(&sink, context, &result).await;
+            send_tool_result(
+                &sink,
+                context,
+                &result,
+                agent.tool_result_materializer.as_ref(),
+                agent.session_id.as_ref(),
+            )
+            .await;
             return vec![result];
         }
         HookDirectiveOutcome::ApprovalRequired { reason, .. } => {
             let msg = format!("Approval required after PreToolUse hook: {reason}");
             let result = ToolExecution::new(&call, ToolOutcome::error(msg));
-            send_tool_result(&sink, context, &result).await;
+            send_tool_result(
+                &sink,
+                context,
+                &result,
+                agent.tool_result_materializer.as_ref(),
+                agent.session_id.as_ref(),
+            )
+            .await;
             return vec![result];
         }
         HookDirectiveOutcome::Blocked { reason, .. } => {
             let msg = format!("Blocked by PreToolUse hook: {reason:?}");
             let result = ToolExecution::new(&call, ToolOutcome::error(msg));
-            send_tool_result(&sink, context, &result).await;
+            send_tool_result(
+                &sink,
+                context,
+                &result,
+                agent.tool_result_materializer.as_ref(),
+                agent.session_id.as_ref(),
+            )
+            .await;
             return vec![result];
         }
     };
@@ -312,7 +347,14 @@ where
         workspace_root,
     )
     .await;
-    send_tool_result(&sink, context, &execution).await;
+    send_tool_result(
+        &sink,
+        context,
+        &execution,
+        agent.tool_result_materializer.as_ref(),
+        agent.session_id.as_ref(),
+    )
+    .await;
     vec![execution]
 }
 
@@ -490,6 +532,8 @@ mod tests {
                 agent_semaphore: agent_semaphore.clone(),
                 workspace_persist:
                     crate::application::run::workspace_test_support::workspace_persist(&ctx),
+                tool_result_materializer:
+                    crate::application::tool::test_support::test_tool_result_materializer(),
                 runtime_cancellation: cancel.clone(),
             };
             execute_agent_calls(

@@ -427,6 +427,7 @@ impl AgentRunner for CliAgentRunner {
                     .workspace()
                     .expect("DerivedRun must retain workspace")
                     .persist(),
+                tool_result_materializer: self.tool_result_materializer.clone(),
                 runtime_cancellation: runtime_token.clone(),
             };
 

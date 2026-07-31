@@ -51,6 +51,8 @@ pub struct Agent {
     pub workspace_persist: Arc<dyn project::WorkspacePersist>,
     pub(crate) context: ContextCoordinator,
     pub(crate) session_id: context::domain::SessionId,
+    pub(crate) tool_result_materializer:
+        Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
 }
 
@@ -108,6 +110,8 @@ impl Agent {
             ),
             context: ContextCoordinator::new(context::adapters::isolated_context("test-session")),
             session_id: context::domain::SessionId::new("test-session"),
+            tool_result_materializer:
+                crate::application::tool::test_support::test_tool_result_materializer(),
             ctx,
             max_tool_concurrency,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),

@@ -22,7 +22,7 @@ pub fn build_agent_runner(
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     tool_result_materializer: Arc<
-        crate::application::tool::result_materialization::ToolResultMaterializer,
+        crate::application::tool::tool_result_materializer::ToolResultMaterializer,
     >,
     workspace: project::WorkspaceViews,
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,

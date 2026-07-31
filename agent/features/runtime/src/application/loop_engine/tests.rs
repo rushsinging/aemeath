@@ -1094,7 +1094,7 @@ impl crate::application::interaction::coordinator::InteractionCompletionContextP
     ) -> crate::application::interaction::coordinator::InteractionCompletionContext<'_> {
         static MATERIALIZER: std::sync::OnceLock<
             std::sync::Arc<
-                crate::application::tool::result_materialization::ToolResultMaterializer,
+                crate::application::tool::tool_result_materializer::ToolResultMaterializer,
             >,
         > = std::sync::OnceLock::new();
         let materializer = MATERIALIZER

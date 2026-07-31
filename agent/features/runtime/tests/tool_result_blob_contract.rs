@@ -13,6 +13,7 @@ use storage::api::{
 struct FakeBlobPort {
     values: Mutex<HashMap<StorageKey, Vec<u8>>>,
     writes: Mutex<Vec<(StorageKey, Vec<u8>, WriteOptions)>>,
+    write_failure: Mutex<Option<String>>,
 }
 
 #[async_trait]
@@ -37,6 +38,12 @@ impl AtomicBlobPort for FakeBlobPort {
         bytes: &[u8],
         options: WriteOptions,
     ) -> Result<WriteReceipt, StorageError> {
+        if let Some(message) = self.write_failure.lock().unwrap().clone() {
+            return Err(StorageError::new(
+                storage::api::StorageErrorKind::Io,
+                message,
+            ));
+        }
         self.values
             .lock()
             .unwrap()
@@ -142,4 +149,27 @@ async fn adapter_rejects_same_identifier_with_different_content() {
 
     assert!(error.to_string().contains("不同内容"));
     assert_eq!(blob.writes.lock().unwrap().len(), 1);
+    assert_eq!(
+        blob.values
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .map(Vec::as_slice),
+        Some(b"old".as_slice())
+    );
+}
+
+#[tokio::test]
+async fn adapter_write_failure_returns_no_locator_and_keeps_storage_empty() {
+    let blob = Arc::new(FakeBlobPort::default());
+    *blob.write_failure.lock().unwrap() = Some("磁盘不可写".to_string());
+    let store = AtomicBlobToolResultStore::new(blob.clone(), "/root".into());
+
+    let result = store.write_once("session", "tool", b"full output").await;
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("磁盘不可写"));
+    assert!(blob.values.lock().unwrap().is_empty());
+    assert!(blob.writes.lock().unwrap().is_empty());
 }

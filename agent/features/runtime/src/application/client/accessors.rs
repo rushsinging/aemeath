@@ -112,7 +112,7 @@ pub struct SessionRuntime {
     /// loop before tool execution, read by sub-agent derivation.
     pub(crate) parent_context_source: ParentRunContextSource,
     pub(crate) tool_result_materializer:
-        Arc<crate::application::tool::result_materialization::ToolResultMaterializer>,
+        Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     pub(crate) active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
     pub(crate) interaction_bridge: Arc<crate::application::interaction::port::InteractionBridge>,
     pub(crate) session_ingress: Arc<crate::application::session::ingress::SessionIngress>,
@@ -168,7 +168,7 @@ impl SessionRuntime {
         agent_runner: Arc<dyn AgentRunner>,
         parent_context_source: ParentRunContextSource,
         tool_result_materializer: Arc<
-            crate::application::tool::result_materialization::ToolResultMaterializer,
+            crate::application::tool::tool_result_materializer::ToolResultMaterializer,
         >,
         active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
         runtime_context_factory: Arc<RuntimeContextFactory>,

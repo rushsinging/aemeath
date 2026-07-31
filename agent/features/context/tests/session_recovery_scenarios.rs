@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use context::adapters::LegacySessionDecoder;
 use context::application::{SessionLoadError, SessionPersistenceService};
+use context::domain::session::{CanonicalSession, CommittedRunSlice, CommittedRunStep};
 use context::ports::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
+use share::message::{ContentBlock, Message, Role};
 
 #[derive(Default)]
 struct JourneyStore {
@@ -35,6 +37,66 @@ impl SessionSnapshotStore for JourneyStore {
     async fn quarantine(&self, _generation: SessionGeneration) -> Result<(), SessionStoreError> {
         Ok(())
     }
+}
+
+#[tokio::test]
+async fn unavailable_tool_result_projection_survives_save_and_resume() {
+    let store = Arc::new(JourneyStore::default());
+    let preview = "<persisted-output>bounded unavailable preview</persisted-output>";
+    let projection = serde_json::json!({
+        "text": preview,
+        "truncated": true,
+        "original_chars": 50_001,
+        "original_bytes": 50_001,
+        "omitted_chars": 47_501,
+        "blob": {
+            "status": "unavailable",
+            "reason": "write_failed"
+        }
+    });
+    let mut session = CanonicalSession::fixture("resume-tool-result");
+    session.run_slices = vec![CommittedRunSlice::new(
+        "run",
+        vec![CommittedRunStep::compatibility_outcome_only(
+            "step",
+            vec![Message {
+                role: Role::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "tool".to_string(),
+                    content: projection.clone(),
+                    is_error: false,
+                    text: Some(preview.to_string()),
+                }],
+                metadata: None,
+            }],
+        )],
+    )];
+    let service = SessionPersistenceService::new(store.clone(), Arc::new(LegacySessionDecoder));
+
+    service.save(&session).await.unwrap();
+    let persisted = store.writes.lock().unwrap()[0].clone();
+    assert!(!String::from_utf8_lossy(&persisted).contains("FULL_PAYLOAD_SENTINEL"));
+    *store.primary.lock().unwrap() = Some(persisted);
+    let resumed = service.load().await.unwrap();
+
+    let ContentBlock::ToolResult { content, text, .. } = &resumed.run_slices[0].steps[0]
+        .outcome
+        .as_ref()
+        .unwrap()
+        .messages[0]
+        .content[0]
+    else {
+        panic!("expected resumed tool result");
+    };
+    assert_eq!(content, &projection);
+    assert_eq!(text.as_deref(), Some(preview));
+    assert!(content.pointer("/blob/locator").is_none());
+    assert_eq!(
+        content
+            .pointer("/blob/reason")
+            .and_then(serde_json::Value::as_str),
+        Some("write_failed")
+    );
 }
 
 #[tokio::test]

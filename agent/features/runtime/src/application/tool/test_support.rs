@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 pub(crate) fn test_tool_result_materializer(
-) -> Arc<super::result_materialization::ToolResultMaterializer> {
+) -> Arc<super::tool_result_materializer::ToolResultMaterializer> {
     struct TestBlobPort;
 
     #[async_trait]
@@ -20,8 +20,12 @@ pub(crate) fn test_tool_result_materializer(
         }
     }
 
-    Arc::new(super::result_materialization::ToolResultMaterializer::new(
-        Arc::new(TestBlobPort),
-        super::result_materialization::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
-    ))
+    Arc::new(
+        super::tool_result_materializer::ToolResultMaterializer::new(
+            Arc::new(TestBlobPort),
+            super::tool_result_materializer::ToolResultMaterializationPolicy::new(
+                50_000, 2_000, 500,
+            ),
+        ),
+    )
 }

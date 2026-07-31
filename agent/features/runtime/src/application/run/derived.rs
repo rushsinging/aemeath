@@ -19,7 +19,7 @@ pub struct CliAgentRunner {
     pub max_tool_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub tool_result_materializer:
-        Arc<crate::application::tool::result_materialization::ToolResultMaterializer>,
+        Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     /// Runtime-owned workspace source used to derive isolated sub-run views.
     pub workspace: crate::application::run::workspace::RuntimeWorkspaceAccess,
     /// Skill metadata catalog shared with sub-run isolated contexts.

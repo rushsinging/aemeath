@@ -22,7 +22,8 @@ pub(crate) struct ToolRoundContext<'a> {
     pub language: &'a str,
     pub workspace_root: std::path::PathBuf,
     pub session_id: &'a str,
-    pub materializer: &'a crate::application::tool::result_materialization::ToolResultMaterializer,
+    pub materializer:
+        &'a crate::application::tool::tool_result_materializer::ToolResultMaterializer,
     pub log_patch: logging::LogContextPatch,
 }
 

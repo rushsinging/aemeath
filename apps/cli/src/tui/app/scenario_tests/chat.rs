@@ -232,14 +232,17 @@ fn oversized_unknown_tool_result_renders_truncation_notice() {
         id,
         provider_id: "provider-unknown-large-1".into(),
         tool_name: "UnknownTool".into(),
-        output: format!(
-            "visible preview\n... [truncated tool result; original size: {} bytes]",
-            2_500_000_000usize
-        ),
+        output: "<persisted-output>\nOutput too large. Full output unavailable because persistence failed.\n\n--- head (15 chars) ---\nvisible preview\n\n[... 2499999985 chars omitted ...]\n\n--- tail (0 chars) ---\n\n</persisted-output>".into(),
         content: serde_json::json!({
-            "preview": "visible preview",
+            "text": "<persisted-output>\nOutput too large. Full output unavailable because persistence failed.\n\n--- head (15 chars) ---\nvisible preview\n\n[... 2499999985 chars omitted ...]\n\n--- tail (0 chars) ---\n\n</persisted-output>",
             "truncated": true,
+            "original_chars": 2_500_000_000usize,
             "original_bytes": 2_500_000_000usize,
+            "omitted_chars": 2_499_999_985usize,
+            "blob": {
+                "status": "unavailable",
+                "reason": "write_failed"
+            }
         }),
         is_error: false,
         images: vec![],
@@ -249,8 +252,9 @@ fn oversized_unknown_tool_result_renders_truncation_notice() {
 
     let screen = harness.screen();
     assert!(screen.contains("UnknownTool"));
-    assert!(screen.contains("truncated tool result"));
-    assert!(screen.contains("2500000000 bytes"));
+    assert!(screen.contains("Output too large"));
+    assert!(screen.contains("persistence failed"));
+    assert!(!screen.contains("FULL_PAYLOAD_SENTINEL"));
     harness.assert_idle();
 }
 

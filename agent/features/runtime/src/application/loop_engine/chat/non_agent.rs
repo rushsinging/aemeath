@@ -286,7 +286,14 @@ where
             stderr
         };
         let result = ToolExecution::new(&owned_call, ToolOutcome::error(error_detail));
-        send_tool_result(sink, context, &result).await;
+        send_tool_result(
+            sink,
+            context,
+            &result,
+            agent.tool_result_materializer.as_ref(),
+            agent.session_id.as_ref(),
+        )
+        .await;
         return vec![result];
     }
     // Apply the hook directive through the canonical re-validation path (#926).
@@ -320,19 +327,40 @@ where
         HookDirectiveOutcome::InvalidInput { error, .. } => {
             let msg = format!("PreToolUse hook returned invalid input: {error}");
             let result = ToolExecution::new(&owned_call, ToolOutcome::error(msg));
-            send_tool_result(sink, context, &result).await;
+            send_tool_result(
+                sink,
+                context,
+                &result,
+                agent.tool_result_materializer.as_ref(),
+                agent.session_id.as_ref(),
+            )
+            .await;
             return vec![result];
         }
         HookDirectiveOutcome::Denied { reason, .. } => {
             let msg = format!("Denied by PreToolUse hook re-evaluation: {reason}");
             let result = ToolExecution::new(&owned_call, ToolOutcome::error(msg));
-            send_tool_result(sink, context, &result).await;
+            send_tool_result(
+                sink,
+                context,
+                &result,
+                agent.tool_result_materializer.as_ref(),
+                agent.session_id.as_ref(),
+            )
+            .await;
             return vec![result];
         }
         HookDirectiveOutcome::ApprovalRequired { reason, .. } => {
             let msg = format!("Approval required after PreToolUse hook: {reason}");
             let result = ToolExecution::new(&owned_call, ToolOutcome::error(msg));
-            send_tool_result(sink, context, &result).await;
+            send_tool_result(
+                sink,
+                context,
+                &result,
+                agent.tool_result_materializer.as_ref(),
+                agent.session_id.as_ref(),
+            )
+            .await;
             return vec![result];
         }
         HookDirectiveOutcome::Blocked { reason, .. } => {
@@ -341,7 +369,14 @@ where
             // synthesizes a Blocked.
             let msg = format!("Blocked by PreToolUse hook: {reason:?}");
             let result = ToolExecution::new(&owned_call, ToolOutcome::error(msg));
-            send_tool_result(sink, context, &result).await;
+            send_tool_result(
+                sink,
+                context,
+                &result,
+                agent.tool_result_materializer.as_ref(),
+                agent.session_id.as_ref(),
+            )
+            .await;
             return vec![result];
         }
     };
@@ -462,7 +497,14 @@ where
         .await;
         // TasksSnapshot 由 loop_runner 在 PostToolExecutionSync 之后统一推送（#642），
         // 不再在此处发 TasksChanged 通知。
-        send_tool_result(sink, context, &ex).await;
+        send_tool_result(
+            sink,
+            context,
+            &ex,
+            agent.tool_result_materializer.as_ref(),
+            agent.session_id.as_ref(),
+        )
+        .await;
         out.push(ex);
     }
     out

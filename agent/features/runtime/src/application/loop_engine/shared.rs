@@ -1,7 +1,7 @@
 //! Loop Engine 共享逻辑——Main 和 Sub 完全一致的方法提取到此。
 
 use crate::application::tool::agent::ToolExecution;
-use crate::application::tool::result_materialization::ToolResultMaterializer;
+use crate::application::tool::tool_result_materializer::ToolResultMaterializer;
 
 /// Materialize a batch of [`ToolExecution`]s into a single [`Message`] with
 /// tool-result content blocks, mapping through `provider_id`.

@@ -41,7 +41,7 @@ use crate::domain::agent_run::{InteractionContinuation, Run, RunTransitionError}
 pub struct InteractionCompletionContext<'a> {
     tool_context: tools::ToolExecutionContext,
     tool_execution: &'a dyn tools::ToolExecutionPort,
-    materializer: &'a crate::application::tool::result_materialization::ToolResultMaterializer,
+    materializer: &'a crate::application::tool::tool_result_materializer::ToolResultMaterializer,
     session_id: &'a str,
 }
 
@@ -49,7 +49,7 @@ impl<'a> InteractionCompletionContext<'a> {
     pub fn new(
         tool_context: tools::ToolExecutionContext,
         tool_execution: &'a dyn tools::ToolExecutionPort,
-        materializer: &'a crate::application::tool::result_materialization::ToolResultMaterializer,
+        materializer: &'a crate::application::tool::tool_result_materializer::ToolResultMaterializer,
         session_id: &'a str,
     ) -> Self {
         Self {

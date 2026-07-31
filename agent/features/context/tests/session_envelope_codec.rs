@@ -6,7 +6,7 @@ use context::domain::session::{
 };
 use context::domain::{FinalizeCause, StepReceipt, ToolOutcomeKind};
 use serde_json::json;
-use share::message::Message;
+use share::message::{ContentBlock, Message, Role};
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
 
 #[test]
@@ -29,6 +29,60 @@ fn committed_step_messages_preserve_the_existing_json_array_wire() {
     let decoded: CommittedStepMessages =
         serde_json::from_value(json!([Message::user("wire")])).unwrap();
     assert_eq!(decoded[0].text_content(), "wire");
+}
+
+#[test]
+fn tool_result_projection_round_trips_without_full_payload() {
+    let preview = "<persisted-output>bounded preview</persisted-output>";
+    let content = json!({
+        "text": preview,
+        "truncated": true,
+        "original_chars": 50_001,
+        "original_bytes": 50_001,
+        "omitted_chars": 47_501,
+        "blob": {
+            "status": "persisted",
+            "locator": "tool-result://session/tool"
+        }
+    });
+    let tool_result = Message {
+        role: Role::User,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: "tool".to_string(),
+            content: content.clone(),
+            is_error: false,
+            text: Some(preview.to_string()),
+        }],
+        metadata: None,
+    };
+    let mut session = CanonicalSession::fixture("tool-result-projection");
+    session.run_slices = vec![CommittedRunSlice::new(
+        "run",
+        vec![CommittedRunStep::compatibility_outcome_only(
+            "step",
+            vec![tool_result],
+        )],
+    )];
+
+    let bytes = SessionCodec::encode(&session).unwrap();
+    assert!(!String::from_utf8_lossy(&bytes).contains("FULL_PAYLOAD_SENTINEL"));
+    let decoded = decode_session(&bytes).unwrap();
+    let block = &decoded.session.run_slices[0].steps[0]
+        .outcome
+        .as_ref()
+        .unwrap()
+        .messages[0]
+        .content[0];
+    let ContentBlock::ToolResult {
+        content: decoded_content,
+        text,
+        ..
+    } = block
+    else {
+        panic!("expected tool result projection");
+    };
+    assert_eq!(decoded_content, &content);
+    assert_eq!(text.as_deref(), Some(preview));
 }
 
 #[test]

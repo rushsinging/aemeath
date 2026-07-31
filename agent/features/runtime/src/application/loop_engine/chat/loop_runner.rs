@@ -702,6 +702,7 @@ where
                     agent_semaphore.clone(),
                     &session_id,
                     &run_id,
+                    tool_result_materializer.clone(),
                 );
                 let mut interaction =
                     crate::application::loop_engine::run_services::RuntimeInteraction::new(
