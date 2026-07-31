@@ -26,6 +26,8 @@ pub(crate) struct ConversationRetainedStateSnapshot {
     pub agent_runs: usize,
     pub agent_run_steps: usize,
     pub terminal_agent_runs: usize,
+    pub output_view_journal_entries: usize,
+    pub output_view_journal_item_id_bytes: usize,
     pub has_active_interaction: bool,
 }
 
@@ -89,16 +91,13 @@ impl ConversationModel {
     }
 
     pub fn apply<U: ConversationUpdate>(&mut self, update: U) -> Vec<ConversationChange> {
-        let before_item_ids = self.timeline_item_ids();
         let before_placeholder = self.model_stream_placeholder.clone();
         let changes = update.update(self);
         if !changes.is_empty() {
             self.revision = self.revision.wrapping_add(1);
-            self.publish_output_view_changes(
-                &before_item_ids,
-                before_placeholder.as_ref(),
-                &changes,
-            );
+            self.publish_output_view_changes(before_placeholder.as_ref(), &changes);
+        } else {
+            let _ = self.timeline.take_pending_view_changes();
         }
         changes
     }
@@ -122,63 +121,39 @@ impl ConversationModel {
         self.output_view_journal.changes_since(cursor)
     }
 
-    fn timeline_item_ids(&self) -> Vec<String> {
-        self.timeline
-            .items()
-            .iter()
-            .map(|item| item.id().into_owned())
-            .collect()
-    }
-
     fn publish_output_view_changes(
         &mut self,
-        before_item_ids: &[String],
         before_placeholder: Option<&ModelStreamWaitingView>,
         changes: &[ConversationChange],
     ) {
-        let after_item_ids = self.timeline_item_ids();
-        if before_item_ids != after_item_ids.as_slice() {
-            if after_item_ids.starts_with(before_item_ids) {
-                let appended = after_item_ids.iter().skip(before_item_ids.len());
-                for item_id in appended {
-                    self.output_view_journal.publish(OutputViewChange::Append {
-                        item_id: item_id.clone(),
-                    });
+        let timeline_changes = self.timeline.take_pending_view_changes();
+        let mut changed_item_ids = std::collections::HashSet::new();
+        for change in &timeline_changes {
+            match change {
+                OutputViewChange::Append { item_id }
+                | OutputViewChange::Update { item_id }
+                | OutputViewChange::Remove { item_id } => {
+                    changed_item_ids.insert(item_id.clone());
                 }
-                for item_id in changes.iter().filter_map(output_view_item_id_for_change) {
-                    if before_item_ids.iter().any(|existing| existing == &item_id) {
-                        self.output_view_journal
-                            .publish(OutputViewChange::Update { item_id });
-                    }
-                }
-            } else if before_item_ids.starts_with(&after_item_ids) {
-                for item_id in before_item_ids.iter().skip(after_item_ids.len()) {
-                    self.output_view_journal.publish(OutputViewChange::Remove {
-                        item_id: item_id.clone(),
-                    });
-                }
-            } else if let Some(item_id) = changes.iter().find_map(|change| match change {
-                ConversationChange::AskUserDismissed { id } => Some(id.clone()),
-                _ => None,
-            }) {
-                self.output_view_journal
-                    .publish(OutputViewChange::Remove { item_id });
-            } else {
-                self.output_view_journal.publish(OutputViewChange::Reset);
+                OutputViewChange::Reset | OutputViewChange::Placeholder => {}
             }
-            return;
+            self.output_view_journal.publish(change.clone());
         }
 
-        if before_placeholder != self.model_stream_placeholder.as_ref() {
+        if before_placeholder != self.model_stream_placeholder.as_ref()
+            && !timeline_changes
+                .iter()
+                .any(|change| matches!(change, OutputViewChange::Placeholder))
+        {
             self.output_view_journal
                 .publish(OutputViewChange::Placeholder);
-            return;
         }
 
-        let item_id = changes.iter().find_map(output_view_item_id_for_change);
-        if let Some(item_id) = item_id {
-            self.output_view_journal
-                .publish(OutputViewChange::Update { item_id });
+        for item_id in changes.iter().filter_map(output_view_item_id_for_change) {
+            if !changed_item_ids.contains(&item_id) {
+                self.output_view_journal
+                    .publish(OutputViewChange::Update { item_id });
+            }
         }
     }
 
@@ -210,6 +185,9 @@ impl ConversationModel {
             })
             .count();
 
+        let (output_view_journal_entries, output_view_journal_item_id_bytes) =
+            self.output_view_journal.retained_metrics();
+
         ConversationRetainedStateSnapshot {
             chats: self.chats.len(),
             turns,
@@ -220,6 +198,8 @@ impl ConversationModel {
             agent_runs: self.agent_runs.len(),
             agent_run_steps,
             terminal_agent_runs,
+            output_view_journal_entries,
+            output_view_journal_item_id_bytes,
             has_active_interaction: self.active_interaction.is_some(),
         }
     }
@@ -308,7 +288,7 @@ impl ConversationModel {
         let user_block_id = self.next_block_id("user");
         let turn_id = ChatTurnId::new_v7();
         self.timeline.push(OutputTimelineItem::UserMessage {
-            id: user_block_id,
+            id: user_block_id.clone(),
             text: submission,
         });
         vec![
@@ -318,6 +298,9 @@ impl ConversationModel {
             ConversationChange::ChatTurnStarted {
                 chat_id: chat_id.to_string(),
                 turn_id: turn_id.to_string(),
+            },
+            ConversationChange::UserMessageAppended {
+                block_id: user_block_id,
             },
             ConversationChange::OutputDirty,
         ]
@@ -489,8 +472,12 @@ impl ConversationModel {
 
 fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String> {
     match change {
-        ConversationChange::AssistantTextAppended { block_id }
+        ConversationChange::UserMessageAppended { block_id }
+        | ConversationChange::AssistantTextAppended { block_id }
         | ConversationChange::ThinkingTextAppended { block_id }
+        | ConversationChange::SystemMessageAppended { block_id }
+        | ConversationChange::ErrorAppended { block_id, .. }
+        | ConversationChange::QueuedSubmissionAdded { id: block_id }
         | ConversationChange::BlockCompleted {
             block_id: Some(block_id),
         }

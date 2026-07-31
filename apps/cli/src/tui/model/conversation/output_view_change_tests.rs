@@ -1,6 +1,25 @@
 use super::super::intent::{AppendUserMessage, AssistantText};
 use super::{ConversationModel, OutputViewChange, OutputViewChanges, OUTPUT_VIEW_JOURNAL_CAPACITY};
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::output_timeline::OutputTimelineItem;
+
+#[test]
+fn append_does_not_read_existing_timeline_identities() {
+    let mut model = ConversationModel::default();
+    for index in 0..5_000 {
+        model.timeline.push(OutputTimelineItem::UserMessage {
+            id: format!("history-{index}"),
+            text: String::new(),
+        });
+    }
+    model.timeline.reset_identity_read_count();
+
+    model.apply(AppendUserMessage {
+        text: "incremental".to_string(),
+    });
+
+    assert_eq!(model.timeline.identity_read_count(), 0);
+}
 
 #[test]
 fn append_and_streaming_update_publish_payload_free_output_view_changes() {

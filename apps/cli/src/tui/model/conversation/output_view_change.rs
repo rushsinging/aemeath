@@ -53,6 +53,21 @@ impl OutputViewJournal {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn retained_metrics(&self) -> (usize, usize) {
+        let item_id_bytes = self
+            .entries
+            .iter()
+            .map(|entry| match &entry.change {
+                OutputViewChange::Append { item_id }
+                | OutputViewChange::Update { item_id }
+                | OutputViewChange::Remove { item_id } => item_id.len(),
+                OutputViewChange::Reset | OutputViewChange::Placeholder => 0,
+            })
+            .sum();
+        (self.entries.len(), item_id_bytes)
+    }
+
     pub(super) fn changes_since(&self, cursor: OutputViewCursor) -> OutputViewChanges {
         let next_cursor = self.cursor();
         if cursor.0 > self.sequence {

@@ -25,6 +25,7 @@ use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidatio
 #[derive(Default)]
 struct RecordingWriter {
     saved: Mutex<Vec<CanonicalSession>>,
+    saved_tool_receipts: Mutex<Vec<(String, u64, context::domain::ToolCallReceipt)>>,
     fail: bool,
 }
 
@@ -35,6 +36,23 @@ impl CanonicalSessionWriter for RecordingWriter {
             return Err("disk full".to_string());
         }
         self.saved.lock().unwrap().push(session.clone());
+        Ok(())
+    }
+
+    async fn save_tool_receipt(
+        &self,
+        session_id: &str,
+        revision: u64,
+        receipt: &context::domain::ToolCallReceipt,
+    ) -> Result<(), String> {
+        if self.fail {
+            return Err("disk full".to_string());
+        }
+        self.saved_tool_receipts.lock().unwrap().push((
+            session_id.to_string(),
+            revision,
+            receipt.clone(),
+        ));
         Ok(())
     }
 }
@@ -720,7 +738,17 @@ async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
     assert!(first.changed);
     assert!(!second.changed);
     assert_eq!(holder.read().unwrap().revision, 1);
-    assert_eq!(writer.saved.lock().unwrap().len(), 1);
+    assert!(
+        writer.saved.lock().unwrap().is_empty(),
+        "Tool receipt 更新不得重编码完整 CanonicalSession"
+    );
+    let saved_receipts = writer.saved_tool_receipts.lock().unwrap();
+    assert_eq!(saved_receipts.len(), 1);
+    assert_eq!(
+        saved_receipts[0].0,
+        first.receipt.identity.session_id.as_str()
+    );
+    assert_eq!(saved_receipts[0].1, 1);
     assert_eq!(
         holder.read().unwrap().run_slices[0].steps[0].tool_receipts[0].state,
         ToolCallState::Pending
@@ -731,6 +759,7 @@ async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
 async fn advance_tool_receipt_write_failure_does_not_publish_candidate() {
     let writer = Arc::new(RecordingWriter {
         saved: Mutex::new(vec![]),
+        saved_tool_receipts: Mutex::new(vec![]),
         fail: true,
     });
     let (repository, holder) = repository(writer);
@@ -778,6 +807,7 @@ async fn concurrent_appends_with_same_revision_allow_one_commit_and_reject_one_c
 async fn failed_durable_write_does_not_publish_candidate() {
     let writer = Arc::new(RecordingWriter {
         saved: Mutex::new(vec![]),
+        saved_tool_receipts: Mutex::new(vec![]),
         fail: true,
     });
     let (repository, holder) = repository(writer);

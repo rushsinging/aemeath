@@ -1,14 +1,34 @@
 use super::item::{OutputTimelineItem, TimelineToolCallRef};
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::output_view_change::OutputViewChange;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct OutputTimelineModel {
     items: Vec<OutputTimelineItem>,
+    pending_view_changes: Vec<OutputViewChange>,
+    #[cfg(test)]
+    identity_read_count: std::cell::Cell<usize>,
 }
 
 impl OutputTimelineModel {
     pub fn items(&self) -> &[OutputTimelineItem] {
         &self.items
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_identity_read(&self) {
+        self.identity_read_count
+            .set(self.identity_read_count.get().saturating_add(1));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reset_identity_read_count(&self) {
+        self.identity_read_count.set(0);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn identity_read_count(&self) -> usize {
+        self.identity_read_count.get()
     }
 
     pub fn item(&self, id: &str) -> Option<&OutputTimelineItem> {
@@ -19,15 +39,34 @@ impl OutputTimelineModel {
         &mut self.items
     }
 
+    pub(crate) fn take_pending_view_changes(&mut self) -> Vec<OutputViewChange> {
+        std::mem::take(&mut self.pending_view_changes)
+    }
+
     pub fn push(&mut self, item: OutputTimelineItem) {
+        let item_id = item.id().into_owned();
         self.items.push(item);
+        self.pending_view_changes
+            .push(OutputViewChange::Append { item_id });
     }
 
     pub fn retain<F>(&mut self, mut keep: F)
     where
         F: FnMut(&OutputTimelineItem) -> bool,
     {
-        self.items.retain(|item| keep(item));
+        let mut removed = Vec::new();
+        self.items.retain(|item| {
+            let keep_item = keep(item);
+            if !keep_item {
+                removed.push(item.id().into_owned());
+            }
+            keep_item
+        });
+        self.pending_view_changes.extend(
+            removed
+                .into_iter()
+                .map(|item_id| OutputViewChange::Remove { item_id }),
+        );
     }
 
     pub fn contains_tool_call(&self, chat_id: &ChatId, turn_id: &ChatTurnId, id: &str) -> bool {
@@ -61,7 +100,7 @@ impl OutputTimelineModel {
         tool_call_id: ToolCallId,
     ) {
         if !self.contains_tool_call(&chat_id, &turn_id, tool_call_id.as_ref()) {
-            self.items.push(OutputTimelineItem::ToolCall {
+            self.push(OutputTimelineItem::ToolCall {
                 reference: TimelineToolCallRef::new(chat_id, turn_id, tool_call_id),
             });
         }
@@ -74,7 +113,7 @@ impl OutputTimelineModel {
         tool_call_id: ToolCallId,
     ) {
         if !self.contains_tool_result(&chat_id, &turn_id, tool_call_id.as_ref()) {
-            self.items.push(OutputTimelineItem::ToolResult {
+            self.push(OutputTimelineItem::ToolResult {
                 reference: TimelineToolCallRef::new(chat_id, turn_id, tool_call_id),
             });
         }
@@ -98,6 +137,7 @@ impl OutputTimelineModel {
             return;
         };
         let result = self.items.remove(result_pos);
+        let result_id = result.id().into_owned();
         let Some(call_pos) = self.items.iter().position(|item| {
             matches!(
                 item,
@@ -111,6 +151,11 @@ impl OutputTimelineModel {
             return;
         };
         self.items.insert(call_pos + 1, result);
+        self.pending_view_changes.push(OutputViewChange::Remove {
+            item_id: result_id.clone(),
+        });
+        self.pending_view_changes
+            .push(OutputViewChange::Append { item_id: result_id });
     }
 }
 
