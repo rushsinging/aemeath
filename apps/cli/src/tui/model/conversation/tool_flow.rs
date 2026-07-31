@@ -13,6 +13,11 @@ impl ConversationModel {
         id: &str,
     ) {
         // 从 timeline 查找 OrphanToolResult 并克隆 payload。
+        // O(1) 前置判断：正常路径（result 晚于 call 到达）不存在 orphan，
+        // 避免每次 ToolCallUpdate 都全表扫描 timeline（issue #1467）。
+        if !self.timeline.contains_orphan(id) {
+            return;
+        }
         let orphan_payload = self.timeline.items().iter().find_map(|item| {
             if let OutputTimelineItem::OrphanToolResult {
                 id: orphan_id,
