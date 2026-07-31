@@ -175,8 +175,7 @@ impl HookPort for Dispatcher {
         for sub in matching {
             let current_input =
                 serde_json::to_value(&current_invocation).unwrap_or(serde_json::json!({}));
-            let invocation_env =
-                invocation_environment(&current_invocation, context.cwd(), context.env());
+            let invocation_env = invocation_environment(&current_invocation, context.cwd());
             let outcome = self
                 .execute_subscription(
                     sub,
@@ -286,7 +285,6 @@ impl HookPort for Dispatcher {
                                     &current_invocation,
                                     error,
                                     context.cwd(),
-                                    context.env(),
                                     cancellation,
                                 )
                                 .await;
@@ -348,9 +346,8 @@ impl HookPort for Dispatcher {
 fn invocation_environment(
     invocation: &HookInvocation,
     cwd: &std::path::Path,
-    base: &HashMap<String, String>,
 ) -> HashMap<String, String> {
-    let mut env = base.clone();
+    let mut env = HashMap::new();
     env.insert(
         "AEMEATH_HOOK_EVENT".to_string(),
         serde_json::to_string(&invocation.point()).unwrap_or_default(),
@@ -544,7 +541,6 @@ impl Dispatcher {
         stop_invocation: &HookInvocation,
         error: String,
         cwd: &std::path::Path,
-        env: &HashMap<String, String>,
         cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         let turns = match stop_invocation {
@@ -566,7 +562,7 @@ impl Dispatcher {
         matching.sort_by_key(|s| s.order);
 
         let current_input = serde_json::to_value(&invocation).unwrap_or(serde_json::json!({}));
-        let invocation_env = invocation_environment(&invocation, cwd, env);
+        let invocation_env = invocation_environment(&invocation, cwd);
         let mut all_executions: Vec<HookExecution> = Vec::new();
         for sub in matching {
             match self

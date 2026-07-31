@@ -41,6 +41,10 @@ pub(super) struct ScriptedCall {
     pub command: String,
     /// 传入的 stdin JSON。
     pub stdin: serde_json::Value,
+    /// 单次调用工作目录。
+    pub cwd: std::path::PathBuf,
+    /// 单次调用环境。
+    pub env: std::collections::HashMap<String, String>,
 }
 
 impl ScriptStep {
@@ -126,8 +130,8 @@ impl Executor for Scripted {
         &self,
         command: &HookCommand,
         stdin: &serde_json::Value,
-        _cwd: &std::path::Path,
-        _env: &std::collections::HashMap<String, String>,
+        cwd: &std::path::Path,
+        env: &std::collections::HashMap<String, String>,
         _timeout: Duration,
         _cancellation: &dyn CancellationSignal,
     ) -> Result<RawExecution, ExecutionFault> {
@@ -137,6 +141,8 @@ impl Executor for Scripted {
             .push(ScriptedCall {
                 command: command.command.clone(),
                 stdin: stdin.clone(),
+                cwd: cwd.to_path_buf(),
+                env: env.clone(),
             });
         match self.steps.lock().expect("scripted steps lock").pop_front() {
             Some(ScriptStep::Ok(raw)) => Ok(raw),
