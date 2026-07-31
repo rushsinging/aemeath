@@ -8,6 +8,7 @@ use crate::tui::view_model::{
     HookNoticeBlockView, HookNoticeSemanticKind, ModelStreamPlaceholderBlockView, OutputBlockKind,
     OutputViewModel, SemanticStyle, TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
 };
+use crate::tui::view_state::RunActivityState;
 use std::collections::HashMap;
 
 use super::output_tool_view::{
@@ -48,6 +49,30 @@ impl<'a> ToolIndex<'a> {
 pub struct OutputViewAssembler;
 
 impl OutputViewAssembler {
+    pub fn assemble_from_conversation_with_activity(
+        conversation: &ConversationModel,
+        activity: &RunActivityState,
+        now: std::time::Instant,
+        version: u64,
+        workspace_root: Option<&std::path::Path>,
+    ) -> OutputViewModel {
+        let mut output = Self::assemble_from_conversation(conversation, version, workspace_root);
+        if activity.is_model_silent(now) {
+            if let Some(block_id) = activity.silence_block_id() {
+                let dots = ".".repeat((activity.frame % 3 + 1) as usize);
+                output.roots.push(leaf(
+                    block_id.clone(),
+                    OutputBlockKind::ThinkingMessage(TextBlockView {
+                        key: block_id,
+                        text: format!("Thinking{dots}"),
+                        style: SemanticStyle::Muted,
+                    }),
+                ));
+            }
+        }
+        output
+    }
+
     pub fn assemble_from_conversation(
         conversation: &ConversationModel,
         version: u64,

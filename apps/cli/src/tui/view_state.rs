@@ -5,6 +5,10 @@ pub mod input;
 pub mod input_selection;
 pub mod layout;
 pub mod output;
+pub mod run_activity;
+#[cfg(test)]
+#[path = "view_state/run_activity_tests.rs"]
+mod run_activity_tests;
 pub mod spinner_anim;
 pub mod status;
 
@@ -13,6 +17,7 @@ pub use input::InputViewState;
 pub use input_selection::InputSelectionViewState;
 pub use layout::LayoutViewState;
 pub use output::OutputViewState;
+pub use run_activity::RunActivityState;
 pub use spinner_anim::SpinnerAnim;
 pub use status::StatusSelectionViewState;
 
@@ -23,6 +28,7 @@ pub struct AppViewState {
     pub layout: LayoutViewState,
     pub animation: AnimationViewState,
     pub spinner: SpinnerAnim,
+    pub run_activity: RunActivityState,
     /// Status 选区真相（#59 S4）。T2 接入 mouse_handler + 渲染前管线。
     pub status_sel: StatusSelectionViewState,
     /// Input 选区真相（#59 S4）。T4 接入 mouse_handler + 渲染前管线。

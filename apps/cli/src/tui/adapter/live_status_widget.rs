@@ -29,7 +29,12 @@ mod tests {
         };
         let queued = vec!["queued input".to_string()];
 
-        let vm = LiveStatusAssembler::assemble(&model, &anim, &queued);
+        let vm = LiveStatusAssembler::assemble(
+            &model,
+            &crate::tui::view_state::RunActivityState::default(),
+            &anim,
+            &queued,
+        );
 
         let spinner = vm.spinner.expect("spinner projected");
         assert_eq!(spinner.frame, 12);

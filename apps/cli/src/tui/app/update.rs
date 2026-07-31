@@ -263,7 +263,19 @@ impl App {
                     self.view_state.animation.spinner_frame.wrapping_add(1);
                 self.view_state.animation.version =
                     self.view_state.animation.version.wrapping_add(1);
+                let before_silent = self
+                    .view_state
+                    .run_activity
+                    .is_model_silent(std::time::Instant::now());
                 self.view_state.spinner.advance();
+                self.view_state.run_activity.advance_frame();
+                let after_silent = self
+                    .view_state
+                    .run_activity
+                    .is_model_silent(std::time::Instant::now());
+                if before_silent != after_silent || after_silent {
+                    self.mark_output_dirty();
+                }
                 // 临时 status notice 过期检查：到期回退到 graph_phase 派生态。
                 if self
                     .model
@@ -272,20 +284,19 @@ impl App {
                 {
                     self.mark_output_dirty();
                 }
-                // 动画只在 viewport 绘制阶段按当前 frame 解析；不要标脏 output，
-                // 否则每 90ms 都会扫描完整 roots 并重建历史文档。
-                let request_render = self.model.conversation.runtime.spinner.chat_active;
-                crate::tui::log_trace!(                    "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} phase={:?} verb={} dirty_output={}",
-                    before_frame,
-                    self.view_state.animation.spinner_frame,
-                    before_version,
-                    self.view_state.animation.version,
-                    self.view_state.spinner.frame,
-                    self.model.conversation.runtime.spinner.chat_active,
-                    self.model.conversation.runtime.spinner.phase,
-                    self.view_state.spinner.verb,
-                    self.view_state.dirty.output
-                );
+                let request_render = self.view_state.run_activity.is_active();
+                crate::tui::log_trace!(
+                  "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} phase={:?} verb={} dirty_output={}",
+                  before_frame,
+                  self.view_state.animation.spinner_frame,
+                  before_version,
+                  self.view_state.animation.version,
+                  self.view_state.spinner.frame,
+                  self.view_state.run_activity.is_active(),
+                  self.model.conversation.runtime.spinner.phase,
+                  self.view_state.spinner.verb,
+                  self.view_state.dirty.output
+              );
                 if request_render {
                     UpdateResult::one(Effect::RequestRender)
                 } else {
@@ -490,14 +501,44 @@ impl App {
         let mapping = map_runtime_event(&event);
         if let Some(kind) = diagnostic_kind {
             crate::tui::log_trace!(
-                "event_delivery boundary=tui_mapper kind={} outcome=mapped conversation_intents={} diagnostic_intents={} session_intents={}",
-                kind,
-                mapping.conversation.len(),
-                mapping.diagnostic.len(),
-                mapping.session.len()
-            );
+              "event_delivery boundary=tui_mapper kind={} outcome=mapped conversation_intents={} diagnostic_intents={} session_intents={}",
+              kind,
+              mapping.conversation.len(),
+              mapping.diagnostic.len(),
+              mapping.session.len()
+          );
         }
         let model_result = reduce_agent_event(&mut self.model, mapping);
+        self.refresh_live_status_from_model();
+        let valid_model_activity = match &event {
+            TuiRuntimeEvent::Text { text, .. } | TuiRuntimeEvent::Thinking { text, .. } => {
+                !text.is_empty()
+            }
+            TuiRuntimeEvent::ToolCallStart { .. } => true,
+            TuiRuntimeEvent::ToolCallUpdate {
+                arguments_delta,
+                arguments,
+                ..
+            } => {
+                arguments_delta
+                    .as_ref()
+                    .is_some_and(|value| !value.is_empty())
+                    || arguments.is_some()
+            }
+            _ => false,
+        };
+        if valid_model_activity {
+            if let Some(run_id) = self.model.conversation.active_main_run_id() {
+                if self
+                    .view_state
+                    .run_activity
+                    .observe_main_model_activity(run_id, std::time::Instant::now())
+                {
+                    self.mark_output_dirty();
+                    self.output_view_cache = None;
+                }
+            }
+        }
         if let Some(kind) = diagnostic_kind {
             crate::tui::log_trace!(
                 "event_delivery boundary=tui_reducer kind={} outcome=reduced timeline_items={} queued={} revision={} dirty_output={} effects={}",
@@ -578,24 +619,35 @@ impl App {
             .map(ToOwned::to_owned);
         // memo：conversation revision 不变 且 workspace_root 不变 则复用上次 view_model，跳过全量 assemble。
         // workspace_root 来自 /worktree enter，不推进 revision，需单独纳入 key（#425 review Fix 1）。
+        let activity_frame = self.view_state.run_activity.frame;
+        let model_silent = self
+            .view_state
+            .run_activity
+            .is_model_silent(std::time::Instant::now());
         let need_rebuild = self
             .output_view_cache
             .as_ref()
             .map(|cache| {
                 cache.revision != revision
                     || cache.workspace_root.as_deref() != current_workspace_root.as_deref()
+                    || cache.model_silent != model_silent
+                    || (model_silent && cache.activity_frame != activity_frame)
             })
             .unwrap_or(true);
         if need_rebuild {
             self.assemble_count = self.assemble_count.saturating_add(1);
             let workspace_root = current_workspace_root.as_deref().map(std::path::Path::new);
-            let view_model = OutputViewAssembler::assemble_from_conversation(
+            let view_model = OutputViewAssembler::assemble_from_conversation_with_activity(
                 &self.model.conversation,
+                &self.view_state.run_activity,
+                std::time::Instant::now(),
                 revision,
                 workspace_root,
             );
             self.output_view_cache = Some(OutputViewCache {
                 revision,
+                activity_frame,
+                model_silent,
                 workspace_root: current_workspace_root.clone(),
                 view_model,
             });
@@ -607,6 +659,8 @@ impl App {
             .expect("memo cache filled above");
         let view_model = cache.view_model;
         let cached_revision = cache.revision;
+        let cached_activity_frame = cache.activity_frame;
+        let cached_model_silent = cache.model_silent;
         let cached_workspace_root = cache.workspace_root;
         let root_count = view_model.roots.len();
         let width = self.output_document_width();
@@ -662,6 +716,8 @@ impl App {
         // 无论渲染成败都把 view_model 放回 cache，保留 memo。
         self.output_view_cache = Some(OutputViewCache {
             revision: cached_revision,
+            activity_frame: cached_activity_frame,
+            model_silent: cached_model_silent,
             workspace_root: cached_workspace_root,
             view_model,
         });
@@ -799,6 +855,7 @@ impl App {
             .collect();
         crate::tui::view_assembler::live_status::LiveStatusAssembler::assemble(
             &self.model.conversation,
+            &self.view_state.run_activity,
             &self.view_state.spinner,
             &queued_texts,
         )
@@ -814,32 +871,21 @@ impl App {
     /// verb/active 检测属 effectful 边界（rng/激活检测），故放在此渲染前的副作用处，
     /// 而非纯 reducer。
     pub(crate) fn refresh_live_status_from_model(&mut self) {
-        // #536: 可见性由 chat_active 驱动。
-        let active = self.model.conversation.runtime.spinner.chat_active;
-        let before_anim = self.view_state.spinner.clone();
-        if active {
-            if self.view_state.spinner.verb.is_empty() {
-                self.view_state.spinner.pick_verb();
-            }
-            self.view_state
-                .spinner
-                .sync_phase(self.model.conversation.runtime.spinner.phase.clone());
-        } else if self.view_state.spinner != crate::tui::view_state::SpinnerAnim::default() {
-            self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
-        }
-        crate::tui::log_trace!(
-            "tui.spinner.refresh active={} phase={:?} before_frame={} after_frame={} before_phase_frame={} after_phase_frame={} before_phase={:?} after_phase={:?} before_verb={} after_verb={}",
-            active,
-            self.model.conversation.runtime.spinner.phase,
-            before_anim.frame,
-            self.view_state.spinner.frame,
-            before_anim.phase_frame,
-            self.view_state.spinner.phase_frame,
-            before_anim.phase,
-            self.view_state.spinner.phase,
-            before_anim.verb,
-            self.view_state.spinner.verb
+        let main_run = self.model.conversation.active_main_run_snapshot();
+        let main_run_id = main_run.map(|snapshot| &snapshot.run_id);
+        let invoking_model = main_run.is_some_and(|snapshot| {
+            snapshot.status == crate::tui::adapter::tui_runtime_event::TuiRunStatus::InvokingModel
+        });
+        self.view_state.run_activity.sync_main_run(
+            main_run_id,
+            invoking_model,
+            std::time::Instant::now(),
         );
+        if self.view_state.run_activity.verb.is_empty() && main_run.is_some() {
+            self.view_state.spinner.pick_verb();
+            self.view_state.run_activity.verb = self.view_state.spinner.verb.clone();
+        }
+        self.view_state.run_activity.frame = self.view_state.spinner.frame;
     }
     /// 根据当前 document 与 layout/live-status 投影同步 OutputViewState 滚动真相。
     /// 每帧渲染前调用；OutputArea render 直接消费 view_state.output，不再写 widget 镜像。
