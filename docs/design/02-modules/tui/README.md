@@ -25,6 +25,7 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
 - Interaction command result 只结束本地交互块；Run 只由 SDK `RunResumed` / `RunCancelling` / `RunCancelled` 等 Runtime 权威事件推进
 - 六 Context 核心字段私有，root reducer 是唯一写入口；ViewAssembler 只读 accessor，ViewState 只持瞬时交互 / 渲染状态
 - Conversation 的结构化投影（runs / queued / progress）与 `timeline` 是同一 reducer 事务原子维护的互补投影，只约束重叠事实，**NEVER** 假定可完整互相重建
+- Connect 是 pre-chat Config application 用例；TUI 只投影 SDK `ConnectView`、采集受保护输入并发送带 revision 的类型化命令，**NEVER** 读取配置/env、维护 Provider Catalog、执行 Probe 或持久化。完整边界见 [Config Connect 设计](../config/02-provider-catalog-and-connect.md)
 
 ### Reflection 展示边界（#899）
 

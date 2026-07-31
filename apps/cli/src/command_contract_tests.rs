@@ -1,6 +1,153 @@
 use std::sync::Arc;
 
 #[test]
+fn connect_reducer_masks_credential_and_submits_typed_effect() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let view = sdk::ConnectView {
+        session_id: sdk::ConnectSessionId("connect-1".to_string()),
+        revision: sdk::ConnectRevision(3),
+        stage: sdk::ConnectStage::EditCredential,
+        origin: sdk::ConnectOrigin::ExplicitCommand,
+        catalog: Vec::new(),
+        draft: sdk::ConnectDraftView {
+            source: Some("Anthropic".to_string()),
+            driver: Some("anthropic".to_string()),
+            base_url: Some("https://api.anthropic.com".to_string()),
+            has_api_key: false,
+            provider_user_agent: None,
+            model: None,
+            set_global_default: false,
+        },
+        existing_provider: None,
+        available_actions: vec![sdk::ConnectAvailableAction::SetCredential],
+        probe_status: None,
+        last_error: None,
+        terminal: None,
+    };
+    let mut model = crate::subcommand::connect_command::ConnectUiModel::new(view);
+    model.update(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+
+    assert_eq!(model.visible_input(), "•");
+    assert!(!model.visible_input().contains('s'));
+    assert!(matches!(
+        model.update(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        Some(crate::subcommand::connect_command::ConnectEffect::Apply {
+            revision: sdk::ConnectRevision(3),
+            command: sdk::ConnectCommand::SetCredential { api_key },
+            ..
+        }) if api_key == "s"
+    ));
+}
+
+#[test]
+fn connect_effect_carries_session_revision_and_typed_command() {
+    let effect = crate::subcommand::connect_command::ConnectEffect::Apply {
+        session_id: sdk::ConnectSessionId("connect-1".to_string()),
+        revision: sdk::ConnectRevision(8),
+        command: sdk::ConnectCommand::SkipProbe,
+    };
+
+    assert!(matches!(
+        effect,
+        crate::subcommand::connect_command::ConnectEffect::Apply {
+            revision: sdk::ConnectRevision(8),
+            command: sdk::ConnectCommand::SkipProbe,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn credential_stage_uses_masked_input_mode() {
+    assert_eq!(
+        crate::subcommand::connect_command::input_mode_for_stage(sdk::ConnectStage::EditCredential),
+        crate::subcommand::connect_command::ConnectInputMode::Masked
+    );
+    assert_eq!(
+        crate::subcommand::connect_command::input_mode_for_stage(sdk::ConnectStage::EditEndpoint),
+        crate::subcommand::connect_command::ConnectInputMode::Visible
+    );
+}
+
+#[test]
+fn connect_projection_lists_server_published_catalog() {
+    let view = sdk::ConnectView {
+        session_id: sdk::ConnectSessionId("connect-1".to_string()),
+        revision: sdk::ConnectRevision(0),
+        stage: sdk::ConnectStage::SelectProvider,
+        origin: sdk::ConnectOrigin::ExplicitCommand,
+        catalog: vec![sdk::ConnectProviderOption {
+            source: "Anthropic".to_string(),
+            driver: "anthropic".to_string(),
+            default_base_url: String::new(),
+            recommended_models: Vec::new(),
+        }],
+        draft: sdk::ConnectDraftView {
+            source: None,
+            driver: None,
+            base_url: None,
+            has_api_key: false,
+            provider_user_agent: None,
+            model: None,
+            set_global_default: false,
+        },
+        existing_provider: None,
+        available_actions: vec![sdk::ConnectAvailableAction::SelectProvider],
+        probe_status: None,
+        last_error: None,
+        terminal: None,
+    };
+
+    let projection = crate::subcommand::connect_command::ConnectProjection::from_view(&view);
+    assert!(projection
+        .lines()
+        .iter()
+        .any(|line| line == "  Anthropic (anthropic)"));
+}
+
+#[test]
+fn connect_projection_masks_api_key_and_emits_only_typed_sdk_commands() {
+    let view = sdk::ConnectView {
+        session_id: sdk::ConnectSessionId("connect-1".to_string()),
+        revision: sdk::ConnectRevision(4),
+        stage: sdk::ConnectStage::EditCredential,
+        origin: sdk::ConnectOrigin::ExplicitCommand,
+        catalog: Vec::new(),
+        draft: sdk::ConnectDraftView {
+            source: Some("Anthropic".to_string()),
+            driver: Some("anthropic".to_string()),
+            base_url: Some("https://api.anthropic.com".to_string()),
+            has_api_key: true,
+            provider_user_agent: None,
+            model: None,
+            set_global_default: false,
+        },
+        existing_provider: None,
+        available_actions: vec![sdk::ConnectAvailableAction::SetCredential],
+        probe_status: None,
+        last_error: None,
+        terminal: None,
+    };
+    let projection = crate::subcommand::connect_command::ConnectProjection::from_view(&view);
+
+    assert!(projection
+        .lines()
+        .iter()
+        .any(|line| line.contains("••••••••")));
+    assert!(!projection
+        .lines()
+        .iter()
+        .any(|line| line.contains("secret-key")));
+    assert_eq!(
+        crate::subcommand::connect_command::command_for_input(&view, "secret-key").unwrap(),
+        sdk::ConnectCommand::SetCredential {
+            api_key: "secret-key".to_string()
+        }
+    );
+}
+
+#[test]
 fn tui_and_no_tui_share_the_same_router_contract() {
     let wiring = composition::tools::wire_commands().expect("command wiring");
     let catalog = wiring.catalog();

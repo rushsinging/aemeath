@@ -551,7 +551,7 @@ fn valid_spec() -> ProviderBuildSpec {
         source_key: "test-source".to_string(),
         api_style: None,
         api_key: "sk-test-key".to_string(),
-        base_url: None,
+        base_url: Some("https://api.anthropic.com".to_string()),
         model: ModelId {
             provider: "Anthropic".to_string(),
             model: "claude-sonnet-4-20250514".to_string(),
@@ -591,6 +591,19 @@ fn factory_build_valid_spec_returns_binding() {
     assert!(cap.supports_streaming);
     assert_eq!(cap.context_limit, spec.context_window);
     assert_eq!(cap.output_limit, Some(spec.max_tokens as usize));
+}
+
+#[test]
+fn factory_build_missing_endpoint_fails_closed() {
+    let factory = super::provider_factory();
+    let mut spec = valid_spec();
+    spec.base_url = None;
+
+    let err = factory
+        .build(spec)
+        .expect_err("Composition 必须拒绝未由 Config 解析的 endpoint");
+    assert_eq!(err.kind, ProviderErrorKind::Configuration);
+    assert!(err.safe_message.contains("base URL"));
 }
 
 #[test]

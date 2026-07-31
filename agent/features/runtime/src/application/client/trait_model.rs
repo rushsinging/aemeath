@@ -2,7 +2,7 @@ use sdk::{ModelSummary, SdkError};
 
 use super::accessors::AgentClientImpl;
 use crate::ports::{ProviderBuildSpec, ProviderFactory};
-use config::ConfigQuery;
+use config::{resolve_provider_runtime, ConfigQuery};
 
 type Result<T> = std::result::Result<T, SdkError>;
 
@@ -25,18 +25,13 @@ pub(crate) async fn build_provider_binding_for_switch(
     let runtime_model = snapshot
         .resolve_runtime_model((!selection.trim().is_empty()).then_some(selection), None)
         .map_err(|e| e.to_string())?;
-    build_provider_binding_from_runtime_model(
-        runtime_model,
-        snapshot.api_timeout_secs(),
-        snapshot.user_agent(),
-        factory,
-    )
+    build_provider_binding_from_runtime_model(runtime_model, &snapshot, None, factory)
 }
 
 fn build_provider_binding_from_runtime_model(
     runtime_model: share::config::models::ResolvedRuntimeModel,
-    api_timeout_secs: u64,
-    user_agent: &str,
+    snapshot: &share::config::domain::snapshot::ConfigSnapshot,
+    base_url_override: Option<&str>,
     factory: &dyn ProviderFactory,
 ) -> std::result::Result<(crate::ports::ProviderBinding, sdk::ModelSwitchResult), String> {
     let resolved_model = runtime_model.resolved_model().clone();
@@ -50,7 +45,8 @@ fn build_provider_binding_from_runtime_model(
         )
     })?;
 
-    let base_url = non_empty_string(&resolved_model.source_config.base_url);
+    let runtime_provider = resolve_provider_runtime(snapshot, &resolved_model, base_url_override);
+    let base_url = runtime_provider.base_url;
     let model_id = provider::ModelId {
         provider: resolved_model.source_key.clone(),
         model: resolved_model.model.id.clone(),
@@ -81,8 +77,8 @@ fn build_provider_binding_from_runtime_model(
         } else {
             None
         },
-        timeout: std::time::Duration::from_secs(api_timeout_secs),
-        user_agent: user_agent.to_string(),
+        timeout: std::time::Duration::from_secs(snapshot.api_timeout_secs()),
+        user_agent: runtime_provider.user_agent,
     };
 
     let binding = factory.build(spec).map_err(|e| e.to_string())?;

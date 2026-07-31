@@ -57,7 +57,8 @@ impl OpenAICompatibleProvider {
         user_agent: String,
     ) -> Self {
         let driver = driver_for_provider_driver(config.driver);
-        let raw_base_url = base_url.unwrap_or_else(|| "https://api.openai.com".to_string());
+        let raw_base_url = base_url.expect("Provider construction 必须传入已解析 base URL");
+        let model = model.expect("Provider construction 必须传入已解析模型");
         let base_url = if matches!(
             config.driver,
             crate::ProviderDriverKind::Minimax
@@ -73,7 +74,7 @@ impl OpenAICompatibleProvider {
         };
         Self {
             base_url,
-            model: model.unwrap_or_else(|| "gpt-4o".to_string()),
+            model,
             config,
             api_key,
             user_agent,

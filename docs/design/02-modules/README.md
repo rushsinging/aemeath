@@ -18,7 +18,7 @@
 | [memory/](memory/README.md) | MemoryEntry 聚合、检索与注入、Reflection 引擎、MemoryPort |
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope |
 | [workflow/](workflow/README.md) | ReasoningNode 状态机、effort 调节、ReasoningPort OHS 与 clamp 不变量 |
-| [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、Config-owned OHS / project participant、CompatibilityAdapter ACL |
+| [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、Config-owned OHS / project participant、Provider Catalog、Connect 向导、首次聊天初始化与 CompatibilityAdapter ACL |
 | [tui/](tui/README.md) | 八层 TEA 管线、六 Context 投影、Intent / Change / Effect、SDK ACL、ViewAssembler / ViewModel / Render 与四类 Interaction 资源隔离 |
 | [storage/](storage/README.md) | 原子读写、backup / quarantine、路径安全及数据所有权边界 |
 | [logging/](logging/README.md) | 14 字段诊断 schema、TargetCatalog、scope-local context、sink / rotation 与 Audit 分离 |
@@ -44,7 +44,7 @@
 | Workflow | `domain + adapters` 两层 | v0.1.0 仅有 Reasoning Graph / effort 调节，无第二个独立变化轴 |
 | Policy | `domain + adapters` 两层 | v0.1.0 只有 Policy evaluate 与 AllowAll 实现，无内部子能力或出站 seam |
 | Provider | `domain + ports + adapters` 三层 | invoke/capability/error 策略在 domain；Anthropic/OpenAI-compatible/Ollama 技术实现在 adapters |
-| Config | `domain + adapters` 两层 | 只有一条 effective-config 生命周期；File/Env/CLI/Compatibility 是不同外部来源 |
+| Config | `domain + application + ports + adapters` 四层 | effective-config 核心维持扁平；Connect 引入独立用例编排与 Provider Probe 出站 seam，Catalog/状态机/UA 策略仍归 domain，外部 I/O 归 adapters |
 | Hook | `domain + ports + adapters` 三层 | 单一 Hook dispatch 能力在 domain；进程执行与类型化协议在 adapters |
 | Audit | `domain + adapters` 两层 | v0.1.0 只拥有 Usage；ingest、append 与 query 是同一 schema 的处理管线 |
 | Logging | `domain + adapters` 两层 | 各目录是同一诊断记录流水线阶段，不具备独立业务状态所有权 |
@@ -70,6 +70,7 @@
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-21 | #1457 为 Config 增加 Connect 用例编排与 Provider Probe 出站 seam，Target 结构从两层扩展为最小必要的四层 | [#1457](https://github.com/rushsinging/aemeath/issues/1457) |
 | 2026-07-11 | 初稿：承接说明 + 规划模块清单 | #760 |
 | 2026-07-11 | 改为纯目标态（移除"承接现有文档"迁移列）、链接化、新增修改历史 | #760 |
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |

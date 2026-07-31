@@ -388,6 +388,11 @@ impl AgentRunner for CliAgentRunner {
 
             // #1385: Read access and persist from the SAME derived workspace.
             // Never call derive_isolated() a second time.
+            let runtime_provider = config::resolve_provider_runtime_for_selection(
+                derived.instance.context().config_ref().config(),
+                &derived.model_name,
+                None,
+            );
             let sub_ctx = ToolExecutionContext::new(
                 sub_scope,
                 tools::ToolExecutionPorts::new(
@@ -404,14 +409,7 @@ impl AgentRunner for CliAgentRunner {
                     derived.instance.context().memory(),
                     guidance,
                 )
-                .with_user_agent(
-                    derived
-                        .instance
-                        .context()
-                        .config_ref()
-                        .config()
-                        .user_agent(),
-                )
+                .with_user_agent(&runtime_provider.user_agent)
                 .with_memory_context(
                     Some(parent_frame.context.skill_load_session_id().to_string()),
                     None,

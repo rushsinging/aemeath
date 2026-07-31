@@ -363,6 +363,605 @@
       ],
       "type": "object"
     },
+    "ConnectAvailableAction": {
+      "enum": [
+        "select_provider",
+        "confirm_overwrite",
+        "reject_overwrite",
+        "set_endpoint",
+        "set_credential",
+        "set_provider_user_agent",
+        "select_recommended_model",
+        "enter_custom_model",
+        "set_custom_model",
+        "set_global_default",
+        "skip_probe",
+        "begin_probe",
+        "continue_after_probe",
+        "edit_after_probe_failure",
+        "confirm_save",
+        "retry_save",
+        "cancel"
+      ],
+      "type": "string"
+    },
+    "ConnectCommand": {
+      "oneOf": [
+        {
+          "enum": [
+            "confirm_overwrite",
+            "reject_overwrite",
+            "enter_custom_model",
+            "skip_probe",
+            "begin_probe",
+            "continue_after_probe",
+            "edit_after_probe_failure",
+            "confirm_save"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "select_provider": {
+              "properties": {
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "select_provider"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set_endpoint": {
+              "properties": {
+                "base_url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "base_url"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "set_endpoint"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set_credential": {
+              "properties": {
+                "api_key": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "api_key"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "set_credential"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set_provider_user_agent": {
+              "properties": {
+                "raw": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "set_provider_user_agent"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "select_recommended_model": {
+              "properties": {
+                "index": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "index"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "select_recommended_model"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set_custom_model": {
+              "properties": {
+                "context_window": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "max_tokens": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "model_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "model_id",
+                "context_window",
+                "max_tokens"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "set_custom_model"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set_global_default": {
+              "properties": {
+                "set_as_default": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "set_as_default"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "set_global_default"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "ConnectCommand"
+    },
+    "ConnectDraftView": {
+      "properties": {
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "driver": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "has_api_key": {
+          "type": "boolean"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConnectModelDraftView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider_user_agent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "set_global_default": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "has_api_key",
+        "set_global_default"
+      ],
+      "type": "object"
+    },
+    "ConnectErrorKind": {
+      "enum": [
+        "invalid_transition",
+        "stale_revision",
+        "validation",
+        "catalog_unavailable",
+        "probe_failed",
+        "persist_conflict",
+        "persist_failed",
+        "persist_unavailable",
+        "interactive_setup_required",
+        "bootstrap_rollback_refused"
+      ],
+      "type": "string"
+    },
+    "ConnectErrorView": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ConnectErrorKind"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "title": "ConnectErrorView",
+      "type": "object"
+    },
+    "ConnectExistingProviderView": {
+      "properties": {
+        "base_url": {
+          "type": "string"
+        },
+        "driver": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "has_api_key": {
+          "type": "boolean"
+        },
+        "model_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "base_url",
+        "has_api_key"
+      ],
+      "type": "object"
+    },
+    "ConnectModelDraftView": {
+      "properties": {
+        "context_window": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_tokens": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "model_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_id"
+      ],
+      "type": "object"
+    },
+    "ConnectOrigin": {
+      "enum": [
+        "explicit_command",
+        "first_chat_bootstrap"
+      ],
+      "type": "string"
+    },
+    "ConnectOutcome": {
+      "oneOf": [
+        {
+          "enum": [
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "completed": {
+              "properties": {
+                "applied_revision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "applied_revision"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "completed"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "ConnectOutcome"
+    },
+    "ConnectProbeErrorKind": {
+      "enum": [
+        "cancelled",
+        "timeout",
+        "authentication",
+        "endpoint",
+        "model",
+        "protocol",
+        "internal"
+      ],
+      "type": "string"
+    },
+    "ConnectProbeStatus": {
+      "oneOf": [
+        {
+          "enum": [
+            "not_run",
+            "running"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "success": {
+              "properties": {
+                "latency_ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "latency_ms"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "success"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "failed": {
+              "properties": {
+                "kind": {
+                  "$ref": "#/$defs/ConnectProbeErrorKind"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "message"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "failed"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ConnectProviderOption": {
+      "properties": {
+        "default_base_url": {
+          "type": "string"
+        },
+        "driver": {
+          "type": "string"
+        },
+        "recommended_models": {
+          "items": {
+            "$ref": "#/$defs/ConnectRecommendedModelOption"
+          },
+          "type": "array"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "driver",
+        "default_base_url",
+        "recommended_models"
+      ],
+      "type": "object"
+    },
+    "ConnectRecommendedModelOption": {
+      "properties": {
+        "context_window": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_tokens": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_id",
+        "context_window",
+        "max_tokens"
+      ],
+      "type": "object"
+    },
+    "ConnectRevision": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "ConnectSessionId": {
+      "type": "string"
+    },
+    "ConnectStage": {
+      "enum": [
+        "select_provider",
+        "confirm_overwrite",
+        "edit_endpoint",
+        "edit_credential",
+        "edit_user_agent",
+        "select_model",
+        "edit_custom_model",
+        "choose_global_default",
+        "choose_probe",
+        "probing",
+        "review",
+        "saving",
+        "completed",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "ConnectView": {
+      "properties": {
+        "available_actions": {
+          "items": {
+            "$ref": "#/$defs/ConnectAvailableAction"
+          },
+          "type": "array"
+        },
+        "catalog": {
+          "items": {
+            "$ref": "#/$defs/ConnectProviderOption"
+          },
+          "type": "array"
+        },
+        "draft": {
+          "$ref": "#/$defs/ConnectDraftView"
+        },
+        "existing_provider": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConnectExistingProviderView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConnectErrorView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin": {
+          "$ref": "#/$defs/ConnectOrigin"
+        },
+        "probe_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConnectProbeStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/ConnectRevision"
+        },
+        "session_id": {
+          "$ref": "#/$defs/ConnectSessionId"
+        },
+        "stage": {
+          "$ref": "#/$defs/ConnectStage"
+        },
+        "terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConnectOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "revision",
+        "stage",
+        "origin",
+        "catalog",
+        "draft",
+        "available_actions"
+      ],
+      "title": "ConnectView",
+      "type": "object"
+    },
     "ContentBlock": {
       "description": "消息内容块。`#[serde(tag = \"type\")]` + snake_case 与 wire / 持久化 JSON 对齐。",
       "oneOf": [

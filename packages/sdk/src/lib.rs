@@ -12,6 +12,7 @@ mod chat_view;
 pub mod client;
 pub mod commands;
 pub mod config_view;
+pub mod connect;
 pub mod content;
 pub mod error;
 pub mod models;
@@ -44,7 +45,7 @@ pub use chat::{
     ResumedStepFinalizeCause, SkillRequest, ToolCallStatusView, ToolResultImage,
     WorkspaceContextView, WorkspaceStackEntryView,
 };
-pub use client::{AgentClient, RunControlClient};
+pub use client::{AgentClient, ConnectClient, RunControlClient};
 pub use commands::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
@@ -55,6 +56,12 @@ pub use config_view::{
     ConfigApplicationScopeView, ConfigChangeCause, ConfigChangedEvent, ConfigField,
     ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, ElementSpacingView,
     MarkdownSpacingModeView, MarkdownSpacingOverridesView, PermissionModeView,
+};
+pub use connect::{
+    ConnectAvailableAction, ConnectCommand, ConnectDraftView, ConnectErrorKind, ConnectErrorView,
+    ConnectExistingProviderView, ConnectModelDraftView, ConnectOrigin, ConnectOutcome,
+    ConnectProbeErrorKind, ConnectProbeStatus, ConnectProviderOption,
+    ConnectRecommendedModelOption, ConnectRevision, ConnectSessionId, ConnectStage, ConnectView,
 };
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;

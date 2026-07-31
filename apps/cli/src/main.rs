@@ -48,6 +48,20 @@ async fn main() {
         Some(Commands::Run { run_args }) => {
             chat::run_chat(run_args.into()).await;
         }
+        Some(Commands::Connect) => {
+            let bootstrap = composition::app::build_connect_bootstrap()
+                .await
+                .unwrap_or_else(|error| {
+                    eprintln!("Error: {error}");
+                    std::process::exit(1);
+                });
+            subcommand::connect_command::run_connect_command(bootstrap.connect)
+                .await
+                .unwrap_or_else(|error| {
+                    eprintln!("Error: {error}");
+                    std::process::exit(1);
+                });
+        }
         Some(Commands::Update { check }) => {
             let args = Args::from(cli.run_args);
             let user_agent = composition::app::configured_user_agent(args.into())
