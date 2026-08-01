@@ -2,6 +2,7 @@
 ///
 /// COLA 语义：消费 Port/Gateway，拥有用例决策，不依赖具体 Adapter。
 /// 协议转换和运行时桥接已移入 `adapters/`。
+pub(crate) mod activity;
 pub(crate) mod client;
 pub(crate) mod context;
 pub(crate) mod hook;

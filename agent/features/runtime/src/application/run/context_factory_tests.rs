@@ -273,6 +273,7 @@ fn make_bindings() -> RunCapabilityBindings {
 fn make_parent_context() -> RuntimeContext {
     let services = make_services();
     let bindings = make_bindings();
+    let run_id = crate::domain::agent_run::RunId::new_v7();
     // #1248 Task 3: Use the test-only token — production code must go
     // through RuntimeContextFactory::assemble().
     RuntimeContext::new(
@@ -283,8 +284,34 @@ fn make_parent_context() -> RuntimeContext {
                 FakeContextPort,
             )),
         ),
+        Arc::new(crate::application::activity::ActivityCoordinator::production(run_id)),
         crate::application::run::context::RuntimeContextAssemblyToken::new_for_test(),
     )
+}
+
+#[test]
+fn runtime_context_factory_assembles_activity_coordinator_for_bound_run_identity() {
+    let source = include_str!("context_factory.rs");
+
+    assert!(source.contains(".run_id()"));
+    assert!(source.contains("ActivityCoordinator::production(run_id.clone())"));
+}
+
+#[test]
+fn runtime_context_owns_one_activity_coordinator() {
+    let source = include_str!("context.rs");
+
+    assert!(source.contains("activities: Arc<ActivityCoordinator>"));
+    assert!(source.contains("pub(crate) fn activities(&self) -> &Arc<ActivityCoordinator>"));
+}
+
+#[test]
+fn run_factory_assigns_one_identity_to_domain_run_and_runtime_context() {
+    let source = include_str!("factory.rs");
+
+    assert!(source.contains("let run_id = crate::domain::agent_run::RunId::new_v7();"));
+    assert!(source.contains("request.with_run_id(run_id.clone())"));
+    assert!(source.contains("RunInstance::new(\n            run_id,"));
 }
 
 #[test]

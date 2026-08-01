@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use crate::application::activity::ActivityCoordinator;
 use crate::application::hook::empty::BoundaryHookPort;
 use crate::application::interaction::port::{
     ParentMediatedInteractionPort, UnavailableInteractionPort,
@@ -223,6 +224,7 @@ impl RuntimeContextFactory {
         let hook = self.select_hook_port(request.spec(), parent.as_deref())?;
         let reasoning = self.select_reasoning_port(bindings, parent.as_deref())?;
         let event_route = self.select_event_route(bindings)?;
+        let activities = self.select_activity_coordinator(request)?;
         let lifecycle = self.select_lifecycle(request, parent.as_deref())?;
         let skill_load = self.select_skill_load(&context, parent.as_deref(), &session);
         let bindings = RunCapabilityBindings {
@@ -251,6 +253,7 @@ impl RuntimeContextFactory {
             bindings,
             hook,
             skill_load.state,
+            activities,
             RunCreationResources { session, workspace },
         )
     }
@@ -260,6 +263,7 @@ impl RuntimeContextFactory {
         bindings: RunCapabilityBindings,
         hook: HookSelection,
         skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
+        activities: Arc<ActivityCoordinator>,
         resources: RunCreationResources,
     ) -> Result<
         (
@@ -282,6 +286,7 @@ impl RuntimeContextFactory {
             services,
             bindings,
             skill_load_state,
+            activities,
             RuntimeContextAssemblyToken::new(),
         );
         let context = match resources.session.lease {
@@ -547,6 +552,14 @@ impl RuntimeContextFactory {
         Ok(EventRouteSelection { sink })
     }
 
+    fn select_activity_coordinator(
+        &self,
+        request: &RunCreationRequest,
+    ) -> Result<Arc<ActivityCoordinator>, RunCreationError> {
+        let run_id = request.run_id().ok_or(RunCreationError::ContextAssembly)?;
+        Ok(Arc::new(ActivityCoordinator::production(run_id.clone())))
+    }
+
     fn select_lifecycle(
         &self,
         _request: &RunCreationRequest,
@@ -658,6 +671,9 @@ impl RuntimeContextFactory {
                     bindings.model.context.clone(),
                 ),
             ),
+            Arc::new(ActivityCoordinator::production(
+                crate::domain::agent_run::RunId::new_v7(),
+            )),
             RuntimeContextAssemblyToken::new(),
         ))
     }

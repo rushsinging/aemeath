@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use sdk::ChatInputEvent;
 use tokio_util::sync::CancellationToken;
 
+use crate::application::activity::ActivityCoordinator;
 use crate::application::interaction::port::InteractionPort;
 use crate::application::loop_engine::chat::run_input_buffer::RunInputBuffer;
 use crate::application::loop_engine::chat::ChatEventSinkHandle;
@@ -347,6 +348,8 @@ pub struct RuntimeContext {
     usage: RunUsageTracker,
     /// per-Run 输入缓冲 handle（推入侧）。
     input: RunInputBufferHandle,
+    /// per-Run Activity 观察注册表唯一 owner。
+    activities: Arc<ActivityCoordinator>,
     /// Optional session lease held for the full Run lifetime.
     session_lease: Option<Arc<context::OwnedSessionSharedPermit>>,
 }
@@ -384,6 +387,7 @@ impl RuntimeContext {
         services: RuntimeServices,
         bindings: impl Into<RunCapabilityBindings>,
         skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
+        activities: Arc<ActivityCoordinator>,
         _token: RuntimeContextAssemblyToken,
     ) -> Self {
         let bindings = bindings.into();
@@ -406,6 +410,7 @@ impl RuntimeContext {
             event_sink: bindings.io.event_sink,
             usage: bindings.lifecycle.usage,
             input: bindings.io.input,
+            activities,
             session_lease: None,
         }
     }
@@ -473,6 +478,10 @@ impl RuntimeContext {
     /// Run 级配置快照。
     pub fn config(&self) -> &RunConfigSnapshot {
         &self.config
+    }
+    /// per-Run ActivityCoordinator，只读共享引用。
+    pub(crate) fn activities(&self) -> &Arc<ActivityCoordinator> {
+        &self.activities
     }
     /// per-Run 取消作用域。
     pub fn cancel(&self) -> &RunCancellationScope {
