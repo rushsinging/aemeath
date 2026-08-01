@@ -52,11 +52,16 @@ fn provider_view() -> sdk::ConfigFormView {
     }
 }
 
-fn screen(view: &sdk::ConfigFormView, width: u16, height: u16) -> String {
+fn screen_with_interaction(
+    view: &sdk::ConfigFormView,
+    width: u16,
+    height: u16,
+    interaction: ConfigFormInteraction,
+) -> String {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_config_form(frame, view, "", 0))
+        .draw(|frame| render_config_form(frame, view, "", 0, interaction))
         .unwrap();
     let buffer = terminal.backend().buffer();
     (0..height)
@@ -67,6 +72,61 @@ fn screen(view: &sdk::ConfigFormView, width: u16, height: u16) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn screen(view: &sdk::ConfigFormView, width: u16, height: u16) -> String {
+    screen_with_interaction(
+        view,
+        width,
+        height,
+        ConfigFormInteraction {
+            focused_field: 0,
+            selected_option: 0,
+            focused_action: 0,
+        },
+    )
+}
+
+#[test]
+fn selected_provider_is_visibly_marked_after_navigation() {
+    let screen = screen_with_interaction(
+        &provider_view(),
+        80,
+        20,
+        ConfigFormInteraction {
+            focused_field: 0,
+            selected_option: 1,
+            focused_action: 0,
+        },
+    );
+
+    assert!(screen.contains("● OpenAI"));
+    assert!(screen.contains("○ Anthropic"));
+}
+
+#[test]
+fn selected_action_is_visibly_marked() {
+    let mut view = provider_view();
+    view.page.fields.clear();
+    view.page.actions.push(sdk::ConfigFormAction {
+        id: sdk::ConfigFormActionId("confirm".to_string()),
+        label: "确认".to_string(),
+        style: sdk::ConfigFormActionStyle::Primary,
+        shortcut: None,
+    });
+    let screen = screen_with_interaction(
+        &view,
+        80,
+        20,
+        ConfigFormInteraction {
+            focused_field: 0,
+            selected_option: 0,
+            focused_action: 1,
+        },
+    );
+
+    assert!(screen.contains("[确 认 ]"), "{screen}");
+    assert!(!screen.contains("[取 消 ]"));
 }
 
 #[test]
@@ -89,13 +149,37 @@ fn replacing_page_clears_previous_frame_content() {
     let backend = TestBackend::new(80, 20);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_config_form(frame, &provider_view(), "", 0))
+        .draw(|frame| {
+            render_config_form(
+                frame,
+                &provider_view(),
+                "",
+                0,
+                ConfigFormInteraction {
+                    focused_field: 0,
+                    selected_option: 0,
+                    focused_action: 0,
+                },
+            )
+        })
         .unwrap();
     let mut next = provider_view();
     next.page.title = "设置 Base URL".to_string();
     next.page.fields.clear();
     terminal
-        .draw(|frame| render_config_form(frame, &next, "https://example.test", 0))
+        .draw(|frame| {
+            render_config_form(
+                frame,
+                &next,
+                "https://example.test",
+                0,
+                ConfigFormInteraction {
+                    focused_field: 0,
+                    selected_option: 0,
+                    focused_action: 0,
+                },
+            )
+        })
         .unwrap();
     let buffer = terminal.backend().buffer();
     let screen = (0..20)

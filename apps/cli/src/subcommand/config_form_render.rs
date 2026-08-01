@@ -7,11 +7,19 @@ use crate::tui::render::theme;
 
 const WIDE_LAYOUT_MIN_WIDTH: u16 = 72;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ConfigFormInteraction {
+    pub(crate) focused_field: usize,
+    pub(crate) selected_option: usize,
+    pub(crate) focused_action: usize,
+}
+
 pub(crate) fn render_config_form(
     frame: &mut ratatui::Frame<'_>,
     view: &sdk::ConfigFormView,
     visible_input: &str,
     scroll: u16,
+    interaction: ConfigFormInteraction,
 ) {
     let area = frame.area();
     frame.render_widget(Clear, area);
@@ -35,16 +43,16 @@ pub(crate) fn render_config_form(
         .constraints([
             Constraint::Length(2),
             Constraint::Min(3),
-            Constraint::Length(3),
+            Constraint::Length(4),
         ])
         .split(inner);
     render_header(frame, view, rows[0]);
     if area.width >= WIDE_LAYOUT_MIN_WIDTH {
-        render_wide_body(frame, view, rows[1], scroll);
+        render_wide_body(frame, view, rows[1], scroll, interaction);
     } else {
-        render_narrow_body(frame, view, rows[1], scroll);
+        render_narrow_body(frame, view, rows[1], scroll, interaction);
     }
-    render_footer(frame, view, visible_input, rows[2]);
+    render_footer(frame, view, visible_input, rows[2], interaction);
 }
 
 fn render_header(frame: &mut ratatui::Frame<'_>, view: &sdk::ConfigFormView, area: Rect) {
@@ -70,12 +78,13 @@ fn render_wide_body(
     view: &sdk::ConfigFormView,
     area: Rect,
     scroll: u16,
+    interaction: ConfigFormInteraction,
 ) {
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
         .split(area);
-    render_fields(frame, view, columns[0], scroll);
+    render_fields(frame, view, columns[0], scroll, interaction);
     render_details(frame, view, columns[1], scroll);
 }
 
@@ -84,12 +93,13 @@ fn render_narrow_body(
     view: &sdk::ConfigFormView,
     area: Rect,
     scroll: u16,
+    interaction: ConfigFormInteraction,
 ) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(area);
-    render_fields(frame, view, rows[0], scroll);
+    render_fields(frame, view, rows[0], scroll, interaction);
     render_details(frame, view, rows[1], scroll);
 }
 
@@ -98,23 +108,46 @@ fn render_fields(
     view: &sdk::ConfigFormView,
     area: Rect,
     scroll: u16,
+    interaction: ConfigFormInteraction,
 ) {
     let items = view
         .page
         .fields
         .iter()
-        .flat_map(|field| {
+        .enumerate()
+        .flat_map(|(field_index, field)| {
+            let is_focused = field_index == interaction.focused_field;
+            let marker = if is_focused { "▸ " } else { "  " };
+            let label_style = if is_focused {
+                Style::default().fg(theme::ACCENT_BRIGHT)
+            } else {
+                Style::default().fg(theme::TEXT)
+            };
             let mut lines = vec![ListItem::new(Line::from(vec![
-                Span::styled("  ", Style::default().fg(theme::ACCENT)),
-                Span::styled(&field.label, Style::default().fg(theme::TEXT)),
+                Span::styled(marker, Style::default().fg(theme::ACCENT)),
+                Span::styled(&field.label, label_style),
             ]))];
             if field.field_type == sdk::ConfigFormFieldType::SingleSelect {
-                lines.extend(field.options.iter().map(|option| {
-                    ListItem::new(Line::from(vec![
-                        Span::styled("    • ", Style::default().fg(theme::ACCENT)),
-                        Span::styled(&option.label, Style::default().fg(theme::TEXT)),
-                    ]))
-                }));
+                lines.extend(
+                    field
+                        .options
+                        .iter()
+                        .enumerate()
+                        .map(|(option_index, option)| {
+                            let selected =
+                                is_focused && option_index == interaction.selected_option;
+                            let option_marker = if selected { "    ● " } else { "    ○ " };
+                            let option_style = if selected {
+                                Style::default().fg(theme::ACCENT_BRIGHT)
+                            } else {
+                                Style::default().fg(theme::TEXT)
+                            };
+                            ListItem::new(Line::from(vec![
+                                Span::styled(option_marker, Style::default().fg(theme::ACCENT)),
+                                Span::styled(&option.label, option_style),
+                            ]))
+                        }),
+                );
             } else if let Some(value) = &field.display_value {
                 lines.push(ListItem::new(Line::from(Span::styled(
                     format!("    {value}"),
@@ -189,26 +222,38 @@ fn render_footer(
     view: &sdk::ConfigFormView,
     visible_input: &str,
     area: Rect,
+    interaction: ConfigFormInteraction,
 ) {
-    let actions = view
-        .page
-        .actions
-        .iter()
-        .map(|action| action.label.as_str())
-        .collect::<Vec<_>>()
-        .join(" · ");
+    let mut action_spans = Vec::new();
+    for (action_index, action) in view.page.actions.iter().enumerate() {
+        if action_index > 0 {
+            action_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_DIM)));
+        }
+        let selected = interaction.focused_action == action_index;
+        let label = if selected {
+            format!("[{}]", action.label)
+        } else {
+            action.label.clone()
+        };
+        action_spans.push(Span::styled(
+            label,
+            if selected {
+                Style::default().fg(theme::ACCENT_BRIGHT)
+            } else {
+                Style::default().fg(theme::TEXT_MUTED)
+            },
+        ));
+    }
     let text = vec![
+        Line::from(action_spans),
         Line::from(vec![
             Span::styled("> ", Style::default().fg(theme::ACCENT)),
             Span::styled(visible_input, Style::default().fg(theme::TEXT)),
         ]),
-        Line::from(vec![
-            Span::styled(actions, Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(
-                "  Esc 取消 · Enter 提交",
-                Style::default().fg(theme::TEXT_DIM),
-            ),
-        ]),
+        Line::from(Span::styled(
+            "Tab/↑↓ 切换 · ←→ 选择 · Esc 取消 · Enter 提交",
+            Style::default().fg(theme::TEXT_DIM),
+        )),
     ];
     frame.render_widget(
         Paragraph::new(text)

@@ -20,6 +20,7 @@ pub(crate) struct ConfigFormModel {
     focused_field: usize,
     input: String,
     selected_option: usize,
+    focused_action: usize,
     scroll: u16,
 }
 
@@ -31,6 +32,7 @@ impl ConfigFormModel {
             focused_field: 0,
             input,
             selected_option: 0,
+            focused_action: 0,
             scroll: 0,
         }
     }
@@ -44,8 +46,17 @@ impl ConfigFormModel {
         self.view = view;
         self.focused_field = 0;
         self.selected_option = 0;
+        self.focused_action = 0;
         self.scroll = 0;
         self.input = initial_input(&self.view, self.focused_field);
+    }
+
+    pub(crate) fn interaction(&self) -> super::config_form_render::ConfigFormInteraction {
+        super::config_form_render::ConfigFormInteraction {
+            focused_field: self.focused_field,
+            selected_option: self.selected_option,
+            focused_action: self.focused_action,
+        }
     }
 
     pub(crate) fn visible_input(&self) -> String {
@@ -126,7 +137,7 @@ impl ConfigFormModel {
                 .view
                 .page
                 .actions
-                .first()
+                .get(self.focused_action)
                 .map(|action| ConfigFormEffect::InvokeAction {
                     command: sdk::ConfigFormInvokeAction {
                         session_id: self.view.session_id.clone(),
@@ -211,6 +222,9 @@ impl ConfigFormModel {
 
     fn focus_next(&mut self) {
         if self.view.page.fields.is_empty() {
+            if !self.view.page.actions.is_empty() {
+                self.focused_action = (self.focused_action + 1) % self.view.page.actions.len();
+            }
             return;
         }
         self.clear_sensitive_input();
@@ -221,6 +235,12 @@ impl ConfigFormModel {
 
     fn focus_previous(&mut self) {
         if self.view.page.fields.is_empty() {
+            if !self.view.page.actions.is_empty() {
+                self.focused_action = self
+                    .focused_action
+                    .checked_sub(1)
+                    .unwrap_or(self.view.page.actions.len() - 1);
+            }
             return;
         }
         self.clear_sensitive_input();
@@ -233,6 +253,12 @@ impl ConfigFormModel {
     }
 
     fn select_next(&mut self) {
+        if self.view.page.fields.is_empty() {
+            if !self.view.page.actions.is_empty() {
+                self.focused_action = (self.focused_action + 1) % self.view.page.actions.len();
+            }
+            return;
+        }
         let Some(field) = self.view.page.fields.get(self.focused_field) else {
             return;
         };
@@ -242,6 +268,15 @@ impl ConfigFormModel {
     }
 
     fn select_previous(&mut self) {
+        if self.view.page.fields.is_empty() {
+            if !self.view.page.actions.is_empty() {
+                self.focused_action = self
+                    .focused_action
+                    .checked_sub(1)
+                    .unwrap_or(self.view.page.actions.len() - 1);
+            }
+            return;
+        }
         let Some(field) = self.view.page.fields.get(self.focused_field) else {
             return;
         };
@@ -339,6 +374,7 @@ pub(crate) async fn run_config_form(
                     model.view(),
                     &model.visible_input(),
                     model.scroll(),
+                    model.interaction(),
                 )
             })
             .map_err(|error| sdk::SdkError::Internal(error.to_string()))?;

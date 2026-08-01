@@ -61,6 +61,87 @@ fn view_replacement_clears_secret_and_uses_server_revision() {
     assert_eq!(model.view().revision, sdk::ConfigFormRevision(2));
 }
 
+fn select_view() -> sdk::ConfigFormView {
+    let mut view = secret_view();
+    view.page.fields[0] = sdk::ConfigFormField {
+        id: sdk::ConfigFormFieldId("provider_source".to_string()),
+        label: "Provider".to_string(),
+        description: None,
+        field_type: sdk::ConfigFormFieldType::SingleSelect,
+        required: true,
+        has_value: false,
+        display_value: None,
+        options: vec![
+            sdk::ConfigFormOption {
+                id: sdk::ConfigFormOptionId("Anthropic".to_string()),
+                label: "Anthropic".to_string(),
+                description: None,
+            },
+            sdk::ConfigFormOption {
+                id: sdk::ConfigFormOptionId("OpenAI".to_string()),
+                label: "OpenAI".to_string(),
+                description: None,
+            },
+        ],
+        error: None,
+    };
+    view
+}
+
+fn action_view() -> sdk::ConfigFormView {
+    let mut view = secret_view();
+    view.page.fields.clear();
+    view.page.actions = vec![
+        sdk::ConfigFormAction {
+            id: sdk::ConfigFormActionId("confirm".to_string()),
+            label: "确认保存".to_string(),
+            style: sdk::ConfigFormActionStyle::Primary,
+            shortcut: None,
+        },
+        sdk::ConfigFormAction {
+            id: sdk::ConfigFormActionId("cancel".to_string()),
+            label: "取消".to_string(),
+            style: sdk::ConfigFormActionStyle::Destructive,
+            shortcut: Some("Esc".to_string()),
+        },
+    ];
+    view
+}
+
+#[test]
+fn single_select_key_changes_interaction_and_submission_value() {
+    let mut model = ConfigFormModel::new(select_view());
+    model.update(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+
+    assert_eq!(model.interaction().selected_option, 1);
+    let effect = model
+        .update(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .unwrap();
+    assert!(matches!(
+        effect,
+        ConfigFormEffect::SubmitPage { command }
+            if matches!(
+                &command.values[0].value,
+                sdk::ConfigFormValue::SelectedOption(option) if option.as_str() == "OpenAI"
+            )
+    ));
+}
+
+#[test]
+fn action_focus_can_select_non_first_action_and_enter_invokes_it() {
+    let mut model = ConfigFormModel::new(action_view());
+    model.update(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+
+    assert_eq!(model.interaction().focused_action, 1);
+    let effect = model
+        .update(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .unwrap();
+    assert!(matches!(
+        effect,
+        ConfigFormEffect::InvokeAction { command }
+            if command.action_id.as_str() == "cancel"
+    ));
+}
 #[test]
 fn escape_emits_cancel_with_current_identity() {
     let mut model = ConfigFormModel::new(secret_view());
