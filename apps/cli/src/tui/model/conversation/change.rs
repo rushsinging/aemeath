@@ -97,6 +97,16 @@ pub enum ConversationChange {
         active_request_id: UiInteractionRequestId,
         received_request_id: UiInteractionRequestId,
     },
+    ActivityObservationChanged {
+        run_id: super::interaction::UiRunId,
+        activity_id: crate::tui::adapter::tui_runtime_event::UiActivityId,
+    },
+    ActivityObservationStale {
+        run_id: super::interaction::UiRunId,
+    },
+    ActivitySnapshotReplaced {
+        run_id: super::interaction::UiRunId,
+    },
     RunStatusObserved {
         run_id: super::interaction::UiRunId,
         parent_run_id: Option<super::interaction::UiRunId>,

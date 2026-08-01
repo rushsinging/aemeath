@@ -359,9 +359,17 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
     };
 
     match event {
-        TuiRuntimeEvent::ActivityChanged { .. } | TuiRuntimeEvent::ActivitySnapshot(_) => {
-            AgentEventMapping::default()
-        }
+        TuiRuntimeEvent::ActivityChanged { kind, activity } => conversation(
+            ConversationIntent::ObserveActivityChange(ObserveActivityChange {
+                kind: *kind,
+                activity: activity.clone(),
+            }),
+        ),
+        TuiRuntimeEvent::ActivitySnapshot(snapshot) => conversation(
+            ConversationIntent::ReplaceActivitySnapshot(ReplaceActivitySnapshot {
+                snapshot: snapshot.clone(),
+            }),
+        ),
         TuiRuntimeEvent::SkillsUpdated { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::Text { context, text } => {
             conversation(ConversationIntent::AssistantText(AssistantText {

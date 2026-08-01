@@ -292,6 +292,17 @@ pub struct RunCancelled {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObserveActivityChange {
+    pub kind: crate::tui::adapter::tui_runtime_event::TuiActivityChangeKind,
+    pub activity: crate::tui::adapter::tui_runtime_event::TuiActivityObservation,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReplaceActivitySnapshot {
+    pub snapshot: crate::tui::adapter::tui_runtime_event::TuiActivitySnapshot,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObserveRunStatus {
     pub run_id: UiRunId,
     pub parent_run_id: Option<UiRunId>,
@@ -454,6 +465,8 @@ pub enum ConversationIntent {
     RunCancelled(RunCancelled),
     RunCompleted(RunCompleted),
     RunFailed(RunFailed),
+    ObserveActivityChange(ObserveActivityChange),
+    ReplaceActivitySnapshot(ReplaceActivitySnapshot),
     ObserveRunStatus(ObserveRunStatus),
     RunStepStarted(RunStepStarted),
     RunStepCompleted(RunStepCompleted),

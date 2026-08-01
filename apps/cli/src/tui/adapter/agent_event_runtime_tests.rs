@@ -1,15 +1,65 @@
 use super::map_runtime_event;
 use crate::tui::adapter::tui_runtime_event::{
-    TuiInteractionBody, TuiInteractionRequest, TuiRunEvent, TuiRunStatus, TuiRunStepEvent,
-    TuiRuntimeEvent, TuiToolApprovalPrompt, TuiWorkspaceSnapshot,
+    TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
+    TuiActivityObservation, TuiActivitySnapshot, TuiActivitySource, TuiActivityState,
+    TuiActivityTiming, TuiInteractionBody, TuiInteractionRequest, TuiRunEvent, TuiRunPurpose,
+    TuiRunStatus, TuiRunStepEvent, TuiRuntimeEvent, TuiToolApprovalPrompt, TuiWorkspaceSnapshot,
+    UiActivityId,
 };
 use crate::tui::model::conversation::intent::{
-    ConversationIntent, ObserveRunStatus, RunCancelling, RunStepStarted, ShowInteraction,
+    ConversationIntent, ObserveActivityChange, ObserveRunStatus, ReplaceActivitySnapshot,
+    RunCancelling, RunStepStarted, ShowInteraction,
 };
 use crate::tui::model::conversation::interaction::{
     UiInteractionRequestId, UiRiskLevel, UiRunId, UiRunStepId,
 };
 use crate::tui::model::workspace_provider::WorkspaceIntent;
+
+fn activity(run_id: &str, activity_id: &str, revision: u64) -> TuiActivityObservation {
+    TuiActivityObservation {
+        id: UiActivityId::from(activity_id),
+        run_id: UiRunId::from(run_id),
+        run_step_id: None,
+        parent_activity_id: None,
+        source: TuiActivitySource::Run,
+        kind: TuiActivityKind::Run,
+        state: TuiActivityState::Running,
+        detail: TuiActivityDetail::Run {
+            purpose: TuiRunPurpose::Main,
+        },
+        audience: TuiActivityAudience::User,
+        revision,
+        timing: TuiActivityTiming::default(),
+    }
+}
+
+#[test]
+fn activity_events_map_to_dedicated_conversation_intents() {
+    let changed = map_runtime_event(&TuiRuntimeEvent::ActivityChanged {
+        kind: TuiActivityChangeKind::Updated,
+        activity: activity("run-1", "activity-1", 2),
+    });
+    assert!(matches!(
+        changed.conversation.as_slice(),
+        [ConversationIntent::ObserveActivityChange(ObserveActivityChange {
+            kind: TuiActivityChangeKind::Updated,
+            activity,
+        })] if activity.id.as_str() == "activity-1" && activity.revision == 2
+    ));
+
+    let snapshot = map_runtime_event(&TuiRuntimeEvent::ActivitySnapshot(TuiActivitySnapshot {
+        run_id: UiRunId::from("run-1"),
+        revision: 3,
+        activities: vec![activity("run-1", "activity-1", 3)],
+    }));
+    assert!(matches!(
+        snapshot.conversation.as_slice(),
+        [ConversationIntent::ReplaceActivitySnapshot(ReplaceActivitySnapshot { snapshot })]
+            if snapshot.run_id.as_str() == "run-1"
+                && snapshot.revision == 3
+                && snapshot.activities.len() == 1
+    ));
+}
 
 #[test]
 fn runtime_run_and_step_lifecycle_maps_to_existing_conversation_intents() {

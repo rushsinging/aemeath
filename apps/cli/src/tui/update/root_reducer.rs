@@ -208,6 +208,9 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::InteractionCompleted { .. }
             | ConversationChange::InteractionCommandRejected { .. }
             | ConversationChange::InteractionConflict { .. }
+            | ConversationChange::ActivityObservationChanged { .. }
+            | ConversationChange::ActivityObservationStale { .. }
+            | ConversationChange::ActivitySnapshotReplaced { .. }
             | ConversationChange::RunStatusObserved { .. }
             | ConversationChange::AgentRunChanged { .. }
             | ConversationChange::AgentRunStepChanged { .. } => {

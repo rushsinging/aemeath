@@ -1,3 +1,4 @@
+use super::activity_observation::{ActivityIncrementOutcome, ActivityObservationModel};
 use super::agent_progress::AgentProgressEntry;
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
@@ -47,6 +48,7 @@ pub struct ConversationModel {
     pub(super) agent_runs: Vec<AgentRunState>,
     run_state_snapshots: Vec<RunStateSnapshot>,
     active_main_run_id: Option<UiRunId>,
+    activity_observations: ActivityObservationModel,
 
     // ── 运行态 ──
     pub runtime: RuntimeState,
@@ -71,6 +73,7 @@ impl Default for ConversationModel {
             agent_runs: Vec::new(),
             run_state_snapshots: Vec::new(),
             active_main_run_id: None,
+            activity_observations: ActivityObservationModel::default(),
             runtime: RuntimeState::default(),
         }
     }
@@ -140,6 +143,42 @@ impl ConversationModel {
             agent_run_steps,
             terminal_agent_runs,
             has_active_interaction: self.active_interaction.is_some(),
+        }
+    }
+
+    pub(crate) fn activity_observations(&self) -> &ActivityObservationModel {
+        &self.activity_observations
+    }
+
+    pub(super) fn observe_activity_change(
+        &mut self,
+        activity: crate::tui::adapter::tui_runtime_event::TuiActivityObservation,
+    ) -> Vec<ConversationChange> {
+        let run_id = activity.run_id.clone();
+        let activity_id = activity.id.clone();
+        match self.activity_observations.observe_increment(activity) {
+            ActivityIncrementOutcome::Applied => {
+                vec![ConversationChange::ActivityObservationChanged {
+                    run_id,
+                    activity_id,
+                }]
+            }
+            ActivityIncrementOutcome::GapDetected => {
+                vec![ConversationChange::ActivityObservationStale { run_id }]
+            }
+            ActivityIncrementOutcome::Ignored => Vec::new(),
+        }
+    }
+
+    pub(super) fn replace_activity_snapshot(
+        &mut self,
+        snapshot: crate::tui::adapter::tui_runtime_event::TuiActivitySnapshot,
+    ) -> Vec<ConversationChange> {
+        let run_id = snapshot.run_id.clone();
+        if self.activity_observations.replace_snapshot(snapshot) {
+            vec![ConversationChange::ActivitySnapshotReplaced { run_id }]
+        } else {
+            Vec::new()
         }
     }
 
