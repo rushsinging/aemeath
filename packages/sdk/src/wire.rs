@@ -7,13 +7,14 @@ use schemars::{schema_for, JsonSchema};
 use serde_json::{json, Map, Value};
 
 use crate::{
-    CancelCurrentRunOutcome, CancelRunOutcome, CancelRunStepOutcome, ChatEventContext, ChatMessage,
-    ConfigChangedEvent, ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView,
-    ControlDeadline, ElementSpacingView, HookMessageView, InteractionCancelReason,
-    InteractionCommandOutcome, InteractionReply, InteractionRequest, InteractionRequestBody,
-    MarkdownSpacingModeView, MarkdownSpacingOverridesView, ModelSummary, ProjectContext,
-    ReflectionHistoryView, RunTerminationReason, SessionResumeFailureKind, SessionSnapshot,
-    SessionSummary, TerminateRunOutcome, WorkspaceContextView,
+    ActivityChangeKind, ActivityId, ActivitySnapshotView, ActivityView, CancelCurrentRunOutcome,
+    CancelRunOutcome, CancelRunStepOutcome, ChatEventContext, ChatMessage, ConfigChangedEvent,
+    ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, ControlDeadline,
+    ElementSpacingView, HookMessageView, InteractionCancelReason, InteractionCommandOutcome,
+    InteractionReply, InteractionRequest, InteractionRequestBody, MarkdownSpacingModeView,
+    MarkdownSpacingOverridesView, ModelSummary, ProjectContext, ReflectionHistoryView,
+    RunTerminationReason, SessionResumeFailureKind, SessionSnapshot, SessionSummary,
+    TerminateRunOutcome, WorkspaceContextView,
 };
 
 /// 生成供未来 Server adapter 组装 OpenAPI components 的 JSON Schema 文档。
@@ -21,6 +22,10 @@ use crate::{
 /// 这里不冻结 `paths`、`servers` 或任意传输语义；这些属于 Server Future 设计。
 pub fn components_document() -> Value {
     let mut definitions = Map::new();
+    register::<ActivityId>(&mut definitions);
+    register::<ActivityView>(&mut definitions);
+    register::<ActivitySnapshotView>(&mut definitions);
+    register::<ActivityChangeKind>(&mut definitions);
     register::<InteractionRequest>(&mut definitions);
     register::<InteractionRequestBody>(&mut definitions);
     register::<InteractionReply>(&mut definitions);

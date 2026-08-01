@@ -26,6 +26,7 @@ mod skills_updated_tests {
     }
 }
 
+use crate::activity::{ActivityChangeKind, ActivitySnapshotView, ActivityView};
 use crate::chat::AskUserQuestionItem;
 use crate::chat_result::{ChatResult, ToolResultImage};
 use crate::chat_view::{
@@ -233,6 +234,13 @@ pub struct ReflectionHistoryView {
 /// Chat 事件流中的单个事件。
 #[derive(Debug)]
 pub enum ChatEvent {
+    /// Runtime Activity 的完整增量观测。
+    ActivityChanged {
+        kind: ActivityChangeKind,
+        activity: ActivityView,
+    },
+    /// 单个 Run 在同一 revision 下的完整 Activity 快照。
+    ActivitySnapshot(ActivitySnapshotView),
     SkillsUpdated {
         event: crate::tui::SkillsUpdatedEvent,
     },

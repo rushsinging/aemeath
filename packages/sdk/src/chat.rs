@@ -2,6 +2,12 @@
 
 use crate::ChatInputEventPort;
 
+pub use crate::activity::{
+    ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
+    ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
+    CompactStageView, HookPointView, InteractionKindView, ModelStreamStateView, RunPhaseKindView,
+    RunPurposeView,
+};
 pub use crate::chat_event::{
     ChatEvent, ChatEventContext, ReflectionApplyStatusView, ReflectionErrorCategoryView,
     ReflectionHistoryView, ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView,

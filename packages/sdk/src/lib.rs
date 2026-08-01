@@ -3,6 +3,10 @@
 //! `packages/sdk` 只放 trait + 公共类型，零业务依赖。
 //! 实现在 `agent/runtime`。
 
+pub mod activity;
+#[cfg(test)]
+#[path = "activity_tests.rs"]
+mod activity_tests;
 pub mod bootstrap;
 pub mod change_set;
 pub mod chat;
@@ -32,6 +36,12 @@ pub mod wire;
 pub mod ids;
 pub mod interaction;
 
+pub use activity::{
+    ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
+    ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
+    CompactStageView, HookPointView, InteractionKindView, ModelStreamStateView, RunPhaseKindView,
+    RunPurposeView,
+};
 pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode};
 pub use change_set::ChangeSet;
 pub use chat::{
