@@ -213,6 +213,31 @@ fn compact_request_merges_previous_summary_without_duplicate_empty_prompt() {
     assert!(text.contains("继续检查 compact"));
 }
 
+/// #1486：LLM 压缩请求的 previous_summary 必须截断（保留尾部），
+/// 否则上次 summary 巨大时压缩请求本身超 provider 输入限制，
+/// LLM 压缩必然失败、永远 fallback。
+#[test]
+fn compact_request_caps_oversized_previous_summary() {
+    let huge_previous = "x".repeat(900_000);
+    let request = build_compact_request(
+        &[Message::user("继续")],
+        Some(huge_previous.as_str()),
+        100_000,
+    );
+
+    let text = request[0].text_content();
+    let cap = crate::domain::token_budget::FALLBACK_PREVIOUS_SUMMARY_CAP;
+    assert!(
+        text.len() <= cap + 6_000,
+        "previous_summary 超大时压缩请求必须保持有界: {} chars (cap={cap} + 模板开销)",
+        text.len()
+    );
+    assert!(
+        text.contains("<previous_summary_tail>"),
+        "应使用截断标记: {text}"
+    );
+}
+
 #[test]
 fn fallback_summary_latest_user_request_continues_without_claiming_completion() {
     let summary = build_summary_text(

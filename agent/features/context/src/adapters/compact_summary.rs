@@ -279,12 +279,32 @@ pub fn build_compact_request(
     let previous_summary = previous_summary
         .filter(|summary| !summary.trim().is_empty())
         .map(|summary| {
-            format!(
-                "<previous_summary>\n{summary}\n</previous_summary>\n\n\
-                 The previous summary is authoritative compacted history. Merge it with the newer \
-                 conversation history below; do not drop its user requests, decisions, completed \
-                 work, problems, or continuation state.\n\n"
-            )
+            // #1486：压缩请求的 previous_summary 同样必须有界——上次 summary
+            // 巨大时全文嵌入会让 LLM 压缩请求本身超 provider 输入限制，
+            // 导致语义压缩必然失败、永远 fallback。与 fallback 路径一致，
+            // 只保留关键尾部。
+            if summary.len() > FALLBACK_PREVIOUS_SUMMARY_CAP {
+                let tail = slice_tail(summary, FALLBACK_PREVIOUS_SUMMARY_CAP);
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[compact] 压缩请求 previous_summary {} chars 超过上限 {FALLBACK_PREVIOUS_SUMMARY_CAP}，仅保留尾部 {} chars",
+                    summary.len(),
+                    tail.len(),
+                );
+                format!(
+                    "<previous_summary_tail>\n{tail}\n</previous_summary_tail>\n\n\
+                     The previous summary tail is authoritative compacted history (older head \
+                     truncated). Merge it with the newer conversation history below; do not drop \
+                     its user requests, decisions, completed work, problems, or continuation state.\n\n"
+                )
+            } else {
+                format!(
+                    "<previous_summary>\n{summary}\n</previous_summary>\n\n\
+                     The previous summary is authoritative compacted history. Merge it with the newer \
+                     conversation history below; do not drop its user requests, decisions, completed \
+                     work, problems, or continuation state.\n\n"
+                )
+            }
         })
         .unwrap_or_default();
     let prompt = format!(
