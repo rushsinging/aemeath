@@ -241,34 +241,6 @@ pub(crate) enum TuiRunTerminationReason {
     ParentStepCancelled,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct TuiRunTiming {
-    pub(crate) observation_revision: u64,
-    pub(crate) total_elapsed_ms: u64,
-    pub(crate) phase_elapsed_ms: u64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum TuiRunStatus {
-    Created,
-    DrainingInput,
-    PreparingContext,
-    InvokingModel,
-    ApplyingResponse,
-    AwaitingToolApproval,
-    ExecutingTools,
-    AwaitingUser,
-    Compacting,
-    CancellingStep,
-    FinalizingStep,
-    Cancelling,
-    Terminating,
-    Completed,
-    Failed,
-    Cancelled,
-    Terminated,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum TuiRunEvent {
     Started,
@@ -292,10 +264,6 @@ pub(crate) enum TuiRunEvent {
     },
     Terminated {
         reason: TuiRunTerminationReason,
-    },
-    Transitioned {
-        status: TuiRunStatus,
-        timing: TuiRunTiming,
     },
 }
 
@@ -565,6 +533,7 @@ pub(crate) struct TuiSkillSlashRoute {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum TuiRuntimeEvent {
+    Noop,
     ActivityChanged {
         kind: TuiActivityChangeKind,
         activity: TuiActivityObservation,

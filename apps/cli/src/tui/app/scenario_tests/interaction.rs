@@ -88,8 +88,9 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
         .app
         .model
         .conversation
-        .active_main_run_snapshot()
-        .is_none());
+        .activity_observations()
+        .activities()
+        .is_empty());
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
         steps: vec![TuiResumedSessionStep {

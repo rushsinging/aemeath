@@ -148,18 +148,6 @@ fn authoritative_cancelled_terminal_never_renders_completed_verb() {
 #[test]
 fn streaming_has_representative_thinking_and_completed_snapshots() {
     let mut harness = TuiScenarioHarness::new(100, 30);
-    harness.runtime_event(TuiRuntimeEvent::Run {
-        run_id: crate::tui::model::conversation::interaction::UiRunId::from("main-1"),
-        parent_run_id: None,
-        event: crate::tui::adapter::tui_runtime_event::TuiRunEvent::Transitioned {
-            status: crate::tui::adapter::tui_runtime_event::TuiRunStatus::InvokingModel,
-            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
-                observation_revision: 1,
-                total_elapsed_ms: 1_000,
-                phase_elapsed_ms: 1_000,
-            },
-        },
-    });
     harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
     harness.runtime_event(TuiRuntimeEvent::Thinking {
         context: ctx(),
@@ -168,7 +156,7 @@ fn streaming_has_representative_thinking_and_completed_snapshots() {
     harness.render();
     let thinking_screen = harness.screen();
     assert!(thinking_screen.contains("Inspecting the repository"));
-    assert!(thinking_screen.contains("Thinking…"));
+    assert!(!thinking_screen.contains("Thinking…"));
 
     harness.runtime_event(TuiRuntimeEvent::Text {
         context: ctx(),
@@ -177,18 +165,6 @@ fn streaming_has_representative_thinking_and_completed_snapshots() {
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context: ctx(),
         text: "The result is ready.".into(),
-    });
-    harness.runtime_event(TuiRuntimeEvent::Run {
-        run_id: crate::tui::model::conversation::interaction::UiRunId::from("main-1"),
-        parent_run_id: None,
-        event: crate::tui::adapter::tui_runtime_event::TuiRunEvent::Transitioned {
-            status: crate::tui::adapter::tui_runtime_event::TuiRunStatus::Completed,
-            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
-                observation_revision: 1,
-                total_elapsed_ms: 16_885,
-                phase_elapsed_ms: 12_699,
-            },
-        },
     });
     harness.runtime_event(TuiRuntimeEvent::Done {
         context: ctx(),

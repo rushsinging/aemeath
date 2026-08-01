@@ -216,7 +216,12 @@ mod tests {
             "2026-01-01T00:00:00Z".to_string(),
         );
 
-        assert!(app.model.conversation.active_main_run_snapshot().is_none());
+        assert!(app
+            .model
+            .conversation
+            .activity_observations()
+            .activities()
+            .is_empty());
     }
     #[test]
     fn test_apply_resume_input_history_populates_app_history() {

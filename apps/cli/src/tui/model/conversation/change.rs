@@ -107,11 +107,6 @@ pub enum ConversationChange {
     ActivitySnapshotReplaced {
         run_id: super::interaction::UiRunId,
     },
-    RunStatusObserved {
-        run_id: super::interaction::UiRunId,
-        parent_run_id: Option<super::interaction::UiRunId>,
-        status: crate::tui::adapter::tui_runtime_event::TuiRunStatus,
-    },
     AgentRunChanged {
         run_id: super::interaction::UiRunId,
         phase: super::interaction::AgentRunPhase,

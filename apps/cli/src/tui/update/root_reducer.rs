@@ -211,7 +211,6 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::ActivityObservationChanged { .. }
             | ConversationChange::ActivityObservationStale { .. }
             | ConversationChange::ActivitySnapshotReplaced { .. }
-            | ConversationChange::RunStatusObserved { .. }
             | ConversationChange::AgentRunChanged { .. }
             | ConversationChange::AgentRunStepChanged { .. } => {
                 ModelChange::output_and_status_dirty()

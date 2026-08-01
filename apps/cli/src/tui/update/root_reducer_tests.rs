@@ -42,7 +42,11 @@ fn session_history_restore_keeps_run_snapshot_inactive() {
         })),
     );
 
-    assert!(model.conversation.active_main_run_snapshot().is_none());
+    assert!(model
+        .conversation
+        .activity_observations()
+        .activities()
+        .is_empty());
 }
 #[test]
 fn test_ready_tool_update_does_not_start_runtime_tool_spinner() {

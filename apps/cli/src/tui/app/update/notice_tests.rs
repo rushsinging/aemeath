@@ -306,16 +306,8 @@ fn test_spinner_tick_active_requests_redraw_without_marking_output_dirty() {
     let run_id = crate::tui::model::conversation::interaction::UiRunId::from("main-1");
     app.model
         .conversation
-        .apply(crate::tui::model::conversation::intent::ObserveRunStatus {
-            run_id: run_id.clone(),
-            parent_run_id: None,
-            status: crate::tui::adapter::tui_runtime_event::TuiRunStatus::InvokingModel,
-            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
-                observation_revision: 1,
-                total_elapsed_ms: 0,
-                phase_elapsed_ms: 0,
-            },
-        });
+        .activity_observations_mut()
+        .replace_for_test(run_id.clone(), 2, Vec::new());
     app.view_state.run_activity.sync_main_run(
         Some(&run_id),
         true,

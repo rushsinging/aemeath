@@ -42,7 +42,12 @@ mod tests {
 
         assert_eq!(effects, vec![Effect::QueryReflectionHistory { limit: 10 }]);
         assert!(!app.chat.is_processing);
-        assert!(app.model.conversation.active_main_run_snapshot().is_none());
+        assert!(app
+            .model
+            .conversation
+            .activity_observations()
+            .activities()
+            .is_empty());
     }
 
     #[test]

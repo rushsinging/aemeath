@@ -652,12 +652,6 @@ impl ConversationUpdate for ReplaceActivitySnapshot {
     }
 }
 
-impl ConversationUpdate for ObserveRunStatus {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.observe_run_status(self.run_id, self.parent_run_id, self.status, self.timing)
-    }
-}
-
 impl ConversationUpdate for RunStepStarted {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         if model.start_agent_run_step(&self.run_id, self.step_id.clone(), self.tool_reference) {
@@ -741,7 +735,6 @@ impl ConversationUpdate for ConversationIntent {
             Self::RunFailed(s) => s.update(model),
             Self::ObserveActivityChange(s) => s.update(model),
             Self::ReplaceActivitySnapshot(s) => s.update(model),
-            Self::ObserveRunStatus(s) => s.update(model),
             Self::RunStepStarted(s) => s.update(model),
             Self::RunStepCompleted(s) => s.update(model),
             Self::CompleteChat(s) => s.update(model),

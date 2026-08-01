@@ -50,6 +50,14 @@ fn production_source(source: &str) -> String {
 fn run_activity_has_no_legacy_business_state_source() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let forbidden_symbols = [
+        "RunStatusObserved",
+        "RunStateSnapshot",
+        "run_state_snapshots",
+        "active_main_run_snapshot",
+        "active_main_run_id",
+        "TuiRunStatus",
+        "TuiRunTiming",
+        "ObserveRunStatus",
         "SpinnerModel",
         "SpinnerPhase",
         "chat_active",

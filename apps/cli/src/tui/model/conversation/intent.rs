@@ -11,7 +11,6 @@ use super::interaction::{
 use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
-use crate::tui::adapter::tui_runtime_event::TuiRunStatus;
 use std::time::Instant;
 
 // ════════════════════════════════════════════════════════════════════
@@ -303,14 +302,6 @@ pub struct ReplaceActivitySnapshot {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ObserveRunStatus {
-    pub run_id: UiRunId,
-    pub parent_run_id: Option<UiRunId>,
-    pub status: TuiRunStatus,
-    pub timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunCompleted {
     pub run_id: UiRunId,
 }
@@ -467,7 +458,6 @@ pub enum ConversationIntent {
     RunFailed(RunFailed),
     ObserveActivityChange(ObserveActivityChange),
     ReplaceActivitySnapshot(ReplaceActivitySnapshot),
-    ObserveRunStatus(ObserveRunStatus),
     RunStepStarted(RunStepStarted),
     RunStepCompleted(RunStepCompleted),
     CompleteChat(CompleteChat),

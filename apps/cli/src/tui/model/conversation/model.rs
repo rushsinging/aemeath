@@ -6,7 +6,6 @@ use super::chat_turn::ChatTurn;
 use super::ids::{ChatId, ChatTurnId};
 use super::interaction::{AgentRunState, InteractionState, UiRunId};
 use super::queued_submission::QueuedSubmission;
-use super::run_state::{is_terminal, RunStateSnapshot};
 use super::runtime_state::RuntimeState;
 use super::update::ConversationUpdate;
 use crate::tui::model::output_timeline::{OutputTimelineItem, OutputTimelineModel};
@@ -46,8 +45,6 @@ pub struct ConversationModel {
     pub(super) active_thinking_context: Option<(ChatId, ChatTurnId)>,
     pub(super) active_interaction: Option<InteractionState>,
     pub(super) agent_runs: Vec<AgentRunState>,
-    run_state_snapshots: Vec<RunStateSnapshot>,
-    active_main_run_id: Option<UiRunId>,
     activity_observations: ActivityObservationModel,
 
     // ── 运行态 ──
@@ -71,8 +68,6 @@ impl Default for ConversationModel {
             active_thinking_context: None,
             active_interaction: None,
             agent_runs: Vec::new(),
-            run_state_snapshots: Vec::new(),
-            active_main_run_id: None,
             activity_observations: ActivityObservationModel::default(),
             runtime: RuntimeState::default(),
         }
@@ -185,63 +180,6 @@ impl ConversationModel {
         } else {
             Vec::new()
         }
-    }
-
-    pub(crate) fn run_state_snapshots(&self) -> &[RunStateSnapshot] {
-        &self.run_state_snapshots
-    }
-
-    pub(crate) fn active_main_run_id(&self) -> Option<&UiRunId> {
-        self.active_main_run_id.as_ref()
-    }
-
-    pub(crate) fn active_main_run_snapshot(&self) -> Option<&RunStateSnapshot> {
-        let run_id = self.active_main_run_id.as_ref()?;
-        self.run_state_snapshots
-            .iter()
-            .find(|snapshot| &snapshot.run_id == run_id)
-    }
-
-    pub(super) fn observe_run_status(
-        &mut self,
-        run_id: UiRunId,
-        parent_run_id: Option<UiRunId>,
-        status: crate::tui::adapter::tui_runtime_event::TuiRunStatus,
-        timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming,
-    ) -> Vec<ConversationChange> {
-        if let Some(snapshot) = self
-            .run_state_snapshots
-            .iter_mut()
-            .find(|snapshot| snapshot.run_id == run_id)
-        {
-            if snapshot.status == status || is_terminal(snapshot.status) {
-                return Vec::new();
-            }
-            snapshot.parent_run_id = parent_run_id.clone();
-            snapshot.status = status;
-            snapshot.timing_observation_revision = timing.observation_revision;
-            snapshot.total_elapsed_ms = timing.total_elapsed_ms;
-            snapshot.phase_elapsed_ms = timing.phase_elapsed_ms;
-        } else {
-            self.run_state_snapshots.push(RunStateSnapshot {
-                run_id: run_id.clone(),
-                parent_run_id: parent_run_id.clone(),
-                status,
-                timing_observation_revision: timing.observation_revision,
-                total_elapsed_ms: timing.total_elapsed_ms,
-                phase_elapsed_ms: timing.phase_elapsed_ms,
-            });
-        }
-
-        if parent_run_id.is_none() {
-            self.active_main_run_id = Some(run_id.clone());
-        }
-
-        vec![ConversationChange::RunStatusObserved {
-            run_id,
-            parent_run_id,
-            status,
-        }]
     }
 
     pub(crate) fn agent_run(&self, run_id: &UiRunId) -> Option<&AgentRunState> {

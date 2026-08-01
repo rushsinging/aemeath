@@ -516,7 +516,24 @@ impl App {
             _ => false,
         };
         if valid_model_activity {
-            if let Some(run_id) = self.model.conversation.active_main_run_id() {
+            let active_run_id = self
+                .model
+                .conversation
+                .activity_observations()
+                .activities()
+                .iter()
+                .find(|activity| {
+                    activity.kind == crate::tui::adapter::tui_runtime_event::TuiActivityKind::Run
+                        && matches!(
+                            activity.detail,
+                            crate::tui::adapter::tui_runtime_event::TuiActivityDetail::Run {
+                                purpose:
+                                    crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Main
+                            }
+                        )
+                })
+                .map(|activity| activity.run_id.clone());
+            if let Some(run_id) = active_run_id.as_ref() {
                 if self
                     .view_state
                     .run_activity
