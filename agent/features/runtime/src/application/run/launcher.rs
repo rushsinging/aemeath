@@ -33,7 +33,11 @@ pub async fn launch(
     loop_context: &mut crate::application::loop_engine::RunLoop<'_>,
 ) -> RunLaunchResult {
     let run_id = instance.run().id().clone();
-    active_run.activate(run_id.clone(), cancel.clone());
+    if instance.run().parent_id().is_none() {
+        active_run.activate_session(run_id.clone(), cancel.clone());
+    } else {
+        active_run.activate(run_id.clone(), cancel.clone());
+    }
     let (run, execution, context) = instance.execution_parts_mut();
 
     let result = match execute_prepared_loop(run, execution, context, &cancel, loop_context).await {

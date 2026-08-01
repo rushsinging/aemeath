@@ -1159,6 +1159,28 @@ mod tests {
         );
     } // ── Task 4 GREEN: single-source verification tests ──
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn agent_client_cancel_current_run_delegates_without_identity() {
+        use crate::domain::agent_run::ActiveRunPort;
+        use sdk::AgentClient;
+
+        let shell =
+            make_test_shell(crate::application::run::context::ParentRunContextSource::new()).await;
+        let run_id = sdk::RunId::new_v7();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
+        shell.active_run.activate_session(run_id, cancel.clone());
+        let client = AgentClientImpl {
+            inner: Arc::new(RuntimeHandle { shell }),
+        };
+
+        assert_eq!(
+            client.cancel_current_run(deadline),
+            sdk::CancelCurrentRunOutcome::Accepted
+        );
+        assert!(cancel.is_cancelled());
+    }
+
     /// #1385 Task 7: `tui_launch_context()` reads binding from
     /// `shell.model_state` — the single model binding state.
     #[tokio::test(flavor = "current_thread")]

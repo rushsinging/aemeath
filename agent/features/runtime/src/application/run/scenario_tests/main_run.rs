@@ -9,6 +9,34 @@ use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::domain::agent_run::{RunSpec, RunStatus};
 
 #[tokio::test]
+async fn session_run_launcher_registers_identity_free_cancel_target() {
+    let fixture = SessionRunFixture::default();
+    let mut instance = fixture
+        .create(RunSpec::main())
+        .expect("production RunFactory creates session Run");
+    instance.initialize(Vec::new(), 0);
+    let mut harness = ScenarioLoopHarness::blocks_in_model();
+    let cancel = CancellationToken::new();
+    let active_run = Arc::new(ActiveRunRegistry::default());
+    let control = active_run.clone();
+    let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
+
+    let cancel_task = tokio::spawn(async move {
+        tokio::task::yield_now().await;
+        control.cancel_current_run(deadline)
+    });
+    let result = launcher::launch(&mut instance, cancel, active_run, &mut harness.run_loop()).await;
+
+    assert_eq!(
+        cancel_task.await.expect("cancel task completes"),
+        sdk::CancelCurrentRunOutcome::Accepted
+    );
+    assert!(matches!(result, RunLaunchResult::Terminal));
+    assert_eq!(instance.run().status(), RunStatus::Cancelled);
+    assert_eq!(harness.cancelled_terminal_event_count(), 1);
+    assert_eq!(harness.completed_terminal_event_count(), 0);
+}
+#[tokio::test]
 async fn main_run_uses_single_factory_launcher_and_loop() {
     let fixture = SessionRunFixture::default();
     let committed_context = fixture.committed_context().clone();
@@ -29,5 +57,5 @@ async fn main_run_uses_single_factory_launcher_and_loop() {
         &committed_context
     ));
     assert!(harness.saw_input_and_model());
-    assert_eq!(harness.terminal_event_count(), 1);
+    assert_eq!(harness.completed_terminal_event_count(), 1);
 }

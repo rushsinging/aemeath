@@ -323,6 +323,7 @@ pub trait RunLifecyclePort: Send + Sync {
         step_id: sdk::RunStepId,
         cancel: CancellationToken,
     );
+    fn clear_step_scope(&self, run_id: &sdk::RunId, step_id: &sdk::RunStepId);
 }
 
 #[async_trait]
@@ -1125,6 +1126,34 @@ async fn execute_step(
     let step_cancel = cancel.child_token();
     let step_id = sdk::RunStepId::new_v7();
     port.register_step_scope(run.id(), step_id.clone(), step_cancel.clone());
+    let result = execute_step_with_scope(
+        run,
+        execution,
+        cancel,
+        port,
+        guard,
+        inputs,
+        terminal_text,
+        step_id.clone(),
+        step_cancel,
+    )
+    .await;
+    port.clear_step_scope(run.id(), &step_id);
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_step_with_scope(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    cancel: &CancellationToken,
+    port: &mut RunLoop<'_>,
+    guard: &mut StuckGuard,
+    inputs: &[LoopInput],
+    terminal_text: &mut Option<String>,
+    step_id: sdk::RunStepId,
+    step_cancel: CancellationToken,
+) -> Result<(), LoopEngineError> {
     let step_id = match run_step_input_phase(
         run,
         execution,

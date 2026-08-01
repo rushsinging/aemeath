@@ -92,5 +92,5 @@ async fn derived_run_uses_parent_factory_launcher_and_same_loop() {
         ));
     assert!(session_fixture.event_sink().events().is_empty());
     assert!(harness.saw_input_and_model());
-    assert_eq!(harness.terminal_event_count(), 1);
+    assert_eq!(harness.completed_terminal_event_count(), 1);
 }

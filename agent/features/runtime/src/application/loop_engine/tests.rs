@@ -555,6 +555,15 @@ impl ScenarioLoopHarness {
         }
     }
 
+    pub(crate) fn blocks_in_model() -> Self {
+        Self {
+            scenario: ScriptedScenario {
+                block_model_forever: true,
+                ..Default::default()
+            },
+        }
+    }
+
     pub(crate) fn run_loop(&mut self) -> RunLoop<'_> {
         scripted_run_loop(&mut self.scenario)
     }
@@ -564,11 +573,37 @@ impl ScenarioLoopHarness {
         calls.contains(&"input") && calls.contains(&"model")
     }
 
-    pub(crate) fn terminal_event_count(&self) -> usize {
+    pub(crate) fn completed_terminal_event_count(&self) -> usize {
         self.scenario
             .events()
             .iter()
-            .filter(|event| matches!(event, RunDomainEvent::Completed { .. }))
+            .filter(|event| {
+                matches!(
+                    event,
+                    RunDomainEvent::Completed {
+                        user_cancelled_step: false,
+                        ..
+                    }
+                )
+            })
+            .count()
+    }
+
+    pub(crate) fn cancelled_terminal_event_count(&self) -> usize {
+        self.scenario
+            .events()
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    RunDomainEvent::Cancelled { .. }
+                        | RunDomainEvent::Terminated { .. }
+                        | RunDomainEvent::Completed {
+                            user_cancelled_step: true,
+                            ..
+                        }
+                )
+            })
             .count()
     }
 }
@@ -882,6 +917,8 @@ impl RunLifecyclePort for RunLifecycleFake {
         self.state.lock().unwrap().registered_step = Some(step_id);
         *self.step_cancel.lock().unwrap() = Some(cancel);
     }
+
+    fn clear_step_scope(&self, _run_id: &sdk::RunId, _step_id: &sdk::RunStepId) {}
 }
 
 #[async_trait::async_trait]

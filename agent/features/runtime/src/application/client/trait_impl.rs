@@ -55,7 +55,7 @@ impl AgentClient for AgentClientImpl {
             "agent client received cancel_current_run: deadline_unix_ms={}",
             deadline.unix_millis()
         );
-        let outcome = self.inner.shell.active_run.cancel_current_main(deadline);
+        let outcome = self.inner.shell.active_run.cancel_current_run(deadline);
         log::debug!(
             target: crate::LOG_TARGET,
             "agent client completed cancel_current_run: outcome={outcome:?}"
