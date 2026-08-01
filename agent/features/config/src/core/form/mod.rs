@@ -1,6 +1,12 @@
+#[path = "provider_connect.rs"]
+mod provider_connect;
 #[path = "service.rs"]
 mod service;
 
+pub use provider_connect::{
+    connect_command_for_form, provider_connect_form_view, ProviderConnectFormError,
+    PROVIDER_CONNECT_WORKFLOW_ID,
+};
 pub use service::{ConfigFormService, SubmittedConfigFormPage};
 
 use std::fmt;
@@ -310,6 +316,10 @@ impl ConfigFormError {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "provider_connect_tests.rs"]
+mod provider_connect_tests;
 
 #[cfg(test)]
 #[path = "service_tests.rs"]
