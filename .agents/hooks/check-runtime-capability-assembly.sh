@@ -506,6 +506,7 @@ approved_root_exports = {
     "ProviderBuildSpec",
     "ProviderFactory",
     "ProviderPort",
+    "ProviderCompactGenerator",
     "ReflectionError",
     "ReflectionTaskAdapter",
     "ReflectionTaskCompletion",
