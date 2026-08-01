@@ -17,8 +17,8 @@ fn full_window() -> OutputRenderWindow {
     }
 }
 
-fn materialize_all<'a>(
-    view: &'a mut RetainedOutputView,
+fn materialize_all(
+    view: &mut RetainedOutputView,
     model: &ConversationModel,
     workspace_root: Option<&std::path::Path>,
 ) -> super::MaterializedOutputWindow {
