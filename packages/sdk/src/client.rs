@@ -3,15 +3,46 @@
 use async_trait::async_trait;
 
 use crate::{
-    CancelCurrentRunOutcome, CancelRunStepOutcome, ChatRequest, ChatStream, ConfigUpdate,
-    ConfigUpdateResult, ConfigView, ConnectCommand, ConnectOrigin, ConnectRevision,
-    ConnectSessionId, ConnectView, ControlDeadline, RunId, RunStepId, RunTerminationReason,
-    TerminateRunOutcome,
+    CancelCurrentRunOutcome, CancelRunStepOutcome, ChatRequest, ChatStream, ConfigFormInvokeAction,
+    ConfigFormOrigin, ConfigFormRevision, ConfigFormSessionId, ConfigFormSubmitPage,
+    ConfigFormView, ConfigFormWorkflowId, ConfigUpdate, ConfigUpdateResult, ConfigView,
+    ConnectCommand, ConnectOrigin, ConnectRevision, ConnectSessionId, ConnectView, ControlDeadline,
+    RunId, RunStepId, RunTerminationReason, TerminateRunOutcome,
 };
 
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
+
+#[async_trait]
+pub trait ConfigFormClient: Send + Sync + 'static {
+    async fn start_form(
+        &self,
+        workflow_id: ConfigFormWorkflowId,
+        origin: ConfigFormOrigin,
+    ) -> Result<ConfigFormView, super::SdkError>;
+
+    async fn submit_page(
+        &self,
+        command: ConfigFormSubmitPage,
+    ) -> Result<ConfigFormView, super::SdkError>;
+
+    async fn invoke_action(
+        &self,
+        command: ConfigFormInvokeAction,
+    ) -> Result<ConfigFormView, super::SdkError>;
+
+    async fn cancel_form(
+        &self,
+        session_id: ConfigFormSessionId,
+        revision: ConfigFormRevision,
+    ) -> Result<ConfigFormView, super::SdkError>;
+
+    async fn refresh_form(
+        &self,
+        session_id: ConfigFormSessionId,
+    ) -> Result<Option<ConfigFormView>, super::SdkError>;
+}
 
 #[async_trait]
 pub trait ConnectClient: Send + Sync + 'static {

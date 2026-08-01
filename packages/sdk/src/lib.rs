@@ -11,6 +11,7 @@ mod chat_result;
 mod chat_view;
 pub mod client;
 pub mod commands;
+pub mod config_form;
 pub mod config_view;
 pub mod connect;
 pub mod content;
@@ -45,12 +46,21 @@ pub use chat::{
     ResumedStepFinalizeCause, SkillRequest, ToolCallStatusView, ToolResultImage,
     WorkspaceContextView, WorkspaceStackEntryView,
 };
-pub use client::{AgentClient, ConnectClient, RunControlClient};
+pub use client::{AgentClient, ConfigFormClient, ConnectClient, RunControlClient};
 pub use commands::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
     CommandRoute, CommandRouterPort, CommandTarget, ContextEstimate, ModelSwitchResult,
     ParsedArguments, SkillRequestCommand, SlashInput, SnapshotQueryCommand, SnapshotQueryTarget,
+};
+pub use config_form::{
+    ConfigFormAction, ConfigFormActionId, ConfigFormActionStyle, ConfigFormBusy,
+    ConfigFormErrorKind, ConfigFormErrorView, ConfigFormField, ConfigFormFieldError,
+    ConfigFormFieldId, ConfigFormFieldType, ConfigFormFieldValue, ConfigFormInvokeAction,
+    ConfigFormOption, ConfigFormOptionId, ConfigFormOrigin, ConfigFormPage, ConfigFormPageError,
+    ConfigFormPageId, ConfigFormRefreshPolicy, ConfigFormRevision, ConfigFormSessionId,
+    ConfigFormStep, ConfigFormSubmitPage, ConfigFormTerminal, ConfigFormValue, ConfigFormView,
+    ConfigFormWorkflowId,
 };
 pub use config_view::{
     ConfigApplicationScopeView, ConfigChangeCause, ConfigChangedEvent, ConfigField,
