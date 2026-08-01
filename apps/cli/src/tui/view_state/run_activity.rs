@@ -8,6 +8,7 @@ pub struct RunActivityState {
     main_run_id: Option<UiRunId>,
     invoking_model_silence_started_at: Option<Instant>,
     timing_observed_at: Option<Instant>,
+    timing_observation_revision: Option<u64>,
     total_elapsed_ms: u64,
     phase_elapsed_ms: u64,
     silence_interval: u64,
@@ -20,6 +21,7 @@ impl RunActivityState {
         &mut self,
         run_id: Option<&UiRunId>,
         invoking_model: bool,
+        timing_observation_revision: u64,
         total_elapsed_ms: u64,
         phase_elapsed_ms: u64,
         now: Instant,
@@ -27,12 +29,23 @@ impl RunActivityState {
         let identity_changed = self.main_run_id.as_ref() != run_id;
         if identity_changed {
             self.main_run_id = run_id.cloned();
+            self.timing_observation_revision = None;
             self.frame = 0;
             self.verb.clear();
         }
-        self.total_elapsed_ms = total_elapsed_ms;
-        self.phase_elapsed_ms = phase_elapsed_ms;
-        self.timing_observed_at = run_id.map(|_| now);
+        let timing_observation_changed = run_id.is_some()
+            && self.timing_observation_revision != Some(timing_observation_revision);
+        if timing_observation_changed {
+            self.timing_observation_revision = Some(timing_observation_revision);
+            self.total_elapsed_ms = total_elapsed_ms;
+            self.phase_elapsed_ms = phase_elapsed_ms;
+            self.timing_observed_at = Some(now);
+        } else if run_id.is_none() {
+            self.timing_observation_revision = None;
+            self.total_elapsed_ms = 0;
+            self.phase_elapsed_ms = 0;
+            self.timing_observed_at = None;
+        }
 
         if run_id.is_some() && invoking_model {
             if identity_changed || self.invoking_model_silence_started_at.is_none() {

@@ -57,6 +57,7 @@ fn run_status_view_maps_without_string_erasure() {
             parent_run_id: Some(parent_run_id.clone()),
             status: sdk_status,
             timing: sdk::RunTimingView {
+                observation_revision: 1,
                 total_elapsed_ms: 12_345,
                 phase_elapsed_ms: 678,
             },
@@ -71,6 +72,7 @@ fn run_status_view_maps_without_string_erasure() {
             }) if mapped_run_id.as_str() == run_id.as_str()
                 && mapped_parent_run_id.as_str() == parent_run_id.as_str()
                 && status == expected_status
+                && timing.observation_revision == 1
                 && timing.total_elapsed_ms == 12_345
                 && timing.phase_elapsed_ms == 678
         ));

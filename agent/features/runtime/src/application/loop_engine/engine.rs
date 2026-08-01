@@ -1023,7 +1023,7 @@ pub async fn run_loop(
 
                 // User input: resume if awaiting, then drain into work.
                 if run.status() == RunStatus::AwaitingUser {
-                    run.transition(RunTransition::UserResumed)?;
+                    transition_and_emit(run, execution, port, RunTransition::UserResumed).await?;
                 }
                 // batch is non-empty per DrainOutcome::Ready contract
                 run.apply_drain_decision(DrainDecision::Inputs, None)?;
@@ -1057,7 +1057,7 @@ pub async fn run_loop(
                     if batch.is_empty() {
                         return Ok(LoopDirective::AwaitUser);
                     }
-                    run.transition(RunTransition::UserResumed)?;
+                    transition_and_emit(run, execution, port, RunTransition::UserResumed).await?;
                 }
                 run.apply_drain_decision(DrainDecision::InternalContinuation, None)?;
                 execute_step(
@@ -1155,7 +1155,7 @@ async fn execute_step(
             }
         };
     if needs_compaction {
-        run.transition(RunTransition::BeginCompaction)?;
+        transition_and_emit(run, execution, port, RunTransition::BeginCompaction).await?;
         match run_context_compaction_phase(run, execution, &step_cancel, port.compaction_mut())
             .await?
         {
@@ -1168,13 +1168,13 @@ async fn execute_step(
                 return Ok(());
             }
         }
-        run.transition(RunTransition::CompactionCompleted)?;
+        transition_and_emit(run, execution, port, RunTransition::CompactionCompleted).await?;
     }
 
     if handle_interrupt(run, execution, cancel, port).await? {
         return Ok(());
     }
-    run.transition(RunTransition::ContextPrepared)?;
+    transition_and_emit(run, execution, port, RunTransition::ContextPrepared).await?;
     let mut compacted_after_context_too_long = false;
     let (model_step, token_usage) = loop {
         match run_model_invocation_phase(run, execution, &step_cancel, port.model_mut()).await {
@@ -1194,7 +1194,8 @@ async fn execute_step(
                     .await?;
                     return Ok(());
                 }
-                run.transition(RunTransition::ModelContextExceeded)?;
+                transition_and_emit(run, execution, port, RunTransition::ModelContextExceeded)
+                    .await?;
                 match run_context_compaction_phase(
                     run,
                     execution,
@@ -1213,8 +1214,9 @@ async fn execute_step(
                         return Ok(());
                     }
                 }
-                run.transition(RunTransition::CompactionCompleted)?;
-                run.transition(RunTransition::ContextPrepared)?;
+                transition_and_emit(run, execution, port, RunTransition::CompactionCompleted)
+                    .await?;
+                transition_and_emit(run, execution, port, RunTransition::ContextPrepared).await?;
                 compacted_after_context_too_long = true;
             }
             ModelInvocationOutcome::Failed(error) => {
@@ -1259,7 +1261,7 @@ async fn execute_step(
         return Ok(());
     }
     run.record_model_invocation(&step_id, model_invocation(&model_step))?;
-    run.transition(RunTransition::ModelInvoked)?;
+    transition_and_emit(run, execution, port, RunTransition::ModelInvoked).await?;
     log::debug!(
         target: crate::LOG_TARGET,
         "[run_loop] model_step={} run_id={}",
@@ -1303,7 +1305,13 @@ async fn execute_step(
                     match block_result {
                         StopHookBlockResult::Blocked { .. } => {
                             // #1272: Block → ContinueAfterResponse for another attempt.
-                            run.transition(RunTransition::ContinueAfterResponse)?;
+                            transition_and_emit(
+                                run,
+                                execution,
+                                port,
+                                RunTransition::ContinueAfterResponse,
+                            )
+                            .await?;
                             run.complete_step(&step_id)?;
                             run_step_finalization_phase(
                                 execution,
@@ -1335,7 +1343,8 @@ async fn execute_step(
             match guard.inspect_text(terminal_text.as_deref().unwrap_or("")) {
                 decision @ StuckDecision::SoftBlock { .. } => {
                     record_stuck(run, execution, port, &decision).await?;
-                    run.transition(RunTransition::ContinueAfterResponse)?;
+                    transition_and_emit(run, execution, port, RunTransition::ContinueAfterResponse)
+                        .await?;
                     run.complete_step(&step_id)?;
                     run_step_finalization_phase(
                         execution,
@@ -1359,7 +1368,7 @@ async fn execute_step(
             }
 
             // #1272: Complete goes to DrainingInput (not Finishing→Finish)
-            run.transition(RunTransition::ContinueAfterResponse)?;
+            transition_and_emit(run, execution, port, RunTransition::ContinueAfterResponse).await?;
             run.complete_step(&step_id)?;
             run_step_finalization_phase(
                 execution,
@@ -1386,7 +1395,7 @@ async fn execute_step(
                 StuckDecision::Allow => {}
             }
             // #1272: Continue goes to DrainingInput
-            run.transition(RunTransition::ContinueAfterResponse)?;
+            transition_and_emit(run, execution, port, RunTransition::ContinueAfterResponse).await?;
             run.complete_step(&step_id)?;
             run_step_finalization_phase(
                 execution,
@@ -1402,7 +1411,7 @@ async fn execute_step(
             {
                 record_stuck(run, execution, port, &decision).await?;
             }
-            run.transition(RunTransition::ResponseWithTools)?;
+            transition_and_emit(run, execution, port, RunTransition::ResponseWithTools).await?;
             let mut guarded_calls = Vec::with_capacity(calls.len());
             for call in calls {
                 run.add_tool_call(&step_id, call.clone())?;
@@ -1440,7 +1449,7 @@ async fn execute_step(
             for (call, _) in &guarded_calls {
                 run.advance_tool_call(&step_id, &call.id, ToolCallStatus::Ready)?;
             }
-            run.transition(RunTransition::ToolsApproved)?;
+            transition_and_emit(run, execution, port, RunTransition::ToolsApproved).await?;
             for (call, decision) in &guarded_calls {
                 if matches!(decision, ToolGuardDecision::Allow) {
                     run.advance_tool_call(&step_id, &call.id, ToolCallStatus::Running)?;
@@ -1542,7 +1551,8 @@ async fn execute_step(
                     )
                     .await?;
                     // #1272: ToolsCompleted → DrainingInput (not PreparingContext)
-                    run.transition(RunTransition::ToolsCompleted)?;
+                    transition_and_emit(run, execution, port, RunTransition::ToolsCompleted)
+                        .await?;
                 }
                 #[cfg(test)]
                 ToolStep::AwaitUser => {
@@ -1557,8 +1567,7 @@ async fn execute_step(
                         crate::ports::FinalizeCause::Completed,
                     )
                     .await?;
-                    run.transition(RunTransition::AwaitUser)?;
-                    emit_events(run, execution, port).await?;
+                    transition_and_emit(run, execution, port, RunTransition::AwaitUser).await?;
                     // Return to caller; the caller will call run_loop again
                     // with drain_input picking up the user response.
                     return Ok(());
@@ -2068,7 +2077,7 @@ async fn handle_interaction_outcome(
                     crate::ports::FinalizeCause::Completed,
                 )
                 .await?;
-                run.transition(RunTransition::ToolsCompleted)?;
+                transition_and_emit(run, execution, port, RunTransition::ToolsCompleted).await?;
             } else {
                 // Start the next interaction from the queue
                 let next = remaining_queue[0].clone();
@@ -2539,6 +2548,16 @@ async fn cancel_run(
         .await?;
     }
     run.finish_cancellation()?;
+    emit_events(run, execution, port).await
+}
+
+async fn transition_and_emit(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    port: &mut RunLoop<'_>,
+    transition: RunTransition,
+) -> Result<(), LoopEngineError> {
+    run.transition(transition)?;
     emit_events(run, execution, port).await
 }
 

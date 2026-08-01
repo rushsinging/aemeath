@@ -24,6 +24,21 @@ fn execution_state_is_owned_by_engine_and_not_exposed_as_a_port() {
 }
 
 #[test]
+fn engine_state_transitions_use_the_immediate_publish_boundary() {
+    let source = include_str!("engine.rs");
+    let direct_transition_count = source.matches("run.transition(RunTransition::").count();
+
+    assert_eq!(
+        direct_transition_count, 0,
+        "Engine state changes must go through transition_and_emit; found {direct_transition_count} direct transitions",
+    );
+    assert!(source.contains("async fn transition_and_emit("));
+    assert!(source.contains(
+        "transition_and_emit(run, execution, port, RunTransition::ContextPrepared).await?"
+    ));
+}
+
+#[test]
 fn production_engine_owns_step_state_reset() {
     let source = include_str!("engine.rs");
     assert!(source.contains("execution.begin_step()"));
@@ -1251,7 +1266,10 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
             "accept_step_input",
             "emit",
             "needs_compaction",
+            "emit",
             "model",
+            "emit",
+            "emit",
             "finalize_step",
             "input",
             "emit",
@@ -1445,9 +1463,15 @@ async fn provider_context_too_long_compacts_then_rebuilds_before_reinvoking() {
             "accept_step_input",
             "emit",
             "needs_compaction",
+            "emit",
             "model",
+            "emit",
             "compact",
+            "emit",
+            "emit",
             "model",
+            "emit",
+            "emit",
             "finalize_step",
             "input",
             "emit",

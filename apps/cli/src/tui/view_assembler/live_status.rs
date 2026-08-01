@@ -127,6 +127,7 @@ mod tests {
             parent_run_id: None,
             status,
             timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                observation_revision: 1,
                 total_elapsed_ms: 12_345,
                 phase_elapsed_ms: 6_789,
             },
@@ -141,6 +142,7 @@ mod tests {
         activity.sync_main_run(
             Some(&UiRunId::from("main-1")),
             true,
+            1,
             12_345,
             6_789,
             Instant::now(),

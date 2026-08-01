@@ -4,6 +4,7 @@ pub use sdk::RunId;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RunTimingSnapshot {
+    pub observation_revision: u64,
     pub total_elapsed_ms: u64,
     pub phase_elapsed_ms: u64,
 }

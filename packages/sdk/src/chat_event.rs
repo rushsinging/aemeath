@@ -77,6 +77,7 @@ mod run_status_view_tests {
             parent_run_id: None,
             status: RunStatusView::InvokingModel,
             timing: super::RunTimingView {
+                observation_revision: 1,
                 total_elapsed_ms: 12_345,
                 phase_elapsed_ms: 678,
             },
@@ -134,6 +135,7 @@ impl ChatEventContext {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RunTimingView {
+    pub observation_revision: u64,
     pub total_elapsed_ms: u64,
     pub phase_elapsed_ms: u64,
 }

@@ -175,6 +175,7 @@ impl ConversationModel {
             }
             snapshot.parent_run_id = parent_run_id.clone();
             snapshot.status = status;
+            snapshot.timing_observation_revision = timing.observation_revision;
             snapshot.total_elapsed_ms = timing.total_elapsed_ms;
             snapshot.phase_elapsed_ms = timing.phase_elapsed_ms;
         } else {
@@ -182,6 +183,7 @@ impl ConversationModel {
                 run_id: run_id.clone(),
                 parent_run_id: parent_run_id.clone(),
                 status,
+                timing_observation_revision: timing.observation_revision,
                 total_elapsed_ms: timing.total_elapsed_ms,
                 phase_elapsed_ms: timing.phase_elapsed_ms,
             });

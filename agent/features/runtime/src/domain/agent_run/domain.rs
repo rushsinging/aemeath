@@ -41,6 +41,7 @@ pub struct Run {
     steps: Vec<RunStep>,
     started_at: Option<Instant>,
     phase_started_at: Option<Instant>,
+    timing_observation_revision: u64,
     events: Vec<RunDomainEvent>,
 }
 
@@ -64,6 +65,7 @@ impl Run {
             steps: Vec::new(),
             started_at: None,
             phase_started_at: None,
+            timing_observation_revision: 0,
             events: Vec::new(),
         }
     }
@@ -297,7 +299,9 @@ impl Run {
     fn apply_state_transition(&mut self, to: RunStatus, reason: RunTransitionReason) {
         let now = Instant::now();
         let from = self.status;
+        self.timing_observation_revision = self.timing_observation_revision.wrapping_add(1);
         let timing = RunTimingSnapshot {
+            observation_revision: self.timing_observation_revision,
             total_elapsed_ms: self
                 .started_at
                 .map_or(0, |started_at| duration_millis(now, started_at)),

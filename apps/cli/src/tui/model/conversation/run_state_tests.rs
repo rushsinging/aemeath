@@ -3,11 +3,20 @@ use super::interaction::UiRunId;
 use super::model::ConversationModel;
 use crate::tui::adapter::tui_runtime_event::{TuiRunStatus, TuiRunTiming};
 
-fn timing(total_elapsed_ms: u64, phase_elapsed_ms: u64) -> TuiRunTiming {
+fn timing_with_revision(
+    observation_revision: u64,
+    total_elapsed_ms: u64,
+    phase_elapsed_ms: u64,
+) -> TuiRunTiming {
     TuiRunTiming {
+        observation_revision,
         total_elapsed_ms,
         phase_elapsed_ms,
     }
+}
+
+fn timing(total_elapsed_ms: u64, phase_elapsed_ms: u64) -> TuiRunTiming {
+    timing_with_revision(1, total_elapsed_ms, phase_elapsed_ms)
 }
 
 fn observe(
@@ -36,6 +45,28 @@ fn unknown_transition_creates_snapshot_and_main_identity() {
     assert_eq!(snapshot.total_elapsed_ms, 12_345);
     assert_eq!(snapshot.phase_elapsed_ms, 678);
     assert_eq!(changes.len(), 1);
+}
+
+#[test]
+fn status_transition_updates_timing_observation_revision() {
+    let mut model = ConversationModel::default();
+    model.apply(ObserveRunStatus {
+        run_id: UiRunId::from("main-1"),
+        parent_run_id: None,
+        status: TuiRunStatus::PreparingContext,
+        timing: timing_with_revision(1, 100, 0),
+    });
+
+    model.apply(ObserveRunStatus {
+        run_id: UiRunId::from("main-1"),
+        parent_run_id: None,
+        status: TuiRunStatus::InvokingModel,
+        timing: timing_with_revision(2, 200, 0),
+    });
+
+    let snapshot = model.active_main_run_snapshot().expect("main snapshot");
+    assert_eq!(snapshot.timing_observation_revision, 2);
+    assert_eq!(snapshot.total_elapsed_ms, 200);
 }
 
 #[test]

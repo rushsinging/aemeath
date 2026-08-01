@@ -135,6 +135,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             parent_run_id,
             status: run_status_to_sdk(to),
             timing: sdk::RunTimingView {
+                observation_revision: timing.observation_revision,
                 total_elapsed_ms: timing.total_elapsed_ms,
                 phase_elapsed_ms: timing.phase_elapsed_ms,
             },
@@ -694,6 +695,7 @@ mod run_status_mapping_tests {
                 to: runtime_status,
                 reason: RunTransitionReason::DrainStarted,
                 timing: crate::domain::agent_run::RunTimingSnapshot {
+                    observation_revision: 7,
                     total_elapsed_ms: 12_345,
                     phase_elapsed_ms: 678,
                 },
@@ -709,6 +711,7 @@ mod run_status_mapping_tests {
                     assert_eq!(mapped_run_id, run_id);
                     assert_eq!(mapped_parent_run_id, Some(parent_run_id));
                     assert_eq!(status, expected_status);
+                    assert_eq!(timing.observation_revision, 7);
                     assert_eq!(timing.total_elapsed_ms, 12_345);
                     assert_eq!(timing.phase_elapsed_ms, 678);
                 }

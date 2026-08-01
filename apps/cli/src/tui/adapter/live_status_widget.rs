@@ -21,6 +21,7 @@ mod tests {
             parent_run_id: None,
             status: TuiRunStatus::InvokingModel,
             timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                observation_revision: 1,
                 total_elapsed_ms: 12_345,
                 phase_elapsed_ms: 678,
             },
@@ -38,7 +39,7 @@ mod tests {
 
         let now = std::time::Instant::now();
         let mut activity = RunActivityState::default();
-        activity.sync_main_run(Some(&UiRunId::from("main-1")), true, 12_345, 678, now);
+        activity.sync_main_run(Some(&UiRunId::from("main-1")), true, 1, 12_345, 678, now);
         let vm = LiveStatusAssembler::assemble(&model, &activity, &anim, &queued);
         let spinner = vm.spinner.expect("spinner projected");
         assert_eq!(spinner.frame, 12);

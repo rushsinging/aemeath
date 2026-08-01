@@ -216,6 +216,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             TuiRunEvent::Transitioned {
                 status: run_status(status),
                 timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                    observation_revision: timing.observation_revision,
                     total_elapsed_ms: timing.total_elapsed_ms,
                     phase_elapsed_ms: timing.phase_elapsed_ms,
                 },

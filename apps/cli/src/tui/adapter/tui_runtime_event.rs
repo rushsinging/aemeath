@@ -43,6 +43,7 @@ pub(crate) enum TuiRunTerminationReason {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct TuiRunTiming {
+    pub(crate) observation_revision: u64,
     pub(crate) total_elapsed_ms: u64,
     pub(crate) phase_elapsed_ms: u64,
 }

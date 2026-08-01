@@ -154,6 +154,7 @@ fn streaming_has_representative_thinking_and_completed_snapshots() {
         event: crate::tui::adapter::tui_runtime_event::TuiRunEvent::Transitioned {
             status: crate::tui::adapter::tui_runtime_event::TuiRunStatus::InvokingModel,
             timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                observation_revision: 1,
                 total_elapsed_ms: 1_000,
                 phase_elapsed_ms: 1_000,
             },
@@ -183,6 +184,7 @@ fn streaming_has_representative_thinking_and_completed_snapshots() {
         event: crate::tui::adapter::tui_runtime_event::TuiRunEvent::Transitioned {
             status: crate::tui::adapter::tui_runtime_event::TuiRunStatus::Completed,
             timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                observation_revision: 1,
                 total_elapsed_ms: 16_885,
                 phase_elapsed_ms: 12_699,
             },

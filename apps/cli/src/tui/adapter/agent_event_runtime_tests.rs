@@ -47,6 +47,7 @@ fn transitioned_run_maps_to_status_observation() {
         event: TuiRunEvent::Transitioned {
             status: TuiRunStatus::InvokingModel,
             timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                observation_revision: 1,
                 total_elapsed_ms: 12_345,
                 phase_elapsed_ms: 678,
             },
@@ -60,6 +61,7 @@ fn transitioned_run_maps_to_status_observation() {
             parent_run_id: Some(actual_parent_run_id),
             status: TuiRunStatus::InvokingModel,
             timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                observation_revision: 1,
                 total_elapsed_ms: 12_345,
                 phase_elapsed_ms: 678,
             },
