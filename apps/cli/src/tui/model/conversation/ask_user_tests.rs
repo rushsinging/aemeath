@@ -204,7 +204,7 @@ fn test_dismiss_ask_user_batch_removes_block() {
     let changes = model.apply(DismissAskUserBatch);
     assert!(changes
         .iter()
-        .any(|c| matches!(c, ConversationChange::AskUserDismissed)));
+        .any(|c| matches!(c, ConversationChange::AskUserDismissed { .. })));
     assert!(!model.timeline.items().iter().any(|b| matches!(
         b,
         crate::tui::model::output_timeline::OutputTimelineItem::AskUserBatch { .. }

@@ -22,6 +22,7 @@ mod model_extra_tests;
 #[cfg(test)]
 mod model_tests;
 pub mod notice;
+pub(crate) mod output_view_change;
 pub mod processing_job;
 pub mod queued_submission;
 #[cfg(test)]

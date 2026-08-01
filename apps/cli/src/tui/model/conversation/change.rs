@@ -28,11 +28,15 @@ pub enum ConversationChange {
         index: usize,
     },
     ToolCallBound {
+        chat_id: String,
+        turn_id: String,
         id: String,
         name: String,
         running: bool,
     },
     ToolCallCompleted {
+        chat_id: String,
+        turn_id: String,
         id: String,
         status: ToolCallStatus,
     },
@@ -55,6 +59,8 @@ pub enum ConversationChange {
     },
     /// Agent 工具的 role/model 元数据已写入（issue #499）。
     AgentMetaUpdated {
+        chat_id: String,
+        turn_id: String,
         tool_id: String,
     },
     ChatCompleting {
@@ -72,7 +78,9 @@ pub enum ConversationChange {
     AskUserUpdated {
         id: String,
     },
-    AskUserDismissed,
+    AskUserDismissed {
+        id: String,
+    },
     InteractionShown {
         request_id: UiInteractionRequestId,
     },
