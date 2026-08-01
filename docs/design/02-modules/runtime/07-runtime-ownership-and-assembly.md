@@ -394,46 +394,31 @@ async fn submit_input(
     prepared.context.input().submit(input).await
 }
 
-// 6. RunFactory 校验声明并协调三件对象；RuntimeContextFactory 只选择 adapter 并创建 Context。
-async fn create(
+// 6. RunFactory 是完整 Run 的唯一创建入口；ContextFactory 只执行内部 capability 绑定。
+fn create(
     &self,
     request: RunCreationRequest,
 ) -> Result<RunInstance, RunCreationError> {
-    let parent_ceiling = request.parent.as_ref().map(|p| p.capabilities());
-    request.spec.validate_against(parent_ceiling)?;
-
-    let interaction = match request.spec.interaction_mode {
-        InteractionBindingMode::Client =>
-            self.services.interaction.bind_client(request.session.clone()).await?,
-        InteractionBindingMode::ParentMediated =>
-            self.services.interaction.bind_parent_mediated(
-                request.parent.ok_or(MissingParent)?,
-            ).await?,
-        InteractionBindingMode::Unavailable =>
-            self.services.interaction.bind_unavailable(),
-    };
-    let hooks = match request.spec.hook_mode {
-        HookBindingMode::Full =>
-            self.services.hooks.bind_full(request.spec.hook_scope).await?,
-        HookBindingMode::BoundaryOnly => self.services.hooks.bind_empty(),        HookBindingMode::Disabled => self.services.hooks.bind_disabled(),
-    };
-
-    let context = self.context_factory.create(        self.services.provider.bind(&request.spec, &request.session).await?,
-        self.services.context.bind(&request.spec, &request.session).await?,
-        self.services.tools.bind_restricted(&request.spec, parent_ceiling).await?,
-        interaction,
-        hooks,
-        self.services.workspace.bind(&request.spec, &request.session).await?,
-        request.session.run_config_snapshot(),
-    );
-    let run = Run::idle(request.spec);
-    let execution = RunExecutionState::empty(run.id());
-    Ok(RunInstance { run, context, execution })
+    let (context, session, workspace) =
+        self.context_factory.prepare(&request, &self.bindings)?;
+    let parent_run_id = request.parent().map(|parent| parent.run_id().clone());
+    Ok(RunInstance::new(
+        request.spec().clone(),
+        parent_run_id,
+        session,
+        context,
+        workspace,
+    ))
 }
 
-// 7. Loop Engine 只消费已绑定能力；Idle Run 由 InputPort 输入激活。
-async fn execute(instance: RunInstance) -> Result<AgentRunTerminal, RunExecutionError> {
-    loop_engine::run_loop(instance).await
+// 7. Main 与 Derived 都把完整 RunInstance 交给同一 Launcher 和 Loop Engine。
+async fn execute(mut instance: RunInstance) -> Result<RunLaunchResult, RunExecutionError> {
+    run::launcher::launch(
+        &mut instance,
+        cancellation,
+        active_run_registry,
+        &mut loop_ports,
+    ).await
 }
 ```
 
@@ -442,8 +427,8 @@ async fn execute(instance: RunInstance) -> Result<AgentRunTerminal, RunExecution
 - `compose_runtime` 可以选择实现，但不能解析 `RunSpec` 决定能力升降；
 - `prepare_root_run` / `prepare_child_run` 可以声明模式，但不能 `new` 具体 Port 或携带输入内容；
 - `submit_input` 是外部输入进入 Run 的唯一入口，首次输入不具有特殊装配语义；
-- `RunFactory::create` 可以校验声明并协调 `Run`、`RuntimeContext`、`RunExecutionState`，但不能执行 Loop、恢复 Session 或持久化 Step；
-- `RuntimeContextFactory::create` 可以按模式创建 capability adapter，但不能创建 `Run` 或 `RunExecutionState`；
+- `RunFactory::create` 可以校验声明、调用 crate-private `RuntimeContextFactory::prepare`，并协调 `Run`、`RuntimeContext`、`RunExecutionState` 与 workspace capability，但不能执行 Loop、恢复 Session 或持久化 Step；
+- `RuntimeContextFactory::prepare` 只允许由 `RunFactory::create` 调用；它按模式绑定 capability 并调用私有 `RuntimeContext::new`，不得成为调用方可见的第二创建入口；
 - `execute` 只能使用完整 `RunInstance`，不能拆包后从调用方分别传入 Run、Execution 与 Context，也不能按 Main/Sub 分支；
 - `RuntimeContext::private_new` 必须只对 factory 可达，失败时不得返回半装配的 `RunInstance`。
 
@@ -455,24 +440,33 @@ async fn execute(instance: RunInstance) -> Result<AgentRunTerminal, RunExecution
 struct RunCreationRequest {
     spec: RunSpec,
     session: SessionSnapshot,
-    parent: Option<ParentRunCapabilities>,
+    parent: Option<ParentRunFacts>,
 }
 
-struct ParentRunCapabilities {
+struct ParentRunFacts {
     run_id: RunId,
-    context: RuntimeContextCapabilityView,
-    cancellation: RunCancellationScope,
-    workspace: ParentWorkspaceCapability,
+    spec: RunSpec,
+}
+
+struct SessionRunBindings {
+    // Session-owned live capability view，和纯值 request 分离。
+}
+
+struct ParentRunBindings {
+    context: Arc<RuntimeContext>,
+    workspace: RuntimeWorkspaceAccess,
 }
 
 struct RunInstance {
     run: Run,
     context: RuntimeContext,
     execution: RunExecutionState,
+    session: SessionSnapshot,
+    workspace: Option<RuntimeWorkspaceAccess>,
 }
 ```
 
-`SessionSnapshot` 和 `ParentRunCapabilities` 只携带准备本次 Run 所需的窄事实或 capability view。它们不得暴露 `SessionState` 锁、Composition wiring、具体 adapter、完整父 `RuntimeContext` 或可越权的服务集合。`RunInstance` 创建后处于 `Idle`，`RunExecutionState` 为空；首次输入和后续输入没有语义特例，全部经已绑定的 `InputPort::submit(InputEnvelope)` 进入 Run，并由状态机从 `Idle` 激活到 drain/step 流程。
+`SessionSnapshot` 和 `ParentRunFacts` 只携带准备本次 Run 所需的纯值事实；live capability 分别留在 `SessionRunBindings` 与 `ParentRunBindings`。纯值请求不得暴露 `SessionState` 锁、Composition wiring、具体 adapter、完整父 `RuntimeContext` 或可越权的服务集合；父 Context 与 workspace 只在 Factory owning layer 的 live bindings 中流动。`RunInstance` 创建后处于 `Idle`，`RunExecutionState` 为空；首次输入和后续输入没有语义特例，全部经已绑定的 `InputPort::submit(InputEnvelope)` 进入 Run，并由状态机从 `Idle` 激活到 drain/step 流程。
 
 Factory 负责：
 

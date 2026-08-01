@@ -156,9 +156,8 @@ impl InitialProviderAssembly {
 
 /// Runtime bootstrap 所需的活依赖；由 Composition 一次性构造并注入。
 ///
-/// #1248 Task 3: `runtime_context_factory` is constructed by Composition
-/// and injected here so `from_args_with_workspace` does not construct
-/// the factory itself.
+/// `runtime_context_factory` 随 Agent Runner assembly 进入 bootstrap，保证
+/// Main 与 Derived 路径共享同一基础 factory 实例。
 pub struct RuntimeBootstrapDependencies {
     workspace: project::WorkspaceViews,
     wiring: Arc<context::MainSessionWiring>,
@@ -190,9 +189,6 @@ impl RuntimeBootstrapDependencies {
         prompt: PromptAssembly,
         skills: SkillBootstrapAssembly,
         agent_runner: crate::application::client::bootstrap::AgentRunnerAssembly,
-        runtime_context_factory: Arc<
-            crate::application::run::context_factory::RuntimeContextFactory,
-        >,
     ) -> Self {
         let RuntimeCoreDependencies {
             workspace,
@@ -213,6 +209,7 @@ impl RuntimeBootstrapDependencies {
             max_tool_concurrency,
             max_agent_concurrency,
             agent_semaphore,
+            runtime_context_factory,
         } = agent_runner;
         Self {
             workspace,
@@ -482,9 +479,8 @@ mod tests {
 
     use super::*;
     use crate::application::client::accessors::SessionRuntime;
-    use crate::application::run::config::RunConfigSnapshot;
     use crate::domain::agent_run::RunSpec;
-    use crate::ports::{ContextPort, PolicyPort};
+    use crate::ports::PolicyPort;
     use hook::{HookInvocation, HookOutcome, HookPort};
     use memory::api::{MemoryPort, ReflectionHistoryStore};
 
@@ -636,26 +632,6 @@ mod tests {
         assert!(!production.contains("provider_factory.build("));
     }
 
-    /// #1385 Task 12: noop event sink handle for tests.
-    fn test_sink() -> crate::application::loop_engine::chat::ChatEventSinkHandle {
-        #[derive(Clone)]
-        struct NoOpSink;
-        impl crate::application::loop_engine::chat::ChatEventSink for NoOpSink {
-            fn send_event<'a>(
-                &'a self,
-                _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-            ) -> crate::application::loop_engine::chat::EventFuture<'a> {
-                Box::pin(std::future::ready(()))
-            }
-            fn try_send_event(
-                &self,
-                _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-            ) {
-            }
-        }
-        crate::application::loop_engine::chat::ChatEventSinkHandle::new(NoOpSink)
-    }
-
     struct EnvGuard {
         key: &'static str,
         previous: Option<std::ffi::OsString>,
@@ -683,49 +659,6 @@ mod tests {
                     None => std::env::remove_var(self.key),
                 }
             }
-        }
-    }
-
-    // ── Fake implementations for RuntimeContext assembly tests ──
-
-    struct FakeContextPort;
-    #[async_trait::async_trait]
-    impl ContextPort for FakeContextPort {
-        async fn build_window(
-            &self,
-            _request: &crate::ports::ContextRequest,
-        ) -> Result<crate::ports::ContextWindow, crate::ports::ContextPortError> {
-            Err(crate::ports::ContextPortError::Compact("fake".into()))
-        }
-        async fn needs_compaction(
-            &self,
-            _request: &crate::ports::ContextRequest,
-        ) -> Result<crate::ports::CompactionDecision, crate::ports::ContextPortError> {
-            Err(crate::ports::ContextPortError::Compact("fake".into()))
-        }
-        async fn compact(
-            &self,
-            _request: &crate::ports::CompactRequest,
-        ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-            Err(crate::ports::ContextPortError::Compact("fake".into()))
-        }
-        async fn manual_compact(
-            &self,
-            _request: &crate::ports::ManualCompactRequest,
-        ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-            Err(crate::ports::ContextPortError::Compact("fake".into()))
-        }
-        async fn clear_session(
-            &self,
-            _session_id: &crate::ports::SessionId,
-        ) -> Result<(), crate::ports::ContextPortError> {
-            Ok(())
-        }
-        async fn append_and_persist(
-            &self,
-            _append: &crate::ports::ContextAppend,
-        ) -> Result<crate::ports::AppendReceipt, crate::ports::ContextAppendError> {
-            Err(crate::ports::ContextAppendError::Storage("fake".into()))
         }
     }
 
@@ -937,48 +870,13 @@ mod tests {
     async fn two_assembler_calls_produce_different_cancel_shared_arcs() {
         let shell =
             make_test_shell(crate::application::run::context::ParentRunContextSource::new()).await;
-        let config = RunConfigSnapshot::capture(shell.wiring.committed_config());
-
-        let spec = RunSpec::main();
-        let reasoning = Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium));
-        let memory: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
-        let context: Arc<dyn ContextPort> = Arc::new(FakeContextPort);
-        let sink = test_sink();
-
-        let make_bindings = |context: Arc<dyn ContextPort>, memory: Arc<dyn MemoryPort>| {
-            let binding = shell.model_state.binding();
-            crate::application::run::context::RunCapabilityBindings {
-                model: crate::application::run::context::ModelBindings {
-                    context,
-                    provider: binding,
-                    interaction: shell.interaction_bridge.clone(),
-                    memory,
-                    config: config.clone(),
-                    reasoning: reasoning.clone(),
-                    tool_catalog: None,
-                },
-                io: crate::application::run::context::IoBindings {
-                    event_sink: sink.clone(),
-                    input: crate::application::run::context::RunInputBufferHandle::new(),
-                },
-                lifecycle: crate::application::run::context::LifecycleBindings {
-                    cancel: crate::application::run::context::RunCancellationScope::new(),
-                    usage: crate::application::run::context::RunUsageTracker::new(),
-                },
-                skill_load_session_id: "session".to_string(),
-            }
-        };
-
-        let ctx1 = shell
-            .runtime_context_factory
-            .create(&spec, make_bindings(context.clone(), memory.clone()), None)
-            .expect("first assembly");
-
-        let ctx2 = shell
-            .runtime_context_factory
-            .create(&spec, make_bindings(context.clone(), memory.clone()), None)
-            .expect("second assembly");
-
+        let fixture = crate::application::run::run_factory_support::SessionRunFixture::builder()
+            .with_provider_binding(shell.model_state.binding())
+            .build();
+        let first = fixture.create(RunSpec::main()).expect("first assembly");
+        let second = fixture.create(RunSpec::main()).expect("second assembly");
+        let ctx1 = first.context();
+        let ctx2 = second.context();
         // Different cancellation scopes.
         ctx1.cancel().token().cancel();
         assert!(ctx1.cancel().token().is_cancelled());
@@ -1001,59 +899,32 @@ mod tests {
     async fn model_switch_affects_only_next_assembler() {
         let shell =
             make_test_shell(crate::application::run::context::ParentRunContextSource::new()).await;
-        let config = RunConfigSnapshot::capture(shell.wiring.committed_config());
-
-        let spec = RunSpec::main();
-        let reasoning = Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium));
-        let memory: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
-        let context: Arc<dyn ContextPort> = Arc::new(FakeContextPort);
-        let sink = test_sink();
-
-        let make_bindings = |context: Arc<dyn ContextPort>, memory: Arc<dyn MemoryPort>| {
-            let binding = shell.model_state.binding();
-            crate::application::run::context::RunCapabilityBindings {
-                model: crate::application::run::context::ModelBindings {
-                    context,
-                    provider: binding,
-                    interaction: shell.interaction_bridge.clone(),
-                    memory,
-                    config: config.clone(),
-                    reasoning: reasoning.clone(),
-                    tool_catalog: None,
-                },
-                io: crate::application::run::context::IoBindings {
-                    event_sink: sink.clone(),
-                    input: crate::application::run::context::RunInputBufferHandle::new(),
-                },
-                lifecycle: crate::application::run::context::LifecycleBindings {
-                    cancel: crate::application::run::context::RunCancellationScope::new(),
-                    usage: crate::application::run::context::RunUsageTracker::new(),
-                },
-                skill_load_session_id: "session".to_string(),
-            }
-        };
-
-        // First assembly captures the current binding.
-        let ctx_before = shell
-            .runtime_context_factory
-            .create(&spec, make_bindings(context.clone(), memory.clone()), None)
+        let fixture_before =
+            crate::application::run::run_factory_support::SessionRunFixture::builder()
+                .with_provider_binding(shell.model_state.binding())
+                .build();
+        let run_before = fixture_before
+            .create(RunSpec::main())
             .expect("first assembly");
+        let ctx_before = run_before.context();
 
         let binding_before = ctx_before.provider();
-
         // Simulate model switch: create a new binding.
         let new_binding =
             crate::application::model::test_support::test_binding(vec!["new model response"]);
         shell.model_state.update_binding(new_binding.clone());
 
         // Second assembly picks up the new binding.
-        let ctx_after = shell
-            .runtime_context_factory
-            .create(&spec, make_bindings(context.clone(), memory.clone()), None)
+        let fixture_after =
+            crate::application::run::run_factory_support::SessionRunFixture::builder()
+                .with_provider_binding(shell.model_state.binding())
+                .build();
+        let run_after = fixture_after
+            .create(RunSpec::main())
             .expect("second assembly");
+        let ctx_after = run_after.context();
 
         let binding_after = ctx_after.provider();
-
         // The first context still uses the old binding.
         assert!(
             Arc::ptr_eq(&binding_before, &ctx_before.provider()),
@@ -1232,6 +1103,16 @@ mod tests {
                 }
             }
         }
+        let runtime_context_factory = Arc::new(
+            crate::application::run::context_factory::RuntimeContextFactory::new(
+                tools.catalog_port(),
+                tools.execution(),
+                policy,
+                Arc::new(TestReflectionHistory),
+                task_wiring.access(),
+                hook_runner.clone(),
+            ),
+        );
         let dependencies = RuntimeBootstrapDependencies::new(
             RuntimeCoreDependencies::new(
                 workspace,
@@ -1256,18 +1137,7 @@ mod tests {
                 max_tool_concurrency: 10,
                 max_agent_concurrency: 4,
                 agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-            },
-            {
-                Arc::new(
-                    crate::application::run::context_factory::RuntimeContextFactory::new(
-                        tools.catalog_port(),
-                        tools.execution(),
-                        policy,
-                        Arc::new(TestReflectionHistory),
-                        task_wiring.access(),
-                        hook_runner.clone(),
-                    ),
-                )
+                runtime_context_factory: runtime_context_factory.clone(),
             },
         );
         let client = from_args_with_workspace(args, dependencies)

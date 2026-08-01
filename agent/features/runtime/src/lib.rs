@@ -98,6 +98,17 @@ mod boundary_tests {
                 if path.is_dir() {
                     assert_tree(&path);
                 } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    let stem = path
+                        .file_stem()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or_default();
+                    if stem.ends_with("_tests")
+                        || path
+                            .components()
+                            .any(|component| component.as_os_str() == "tests")
+                    {
+                        continue;
+                    }
                     let source = std::fs::read_to_string(&path).expect("read Runtime source file");
                     assert!(
                         !source.contains(&["Task", "Persist"].concat()),

@@ -1,101 +1,13 @@
 use super::*;
-use crate::application::interaction::port::InteractionBridge;
 use crate::application::run::config::RunConfigSnapshot;
-use crate::application::run::context::{
-    IoBindings, LifecycleBindings, ModelBindings, RunCancellationScope, RunCapabilityBindings,
-    RunInputBufferHandle, RunUsageTracker, RuntimeContext,
-};
+use crate::application::run::context::{RunInputBufferHandle, RunUsageTracker, RuntimeContext};
 use crate::application::run::context_factory::RuntimeContextFactory;
-use crate::application::run::test_task_access;
+use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{PolicyDecision, PolicyPort, PolicyRequest, ProviderBinding, ProviderPort};
+use crate::ports::{PolicyDecision, PolicyPort, PolicyRequest};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-// Re-declare local fakes (needed because sub_context_derivation_tests's
-// fakes are pub(super) and not visible across sibling modules).
-
-struct LocalFakeCtxPort;
-#[async_trait::async_trait]
-impl crate::ports::ContextPort for LocalFakeCtxPort {
-    async fn build_window(
-        &self,
-        _request: &crate::ports::ContextRequest,
-    ) -> Result<crate::ports::ContextWindow, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn needs_compaction(
-        &self,
-        _request: &crate::ports::ContextRequest,
-    ) -> Result<crate::ports::CompactionDecision, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn compact(
-        &self,
-        _request: &crate::ports::CompactRequest,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn manual_compact(
-        &self,
-        _request: &crate::ports::ManualCompactRequest,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn clear_session(
-        &self,
-        _session_id: &crate::ports::SessionId,
-    ) -> Result<(), crate::ports::ContextPortError> {
-        Ok(())
-    }
-    async fn append_and_persist(
-        &self,
-        _append: &crate::ports::ContextAppend,
-    ) -> Result<crate::ports::AppendReceipt, crate::ports::ContextAppendError> {
-        Err(crate::ports::ContextAppendError::Storage("fake".into()))
-    }
-}
-
-struct LocalFakeProvPort;
-#[async_trait::async_trait]
-impl ProviderPort for LocalFakeProvPort {
-    fn capabilities(
-        &self,
-        _model: &crate::ports::ModelId,
-    ) -> Result<crate::ports::ModelCapability, crate::ports::ProviderError> {
-        Ok(crate::ports::ModelCapability {
-            model: crate::ports::ModelId {
-                provider: "test".into(),
-                model: "test".into(),
-            },
-            supports_tools: true,
-            supports_parallel_tool_calls: false,
-            supports_streaming: true,
-            reasoning: crate::ports::ReasoningCapability::none(),
-            context_limit: None,
-            output_limit: None,
-        })
-    }
-    async fn invoke(
-        &self,
-        _request: crate::ports::InvocationRequest,
-        _cancellation: &dyn provider::CancellationSignal,
-    ) -> Result<crate::ports::InvocationStream, crate::ports::ProviderError> {
-        Err(crate::ports::ProviderError::cancelled())
-    }
-}
-
-struct LocalFakeHookPort;
-#[async_trait::async_trait]
-impl hook::HookPort for LocalFakeHookPort {
-    async fn dispatch(
-        &self,
-        _invocation: hook::HookInvocation,
-        _cancellation: &dyn hook::CancellationSignal,
-    ) -> hook::HookOutcome {
-        hook::HookOutcome::proceed()
-    }
-}
 /// A catalog that records whether `snapshot` was called, delegating to
 /// a real built-in catalog.
 struct SpyToolCatalog {
@@ -126,76 +38,34 @@ impl PolicyPort for SpyPolicy {
     }
 }
 
-fn noop_event_sink() -> crate::application::loop_engine::chat::ChatEventSinkHandle {
-    #[derive(Clone)]
-    struct NoOp;
-    impl crate::application::loop_engine::chat::ChatEventSink for NoOp {
-        fn send_event<'a>(
-            &'a self,
-            _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-        ) -> crate::application::loop_engine::chat::EventFuture<'a> {
-            Box::pin(std::future::ready(()))
-        }
-        fn try_send_event(
-            &self,
-            _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-        ) {
-        }
-    }
-    crate::application::loop_engine::chat::ChatEventSinkHandle::new(NoOp)
-}
-
-/// #1248 Task 3: shared factory-based context construction for wiring tests.
+/// Shared production-factory context construction for wiring tests.
 fn assemble_test_context(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
     policy: Arc<dyn PolicyPort>,
     config: RunConfigSnapshot,
-) -> (RuntimeContext, RuntimeContextFactory) {
-    let provider_port: Arc<dyn ProviderPort> = Arc::new(LocalFakeProvPort);
-    let binding = ProviderBinding {
-        provider: provider_port.clone(),
-        model: crate::ports::ModelId {
-            provider: "test-provider".into(),
-            model: "test-model".into(),
-        },
-        max_tokens: 8192,
-        requested_reasoning: provider::ReasoningLevel::Medium,
-        context_window: None,
-    };
-
-    let factory = RuntimeContextFactory::new(
-        tool_catalog,
-        tool_execution,
-        policy,
+) -> (RuntimeContext, Arc<RuntimeContextFactory>) {
+    let factory = Arc::new(RuntimeContextFactory::new(
+        tool_catalog.clone(),
+        tool_execution.clone(),
+        policy.clone(),
         Arc::new(sub_context_derivation_tests::FakeReflHist),
-        test_task_access(),
-        Arc::new(LocalFakeHookPort),
-    );
-    let bindings = RunCapabilityBindings {
-        model: ModelBindings {
-            context: Arc::new(LocalFakeCtxPort),
-            provider: Arc::new(binding),
-            interaction: Arc::new(InteractionBridge::new()),
-            memory: Arc::new(memory::NoOpMemory),
-            config,
-            reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
-            tool_catalog: None,
-        },
-        io: IoBindings {
-            event_sink: noop_event_sink(),
-            input: RunInputBufferHandle::new(),
-        },
-        lifecycle: LifecycleBindings {
-            cancel: RunCancellationScope::new(),
-            usage: RunUsageTracker::new(),
-        },
-        skill_load_session_id: "session".to_string(),
-    };
-    let ctx = factory
-        .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)
-        .expect("test wiring context assembly");
-    (ctx, factory)
+        crate::application::run::test_task_access(),
+        Arc::new(sub_context_derivation_tests::FakeHookPort),
+    ));
+    let fixture = SessionRunFixture::builder()
+        .with_context_factory(factory.clone())
+        .with_tool_catalog(tool_catalog)
+        .with_tool_execution(tool_execution)
+        .with_policy(policy)
+        .with_config(config.config().clone())
+        .build();
+    let context = fixture
+        .create(RunSpec::main())
+        .expect("test wiring parent run creation")
+        .context()
+        .clone();
+    (context, factory)
 }
 
 fn make_spy_parent_context(
@@ -351,9 +221,9 @@ async fn derived_context_integration_verifies_policy_catalog() {
         ProviderErrorKind::Network,
         "integration-spy",
     ));
-    // #1248 Task 3: Use the same factory as the parent context so static
-    // ports (policy, hooks, reflection) are Arc-identical.
-    runner.runtime_context_factory = Arc::new(shared_factory);
+    // Parent 与 Derived 共用基础 factory，保证 policy、hook、reflection 等
+    // 静态服务保持同一 Arc 身份。
+    runner.runtime_context_factory = shared_factory;
     runner.parent_context = source;
     let ctx = test_ctx();
 
@@ -553,7 +423,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
         workspace,
         skill_catalog: tools::composition::wire_skills().catalog(),
         parent_context: source,
-        runtime_context_factory: Arc::new(shared_factory),
+        runtime_context_factory: shared_factory,
     };
     let ctx = test_ctx();
 
@@ -752,7 +622,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         workspace,
         skill_catalog: tools::composition::wire_skills().catalog(),
         parent_context: source,
-        runtime_context_factory: Arc::new(shared_factory),
+        runtime_context_factory: shared_factory,
     };
     let ctx = test_ctx();
     let (tx, _rx) = mpsc::channel::<tools::AgentProgressEvent>(8);

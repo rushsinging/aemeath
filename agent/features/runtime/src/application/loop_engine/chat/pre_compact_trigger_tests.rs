@@ -227,6 +227,10 @@ fn failing_append_reflection_history() -> Arc<dyn memory::api::ReflectionHistory
 fn build_compact_test_port(
     harness: &CompactHarness,
 ) -> crate::application::loop_engine::run_services::RuntimeCompaction<'_, ChatCompactionObserver> {
+    assert!(Arc::ptr_eq(
+        &harness.runtime_context.context(),
+        &harness.context_port
+    ));
     crate::application::loop_engine::run_services::RuntimeCompaction::new(
         &harness.runtime_context,
         ChatCompactionObserver {
@@ -243,6 +247,7 @@ struct CompactHarness {
     adapter: ReflectionTaskAdapter,
     stub: Arc<StubContextPort>,
     runtime_context: crate::application::run::context::RuntimeContext,
+    context_port: Arc<dyn ContextPort>,
 }
 
 impl CompactHarness {
@@ -250,89 +255,24 @@ impl CompactHarness {
         let adapter = production_adapter();
         let stub = StubContextPort::new(outcome);
         let binding = pre_compact_test_binding();
-        let memory: Arc<dyn memory::MemoryPort> = Arc::new(memory::NoOpMemory);
-        let reflection_history = noop_reflection_history();
         let config_snapshot = ConfigSnapshot::new(Config::default());
-        let run_config =
-            crate::application::run::config::RunConfigSnapshot::capture(config_snapshot.clone());
-        let hook_events = HashMap::new();
-        let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-            hook::build_dispatcher(
-                &share::config::hooks::HooksConfig {
-                    events: hook_events,
-                },
-                std::collections::HashMap::new(),
-            )
-            .unwrap(),
-        );
-        let tool_catalog =
-            ::tools::composition::TestCatalogExecutionFactory::empty().catalog_port();
-        let tool_execution = ::tools::composition::TestCatalogExecutionFactory::empty().execution();
-        let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
-        let reasoning = Arc::new(std::sync::Mutex::new(share::reasoning::ReasoningLevel::Off));
-        let runtime_context = {
-            use crate::application::run::context::{
-                IoBindings, LifecycleBindings, ModelBindings, RunCancellationScope,
-                RunCapabilityBindings, RunInputBufferHandle, RunUsageTracker,
-            };
-            use crate::application::run::context_factory::RuntimeContextFactory;
-
-            let factory = RuntimeContextFactory::new(
-                tool_catalog.clone(),
-                tool_execution.clone(),
-                Arc::new(policy::AllowAllPolicy),
-                reflection_history.clone(),
-                task_access.clone(),
-                hook_runner.clone(),
-            );
-            let bindings = RunCapabilityBindings {
-                model: ModelBindings {
-                    context: stub.clone(),
-                    provider: binding.clone(),
-                    interaction: Arc::new(
-                        crate::application::interaction::port::InteractionBridge::new(),
-                    ),
-                    memory: memory.clone(),
-                    config: run_config.clone(),
-                    reasoning: reasoning.clone(),
-                    tool_catalog: None,
-                },
-                io: IoBindings {
-                    event_sink: {
-                        #[derive(Clone)]
-                        struct NoOpSink;
-                        impl crate::application::loop_engine::chat::ChatEventSink for NoOpSink {
-                            fn send_event<'a>(
-                                &'a self,
-                                _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-                            ) -> crate::application::loop_engine::chat::EventFuture<'a>
-                            {
-                                Box::pin(std::future::ready(()))
-                            }
-                            fn try_send_event(
-                                &self,
-                                _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-                            ) {
-                            }
-                        }
-                        crate::application::loop_engine::chat::ChatEventSinkHandle::new(NoOpSink)
-                    },
-                    input: RunInputBufferHandle::new(),
-                },
-                lifecycle: LifecycleBindings {
-                    cancel: RunCancellationScope::new(),
-                    usage: RunUsageTracker::new(),
-                },
-                skill_load_session_id: "session".to_string(),
-            };
-            factory
-                .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)
-                .expect("pre-compact context assembly must succeed")
-        };
+        let runtime_context =
+            crate::application::run::run_factory_support::SessionRunFixture::builder()
+                .with_context_port(stub.clone())
+                .with_provider_binding(binding)
+                .with_config(config_snapshot)
+                .with_session_id("session".to_string())
+                .build()
+                .create(crate::domain::agent_run::RunSpec::main())
+                .expect("pre-compact parent run creation must succeed")
+                .context()
+                .clone();
+        let context_port = runtime_context.context();
         Self {
             adapter,
             stub,
             runtime_context,
+            context_port,
         }
     }
 }

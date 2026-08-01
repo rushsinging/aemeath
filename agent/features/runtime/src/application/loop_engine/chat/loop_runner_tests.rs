@@ -275,6 +275,12 @@ fn noop_hook_port() -> Arc<dyn hook::HookPort> {
 
 /// #1385: Construct a [`SessionRuntime`] for tests.
 fn test_shell() -> crate::application::client::SessionRuntime {
+    test_shell_with_hooks(noop_hook_port())
+}
+
+fn test_shell_with_hooks(
+    hooks: Arc<dyn hook::HookPort>,
+) -> crate::application::client::SessionRuntime {
     let wiring = test_wiring();
     let binding = crate::application::model::test_support::test_binding(vec!["dummy"]);
     let cwd = std::env::current_dir().unwrap();
@@ -358,7 +364,7 @@ fn test_shell() -> crate::application::client::SessionRuntime {
                 Arc::new(policy::AllowAllPolicy),
                 test_reflection_history_store(),
                 Arc::new(task::TaskStore::new()),
-                noop_hook_port(),
+                hooks,
             ),
         ),
     }
@@ -1075,14 +1081,9 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         drop(input_tx);
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(blocking_then_success_hook_port(&flag_path));
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
-    );
-    shell.runtime_context_factory = Arc::new(
-        shell
-            .runtime_context_factory
-            .with_hooks(blocking_then_success_hook_port(&flag_path)),
     );
     shell.set_test_session_id("test-stop-hook-blocked");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
@@ -1199,14 +1200,9 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
         drop(input_tx);
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(delayed_blocking_then_success_hook_port(&flag_path));
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
-    );
-    shell.runtime_context_factory = Arc::new(
-        shell
-            .runtime_context_factory
-            .with_hooks(delayed_blocking_then_success_hook_port(&flag_path)),
     );
     shell.set_test_session_id("test-stop-hook-follow-up");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
@@ -1300,16 +1296,11 @@ async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
         drop(input_tx);
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(blocking_then_success_hook_port(&flag_path));
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         )),
-    );
-    shell.runtime_context_factory = Arc::new(
-        shell
-            .runtime_context_factory
-            .with_hooks(blocking_then_success_hook_port(&flag_path)),
     );
     shell.set_test_session_id("test-stop-hook-metadata");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
@@ -1462,16 +1453,15 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         drop(input_tx);
     });
 
-    let mut shell = test_shell();
+    let mut shell = test_shell_with_hooks(Arc::new(
+        hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap(),
+    ));
     shell.workspace = workspace;
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["final response"]),
         )),
     );
-    shell.runtime_context_factory = Arc::new(shell.runtime_context_factory.with_hooks(Arc::new(
-        hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap(),
-    )));
     shell.set_test_session_id("test-worktree-stop-hook-env");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -1537,14 +1527,12 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         drop(input_tx);
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             TwoTurnProvider,
         )),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-session");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -1683,16 +1671,11 @@ async fn test_continue_false_json_treated_as_block() {
         drop(input_tx);
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(continue_false_then_allow_hook_port(&flag_path));
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["first response", "second response"]),
         )),
-    );
-    shell.runtime_context_factory = Arc::new(
-        shell
-            .runtime_context_factory
-            .with_hooks(continue_false_then_allow_hook_port(&flag_path)),
     );
     shell.set_test_session_id("test-continue-false");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
@@ -1773,7 +1756,7 @@ async fn test_stall_triggers_stop_hook_check() {
 
     // LLM 前 3 次返回相同输出（触发 stall），第 4 次返回不同输出
     // Stop hook 前 3 次阻断，第 4 次放行
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(block_n_times_hook_port(&counter_path, 3));
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec![
@@ -1783,11 +1766,6 @@ async fn test_stall_triggers_stop_hook_check() {
                 "final ok",
             ]),
         )),
-    );
-    shell.runtime_context_factory = Arc::new(
-        shell
-            .runtime_context_factory
-            .with_hooks(block_n_times_hook_port(&counter_path, 3)),
     );
     shell.set_test_session_id("test-stall-hook");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
@@ -1927,14 +1905,12 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(always_blocking_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["turn one final", "turn two final"]),
         )),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-persistent-loop");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -2060,14 +2036,12 @@ async fn test_stall_detector_resets_across_user_turns() {
         drop(input_tx); // 无条件关闭通道 → recv_next_input 返回 None → shutdown
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             IdenticalReplyProvider::new("Done.", per_turn_delay),
         )),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-stall-reset-across-turns");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -2227,14 +2201,12 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             provider.clone(),
         )),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-idle-control-command");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -2319,14 +2291,12 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         drop(input_tx); // 关闭通道 → shutdown
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             provider.clone(),
         )),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-idle-pending-save");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -2391,14 +2361,12 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         drop(input_tx);
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             provider.clone(),
         )),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-idle-pending-list-reminders");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -2442,16 +2410,11 @@ async fn test_stop_hook_block_limit_stops_loop() {
     // #1248 Task 6: Need 16+ unique responses — Run counts blocks, not StuckGuard.
     let responses: Vec<String> = (1..=18).map(|i| format!("r{i}")).collect();
     let response_refs: Vec<&str> = responses.iter().map(|s| s.as_str()).collect();
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(always_blocking_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(response_refs),
         )),
-    );
-    shell.runtime_context_factory = Arc::new(
-        shell
-            .runtime_context_factory
-            .with_hooks(always_blocking_hook_port()),
     );
     shell.set_test_session_id("test-block-limit");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
@@ -2608,8 +2571,6 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
             provider.clone(),
         )),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-cancel-then-idle");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -2787,15 +2748,13 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         drop(input_tx); // 关闭通道 → shutdown
     });
 
-    let mut shell = test_shell();
+    let mut shell = test_shell_with_hooks(test_hook_port());
     shell.active_run = active_run.clone();
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             provider.clone(),
         )),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-cancel-preserves-prior-turns");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -2943,12 +2902,10 @@ async fn test_chat_impl_idle_until_first_input_event() {
         drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-idle-until-first-input");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -3035,14 +2992,12 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         drop(input_tx); // 关闭通道 → shutdown
     });
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             provider.clone(),
         )),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-no-turn-signal-before-first-input");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -3102,12 +3057,10 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
     });
 
     let provider = SequenceProvider::new(vec!["response to new input"]);
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-resume-skip-pending");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -3147,12 +3100,10 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
     });
 
     let provider = SequenceProvider::new(vec!["hi there"]);
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-user-tail-idle");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -3262,12 +3213,10 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
     });
 
     let provider = ApiErrorThenNormalProvider::new();
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-api-error-finalize");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -3785,12 +3734,10 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
         })
         .expect("input channel is open");
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-per-turn-drain-seal");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -3911,12 +3858,10 @@ async fn per_turn_drain_seal_input_id_preserved_when_run_returns_tool_results_wi
         })
         .unwrap();
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-per-turn-drain-seal-2");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 
@@ -4003,12 +3948,10 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
         })
         .expect("input channel is open");
 
-    let mut shell = test_shell();
+    let shell = test_shell_with_hooks(test_hook_port());
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
-    shell.runtime_context_factory =
-        Arc::new(shell.runtime_context_factory.with_hooks(test_hook_port()));
     shell.set_test_session_id("test-per-turn-drain-seal-single");
     let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
 

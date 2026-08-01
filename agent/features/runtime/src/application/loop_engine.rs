@@ -31,4 +31,6 @@ pub use run_loop::RunLoop;
 pub use stuck_guard::{StuckDecision, StuckGuard};
 
 #[cfg(test)]
+pub(crate) use tests::ScenarioLoopHarness;
+#[cfg(test)]
 mod tests;

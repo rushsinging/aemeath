@@ -13,6 +13,8 @@ pub struct AgentRunnerAssembly {
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
+    pub runtime_context_factory:
+        Arc<crate::application::run::context_factory::RuntimeContextFactory>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -31,6 +33,7 @@ pub fn build_agent_runner(
 ) -> AgentRunnerAssembly {
     let parent_context_for_runner = parent_context_source.clone();
     let semaphore_for_runner = agent_semaphore.clone();
+    let factory_for_runner = runtime_context_factory.clone();
     let runner: Arc<dyn tools::AgentRunner> = Arc::new(agent_runner::CliAgentRunner {
         factory,
         active_run,
@@ -40,7 +43,7 @@ pub fn build_agent_runner(
         workspace: crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace),
         skill_catalog,
         parent_context: parent_context_for_runner,
-        runtime_context_factory,
+        runtime_context_factory: factory_for_runner,
     });
     AgentRunnerAssembly {
         runner,
@@ -48,6 +51,7 @@ pub fn build_agent_runner(
         max_tool_concurrency,
         max_agent_concurrency: agent_semaphore.available_permits(),
         agent_semaphore,
+        runtime_context_factory,
     }
 }
 
@@ -173,9 +177,8 @@ mod tests {
             }),
         );
 
-        // #1385: runner now only carries fields used by run_agent / complete;
-        // policy / hook_runner / tool_catalog / tool_execution / tool_context_binding
-        // are all accessed through derived.context at runtime.
+        // Runner 只保存执行 Derived Run 所需的依赖；静态 Runtime 服务统一
+        // 由同一个 RuntimeContextFactory 提供。
         assert!(runner.parent_context_source.get().is_none());
     }
 

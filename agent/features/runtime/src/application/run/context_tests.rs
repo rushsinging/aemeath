@@ -1,248 +1,25 @@
 //! RuntimeContext L1/L2 测试。
 //!
-//! #1385 Task 2：验证 per-Run 活契约容器不包含 Workspace/MainSessionWiring/Composition scope。
+//! 验证 per-Run 活契约容器不包含 Workspace、MainSessionWiring 或 Composition scope。
 
 use std::sync::Arc;
 
-use tokio_util::sync::CancellationToken;
-
-use crate::application::interaction::port::{InteractionBridge, InteractionPort};
-use crate::application::run::config::RunConfigSnapshot;
 use crate::application::run::context::{
-    ParentRunContextSource, ParentRunFrame, RunCancellationScope, RunCapabilityBindings,
-    RunInputBufferHandle, RunUsageTracker, RuntimeContext,
+    ParentRunContextSource, ParentRunFrame, RunCancellationScope, RunInputBufferHandle,
+    RunUsageTracker,
 };
-use crate::application::run::context_factory::RuntimeContextFactory;
-use crate::ports::{
-    ContextPort, PolicyDecision, PolicyPort, PolicyRequest, ProviderBinding, ProviderPort,
+use crate::application::run::creation::RunInstance;
+use crate::application::run::run_factory_support::{
+    doubles::{FakeContextPort, RecordingEventSink},
+    SessionRunFixture,
 };
-use hook::{HookInvocation, HookOutcome, HookPort};
-use memory::api::MemoryPort;
-use tools::{
-    CancellationSignal, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot,
-    ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort, ToolInvocation, ToolProfileName,
-};
+use crate::ports::ContextPort;
+use tools::ToolProfileName;
 
-// ── Test helper: noop event sink ──
-
-fn noop_event_sink() -> crate::application::loop_engine::chat::ChatEventSinkHandle {
-    #[derive(Clone)]
-    struct NoOp;
-    impl crate::application::loop_engine::chat::ChatEventSink for NoOp {
-        fn send_event<'a>(
-            &'a self,
-            _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-        ) -> crate::application::loop_engine::chat::EventFuture<'a> {
-            Box::pin(std::future::ready(()))
-        }
-        fn try_send_event(&self, _event: crate::application::loop_engine::chat::RuntimeStreamEvent) {}
-    }
-    crate::application::loop_engine::chat::ChatEventSinkHandle::new(NoOp)
-}
-
-// ── 测试用 fake / no-op 实现 ──
-
-struct FakeContextPort;
-#[async_trait::async_trait]
-impl ContextPort for FakeContextPort {
-    async fn build_window(
-        &self,
-        _request: &crate::ports::ContextRequest,
-    ) -> Result<crate::ports::ContextWindow, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn needs_compaction(
-        &self,
-        _request: &crate::ports::ContextRequest,
-    ) -> Result<crate::ports::CompactionDecision, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn compact(
-        &self,
-        _request: &crate::ports::CompactRequest,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn manual_compact(
-        &self,
-        _request: &crate::ports::ManualCompactRequest,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn clear_session(
-        &self,
-        _session_id: &crate::ports::SessionId,
-    ) -> Result<(), crate::ports::ContextPortError> {
-        Ok(())
-    }
-    async fn append_and_persist(
-        &self,
-        _append: &crate::ports::ContextAppend,
-    ) -> Result<crate::ports::AppendReceipt, crate::ports::ContextAppendError> {
-        Err(crate::ports::ContextAppendError::Storage("fake".into()))
-    }
-}
-
-struct FakeProviderPort;
-#[async_trait::async_trait]
-impl ProviderPort for FakeProviderPort {
-    fn capabilities(
-        &self,
-        _model: &crate::ports::ModelId,
-    ) -> Result<crate::ports::ModelCapability, crate::ports::ProviderError> {
-        Ok(crate::ports::ModelCapability {
-            model: crate::ports::ModelId {
-                provider: "test".into(),
-                model: "test".into(),
-            },
-            supports_tools: true,
-            supports_parallel_tool_calls: false,
-            supports_streaming: true,
-            reasoning: crate::ports::ReasoningCapability::none(),
-            context_limit: None,
-            output_limit: None,
-        })
-    }
-    async fn invoke(
-        &self,
-        _request: crate::ports::InvocationRequest,
-        _cancellation: &dyn provider::CancellationSignal,
-    ) -> Result<crate::ports::InvocationStream, crate::ports::ProviderError> {
-        Err(crate::ports::ProviderError::cancelled())
-    }
-}
-
-struct FakeToolCatalog;
-impl ToolCatalogPort for FakeToolCatalog {
-    fn snapshot(
-        &self,
-        _scope: &tools::RegistryScopeName,
-        _profile: &ToolProfileName,
-    ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
-        Ok(ToolCatalogSnapshot::new(
-            tools::RegistryScopeName::new("fake"),
-            ToolProfileName::new("fake"),
-            vec![],
-        ))
-    }
-}
-
-struct FakeToolExecution;
-#[async_trait::async_trait]
-impl ToolExecutionPort for FakeToolExecution {
-    async fn execute(
-        &self,
-        _invocation: ToolInvocation,
-        _context: &ToolExecutionContext,
-    ) -> ToolExecutionOutcome {
-        ToolExecutionOutcome::success_text("fake")
-    }
-}
-
-struct FakePolicy;
-impl PolicyPort for FakePolicy {
-    fn evaluate(&self, _request: &PolicyRequest) -> PolicyDecision {
-        PolicyDecision::Allow(tools::AuthorizationContext::STANDARD)
-    }
-}
-
-struct FakeReflectionHistory;
-#[async_trait::async_trait]
-impl memory::api::ReflectionHistoryQuery for FakeReflectionHistory {
-    async fn list(
-        &self,
-        _limit: usize,
-    ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::MemoryError> {
-        Ok(vec![])
-    }
-}
-#[async_trait::async_trait]
-impl memory::api::ReflectionHistoryStore for FakeReflectionHistory {
-    async fn append(
-        &self,
-        _record: &memory::api::ReflectionRecord,
-    ) -> Result<(), memory::MemoryError> {
-        Ok(())
-    }
-    async fn upsert(
-        &self,
-        _record: &memory::api::ReflectionRecord,
-    ) -> Result<(), memory::MemoryError> {
-        Ok(())
-    }
-}
-
-// FakeTaskAccess not needed — use `task::TaskStore::new()` directly which implements TaskAccess.
-
-struct FakeHook;
-#[async_trait::async_trait]
-impl HookPort for FakeHook {
-    async fn dispatch(
-        &self,
-        _invocation: HookInvocation,
-        _cancellation: &dyn hook::CancellationSignal,
-    ) -> HookOutcome {
-        HookOutcome::proceed()
-    }
-}
-// ── #1248 Task 3: Factory-based context construction helper ──
-
-fn make_context() -> RuntimeContext {
-    let factory = make_factory();
-    let bindings = make_bindings();
-    factory
-        .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)
-        .expect("test context assembly must succeed")
-}
-
-fn make_factory() -> RuntimeContextFactory {
-    RuntimeContextFactory::new(
-        Arc::new(FakeToolCatalog),
-        Arc::new(FakeToolExecution),
-        Arc::new(FakePolicy),
-        Arc::new(FakeReflectionHistory),
-        Arc::new(task::TaskStore::new()),
-        Arc::new(FakeHook),
-    )
-}
-
-fn make_bindings() -> RunCapabilityBindings {
-    let provider_port: Arc<dyn ProviderPort> = Arc::new(FakeProviderPort);
-    let binding = ProviderBinding {
-        provider: provider_port.clone(),
-        model: crate::ports::ModelId {
-            provider: "test".into(),
-            model: "test-model".into(),
-        },
-        max_tokens: 4096,
-        requested_reasoning: provider::ReasoningLevel::Medium,
-        context_window: None,
-    };
-
-    RunCapabilityBindings {
-        model: crate::application::run::context::ModelBindings {
-            context: Arc::new(FakeContextPort),
-            provider: Arc::new(binding),
-            interaction: Arc::new(InteractionBridge::new()),
-            memory: Arc::new(memory::NoOpMemory),
-            config: RunConfigSnapshot::capture(
-                share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
-                    share::config::domain::snapshot::ConfigRevision::new(1),
-                    share::config::Config::default(),
-                ),
-            ),
-            reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
-            tool_catalog: None,
-        },
-        io: crate::application::run::context::IoBindings {
-            event_sink: noop_event_sink(),
-            input: RunInputBufferHandle::new(),
-        },
-        lifecycle: crate::application::run::context::LifecycleBindings {
-            cancel: RunCancellationScope::new(),
-            usage: RunUsageTracker::new(),
-        },
-    }
+fn make_run_instance() -> RunInstance {
+    SessionRunFixture::default()
+        .create(crate::domain::agent_run::RunSpec::main())
+        .expect("production RunFactory should create test run")
 }
 
 #[test]
@@ -256,89 +33,35 @@ fn runtime_context_production_model_has_no_flat_run_context_bindings() {
 
 #[test]
 fn main_runtime_context_preserves_injected_port_identity() {
-    let context_arc: Arc<dyn ContextPort> = Arc::new(FakeContextPort);
-    let provider_port: Arc<dyn ProviderPort> = Arc::new(FakeProviderPort);
-    let binding = ProviderBinding {
-        provider: provider_port.clone(),
-        model: crate::ports::ModelId {
-            provider: "test".into(),
-            model: "test-model".into(),
-        },
-        max_tokens: 4096,
-        requested_reasoning: provider::ReasoningLevel::Medium,
-        context_window: None,
-    };
-    let provider_arc = Arc::new(binding);
-    let tool_catalog_arc: Arc<dyn ToolCatalogPort> = Arc::new(FakeToolCatalog);
-    let tool_execution_arc: Arc<dyn ToolExecutionPort> = Arc::new(FakeToolExecution);
-    let policy_arc: Arc<dyn PolicyPort> = Arc::new(FakePolicy);
-    let interaction_arc: Arc<dyn InteractionPort> = Arc::new(InteractionBridge::new());
-    let memory_arc: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
-    let reflection_history_arc: Arc<dyn memory::api::ReflectionHistoryStore> =
-        Arc::new(FakeReflectionHistory);
-    let task_arc: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
-    let hooks_arc: Arc<dyn HookPort> = Arc::new(FakeHook);
-    let reasoning_arc = Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium));
+    let context_port: Arc<dyn ContextPort> = Arc::new(FakeContextPort);
+    let fixture = SessionRunFixture::builder()
+        .with_context_port(context_port)
+        .build();
+    let instance = fixture
+        .create(crate::domain::agent_run::RunSpec::main())
+        .expect("production RunFactory should create test run");
+    let context = instance.context();
 
-    let factory = RuntimeContextFactory::new(
-        tool_catalog_arc.clone(),
-        tool_execution_arc.clone(),
-        policy_arc.clone(),
-        reflection_history_arc.clone(),
-        task_arc.clone(),
-        hooks_arc.clone(),
-    );
-    let bindings = RunCapabilityBindings {
-        model: crate::application::run::context::ModelBindings {
-            context: context_arc.clone(),
-            provider: provider_arc.clone(),
-            interaction: interaction_arc.clone(),
-            memory: memory_arc.clone(),
-            config: RunConfigSnapshot::capture(
-                share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
-                    share::config::domain::snapshot::ConfigRevision::new(1),
-                    share::config::Config::default(),
-                ),
-            ),
-            reasoning: reasoning_arc.clone(),
-            tool_catalog: None,
-        },
-        io: crate::application::run::context::IoBindings {
-            event_sink: noop_event_sink(),
-            input: RunInputBufferHandle::new(),
-        },
-        lifecycle: crate::application::run::context::LifecycleBindings {
-            cancel: RunCancellationScope::new(),
-            usage: RunUsageTracker::new(),
-        },
-    };
-
-    let ctx = factory
-        .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)
-        .expect("test context assembly");
-
-    assert!(Arc::ptr_eq(&ctx.context(), &context_arc));
-    assert!(Arc::ptr_eq(&ctx.provider(), &provider_arc));
-    assert!(Arc::ptr_eq(&ctx.tool_catalog(), &tool_catalog_arc));
-    assert!(Arc::ptr_eq(&ctx.tool_execution(), &tool_execution_arc));
-    assert!(Arc::ptr_eq(&ctx.policy(), &policy_arc));
-    assert!(Arc::ptr_eq(&ctx.interaction(), &interaction_arc));
-    assert!(Arc::ptr_eq(&ctx.memory(), &memory_arc));
+    assert!(Arc::ptr_eq(&context.context(), fixture.committed_context()));
+    assert!(Arc::ptr_eq(&context.provider(), fixture.provider()));
+    assert!(Arc::ptr_eq(&context.tool_catalog(), fixture.tool_catalog()));
     assert!(Arc::ptr_eq(
-        &ctx.reflection_history(),
-        &reflection_history_arc
+        &context.tool_execution(),
+        fixture.tool_execution()
     ));
-    assert!(Arc::ptr_eq(&ctx.task(), &task_arc));
-    assert!(Arc::ptr_eq(&ctx.hooks(), &hooks_arc));
-    assert!(Arc::ptr_eq(&ctx.reasoning(), &reasoning_arc));
+    assert!(Arc::ptr_eq(&context.policy(), fixture.policy()));
+    assert!(Arc::ptr_eq(&context.interaction(), fixture.interaction()));
+    assert!(Arc::ptr_eq(&context.memory(), fixture.memory()));
+    assert!(Arc::ptr_eq(&context.hooks(), fixture.hooks()));
+    assert!(Arc::ptr_eq(&context.reasoning(), fixture.reasoning()));
 }
 
 // ── L1：cancellation scope 测试 ──
 
 #[test]
 fn runtime_context_cancel_scope_is_per_run() {
-    let ctx1 = make_context();
-    let ctx2 = make_context();
+    let ctx1 = make_run_instance().context().clone();
+    let ctx2 = make_run_instance().context().clone();
 
     assert!(!ctx1.cancel().token().is_cancelled());
     assert!(!ctx2.cancel().token().is_cancelled());
@@ -366,7 +89,7 @@ fn child_cancel_does_not_propagate_to_parent() {
 
 #[test]
 fn runtime_context_has_all_required_accessors() {
-    let ctx = make_context();
+    let ctx = make_run_instance().context().clone();
 
     let _context = ctx.context();
     let _provider = ctx.provider();
@@ -385,7 +108,7 @@ fn runtime_context_has_all_required_accessors() {
 
 #[test]
 fn runtime_context_config_accessor_returns_snapshot() {
-    let ctx = make_context();
+    let ctx = make_run_instance().context().clone();
     let cfg = ctx.config();
     let _revision = cfg.revision();
     let _allow_all = cfg.allow_all();
@@ -401,7 +124,7 @@ fn runtime_context_config_accessor_returns_snapshot() {
 /// results from their injected implementations.
 #[test]
 fn runtime_context_ports_are_functional_not_just_identity() {
-    let ctx = make_context();
+    let ctx = make_run_instance().context().clone();
 
     // Tool catalog: snapshot() returns a valid catalog.
     let catalog = ctx
@@ -452,7 +175,7 @@ fn parent_run_context_source_preserves_run_identity() {
     let frame = Arc::new(ParentRunFrame {
         run_id: run_id.clone(),
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(make_context()),
+        context: Arc::new(make_run_instance().context().clone()),
     });
     let _guard = source.install(frame);
 
@@ -465,18 +188,13 @@ fn parent_run_context_source_install_recovers_from_poison() {
     let source = ParentRunContextSource::new();
 
     // Poison the lock by panicking while holding a write guard.
-    let inner = source.inner.clone();
-    let handle = std::thread::spawn(move || {
-        let _guard = inner.write().unwrap();
-        panic!("deliberate poison");
-    });
-    assert!(handle.join().is_err(), "thread must have panicked");
+    source.poison_for_test();
 
     // After poison, install must still succeed (recover, not panic).
     let frame = Arc::new(ParentRunFrame {
         run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(make_context()),
+        context: Arc::new(make_run_instance().context().clone()),
     });
     let _guard = source.install(frame);
     // If we got here without panicking, poison recovery works.
@@ -492,17 +210,12 @@ fn parent_run_context_source_get_recovers_from_poison() {
     let frame = Arc::new(ParentRunFrame {
         run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(make_context()),
+        context: Arc::new(make_run_instance().context().clone()),
     });
     let _guard = source.install(frame);
 
     // Poison the lock.
-    let inner = source.inner.clone();
-    let handle = std::thread::spawn(move || {
-        let _guard = inner.write().unwrap();
-        panic!("deliberate poison");
-    });
-    assert!(handle.join().is_err());
+    source.poison_for_test();
 
     // After poison, get() must still succeed.
     let result = source.get();
@@ -523,17 +236,12 @@ fn parent_run_frame_guard_drop_does_not_double_panic_on_poison() {
     let frame = Arc::new(ParentRunFrame {
         run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(make_context()),
+        context: Arc::new(make_run_instance().context().clone()),
     });
     let guard = source.install(frame);
 
     // Poison the lock.
-    let inner = source.inner.clone();
-    let handle = std::thread::spawn(move || {
-        let _write_guard = inner.write().unwrap();
-        panic!("deliberate poison");
-    });
-    assert!(handle.join().is_err());
+    source.poison_for_test();
 
     // Drop the guard — must NOT panic (no double panic / abort).
     drop(guard);
@@ -547,18 +255,13 @@ fn parent_run_context_source_install_works_after_poison_recovery() {
     let source = ParentRunContextSource::new();
 
     // Poison the lock.
-    let inner = source.inner.clone();
-    let handle = std::thread::spawn(move || {
-        let _guard = inner.write().unwrap();
-        panic!("deliberate poison");
-    });
-    assert!(handle.join().is_err());
+    source.poison_for_test();
 
     // Install a new frame after poison.
     let frame = Arc::new(ParentRunFrame {
         run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(make_context()),
+        context: Arc::new(make_run_instance().context().clone()),
     });
     let guard = source.install(frame);
 
@@ -645,7 +348,7 @@ fn run_cancellation_scope_clone_shares_state() {
 /// context sees the same token as the original.
 #[test]
 fn runtime_context_clone_shares_cancellation() {
-    let ctx_a = make_context();
+    let ctx_a = make_run_instance().context().clone();
     let ctx_b = ctx_a.clone();
 
     ctx_a.cancel().token().cancel();
@@ -661,7 +364,7 @@ fn runtime_context_clone_shares_cancellation() {
 /// because both references point to the same `RunCancellationScope`.
 #[test]
 fn runtime_context_arc_shared_cancellation_propagates() {
-    let ctx = Arc::new(make_context());
+    let ctx = Arc::new(make_run_instance().context().clone());
     let ctx2 = Arc::clone(&ctx);
 
     ctx.cancel().token().cancel();
@@ -742,12 +445,7 @@ fn run_usage_tracker_recovers_from_poison() {
     let clone = tracker.clone();
 
     // Poison the lock by panicking while holding write guard.
-    let inner = tracker.last_api_total_tokens.clone();
-    let handle = std::thread::spawn(move || {
-        let _guard = inner.write().unwrap();
-        panic!("deliberate poison");
-    });
-    assert!(handle.join().is_err());
+    tracker.poison_for_test();
 
     // After poison, get() must still work (recover, not panic).
     let _val = clone.get();
@@ -795,59 +493,56 @@ fn run_input_buffer_handle_new_handles_are_isolated() {
 
 // ── RuntimeContext I/O seam accessor tests ──
 
-fn make_context_with_io_seams() -> (
-    RuntimeContext,
-    crate::application::loop_engine::chat::ChatEventSinkHandle,
+fn make_instance_with_io_seams() -> (
+    RunInstance,
+    RecordingEventSink,
     RunUsageTracker,
     RunInputBufferHandle,
 ) {
-    let event_sink = noop_event_sink();
-    let usage = RunUsageTracker::new();
-    let input = RunInputBufferHandle::new();
+    let event_sink = RecordingEventSink::default();
+    let instance = SessionRunFixture::builder()
+        .with_event_sink(event_sink.clone())
+        .build()
+        .create(crate::domain::agent_run::RunSpec::main())
+        .expect("production RunFactory should create test run");
+    let usage = instance.context().usage().clone();
+    let input = instance.context().input().clone();
 
-    let factory = make_factory();
-    let mut bindings = make_bindings();
-    bindings.io.event_sink = event_sink.clone();
-    bindings.lifecycle.usage = usage.clone();
-    bindings.io.input = input.clone();
-
-    let ctx = factory
-        .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)
-        .expect("test context assembly must succeed");
-
-    (ctx, event_sink, usage, input)
+    (instance, event_sink, usage, input)
 }
 
 #[test]
 fn runtime_context_event_sink_accessor_preserves_identity() {
-    let (ctx, event_sink, _usage, _input) = make_context_with_io_seams();
-    // Smoke test — calling event_sink() works.
-    let _ = ctx.event_sink();
+    let (instance, event_sink, _usage, _input) = make_instance_with_io_seams();
+    let _context = instance.context();
     let _ = event_sink;
 }
 
 #[test]
 fn runtime_context_usage_accessor_preserves_identity() {
-    let (ctx, _event_sink, usage, _input) = make_context_with_io_seams();
+    let (instance, _event_sink, usage, _input) = make_instance_with_io_seams();
+    let context = instance.context();
 
     usage.update(123);
-    assert_eq!(ctx.usage().get(), Some(123));
+    assert_eq!(context.usage().get(), Some(123));
 
-    ctx.usage().update(456);
+    context.usage().update(456);
     assert_eq!(usage.get(), Some(456));
 }
 
 #[test]
 fn runtime_context_input_accessor_preserves_identity() {
-    let (ctx, _event_sink, _usage, input) = make_context_with_io_seams();
+    let (instance, _event_sink, _usage, input) = make_instance_with_io_seams();
+    let context = instance.context();
 
-    assert_eq!(input.is_sealed(), ctx.input().is_sealed());
+    assert_eq!(input.is_sealed(), context.input().is_sealed());
 }
 
 #[test]
 fn runtime_context_clone_shares_io_seams() {
-    let (ctx, _event_sink, usage, input) = make_context_with_io_seams();
-    let clone = ctx.clone();
+    let (instance, _event_sink, usage, input) = make_instance_with_io_seams();
+    let context = instance.context().clone();
+    let clone = context.clone();
 
     usage.update(777);
     assert_eq!(clone.usage().get(), Some(777));
@@ -858,16 +553,18 @@ fn runtime_context_clone_shares_io_seams() {
         images: vec![],
     });
     assert!(!clone.input().is_sealed());
-    assert!(!ctx.input().is_sealed());
+    assert!(!context.input().is_sealed());
 }
 
 #[test]
 fn runtime_context_new_runs_have_isolated_io_seams() {
-    let (ctx1, _sink1, usage1, input1) = make_context_with_io_seams();
-    let (ctx2, _sink2, usage2, input2) = make_context_with_io_seams();
+    let (instance1, _sink1, usage1, input1) = make_instance_with_io_seams();
+    let (instance2, _sink2, usage2, input2) = make_instance_with_io_seams();
+    let context1 = instance1.context();
+    let context2 = instance2.context();
 
-    ctx1.usage().update(100);
-    ctx2.usage().update(200);
+    context1.usage().update(100);
+    context2.usage().update(200);
     assert_eq!(usage1.get(), Some(100));
     assert_eq!(usage2.get(), Some(200));
 
@@ -887,27 +584,28 @@ fn runtime_context_new_runs_have_isolated_io_seams() {
 
 #[test]
 fn runtime_context_has_all_required_accessors_with_io_seams() {
-    let (ctx, _sink, _usage, _input) = make_context_with_io_seams();
+    let (instance, _sink, _usage, _input) = make_instance_with_io_seams();
+    let context = instance.context();
 
     // Existing accessors still work.
-    let _context = ctx.context();
-    let _provider = ctx.provider();
-    let _tool_catalog = ctx.tool_catalog();
-    let _tool_execution = ctx.tool_execution();
-    let _policy = ctx.policy();
-    let _interaction = ctx.interaction();
-    let _memory = ctx.memory();
-    let _reflection_history = ctx.reflection_history();
-    let _task = ctx.task();
-    let _hooks = ctx.hooks();
-    let _reasoning = ctx.reasoning();
-    let _config = ctx.config();
-    let _cancel = ctx.cancel();
+    let _context = context.context();
+    let _provider = context.provider();
+    let _tool_catalog = context.tool_catalog();
+    let _tool_execution = context.tool_execution();
+    let _policy = context.policy();
+    let _interaction = context.interaction();
+    let _memory = context.memory();
+    let _reflection_history = context.reflection_history();
+    let _task = context.task();
+    let _hooks = context.hooks();
+    let _reasoning = context.reasoning();
+    let _config = context.config();
+    let _cancel = context.cancel();
 
     // New I/O seam accessors.
-    let _event_sink = ctx.event_sink();
-    let _usage = ctx.usage();
-    let _input = ctx.input();
+    let _event_sink = context.event_sink();
+    let _usage = context.usage();
+    let _input = context.input();
 }
 
 // ── #1385 Task 12: RuntimeContext I/O seam production-facing tests ──
@@ -1013,31 +711,35 @@ fn factory_assembled_context_event_sink_is_real_not_noop() {
             self.seen.store(true, Ordering::SeqCst);
             Box::pin(std::future::ready(()))
         }
-        fn try_send_event(&self, _event: crate::application::loop_engine::chat::RuntimeStreamEvent) {
+        fn try_send_event(
+            &self,
+            _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
+        ) {
             self.seen.store(true, Ordering::SeqCst);
         }
     }
 
     let seen = Arc::new(AtomicBool::new(false));
     let sink = SharedSink { seen: seen.clone() };
-    let handle = crate::application::loop_engine::chat::ChatEventSinkHandle::new(sink);
+    let _ = crate::application::loop_engine::chat::ChatEventSinkHandle::new(sink);
 
-    // Build a RuntimeContext with this real handle via factory.
-    let factory = make_factory();
-    let mut bindings = make_bindings();
-    bindings.io.event_sink = handle;
-    let ctx = factory
-        .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)
-        .expect("test context assembly");
+    let fixture = SessionRunFixture::default();
+    let instance = fixture
+        .create(crate::domain::agent_run::RunSpec::main())
+        .expect("production RunFactory should create test run");
 
-    // Send an event through the RuntimeContext's event_sink.
-    let event_sink = ctx.event_sink();
-    event_sink.try_send_event(
-        crate::application::loop_engine::chat::RuntimeStreamEvent::SystemMessage("probe".to_string()),
+    instance.context().event_sink().try_send_event(
+        crate::application::loop_engine::chat::RuntimeStreamEvent::SystemMessage(
+            "probe".to_string(),
+        ),
     );
 
     assert!(
-        seen.load(Ordering::SeqCst),
+        fixture.event_sink().events().iter().any(|event| matches!(
+            event,
+            crate::application::loop_engine::chat::RuntimeStreamEvent::SystemMessage(message)
+                if message == "probe"
+        )),
         "event_sink must be real, not noop"
     );
 }

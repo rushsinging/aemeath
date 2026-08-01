@@ -471,12 +471,21 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             }
         }
     }
+    let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
+        tools.catalog_port(),
+        tools.execution(),
+        Arc::new(policy::AllowAllPolicy),
+        reflection_history,
+        task_access,
+        hook_runner,
+    ));
     let agent_runner = runtime::AgentRunnerAssembly {
         runner: Arc::new(NoopRunner),
         parent_context_source: runtime::ParentRunContextSource::new(),
         max_tool_concurrency: 10,
         max_agent_concurrency: 4,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+        runtime_context_factory: runtime_context_factory.clone(),
     };
 
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
@@ -499,17 +508,11 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             Vec::new(),
         )),
         agent_runner,
-        {
-            Arc::new(runtime::RuntimeContextFactory::new(
-                tools.catalog_port(),
-                tools.execution(),
-                Arc::new(policy::AllowAllPolicy),
-                reflection_history,
-                task_access,
-                hook_runner,
-            ))
-        },
     );
+    assert!(Arc::ptr_eq(
+        dependencies.runtime_context_factory(),
+        &runtime_context_factory,
+    ));
 
     let args = ChatBootstrapArgs {
         cwd: Some(root),
