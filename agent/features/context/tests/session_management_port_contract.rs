@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use context::adapters::decode_session;
+use context::adapters::{decode_session, CanonicalSessionWriter};
 use context::domain::session::{CanonicalSession, SessionCodec, SnapshotState};
+use context::domain::{SessionId, ToolCallIdentity};
 use context::ports::SessionManagementPort;
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
 
@@ -20,6 +21,56 @@ fn session_for_project(
         context_stack: Vec::new(),
     });
     session
+}
+
+#[tokio::test]
+async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
+    let root = std::env::temp_dir().join(format!(
+        "aemeath-tool-receipt-ledger-contract-{}",
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&root).expect("create storage root");
+    let blob: Arc<dyn storage::api::AtomicBlobPort> = Arc::new(
+        storage::FileSystemBlobAdapter::new(&root).expect("create filesystem blob adapter"),
+    );
+    let port = context::adapters::AtomicBlobSessionManagement::new(Arc::clone(&blob));
+    let writer = context::adapters::AtomicBlobCanonicalSessionWriter::new(blob);
+    let project = ProjectIdentity {
+        initial_cwd: "/receipt-ledger".to_string(),
+        git_common_dir: None,
+    };
+    let session_id = SessionId::new("receipt-ledger");
+    let session = session_for_project(session_id.as_str(), project.clone(), "/receipt-ledger");
+    port.import_for_project(
+        &SessionCodec::encode(&session).expect("encode session"),
+        &project,
+    )
+    .await
+    .expect("persist session");
+    let identity = ToolCallIdentity {
+        session_id: session_id.clone(),
+        run_id: sdk::RunId::new("run"),
+        step_id: context::domain::RunStepId::new("step"),
+        runtime_call_id: "call-1".to_string(),
+        provider_call_id: Some("provider-1".to_string()),
+        tool_name: "Glob".to_string(),
+        call_index: 0,
+        agent: false,
+    };
+    let receipt = context::domain::ToolCallReceipt::pending(identity, "safe preview");
+    writer
+        .save_tool_receipt(session_id.as_str(), 1, &receipt)
+        .await
+        .expect("persist receipt ledger");
+
+    let resumed = port
+        .load_for_project(session_id.as_str(), &project)
+        .await
+        .expect("resume session with receipt ledger");
+
+    assert_eq!(resumed.revision, 1);
+    assert_eq!(resumed.run_slices[0].steps[0].tool_receipts[0], receipt);
+    std::fs::remove_dir_all(root).expect("remove storage root");
 }
 
 #[tokio::test]

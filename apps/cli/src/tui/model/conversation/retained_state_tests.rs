@@ -62,6 +62,8 @@ fn retained_state_snapshot_separates_history_from_transient_state() {
     assert_eq!(retained.agent_runs, 1);
     assert_eq!(retained.agent_run_steps, 2);
     assert_eq!(retained.terminal_agent_runs, 1);
+    assert!(retained.output_view_journal_entries > 0);
+    assert!(retained.output_view_journal_item_id_bytes > 0);
     assert!(!retained.has_active_interaction);
 }
 
@@ -79,8 +81,17 @@ fn retained_state_snapshot_returns_to_zero_after_reset() {
 
     model.reset();
 
-    assert_eq!(
-        model.retained_state_snapshot(),
-        super::model::ConversationRetainedStateSnapshot::default()
-    );
+    let retained = model.retained_state_snapshot();
+    assert_eq!(retained.chats, 0);
+    assert_eq!(retained.turns, 0);
+    assert_eq!(retained.tool_calls, 0);
+    assert_eq!(retained.timeline_items, 0);
+    assert_eq!(retained.agent_progress_entries, 0);
+    assert_eq!(retained.agent_progress_bytes, 0);
+    assert_eq!(retained.agent_runs, 0);
+    assert_eq!(retained.agent_run_steps, 0);
+    assert_eq!(retained.terminal_agent_runs, 0);
+    assert_eq!(retained.output_view_journal_entries, 1);
+    assert_eq!(retained.output_view_journal_item_id_bytes, 0);
+    assert!(!retained.has_active_interaction);
 }

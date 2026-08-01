@@ -47,11 +47,10 @@ fn bench_refresh_cost_by_conversation_size() {
     for n in [500usize, 1000, 2000, 4000] {
         let conv = build_conversation(n);
         let blocks = conv.timeline.items().len();
-        let rev = conv.revision();
 
         // assemble 全量（A3 memo miss 时、即每个 streaming chunk 的成本）
         let t = Instant::now();
-        let vm = OutputViewAssembler::assemble_from_conversation(&conv, rev, None);
+        let vm = assemble_output_view(&conv, None);
         let assemble_ms = t.elapsed().as_secs_f64() * 1000.0;
         let roots = vm.roots.len();
 

@@ -13,6 +13,7 @@ pub(crate) mod session_legacy_workspace;
 mod session_lifecycle;
 mod session_resume;
 mod skill_prompt_source;
+mod tool_receipt_ledger;
 
 pub use atomic_blob_session::AtomicBlobSessionStore;
 pub use atomic_blob_session_management::AtomicBlobSessionManagement;

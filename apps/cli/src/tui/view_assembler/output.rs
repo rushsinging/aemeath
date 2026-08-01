@@ -1,25 +1,33 @@
 use crate::tui::model::conversation::block::HookNoticeKind;
+#[cfg(test)]
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::model::ConversationModel;
+#[cfg(test)]
 use crate::tui::model::conversation::tool_call::ToolCall;
 use crate::tui::model::output_timeline::OutputTimelineItem;
+#[cfg(test)]
+use crate::tui::view_model::OutputViewModel;
 use crate::tui::view_model::{
     allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
     HookNoticeBlockView, HookNoticeSemanticKind, ModelStreamPlaceholderBlockView, OutputBlockKind,
-    OutputViewModel, SemanticStyle, TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
+    SemanticStyle, TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
 };
+#[cfg(test)]
 use std::collections::HashMap;
 
+use super::output_tool_lookup::ToolCallLookup;
 use super::output_tool_view::{
     display_text_for_tool_result, find_tool_call, find_tool_view, summarize_non_embedded_result,
     tool_result_is_embedded,
 };
 
-/// assemble 期一次性构建的工具查找索引，把 O(n²) 线性扫描降为 O(1)。
+#[cfg(test)]
+/// 测试参考装配使用的完整工具索引。
 pub(super) struct ToolIndex<'a> {
     calls: HashMap<(&'a ChatId, &'a ChatTurnId, &'a ToolCallId), &'a ToolCall>,
 }
 
+#[cfg(test)]
 impl<'a> ToolIndex<'a> {
     pub(super) fn build(conversation: &'a ConversationModel) -> Self {
         let mut calls = HashMap::new();
@@ -35,8 +43,21 @@ impl<'a> ToolIndex<'a> {
         Self { calls }
     }
 
+    #[cfg(test)]
     pub(super) fn call(
         &self,
+        chat_id: &ChatId,
+        turn_id: &ChatTurnId,
+        tool_id: &ToolCallId,
+    ) -> Option<&'a ToolCall> {
+        self.calls.get(&(chat_id, turn_id, tool_id)).copied()
+    }
+}
+
+#[cfg(test)]
+impl ToolCallLookup for ToolIndex<'_> {
+    fn call<'a>(
+        &'a self,
         chat_id: &ChatId,
         turn_id: &ChatTurnId,
         tool_id: &ToolCallId,
@@ -48,280 +69,240 @@ impl<'a> ToolIndex<'a> {
 pub struct OutputViewAssembler;
 
 impl OutputViewAssembler {
-    pub fn assemble_from_conversation(
-        conversation: &ConversationModel,
-        version: u64,
+    pub(super) fn assemble_item(
+        item: &OutputTimelineItem,
+        tool_lookup: &impl ToolCallLookup,
         workspace_root: Option<&std::path::Path>,
-    ) -> OutputViewModel {
-        #[cfg(test)]
-        let started = std::time::Instant::now();
-        let mut roots: Vec<BlockNode> = Vec::new();
-        let tool_index = ToolIndex::build(conversation);
-
-        for item in conversation.timeline.items() {
-            match item {
-                OutputTimelineItem::UserMessage { id, text } => {
-                    roots.push(leaf(
-                        id.clone(),
-                        OutputBlockKind::UserMessage(TextBlockView {
-                            key: id.clone(),
-                            text: text.clone(),
-                            style: SemanticStyle::Normal,
+    ) -> Option<BlockNode> {
+        match item {
+            OutputTimelineItem::UserMessage { id, text } => Some(leaf(
+                id.clone(),
+                OutputBlockKind::UserMessage(TextBlockView {
+                    key: id.clone(),
+                    text: text.clone(),
+                    style: SemanticStyle::Normal,
+                }),
+            )),
+            OutputTimelineItem::AssistantText { id, text, .. } => Some(leaf(
+                id.clone(),
+                OutputBlockKind::AssistantMessage(TextBlockView {
+                    key: id.clone(),
+                    text: text.clone(),
+                    style: SemanticStyle::Normal,
+                }),
+            )),
+            OutputTimelineItem::Thinking { id, text, .. } => Some(leaf(
+                id.clone(),
+                OutputBlockKind::ThinkingMessage(TextBlockView {
+                    key: id.clone(),
+                    text: text.clone(),
+                    style: SemanticStyle::Muted,
+                }),
+            )),
+            OutputTimelineItem::ToolCall { reference } => {
+                let tool = find_tool_view(
+                    tool_lookup,
+                    &reference.context.chat_id,
+                    &reference.context.turn_id,
+                    &reference.tool_call_id,
+                    workspace_root,
+                )?;
+                let mut parent = leaf(tool.key.clone(), OutputBlockKind::ToolCall(tool.clone()));
+                if let Some(result_text) = tool.result_summary.clone() {
+                    let result_id = format!("{}-result", reference.tool_call_id.as_ref());
+                    let child = leaf(
+                        result_id.clone(),
+                        OutputBlockKind::ToolResult(ToolResultBlockView {
+                            key: result_id,
+                            tool_title: tool.title.clone(),
+                            args_preview: tool.args_preview.clone(),
+                            result_text,
+                            data: tool
+                                .result_payload
+                                .as_ref()
+                                .map(|payload| payload.content.clone()),
+                            style: tool.style,
                         }),
-                    ));
+                    );
+                    push_child_checked(&mut parent, child, 1);
                 }
-                OutputTimelineItem::AssistantText { id, text, .. } => {
-                    roots.push(leaf(
-                        id.clone(),
-                        OutputBlockKind::AssistantMessage(TextBlockView {
-                            key: id.clone(),
-                            text: text.clone(),
-                            style: SemanticStyle::Normal,
-                        }),
-                    ));
+                Some(parent)
+            }
+            OutputTimelineItem::ToolResult { reference } => {
+                if tool_result_is_embedded(
+                    tool_lookup,
+                    &reference.context.chat_id,
+                    &reference.context.turn_id,
+                    &reference.tool_call_id,
+                ) {
+                    return None;
                 }
-                OutputTimelineItem::Thinking { id, text, .. } => {
-                    roots.push(leaf(
-                        id.clone(),
-                        OutputBlockKind::ThinkingMessage(TextBlockView {
-                            key: id.clone(),
-                            text: text.clone(),
-                            style: SemanticStyle::Muted,
-                        }),
-                    ));
-                }
-                OutputTimelineItem::ToolCall { reference } => {
-                    if let Some(tool) = find_tool_view(
-                        &tool_index,
-                        &reference.context.chat_id,
-                        &reference.context.turn_id,
-                        &reference.tool_call_id,
-                        workspace_root,
-                    ) {
-                        let mut parent =
-                            leaf(tool.key.clone(), OutputBlockKind::ToolCall(tool.clone()));
-                        // 工具结果升为子块：取 result_summary 同源文本，附加为 depth-1 子节点。
-                        if let Some(result_text) = tool.result_summary.clone() {
-                            let result_id = format!("{}-result", reference.tool_call_id.as_ref());
-                            let child = leaf(
-                                result_id.clone(),
-                                OutputBlockKind::ToolResult(ToolResultBlockView {
-                                    key: result_id,
-                                    tool_title: tool.title.clone(),
-                                    args_preview: tool.args_preview.clone(),
-                                    result_text,
-                                    data: tool.result_payload.as_ref().map(|p| p.content.clone()),
-                                    style: tool.style,
-                                }),
-                            );
-                            push_child_checked(&mut parent, child, 1);
-                        }
-                        roots.push(parent);
+                let call = find_tool_call(
+                    tool_lookup,
+                    &reference.context.chat_id,
+                    &reference.context.turn_id,
+                    &reference.tool_call_id,
+                )?;
+                let payload = call.result.as_ref()?;
+                let tool_name = Some(call.name.as_str());
+                let display_output =
+                    display_text_for_tool_result(tool_name, &payload.output, &payload.content);
+                let text =
+                    summarize_non_embedded_result(tool_name, &display_output, payload.is_error);
+                let text = if payload.image_count > 0 {
+                    format!("{text}\n[图片: {}]", payload.image_count)
+                } else {
+                    text
+                };
+                let id = format!("{}-result", reference.tool_call_id.as_ref());
+                Some(leaf(
+                    id.clone(),
+                    OutputBlockKind::DiagnosticNotice(TextBlockView {
+                        key: id,
+                        text,
+                        style: if payload.is_error {
+                            SemanticStyle::Error
+                        } else {
+                            SemanticStyle::Success
+                        },
+                    }),
+                ))
+            }
+            OutputTimelineItem::System { id, text } => Some(leaf(
+                id.clone(),
+                OutputBlockKind::SystemNotice(TextBlockView {
+                    key: id.clone(),
+                    text: text.clone(),
+                    style: SemanticStyle::Muted,
+                }),
+            )),
+            OutputTimelineItem::HookNotice { id, content } => {
+                let (kind, style) = match content.kind {
+                    HookNoticeKind::Blocked => {
+                        (HookNoticeSemanticKind::Blocked, SemanticStyle::Error)
                     }
-                }
-                OutputTimelineItem::ToolResult { reference } => {
-                    if tool_result_is_embedded(
-                        &tool_index,
-                        &reference.context.chat_id,
-                        &reference.context.turn_id,
-                        &reference.tool_call_id,
-                    ) {
-                        continue;
+                    HookNoticeKind::Failed => {
+                        (HookNoticeSemanticKind::Failed, SemanticStyle::Error)
                     }
-                    // A4.5: 从 chats.tool_calls[].result（ToolResultPayload）读，不再读 blocks。
-                    let Some(call) = find_tool_call(
-                        &tool_index,
-                        &reference.context.chat_id,
-                        &reference.context.turn_id,
-                        &reference.tool_call_id,
-                    ) else {
-                        continue;
-                    };
-                    let Some(payload) = call.result.as_ref() else {
-                        continue;
-                    };
-                    let tool_name = Some(call.name.as_str());
-                    let display_output =
-                        display_text_for_tool_result(tool_name, &payload.output, &payload.content);
-                    let text =
-                        summarize_non_embedded_result(tool_name, &display_output, payload.is_error);
-                    let text = if payload.image_count > 0 {
-                        format!("{text}\n[图片: {}]", payload.image_count)
-                    } else {
-                        text
-                    };
-                    roots.push(leaf(
-                        format!("{}-result", reference.tool_call_id.as_ref()),
-                        OutputBlockKind::DiagnosticNotice(TextBlockView {
-                            key: format!("{}-result", reference.tool_call_id.as_ref()),
-                            text,
-                            style: if payload.is_error {
-                                SemanticStyle::Error
-                            } else {
-                                SemanticStyle::Success
-                            },
-                        }),
-                    ));
+                    HookNoticeKind::Info => (HookNoticeSemanticKind::Info, SemanticStyle::Muted),
+                };
+                Some(leaf(
+                    id.clone(),
+                    OutputBlockKind::HookNotice(HookNoticeBlockView {
+                        key: id.clone(),
+                        kind,
+                        title: content.title.clone(),
+                        body: content.body.clone(),
+                        details: content.details.clone(),
+                        style,
+                    }),
+                ))
+            }
+            OutputTimelineItem::Error { id, text } => Some(leaf(
+                id.clone(),
+                OutputBlockKind::DiagnosticNotice(TextBlockView {
+                    key: id.clone(),
+                    text: text.clone(),
+                    style: SemanticStyle::Error,
+                }),
+            )),
+            OutputTimelineItem::QueuedUserMessage { .. } => None,
+            OutputTimelineItem::AgentProgress { id, message, .. } => Some(leaf(
+                id.clone(),
+                OutputBlockKind::DiagnosticNotice(TextBlockView {
+                    key: id.clone(),
+                    text: message.clone(),
+                    style: SemanticStyle::Running,
+                }),
+            )),
+            OutputTimelineItem::AskUserBatch {
+                id,
+                slots,
+                active_index,
+                phase,
+                cursor,
+                selected,
+                chat_input_active,
+                chat_input_text,
+                chat_input_cursor,
+                confirm_cursor,
+                confirmed,
+                ..
+            } => {
+                use crate::tui::model::conversation::block::AskUserPhase as MPhase;
+                let phase = match phase {
+                    MPhase::Answering => AskUserPhaseView::Answering,
+                    MPhase::Confirming => AskUserPhaseView::Confirming,
+                };
+                let slots = slots
+                    .iter()
+                    .map(|slot| AskUserSlotView {
+                        id: slot.id.clone(),
+                        question: slot.question.clone(),
+                        options: slot.options.clone(),
+                        llm_option_count: slot.llm_option_count,
+                        multi_select: slot.multi_select,
+                        default: slot.default.clone(),
+                        answer: slot.answer.clone(),
+                    })
+                    .collect();
+                Some(leaf(
+                    id.clone(),
+                    OutputBlockKind::AskUserBatch(AskUserBatchBlockView {
+                        key: id.clone(),
+                        slots,
+                        active_index: *active_index,
+                        phase,
+                        cursor: *cursor,
+                        selected: selected.clone(),
+                        chat_input_active: *chat_input_active,
+                        chat_input_text: chat_input_text.clone(),
+                        chat_input_cursor: *chat_input_cursor,
+                        confirm_cursor: *confirm_cursor,
+                        confirmed: *confirmed,
+                    }),
+                ))
+            }
+            OutputTimelineItem::OrphanToolResult {
+                id,
+                tool_name,
+                output,
+                content,
+                is_error,
+            } => {
+                let display_output = display_text_for_tool_result(Some(tool_name), output, content);
+                let text =
+                    summarize_non_embedded_result(Some(tool_name), &display_output, *is_error);
+                if text.is_empty() {
+                    return None;
                 }
-                OutputTimelineItem::System { id, text } => {
-                    roots.push(leaf(
-                        id.clone(),
-                        OutputBlockKind::SystemNotice(TextBlockView {
-                            key: id.clone(),
-                            text: text.clone(),
-                            style: SemanticStyle::Muted,
-                        }),
-                    ));
-                }
-                OutputTimelineItem::HookNotice { id, content } => {
-                    let (kind, style) = match content.kind {
-                        HookNoticeKind::Blocked => {
-                            (HookNoticeSemanticKind::Blocked, SemanticStyle::Error)
-                        }
-                        HookNoticeKind::Failed => {
-                            (HookNoticeSemanticKind::Failed, SemanticStyle::Error)
-                        }
-                        HookNoticeKind::Info => {
-                            (HookNoticeSemanticKind::Info, SemanticStyle::Muted)
-                        }
-                    };
-                    roots.push(leaf(
-                        id.clone(),
-                        OutputBlockKind::HookNotice(HookNoticeBlockView {
-                            key: id.clone(),
-                            kind,
-                            title: content.title.clone(),
-                            body: content.body.clone(),
-                            details: content.details.clone(),
-                            style,
-                        }),
-                    ));
-                }
-                OutputTimelineItem::Error { id, text } => {
-                    roots.push(leaf(
-                        id.clone(),
-                        OutputBlockKind::DiagnosticNotice(TextBlockView {
-                            key: id.clone(),
-                            text: text.clone(),
-                            style: SemanticStyle::Error,
-                        }),
-                    ));
-                }
-                OutputTimelineItem::QueuedUserMessage { .. } => {
-                    // 排队输入不再作为 document block 渲染，改为在 spinner 上方固定显示。
-                }
-                OutputTimelineItem::AgentProgress { id, message, .. } => {
-                    // 当前无 mutation 推此 timeline 项；agent 进度内联于 tool_calls[].activities（activity_lines）。误接入会重现 A4.2 双显示回归。
-                    roots.push(leaf(
-                        id.clone(),
-                        OutputBlockKind::DiagnosticNotice(TextBlockView {
-                            key: id.clone(),
-                            text: message.clone(),
-                            style: SemanticStyle::Running,
-                        }),
-                    ));
-                }
-                OutputTimelineItem::AskUserBatch {
-                    id,
-                    slots,
-                    active_index,
-                    phase,
-                    cursor,
-                    selected,
-                    chat_input_active,
-                    chat_input_text,
-                    chat_input_cursor,
-                    confirm_cursor,
-                    confirmed,
-                    ..
-                } => {
-                    use crate::tui::model::conversation::block::AskUserPhase as MPhase;
-                    let phase_view = match phase {
-                        MPhase::Answering => AskUserPhaseView::Answering,
-                        MPhase::Confirming => AskUserPhaseView::Confirming,
-                    };
-                    let slots_view: Vec<_> = slots
-                        .iter()
-                        .map(|s| AskUserSlotView {
-                            id: s.id.clone(),
-                            question: s.question.clone(),
-                            options: s.options.clone(),
-                            llm_option_count: s.llm_option_count,
-                            multi_select: s.multi_select,
-                            default: s.default.clone(),
-                            answer: s.answer.clone(),
-                        })
-                        .collect();
-                    roots.push(leaf(
-                        id.clone(),
-                        OutputBlockKind::AskUserBatch(AskUserBatchBlockView {
-                            key: id.clone(),
-                            slots: slots_view,
-                            active_index: *active_index,
-                            phase: phase_view,
-                            cursor: *cursor,
-                            selected: selected.clone(),
-                            chat_input_active: *chat_input_active,
-                            chat_input_text: chat_input_text.clone(),
-                            chat_input_cursor: *chat_input_cursor,
-                            confirm_cursor: *confirm_cursor,
-                            confirmed: *confirmed,
-                        }),
-                    ));
-                }
-                OutputTimelineItem::OrphanToolResult {
-                    id,
-                    tool_name,
-                    output,
-                    content,
-                    is_error,
-                } => {
-                    // 与非嵌入路径一致（DRY）：只展示工具摘要（如 `✓ Read completed`），
-                    // 绝不把完整原始 output 当正文逐行刷出；颜色随成功/失败而非 Warning（#87）。
-                    let display_output =
-                        display_text_for_tool_result(Some(tool_name), output, content);
-                    let text =
-                        summarize_non_embedded_result(Some(tool_name), &display_output, *is_error);
-                    if text.is_empty() {
-                        continue;
-                    }
-                    roots.push(leaf(
-                        format!("orphan-{id}"),
-                        OutputBlockKind::DiagnosticNotice(TextBlockView {
-                            key: format!("orphan-{id}"),
-                            text,
-                            style: if *is_error {
-                                SemanticStyle::Error
-                            } else {
-                                SemanticStyle::Success
-                            },
-                        }),
-                    ));
-                }
+                let id = format!("orphan-{id}");
+                Some(leaf(
+                    id.clone(),
+                    OutputBlockKind::DiagnosticNotice(TextBlockView {
+                        key: id,
+                        text,
+                        style: if *is_error {
+                            SemanticStyle::Error
+                        } else {
+                            SemanticStyle::Success
+                        },
+                    }),
+                ))
             }
         }
-        if let Some(placeholder) = &conversation.model_stream_placeholder {
-            roots.push(leaf(
-                "model-stream-placeholder".to_string(),
-                OutputBlockKind::ModelStreamPlaceholder(ModelStreamPlaceholderBlockView {
-                    key: "model-stream-placeholder".to_string(),
-                    elapsed_secs: placeholder.elapsed_secs,
-                    phase: placeholder.phase.clone(),
-                }),
-            ));
-        }
+    }
 
-        #[cfg(test)]
-        crate::tui::render::performance::record_assemble(
-            conversation.timeline.items().len(),
-            roots.len(),
-            started.elapsed(),
-        );
-        OutputViewModel {
-            roots,
-            version,
-            follow_tail_hint: true,
-        }
+    pub(super) fn assemble_placeholder(conversation: &ConversationModel) -> Option<BlockNode> {
+        let placeholder = conversation.model_stream_placeholder.as_ref()?;
+        Some(leaf(
+            "model-stream-placeholder".to_string(),
+            OutputBlockKind::ModelStreamPlaceholder(ModelStreamPlaceholderBlockView {
+                key: "model-stream-placeholder".to_string(),
+                elapsed_secs: placeholder.elapsed_secs,
+                phase: placeholder.phase.clone(),
+            }),
+        ))
     }
 }
 
@@ -348,6 +329,32 @@ fn push_child_checked(parent: &mut BlockNode, child: BlockNode, depth: usize) {
         return;
     }
     parent.children.push(child);
+}
+
+#[cfg(test)]
+fn assemble_output_window(
+    conversation: &ConversationModel,
+    workspace_root: Option<&std::path::Path>,
+    window: crate::tui::view_model::OutputRenderWindow,
+) -> OutputViewModel {
+    super::retained_output_view::RetainedOutputView::default()
+        .materialize_window(conversation, workspace_root, window)
+        .view_model
+}
+
+#[cfg(test)]
+fn assemble_output_view(
+    conversation: &ConversationModel,
+    workspace_root: Option<&std::path::Path>,
+) -> OutputViewModel {
+    assemble_output_window(
+        conversation,
+        workspace_root,
+        crate::tui::view_model::OutputRenderWindow {
+            line_limit: usize::MAX,
+            tail_offset: 0,
+        },
+    )
 }
 
 #[cfg(test)]
