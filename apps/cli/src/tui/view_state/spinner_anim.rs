@@ -60,16 +60,6 @@ impl SpinnerAnim {
         self.phase_frame = self.phase_frame.wrapping_add(1);
     }
 
-    /// 根据固定 90ms ticker 估算已运行秒数。
-    pub fn elapsed_secs(&self) -> u64 {
-        self.frame.saturating_mul(90) / 1000
-    }
-
-    /// 根据固定 90ms ticker 估算当前 phase 已运行秒数。
-    pub fn phase_elapsed_secs(&self) -> u64 {
-        self.phase_frame.saturating_mul(90) / 1000
-    }
-
     /// 随机选定一个 verb（effectful：用 rng，故归 view_state 更新边界）。
     /// 选一次后稳定，直到下次显式调用。同时把 frame 复位到 0。
     pub fn pick_verb(&mut self) {
@@ -114,17 +104,6 @@ mod tests {
         anim.advance();
         assert_eq!(anim.frame, 0);
         assert_eq!(anim.phase_frame, 0);
-    }
-
-    #[test]
-    fn test_spinner_anim_elapsed_secs_uses_fixed_tick_rate() {
-        let anim = SpinnerAnim {
-            frame: 12,
-            phase_frame: 4,
-            verb: String::new(),
-        };
-        assert_eq!(anim.elapsed_secs(), 1);
-        assert_eq!(anim.phase_elapsed_secs(), 0);
     }
 
     #[test]

@@ -46,6 +46,10 @@ fn transitioned_run_maps_to_status_observation() {
         parent_run_id: Some(parent_run_id.clone()),
         event: TuiRunEvent::Transitioned {
             status: TuiRunStatus::InvokingModel,
+            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                total_elapsed_ms: 12_345,
+                phase_elapsed_ms: 678,
+            },
         },
     });
 
@@ -55,8 +59,11 @@ fn transitioned_run_maps_to_status_observation() {
             run_id: actual_run_id,
             parent_run_id: Some(actual_parent_run_id),
             status: TuiRunStatus::InvokingModel,
-        })] if actual_run_id == &run_id && actual_parent_run_id == &parent_run_id
-    ));
+            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                total_elapsed_ms: 12_345,
+                phase_elapsed_ms: 678,
+            },
+        })] if actual_run_id == &run_id && actual_parent_run_id == &parent_run_id    ));
 }
 
 #[test]

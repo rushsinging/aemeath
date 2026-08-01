@@ -41,6 +41,12 @@ pub(crate) enum TuiRunTerminationReason {
     ParentStepCancelled,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TuiRunTiming {
+    pub(crate) total_elapsed_ms: u64,
+    pub(crate) phase_elapsed_ms: u64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TuiRunStatus {
     Created,
@@ -88,6 +94,7 @@ pub(crate) enum TuiRunEvent {
     },
     Transitioned {
         status: TuiRunStatus,
+        timing: TuiRunTiming,
     },
 }
 

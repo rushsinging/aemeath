@@ -310,10 +310,14 @@ fn test_spinner_tick_active_requests_redraw_without_marking_output_dirty() {
             run_id: run_id.clone(),
             parent_run_id: None,
             status: crate::tui::adapter::tui_runtime_event::TuiRunStatus::InvokingModel,
+            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                total_elapsed_ms: 0,
+                phase_elapsed_ms: 0,
+            },
         });
     app.view_state
         .run_activity
-        .sync_main_run(Some(&run_id), true, std::time::Instant::now());
+        .sync_main_run(Some(&run_id), true, 0, 0, std::time::Instant::now());
     app.view_state.dirty.clear_output();
     let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(8);
     let spawn_refs = SpawnContextRefs { agent_client: None };

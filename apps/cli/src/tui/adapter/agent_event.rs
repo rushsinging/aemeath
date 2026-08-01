@@ -758,11 +758,12 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     text: reason.clone(),
                 }))
             }
-            TuiRunEvent::Transitioned { status } => {
+            TuiRunEvent::Transitioned { status, timing } => {
                 conversation(ConversationIntent::ObserveRunStatus(ObserveRunStatus {
                     run_id: run_id.clone(),
                     parent_run_id: parent_run_id.clone(),
                     status: *status,
+                    timing: *timing,
                 }))
             }
             TuiRunEvent::DrainingInput

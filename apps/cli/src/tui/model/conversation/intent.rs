@@ -296,6 +296,7 @@ pub struct ObserveRunStatus {
     pub run_id: UiRunId,
     pub parent_run_id: Option<UiRunId>,
     pub status: TuiRunStatus,
+    pub timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

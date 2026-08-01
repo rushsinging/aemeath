@@ -209,11 +209,16 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             run_id,
             parent_run_id,
             status,
+            timing,
         } => run_event(
             run_id,
             parent_run_id,
             TuiRunEvent::Transitioned {
                 status: run_status(status),
+                timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                    total_elapsed_ms: timing.total_elapsed_ms,
+                    phase_elapsed_ms: timing.phase_elapsed_ms,
+                },
             },
         ),
         ChatEvent::RunTerminationRequested {

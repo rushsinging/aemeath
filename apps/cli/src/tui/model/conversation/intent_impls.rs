@@ -642,7 +642,7 @@ impl_run_transition!(RunFailed, super::interaction::AgentRunPhase::Failed);
 
 impl ConversationUpdate for ObserveRunStatus {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.observe_run_status(self.run_id, self.parent_run_id, self.status)
+        model.observe_run_status(self.run_id, self.parent_run_id, self.status, self.timing)
     }
 }
 

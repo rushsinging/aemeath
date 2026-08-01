@@ -128,11 +128,16 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             run_id,
             parent_run_id,
             to,
+            timing,
             ..
         } => ChatEvent::RunTransitioned {
             run_id,
             parent_run_id,
             status: run_status_to_sdk(to),
+            timing: sdk::RunTimingView {
+                total_elapsed_ms: timing.total_elapsed_ms,
+                phase_elapsed_ms: timing.phase_elapsed_ms,
+            },
         },
         RunDomainEvent::AwaitingUser {
             run_id,
@@ -688,6 +693,10 @@ mod run_status_mapping_tests {
                 from: RunStatus::Created,
                 to: runtime_status,
                 reason: RunTransitionReason::DrainStarted,
+                timing: crate::domain::agent_run::RunTimingSnapshot {
+                    total_elapsed_ms: 12_345,
+                    phase_elapsed_ms: 678,
+                },
             };
 
             match map_domain_event(event) {
@@ -695,10 +704,13 @@ mod run_status_mapping_tests {
                     run_id: mapped_run_id,
                     parent_run_id: mapped_parent_run_id,
                     status,
+                    timing,
                 } => {
                     assert_eq!(mapped_run_id, run_id);
                     assert_eq!(mapped_parent_run_id, Some(parent_run_id));
                     assert_eq!(status, expected_status);
+                    assert_eq!(timing.total_elapsed_ms, 12_345);
+                    assert_eq!(timing.phase_elapsed_ms, 678);
                 }
                 other => panic!("expected RunTransitioned, got {other:?}"),
             }

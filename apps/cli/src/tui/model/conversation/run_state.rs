@@ -6,6 +6,8 @@ pub(crate) struct RunStateSnapshot {
     pub(crate) run_id: UiRunId,
     pub(crate) parent_run_id: Option<UiRunId>,
     pub(crate) status: TuiRunStatus,
+    pub(crate) total_elapsed_ms: u64,
+    pub(crate) phase_elapsed_ms: u64,
 }
 
 impl RunStateSnapshot {

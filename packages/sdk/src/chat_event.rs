@@ -76,6 +76,10 @@ mod run_status_view_tests {
             run_id: crate::RunId::new_v7(),
             parent_run_id: None,
             status: RunStatusView::InvokingModel,
+            timing: super::RunTimingView {
+                total_elapsed_ms: 12_345,
+                phase_elapsed_ms: 678,
+            },
         };
 
         match event {
@@ -126,6 +130,12 @@ impl ChatEventContext {
     pub fn new(chat_id: crate::ids::ChatId, turn_id: crate::ids::ChatTurnId) -> Self {
         Self { chat_id, turn_id }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RunTimingView {
+    pub total_elapsed_ms: u64,
+    pub phase_elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -402,6 +412,7 @@ pub enum ChatEvent {
         run_id: crate::RunId,
         parent_run_id: Option<crate::RunId>,
         status: RunStatusView,
+        timing: RunTimingView,
     },
     RunAwaitingUser {
         run_id: crate::RunId,

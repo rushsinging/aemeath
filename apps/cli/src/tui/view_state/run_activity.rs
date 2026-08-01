@@ -7,19 +7,32 @@ const MODEL_SILENCE_THRESHOLD: Duration = Duration::from_secs(10);
 pub struct RunActivityState {
     main_run_id: Option<UiRunId>,
     invoking_model_silence_started_at: Option<Instant>,
+    timing_observed_at: Option<Instant>,
+    total_elapsed_ms: u64,
+    phase_elapsed_ms: u64,
     silence_interval: u64,
     pub frame: u64,
     pub verb: String,
 }
 
 impl RunActivityState {
-    pub fn sync_main_run(&mut self, run_id: Option<&UiRunId>, invoking_model: bool, now: Instant) {
+    pub fn sync_main_run(
+        &mut self,
+        run_id: Option<&UiRunId>,
+        invoking_model: bool,
+        total_elapsed_ms: u64,
+        phase_elapsed_ms: u64,
+        now: Instant,
+    ) {
         let identity_changed = self.main_run_id.as_ref() != run_id;
         if identity_changed {
             self.main_run_id = run_id.cloned();
             self.frame = 0;
             self.verb.clear();
         }
+        self.total_elapsed_ms = total_elapsed_ms;
+        self.phase_elapsed_ms = phase_elapsed_ms;
+        self.timing_observed_at = run_id.map(|_| now);
 
         if run_id.is_some() && invoking_model {
             if identity_changed || self.invoking_model_silence_started_at.is_none() {
@@ -55,11 +68,12 @@ impl RunActivityState {
             })
     }
 
-    pub fn elapsed_secs(&self, now: Instant) -> u64 {
-        self.invoking_model_silence_started_at
-            .map_or(0, |started_at| {
-                now.saturating_duration_since(started_at).as_secs()
-            })
+    pub fn total_elapsed_secs(&self, now: Instant) -> u64 {
+        self.elapsed_ms_since_observation(now, self.total_elapsed_ms) / 1000
+    }
+
+    pub fn phase_elapsed_secs(&self, now: Instant) -> u64 {
+        self.elapsed_ms_since_observation(now, self.phase_elapsed_ms) / 1000
     }
 
     pub fn silence_block_id(&self) -> Option<String> {
@@ -70,6 +84,14 @@ impl RunActivityState {
             run_id.as_str(),
             self.silence_interval
         ))
+    }
+
+    fn elapsed_ms_since_observation(&self, now: Instant, baseline_ms: u64) -> u64 {
+        let delta_ms = self.timing_observed_at.map_or(0, |observed_at| {
+            u64::try_from(now.saturating_duration_since(observed_at).as_millis())
+                .unwrap_or(u64::MAX)
+        });
+        baseline_ms.saturating_add(delta_ms)
     }
 
     fn begin_silence_interval(&mut self, now: Instant) {

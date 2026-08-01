@@ -20,6 +20,10 @@ mod tests {
             run_id: UiRunId::from("main-1"),
             parent_run_id: None,
             status: TuiRunStatus::InvokingModel,
+            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                total_elapsed_ms: 12_345,
+                phase_elapsed_ms: 678,
+            },
         });
         model.apply(UpdateTaskLines(vec![
             "━━ Tasks: 1/2 ━━".to_string(),
@@ -34,12 +38,12 @@ mod tests {
 
         let now = std::time::Instant::now();
         let mut activity = RunActivityState::default();
-        activity.sync_main_run(Some(&UiRunId::from("main-1")), true, now);
+        activity.sync_main_run(Some(&UiRunId::from("main-1")), true, 12_345, 678, now);
         let vm = LiveStatusAssembler::assemble(&model, &activity, &anim, &queued);
         let spinner = vm.spinner.expect("spinner projected");
         assert_eq!(spinner.frame, 12);
         assert_eq!(spinner.verb, "Forging");
-        assert_eq!(spinner.elapsed_secs, 0);
+        assert_eq!(spinner.elapsed_secs, 12);
         assert_eq!(spinner.phase_elapsed_secs, 0);
         assert_eq!(spinner.phase_text.as_deref(), Some("Thinking…"));
         assert_eq!(vm.task_lines, vec!["━━ Tasks: 1/2 ━━", "✓ #1 done"]);

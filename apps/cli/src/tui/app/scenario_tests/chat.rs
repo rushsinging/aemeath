@@ -153,6 +153,10 @@ fn streaming_has_representative_thinking_and_completed_snapshots() {
         parent_run_id: None,
         event: crate::tui::adapter::tui_runtime_event::TuiRunEvent::Transitioned {
             status: crate::tui::adapter::tui_runtime_event::TuiRunStatus::InvokingModel,
+            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                total_elapsed_ms: 1_000,
+                phase_elapsed_ms: 1_000,
+            },
         },
     });
     harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
@@ -178,6 +182,10 @@ fn streaming_has_representative_thinking_and_completed_snapshots() {
         parent_run_id: None,
         event: crate::tui::adapter::tui_runtime_event::TuiRunEvent::Transitioned {
             status: crate::tui::adapter::tui_runtime_event::TuiRunStatus::Completed,
+            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                total_elapsed_ms: 16_885,
+                phase_elapsed_ms: 12_699,
+            },
         },
     });
     harness.runtime_event(TuiRuntimeEvent::Done {

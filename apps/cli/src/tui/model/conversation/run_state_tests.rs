@@ -1,7 +1,14 @@
 use super::intent::ObserveRunStatus;
 use super::interaction::UiRunId;
 use super::model::ConversationModel;
-use crate::tui::adapter::tui_runtime_event::TuiRunStatus;
+use crate::tui::adapter::tui_runtime_event::{TuiRunStatus, TuiRunTiming};
+
+fn timing(total_elapsed_ms: u64, phase_elapsed_ms: u64) -> TuiRunTiming {
+    TuiRunTiming {
+        total_elapsed_ms,
+        phase_elapsed_ms,
+    }
+}
 
 fn observe(
     model: &mut ConversationModel,
@@ -13,6 +20,7 @@ fn observe(
         run_id: UiRunId::from(run_id),
         parent_run_id: parent_run_id.map(UiRunId::from),
         status,
+        timing: timing(12_345, 678),
     })
 }
 
@@ -24,6 +32,9 @@ fn unknown_transition_creates_snapshot_and_main_identity() {
 
     assert_eq!(model.run_state_snapshots().len(), 1);
     assert_eq!(model.active_main_run_id(), Some(&UiRunId::from("main-1")));
+    let snapshot = model.active_main_run_snapshot().expect("main snapshot");
+    assert_eq!(snapshot.total_elapsed_ms, 12_345);
+    assert_eq!(snapshot.phase_elapsed_ms, 678);
     assert_eq!(changes.len(), 1);
 }
 

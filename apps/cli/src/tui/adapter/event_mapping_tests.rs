@@ -56,6 +56,10 @@ fn run_status_view_maps_without_string_erasure() {
             run_id: run_id.clone(),
             parent_run_id: Some(parent_run_id.clone()),
             status: sdk_status,
+            timing: sdk::RunTimingView {
+                total_elapsed_ms: 12_345,
+                phase_elapsed_ms: 678,
+            },
         });
 
         assert!(matches!(
@@ -63,10 +67,12 @@ fn run_status_view_maps_without_string_erasure() {
             SdkEventMapping::Runtime(TuiRuntimeEvent::Run {
                 run_id: mapped_run_id,
                 parent_run_id: Some(mapped_parent_run_id),
-                event: TuiRunEvent::Transitioned { status },
+                event: TuiRunEvent::Transitioned { status, timing },
             }) if mapped_run_id.as_str() == run_id.as_str()
                 && mapped_parent_run_id.as_str() == parent_run_id.as_str()
                 && status == expected_status
+                && timing.total_elapsed_ms == 12_345
+                && timing.phase_elapsed_ms == 678
         ));
     }
 }

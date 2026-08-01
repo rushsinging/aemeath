@@ -163,6 +163,7 @@ impl ConversationModel {
         run_id: UiRunId,
         parent_run_id: Option<UiRunId>,
         status: crate::tui::adapter::tui_runtime_event::TuiRunStatus,
+        timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming,
     ) -> Vec<ConversationChange> {
         if let Some(snapshot) = self
             .run_state_snapshots
@@ -174,11 +175,15 @@ impl ConversationModel {
             }
             snapshot.parent_run_id = parent_run_id.clone();
             snapshot.status = status;
+            snapshot.total_elapsed_ms = timing.total_elapsed_ms;
+            snapshot.phase_elapsed_ms = timing.phase_elapsed_ms;
         } else {
             self.run_state_snapshots.push(RunStateSnapshot {
                 run_id: run_id.clone(),
                 parent_run_id: parent_run_id.clone(),
                 status,
+                total_elapsed_ms: timing.total_elapsed_ms,
+                phase_elapsed_ms: timing.phase_elapsed_ms,
             });
         }
 

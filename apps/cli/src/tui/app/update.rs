@@ -861,12 +861,16 @@ impl App {
     pub(crate) fn refresh_live_status_from_model(&mut self) {
         let main_run = self.model.conversation.active_main_run_snapshot();
         let main_run_id = main_run.map(|snapshot| &snapshot.run_id);
+        let total_elapsed_ms = main_run.map_or(0, |snapshot| snapshot.total_elapsed_ms);
+        let phase_elapsed_ms = main_run.map_or(0, |snapshot| snapshot.phase_elapsed_ms);
         let invoking_model = main_run.is_some_and(|snapshot| {
             snapshot.status == crate::tui::adapter::tui_runtime_event::TuiRunStatus::InvokingModel
         });
         self.view_state.run_activity.sync_main_run(
             main_run_id,
             invoking_model,
+            total_elapsed_ms,
+            phase_elapsed_ms,
             std::time::Instant::now(),
         );
         if self.view_state.run_activity.verb.is_empty() && main_run.is_some() {

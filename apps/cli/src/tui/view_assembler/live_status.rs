@@ -73,8 +73,8 @@ impl LiveStatusAssembler {
                     } else {
                         activity.verb.clone()
                     },
-                    elapsed_secs: activity.elapsed_secs(now),
-                    phase_elapsed_secs: anim.phase_elapsed_secs(),
+                    elapsed_secs: activity.total_elapsed_secs(now),
+                    phase_elapsed_secs: activity.phase_elapsed_secs(now),
                     phase_text: Some(phase_text),
                 })
             });
@@ -126,14 +126,25 @@ mod tests {
             run_id: UiRunId::from("main-1"),
             parent_run_id: None,
             status,
+            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
+                total_elapsed_ms: 12_345,
+                phase_elapsed_ms: 6_789,
+            },
         });
         conversation
     }
 
     #[test]
     fn typed_status_controls_activity_visibility() {
-        let activity = RunActivityState::default();
         let anim = SpinnerAnim::default();
+        let mut activity = RunActivityState::default();
+        activity.sync_main_run(
+            Some(&UiRunId::from("main-1")),
+            true,
+            12_345,
+            6_789,
+            Instant::now(),
+        );
         let invoking = LiveStatusAssembler::assemble(
             &conversation_at(TuiRunStatus::InvokingModel),
             &activity,
@@ -141,9 +152,15 @@ mod tests {
             &[],
         );
         assert_eq!(
-            invoking.spinner.and_then(|view| view.phase_text),
+            invoking
+                .spinner
+                .as_ref()
+                .and_then(|view| view.phase_text.clone()),
             Some("Thinking…".to_string())
         );
+        let spinner = invoking.spinner.expect("runtime-timed activity");
+        assert_eq!(spinner.elapsed_secs, 12);
+        assert_eq!(spinner.phase_elapsed_secs, 6);
 
         for status in [
             TuiRunStatus::Created,
