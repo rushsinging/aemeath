@@ -103,6 +103,7 @@ impl ConnectError {
 /// 用于 [`ConnectError::InvalidTransition`] 等错误投影。
 pub(crate) fn command_name(command: &ConnectCommand) -> &'static str {
     match command {
+        ConnectCommand::Back => "Back",
         ConnectCommand::SelectProvider { .. } => "SelectProvider",
         ConnectCommand::ConfirmOverwrite => "ConfirmOverwrite",
         ConnectCommand::RejectOverwrite => "RejectOverwrite",

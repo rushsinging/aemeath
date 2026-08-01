@@ -111,7 +111,7 @@ fn action_view() -> sdk::ConfigFormView {
 #[test]
 fn single_select_key_changes_interaction_and_submission_value() {
     let mut model = ConfigFormModel::new(select_view());
-    model.update(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    model.update(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
     assert_eq!(model.interaction().selected_option, 1);
     let effect = model
@@ -125,6 +125,61 @@ fn single_select_key_changes_interaction_and_submission_value() {
                 sdk::ConfigFormValue::SelectedOption(option) if option.as_str() == "OpenAI"
             )
     ));
+}
+
+#[test]
+fn vertical_single_select_uses_up_down_and_tab_does_not_reset_selection() {
+    let mut model = ConfigFormModel::new(select_view());
+    model.update(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(model.interaction().selected_option, 1);
+
+    model.update(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(model.interaction().selected_option, 1);
+
+    model.update(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    assert_eq!(model.interaction().selected_option, 0);
+}
+
+#[test]
+fn text_input_tracks_cursor_for_insertion_and_deletion() {
+    let mut view = secret_view();
+    view.page.fields[0].field_type = sdk::ConfigFormFieldType::Text;
+    view.page.fields[0].display_value = Some("ac".to_string());
+    let mut model = ConfigFormModel::new(view);
+
+    model.update(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    model.update(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+    assert_eq!(model.visible_input(), "abc");
+    assert_eq!(model.input_cursor_column(), Some(2));
+
+    model.update(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    assert_eq!(model.visible_input(), "ac");
+    assert_eq!(model.input_cursor_column(), Some(1));
+}
+
+#[test]
+fn escape_emits_back_after_initial_page_and_cancel_on_initial_page() {
+    let mut child_view = secret_view();
+    child_view.page.id = sdk::ConfigFormPageId("edit_endpoint".to_string());
+    let mut child_model = ConfigFormModel::new(child_view);
+    let child_effect = child_model
+        .update(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .unwrap();
+    assert!(matches!(
+        child_effect,
+        ConfigFormEffect::Back {
+            session_id: sdk::ConfigFormSessionId(ref value),
+            revision: sdk::ConfigFormRevision(1),
+        } if value == "session-1"
+    ));
+
+    let mut initial_view = select_view();
+    initial_view.page.id = sdk::ConfigFormPageId("select_provider".to_string());
+    let mut initial_model = ConfigFormModel::new(initial_view);
+    let initial_effect = initial_model
+        .update(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .unwrap();
+    assert!(matches!(initial_effect, ConfigFormEffect::Cancel { .. }));
 }
 
 #[test]
@@ -143,7 +198,7 @@ fn action_focus_can_select_non_first_action_and_enter_invokes_it() {
     ));
 }
 #[test]
-fn escape_emits_cancel_with_current_identity() {
+fn escape_emits_back_with_current_identity_on_child_page() {
     let mut model = ConfigFormModel::new(secret_view());
     let effect = model
         .update(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
@@ -151,7 +206,7 @@ fn escape_emits_cancel_with_current_identity() {
 
     assert!(matches!(
         effect,
-        ConfigFormEffect::Cancel {
+        ConfigFormEffect::Back {
             session_id: sdk::ConfigFormSessionId(ref value),
             revision: sdk::ConfigFormRevision(1),
         } if value == "session-1"

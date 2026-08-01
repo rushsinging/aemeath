@@ -72,6 +72,18 @@ fn typed_provider_selection_maps_to_connect_command() {
 }
 
 #[test]
+fn back_form_command_maps_to_connect_back_command() {
+    let command = connect_command_for_form(
+        &connect_view(ConnectStage::EditEndpoint),
+        ConfigFormCommand::Back,
+        crate::catalog::PROVIDER_CATALOG,
+    )
+    .unwrap();
+
+    assert!(matches!(command, crate::connect::ConnectCommand::Back));
+}
+
+#[test]
 fn custom_model_page_requires_three_typed_fields() {
     let form = provider_connect_form_view(
         &connect_view(ConnectStage::EditCustomModel),

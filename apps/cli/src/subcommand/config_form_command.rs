@@ -6,6 +6,10 @@ pub(crate) enum ConfigFormEffect {
     InvokeAction {
         command: sdk::ConfigFormInvokeAction,
     },
+    Back {
+        session_id: sdk::ConfigFormSessionId,
+        revision: sdk::ConfigFormRevision,
+    },
     Cancel {
         session_id: sdk::ConfigFormSessionId,
         revision: sdk::ConfigFormRevision,
@@ -19,6 +23,7 @@ pub(crate) struct ConfigFormModel {
     view: sdk::ConfigFormView,
     focused_field: usize,
     input: String,
+    input_cursor: usize,
     selected_option: usize,
     focused_action: usize,
     scroll: u16,
@@ -27,10 +32,12 @@ pub(crate) struct ConfigFormModel {
 impl ConfigFormModel {
     pub(crate) fn new(view: sdk::ConfigFormView) -> Self {
         let input = initial_input(&view, 0);
+        let input_cursor = input.chars().count();
         Self {
             view,
             focused_field: 0,
             input,
+            input_cursor,
             selected_option: 0,
             focused_action: 0,
             scroll: 0,
@@ -49,6 +56,7 @@ impl ConfigFormModel {
         self.focused_action = 0;
         self.scroll = 0;
         self.input = initial_input(&self.view, self.focused_field);
+        self.input_cursor = self.input.chars().count();
     }
 
     pub(crate) fn interaction(&self) -> super::config_form_render::ConfigFormInteraction {
@@ -56,6 +64,7 @@ impl ConfigFormModel {
             focused_field: self.focused_field,
             selected_option: self.selected_option,
             focused_action: self.focused_action,
+            input_cursor_column: self.input_cursor_column(),
         }
     }
 
@@ -66,6 +75,10 @@ impl ConfigFormModel {
         }
     }
 
+    pub(crate) fn input_cursor_column(&self) -> Option<usize> {
+        self.accepts_text_input().then_some(self.input_cursor)
+    }
+
     pub(crate) fn scroll(&self) -> u16 {
         self.scroll
     }
@@ -73,16 +86,31 @@ impl ConfigFormModel {
     pub(crate) fn update(&mut self, key: crossterm::event::KeyEvent) -> Option<ConfigFormEffect> {
         use crossterm::event::KeyCode;
         match key.code {
-            KeyCode::Esc => Some(ConfigFormEffect::Cancel {
-                session_id: self.view.session_id.clone(),
-                revision: self.view.revision,
+            KeyCode::Esc => Some(if self.is_initial_page() {
+                ConfigFormEffect::Cancel {
+                    session_id: self.view.session_id.clone(),
+                    revision: self.view.revision,
+                }
+            } else {
+                ConfigFormEffect::Back {
+                    session_id: self.view.session_id.clone(),
+                    revision: self.view.revision,
+                }
             }),
-            KeyCode::Tab | KeyCode::Down => {
-                self.focus_next();
+            KeyCode::Tab => {
+                self.focus_next_region();
                 None
             }
-            KeyCode::BackTab | KeyCode::Up => {
-                self.focus_previous();
+            KeyCode::BackTab => {
+                self.focus_previous_region();
+                None
+            }
+            KeyCode::Down => {
+                self.navigate_down();
+                None
+            }
+            KeyCode::Up => {
+                self.navigate_up();
                 None
             }
             KeyCode::PageDown => {
@@ -94,20 +122,37 @@ impl ConfigFormModel {
                 None
             }
             KeyCode::Left => {
-                self.select_previous();
+                self.navigate_left();
                 None
             }
             KeyCode::Right => {
-                self.select_next();
+                self.navigate_right();
                 None
             }
             KeyCode::Backspace => {
-                self.input.pop();
+                self.delete_before_cursor();
+                None
+            }
+            KeyCode::Delete => {
+                self.delete_at_cursor();
+                None
+            }
+            KeyCode::Home => {
+                if self.accepts_text_input() {
+                    self.input_cursor = 0;
+                }
+                None
+            }
+            KeyCode::End => {
+                if self.accepts_text_input() {
+                    self.input_cursor = self.input.chars().count();
+                }
                 None
             }
             KeyCode::Char(character) => {
                 if self.accepts_text_input() {
-                    self.input.push(character);
+                    insert_character(&mut self.input, self.input_cursor, character);
+                    self.input_cursor += 1;
                 }
                 None
             }
@@ -220,7 +265,84 @@ impl ConfigFormModel {
         )
     }
 
-    fn focus_next(&mut self) {
+    fn is_initial_page(&self) -> bool {
+        self.view.page.id.as_str() == "select_provider"
+    }
+
+    fn focus_next_region(&mut self) {
+        if self.view.page.fields.len() > 1 {
+            self.focus_next_field();
+        } else if self.view.page.fields.is_empty() && self.view.page.actions.len() > 1 {
+            self.focused_action = (self.focused_action + 1) % self.view.page.actions.len();
+        }
+    }
+
+    fn focus_previous_region(&mut self) {
+        if self.view.page.fields.len() > 1 {
+            self.focus_previous_field();
+        } else if self.view.page.fields.is_empty() && self.view.page.actions.len() > 1 {
+            self.focused_action = self
+                .focused_action
+                .checked_sub(1)
+                .unwrap_or(self.view.page.actions.len() - 1);
+        }
+    }
+
+    fn navigate_down(&mut self) {
+        if self.focused_field_type() == Some(sdk::ConfigFormFieldType::SingleSelect) {
+            self.select_next();
+        } else if self.view.page.fields.len() > 1 {
+            self.focus_next_field();
+        } else if self.view.page.fields.is_empty() {
+            self.select_next();
+        }
+    }
+
+    fn navigate_up(&mut self) {
+        if self.focused_field_type() == Some(sdk::ConfigFormFieldType::SingleSelect) {
+            self.select_previous();
+        } else if self.view.page.fields.len() > 1 {
+            self.focus_previous_field();
+        } else if self.view.page.fields.is_empty() {
+            self.select_previous();
+        }
+    }
+
+    fn navigate_left(&mut self) {
+        if self.accepts_text_input() {
+            self.input_cursor = self.input_cursor.saturating_sub(1);
+        } else if self.focused_field_type() == Some(sdk::ConfigFormFieldType::Boolean)
+            || self.view.page.fields.is_empty()
+        {
+            self.select_previous();
+        }
+    }
+
+    fn navigate_right(&mut self) {
+        if self.accepts_text_input() {
+            self.input_cursor = (self.input_cursor + 1).min(self.input.chars().count());
+        } else if self.focused_field_type() == Some(sdk::ConfigFormFieldType::Boolean)
+            || self.view.page.fields.is_empty()
+        {
+            self.select_next();
+        }
+    }
+
+    fn delete_before_cursor(&mut self) {
+        if !self.accepts_text_input() || self.input_cursor == 0 {
+            return;
+        }
+        self.input_cursor -= 1;
+        remove_character(&mut self.input, self.input_cursor);
+    }
+
+    fn delete_at_cursor(&mut self) {
+        if self.accepts_text_input() {
+            remove_character(&mut self.input, self.input_cursor);
+        }
+    }
+
+    fn focus_next_field(&mut self) {
         if self.view.page.fields.is_empty() {
             if !self.view.page.actions.is_empty() {
                 self.focused_action = (self.focused_action + 1) % self.view.page.actions.len();
@@ -231,9 +353,10 @@ impl ConfigFormModel {
         self.focused_field = (self.focused_field + 1) % self.view.page.fields.len();
         self.selected_option = 0;
         self.input = initial_input(&self.view, self.focused_field);
+        self.input_cursor = self.input.chars().count();
     }
 
-    fn focus_previous(&mut self) {
+    fn focus_previous_field(&mut self) {
         if self.view.page.fields.is_empty() {
             if !self.view.page.actions.is_empty() {
                 self.focused_action = self
@@ -250,6 +373,7 @@ impl ConfigFormModel {
             .unwrap_or(self.view.page.fields.len() - 1);
         self.selected_option = 0;
         self.input = initial_input(&self.view, self.focused_field);
+        self.input_cursor = self.input.chars().count();
     }
 
     fn select_next(&mut self) {
@@ -298,6 +422,26 @@ impl ConfigFormModel {
     }
 }
 
+fn character_byte_index(value: &str, character_index: usize) -> usize {
+    value
+        .char_indices()
+        .nth(character_index)
+        .map_or(value.len(), |(byte_index, _)| byte_index)
+}
+
+fn insert_character(value: &mut String, character_index: usize, character: char) {
+    let byte_index = character_byte_index(value, character_index);
+    value.insert(byte_index, character);
+}
+
+fn remove_character(value: &mut String, character_index: usize) {
+    let start = character_byte_index(value, character_index);
+    let end = character_byte_index(value, character_index + 1);
+    if start < end {
+        value.replace_range(start..end, "");
+    }
+}
+
 fn initial_input(view: &sdk::ConfigFormView, focused_field: usize) -> String {
     view.page
         .fields
@@ -322,6 +466,10 @@ pub(crate) async fn execute_form_effect(
     match effect {
         ConfigFormEffect::SubmitPage { command } => client.submit_page(command).await.map(Some),
         ConfigFormEffect::InvokeAction { command } => client.invoke_action(command).await.map(Some),
+        ConfigFormEffect::Back {
+            session_id,
+            revision,
+        } => client.back_form(session_id, revision).await.map(Some),
         ConfigFormEffect::Cancel {
             session_id,
             revision,

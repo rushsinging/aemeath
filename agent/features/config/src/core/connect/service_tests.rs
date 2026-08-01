@@ -278,6 +278,71 @@ async fn custom_model_skip_probe_save_completes_without_exposing_api_key() {
 }
 
 #[tokio::test]
+async fn back_from_each_edit_stage_returns_to_previous_stage_and_preserves_draft() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let initial = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .await;
+    let endpoint = advance(
+        &service,
+        initial,
+        ConnectCommand::SelectProvider {
+            source: find_by_source("Anthropic").unwrap().source,
+        },
+    )
+    .await;
+    let credential = advance(
+        &service,
+        endpoint.clone(),
+        ConnectCommand::SetEndpoint {
+            base_url: "https://custom.example.test".into(),
+        },
+    )
+    .await;
+
+    let returned = advance(&service, credential, ConnectCommand::Back).await;
+
+    assert_eq!(returned.stage, ConnectStage::EditEndpoint);
+    assert_eq!(
+        returned.draft.base_url(),
+        Some("https://custom.example.test")
+    );
+    let provider_selection = advance(&service, returned, ConnectCommand::Back).await;
+    assert_eq!(provider_selection.stage, ConnectStage::SelectProvider);
+    assert_eq!(
+        provider_selection
+            .draft
+            .source
+            .map(|source| source.as_str()),
+        Some("Anthropic")
+    );
+}
+
+#[tokio::test]
+async fn back_from_initial_provider_stage_is_rejected_without_cancelling_session() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let initial = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .await;
+
+    let error = service
+        .apply(initial.session_id, initial.revision, ConnectCommand::Back)
+        .await
+        .expect_err("initial stage has no previous page");
+
+    assert!(matches!(error, ConnectError::InvalidTransition { .. }));
+    let current = service.view(initial.session_id).await.unwrap();
+    assert_eq!(current.stage, ConnectStage::SelectProvider);
+    assert_eq!(current.terminal, None);
+}
+
+#[tokio::test]
 async fn stale_revision_rejects_command_without_changing_view() {
     let service = ConnectAppService::builder()
         .with_catalog(PROVIDER_CATALOG)

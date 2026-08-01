@@ -118,6 +118,8 @@ struct ConnectDraft {
 
 客户端通过 `ConnectCommand` 推进状态。每条命令必须携带 session id 与预期 revision；Config application service 对非法 stage、过期 revision、未知 Catalog 项和重复终态命令返回类型化错误，禁止由 TUI 猜测下一状态。
 
+`Back` 也是 Config-owned 的类型化状态迁移：除首页、异步执行中和终态外，返回上一编辑阶段并保留已填写 draft；从 Review 返回时清除旧 Probe 展示结果。首页没有上一页，TUI 在首页按 `Esc` 才发送 `Cancel`，其他页面按 `Esc` 必须发送 `Back`，禁止直接终止向导。
+
 ### 3.2 向导流程
 
 1. 列出 Catalog 中全部内置 Provider；
@@ -287,6 +289,8 @@ TUI 的 Connect 界面遵循既有 TEA 管线：SDK DTO → ACL → Intent → C
 
 - Provider 列表、默认值、当前 stage、可执行动作和校验错误完全来自 `ConnectView`；
 - API Key 输入使用遮罩，review 与诊断不显示明文；
+- TUI reducer 维护显式控件焦点与文本 cursor offset：纵向 `SingleSelect` 使用 `↑/↓`，文本输入使用 `←/→` 移动真实终端光标，`Tab/BackTab` 只在存在多个可聚焦区域时切换，禁止单字段页无意义回绕并重置选择；
+- 非首页 `Esc` 发送类型化 `Back`，首页 `Esc` 发送 `Cancel`；返回目标与 draft 保留语义由 Config 状态机决定；
 - reducer 不解析 URL、模型限制或 UA，不判断是否可覆盖/保存；
 - Effect Driver 只发送类型化命令，不读写 config/env/fs/network；
 - stale revision、probe failure、persist conflict 与 rollback refusal 均按 SDK DTO 显示，不以字符串匹配推导状态。

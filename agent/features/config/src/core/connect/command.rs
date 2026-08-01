@@ -35,6 +35,9 @@ use crate::catalog::ProviderSource;
 /// 服务端在校验通过前**不**修改 session 状态；任何 typed error 都是无副作用的。
 #[derive(Debug, Clone)]
 pub enum ConnectCommand {
+    /// 返回当前阶段的上一编辑页；SelectProvider 与异步/终态阶段拒绝该命令。
+    Back,
+
     // --- SelectProvider / ConfirmOverwrite ---
     /// 选择固定 source，迁移至 EditEndpoint（或经 ConfirmOverwrite）。
     SelectProvider {
@@ -112,6 +115,17 @@ pub enum ConnectCommand {
 pub(crate) fn expected_stages(command: &ConnectCommand) -> &'static [super::states::ConnectStage] {
     use super::states::ConnectStage::*;
     match command {
+        ConnectCommand::Back => &[
+            ConfirmOverwrite,
+            EditEndpoint,
+            EditCredential,
+            EditUserAgent,
+            SelectModel,
+            EditCustomModel,
+            ChooseGlobalDefault,
+            ChooseProbe,
+            Review,
+        ],
         ConnectCommand::SelectProvider { .. } => &[SelectProvider],
         ConnectCommand::ConfirmOverwrite | ConnectCommand::RejectOverwrite => &[ConfirmOverwrite],
         ConnectCommand::SetEndpoint { .. } => &[EditEndpoint],

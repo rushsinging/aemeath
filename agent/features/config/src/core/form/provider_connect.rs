@@ -65,9 +65,7 @@ pub fn connect_command_for_form(
         ConfigFormCommand::Cancel => Err(ProviderConnectFormError::InvalidSubmission(
             "取消应调用 Connect cancel 入口".to_string(),
         )),
-        ConfigFormCommand::Back => Err(ProviderConnectFormError::InvalidSubmission(
-            "当前 Connect workflow 不支持通用返回".to_string(),
-        )),
+        ConfigFormCommand::Back => Ok(ConnectCommand::Back),
         ConfigFormCommand::Refresh => Err(ProviderConnectFormError::InvalidSubmission(
             "刷新不产生 Connect 命令".to_string(),
         )),

@@ -212,6 +212,38 @@ impl sdk::ConfigFormClient for ConnectFacade {
             .map_err(form_sdk_error)
     }
 
+    async fn back_form(
+        &self,
+        session_id: sdk::ConfigFormSessionId,
+        revision: sdk::ConfigFormRevision,
+    ) -> Result<sdk::ConfigFormView, SdkError> {
+        let session_id = config::connect::ConnectSessionId::from_transport_str(session_id.as_str())
+            .map_err(SdkError::Internal)?;
+        let current = self
+            .service
+            .view(session_id)
+            .await
+            .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
+        let form_command = connect_command_for_form(
+            &current,
+            config::form::ConfigFormCommand::Back,
+            config::catalog::PROVIDER_CATALOG,
+        )
+        .map_err(form_sdk_error)?;
+        let connect_view = self
+            .service
+            .apply(
+                session_id,
+                config::connect::ConnectRevision::from_value(revision.0),
+                form_command,
+            )
+            .await
+            .map_err(connect_sdk_error)?;
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map_err(form_sdk_error)
+    }
+
     async fn cancel_form(
         &self,
         session_id: sdk::ConfigFormSessionId,

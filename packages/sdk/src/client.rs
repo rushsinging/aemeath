@@ -32,6 +32,12 @@ pub trait ConfigFormClient: Send + Sync + 'static {
         command: ConfigFormInvokeAction,
     ) -> Result<ConfigFormView, super::SdkError>;
 
+    async fn back_form(
+        &self,
+        session_id: ConfigFormSessionId,
+        revision: ConfigFormRevision,
+    ) -> Result<ConfigFormView, super::SdkError>;
+
     async fn cancel_form(
         &self,
         session_id: ConfigFormSessionId,

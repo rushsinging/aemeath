@@ -464,6 +464,7 @@ impl ConnectAppService {
     ) -> (Option<ConnectError>, SyncOutcome) {
         use crate::connect::ConnectCommand as Cmd;
         match command {
+            Cmd::Back => self.sync_back(session),
             Cmd::SelectProvider { source } => self.sync_select_provider(session, *source),
             Cmd::ConfirmOverwrite => self.sync_confirm_overwrite(session),
             Cmd::RejectOverwrite => self.sync_reject_overwrite(session),
@@ -494,6 +495,33 @@ impl ConnectAppService {
 
     fn catalog_entry(&self, source: ProviderSource) -> Option<&'static ProviderCatalogEntry> {
         self.catalog.iter().find(|entry| entry.source == source)
+    }
+
+    fn sync_back(&self, session: &mut ConnectSession) -> (Option<ConnectError>, SyncOutcome) {
+        session.stage = match session.stage {
+            ConnectStage::ConfirmOverwrite | ConnectStage::EditEndpoint => {
+                ConnectStage::SelectProvider
+            }
+            ConnectStage::EditCredential => ConnectStage::EditEndpoint,
+            ConnectStage::EditUserAgent => ConnectStage::EditCredential,
+            ConnectStage::SelectModel => ConnectStage::EditUserAgent,
+            ConnectStage::EditCustomModel => ConnectStage::SelectModel,
+            ConnectStage::ChooseGlobalDefault => ConnectStage::SelectModel,
+            ConnectStage::ChooseProbe => ConnectStage::ChooseGlobalDefault,
+            ConnectStage::Review => ConnectStage::ChooseProbe,
+            actual => {
+                return (
+                    Some(ConnectError::InvalidTransition {
+                        command: "Back",
+                        actual,
+                    }),
+                    SyncOutcome::Proceed,
+                );
+            }
+        };
+        session.last_error = None;
+        session.probe_status = None;
+        (None, SyncOutcome::Proceed)
     }
 
     fn sync_select_provider(

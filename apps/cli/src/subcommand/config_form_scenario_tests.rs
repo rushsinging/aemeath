@@ -83,6 +83,7 @@ fn screen(view: &sdk::ConfigFormView, width: u16, height: u16) -> String {
             focused_field: 0,
             selected_option: 0,
             focused_action: 0,
+            input_cursor_column: None,
         },
     )
 }
@@ -97,6 +98,7 @@ fn selected_provider_is_visibly_marked_after_navigation() {
             focused_field: 0,
             selected_option: 1,
             focused_action: 0,
+            input_cursor_column: None,
         },
     );
 
@@ -122,11 +124,64 @@ fn selected_action_is_visibly_marked() {
             focused_field: 0,
             selected_option: 0,
             focused_action: 1,
+            input_cursor_column: None,
         },
     );
 
     assert!(screen.contains("[确 认 ]"), "{screen}");
     assert!(!screen.contains("[取 消 ]"));
+}
+
+#[test]
+fn focused_text_input_sets_visible_terminal_cursor() {
+    let mut view = provider_view();
+    view.page.id = sdk::ConfigFormPageId("edit_endpoint".to_string());
+    view.page.fields[0].field_type = sdk::ConfigFormFieldType::Text;
+    view.page.fields[0].options.clear();
+    let backend = TestBackend::new(80, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal
+        .draw(|frame| {
+            render_config_form(
+                frame,
+                &view,
+                "https://example.test",
+                0,
+                ConfigFormInteraction {
+                    focused_field: 0,
+                    selected_option: 0,
+                    focused_action: 0,
+                    input_cursor_column: Some(8),
+                },
+            )
+        })
+        .unwrap();
+
+    assert_eq!(terminal.get_cursor_position().unwrap().x, 11);
+    assert!(terminal.get_cursor_position().unwrap().y > 0);
+}
+
+#[test]
+fn text_input_page_publishes_editing_shortcuts() {
+    let mut view = provider_view();
+    view.page.id = sdk::ConfigFormPageId("edit_endpoint".to_string());
+    view.page.fields[0].field_type = sdk::ConfigFormFieldType::Text;
+    view.page.fields[0].options.clear();
+    let screen = screen_with_interaction(
+        &view,
+        80,
+        20,
+        ConfigFormInteraction {
+            focused_field: 0,
+            selected_option: 0,
+            focused_action: 0,
+            input_cursor_column: Some(0),
+        },
+    );
+
+    assert!(screen.contains("←→ 移 动 光 标"), "{screen}");
+    assert!(screen.contains("Esc 返 回"), "{screen}");
 }
 
 #[test]
@@ -159,6 +214,7 @@ fn replacing_page_clears_previous_frame_content() {
                     focused_field: 0,
                     selected_option: 0,
                     focused_action: 0,
+                    input_cursor_column: None,
                 },
             )
         })
@@ -177,6 +233,7 @@ fn replacing_page_clears_previous_frame_content() {
                     focused_field: 0,
                     selected_option: 0,
                     focused_action: 0,
+                    input_cursor_column: None,
                 },
             )
         })

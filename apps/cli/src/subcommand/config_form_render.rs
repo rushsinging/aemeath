@@ -12,6 +12,7 @@ pub(crate) struct ConfigFormInteraction {
     pub(crate) focused_field: usize,
     pub(crate) selected_option: usize,
     pub(crate) focused_action: usize,
+    pub(crate) input_cursor_column: Option<usize>,
 }
 
 pub(crate) fn render_config_form(
@@ -244,16 +245,37 @@ fn render_footer(
             },
         ));
     }
+    let is_initial_page = view.page.id.as_str() == "select_provider";
+    let shortcut = match view
+        .page
+        .fields
+        .get(interaction.focused_field)
+        .map(|field| field.field_type)
+    {
+        Some(
+            sdk::ConfigFormFieldType::Text
+            | sdk::ConfigFormFieldType::Secret
+            | sdk::ConfigFormFieldType::Number,
+        ) => format!(
+            "Tab/↑↓ 切换字段 · ←→ 移动光标 · Esc {} · Enter 提交",
+            if is_initial_page { "取消" } else { "返回" }
+        ),
+        Some(sdk::ConfigFormFieldType::SingleSelect) => format!(
+            "↑↓ 选择 · Esc {} · Enter 提交",
+            if is_initial_page { "取消" } else { "返回" }
+        ),
+        _ => format!(
+            "Tab/↑↓ 切换 · ←→ 选择 · Esc {} · Enter 提交",
+            if is_initial_page { "取消" } else { "返回" }
+        ),
+    };
     let text = vec![
         Line::from(action_spans),
         Line::from(vec![
             Span::styled("> ", Style::default().fg(theme::ACCENT)),
             Span::styled(visible_input, Style::default().fg(theme::TEXT)),
         ]),
-        Line::from(Span::styled(
-            "Tab/↑↓ 切换 · ←→ 选择 · Esc 取消 · Enter 提交",
-            Style::default().fg(theme::TEXT_DIM),
-        )),
+        Line::from(Span::styled(shortcut, Style::default().fg(theme::TEXT_DIM))),
     ];
     frame.render_widget(
         Paragraph::new(text)
@@ -265,6 +287,17 @@ fn render_footer(
             .wrap(Wrap { trim: false }),
         area,
     );
+    if let Some(cursor_column) = interaction.input_cursor_column {
+        let cursor_x = area.x.saturating_add(2).saturating_add(
+            u16::try_from(cursor_column)
+                .unwrap_or(u16::MAX)
+                .min(area.width.saturating_sub(3)),
+        );
+        let cursor_y = area.y.saturating_add(2);
+        if cursor_y < area.bottom() && cursor_x < area.right() {
+            frame.set_cursor_position((cursor_x, cursor_y));
+        }
+    }
 }
 
 #[cfg(test)]
