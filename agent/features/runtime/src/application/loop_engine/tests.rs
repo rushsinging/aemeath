@@ -1194,7 +1194,9 @@ impl InteractionMailboxPort for InteractionMailboxFake {
 }
 
 fn scripted_run_loop(scenario: &mut ScriptedScenario) -> RunLoop<'_> {
-    scenario.ports().run_loop()
+    let mut run_loop = scenario.ports().run_loop();
+    run_loop.bind_test_activity_context();
+    run_loop
 }
 
 fn new_run(timeout: Duration) -> Run {
@@ -2529,6 +2531,8 @@ async fn default_await_user_input_returns_error_not_delegating_to_drain() {
         &mut ports.stuck,
         &ports.plan_approval,
     );
+
+    loop_context.bind_test_activity_context();
 
     let result = run_loop(
         &mut run,

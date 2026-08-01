@@ -72,10 +72,10 @@ pub(crate) struct StartActivity {
     pub(crate) audience: ActivityAudienceView,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct UpdateActivity {
     pub(crate) activity_id: ActivityId,
+    pub(crate) detail: Option<ActivityDetail>,
 }
 
 #[derive(Debug, Error)]
@@ -90,6 +90,8 @@ pub(crate) enum ActivityError {
     UnknownParent(ActivityId),
     #[error("活动所属 Run 不匹配")]
     RunMismatch,
+    #[error("ActivityCoordinator 尚未绑定到 RunLoop")]
+    CoordinatorNotBound,
     #[error("活动来源与所属 RunStep 不匹配")]
     RunStepMismatch,
 }
@@ -177,7 +179,23 @@ impl ActivityCoordinator {
             .map(|activity| activity.id.clone())
     }
 
-    pub(super) fn live_run_phase_id(&self) -> Option<ActivityId> {
+    pub(super) fn live_activity_id_for_source(
+        &self,
+        source: &ActivitySource,
+    ) -> Option<ActivityId> {
+        self.registry
+            .lock()
+            .activities
+            .values()
+            .find(|activity| !activity.state.is_terminal() && &activity.source == source)
+            .map(|activity| activity.id.clone())
+    }
+
+    pub(crate) fn live_run_root_id(&self) -> Option<ActivityId> {
+        self.live_activity_id(&ActivitySource::Run, None)
+    }
+
+    pub(crate) fn live_run_phase_id(&self) -> Option<ActivityId> {
         self.registry
             .lock()
             .activities
@@ -239,13 +257,32 @@ impl ActivityCoordinator {
         Ok(activity_id)
     }
 
+    pub(crate) fn update(&self, command: UpdateActivity) -> Result<(), ActivityError> {
+        let activity_id = command.activity_id;
+        let mut registry = self.registry.lock();
+        let activity = registry
+            .activities
+            .get_mut(&activity_id)
+            .ok_or_else(|| ActivityError::UnknownActivity(activity_id.clone()))?;
+        if activity.state.is_terminal() {
+            return Err(ActivityError::TerminalActivity(activity_id));
+        }
+        if let Some(detail) = command.detail {
+            activity.detail = detail;
+        }
+        activity.revision = self.next_revision();
+        Ok(())
+    }
+
     #[allow(dead_code)]
     pub(crate) fn wait(&self, command: UpdateActivity) -> Result<(), ActivityError> {
+        self.update_detail(&command)?;
         self.transition(command.activity_id, ActivityState::Waiting)
     }
 
     #[allow(dead_code)]
     pub(crate) fn resume(&self, command: UpdateActivity) -> Result<(), ActivityError> {
+        self.update_detail(&command)?;
         self.transition(command.activity_id, ActivityState::Running)
     }
 
@@ -311,6 +348,16 @@ impl ActivityCoordinator {
             revision: *self.revision.lock(),
             activities,
         }
+    }
+
+    fn update_detail(&self, command: &UpdateActivity) -> Result<(), ActivityError> {
+        let Some(detail) = command.detail.clone() else {
+            return Ok(());
+        };
+        self.update(UpdateActivity {
+            activity_id: command.activity_id.clone(),
+            detail: Some(detail),
+        })
     }
 
     fn transition(

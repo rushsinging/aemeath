@@ -92,6 +92,38 @@ fn start_assigns_identity_and_revision_one() {
 }
 
 #[test]
+fn update_replaces_detail_and_advances_revision() {
+    let (coordinator, _) = coordinator();
+    let activity_id = coordinator.start(start_tool()).expect("start activity");
+
+    coordinator
+        .update(UpdateActivity {
+            activity_id: activity_id.clone(),
+            detail: Some(ActivityDetail::Model {
+                model: "test-model".to_string(),
+                attempt: 2,
+                stream: sdk::ModelStreamStateView::Retrying,
+            }),
+        })
+        .expect("update activity");
+
+    let observation = coordinator
+        .snapshot()
+        .find(&activity_id)
+        .expect("updated activity")
+        .clone();
+    assert_eq!(observation.revision, 2);
+    assert_eq!(
+        observation.detail,
+        sdk::ActivityDetailView::Model {
+            model: "test-model".to_string(),
+            attempt: 2,
+            stream: sdk::ModelStreamStateView::Retrying,
+        }
+    );
+}
+
+#[test]
 fn waiting_pauses_active_time_but_total_time_continues() {
     let (coordinator, clock) = coordinator();
     let activity_id = coordinator.start(start_tool()).expect("start activity");
@@ -99,6 +131,7 @@ fn waiting_pauses_active_time_but_total_time_continues() {
     coordinator
         .wait(UpdateActivity {
             activity_id: activity_id.clone(),
+            detail: None,
         })
         .expect("wait activity");
     clock.advance_ms(3_000);
@@ -162,7 +195,10 @@ fn terminal_activity_rejects_conflicting_update() {
         .expect("finish activity");
 
     let error = coordinator
-        .wait(UpdateActivity { activity_id })
+        .wait(UpdateActivity {
+            activity_id,
+            detail: None,
+        })
         .expect_err("terminal update must fail");
     assert!(error.to_string().contains("终态"));
 }

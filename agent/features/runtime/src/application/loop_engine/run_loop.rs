@@ -1,6 +1,6 @@
 use tokio_util::sync::CancellationToken;
 
-use crate::application::activity::ActivityCoordinator;
+use crate::application::activity::{ActivityCoordinator, ActivityError, ActivityTerminal};
 use crate::application::hook::stop_coordination::{StopHookObserver, StopHookOutcome};
 use crate::application::loop_engine::{
     CompactionPort, EventSinkPort, InputPort, InteractionMailboxPort, InternalContinuationKind,
@@ -28,6 +28,7 @@ pub struct RunLoop<'a> {
     stuck: &'a mut dyn StuckHandlingPort,
     plan_approval: &'a dyn PlanApprovalPort,
     activities: Option<std::sync::Arc<ActivityCoordinator>>,
+    model_name: Option<String>,
 }
 
 impl<'a> RunLoop<'a> {
@@ -60,11 +61,108 @@ impl<'a> RunLoop<'a> {
             stuck,
             plan_approval,
             activities: None,
+            model_name: None,
         }
     }
 
-    pub(crate) fn bind_activities(&mut self, activities: std::sync::Arc<ActivityCoordinator>) {
+    pub(crate) fn bind_activity_context(
+        &mut self,
+        activities: std::sync::Arc<ActivityCoordinator>,
+        model_name: String,
+    ) {
         self.activities = Some(activities);
+        self.model_name = Some(model_name);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bind_test_activity_context(&mut self) {
+        self.activities = None;
+        self.model_name = Some("test-model".to_string());
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ensure_test_activities(&mut self, run_id: &sdk::RunId) {
+        if self.activities.is_none() {
+            self.activities = Some(std::sync::Arc::new(ActivityCoordinator::production(
+                run_id.clone(),
+            )));
+        }
+    }
+
+    pub(super) fn model_name(&self) -> Result<&str, ActivityError> {
+        self.model_name
+            .as_deref()
+            .ok_or(ActivityError::CoordinatorNotBound)
+    }
+
+    fn activities(&self) -> Result<&ActivityCoordinator, ActivityError> {
+        self.activities
+            .as_deref()
+            .ok_or(ActivityError::CoordinatorNotBound)
+    }
+
+    pub(super) fn activity_parent_id(&self) -> Result<sdk::ActivityId, ActivityError> {
+        let activities = self.activities()?;
+        activities
+            .live_run_phase_id()
+            .or_else(|| activities.live_run_root_id())
+            .ok_or_else(|| ActivityError::UnknownActivity(sdk::ActivityId::new("run-activity")))
+    }
+
+    pub(super) fn start_model_activity(
+        &self,
+        run_step_id: sdk::RunStepId,
+        parent_activity_id: sdk::ActivityId,
+        invocation_id: sdk::ModelInvocationId,
+        model: String,
+        attempt: u32,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?.start_model_invocation(
+            run_step_id,
+            parent_activity_id,
+            invocation_id,
+            model,
+            attempt,
+        )
+    }
+
+    pub(super) fn update_model_activity(
+        &self,
+        activity_id: sdk::ActivityId,
+        model: String,
+        attempt: u32,
+        stream: sdk::ModelStreamStateView,
+    ) -> Result<(), ActivityError> {
+        self.activities()?
+            .update_model_invocation(activity_id, model, attempt, stream)
+    }
+
+    pub(super) fn finish_activity(
+        &self,
+        activity_id: sdk::ActivityId,
+        terminal: ActivityTerminal,
+    ) -> Result<(), ActivityError> {
+        self.activities()?.finish(activity_id, terminal)
+    }
+
+    pub(super) fn start_tool_activity(
+        &self,
+        run_step_id: sdk::RunStepId,
+        parent_activity_id: sdk::ActivityId,
+        call: &crate::application::tool::agent::ToolCall,
+        parallel_count: u16,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?
+            .start_tool_call(run_step_id, parent_activity_id, call, parallel_count)
+    }
+
+    pub(super) fn finish_tool_activity_by_source(
+        &self,
+        call_id: &sdk::ToolCallId,
+        terminal: ActivityTerminal,
+    ) -> Result<(), ActivityError> {
+        self.activities()?
+            .finish_tool_call_by_source(call_id, terminal)
     }
 
     pub(super) fn input_mut(&mut self) -> &mut dyn InputPort {

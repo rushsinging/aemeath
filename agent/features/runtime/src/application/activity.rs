@@ -3,6 +3,7 @@
 mod coordinator;
 #[allow(dead_code)]
 mod model;
+mod model_tool;
 mod run_events;
 
 #[cfg(test)]
@@ -10,7 +11,14 @@ mod run_events;
 mod coordinator_tests;
 
 #[cfg(test)]
+#[path = "activity/model_tool_tests.rs"]
+mod model_tool_tests;
+
+#[cfg(test)]
 #[path = "activity/run_events_tests.rs"]
 mod run_events_tests;
 
-pub(crate) use coordinator::ActivityCoordinator;
+pub(crate) use coordinator::{
+    ActivityCoordinator, ActivityError, ActivityTerminal, StartActivity, UpdateActivity,
+};
+pub(crate) use model::{ActivityDetail, ActivityKind, ActivitySource};
