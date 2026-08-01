@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use storage::api::{
     AtomicDatasetPort, DatasetKey, DatasetMember, DatasetReadOutcome, Generation, SafePathSegment,
@@ -36,6 +37,7 @@ impl DatasetSessionReader {
         &self,
         session_id: &str,
     ) -> Result<CanonicalSession, SessionGenerationWireError> {
+        let started = Instant::now();
         let dataset_key = session_dataset_key(session_id)?;
         let manifest_name = safe_member_name(SessionGenerationManifest::manifest_member_name())?;
         let primary_manifest = match self
@@ -46,6 +48,12 @@ impl DatasetSessionReader {
             Ok(outcome) => outcome,
             Err(error) => return Err(storage_error(error)),
         };
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "session_resume dataset_manifest_loaded session_id={} elapsed_ms={}",
+            session_id,
+            started.elapsed().as_secs_f64() * 1000.0
+        );
         if matches!(primary_manifest, DatasetReadOutcome::NotFound) {
             return self.load_and_migrate_legacy(session_id).await;
         }
@@ -54,7 +62,15 @@ impl DatasetSessionReader {
             .decode_generation(&dataset_key, Generation::Primary, primary_manifest)
             .await
         {
-            Ok(session) => Ok(session),
+            Ok(session) => {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "session_resume dataset_generation_decoded session_id={} elapsed_ms={}",
+                    session_id,
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
+                Ok(session)
+            }
             Err(primary_error @ SessionGenerationWireError::UnsupportedFutureVersion { .. }) => {
                 Err(primary_error)
             }
@@ -129,6 +145,14 @@ impl DatasetSessionReader {
             .chain(manifest.steps().iter().map(|step| step.member_name()))
             .map(safe_member_name)
             .collect::<Result<Vec<_>, _>>()?;
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "session_resume members_requested session_id={} generation={:?} steps={} members={}",
+            manifest.session_id(),
+            generation,
+            manifest.steps().len(),
+            requested_names.len()
+        );
         let outcome = match generation {
             Generation::Primary => {
                 self.dataset

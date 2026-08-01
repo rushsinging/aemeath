@@ -1066,6 +1066,7 @@ impl FileSystemDatasetAdapter {
         dir: &Dir,
         current: &DatasetManifest,
     ) -> Result<(), StorageError> {
+        let started = std::time::Instant::now();
         let previous_next = PathBuf::from(PREVIOUS_NEXT_DIR);
         if proto::exists(dir, &previous_next)? {
             dir.remove_dir_all(&previous_next).map_err(proto::map_io)?;
@@ -1075,6 +1076,11 @@ impl FileSystemDatasetAdapter {
         if !proto::exists(dir, &primary_dir.join(MANIFEST_FILE))? {
             return proto::sync_dir(dir);
         }
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "dataset_previous_stage_started members={}",
+            current.members().len()
+        );
         let primary_blobs = primary_dir.join(BLOBS_DIR);
         let next_blobs = previous_next.join(BLOBS_DIR);
         dir.create_dir_all(&next_blobs).map_err(proto::map_io)?;
@@ -1087,7 +1093,14 @@ impl FileSystemDatasetAdapter {
         if let Some(bytes) = proto::read_file(dir, &primary_dir.join(MANIFEST_FILE))? {
             proto::write_new_file(dir, &previous_next.join(MANIFEST_FILE), &bytes)?;
         }
-        proto::sync_generation(dir, &previous_next)
+        proto::sync_generation(dir, &previous_next)?;
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "dataset_previous_stage_completed members={} elapsed_ms={}",
+            current.members().len(),
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+        Ok(())
     }
 
     fn commit_sync(
