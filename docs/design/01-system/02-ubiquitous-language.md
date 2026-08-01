@@ -23,6 +23,11 @@
 | **SubAgent** | 由 Main Agent（或另一 SubAgent）经工具派生的子执行主体，其执行是一个 **Sub Run**；共用同一状态机与 Loop，差异由 `ExecutionPolicy` 表达（受限交互、独立轮次 / timeout、结果回传父级）。 |
 | **ExecutionPolicy** | 表达 Main Agent / SubAgent 差异的策略：输入源、交互能力、轮次上限、timeout、结果出口。 |
 | **Interaction** | Run 执行中断、等待外部（人）决策、再恢复的**用例族**（非 BC）：ask_user / 权限审批 / plan mode / pause-resume。对应状态 `AwaitingUser` / `AwaitingToolApproval`。 |
+| **Activity** | Runtime 为观察执行过程而维护的**应用层观测实体集合**；每个 Activity 有稳定身份、父子关系、类型、状态、细节与计时，但不拥有 Run 的执行决策、不构成新的聚合根，也不替代 Run 状态机。 |
+| **Activity Observation** | 一次由 `ActivityCoordinator` 创建或变更的完整 typed 事实，描述一个 Activity 在某个 revision 的状态与 detail；是 Runtime → SDK 的发布输入，不是领域命令。 |
+| **Activity Snapshot** | 某个 Run 当前 Activity 事实集合及 revision 的一致性快照；用于 TUI 初始化、丢帧修复与重连，不是持久化的 Run checkpoint。 |
+| **Activity Change** | Activity 的增量变化（Started / Updated / Finished）；按 Run 维度单调递增 revision 发布，消费者遇到 gap 时必须等待 Snapshot 修复，不能猜测中间状态。 |
+| **Activity Summary** | TUI 从 Activity 事实镜像按用户受众和展示优先级派生的低噪声单行摘要；它是纯视图，不是 Runtime 事实或第二状态源。 |
 
 ### Run 状态机（内存态）
 
@@ -132,6 +137,9 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 | **Main Agent** | **SubAgent** | 前者是用户输入直接触发的顶层执行主体（发起 Main Run）；后者是父级经工具派生的子执行主体（发起 Sub Run）。共用状态机与 Loop，差异在 ExecutionPolicy。 |
 | **领域 Message** | **provider 线格式消息** | 前者是领域内部模型；后者是各家 API 的传输格式。经 Provider 内部 ACL 转换，禁止跨界直用。 |
 | **Reasoning Node** | **Run 状态** | 前者是 effort 调节状态机（Workflow）；后者是执行生命周期状态机（Agent Runtime）。职责不同，不可混淆。 |
+| **Activity** | **Run** | Run 是唯一 Agent 执行生命周期状态机；Activity 是由 Runtime 从 Run、Step、Model、Tool、Hook、Compact 与 Interaction 事实派生的观测集合。Activity 可以表达父子拓扑和局部计时，但不能推进、暂停或终止 Run。 |
+| **Activity Observation** | **Activity Summary** | Observation 是 Runtime 发布的完整 typed 事实；Summary 是 TUI 按用户受众和优先级生成的低噪声展示行。前者跨边界传输，后者只存在于展示层。 |
+| **Activity Snapshot** | **Activity Change** | Snapshot 是按 revision 的全量修复 / 初始化事实；Change 是同一 revision 序列中的增量事实。消费者发现 revision gap 时必须请求或等待 Snapshot，禁止用增量猜测缺失事实。 |
 | **Memory Injection** | **Memory Entry** | 前者是"注入动作"（Context Management）；后者是"记忆数据"（Memory）。 |
 | **Tool** | **Skill** | Tool 是模型调用能力的通用协议；Skill 是其中唯一稳定注册、按 identity 动态加载正文的特殊 Tool，具体 Skill 不各自发布 schema。 |
 | **Registry Scope** | **Tool Profile** | Scope 决定本次 Run 装配了什么；Profile 决定其中哪些 capability 被允许。 |
@@ -157,3 +165,4 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 | 2026-07-12 | 新增 Tool/Skill/Command 统一语言，明确 Scope/Profile、Prompt Fragment 与 MCP Tool 边界 | #787 |
 | 2026-07-12 | 将 Run 精确为唯一 Agent 执行生命周期状态机，避免与其他 BC 局部聚合状态机冲突 | #743 / #787 |
 | 2026-07-14 | 新增 Project Identity / Workspace ID，统一 Session resume、Memory 分区与 Tool Scope 的身份语言 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-08-01 | 增加 Activity、Activity Observation、Activity Snapshot、Activity Change 与 Activity Summary 统一语言，并明确其与 Run 的边界 | 统一 Activity 观测 |

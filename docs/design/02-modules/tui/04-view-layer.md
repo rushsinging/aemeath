@@ -215,6 +215,21 @@ struct LiveStatusViewModel {
 
 `RunActivityView` 包含稳定 block identity、活动 kind、单行文案、动画 frame、verb 与 Main `InvokingModel` 静默占位标志。它是 ViewAssembler 输出，不是 Model 或 ViewState 的副本；Render 不读取 `RunStatus`。
 
+### 3.4.1 ActivitySummaryAssembler
+
+`ActivitySummaryAssembler` 只从 TUI-owned Activity 事实镜像派生用户可见的低噪声活动行：
+
+```text
+Activity fact mirror
+  → filter trusted, non-gap, User audience
+  → select current Main leaf by priority / revision
+  → format one summary line + total/state elapsed timing
+  → LiveStatusViewModel
+```
+
+它不读取 Runtime `RunStatus`，不维护 Activity 状态，不创建 timer，也不把 operational detail 逐条渲染到 TUI。Activity 的完整类型、父子拓扑、Hook attempt、模型调用参数和 Tool 细节属于事实 / 诊断边界；主界面只保留当前最有价值的一行摘要。镜像存在 revision gap 时返回 `None`，等待 Snapshot 修复后再恢复。
+
+
 ## 4. ViewState 状态机
 
 ### 4.1 OutputViewState

@@ -187,7 +187,27 @@ RuntimeStreamEvent::SkillsUpdated
 
 > 违反后果（#1106）：空 SystemMessage → `timeline` 空 System item → `SystemNotice` block → `render_diagnostic` 产 1 空行，叠加 `document_renderer` 给 depth0 前插的 1 行 = **每条空事件吃掉 2 行**，在输出区堆出大片空白。
 
-## 4. SDK DTO 边界
+### 3.7 Activity ACL 与事实镜像
+
+Activity 是 Runtime 发布的 typed 观测事实，不是 TUI 自有生命周期。第一层 ACL 将 SDK `ActivityView` / `ActivitySnapshotView` 穷举转换为 TUI-owned `TuiActivityObservation` / `TuiActivitySnapshot`；第二层只产生 `ObserveActivityChange` 或 `ReplaceActivitySnapshot` Intent，root reducer 是事实镜像的唯一写入口。
+
+```text
+SDK ActivityChanged / ActivitySnapshot
+  → TUI-owned Activity DTO
+  → AgentEventMapping
+  → root reducer
+  → ConversationModel Activity fact mirror
+  → ActivitySummaryAssembler
+  → LiveStatusViewModel
+```
+
+- Activity 增量按 `run_id + revision` 接纳；重复 revision 幂等。
+- revision gap 保留旧的可信事实并标记镜像待修复，**NEVER** 伪造中间状态或继续展示不可信摘要。
+- Snapshot 只替换同一 Run 的 Activity 集合，成功修复后恢复摘要展示。
+- `audience` 是 Runtime 发布的展示边界；TUI 只向用户显示 User 事实，Operational / Diagnostic detail 不得自动进入主状态行。
+- LiveStatus 只消费 Activity Summary，**NEVER** 再读取旧 Run status、`chat_active`、业务 SpinnerPhase 或 running tool counter。
+- Activity 事实镜像与 timeline 是互补投影；Activity 不写 Session、不拥有 Interaction reply、不驱动 Runtime command。
+
 
 ### 4.1 类型所有权
 

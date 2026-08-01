@@ -315,7 +315,27 @@ struct RunRuntimeState {
 
 `RunRuntimeState` **NEVER** 保存 `chat_active`、业务 `SpinnerPhase`、running tool counter 或任何能独立启动/停止活动展示的字段。Tool 名称从当前 RunStep 的 tool calls 只读派生；Hook 与 compact progress 仅作为与 typed status 相符时的 detail，缺失或迟到只影响文案精度，不影响生命周期。
 
-#### 3.6.1 RunActivityView 纯派生
+### 3.6.7 Activity 事实镜像
+
+ConversationModel 的 Activity 集合是 Runtime 观测事实的 TUI-owned 镜像，不是第二套 Run 生命周期。它只通过 root reducer 的 `ObserveActivityChange` / `ReplaceActivitySnapshot` Intent 变更，并按 `run_id` 隔离 Main 与 Sub。
+
+```rust
+struct ActivityFactMirror {
+    run_id: RunId,
+    revision: u64,
+    activities: Vec<TuiActivityObservation>,
+    awaiting_snapshot: bool,
+}
+```
+
+镜像规则：
+
+1. 新 revision 必须是当前 revision 的下一步；相同 revision 且内容相同幂等，冲突则产生 Diagnostic Change。
+2. revision gap 不应用增量，设置 `awaiting_snapshot = true`，并隐藏依赖该镜像的 Activity Summary。
+3. Snapshot revision 不低于当前可信 revision 时整体替换 Activity 集合并清除 gap 标记；旧 Snapshot 不得回滚镜像。
+4. Activity state、detail、timing 只作为展示事实读取；Model **NEVER** 根据 Activity 推进 RunStatus，也不通过 Activity 生成 Runtime command。
+5. TUI 主状态行只消费 `audience = User` 的低噪声摘要，Operational / Diagnostic facts 保留给诊断与调试视图。
+
 
 ```rust
 enum RunActivityKind {
