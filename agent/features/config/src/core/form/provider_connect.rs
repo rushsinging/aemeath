@@ -115,7 +115,18 @@ fn page_for_connect(
                 "base_url",
                 "Base URL",
                 true,
-                connect.draft.base_url.clone(),
+                connect.draft.base_url.clone().or_else(|| {
+                    connect
+                        .draft
+                        .source
+                        .and_then(|source| catalog.iter().find(|entry| entry.source == source))
+                        .and_then(|entry| {
+                            entry
+                                .default_endpoint
+                                .as_ref()
+                                .map(|endpoint| endpoint.url.to_string())
+                        })
+                }),
             )?],
         ),
         ConnectStage::EditCredential => (
@@ -146,14 +157,19 @@ fn page_for_connect(
             "edit_custom_model",
             "自定义模型",
             vec![
-                text_field("model_id", "Model ID", true, model_id(connect))?,
+                text_field("model_id", "Model ID", true, model_id(connect, catalog))?,
                 number_field(
                     "context_window",
                     "Context Window",
                     true,
-                    context_window(connect),
+                    context_window(connect, catalog),
                 )?,
-                number_field("max_tokens", "Max Tokens", true, max_tokens(connect))?,
+                number_field(
+                    "max_tokens",
+                    "Max Tokens",
+                    true,
+                    max_tokens(connect, catalog),
+                )?,
             ],
         ),
         ConnectStage::ChooseGlobalDefault => (
@@ -578,30 +594,54 @@ fn step_for_stage(stage: ConnectStage) -> Option<ConfigFormStep> {
     Some(ConfigFormStep { current, total: 8 })
 }
 
-fn model_id(connect: &ConnectView) -> Option<String> {
+fn model_id(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry]) -> Option<String> {
     connect
         .draft
         .model
         .as_ref()
         .map(|model| model.model_id.clone())
+        .or_else(|| {
+            connect
+                .draft
+                .source
+                .and_then(|source| catalog.iter().find(|entry| entry.source == source))
+                .and_then(|entry| entry.recommended_models.first())
+                .map(|model| model.model_id.to_string())
+        })
 }
 
-fn context_window(connect: &ConnectView) -> Option<u64> {
+fn context_window(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry]) -> Option<u64> {
     connect
         .draft
         .model
         .as_ref()
         .and_then(|model| model.context_window)
         .and_then(|value| u64::try_from(value).ok())
+        .or_else(|| {
+            connect
+                .draft
+                .source
+                .and_then(|source| catalog.iter().find(|entry| entry.source == source))
+                .and_then(|entry| entry.recommended_models.first())
+                .and_then(|model| u64::try_from(model.context_window).ok())
+        })
 }
 
-fn max_tokens(connect: &ConnectView) -> Option<u64> {
+fn max_tokens(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry]) -> Option<u64> {
     connect
         .draft
         .model
         .as_ref()
         .and_then(|model| model.max_tokens)
         .map(u64::from)
+        .or_else(|| {
+            connect
+                .draft
+                .source
+                .and_then(|source| catalog.iter().find(|entry| entry.source == source))
+                .and_then(|entry| entry.recommended_models.first())
+                .map(|model| u64::from(model.max_tokens))
+        })
 }
 
 fn probe_status_text(status: Option<&ProbeStatusView>) -> String {

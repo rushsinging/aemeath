@@ -37,6 +37,19 @@ fn select_provider_page_publishes_catalog_options_and_stable_ids() {
 }
 
 #[test]
+fn endpoint_page_prefills_catalog_default_url() {
+    let mut view = connect_view(ConnectStage::EditEndpoint);
+    view.draft.source = Some(crate::catalog::ProviderSource::new("Anthropic"));
+
+    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+    assert_eq!(
+        form.page.fields[0].display_value.as_deref(),
+        Some("https://api.anthropic.com")
+    );
+    assert!(form.page.fields[0].has_value);
+}
+#[test]
 fn credential_page_is_secret_and_never_contains_plaintext() {
     let mut view = connect_view(ConnectStage::EditCredential);
     view.draft.has_api_key = true;
@@ -119,6 +132,37 @@ fn confirm_overwrite_page_exposes_both_server_actions() {
     );
 }
 
+#[test]
+fn custom_model_page_prefills_catalog_model_defaults() {
+    let mut view = connect_view(ConnectStage::EditCustomModel);
+    view.draft.source = Some(crate::catalog::ProviderSource::new("Anthropic"));
+
+    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+    assert_eq!(
+        form.page.fields[0].display_value.as_deref(),
+        Some("claude-sonnet-5")
+    );
+    assert_eq!(
+        form.page.fields[1].display_value.as_deref(),
+        Some("1000000")
+    );
+    assert_eq!(form.page.fields[2].display_value.as_deref(), Some("128000"));
+    assert!(form.page.fields.iter().all(|field| field.has_value));
+}
+
+#[test]
+fn custom_model_page_keeps_fields_empty_without_catalog_defaults() {
+    let mut view = connect_view(ConnectStage::EditCustomModel);
+    view.draft.source = Some(crate::catalog::ProviderSource::new("Zhipu"));
+
+    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+    assert!(form.page.fields[0].display_value.is_none());
+    assert!(form.page.fields[1].display_value.is_none());
+    assert!(form.page.fields[2].display_value.is_none());
+    assert!(form.page.fields.iter().all(|field| !field.has_value));
+}
 #[test]
 fn custom_model_submission_maps_all_typed_fields() {
     let command = connect_command_for_form(
