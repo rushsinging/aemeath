@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Aemeath Runtime 总体架构",
+    "subtitle": "Session 入站、统一 Run 装配、共享执行引擎与外部能力边界",
+    "output": "index.html",
+    "animation": "none",
+    "visual_preset": "blueprint",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/rushsinging/aemeath",
+      "revision": "fe0f7e6c0a67b2e461ff24ad7d10d6c1b3ea9c3d"
+    },
+    "views": [
+      { "id": "primary-runtime-path", "label": "主执行路径", "focus": ["client_entry", "session_actor", "run_factory", "run_launcher", "shared_loop"], "note": "从客户端入站，经 Session actor 创建一次 Run，再进入唯一共享执行引擎。" },
+      { "id": "assembly-boundary", "label": "装配边界", "focus": ["composition", "run_factory", "runtime_context", "runtime_services"], "note": "区分进程稳定服务、每 Run capability binding 与完整 Run 实例。" },
+      { "id": "outbound-capabilities", "label": "出站能力", "focus": ["shared_loop", "provider_context", "tools_policy", "events_storage"], "note": "共享 Loop 只通过窄 Port 使用 Provider、Context、Tools、Policy、Hook 与持久化。" }
+    ]
+  },
+  "components": [
+    { "id": "client_entry", "type": "frontend", "label": "SDK / TUI", "sublabel": "用户输入与事件展示", "pos": [40, 300], "size": [150, 66] },
+    { "id": "session_actor", "type": "backend", "label": "Session Actor", "sublabel": "idle / command / input gate", "pos": [250, 300], "size": [160, 66], "sources": [{ "path": "agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs", "line": 23, "end_line": 26 }] },
+    { "id": "run_factory", "type": "backend", "label": "RunFactory", "sublabel": "唯一 Run 创建入口", "pos": [470, 300], "size": [150, 66], "tag": "per Run", "sources": [{ "path": "agent/features/runtime/src/application/run/factory.rs", "line": 8, "end_line": 43 }] },
+    { "id": "runtime_context", "type": "backend", "label": "RuntimeContext", "sublabel": "冻结 capability bindings", "pos": [470, 130], "size": [150, 66], "sources": [{ "path": "agent/features/runtime/src/application/run/context_factory.rs", "line": 183, "end_line": 230 }] },
+    { "id": "run_launcher", "type": "backend", "label": "RunLauncher", "sublabel": "注册、执行、终态映射", "pos": [680, 300], "size": [150, 66], "sources": [{ "path": "agent/features/runtime/src/application/run/launcher.rs", "line": 28, "end_line": 59 }] },
+    { "id": "shared_loop", "type": "backend", "label": "Shared Run Loop", "sublabel": "唯一活动 Run 状态机", "pos": [920, 300], "size": [170, 66], "tag": "authoritative", "sources": [{ "path": "agent/features/runtime/src/application/loop_engine/run_loop.rs", "line": 12, "end_line": 29 }] },
+    { "id": "composition", "type": "cloud", "label": "Composition", "sublabel": "注入 process-stable services", "pos": [40, 90], "size": [160, 66] },
+    { "id": "runtime_services", "type": "backend", "label": "RuntimeServices", "sublabel": "Tool / Policy / Hook 等共享端口", "pos": [250, 90], "size": [170, 66], "tag": "process stable", "sources": [{ "path": "agent/features/runtime/src/application/run/context_factory.rs", "line": 108, "end_line": 132 }] },
+    { "id": "provider_context", "type": "external", "label": "Provider + Context", "sublabel": "模型调用与 canonical history", "pos": [900, 100], "size": [170, 66] },
+    { "id": "tools_policy", "type": "security", "label": "Tools + Policy + Hook", "sublabel": "Catalog、执行与监督边界", "pos": [900, 480], "size": [180, 66] },
+    { "id": "events_storage", "type": "database", "label": "Events + Persistence", "sublabel": "Step、receipt 与权威终态", "pos": [680, 480], "size": [170, 66] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Runtime Feature", "wraps": ["session_actor", "run_factory", "runtime_context", "run_launcher", "shared_loop", "runtime_services"] },
+    { "kind": "security-group", "label": "External Capability Boundaries", "wraps": ["provider_context", "tools_policy", "events_storage"] }
+  ],
+  "connections": [
+    { "id": "entry_to_session", "from": "client_entry", "to": "session_actor", "variant": "emphasis" },
+    { "id": "session_to_factory", "from": "session_actor", "to": "run_factory", "variant": "emphasis" },
+    { "id": "factory_to_launcher", "from": "run_factory", "to": "run_launcher", "label": "RunInstance", "variant": "emphasis" },
+    { "id": "launcher_to_loop", "from": "run_launcher", "to": "shared_loop", "variant": "emphasis" },
+    { "id": "composition_to_services", "from": "composition", "to": "runtime_services" },
+    { "id": "services_to_context", "from": "runtime_services", "to": "runtime_context" },
+    { "id": "context_to_factory", "from": "runtime_context", "to": "run_factory" },
+    { "id": "loop_to_provider", "from": "shared_loop", "to": "provider_context", "fromSide": "top", "toSide": "bottom" },
+    { "id": "loop_to_tools", "from": "shared_loop", "to": "tools_policy", "fromSide": "bottom", "toSide": "top" },
+    { "id": "loop_to_persistence", "from": "shared_loop", "to": "events_storage" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "统一入口", "items": ["Session 只接纳输入并为每个 turn 创建新 Run", "RunFactory 返回不可拆散的 RunInstance", "RunLauncher 是 shared run_loop 的唯一启动入口"] },
+    { "dot": "emerald", "title": "所有权", "items": ["RuntimeServices 保存进程稳定端口", "RuntimeContext 保存每 Run 冻结 binding", "Run 是活动 turn 内唯一生产状态机"] },
+    { "dot": "amber", "title": "当前事实", "items": ["图按当前 worktree 实现绘制", "Stop Hook 另有脚本语法阻断，不作为架构成功证据", "Tool binding 守卫结果需待 Hook 修复后重新确认"] }
+  ]
+}

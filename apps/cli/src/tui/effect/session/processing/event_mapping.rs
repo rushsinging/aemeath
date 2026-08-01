@@ -176,11 +176,13 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             UiEvent::SystemMessage("AskUserBatch retired".to_string())
         }
         sdk::ChatEvent::AgentProgress {
-            context,
+            source_context,
+            attachment_context,
             tool_id,
             event,
         } => UiEvent::AgentProgress {
-            context: context.into(),
+            source_context: source_context.into(),
+            attachment_context: attachment_context.into(),
             tool_id,
             event,
         },

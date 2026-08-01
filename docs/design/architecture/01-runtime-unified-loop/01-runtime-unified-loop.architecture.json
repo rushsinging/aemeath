@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Aemeath Runtime 统一执行架构",
+    "subtitle": "refactor/1397：共享准备、启动与 Loop Engine；角色化 Resolver / Capabilities adapter 仍待清理",
+    "output": "index.html",
+    "quality_profile": "showcase",
+    "visual_preset": "blueprint",
+    "repository": {
+      "url": "https://github.com/rushsinging/aemeath",
+      "revision": "d8505aebd3a134f82637372d75fab84f204b952c"
+    }
+  },
+  "components": [
+    {
+      "id": "session-state",
+      "type": "database",
+      "label": "SessionState",
+      "sublabel": "会话级可变事实",
+      "pos": [40, 100],
+      "size": [160, 72],
+      "sources": [{"path": "agent/features/runtime/src/application/run/preparation.rs", "line": 8, "end_line": 71}]
+    },
+    {
+      "id": "run-spec",
+      "type": "external",
+      "label": "RunSpec",
+      "sublabel": "能力声明与上限",
+      "pos": [40, 270],
+      "size": [160, 72],
+      "tag": "残留 RunKind Main/Sub",
+      "sources": [{"path": "agent/features/runtime/src/domain/agent_run/spec.rs", "line": 232, "end_line": 299}]
+    },
+    {
+      "id": "run-preparer",
+      "type": "backend",
+      "label": "RunPreparer",
+      "sublabel": "纯值请求 → PreparedRun",
+      "pos": [280, 185],
+      "size": [170, 78],
+      "sources": [{"path": "agent/features/runtime/src/application/run/preparer.rs", "line": 8, "end_line": 43}]
+    },
+    {
+      "id": "role-resolvers",
+      "type": "external",
+      "label": "角色化 Resolver",
+      "sublabel": "Main / Sub 装配分流",
+      "pos": [280, 390],
+      "size": [170, 78],
+      "tag": "迁移残留",
+      "sources": [{"path": "agent/features/runtime/src/application/run/context_factory.rs", "line": 36, "end_line": 49}, {"path": "agent/features/runtime/src/application/run/context_factory.rs", "line": 51, "end_line": 77}, {"path": "agent/features/runtime/src/application/run/context_factory.rs", "line": 156, "end_line": 191}]
+    },
+    {
+      "id": "runtime-services",
+      "type": "cloud",
+      "label": "RuntimeServices",
+      "sublabel": "长生命周期共享能力",
+      "pos": [520, 40],
+      "size": [180, 78],
+      "sources": [{"path": "agent/features/runtime/src/application/run/context.rs", "line": 232, "end_line": 259}]
+    },
+    {
+      "id": "context-factory",
+      "type": "security",
+      "label": "RuntimeContextFactory",
+      "sublabel": "唯一 Context 构造入口",
+      "pos": [520, 185],
+      "size": [180, 78],
+      "tag": "能力不扩权",
+      "sources": [{"path": "agent/features/runtime/src/application/run/context_factory.rs", "line": 334, "end_line": 465}]
+    },
+    {
+      "id": "run-domain",
+      "type": "backend",
+      "label": "Run",
+      "sublabel": "领域生命周期状态机",
+      "pos": [770, 75],
+      "size": [170, 78],
+      "sources": [{"path": "agent/features/runtime/src/domain/agent_run/domain.rs", "line": 14, "end_line": 58}]
+    },
+    {
+      "id": "runtime-context",
+      "type": "security",
+      "label": "RuntimeContext",
+      "sublabel": "冻结的 Run 能力",
+      "pos": [770, 185],
+      "size": [170, 78],
+      "sources": [{"path": "agent/features/runtime/src/application/run/context.rs", "line": 332, "end_line": 435}]
+    },
+    {
+      "id": "execution-state",
+      "type": "database",
+      "label": "RunExecutionState",
+      "sublabel": "Loop 可变工作状态",
+      "pos": [770, 295],
+      "size": [170, 78],
+      "sources": [{"path": "agent/features/runtime/src/application/run/execution_state.rs", "line": 10, "end_line": 35}]
+    },
+    {
+      "id": "run-launcher",
+      "type": "backend",
+      "label": "RunLauncher",
+      "sublabel": "注册、启动与终态映射",
+      "pos": [1010, 185],
+      "size": [170, 78],
+      "sources": [{"path": "agent/features/runtime/src/application/run/launcher.rs", "line": 23, "end_line": 78}]
+    },
+    {
+      "id": "role-adapters",
+      "type": "external",
+      "label": "Capabilities adapters",
+      "sublabel": "MainRun / SubRun 两套实现",
+      "pos": [1010, 390],
+      "size": [190, 78],
+      "tag": "迁移残留",
+      "sources": [{"path": "agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs", "line": 131, "end_line": 177}, {"path": "agent/features/runtime/src/application/run/derived/loop_run.rs", "line": 122, "end_line": 156}]
+    },
+    {
+      "id": "loop-engine",
+      "type": "backend",
+      "label": "Loop Engine",
+      "sublabel": "输入 → Context → Model → Tool → Finalize",
+      "pos": [1260, 185],
+      "size": [210, 78],
+      "tag": "Main / 派生 Run 共用",
+      "sources": [{"path": "agent/features/runtime/src/application/loop_engine/engine.rs", "line": 595, "end_line": 648}, {"path": "agent/features/runtime/src/application/loop_engine/engine.rs", "line": 676, "end_line": 857}, {"path": "agent/features/runtime/src/application/loop_engine/engine.rs", "line": 860, "end_line": 929}]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "PreparedRun：三个事实 owner",
+      "wraps": ["run-domain", "runtime-context", "execution-state"],
+      "pad": 22
+    }
+  ],
+  "connections": [
+    {"id": "session-snapshot", "from": "session-state", "to": "run-preparer", "label": "SessionSnapshot", "variant": "emphasis"},
+    {"id": "spec-request", "from": "run-spec", "to": "run-preparer", "variant": "emphasis"},
+    {"id": "resolver-prepare", "from": "role-resolvers", "to": "run-preparer", "label": "resolve", "variant": "dashed"},
+    {"id": "prepare-context", "from": "run-preparer", "to": "context-factory", "label": "assemble", "variant": "emphasis"},
+    {"id": "services-factory", "from": "runtime-services", "to": "context-factory"},
+    {"id": "factory-run", "from": "context-factory", "to": "run-domain"},
+    {"id": "factory-context", "from": "context-factory", "to": "runtime-context", "variant": "security"},
+    {"id": "factory-execution", "from": "context-factory", "to": "execution-state"},
+    {"id": "run-launch", "from": "run-domain", "to": "run-launcher"},
+    {"id": "context-launch", "from": "runtime-context", "to": "run-launcher"},
+    {"id": "execution-launch", "from": "execution-state", "to": "run-launcher"},
+    {"id": "adapters-launch", "from": "role-adapters", "to": "run-launcher", "variant": "dashed", "fromSide": "top", "toSide": "bottom"},
+    {"id": "launcher-loop", "from": "run-launcher", "to": "loop-engine", "variant": "emphasis"},
+    {"id": "adapters-loop", "from": "role-adapters", "to": "loop-engine", "variant": "dashed"}
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "已统一",
+      "items": [
+        "Main 与派生 Run 都经 RunPreparer 形成 PreparedRun",
+        "RunLauncher 统一负责 ActiveRun 注册、shared loop 调用与失败映射",
+        "Loop Engine 统一拥有 drain、compact、model、tool、interaction、step finalize 与 terminal 流程"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "迁移残留｜后续清理",
+      "items": [
+        "RunSpec.kind 仍保留 RunKind::Main / Sub，并参与部分能力校验",
+        "MainRunContextResolver 与 SubRunContextResolver 仍形成两条角色化 Context 装配路径",
+        "MainRunCapabilities 与 SubRunCapabilities 仍分别实现同一组 Loop Engine 窄端口"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "状态所有权",
+      "items": [
+        "Run：领域状态迁移、Step、interaction identity 与终态",
+        "RunExecutionState：消息、Context 投影、turn、continuation 与 terminal view",
+        "RuntimeContext：Provider、Tool、Policy、Hook、Interaction、配置、取消与 I/O 能力"
+      ]
+    }
+  ]
+}

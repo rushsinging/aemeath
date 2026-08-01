@@ -1,0 +1,383 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Aemeath Loop 组装与输入所有权",
+    "subtitle": "静态服务与动态 Run 分离；Session mailbox、Run input buffer 和 interaction waiter 各有唯一 owner",
+    "output": "02-loop-assembly.html",
+    "quality_profile": "showcase",
+    "visual_preset": "blueprint",
+    "animation": "none",
+    "viewBox": [
+      1680,
+      920
+    ],
+    "views": [
+      {
+        "id": "static-assembly",
+        "label": "静态服务装配",
+        "focus": [
+          "composition",
+          "runtimeServices",
+          "contextFactory"
+        ],
+        "note": "Composition 只建立进程稳定服务与唯一 RuntimeContextFactory。"
+      },
+      {
+        "id": "run-assembly",
+        "label": "每 Run 动态装配",
+        "focus": [
+          "sessionSnapshot",
+          "creationRequest",
+          "runFactory",
+          "runtimeContext",
+          "runBuffer",
+          "runInstance"
+        ],
+        "note": "纯值 request 形成完整 RunInstance，并为该 Run 创建独立 input buffer。"
+      },
+      {
+        "id": "input-ownership",
+        "label": "输入所有权",
+        "focus": [
+          "sessionMailbox",
+          "runBuffer",
+          "runInstance",
+          "launcher"
+        ],
+        "note": "Session mailbox 拥有 source/deferred，Run buffer 拥有 drain epoch/seal，二者不共享状态。"
+      },
+      {
+        "id": "interaction-ownership",
+        "label": "Interaction 所有权",
+        "focus": [
+          "interactionBinding",
+          "pendingInteraction",
+          "runInstance",
+          "launcher"
+        ],
+        "note": "Factory 绑定 InteractionPort；Run 只持有一个 pending interaction continuation。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "composition",
+      "type": "cloud",
+      "label": "Composition Root",
+      "sublabel": "连接基础设施实现",
+      "tag": "进程级",
+      "pos": [
+        40,
+        80
+      ],
+      "size": [
+        210,
+        76
+      ]
+    },
+    {
+      "id": "runtimeServices",
+      "type": "backend",
+      "label": "RuntimeServices",
+      "sublabel": "Provider · Context · Tool · Hook",
+      "tag": "静态共享",
+      "pos": [
+        340,
+        80
+      ],
+      "size": [
+        230,
+        76
+      ]
+    },
+    {
+      "id": "contextFactory",
+      "type": "backend",
+      "label": "RuntimeContextFactory",
+      "sublabel": "按 RunSpec 绑定 capability",
+      "tag": "唯一 Context 构造器",
+      "pos": [
+        670,
+        80
+      ],
+      "size": [
+        260,
+        80
+      ]
+    },
+    {
+      "id": "sessionMailbox",
+      "type": "database",
+      "label": "SessionInputMailbox",
+      "sublabel": "source + deferred FIFO",
+      "tag": "Session owner",
+      "pos": [
+        40,
+        350
+      ],
+      "size": [
+        230,
+        78
+      ]
+    },
+    {
+      "id": "sessionSnapshot",
+      "type": "database",
+      "label": "SessionSnapshot",
+      "sublabel": "冻结会话事实",
+      "tag": "纯值",
+      "pos": [
+        340,
+        350
+      ],
+      "size": [
+        210,
+        76
+      ]
+    },
+    {
+      "id": "creationRequest",
+      "type": "messagebus",
+      "label": "RunCreationRequest",
+      "sublabel": "RunSpec · snapshot · parent facts",
+      "tag": "不携带用户输入",
+      "pos": [
+        670,
+        350
+      ],
+      "size": [
+        250,
+        80
+      ]
+    },
+    {
+      "id": "runFactory",
+      "type": "backend",
+      "label": "RunFactory",
+      "sublabel": "协调 Run · Context · Execution",
+      "tag": "唯一 Run 创建入口",
+      "pos": [
+        1040,
+        350
+      ],
+      "size": [
+        240,
+        80
+      ]
+    },
+    {
+      "id": "runtimeContext",
+      "type": "backend",
+      "label": "RuntimeContext",
+      "sublabel": "冻结 capability bindings",
+      "pos": [
+        1040,
+        100
+      ],
+      "size": [
+        240,
+        78
+      ]
+    },
+    {
+      "id": "runBuffer",
+      "type": "database",
+      "label": "RunInputBufferHandle",
+      "sublabel": "per Run FIFO · epoch · seal",
+      "tag": "独立实例",
+      "pos": [
+        1040,
+        560
+      ],
+      "size": [
+        240,
+        78
+      ]
+    },
+    {
+      "id": "interactionBinding",
+      "type": "messagebus",
+      "label": "InteractionPort",
+      "sublabel": "register → one-shot receiver",
+      "tag": "per Run binding",
+      "pos": [
+        670,
+        680
+      ],
+      "size": [
+        250,
+        78
+      ]
+    },
+    {
+      "id": "pendingInteraction",
+      "type": "security",
+      "label": "PendingInteraction",
+      "sublabel": "Option · request_id · continuation",
+      "tag": "单 Run 单槽",
+      "pos": [
+        1040,
+        700
+      ],
+      "size": [
+        240,
+        78
+      ]
+    },
+    {
+      "id": "runInstance",
+      "type": "database",
+      "label": "RunInstance",
+      "sublabel": "Run + ExecutionState + RuntimeContext",
+      "tag": "不可拆散",
+      "pos": [
+        1390,
+        350
+      ],
+      "size": [
+        240,
+        82
+      ]
+    },
+    {
+      "id": "launcher",
+      "type": "backend",
+      "label": "RunLauncher",
+      "sublabel": "activate · execute · clear",
+      "tag": "统一启动边界",
+      "pos": [
+        1390,
+        590
+      ],
+      "size": [
+        220,
+        78
+      ]
+    }
+  ],
+  "boundaries": [],
+  "connections": [
+    {
+      "id": "compositionServices",
+      "from": "composition",
+      "to": "runtimeServices",
+      "variant": "emphasis"
+    },
+    {
+      "id": "servicesFactory",
+      "from": "runtimeServices",
+      "to": "contextFactory",
+      "variant": "emphasis"
+    },
+    {
+      "id": "snapshotRequest",
+      "from": "sessionSnapshot",
+      "to": "creationRequest",
+      "variant": "emphasis"
+    },
+    {
+      "id": "requestFactory",
+      "from": "creationRequest",
+      "to": "runFactory",
+      "variant": "emphasis"
+    },
+    {
+      "id": "contextFactoryBinding",
+      "from": "contextFactory",
+      "to": "runtimeContext",
+      "variant": "emphasis"
+    },
+    {
+      "id": "runtimeContextFactory",
+      "from": "runtimeContext",
+      "to": "runFactory",
+      "variant": "emphasis"
+    },
+    {
+      "id": "factoryRunBuffer",
+      "from": "runFactory",
+      "to": "runBuffer",
+      "variant": "default"
+    },
+    {
+      "id": "factoryInstance",
+      "from": "runFactory",
+      "to": "runInstance",
+      "variant": "emphasis"
+    },
+    {
+      "id": "mailboxRunBuffer",
+      "from": "sessionMailbox",
+      "to": "runBuffer",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [[155, 500], [980, 500], [980, 599]]
+    },
+    {
+      "id": "runBufferDefer",
+      "from": "runBuffer",
+      "to": "sessionMailbox",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "bottom",
+      "via": [[960, 599], [120, 599], [120, 500], [155, 500]]
+    },
+    {
+      "id": "interactionPending",
+      "from": "interactionBinding",
+      "to": "pendingInteraction",
+      "variant": "security"
+    },
+    {
+      "id": "runBufferInstance",
+      "from": "runBuffer",
+      "to": "runInstance"
+    },
+    {
+      "id": "pendingInstance",
+      "from": "pendingInteraction",
+      "to": "runInstance",
+      "variant": "security"
+    },
+    {
+      "id": "instanceLauncher",
+      "from": "runInstance",
+      "to": "launcher",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [[1510, 510], [1470, 510], [1470, 560], [1500, 560]]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "创建与输入解耦",
+      "items": [
+        "RunCreationRequest 不携带用户输入",
+        "RunFactory 创建完整 RunInstance",
+        "输入只在 Run 创建后进入绑定的 RunInputBuffer"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "两级输入所有权",
+      "items": [
+        "SessionInputMailbox 独占外部 source 与 deferred FIFO",
+        "RunInputBuffer 独占当前 Run 的 epoch 与 seal",
+        "late input 从 sealed Run 安全回流到下一 Run"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Interaction 单槽",
+      "items": [
+        "每次 register 产生一个 one-shot receiver",
+        "Run 使用 Option 拒绝第二个 active interaction",
+        "端口的多 request map 只隔离并发 Run"
+      ]
+    }
+  ]
+}

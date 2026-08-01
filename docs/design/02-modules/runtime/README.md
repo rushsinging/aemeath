@@ -17,13 +17,14 @@
 ## 核心设计约束
 
 1. **单执行生命周期状态机**：全系统只有 `Run` 驱动 Agent 执行生命周期（内存态、不持久化、崩溃从头开始）；其他 BC 可拥有不驱动 Run 的局部状态机
-2. **Loop Engine 零分支**：Main/Sub 共用一套 Loop，差异 100% 在 RunSpec + RuntimeContext + Event adapter
-3. **单能力直接分层**：仓库 `agent/features/*` 是 VSA；事实核验后 Runtime 当前只有一个完整业务能力 `agent_execution`，因此不增加单元素 `capabilities/agent_execution` 包装，直接在 crate 根按 `domain/application/ports/adapters` 组织
-4. **内部角色不是平级 slice**：`agent_run` 是领域模型，Loop Engine 与各 coordinator 是应用编排，事件投影是 adapter；未来出现多个具有独立用例、状态所有权和变化轴的真实能力时才递归竖切
-5. **唯一生产装配**：具体实现选择、factory 调用和对象图连接全部位于 `agent/composition`，Runtime 内不建立第二个 Composition Root
-6. **安全铁律**：Sub 能力 ≤ Main（只削弱不越权）
-7. **防 stuck 内置**：StuckGuard 四层防线 Main/Sub 统一保护
-8. **Session 回放边界**：Session committed content 是唯一可回放数据源；Runtime 内存态与未入 Session 的 InputBuffer 不可回放，Terminate 时可丢弃
+2. **Loop Engine 零来源分支**：所有 Run 共用一套 Loop；来源差异 100% 在 RunSpec + RuntimeContext capability adapter，NEVER 形成 Main/Sub 生产类型
+3. **IoC 装配**：Runtime 定义 factory/port contracts 与能力选择规则，Composition 只实现和连接；调用方只提交 `RunCreationRequest`
+4. **单能力直接分层**：仓库 `agent/features/*` 是 VSA；事实核验后 Runtime 当前只有一个完整业务能力 `agent_execution`，因此不增加单元素 `capabilities/agent_execution` 包装，直接在 crate 根按 `domain/application/ports/adapters` 组织
+5. **内部角色不是平级 slice**：`agent_run` 是领域模型，Loop Engine 与各 coordinator 是应用编排，事件投影是 adapter；未来出现多个具有独立用例、状态所有权和变化轴的真实能力时才递归竖切
+6. **唯一生产装配**：具体实现实例化和对象图连接全部位于 `agent/composition`；能力决策与统一 `RuntimeContextFactory` 契约属于 Runtime，Runtime 内不建立第二个 Composition Root
+7. **安全铁律**：派生 Run 能力 ≤ 父 Run（只削弱不越权）
+8. **防 stuck 内置**：StuckGuard 四层防线对所有 Run 统一保护
+9. **Session 回放边界**：Session committed content 是唯一可回放数据源；Runtime 内存态与未入 Session 的 InputBuffer 不可回放，Terminate 时可丢弃
 
 ## 文档导航
 
@@ -35,7 +36,7 @@
 | [04-stuck-prevention.md](04-stuck-prevention.md) | StuckGuard 四层防线、分级响应、状态机集成 |
 | [05-recovery-semantics.md](05-recovery-semantics.md) | 从头开始恢复、持久化边界、无 durable |
 | [06-ports-and-adapters.md](06-ports-and-adapters.md) | 入站 OHS、Runtime 消费的能力契约、RuntimeContext 装配、Composition Root |
-| [07-runtime-ownership-and-assembly.md](07-runtime-ownership-and-assembly.md) | 去除 Main/Sub 生产类型、静动态所有权、统一 RuntimeContextFactory 与 Composition 边界 |
+| [07-runtime-ownership-and-assembly.md](07-runtime-ownership-and-assembly.md) | Runtime IoC 终态：去除 Main/Sub 生产类型、静动态所有权、统一 prepare/factory、Interaction/Hook capability adapter 与 Composition 边界 |
 
 ## 相关文档
 

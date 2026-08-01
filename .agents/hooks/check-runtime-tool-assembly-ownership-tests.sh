@@ -6,11 +6,22 @@ GUARD="$SCRIPT_DIR/check-runtime-tool-assembly-ownership.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/agent/features/runtime/src/application/client" "$TMP/agent/composition/src"
+mkdir -p "$TMP/agent/features/runtime/src/application/client" "$TMP/agent/features/runtime/src/application" "$TMP/agent/composition/src"
 cat >"$TMP/agent/features/runtime/src/application/client/from_args.rs" <<'RS'
-struct RuntimeBootstrapDependencies {
-    tool_catalog: (), tool_execution: (), tool_context_binding: (), skill_catalog: (),
-    skill_materializer: (), tool_result_materializer: (), active_run: (),
+struct RuntimeContextFactory;
+pub struct RuntimeBootstrapDependencies {
+    runtime_context_factory: RuntimeContextFactory,
+    tool_catalog: (), skill_catalog: (), skill_materializer: (),
+    tool_result_materializer: (), active_run: (),
+}
+RS
+cat >"$TMP/agent/features/runtime/src/application/runtime_context_factory.rs" <<'RS'
+struct RuntimeServices { tool_execution: (), tool_context_binding: () }
+pub struct RuntimeContextFactory { services: RuntimeServices }
+impl RuntimeContextFactory {
+    pub fn new(tool_execution: (), tool_context_binding: ()) -> Self {
+        Self { services: RuntimeServices { tool_execution, tool_context_binding } }
+    }
 }
 RS
 cat >"$TMP/agent/composition/src/runtime.rs" <<'RS'
@@ -19,6 +30,7 @@ fn wire_runtime_tool_assembly() {
     wire_skills();
     AtomicBlobToolResultStore::new();
     ActiveRunRegistry::default();
+    RuntimeContextFactory::new(tool_assembly.execution.clone(), tool_assembly.binding.clone());
 }
 RS
 
@@ -42,5 +54,35 @@ rm -f "$TMP/agent/features/runtime/src/application/client/from_args.rs.bak"
 
 printf '%s\n' 'fn bad() { FileSystemBlobAdapter::new(); }' >>"$TMP/agent/features/runtime/src/application/client/from_args.rs"
 expect_failure runtime-storage-factory 'Runtime bootstrap must not construct Tool Result filesystem backing'
+sed -i.bak '$d' "$TMP/agent/features/runtime/src/application/client/from_args.rs"
+rm -f "$TMP/agent/features/runtime/src/application/client/from_args.rs.bak"
+
+python3 - "$TMP/agent/features/runtime/src/application/client/from_args.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text()
+path.write_text(source.replace(
+    "    runtime_context_factory: RuntimeContextFactory,\n",
+    "    runtime_context_factory: RuntimeContextFactory,\n    tool_execution: (),\n",
+))
+PY
+expect_failure duplicate-tool-execution 'Runtime bootstrap must not duplicate factory-owned tool_execution'
+python3 - "$TMP/agent/features/runtime/src/application/client/from_args.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text()
+path.write_text(source.replace("    tool_execution: (),\n", ""))
+PY
+
+python3 - "$TMP/agent/features/runtime/src/application/runtime_context_factory.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text()
+path.write_text(source.replace("tool_execution: ()", "missing_execution: ()"))
+PY
+expect_failure missing-factory-execution 'RuntimeContextFactory constructor must receive tool_execution'
 
 printf '%s\n' 'Runtime Tool assembly ownership guard sanity checks passed.'

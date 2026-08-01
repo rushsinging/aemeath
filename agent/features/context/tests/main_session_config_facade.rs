@@ -219,6 +219,7 @@ async fn build_facade_harness(
         compact: None,
         run_slices: vec![],
         committed_steps: vec![],
+        skill_load_records: Vec::new(),
     };
 
     let (open_count, last_key, fail) = memory_opener.shared_fields();
@@ -293,6 +294,7 @@ fn session_with_workspace(
         compact: None,
         run_slices: vec![],
         committed_steps: vec![],
+        skill_load_records: Vec::new(),
     }
 }
 

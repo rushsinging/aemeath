@@ -1,0 +1,297 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Aemeath Runtime Internal Dependency Chain",
+    "subtitle": "从进程装配到 Run 终态的生产依赖链，以及 Tool 监督执行与 Derived Run 派生支线",
+    "output": "index.html",
+    "quality_profile": "showcase",
+    "visual_preset": "signal-flow",
+    "animation": "none",
+    "repository": {
+      "url": "https://github.com/rushsinging/aemeath",
+      "revision": "073775474a040d79dc339a5cb64088067d6831cf"
+    },
+    "viewBox": [1920, 1120],
+    "views": [
+      {
+        "id": "assembly-chain",
+        "label": "装配链路",
+        "focus": ["composition", "runtimeServices", "sessionActor", "snapshots", "runFactory", "runtimeContextFactory", "runInstance"],
+        "note": "Composition 连接静态服务；Session 在 turn 边界冻结快照；两个 Factory 输出不可拆散的 RunInstance。"
+      },
+      {
+        "id": "execution-chain",
+        "label": "统一执行链路",
+        "focus": ["runInstance", "runLauncher", "inputDrain", "contextWindow", "modelInvoke", "responseApply", "finalizeTerminal"],
+        "note": "Main 与 Derived 从 RunInstance 起进入同一 Launcher、Step pipeline 和 terminal finalization。"
+      },
+      {
+        "id": "tool-supervision",
+        "label": "Tool 监督分支",
+        "focus": ["responseApply", "toolCatalog", "policyHook", "toolSupervisor", "toolExecution", "receiptLedger", "contextWindow"],
+        "note": "Tool 调用先过 catalog 与治理，再由 supervisor 统一处理 deadline、cancel、cleanup 和 durable receipt。"
+      },
+      {
+        "id": "derived-chain",
+        "label": "Derived Run 派生",
+        "focus": ["agentTool", "parentFacts", "snapshots", "runFactory", "runtimeContextFactory", "runInstance", "runLauncher"],
+        "note": "Sub-agent 仅增加 ParentRunFacts capability ceiling；Factory 之后完全复用统一生产链路。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "composition",
+      "type": "cloud",
+      "label": "Composition",
+      "sublabel": "wire provider · context · tools · hooks",
+      "tag": "process bootstrap",
+      "pos": [50, 100],
+      "size": [210, 76],
+      "sources": [{"path": "agent/composition/src/runtime.rs", "line": 121, "end_line": 161, "label": "Runtime wiring"}]
+    },
+    {
+      "id": "runtimeServices",
+      "type": "backend",
+      "label": "RuntimeServices",
+      "sublabel": "stable outbound ports",
+      "tag": "static lifetime",
+      "pos": [340, 100],
+      "size": [210, 76],
+      "sources": [{"path": "agent/features/runtime/src/application/run/context_factory.rs", "line": 127, "end_line": 177, "label": "Context Factory services"}]
+    },
+    {
+      "id": "agentClient",
+      "type": "external",
+      "label": "AgentClient::chat",
+      "sublabel": "建立事件流并启动 Session actor",
+      "tag": "main entry",
+      "pos": [50, 330],
+      "size": [210, 76],
+      "sources": [{"path": "agent/features/runtime/src/application/client/trait_chat.rs", "line": 10, "end_line": 49, "label": "Chat entry"}]
+    },
+    {
+      "id": "sessionActor",
+      "type": "backend",
+      "label": "Session Actor",
+      "sublabel": "idle · input gate · command · turn",
+      "tag": "session lifetime",
+      "pos": [340, 330],
+      "size": [220, 80],
+      "sources": [{"path": "agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs", "line": 23, "end_line": 49, "label": "Session loop"}]
+    },
+    {
+      "id": "agentTool",
+      "type": "external",
+      "label": "Agent Tool",
+      "sublabel": "发起 Derived Run",
+      "tag": "sub entry",
+      "pos": [50, 620],
+      "size": [210, 76],
+      "sources": [{"path": "agent/features/runtime/src/application/run/derived/setup.rs", "line": 103, "end_line": 233, "label": "Sub setup"}]
+    },
+    {
+      "id": "parentFacts",
+      "type": "security",
+      "label": "ParentRunFacts",
+      "sublabel": "parent id · spec · capability ceiling",
+      "tag": "pure facts",
+      "pos": [340, 620],
+      "size": [220, 80],
+      "sources": [{"path": "agent/features/runtime/src/application/run/creation.rs", "line": 268, "end_line": 304, "label": "Creation contract"}]
+    },
+    {
+      "id": "snapshots",
+      "type": "database",
+      "label": "Frozen Run Inputs",
+      "sublabel": "RunSpec · SessionSnapshot · ConfigSnapshot",
+      "tag": "pure values",
+      "pos": [650, 330],
+      "size": [240, 82],
+      "sources": [
+        {"path": "agent/features/runtime/src/application/run/creation.rs", "line": 268, "end_line": 310, "label": "RunCreationRequest"},
+        {"path": "agent/features/runtime/src/application/run/config.rs", "line": 1, "label": "Run config"}
+      ]
+    },
+    {
+      "id": "runFactory",
+      "type": "backend",
+      "label": "RunFactory",
+      "sublabel": "纯值请求 + live bindings",
+      "tag": "single creation entry",
+      "pos": [990, 330],
+      "size": [220, 80],
+      "sources": [{"path": "agent/features/runtime/src/application/run/factory.rs", "line": 8, "end_line": 56, "label": "RunFactory"}]
+    },
+    {
+      "id": "runtimeContextFactory",
+      "type": "backend",
+      "label": "RuntimeContextFactory",
+      "sublabel": "按 RunSpec 选择并冻结 capability",
+      "tag": "single binding entry",
+      "pos": [990, 100],
+      "size": [240, 82],
+      "sources": [{"path": "agent/features/runtime/src/application/run/context_factory.rs", "line": 197, "end_line": 277, "label": "Prepare context"}]
+    },
+    {
+      "id": "runInstance",
+      "type": "database",
+      "label": "RunInstance",
+      "sublabel": "Run + ExecutionState + Snapshot + Context",
+      "tag": "indivisible owner",
+      "pos": [1330, 330],
+      "size": [250, 84],
+      "sources": [{"path": "agent/features/runtime/src/application/run/creation.rs", "line": 312, "end_line": 369, "label": "Run aggregate"}]
+    },
+    {
+      "id": "runLauncher",
+      "type": "backend",
+      "label": "RunLauncher",
+      "sublabel": "ActiveRun register · execute · clear",
+      "tag": "unified launch",
+      "pos": [1660, 330],
+      "size": [210, 82],
+      "sources": [{"path": "agent/features/runtime/src/application/run/launcher.rs", "line": 28, "end_line": 59, "label": "Launcher"}]
+    },
+    {
+      "id": "inputDrain",
+      "type": "messagebus",
+      "label": "1 · Input Drain",
+      "sublabel": "epoch · adopt · freeze step",
+      "pos": [1330, 540],
+      "size": [210, 76],
+      "sources": [{"path": "agent/features/runtime/src/application/loop_engine/engine.rs", "line": 786, "end_line": 868, "label": "Drain phase"}]
+    },
+    {
+      "id": "contextWindow",
+      "type": "database",
+      "label": "2 · Context Window",
+      "sublabel": "canonical history · compact",
+      "pos": [1630, 540],
+      "size": [210, 76],
+      "sources": [{"path": "agent/features/runtime/src/application/loop_engine/engine.rs", "line": 943, "end_line": 960, "label": "Step pipeline"}]
+    },
+    {
+      "id": "modelInvoke",
+      "type": "external",
+      "label": "3 · Model Invoke",
+      "sublabel": "ProviderPort · stream",
+      "pos": [1630, 740],
+      "size": [210, 76],
+      "sources": [{"path": "agent/features/runtime/src/application/model/invocation.rs", "line": 1, "label": "Model invocation"}]
+    },
+    {
+      "id": "responseApply",
+      "type": "backend",
+      "label": "4 · Apply Response",
+      "sublabel": "assistant text · tool calls",
+      "pos": [1330, 740],
+      "size": [220, 78],
+      "sources": [{"path": "agent/features/runtime/src/application/loop_engine/engine.rs", "line": 943, "end_line": 960, "label": "Execute step"}]
+    },
+    {
+      "id": "finalizeTerminal",
+      "type": "security",
+      "label": "5 · Finalize + Terminal",
+      "sublabel": "Step finalize · exactly one terminal",
+      "tag": "authoritative outcome",
+      "pos": [1630, 920],
+      "size": [230, 80],
+      "sources": [{"path": "agent/features/runtime/src/application/loop_engine/engine.rs", "line": 929, "end_line": 937, "label": "Terminal claim"}]
+    },
+    {
+      "id": "toolCatalog",
+      "type": "security",
+      "label": "Tool Catalog",
+      "sublabel": "descriptor · schema · timeout",
+      "pos": [990, 650],
+      "size": [210, 74],
+      "sources": [{"path": "agent/features/runtime/src/application/tool/execution_supervisor.rs", "line": 56, "end_line": 65, "label": "Catalog lookup"}]
+    },
+    {
+      "id": "policyHook",
+      "type": "security",
+      "label": "Policy + Hook",
+      "sublabel": "权限与边界决策",
+      "pos": [680, 650],
+      "size": [200, 74]
+    },
+    {
+      "id": "toolSupervisor",
+      "type": "backend",
+      "label": "ToolExecutionSupervisor",
+      "sublabel": "deadline · cancel · cleanup",
+      "tag": "single supervision",
+      "pos": [680, 840],
+      "size": [230, 80],
+      "sources": [{"path": "agent/features/runtime/src/application/tool/execution_supervisor.rs", "line": 35, "end_line": 192, "label": "Supervisor"}]
+    },
+    {
+      "id": "toolExecution",
+      "type": "external",
+      "label": "ToolExecutionPort",
+      "sublabel": "执行具体 Tool adapter",
+      "pos": [990, 840],
+      "size": [210, 76],
+      "sources": [{"path": "agent/features/runtime/src/application/tool/execution_supervisor.rs", "line": 111, "end_line": 162, "label": "Execution call"}]
+    },
+    {
+      "id": "receiptLedger",
+      "type": "database",
+      "label": "Durable Receipt Ledger",
+      "sublabel": "pending → running → terminal",
+      "tag": "before continuation",
+      "pos": [990, 990],
+      "size": [230, 76],
+      "sources": [{"path": "agent/features/runtime/src/application/tool/execution_supervisor.rs", "line": 66, "end_line": 83, "label": "Receipt start"}, {"path": "agent/features/runtime/src/application/tool/execution_supervisor.rs", "line": 164, "end_line": 192, "label": "Receipt terminal"}]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Supervised Tool Branch",
+      "wraps": ["toolCatalog", "policyHook", "toolSupervisor", "toolExecution", "receiptLedger"],
+      "pad": 22
+    }
+  ],
+  "connections": [
+    {"id": "compositionServices", "from": "composition", "to": "runtimeServices", "variant": "emphasis"},
+    {"id": "servicesContextFactory", "from": "runtimeServices", "to": "runtimeContextFactory", "variant": "emphasis"},
+    {"id": "clientSession", "from": "agentClient", "to": "sessionActor", "variant": "emphasis"},
+    {"id": "sessionSnapshot", "from": "sessionActor", "to": "snapshots", "variant": "emphasis"},
+    {"id": "agentParent", "from": "agentTool", "to": "parentFacts", "variant": "emphasis"},
+    {"id": "parentSnapshot", "from": "parentFacts", "to": "snapshots", "variant": "dashed"},
+    {"id": "snapshotFactory", "from": "snapshots", "to": "runFactory", "variant": "emphasis"},
+    {"id": "factoryInstance", "from": "runFactory", "to": "runInstance", "variant": "emphasis"},
+    {"id": "instanceLauncher", "from": "runInstance", "to": "runLauncher", "variant": "emphasis"},
+    {"id": "launcherDrain", "from": "runLauncher", "to": "inputDrain", "variant": "emphasis"},
+    {"id": "drainContext", "from": "inputDrain", "to": "contextWindow", "variant": "emphasis"},
+    {"id": "contextModel", "from": "contextWindow", "to": "modelInvoke", "variant": "emphasis"},
+    {"id": "modelApply", "from": "modelInvoke", "to": "responseApply", "variant": "emphasis"},
+    {"id": "applyFinalize", "from": "responseApply", "to": "finalizeTerminal", "variant": "emphasis"},
+    {"id": "applyCatalog", "from": "responseApply", "to": "toolCatalog", "variant": "security"},
+    {"id": "catalogPolicy", "from": "toolCatalog", "to": "policyHook", "variant": "security"},
+    {"id": "policySupervisor", "from": "policyHook", "to": "toolSupervisor", "variant": "security", "fromSide": "bottom", "toSide": "top"},
+    {"id": "supervisorExecution", "from": "toolSupervisor", "to": "toolExecution", "variant": "security"},
+    {"id": "executionReceipt", "from": "toolExecution", "to": "receiptLedger", "variant": "security", "fromSide": "bottom", "toSide": "top"},
+    {"id": "receiptContinuation", "from": "receiptLedger", "to": "finalizeTerminal", "variant": "dashed"}
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "装配链不变量",
+      "items": ["Composition 只连接具体实现与稳定 Port", "RunCreationRequest 只携带纯值事实", "RunFactory + RuntimeContextFactory 输出完整 RunInstance"]
+    },
+    {
+      "dot": "emerald",
+      "title": "执行链不变量",
+      "items": ["RunLauncher 是 Main 与 Derived 的唯一启动入口", "Shared Loop 独占 input、context、model、tool 与 terminal 状态转换", "RunInstance 在启动前后都不能拆散"]
+    },
+    {
+      "dot": "amber",
+      "title": "Tool 监督顺序",
+      "items": ["Catalog 与 Policy/Hook 先决定是否可执行", "Supervisor 统一处理 deadline、cancel 与 cleanup confirmation", "Terminal receipt 持久化后才能进入 internal continuation"]
+    }
+  ]
+}

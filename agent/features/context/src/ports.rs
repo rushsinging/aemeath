@@ -61,6 +61,14 @@ pub trait SessionRepository: Send + Sync {
             "此 SessionRepository 未实现 Tool receipt 持久化".to_string(),
         ))
     }
+    async fn compare_and_record_skill_load(
+        &self,
+        _mutation: tools::SkillLoadMutation,
+    ) -> Result<tools::SkillLoadDecision, tools::SkillLoadStateError> {
+        Err(tools::SkillLoadStateError::Storage(
+            "此 SessionRepository 未实现 Skill 加载状态持久化".to_string(),
+        ))
+    }
     async fn append_finalized(
         &self,
         append: &ContextAppend,

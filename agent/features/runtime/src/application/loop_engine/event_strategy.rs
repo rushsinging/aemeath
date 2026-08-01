@@ -1,22 +1,19 @@
-//! Event-strategy trait and concrete implementations for Main and Sub adapters.
+//! Run 领域事件的窄输出 observer。
 //!
-//! The [`EventStrategy`] trait abstracts domain-event projection: the Main
-//! adapter projects to [`RuntimeStreamEvent`] and handles finish/reflection,
-//! while the Sub adapter extracts terminal state and reports progress.
-//!
-//! Each adapter holds a concrete strategy and delegates [`emit`] through it.
-//! Because the two strategies have fundamentally different behaviour
-//! (sink-based projection vs progress reporting), the trait exists for
-//! interface consistency, not for dynamic dispatch.
+//! 共享 Engine 只发出 [`RunDomainEvent`]。外层根据真实输出目标选择 observer：
+//! chat stream observer 负责 TUI/SDK 事件与独立 Run 收尾展示；progress observer
+//! 负责派生 Run 的进度与 terminal capture。名称表达输出职责，不表达 Main/Sub 角色。
 
 use async_trait::async_trait;
 
-use crate::application::loop_engine::LoopEngineError;
-use crate::application::main_loop::looping::finalize::finish_completed_loop;
-use crate::application::main_loop::looping::{
+use crate::application::loop_engine::chat::finalize::MainRunFinalizationObserver;
+use crate::application::loop_engine::chat::{
     ChatEventSink as _, RuntimeStreamEvent, RuntimeTurnContext,
 };
-use crate::application::subagent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
+use crate::application::loop_engine::run_finalization::{
+    RunFinalizationCoordinator, RunFinalizationStatus,
+};
+use crate::application::loop_engine::LoopEngineError;
 use crate::domain::agent_run::RunDomainEvent;
 use tools::AgentRunTerminal;
 
@@ -51,32 +48,15 @@ pub(crate) fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<Agent
     }
 }
 
-/// Common interface for event-projection strategies.
-///
-/// Each adapter constructs its concrete strategy and delegates its
-/// [`RunLoopPort::emit`] implementation through it. Because the two
-/// strategies have fundamentally different output channels
-/// (sink-based vs progress-based), the trait exists for interface
-/// consistency, not for dynamic dispatch.
+/// Common interface for domain event observers.
 #[async_trait]
-pub(crate) trait EventStrategy {
-    /// Project domain events into adapter-specific output.
+pub(crate) trait RunEventObserver {
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError>;
 }
 
-// ── Main adapter strategy ──────────────────────────────────────────────
-
-/// Event strategy for the **Main** adapter.
-///
-/// Projects domain events to [`RuntimeStreamEvent`] via the event sink,
-/// handles completion finalization (log, DoneWithDuration, task archival),
-/// and sends cancellation/error events with message snapshots.
-///
-/// #1385 Task 12: Uses [`ChatEventSinkHandle`] (from RuntimeContext) instead of
-/// generic `S: ChatEventSink`, so `MainRunPort::emit()` routes through the
-/// RuntimeContext I/O seam.
-pub(crate) struct MainEventStrategy<'a> {
-    pub sink: crate::application::main_loop::ChatEventSinkHandle,
+/// Publishes Run domain events to the chat stream and finalizes terminal UI state.
+pub(crate) struct ChatStreamEventObserver<'a> {
+    pub sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
     pub session_id: &'a str,
     pub turn_context: &'a RuntimeTurnContext,
     pub task_access: &'a std::sync::Arc<dyn task::TaskAccess>,
@@ -87,21 +67,27 @@ pub(crate) struct MainEventStrategy<'a> {
     pub messages_snapshot: Vec<share::message::Message>,
 }
 
-impl<'a> MainEventStrategy<'a> {
-    fn outcome(&self, status: AgentRunStatus) -> AgentRunOutcome {
-        AgentRunOutcome {
+impl ChatStreamEventObserver<'_> {
+    async fn project_done(&self, status: RunFinalizationStatus) {
+        RunFinalizationCoordinator::new(
+            None,
+            self.model,
+            MainRunFinalizationObserver {
+                sink: self.sink.clone(),
+                context: self.turn_context,
+                access: &**self.task_access,
+                session_id: self.session_id,
+            },
+        )
+        .finalize_terminal(
             status,
-            turns: self.turn_count,
-            duration: self.started_at.elapsed(),
-            role: None,
-            model: self.model.to_string(),
-        }
-    }
-
-    async fn project_done(&self, status: AgentRunStatus) {
-        let outcome = self.outcome(status);
-        log_agent_outcome(&outcome, self.session_id);
-        finish_completed_loop(&outcome, &self.sink, self.turn_context, &**self.task_access).await;
+            self.turn_count,
+            self.started_at.elapsed(),
+            &AgentRunTerminal::Completed {
+                result: String::new(),
+            },
+        )
+        .await;
     }
 
     async fn send_cancelled(&self) {
@@ -115,23 +101,12 @@ impl<'a> MainEventStrategy<'a> {
 }
 
 #[async_trait]
-impl EventStrategy for MainEventStrategy<'_> {
+impl RunEventObserver for ChatStreamEventObserver<'_> {
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
         for event in events {
             match event {
-                RunDomainEvent::Completed {
-                    user_cancelled_step: true,
-                    ..
-                } => {
-                    let outcome = self.outcome(AgentRunStatus::Cancelled);
-                    log_agent_outcome(&outcome, self.session_id);
-                    self.send_cancelled().await;
-                }
-                RunDomainEvent::Completed {
-                    user_cancelled_step: false,
-                    ..
-                } => {
-                    self.project_done(AgentRunStatus::Completed).await;
+                RunDomainEvent::Completed { .. } => {
+                    self.project_done(RunFinalizationStatus::Completed).await;
                 }
                 RunDomainEvent::Failed { error, .. } => {
                     self.sink
@@ -140,7 +115,8 @@ impl EventStrategy for MainEventStrategy<'_> {
                             error: error.clone(),
                         })
                         .await;
-                    self.project_done(AgentRunStatus::ApiError(error)).await;
+                    self.project_done(RunFinalizationStatus::ApiError(error))
+                        .await;
                 }
                 RunDomainEvent::Cancelled { run_id, .. } => {
                     self.send_cancelled().await;
@@ -195,21 +171,15 @@ impl EventStrategy for MainEventStrategy<'_> {
     }
 }
 
-// ── Sub adapter strategy ───────────────────────────────────────────────
-
-/// Event strategy for the **Sub** adapter.
-///
-/// Extracts terminal state from domain events via
-/// [`terminal_from_domain_event`] and reports progress text. Stores the
-/// terminal result for the caller to consume after the loop ends.
-pub(crate) struct SubEventStrategy<'a> {
+/// Reports derived-run progress and captures terminal state for the caller.
+pub(crate) struct ProgressTerminalObserver<'a> {
     pub progress: &'a (dyn Fn(Option<usize>, &str) + Send + Sync),
     pub terminal: &'a mut Option<AgentRunTerminal>,
     pub turn_count: usize,
 }
 
 #[async_trait]
-impl EventStrategy for SubEventStrategy<'_> {
+impl RunEventObserver for ProgressTerminalObserver<'_> {
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
         for event in events {
             if let Some(terminal) = terminal_from_domain_event(&event) {

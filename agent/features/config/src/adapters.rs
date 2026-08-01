@@ -330,17 +330,32 @@ impl ClaudeTranslator {
         let permissions = value.get("permissions").map(|permissions| {
             let allow = permissions
                 .get("allow")
-                .and_then(serde_json::Value::as_array);
+                .and_then(serde_json::Value::as_array)
+                .map(|allow| {
+                    allow
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(ToOwned::to_owned)
+                        .collect()
+                })
+                .filter(|allow: &Vec<String>| !allow.is_empty());
             let deny = permissions
                 .get("deny")
-                .and_then(serde_json::Value::as_array);
+                .and_then(serde_json::Value::as_array)
+                .map(|deny| {
+                    deny.iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(ToOwned::to_owned)
+                        .collect()
+                })
+                .filter(|deny: &Vec<String>| !deny.is_empty());
+            // #1469：兼容层只映射 allow/deny 列表，不推断 mode——
+            // Config committed permission mode 是唯一模式真相（specs/3.11），
+            // 避免项目 .claude/settings.json 的 deny 列表静默覆盖全局显式 mode。
             PermissionConfigPatch {
-                mode: match (allow, deny) {
-                    (_, Some(deny)) if !deny.is_empty() => Some(PermissionModeConfig::Ask),
-                    (Some(allow), _) if !allow.is_empty() => Some(PermissionModeConfig::AutoRead),
-                    _ => None,
-                },
-                ..Default::default()
+                mode: None,
+                auto_approve: allow,
+                deny,
             }
         });
         Ok(ConfigPatch {
@@ -641,15 +656,16 @@ mod tests {
     }
 
     #[test]
-    fn claude_translator_prefers_deny_and_filters_blank_hooks() {
+    fn claude_translator_maps_deny_list_without_inferring_mode_and_filters_blank_hooks() {
         let patch = ClaudeTranslator::translate(
             r#"{"permissions":{"allow":["Read"],"deny":["Bash"]},"hooks":{"Stop":[{"matcher":"*","hooks":[{"command":"   "},{"command":"echo ok","timeout":9}]}]}}"#,
         )
         .unwrap();
-        assert_eq!(
-            patch.permissions.unwrap().mode,
-            Some(PermissionModeConfig::Ask)
-        );
+        let permissions = patch.permissions.unwrap();
+        // #1469：兼容层只映射列表，不推断 mode——显式配置的 mode 是唯一真相。
+        assert_eq!(permissions.mode, None);
+        assert_eq!(permissions.auto_approve, Some(vec!["Read".to_string()]));
+        assert_eq!(permissions.deny, Some(vec!["Bash".to_string()]));
         let hooks = patch.hooks.unwrap();
         let entries = &hooks.events[&share::config::hooks::HookEvent::Stop];
         assert_eq!(entries.len(), 1);
@@ -697,11 +713,51 @@ mod tests {
             patch.models.unwrap().default.as_deref(),
             Some("local/model")
         );
-        assert_eq!(
-            patch.permissions.unwrap().mode,
-            Some(PermissionModeConfig::AutoRead)
-        );
+        let permissions = patch.permissions.unwrap();
+        // #1469：allow 列表只映射 auto_approve，不推断 mode。
+        assert_eq!(permissions.mode, None);
+        assert_eq!(permissions.auto_approve, Some(vec!["Read".to_string()]));
         assert_eq!(patch.hooks.unwrap().events.len(), 1);
+    }
+
+    #[test]
+    fn claude_translator_without_allow_or_deny_keeps_permissions_empty() {
+        let patch = ClaudeTranslator::translate(r#"{"model":"local/model"}"#).unwrap();
+        assert!(patch.permissions.is_none());
+    }
+
+    #[tokio::test]
+    async fn explicit_global_mode_is_not_overridden_by_claude_settings_deny() {
+        // #1469 场景：全局显式 allow_all + 项目 .claude/settings.json（deny 非空），
+        // 兼容层不得把 mode 覆盖为 Ask。
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("aemeath.json");
+        let claude = dir.path().join(".claude/settings.json");
+        tokio::fs::create_dir_all(dir.path().join(".claude"))
+            .await
+            .unwrap();
+        tokio::fs::write(&global, r#"{"permissions":{"mode":"allow_all"}}"#)
+            .await
+            .unwrap();
+        tokio::fs::write(&claude, r#"{"permissions":{"deny":["Artifact"]}}"#)
+            .await
+            .unwrap();
+
+        let mut chain = share::config::domain::merge::PriorityChain::new();
+        chain.push(FileAdapter::read(&global).await.unwrap().unwrap());
+        chain.push(
+            CompatibilityAdapter::read_one(&claude)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let config = chain.merge(share::config::Config::default());
+
+        assert_eq!(
+            config.permissions.mode,
+            share::config::PermissionModeConfig::AllowAll,
+            "显式全局 mode 必须保持，不被 .claude/settings.json deny 列表覆盖"
+        );
     }
 
     #[tokio::test]

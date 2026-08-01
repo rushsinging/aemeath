@@ -9,14 +9,73 @@
 use sdk::ChatInputEvent;
 use share::message::Message;
 
+use crate::application::loop_engine::chat::run_input_buffer::BufferDrain;
+use crate::application::loop_engine::chat::{
+    ChatEventSink, ChatEventSinkHandle, InputEventDrainPort, PendingInputBuffer, RuntimeStreamEvent,
+};
 use crate::application::loop_engine::{
     DrainEpoch, DrainOutcome, InternalContinuationKind, LoopEngineError,
 };
-use crate::application::main_loop::looping::run_input_buffer::BufferDrain;
-use crate::application::main_loop::looping::{
-    ChatEventSink, ChatEventSinkHandle, InputEventDrainPort, PendingInputBuffer, QueueDrainPort,
-    RuntimeStreamEvent,
-};
+
+#[derive(Clone, Default)]
+pub(crate) struct InputContinuationState {
+    stop_hook_feedback: std::sync::Arc<std::sync::Mutex<Option<Message>>>,
+    pending_step_prefix: std::sync::Arc<std::sync::Mutex<Option<Message>>>,
+    tool_results_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl InputContinuationState {
+    pub(crate) fn install_stop_hook_feedback(&self, message: Message) {
+        *self
+            .stop_hook_feedback
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(message);
+    }
+
+    fn take_stop_hook_feedback(&self) -> Option<Message> {
+        self.stop_hook_feedback
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+    }
+
+    fn set_pending_step_prefix(&self, message: Message) {
+        *self
+            .pending_step_prefix
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(message);
+    }
+
+    pub(crate) fn schedule_tool_results(&self) {
+        self.tool_results_pending
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    fn take_tool_results(&self) -> bool {
+        self.tool_results_pending
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+    }
+
+    pub(crate) fn take_step_prefix(&self) -> Option<Message> {
+        self.pending_step_prefix
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+    }
+}
+
+pub(crate) trait SessionInputPort: InputEventDrainPort {
+    fn defer(&self, event: ChatInputEvent);
+}
+
+fn chat_input_event_kind(event: &ChatInputEvent) -> &'static str {
+    match event {
+        ChatInputEvent::UserMessage { .. } => "user_message",
+        ChatInputEvent::SkillRequest(_) => "skill_request",
+        ChatInputEvent::WithdrawAll => "withdraw_all",
+        _ => "control",
+    }
+}
 
 /// Common interface for input-source strategies.
 ///
@@ -49,41 +108,49 @@ pub(crate) trait InputStrategy {
 /// #1385 Task 12: `sink` is now a [`ChatEventSinkHandle`] (shared with
 /// [`RuntimeContext`]) instead of a generic `&S`.  This eliminates the `S`
 /// generic parameter.
-pub(crate) struct MainInputStrategy<'a, Q, I>
+#[derive(Clone)]
+pub(crate) struct BufferedInputAdapter<I>
 where
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
+    I: SessionInputPort,
 {
-    pub input_events: &'a I,
+    pub input_events: I,
     /// #1385 Task 12: Canonical event sink from RuntimeContext, not a separate
     /// sink reference.  This is Clone and implements ChatEventSink directly.
     pub sink: ChatEventSinkHandle,
-    pub queue: &'a Q,
     /// Non-user-message events (controls) are forwarded here for the
     /// session idle gate to process after the Run ends.
-    pub pending_input: &'a mut PendingInputBuffer,
+    pub pending_input: PendingInputBuffer,
     /// #1385 Task 12: Run-scoped input buffer handle shared with RuntimeContext.
     /// User messages received during this Run are accumulated here and drained
     /// per-step within the same Run (#1272).  All access goes through
     /// [`RunInputBufferHandle::with_lock`].
-    pub run_input_buffer: crate::application::runtime_context::RunInputBufferHandle,
-    /// Stop-hook feedback set by `invoke_model`, consumed by drain to
-    /// produce `InternalContinuation::StopHookFeedback`.
-    pub stop_hook_feedback: Option<Message>,
-    /// Bridge between drain and freeze: drain moves the feedback here,
-    /// and `freeze_step` consumes it for injection.
-    pub pending_stop_hook_feedback: Option<Message>,
-    /// Set by `execute_tools`; cleared by drain to produce
-    /// `InternalContinuation::ToolResults`.
-    pub pending_tool_results: bool,
+    pub run_input_buffer: crate::application::run::context::RunInputBufferHandle,
+    /// Stop-hook feedback, step-prefix relay and tool-results continuation.
+    pub continuation: InputContinuationState,
     pub run_id: sdk::RunId,
 }
 
-impl<'a, Q, I> MainInputStrategy<'a, Q, I>
+impl<I> BufferedInputAdapter<I>
 where
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
+    I: SessionInputPort,
 {
+    pub(crate) fn drain_remaining_events(&mut self) {
+        let sealed = self.run_input_buffer.is_sealed();
+        let drained = self.run_input_buffer.with_lock(|buffer| buffer.drain_all());
+        for event in drained {
+            if matches!(event, ChatInputEvent::UserMessage { .. }) && sealed {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "BufferedInputAdapter: sealed buffer contained unconsumed UserMessage; routing to Session mailbox"
+                );
+            }
+            self.input_events.defer(event);
+        }
+        for event in self.pending_input.drain_all() {
+            self.input_events.defer(event);
+        }
+    }
+
     /// Unify UserMessage admission into the active Run's input buffer.
     /// Uses `push_or_reject`: when the buffer is sealed, the message is
     /// routed to `pending_input` for the next Run; when accepted,
@@ -113,7 +180,7 @@ where
                     self.run_id,
                     rejected_id,
                 );
-                self.pending_input.push(rejected);
+                self.input_events.defer(rejected);
             }
             None => {
                 let queued_ids: Vec<_> = queued
@@ -142,14 +209,7 @@ where
         &mut self,
         expected_epoch: DrainEpoch,
     ) -> Result<Option<DrainOutcome>, LoopEngineError> {
-        let mut events = self.input_events.drain_input_events().await;
-        if let Some(queued) = self.queue.drain_queued_input().await {
-            events.extend(
-                queued
-                    .into_iter()
-                    .map(|text| ChatInputEvent::classify_text(text, Vec::new())),
-            );
-        }
+        let events = self.input_events.drain_input_events().await;
         for event in events {
             match event {
                 ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_) => {
@@ -171,9 +231,9 @@ where
 
         // #1272 Per-turn drain-or-seal contract:
         //   StopHookFeedback > ToolResults > user input (Ready) > EmptyAndSealed.
-        if let Some(feedback) = self.stop_hook_feedback.take() {
+        if let Some(feedback) = self.continuation.take_stop_hook_feedback() {
             let text = feedback.text_content();
-            self.pending_stop_hook_feedback = Some(feedback);
+            self.continuation.set_pending_step_prefix(feedback);
             let (batch, epoch) = match self
                 .run_input_buffer
                 .with_lock(|b| b.take_internal_continuation(expected_epoch))
@@ -187,7 +247,7 @@ where
                 BufferDrain::AlreadySealed { epoch } => {
                     log::warn!(
                         target: crate::LOG_TARGET,
-                        "MainInputStrategy: take_internal_continuation returned AlreadySealed at epoch {:?}",
+                        "BufferedInputAdapter: take_internal_continuation returned AlreadySealed at epoch {:?}",
                         epoch,
                     );
                     return Ok(Some(DrainOutcome::EmptyAndSealed { epoch }));
@@ -217,8 +277,7 @@ where
                 epoch,
             }));
         }
-        if self.pending_tool_results {
-            self.pending_tool_results = false;
+        if self.continuation.take_tool_results() {
             let (batch, epoch) = match self
                 .run_input_buffer
                 .with_lock(|b| b.take_internal_continuation(expected_epoch))
@@ -232,7 +291,7 @@ where
                 BufferDrain::AlreadySealed { epoch } => {
                     log::warn!(
                         target: crate::LOG_TARGET,
-                        "MainInputStrategy: take_internal_continuation returned AlreadySealed at epoch {:?}",
+                        "BufferedInputAdapter: take_internal_continuation returned AlreadySealed at epoch {:?}",
                         epoch,
                     );
                     return Ok(Some(DrainOutcome::EmptyAndSealed { epoch }));
@@ -269,10 +328,9 @@ where
 }
 
 #[async_trait::async_trait]
-impl<Q, I> InputStrategy for MainInputStrategy<'_, Q, I>
+impl<I> InputStrategy for BufferedInputAdapter<I>
 where
-    Q: QueueDrainPort + Send,
-    I: InputEventDrainPort + Send,
+    I: SessionInputPort + Send,
 {
     async fn drain_input(
         &mut self,
@@ -319,14 +377,14 @@ where
             BufferDrain::AlreadySealed { epoch } => {
                 log::warn!(
                     target: crate::LOG_TARGET,
-                    "MainInputStrategy: drain_or_seal returned AlreadySealed — buffer was already sealed"
+                    "BufferedInputAdapter: drain_or_seal returned AlreadySealed — buffer was already sealed"
                 );
                 Ok(DrainOutcome::EmptyAndSealed { epoch })
             }
             BufferDrain::EpochMismatch { expected, actual } => {
                 log::error!(
                     target: crate::LOG_TARGET,
-                    "MainInputStrategy: drain_or_seal epoch mismatch — expected {:?}, actual {:?}",
+                    "BufferedInputAdapter: drain_or_seal epoch mismatch — expected {:?}, actual {:?}",
                     expected,
                     actual,
                 );
@@ -375,7 +433,20 @@ where
         // Async park: wait for the next input event from the channel.
         // engine's await_interruptible wraps this future — cancel/timeout
         // will drop it automatically.
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[input_strategy] awaiting session input run_id={} epoch={:?}",
+            self.run_id,
+            expected_epoch,
+        );
         let event = self.input_events.recv_next_input().await;
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[input_strategy] session input wait completed run_id={} epoch={:?} event_kind={}",
+            self.run_id,
+            expected_epoch,
+            event.as_ref().map(chat_input_event_kind).unwrap_or("source_closed"),
+        );
         match event {
             None => {
                 // Channel closed — seal.
@@ -416,6 +487,32 @@ where
     }
 }
 
+#[async_trait::async_trait]
+impl<I> crate::application::loop_engine::InputPort for BufferedInputAdapter<I>
+where
+    I: SessionInputPort + Send,
+{
+    async fn drain_input(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        InputStrategy::drain_input(self, expected_epoch).await
+    }
+
+    fn schedule_internal_continuation(&mut self, kind: InternalContinuationKind) {
+        if matches!(kind, InternalContinuationKind::ToolResults) {
+            self.continuation.schedule_tool_results();
+        }
+    }
+
+    async fn await_user_input(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        InputStrategy::await_user_input(self, expected_epoch).await
+    }
+}
+
 // ── Sub adapter strategy ───────────────────────────────────────────────
 
 /// Input strategy for the **Sub** adapter.
@@ -424,7 +521,7 @@ where
 /// once (epoch 0), then `InternalContinuation::ToolResults` for each
 /// subsequent tool-result turn, and finally `EmptyAndSealed` when the model
 /// produces no further tool calls.
-pub(crate) struct SubInputStrategy<'a> {
+pub(crate) struct FixedInputAdapter<'a> {
     pub prompt: &'a str,
     /// Whether the initial prompt has already been consumed (#1272).
     pub prompt_drained: bool,
@@ -438,7 +535,7 @@ pub(crate) struct SubInputStrategy<'a> {
     pub has_tool_results_pending: bool,
 }
 
-impl<'a> SubInputStrategy<'a> {
+impl<'a> FixedInputAdapter<'a> {
     pub fn new(prompt: &'a str) -> Self {
         Self {
             prompt,
@@ -450,7 +547,7 @@ impl<'a> SubInputStrategy<'a> {
 }
 
 #[async_trait::async_trait]
-impl InputStrategy for SubInputStrategy<'_> {
+impl InputStrategy for FixedInputAdapter<'_> {
     async fn drain_input(
         &mut self,
         expected_epoch: DrainEpoch,
@@ -516,5 +613,28 @@ impl InputStrategy for SubInputStrategy<'_> {
              ; #1248 注入 InteractionBridge 后激活"
                 .to_string(),
         ))
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::application::loop_engine::InputPort for FixedInputAdapter<'_> {
+    async fn drain_input(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        InputStrategy::drain_input(self, expected_epoch).await
+    }
+
+    fn schedule_internal_continuation(&mut self, kind: InternalContinuationKind) {
+        if matches!(kind, InternalContinuationKind::ToolResults) {
+            self.has_tool_results_pending = true;
+        }
+    }
+
+    async fn await_user_input(
+        &mut self,
+        expected_epoch: DrainEpoch,
+    ) -> Result<DrainOutcome, LoopEngineError> {
+        InputStrategy::await_user_input(self, expected_epoch).await
     }
 }

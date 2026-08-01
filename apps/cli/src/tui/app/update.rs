@@ -460,7 +460,10 @@ impl App {
                                 "Type something… (自由输入)".to_string(),
                             ));
                             AskUserSlot {
-                                id: format!("{}-{}", req.request_id.as_str(), i),
+                                id: req
+                                    .tool_call_id
+                                    .clone()
+                                    .unwrap_or_else(|| format!("{}-{i}", req.request_id.as_str())),
                                 question_seq: i,
                                 question: q.prompt.clone(),
                                 options,
@@ -471,7 +474,7 @@ impl App {
                             }
                         })
                         .collect();
-                    self.show_ask_user_batch(slots);
+                    self.show_ask_user_batch(req.request_id.clone(), slots);
                 }
             }
             TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {

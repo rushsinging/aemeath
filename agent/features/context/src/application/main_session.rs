@@ -226,6 +226,7 @@ pub async fn wire_main_session(
         compact: None,
         run_slices: Vec::new(),
         committed_steps: Vec::new(),
+        skill_load_records: Vec::new(),
     };
 
     // Bootstrap the initial config location from the verified workspace
@@ -426,6 +427,11 @@ impl MainSessionWiring {
     /// Returns the currently committed canonical session.
     pub fn committed_session(&self) -> Arc<CanonicalSession> {
         Arc::clone(&self.committed_session.read().unwrap())
+    }
+
+    /// Returns the currently committed Context port.
+    pub fn committed_context(&self) -> Arc<dyn ContextPort> {
+        Arc::clone(&self.context)
     }
 
     /// Returns the currently committed memory port.

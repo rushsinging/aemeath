@@ -207,13 +207,17 @@ impl App {
         let answers = self
             .model
             .conversation
-            .ask_user_batch_answers()
+            .ask_user_batch_answers(&request_id)
             .unwrap_or_default();
-        log::info!(
+        let answer_lengths: Vec<usize> = answers
+            .iter()
+            .map(|answer| answer.chars().count())
+            .collect();
+        log::debug!(
             target: crate::LOG_TARGET,
-            "[ask_user] confirm answers={:?} request_id={}",
-            answers,
+            "[ask_user] reply prepared request_id={} answer_count={} answer_lengths={answer_lengths:?}",
             request_id.as_str(),
+            answers.len(),
         );
 
         self.apply_agent_intent(AgentIntent::Conversation(
@@ -267,13 +271,27 @@ impl App {
                     .ask_user_chat_text()
                     .unwrap_or_default();
                 if !text.is_empty() {
+                    let answer_length = text.chars().count();
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[ask_user] free-text answer committed answer_length={answer_length}",
+                    );
                     self.set_ask_user_chat_input(false);
                     self.apply_agent_intent(AgentIntent::Conversation(
                         ConversationIntent::AnswerCurrentAskUser(AnswerCurrentAskUser {
                             answer: text,
                         }),
                     ));
-                    self.maybe_auto_confirm_ask_user();
+                    let result = self.maybe_auto_confirm_ask_user();
+                    let effect_count = result
+                        .as_ref()
+                        .map(|result| result.effects.len())
+                        .unwrap_or_default();
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[ask_user] free-text confirmation reduced effect_count={effect_count}",
+                    );
+                    return result;
                 }
             }
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {

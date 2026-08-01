@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Aemeath Runtime Run 状态与入站恢复",
+    "subtitle": "普通输入与 Interaction 使用正交等待路径；单一 pending continuation 定向恢复；终态保持真实用户语义",
+    "output": "03-runtime-lifecycle.html",
+    "quality_profile": "showcase",
+    "visual_preset": "blueprint",
+    "animation": "none",
+    "viewBox": [1040, 720],
+    "views": [
+      {"id": "active-loop", "label": "活动主循环", "focus": ["created", "draining", "preparing", "invoking", "processing", "completed"], "note": "Run 的 drain、context、model 与 response/tool 阶段只有一条活动主轨。"},
+      {"id": "ordinary-input", "label": "普通输入路径", "focus": ["awaitingInput", "draining"], "note": "Session mailbox 将 typed input 接纳到 Run buffer；普通输入不创建 interaction continuation。"},
+      {"id": "interaction-resume", "label": "Interaction 恢复", "focus": ["processing", "awaitingInteraction", "draining"], "note": "单 Run 同时只有一个 pending interaction；匹配 reply/cancel 才能恢复。"},
+      {"id": "terminal-outcomes", "label": "互斥终态", "focus": ["completed", "failed", "controlledTerminal"], "note": "取消、终止、超时或断连先收敛 waiter 与 pending work，再发布权威终态。"}
+    ]
+  },
+  "lanes": [
+    {"id": "main", "label": "Run 主循环"},
+    {"id": "inputWait", "label": "普通输入等待"},
+    {"id": "interactionWait", "label": "Interaction 等待"},
+    {"id": "terminal", "label": "互斥终态"}
+  ],
+  "states": [
+    {"id": "created", "type": "start", "label": "Created", "sublabel": "RunInstance ready", "lane": "main", "col": 0, "step": "01", "tag": "entry"},
+    {"id": "draining", "type": "active", "label": "DrainingInput", "sublabel": "Run buffer + epoch", "lane": "main", "col": 1, "step": "02", "tag": "input"},
+    {"id": "preparing", "type": "active", "label": "PreparingContext", "sublabel": "context / compact", "lane": "main", "col": 2, "step": "03", "tag": "context"},
+    {"id": "invoking", "type": "active", "label": "InvokingModel", "sublabel": "stream + retry", "lane": "main", "col": 3, "step": "04", "tag": "model"},
+    {"id": "processing", "type": "decision", "label": "Response / Tools", "sublabel": "apply · approval · execute", "lane": "main", "col": 4, "step": "05", "tag": "step", "width": 120},
+    {"id": "awaitingInput", "type": "waiting", "label": "Awaiting Input", "sublabel": "mailbox → Run buffer", "lane": "inputWait", "col": 0, "tag": "input wait", "width": 150, "yOffset": -55},
+    {"id": "awaitingInteraction", "type": "waiting", "label": "Awaiting Interaction", "sublabel": "one typed continuation", "lane": "interactionWait", "col": 2, "tag": "single slot", "width": 170, "yOffset": 45},
+    {"id": "completed", "type": "success", "label": "Completed", "sublabel": "business success", "lane": "terminal", "col": 2, "tag": "terminal", "yOffset": 75},
+    {"id": "failed", "type": "failure", "label": "Failed", "sublabel": "authoritative failure", "lane": "terminal", "col": 1, "tag": "terminal", "yOffset": 15},
+    {"id": "controlledTerminal", "type": "failure", "label": "Cancelled / Terminated", "sublabel": "cleanup confirmed", "lane": "terminal", "col": 0, "tag": "terminal", "width": 180, "yOffset": -105}
+  ],
+  "transitions": [
+    {"id": "createdDraining", "from": "created", "to": "draining", "variant": "emphasis", "route": "straight"},
+    {"id": "drainingPreparing", "from": "draining", "to": "preparing", "variant": "emphasis", "route": "straight"},
+    {"id": "preparingInvoking", "from": "preparing", "to": "invoking", "variant": "emphasis", "route": "straight"},
+    {"id": "inputDraining", "from": "awaitingInput", "to": "draining", "variant": "emphasis", "fromSide": "left", "toSide": "bottom", "route": "left-channel", "channelX": 300},
+    {"id": "processingInteraction", "from": "processing", "to": "awaitingInteraction", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "straight"},
+    {"id": "processingCompleted", "from": "processing", "to": "completed", "variant": "emphasis", "fromSide": "right", "toSide": "left", "route": "right-channel", "channelX": 1010},
+    {"id": "processingFailed", "from": "processing", "to": "failed", "variant": "security", "fromSide": "right", "toSide": "top", "route": "right-channel", "channelX": 985},
+    {"id": "processingControlledTerminal", "from": "processing", "to": "controlledTerminal", "variant": "security", "fromSide": "right", "toSide": "top", "via": [[800, 157], [800, 290], [350, 290], [350, 315], [402, 315]]}
+  ],
+  "cards": [
+    {"dot": "cyan", "title": "普通输入等待", "items": ["Session mailbox 是唯一外部输入 reader", "Run buffer 保持 FIFO、epoch 与 seal", "新输入后进入 DrainingInput"]},
+    {"dot": "amber", "title": "Interaction 等待", "items": ["当前实现由 AwaitingUser 与 pending_interaction 组合表达", "目标显式命名为 AwaitingInteraction", "reply/cancel 消费单一 pending slot 后恢复"]},
+    {"dot": "rose", "title": "权威终态", "items": ["控制终态前必须清理 waiter 与 pending work", "Completed、Failed 与控制终态互斥", "Runtime 出站事件继续区分 Cancelled 与 Terminated"]}
+  ]
+}

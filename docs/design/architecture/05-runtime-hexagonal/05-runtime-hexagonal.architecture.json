@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Aemeath Runtime Hexagonal Architecture",
+    "subtitle": "驱动端经应用用例进入领域核心；外部能力只通过出站 Port 反转依赖",
+    "output": "index.html",
+    "quality_profile": "showcase",
+    "visual_preset": "blueprint",
+    "animation": "none",
+    "repository": {
+      "url": "https://github.com/rushsinging/aemeath",
+      "revision": "073775474a040d79dc339a5cb64088067d6831cf"
+    },
+    "viewBox": [1760, 980],
+    "views": [
+      {
+        "id": "inbound-path",
+        "label": "入站驱动链路",
+        "focus": ["sdkTui", "agentTool", "clientSession", "runApplication", "domainCore"],
+        "note": "SDK/TUI 与 Agent Tool 只驱动应用用例；活动 Run 的业务转换由领域核心拥有。"
+      },
+      {
+        "id": "ownership-model",
+        "label": "运行时所有权",
+        "focus": ["runtimeServices", "sessionState", "runtimeContext", "runExecutionState", "domainCore"],
+        "note": "静态服务、会话状态、每 Run 冻结 binding 和执行状态各有唯一 owner。"
+      },
+      {
+        "id": "outbound-ports",
+        "label": "出站 Port 反转",
+        "focus": ["runApplication", "runtimeContext", "modelContextPorts", "toolGovernancePorts", "providerContext", "toolsPolicyHook"],
+        "note": "Application 依赖 Port；Provider、Context、Tools、Policy 与 Hook 作为被驱动实现位于边界外。"
+      },
+      {
+        "id": "terminal-truth",
+        "label": "终态与持久化",
+        "focus": ["domainCore", "runApplication", "eventPersistencePorts", "storageAudit"],
+        "note": "Runtime 领域状态机决定业务终态，事件与持久化适配器只透传权威事实。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "compositionRoot",
+      "type": "cloud",
+      "label": "Composition Root",
+      "sublabel": "实例化并连接具体 Adapter",
+      "tag": "process bootstrap",
+      "pos": [60, 90],
+      "size": [220, 76],
+      "sources": [{"path": "agent/composition/src/runtime.rs", "line": 141, "end_line": 161, "label": "Runtime 装配"}]
+    },
+    {
+      "id": "sdkTui",
+      "type": "external",
+      "label": "SDK / TUI",
+      "sublabel": "chat · input events · presentation",
+      "tag": "driving adapter",
+      "pos": [60, 330],
+      "size": [220, 76],
+      "sources": [{"path": "agent/features/runtime/src/application/client/trait_chat.rs", "line": 10, "end_line": 49, "label": "Chat 入站"}]
+    },
+    {
+      "id": "agentTool",
+      "type": "external",
+      "label": "Agent Tool",
+      "sublabel": "父 Run 派生 Sub-agent",
+      "tag": "driving adapter",
+      "pos": [60, 570],
+      "size": [220, 76],
+      "sources": [{"path": "agent/features/runtime/src/application/run/derived/setup.rs", "line": 103, "end_line": 233, "label": "Derived Run"}]
+    },
+    {
+      "id": "clientSession",
+      "type": "backend",
+      "label": "Client + Session Use Cases",
+      "sublabel": "入站 · idle · command · turn boundary",
+      "tag": "application",
+      "pos": [390, 300],
+      "size": [250, 82],
+      "sources": [
+        {"path": "agent/features/runtime/src/application/client.rs", "line": 1, "end_line": 15, "label": "Client owner"},
+        {"path": "agent/features/runtime/src/application/session.rs", "line": 1, "label": "Session owner"}
+      ]
+    },
+    {
+      "id": "runApplication",
+      "type": "backend",
+      "label": "Run Application Core",
+      "sublabel": "Factory · Launcher · Shared Loop",
+      "tag": "use-case orchestration",
+      "pos": [730, 300],
+      "size": [250, 82],
+      "sources": [
+        {"path": "agent/features/runtime/src/application/run/factory.rs", "line": 8, "end_line": 56, "label": "RunFactory"},
+        {"path": "agent/features/runtime/src/application/run/launcher.rs", "line": 28, "end_line": 59, "label": "RunLauncher"},
+        {"path": "agent/features/runtime/src/application/loop_engine/engine.rs", "line": 710, "end_line": 729, "label": "Loop Engine"}
+      ]
+    },
+    {
+      "id": "domainCore",
+      "type": "security",
+      "label": "AgentRun Domain Core",
+      "sublabel": "RunSpec · RunState · RunStep · events",
+      "tag": "authoritative state machine",
+      "pos": [730, 520],
+      "size": [250, 86],
+      "sources": [
+        {"path": "agent/features/runtime/src/domain/agent_run.rs", "line": 1, "label": "Domain owner"},
+        {"path": "agent/features/runtime/src/domain/agent_run/domain.rs", "line": 1, "label": "Run state machine"}
+      ]
+    },
+    {
+      "id": "runtimeServices",
+      "type": "backend",
+      "label": "RuntimeServices",
+      "sublabel": "进程稳定的共享 Port",
+      "tag": "static owner",
+      "pos": [390, 80],
+      "size": [210, 72],
+      "sources": [{"path": "agent/features/runtime/src/application/run/context_factory.rs", "line": 122, "end_line": 177, "label": "服务装配"}]
+    },
+    {
+      "id": "sessionState",
+      "type": "database",
+      "label": "SessionState",
+      "sublabel": "会话级可变事实",
+      "tag": "session owner",
+      "pos": [390, 500],
+      "size": [210, 72],
+      "sources": [{"path": "agent/features/runtime/src/application/client/accessors.rs", "line": 70, "end_line": 145, "label": "SessionRuntime"}]
+    },
+    {
+      "id": "runtimeContext",
+      "type": "backend",
+      "label": "RuntimeContext",
+      "sublabel": "每 Run 冻结 Port binding",
+      "tag": "not a service locator",
+      "pos": [730, 80],
+      "size": [210, 72],
+      "sources": [{"path": "agent/features/runtime/src/application/run/context_factory.rs", "line": 197, "end_line": 268, "label": "Context binding"}]
+    },
+    {
+      "id": "runExecutionState",
+      "type": "database",
+      "label": "RunExecutionState",
+      "sublabel": "消息 · Step · usage · continuation",
+      "tag": "per-run mutable owner",
+      "pos": [730, 720],
+      "size": [230, 76],
+      "sources": [{"path": "agent/features/runtime/src/application/run/execution_state.rs", "line": 1, "label": "执行状态"}]
+    },
+    {
+      "id": "modelContextPorts",
+      "type": "messagebus",
+      "label": "Model + Context Ports",
+      "sublabel": "ProviderPort · ContextPort · Memory",
+      "tag": "outbound ports",
+      "pos": [1080, 210],
+      "size": [240, 78],
+      "sources": [{"path": "agent/features/runtime/src/ports.rs", "line": 19, "end_line": 47, "label": "Runtime Ports"}]
+    },
+    {
+      "id": "toolGovernancePorts",
+      "type": "messagebus",
+      "label": "Tool + Governance Ports",
+      "sublabel": "Catalog · Execution · Policy · Hook · Task",
+      "tag": "outbound ports",
+      "pos": [1080, 430],
+      "size": [250, 82],
+      "sources": [{"path": "agent/features/runtime/src/application/run/context_factory.rs", "line": 139, "end_line": 174, "label": "稳定 Port 集"}]
+    },
+    {
+      "id": "eventPersistencePorts",
+      "type": "messagebus",
+      "label": "Event + Persistence Ports",
+      "sublabel": "EventSink · Step receipt · Tool receipt",
+      "tag": "outbound ports",
+      "pos": [1080, 650],
+      "size": [250, 82],
+      "sources": [{"path": "agent/features/runtime/src/application/tool/execution_supervisor.rs", "line": 56, "end_line": 192, "label": "Durable receipts"}]
+    },
+    {
+      "id": "providerContext",
+      "type": "external",
+      "label": "Provider + Context BC",
+      "sublabel": "模型流与 canonical session",
+      "tag": "driven adapters",
+      "pos": [1460, 210],
+      "size": [230, 78]
+    },
+    {
+      "id": "toolsPolicyHook",
+      "type": "external",
+      "label": "Tools + Policy + Hook BC",
+      "sublabel": "Catalog、监督执行与边界决策",
+      "tag": "driven adapters",
+      "pos": [1450, 430],
+      "size": [250, 82]
+    },
+    {
+      "id": "storageAudit",
+      "type": "external",
+      "label": "Storage + Audit + SDK",
+      "sublabel": "落盘、审计与用户可见事件",
+      "tag": "driven adapters",
+      "pos": [1450, 650],
+      "size": [250, 82]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Runtime Hexagon · Application + Domain",
+      "wraps": ["clientSession", "runApplication", "domainCore", "runtimeServices", "sessionState", "runtimeContext", "runExecutionState"],
+      "pad": 28
+    },
+    {
+      "kind": "security-group",
+      "label": "Outbound Port Boundary",
+      "wraps": ["modelContextPorts", "toolGovernancePorts", "eventPersistencePorts"],
+      "pad": 24
+    }
+  ],
+  "connections": [
+    {"id": "compositionServices", "from": "compositionRoot", "to": "runtimeServices", "variant": "emphasis"},
+    {"id": "sdkClient", "from": "sdkTui", "to": "clientSession", "variant": "emphasis"},
+    {"id": "toolDerived", "from": "agentTool", "to": "runApplication", "variant": "emphasis"},
+    {"id": "sessionRun", "from": "clientSession", "to": "runApplication", "variant": "emphasis"},
+    {"id": "servicesContext", "from": "runtimeServices", "to": "runtimeContext"},
+    {"id": "applicationDomain", "from": "runApplication", "to": "domainCore", "variant": "security"},
+    {"id": "domainExecution", "from": "domainCore", "to": "runExecutionState", "fromSide": "bottom", "toSide": "top"},
+    {"id": "runModelPorts", "from": "runApplication", "to": "modelContextPorts"},
+    {"id": "runToolPorts", "from": "runApplication", "to": "toolGovernancePorts"},
+    {"id": "runEventPorts", "from": "runApplication", "to": "eventPersistencePorts"},
+    {"id": "portsProvider", "from": "modelContextPorts", "to": "providerContext", "variant": "dashed"},
+    {"id": "portsTools", "from": "toolGovernancePorts", "to": "toolsPolicyHook", "variant": "dashed"},
+    {"id": "portsStorage", "from": "eventPersistencePorts", "to": "storageAudit", "variant": "dashed"}
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "依赖规则",
+      "items": ["Driving Adapter 只调用 Application 用例", "Application 可以依赖 Domain 与 Port，Domain 不依赖 Adapter", "Driven BC 通过 Port 接入，不能反向进入领域状态机"]
+    },
+    {
+      "dot": "emerald",
+      "title": "所有权分离",
+      "items": ["RuntimeServices：进程稳定活依赖", "SessionState：会话级可变事实", "RuntimeContext：每 Run 冻结 binding；RunExecutionState：每 Run 可变执行状态"]
+    },
+    {
+      "dot": "violet",
+      "title": "终态不变量",
+      "items": ["AgentRun 是活动 Run 的权威状态机", "Runtime 决定唯一用户可见业务终态", "SDK、TUI、Storage 与 Audit 只映射或持久化权威事实"]
+    }
+  ]
+}

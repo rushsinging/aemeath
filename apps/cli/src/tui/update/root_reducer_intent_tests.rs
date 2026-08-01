@@ -28,6 +28,7 @@ fn interaction_confirmation_marks_output_dirty_and_emits_reply_effect() {
             request: InteractionRequest {
                 request_id: request_id.clone(),
                 run_id: UiRunId::from("run-1"),
+                tool_call_id: None,
                 body: InteractionBody::HardPause(UiStuckDiagnostic {
                     reason: "等待确认".to_string(),
                     recent_actions: Vec::new(),

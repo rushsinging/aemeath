@@ -257,6 +257,7 @@ fn sdk_interaction_to_tui(
     InteractionRequest {
         request_id: UiInteractionRequestId::from(request.id.as_str()),
         run_id: UiRunId::from(request.run_id.as_str()),
+        tool_call_id: request.tool_call_id.clone(),
         body: match &request.body {
             sdk::InteractionRequestBody::UserQuestions(questions) => {
                 InteractionBody::UserQuestions(

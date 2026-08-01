@@ -160,6 +160,7 @@ pub struct UpdateAgentMeta {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShowAskUserBatch {
+    pub request_id: super::interaction::UiInteractionRequestId,
     pub slots: Vec<AskUserSlot>,
 }
 

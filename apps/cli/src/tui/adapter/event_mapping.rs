@@ -303,11 +303,13 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         // #944 5B: AskUserBatch legacy bridge removed.
         ChatEvent::AskUserBatch { .. } => return SdkEventMapping::Nop,
         ChatEvent::AgentProgress {
-            context,
+            source_context,
+            attachment_context,
             tool_id,
             event,
         } => TuiRuntimeEvent::AgentProgress {
-            context: turn_context(context),
+            source_context: turn_context(source_context),
+            attachment_context: turn_context(attachment_context),
             tool_id: tool_id.as_str().to_string(),
             event: agent_progress(event),
         },
@@ -523,6 +525,7 @@ fn interaction_request(value: sdk::InteractionRequest) -> TuiInteractionRequest 
     TuiInteractionRequest {
         request_id: UiInteractionRequestId::from(value.id.as_str()),
         run_id: UiRunId::from(value.run_id.as_str()),
+        tool_call_id: value.tool_call_id,
         body: match value.body {
             sdk::InteractionRequestBody::UserQuestions(questions) => {
                 TuiInteractionBody::UserQuestions(

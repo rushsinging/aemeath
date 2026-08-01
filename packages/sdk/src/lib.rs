@@ -41,7 +41,7 @@ pub use chat::{
     HookExecutionResultView, HookMessageKindView, HookMessageView, OptionItem,
     ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
     ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep,
-    ResumedStepFinalizeCause, SkillRequest, ToolCallStatusView, ToolResultImage, UserInput,
+    ResumedStepFinalizeCause, SkillRequest, ToolCallStatusView, ToolResultImage,
     WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::{AgentClient, RunControlClient};
@@ -80,8 +80,8 @@ pub use session::{
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,
     ClipboardImageView, InputEventFuture, InputEventOptFuture, MemoryConfigView, PasteKind,
-    QueueDrainPort, QueueFuture, ReflectionConfigView, ReminderView, SkillSlashRouteView,
-    SkillView, SkillsUpdatedEvent, TaskStatusView, TuiLaunchContext,
+    ReflectionConfigView, ReminderView, SkillSlashRouteView, SkillView, SkillsUpdatedEvent,
+    TaskStatusView, TuiLaunchContext,
 };
 pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,

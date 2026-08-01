@@ -227,6 +227,7 @@ impl OutputViewAssembler {
                 chat_input_cursor,
                 confirm_cursor,
                 confirmed,
+                ..
             } => {
                 use crate::tui::model::conversation::block::AskUserPhase as MPhase;
                 let phase = match phase {

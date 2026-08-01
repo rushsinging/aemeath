@@ -1,6 +1,6 @@
 //! Prompt 构建辅助函数（从 CLI setup.rs 迁移）。
 
-use crate::application::startup as bootstrap;
+use crate::application::prompt::instructions_hook::PromptInstructionsHook;
 use hook::HookPort;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::i18n::prompt::sections::{agent_roles_footer, agent_roles_header};
@@ -18,7 +18,7 @@ pub async fn build_static_prompt(
         .map(|snap| snap.models().guidance.clone())
         .unwrap_or_default();
     let language = config_file.map(|snap| snap.language()).unwrap_or("en");
-    let instructions_hook = bootstrap::InstructionsLoadedHook {
+    let instructions_hook = PromptInstructionsHook {
         hooks: hook_port.clone(),
         workspace_root: cwd.to_path_buf(),
     };

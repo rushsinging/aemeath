@@ -23,15 +23,6 @@ impl AgentRunner for StubRunner {
             result: request.prompt.to_string(),
         }
     }
-
-    async fn complete(
-        &self,
-        prompt: &str,
-        _system: &str,
-        _cancellation: Arc<dyn crate::domain::CancellationSignal>,
-    ) -> String {
-        prompt.to_string()
-    }
 }
 
 fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
@@ -259,14 +250,6 @@ async fn test_agent_tool_text_fallback_when_output_empty() {
             AgentRunTerminal::Completed {
                 result: String::new(),
             }
-        }
-        async fn complete(
-            &self,
-            _prompt: &str,
-            _system: &str,
-            _cancellation: Arc<dyn crate::domain::CancellationSignal>,
-        ) -> String {
-            String::new()
         }
     }
 

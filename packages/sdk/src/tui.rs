@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 pub type EventFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
-pub type QueueFuture<'a> = Pin<Box<dyn Future<Output = Option<Vec<String>>> + Send + 'a>>;
 pub type InputEventFuture<'a> = Pin<Box<dyn Future<Output = Vec<ChatInputEvent>> + Send + 'a>>;
 
 /// runtime 返回给 TUI 的 chat handle。
@@ -24,11 +23,6 @@ pub trait ChatEventSink<Event>: Clone + Send + Sync + 'static {
     fn send_event<'a>(&'a self, event: Event) -> EventFuture<'a>;
 
     fn try_send_event(&self, event: Event);
-}
-
-/// runtime 请求 TUI drain 排队输入的端口。
-pub trait QueueDrainPort: Send + Sync + 'static {
-    fn drain_queued_input<'a>(&'a self) -> QueueFuture<'a>;
 }
 
 pub type InputEventOptFuture<'a> =

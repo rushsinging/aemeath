@@ -9,7 +9,7 @@ pub(crate) async fn build_client_from_cli_args(
     composition::app::build_agent_client(args).await
 }
 
-fn initial_tui_resume_projection(
+fn initial_tui_resume_view(
     bootstrap: &composition::app::AgentClientBootstrap,
 ) -> Option<&sdk::SessionResumeView> {
     bootstrap.startup_resume.as_ref()
@@ -70,7 +70,7 @@ pub(crate) async fn run_chat(args: Args) {
             return;
         }
 
-        let startup_resume = initial_tui_resume_projection(&bootstrap).cloned();
+        let startup_resume = initial_tui_resume_view(&bootstrap).cloned();
         let mut app =
             crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
         app.agent_client = Some(bootstrap.client.clone());
@@ -105,15 +105,15 @@ pub(crate) async fn run_chat(args: Args) {
         );
         if let Some(resume) = startup_resume {
             crate::tui::log_debug!(
-                "resume_lifecycle boundary=cli_to_tui stage=startup_projection_received session_id={} steps={} messages={}",
+                "resume_lifecycle boundary=cli_to_tui stage=startup_view_received session_id={} steps={} messages={}",
                 resume.session_id,
                 resume.steps.len(),
                 resume.steps.iter().map(|step| step.messages.len()).sum::<usize>()
             );
-            app.resume_startup_projection(resume);
+            app.restore_startup_session(resume);
         } else {
             crate::tui::log_debug!(
-                "resume_lifecycle boundary=cli_to_tui stage=startup_projection_absent session_id={}",
+                "resume_lifecycle boundary=cli_to_tui stage=startup_view_absent session_id={}",
                 app.session.session_id()
             );
         }

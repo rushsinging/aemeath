@@ -5,13 +5,26 @@ use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::update::msg::TuiMsg;
 
 pub(crate) enum ExpectedEffect {
-    SendUserMessage { text: String, replies: Vec<TuiMsg> },
-    CancelCurrentRun { replies: Vec<TuiMsg> },
+    SendUserMessage {
+        text: String,
+        replies: Vec<TuiMsg>,
+    },
+    CancelCurrentRun {
+        replies: Vec<TuiMsg>,
+    },
     ReadClipboardImage,
-    ProcessImageFile { path: String },
+    ProcessImageFile {
+        path: String,
+    },
     QuitApplication,
-    ReplyInteraction { replies: Vec<TuiMsg> },
-    CancelInteraction { replies: Vec<TuiMsg> },
+    ReplyInteraction {
+        request_id: Option<String>,
+        reply: Option<crate::tui::model::conversation::interaction::UiInteractionReply>,
+        replies: Vec<TuiMsg>,
+    },
+    CancelInteraction {
+        replies: Vec<TuiMsg>,
+    },
 }
 
 #[derive(Default)]
@@ -79,9 +92,23 @@ impl ScriptedEffectDriver {
                 ) => assert_eq!(path, &expected, "image path mismatch"),
                 (Effect::QuitApplication, ExpectedEffect::QuitApplication) => {}
                 (
-                    Effect::ReplyInteraction { .. },
-                    ExpectedEffect::ReplyInteraction { replies: scripted },
+                    Effect::ReplyInteraction { request_id, reply },
+                    ExpectedEffect::ReplyInteraction {
+                        request_id: expected_request_id,
+                        reply: expected_reply,
+                        replies: scripted,
+                    },
                 ) => {
+                    if let Some(expected_request_id) = expected_request_id {
+                        assert_eq!(
+                            request_id.as_str(),
+                            expected_request_id,
+                            "interaction request id mismatch"
+                        );
+                    }
+                    if let Some(expected_reply) = expected_reply {
+                        assert_eq!(reply, &expected_reply, "interaction reply payload mismatch");
+                    }
                     replies.extend(scripted);
                 }
                 (

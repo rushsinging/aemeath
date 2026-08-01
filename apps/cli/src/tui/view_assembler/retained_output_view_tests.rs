@@ -159,6 +159,9 @@ fn dismiss_removes_only_the_active_ask_user_root() {
         text: "stable".to_string(),
     });
     model.apply(ShowAskUserBatch {
+        request_id: crate::tui::model::conversation::interaction::UiInteractionRequestId::from(
+            "question-1",
+        ),
         slots: vec![AskUserSlot {
             id: "question-1".to_string(),
             question_seq: 0,

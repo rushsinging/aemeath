@@ -1,4 +1,4 @@
-use runtime::application::reflection::ReflectionError;
+use runtime::ReflectionError;
 
 #[test]
 fn provider_failures_have_stable_display() {

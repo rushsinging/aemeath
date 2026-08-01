@@ -98,10 +98,12 @@ impl RunStep {
             })
     }
 
+    #[cfg(test)]
     pub fn id(&self) -> &RunStepId {
         &self.id
     }
 
+    #[cfg(test)]
     pub fn status(&self) -> RunStepStatus {
         self.status
     }
@@ -110,6 +112,7 @@ impl RunStep {
         self.invocation.as_ref()
     }
 
+    #[cfg(test)]
     pub fn tool_calls(&self) -> &[RunToolCall] {
         &self.tool_calls
     }

@@ -95,35 +95,22 @@ enum MemoryStorageErrorKind {
 - **MUST** `search` 按 query 的 `include_archive` 跨 active + archive 检索且不隐式修改 access_count；需要访问统计时必须另发显式、fallible mutation。
 - **MUST** `compact` 跳过 pinned 条目；`archive` / `compact` 对每个受影响 layer 的 active + archive 成对提交，**NEVER** 暴露只移动一边的半归档。
 
-## 2. ReflectionPromptPort
+## 2. ReflectionWorkflow
 
-`ReflectionPromptPort` 把 Reflection 的领域逻辑暴露给 Runtime 编排。Memory BC 自身不调 LLM。
+`ReflectionWorkflow` 是 Memory application façade：Runtime 提供消息快照、Provider 原始响应、token usage 与执行 identity；Memory 在 owner 内统一完成 prompt 构建、output parsing、对当前 `MemoryPort` 的 apply，以及 Running/terminal history 物化。Memory BC 自身不调 LLM。
 
 ```rust
-trait ReflectionPromptPort: Send + Sync {
-    /// 构建反思 prompt（纯函数）
-    fn build_prompt(
-        &self,
-        project_memory: &str,
-        recent_summary: &str,
-        lang: &str,
-    ) -> String;
+struct ReflectionWorkflow;
 
-    /// 解析 LLM 返回的 JSON
-    fn parse_output(&self, raw: &str) -> Result<ReflectionOutput, ReflectionError>;
-
-    /// 领域内部格式化（例如持久化/兼容文本）；不构成 TUI 展示契约
-    fn format_output(&self, output: &ReflectionOutput, lang: &str) -> String;
-
-    /// 纯格式化当前 Run 经 MemoryPort 取得的项目记忆
-    fn format_memory_summary(&self, entries: &[MemoryEntry]) -> String;
-
-    /// 从消息列表构建对话摘要
-    fn recent_messages_summary(&self, messages: &[Message], max_chars: usize) -> String;
+impl ReflectionWorkflow {
+    fn build_prompt(messages: &[Message], lang: &str, memory: &dyn MemoryPort) -> String;
+    async fn append_running(history: &dyn ReflectionHistoryStore, identity: &ReflectionExecutionIdentity) -> Result<(), ReflectionWorkflowError>;
+    async fn complete(history: &dyn ReflectionHistoryStore, memory: &dyn MemoryPort, identity: &ReflectionExecutionIdentity, raw_response: &str, lang: &str, auto_apply: bool, token_usage: ReflectionTokenUsage, duration_ms: u64) -> Result<ReflectionExecutionResult, ReflectionWorkflowError>;
+    async fn record_failure(history: &dyn ReflectionHistoryStore, identity: &ReflectionExecutionIdentity, category: ReflectionErrorCategory, duration_ms: u64) -> Result<(), ReflectionWorkflowError>;
 }
 ```
 
-`format_output` 不是交付层协议。Runtime 后台任务完成后 **NEVER** 主动把该文本或完整 `ReflectionOutput` 投影到 TUI；交付层只能显式查询下面的安全 history projection。
+Runtime **MUST NOT** 分别调用 `ReflectionEngine::parse_output`、`MemoryPort::apply_reflection` 与 `ReflectionHistoryStore::upsert` 重建第二套业务顺序。Provider invoke、单槽并发、cancel、timeout 与 drain 仍归 Runtime。
 
 ## 3. Reflection history 端口
 
@@ -152,7 +139,7 @@ trait ReflectionHistoryStore: ReflectionHistoryQuery {
 
 ### 为什么不合并到 MemoryPort
 
-1. **职责分离**：MemoryPort 管记忆 CRUD、检索与对当前实例应用 Reflection；ReflectionPromptPort 只做纯 prompt / parse / format。Runtime 必须把当前 Run 的同一 `MemoryPort` Arc 用于检索和 `apply_reflection`，纯 Reflection port **NEVER** 隐式选择 store。
+1. **职责分离**：MemoryPort 管记忆 CRUD/检索与 mutation；ReflectionWorkflow 独占 prompt → parse → apply → history 的 Memory 业务顺序。Runtime 必须把当前 Run 的同一 `MemoryPort` Arc 交给该 workflow，**NEVER** 在 Runtime 复制该顺序。
 2. **Sub 隔离**：Sub Run 装配 `NoOpMemory`（MemoryPort 的空实现），但 Reflection 在 Sub 中完全不触发——不需要 NoOpReflection。
 3. **演进独立**：检索升级（BM25/embedding）和 Reflection prompt 优化可以独立演进。
 
@@ -245,10 +232,6 @@ enum MemoryOpenerError {
 
 **`CorruptTransaction` 区分**：`MemoryOpenerError::CorruptTransaction` 表示 open / recovery 期间发现的既存 storage 损坏（journal crash residue、checksum 失败等）——此时尚无 transaction 运行，**NEVER** 适用 mutation 路径的 `Err = NotCommitted` 语义。该错误与 `MemoryStorageErrorKind::CorruptTransaction`（mutation 路径 storage 返回的 crash-protocol corruption）使用同名 `CorruptTransaction` 全链一致，但发生阶段不同：前者阻止 service 启动（fail closed），后者导致当次 mutation 失败并保留旧 state。领域 JSON/schema 校验失败使用 `MemoryOpenerError::CorruptDataset`，**NEVER** 与 storage crash-protocol corruption 混为一类。
 
-fn assemble_reflection(config: &ConfigSnapshot) -> Arc<dyn ReflectionPromptPort> {
-    Arc::new(ReflectionEngine::new(config.reflection_config()))
-}
-
 fn assemble_reflection_history(
     storage: Arc<dyn AtomicDatasetPort>,
     project: ProjectMemoryKey,
@@ -307,7 +290,7 @@ fn assemble_reflection_history(
 
 ## 8. 机械边界验收
 
-Target 要求机械守卫证明：production Memory wiring 只由 Composition Root 发起；业务调用方只接收 `MemoryPort` / `ReflectionPromptPort`，不能直接构造或获得 `MemoryService` / Storage adapter；Memory 不能直接使用文件 I/O。具体守卫脚本、启用状态、临时白名单与替换责任只见 [Architecture Guards](../../03-engineering/01-architecture-guards.md) 和 [Migration Governance](../../03-engineering/03-migration-governance.md)，本文 **NEVER** 声称尚未登记的规则已在 CI / Stop 生效。
+Target 要求机械守卫证明：production Memory wiring 只由 Composition Root 发起；业务调用方只接收 `MemoryPort` / `ReflectionWorkflow` / history ports，不能直接构造或获得 `MemoryService` / Storage adapter；Memory 不能直接使用文件 I/O。具体守卫脚本、启用状态、临时白名单与替换责任只见 [Architecture Guards](../../03-engineering/01-architecture-guards.md) 和 [Migration Governance](../../03-engineering/03-migration-governance.md)，本文 **NEVER** 声称尚未登记的规则已在 CI / Stop 生效。
 
 ## 9. 相关文档
 
@@ -332,7 +315,8 @@ Target 要求机械守卫证明：production Memory wiring 只由 Composition Ro
 | 2026-07-19 | #900 删除 Composition 第二 active Memory open，将 concrete dataset store/project opener/service 收回 Memory crate 内，生产仅经 Main Session `DatasetMemoryOpener` 返回 `MemoryPort` | #900 |
 | 2026-07-18 | #899 实现 Memory-owned durable Reflection history append/query；冻结 `/reflect [limit]` 仅安全摘要、正文不进入 TUI/日志 | #899 |
 | 2026-07-18 | #897 落地 NoOpMemory、Composition active Memory prepare/install 与 Disabled/Shared 派生；Main 启动按 ProjectIdentity/committed Config 单次 open，Tool 通过同一 MemoryPort Arc 操作 | #897 |
-| 2026-07-12 | 初稿：MemoryPort trait、ReflectionPromptPort、NoOpMemory、Storage 边界、Composition Root、现状缺口 M1-M10 | #789 |
+| 2026-07-25 | 将 prompt/parse/apply/history 顺序收口为 Memory-owned `ReflectionWorkflow`，Runtime 只保留 Provider 调用与任务生命周期 | #1397 |
+| 2026-07-12 | 初稿：MemoryPort trait、Reflection prompt 规则、NoOpMemory、Storage 边界、Composition Root、现状缺口 M1-M10 | #789 |
 | 2026-07-17 | #896 落地 MemoryService candidate/CAS/receipt、Global/Project 独立 dataset revision、Memory-owned AtomicDataset adapter、v2 project key 与 LegacyMemorySource/open migration seam | #896 |
 | 2026-07-14 | 将构造守卫语言对齐 capability-first 组织，移除固定横向层命名 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 增加 DatasetRevision CAS、committed receipt 发布语义与跨实例冲突刷新，移除 Current 路径和未登记守卫声明 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

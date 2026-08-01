@@ -21,7 +21,7 @@ Memory BC **不拥有**：记忆在 Context Window 中的注入位置、token �
 1. **Memory 是数据 BC，不是状态机**：Memory 没有执行生命周期状态机；它守护 MemoryEntry 聚合的局部不变量（id 唯一、layer 不可变、access_count 单调递增、outdated 不可逆）。
 2. **双层记忆**：Global（跨项目通用偏好）+ Project（项目特定决策/模式/陷阱）。两层独立存储、独立检索、统一排序。
 3. **检索与注入分离**：Memory BC 负责 filtering、scoring 与 relevance ranking；Context Management 负责 render、注入时机、位置、预算与跨轮去重。
-4. **Reflection 规则归 Memory，实例由 active Run 绑定**：prompt 模板、output schema 与 parsing 是纯 `ReflectionPromptPort`；apply 规则由当前 Run 的同一 `MemoryPort::apply_reflection` 执行。触发时机和 LLM 调用编排归 Runtime，Memory BC **不依赖** ProviderPort，也不隐式选择 store。
+4. **Reflection workflow 归 Memory，Provider 调用归 Runtime**：Memory-owned `ReflectionWorkflow` 统一构建 prompt、解析 output、应用当前 Run 的同一 `MemoryPort` 并提交 history；Runtime 只判定触发、调用 `ProviderPort` 和管理单槽任务生命周期。Memory BC **不依赖** ProviderPort，也不隐式选择 store。
 5. **去重基于 Jaccard 相似度**：写入时与同 layer 条目比较，超过 `similarity_threshold` 则合并 tags + touch，不新增。
 6. **淘汰基于评分**：pinned 条目不可淘汰；其余按 `eviction_score`（recency + access_count）排序，取最低分候选归档。
 7. **Archive 不删除**：归档条目移到 `_archive.json`，保留可审计性；search 可跨 active + archive 检索。
@@ -40,7 +40,7 @@ Memory 采用 Hexagonal + Clean 组织（`domain ← application ← ports ← a
 
 ```text
 src/
-├── lib.rs                         # 窄 façade：MemoryPort / ReflectionPromptPort PL + composition-only wiring
+├── lib.rs                         # 窄 façade：MemoryPort / ReflectionWorkflow PL + composition-only wiring
 ├── domain/                        # 领域策略、不变量、Published Language
 │   ├── memory_entry.rs             #   MemoryEntry 与跨用例共享不变量
 │   ├── write.rs                    #   add / update / pin / outdated + CAS retry 策略
@@ -51,30 +51,31 @@ src/
 │   ├── write.rs                    #   write 用例编排
 │   ├── retrieve.rs                 #   retrieve 用例编排
 │   ├── compact.rs                  #   compact 用例编排
-│   └── reflection.rs               #   reflection 用例编排（仅在内部用例已独立变化时展开子模块）
+│   └── reflection_workflow.rs      #   prompt / parse / apply / history 用例编排
 ├── ports/                         # 对外端口定义
 │   ├── memory_port.rs              #   MemoryPort（Memory-owned OHS）
-│   └── reflection_prompt_port.rs   #   ReflectionPromptPort（Memory-owned OHS）
+│   └── reflection_history.rs       #   ReflectionHistoryQuery / Store
 └── adapters/                      # 技术实现、外部 detail
     └── storage_integration.rs      #   Storage OHS integration code（dataset journal / commit）
 ```
 
-crate 根 façade 发布 `MemoryPort`、`ReflectionPromptPort` 与必要 PL。Storage OHS 的 integration code 归 `adapters/`。若某用例退化为单一紧密行为，**MUST** 合并回相邻 owner，**NEVER** 为保留目录对称制造空壳。
+crate 根 façade 发布 `MemoryPort`、`ReflectionWorkflow` 与必要 PL。Storage OHS 的 integration code 归 `adapters/`。若某用例退化为单一紧密行为，**MUST** 合并回相邻 owner，**NEVER** 为保留目录对称制造空壳。
 
 ## 4. 对外端口
 
 | 端口 | 消费方 | 职责 |
 |---|---|---|
 | `MemoryPort` | Context Management / Runtime Reflection / MemoryTool / CommandRouter | 返回 typed search envelope、注入 top-N、CRUD、归档、compact、stats |
-| `ReflectionPromptPort` | Runtime（reflection 编排）| 构建 prompt、格式化 memory / recent summary、parse / format output（全为纯逻辑） |
+| `ReflectionWorkflow` | Runtime（reflection 执行）| Memory-owned prompt 构建、output parse、apply 与 terminal history 提交 |
+| `ReflectionHistoryQuery/Store` | Runtime 查询与任务生命周期 | 安全摘要查询、Running/terminal durable facts |
 
-`MemoryPort` 覆盖记忆的全部操作（含对当前实例 apply reflection）；`ReflectionPromptPort` 只暴露纯 prompt / parse / format。Memory BC 自身不调 LLM。
+`MemoryPort` 覆盖记忆的全部操作；`ReflectionWorkflow` 把 prompt / parse / apply / history 的业务顺序收口在 Memory application。Memory BC 自身不调 LLM，Runtime 也不再分别拼接这些 Memory-owned步骤。
 
 ## 5. 与其他 BC 的关系
 
 ### Agent Runtime
 
-Context Management 通过 `MemoryPort` 检索 top-N 记忆并注入 Context Window；Runtime 通过纯 `ReflectionPromptPort` 构建 / 解析反思，并让 shared session lease 下绑定的同一 MemoryPort Arc 执行 apply。Runtime 负责调 ProviderPort，后台 Reflection job **MUST** 持 lease 到完成或取消收口。
+Context Management 通过 `MemoryPort` 检索 top-N 记忆并注入 Context Window；Runtime 调用 Memory-owned `ReflectionWorkflow` 构建 prompt、解析 Provider 返回并提交 apply/history，但 Provider 调用及后台任务 cancel/timeout/drain 仍由 Runtime 拥有。后台 Reflection job **MUST** 持 lease 到完成或取消收口。
 
 ### Context Management
 
@@ -110,7 +111,7 @@ Slash Command 的 `SnapshotQuery`（`/memory` 查看列表）和 `ApplicationCon
 | [01-domain-model.md](01-domain-model.md) | MemoryEntry 聚合、Layer/Category/Source、不变量、scoring/dedup/eviction/archive |
 | [02-retrieval-and-injection.md](02-retrieval-and-injection.md) | 检索策略、BM25 升级路径(#551)、注入格式、similarity_threshold 双重用途 |
 | [03-reflection.md](03-reflection.md) | ReflectionEngine、MemorySuggestion、触发条件、prompt/output/apply、与 Runtime 职责边界 |
-| [04-ports-and-adapters.md](04-ports-and-adapters.md) | MemoryPort / ReflectionPromptPort、NoOpMemory、Storage 边界、project-aware Composition 装配 |
+| [04-ports-and-adapters.md](04-ports-and-adapters.md) | MemoryPort / ReflectionWorkflow / ReflectionHistoryStore、NoOpMemory、Storage 边界、project-aware Composition 装配 |
 
 ## 8. 相关文档
 

@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Runtime Run 生命周期",
+    "subtitle": "活动主轨、交互等待、取消收敛与互斥业务终态",
+    "output": "index.html",
+    "animation": "none",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "active-rail", "label": "活动主轨", "focus": ["created", "context", "model", "response", "completed"], "note": "展示一个 Run 从创建到业务成功的主状态轨。" },
+      { "id": "wait-resume", "label": "等待与恢复", "focus": ["response", "approval", "tools"], "note": "交互等待不是终态，回答后恢复到 Tool 执行。" },
+      { "id": "terminal-exits", "label": "控制与终态", "focus": ["cancelling", "cancelled", "failed", "terminated"], "note": "取消完成资源收敛后才能进入已取消终态。" }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "Active phases" },
+    { "id": "waiting", "label": "Interaction" },
+    { "id": "control", "label": "Convergence" },
+    { "id": "terminal", "label": "Terminal exits" }
+  ],
+  "states": [
+    { "id": "created", "type": "start", "label": "Created", "sublabel": "Run ready", "lane": "main", "col": 0, "step": "01" },
+    { "id": "context", "type": "active", "label": "Context", "sublabel": "prepare window", "lane": "main", "col": 1, "step": "02" },
+    { "id": "model", "type": "active", "label": "Model", "sublabel": "invoke + stream", "lane": "main", "col": 2, "step": "03" },
+    { "id": "response", "type": "decision", "label": "Response", "sublabel": "text or tools", "lane": "main", "col": 3, "step": "04" },
+    { "id": "completed", "type": "success", "label": "Completed", "sublabel": "business success", "lane": "main", "col": 4, "step": "05" },
+    { "id": "approval", "type": "waiting", "label": "Await Input", "sublabel": "continuation", "lane": "waiting", "col": 1, "tag": "wait", "width": 76 },
+    { "id": "tools", "type": "active", "label": "Tools", "sublabel": "supervised", "lane": "waiting", "col": 2, "tag": "active", "width": 76 },
+    { "id": "cancelling", "type": "failure", "label": "Cancelling", "sublabel": "cleanup + receipt", "lane": "control", "col": 0, "yOffset": 54, "tag": "protocol" },
+    { "id": "failed", "type": "failure", "label": "Failed", "sublabel": "authoritative", "lane": "terminal", "col": 2, "tag": "terminal" },
+    { "id": "cancelled", "type": "failure", "label": "Cancelled", "sublabel": "cleanup confirmed", "lane": "terminal", "col": 1, "tag": "terminal" },
+    { "id": "terminated", "type": "failure", "label": "Terminated", "sublabel": "termination done", "lane": "terminal", "col": 0, "tag": "terminal" }
+  ],
+  "transitions": [
+    { "id": "created_context", "from": "created", "to": "context", "variant": "emphasis" },
+    { "id": "context_model", "from": "context", "to": "model", "variant": "emphasis", "route": "straight", "fromSide": "right", "toSide": "left" },
+    { "id": "model_response", "from": "model", "to": "response", "variant": "emphasis", "route": "straight", "fromSide": "right", "toSide": "left" },
+    { "id": "response_completed", "from": "response", "to": "completed", "variant": "emphasis", "route": "straight", "fromSide": "right", "toSide": "left" },
+    { "id": "response_approval", "from": "response", "to": "approval", "variant": "security" },
+    { "id": "approval_tools", "from": "approval", "to": "tools", "variant": "emphasis", "route": "straight", "fromSide": "right", "toSide": "left" },
+    { "id": "tools_response", "from": "tools", "to": "response", "variant": "dashed" },
+    { "id": "context_cancel", "from": "context", "to": "cancelling", "variant": "security" },
+    { "id": "cancel_cancelled", "from": "cancelling", "to": "cancelled", "variant": "security" },
+    { "id": "tools_failed", "from": "tools", "to": "failed", "variant": "security" },
+    { "id": "cancelling_terminated", "from": "cancelling", "to": "terminated", "variant": "security" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "活动主轨", "items": ["Run 从创建、上下文、模型进入响应判断", "文本响应可直接形成成功终态", "Tool 分支完成后回到响应阶段继续推进"] },
+    { "dot": "amber", "title": "等待不是终态", "items": ["审批或用户交互保存 typed continuation", "恢复后进入受监督 Tool round", "等待期间不会投影为 Completed"] },
+    { "dot": "rose", "title": "权威终态", "items": ["Completed、Failed、Cancelled、Terminated 互斥", "Cancelled 只在 cleanup 与 receipt 完成后成立", "Runtime 生命周期完成不自动等于业务成功"] }
+  ]
+}

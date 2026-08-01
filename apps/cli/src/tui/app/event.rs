@@ -175,7 +175,8 @@ pub enum AppEvent {
     },
     /// Sub-agent progress update (streams per-turn output to TUI)
     AgentProgress {
-        context: UiTurnContext,
+        source_context: UiTurnContext,
+        attachment_context: UiTurnContext,
         tool_id: sdk::ids::ToolCallId,
         event: sdk::AgentProgressEventView,
     },

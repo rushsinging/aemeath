@@ -4,6 +4,7 @@
 
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:memory";
 mod adapters;
+mod application;
 mod codec;
 mod domain;
 mod noop;
@@ -18,16 +19,21 @@ pub mod api {
         MemoryPolicy, MemoryPort, MemoryQuery, MemoryRetrievalMode, MemorySearchHit,
         MemorySearchQuery, MemorySearchResult, MemorySource, MemoryStats, MemorySuggestion,
         NoOpMemory, ProjectMemoryKey, ReflectionApplyResult, ReflectionApplyStatus,
-        ReflectionEngine, ReflectionError, ReflectionErrorCategory, ReflectionHistoryQuery,
-        ReflectionHistoryStore, ReflectionMessage, ReflectionOutput, ReflectionPromptPort,
-        ReflectionRecord, ReflectionResult, ReflectionSafeSummary, ReflectionStatus,
-        ReflectionTokenUsage, ReflectionTrigger, WriteResult,
+        ReflectionEngine, ReflectionError, ReflectionErrorCategory, ReflectionExecutionIdentity,
+        ReflectionExecutionResult, ReflectionHistoryQuery, ReflectionHistoryStore,
+        ReflectionMessage, ReflectionOutput, ReflectionRecord, ReflectionResult,
+        ReflectionSafeSummary, ReflectionStatus, ReflectionTokenUsage, ReflectionTrigger,
+        ReflectionWorkflow, ReflectionWorkflowError, WriteResult,
     };
 }
 
 pub use adapters::{
     AtomicDatasetReflectionHistoryStore, DatasetMemoryOpener, FileLegacyMemorySourceFactory,
     InMemoryMemory, MemoryPolicy,
+};
+pub use application::{
+    ReflectionExecutionIdentity, ReflectionExecutionResult, ReflectionWorkflow,
+    ReflectionWorkflowError,
 };
 pub use domain::*;
 pub use noop::NoOpMemory;
