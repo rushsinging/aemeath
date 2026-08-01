@@ -6,6 +6,28 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 
+struct ParentEnvironmentGuard {
+    key: String,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl ParentEnvironmentGuard {
+    fn set(key: String, value: &str) -> Self {
+        let previous = std::env::var_os(&key);
+        std::env::set_var(&key, value);
+        Self { key, previous }
+    }
+}
+
+impl Drop for ParentEnvironmentGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var(&self.key, value),
+            None => std::env::remove_var(&self.key),
+        }
+    }
+}
+
 fn request(command: impl Into<String>) -> ProcessRequest {
     ProcessRequest {
         command: command.into(),
@@ -33,6 +55,27 @@ async fn normal_exit_preserves_status_and_bounded_output() {
     assert_eq!(output.stderr, b"warning");
     assert!(!output.stdout_truncated);
     assert!(!output.stderr_truncated);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn child_sees_only_request_environment() {
+    let inherited_key = format!("AEMEATH_HOOK_UNAPPROVED_{}", uuid::Uuid::new_v4().simple());
+    let _guard = ParentEnvironmentGuard::set(inherited_key.clone(), "parent-secret");
+    let approved_key = "AEMEATH_HOOK_TEST_APPROVED";
+    let mut process_request = request(format!(
+        "printf '%s|%s' \"${{{inherited_key}-missing}}\" \"${{{approved_key}-missing}}\""
+    ));
+    process_request
+        .env
+        .insert(approved_key.to_string(), "approved-value".to_string());
+
+    let output = ProcessDriver
+        .execute(process_request, &CancellationToken::new())
+        .await
+        .expect("隔离环境下命令应正常退出");
+
+    assert_eq!(output.stdout, b"missing|approved-value");
 }
 
 #[cfg(unix)]

@@ -17,6 +17,16 @@ use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSn
 #[async_trait]
 pub trait CanonicalSessionWriter: Send + Sync {
     async fn save(&self, session: &CanonicalSession) -> Result<(), String>;
+
+    async fn save_tool_receipt(
+        &self,
+        session_id: &str,
+        revision: u64,
+        receipt: &crate::domain::ToolCallReceipt,
+    ) -> Result<(), String> {
+        let _ = (session_id, revision, receipt);
+        Err("此 CanonicalSessionWriter 未实现 Tool receipt ledger".to_string())
+    }
 }
 
 pub struct AtomicBlobCanonicalSessionWriter {
@@ -39,7 +49,30 @@ impl CanonicalSessionWriter for AtomicBlobCanonicalSessionWriter {
                 .map_err(|error| error.to_string())?;
         let bytes = crate::domain::session::SessionCodec::encode(session)
             .map_err(|error| error.to_string())?;
-        store.write(&bytes).await.map_err(|error| error.to_string())
+        store
+            .write(&bytes)
+            .await
+            .map_err(|error| error.to_string())?;
+        crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
+            Arc::clone(&self.blob),
+            &session.id,
+        )?
+        .delete()
+        .await
+    }
+
+    async fn save_tool_receipt(
+        &self,
+        session_id: &str,
+        revision: u64,
+        receipt: &crate::domain::ToolCallReceipt,
+    ) -> Result<(), String> {
+        crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
+            Arc::clone(&self.blob),
+            session_id,
+        )?
+        .save(revision, receipt)
+        .await
     }
 }
 
@@ -48,6 +81,15 @@ pub struct NoOpCanonicalSessionWriter;
 #[async_trait]
 impl CanonicalSessionWriter for NoOpCanonicalSessionWriter {
     async fn save(&self, _session: &CanonicalSession) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn save_tool_receipt(
+        &self,
+        _session_id: &str,
+        _revision: u64,
+        _receipt: &crate::domain::ToolCallReceipt,
+    ) -> Result<(), String> {
         Ok(())
     }
 }
@@ -285,14 +327,14 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
-        self.writer
-            .save(&candidate)
-            .await
-            .map_err(ToolReceiptMutationError::Storage)?;
         let receipt = candidate
             .tool_receipt(&mutation)
             .expect("advanced receipt must exist")
             .clone();
+        self.writer
+            .save_tool_receipt(&candidate.id, candidate.revision, &receipt)
+            .await
+            .map_err(ToolReceiptMutationError::Storage)?;
         self.publish_generation(&current, candidate)
             .map_err(ToolReceiptMutationError::Storage)?;
         Ok(ToolReceiptMutationReceipt {

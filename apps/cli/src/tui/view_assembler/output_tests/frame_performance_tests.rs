@@ -1,4 +1,4 @@
-use super::super::OutputViewAssembler;
+use super::super::assemble_output_view;
 use crate::tui::model::conversation::intent::AppendUserMessage;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::render::performance::capture;
@@ -12,16 +12,9 @@ fn assemble_records_source_timeline_items_and_output_roots() {
         });
     }
 
-    let (view_model, metrics) = capture(|| {
-        OutputViewAssembler::assemble_from_conversation(
-            &conversation,
-            conversation.revision(),
-            None,
-        )
-    });
+    let (view_model, metrics) = capture(|| assemble_output_view(&conversation, None));
 
     assert_eq!(view_model.roots.len(), 7);
-    assert_eq!(metrics.assemble_calls, 1);
-    assert_eq!(metrics.assemble_source_items, 7);
-    assert_eq!(metrics.assemble_output_roots, 7);
+    assert_eq!(metrics.retained_view_sync_calls, 0);
+    assert_eq!(metrics.assemble_calls, 0);
 }

@@ -1,15 +1,10 @@
-//! Dispatcher 行为测试（#924 TDD 红灯）。
+//! Dispatcher 行为测试。
 //!
 //! 对应设计：`docs/design/02-modules/hook/README.md` §4 §6 §10 与
 //! `01-run-loop-integration.md` §1 §2。
 //!
-//! 本文件仅新增，不改 runtime / shared config。为避免依赖真实难制造的
-//! Wait/IO 故障，使用私有 `Executor` port + `Scripted` fake 回放；
-//! 生产 `ProcessDriver` 适配 `Executor` 由后续提交承接。
-//!
-//! **当前阶段（红灯）**：`Dispatcher::dispatch` 为空实现（返回 `proceed()`），
-//! 永不调用 executor、不排序、不短路、不重试、不合成 StopFailure。
-//! 因此以下测试应**全部失败**。后续提交在测试驱动下逐个转绿。
+//! 使用私有 `Executor` port + `Scripted` fake 回放难以稳定制造的 Wait/IO 故障，
+//! 同时验证 matcher、排序、短路、重试、StopFailure 与按 invocation 环境构造。
 
 #![cfg(test)]
 
@@ -22,7 +17,7 @@ use crate::domain::outcome::{
     HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecutionStatus, HookReason,
 };
 use crate::domain::subscription::{HookFailurePolicy, HookMatcher, HookSubscription};
-use crate::ports::HookPort;
+use crate::ports::{HookDispatchContext, HookPort};
 
 use super::{Dispatcher, ExecutionFault, ScriptStep, Scripted};
 
@@ -43,6 +38,90 @@ fn stop(turns: usize) -> HookInvocation {
 
 fn sub(point: HookPoint, command: &str) -> HookSubscription {
     HookSubscription::new(point, command)
+}
+
+#[tokio::test]
+async fn consecutive_dispatches_use_only_current_workspace_and_payload_environment() {
+    let subscriptions = vec![
+        sub(HookPoint::PreToolUse, "tool"),
+        sub(HookPoint::Stop, "stop"),
+    ];
+    let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
+    let dispatcher = Dispatcher::with_scripted(subscriptions, scripted.clone());
+    let first_workspace = std::path::PathBuf::from("/tmp/aemeath-workspace-a");
+    let second_workspace = std::path::PathBuf::from("/tmp/aemeath-workspace-b");
+
+    dispatcher
+        .dispatch_at(
+            pre_tool_use("Bash"),
+            HookDispatchContext::new(&first_workspace),
+            &CancellationToken::new(),
+        )
+        .await;
+    dispatcher
+        .dispatch_at(
+            stop(7),
+            HookDispatchContext::new(&second_workspace),
+            &CancellationToken::new(),
+        )
+        .await;
+
+    let calls = scripted.calls();
+    assert_eq!(calls[0].cwd, first_workspace);
+    assert_eq!(calls[0].env["AEMEATH_HOOK_EVENT"], "\"PreToolUse\"");
+    assert_eq!(
+        calls[0].env["AEMEATH_PROJECT_DIR"],
+        "/tmp/aemeath-workspace-a"
+    );
+    assert_eq!(
+        calls[0].env["CLAUDE_PROJECT_DIR"],
+        "/tmp/aemeath-workspace-a"
+    );
+    assert_eq!(calls[0].env["AEMEATH_TOOL_NAME"], "Bash");
+    assert!(!calls[0].env.contains_key("AEMEATH_STOP_TURNS"));
+
+    assert_eq!(calls[1].cwd, second_workspace);
+    assert_eq!(calls[1].env["AEMEATH_HOOK_EVENT"], "\"Stop\"");
+    assert_eq!(
+        calls[1].env["AEMEATH_PROJECT_DIR"],
+        "/tmp/aemeath-workspace-b"
+    );
+    assert_eq!(calls[1].env["AEMEATH_STOP_TURNS"], "7");
+    assert!(!calls[1].env.contains_key("AEMEATH_TOOL_NAME"));
+    assert!(!calls[1].env.contains_key("AEMEATH_TOOL_INPUT"));
+}
+
+#[tokio::test]
+async fn stop_failure_rebuilds_environment_without_stop_only_variables() {
+    let subscriptions = vec![
+        sub(HookPoint::Stop, "stop"),
+        sub(HookPoint::StopFailure, "observe"),
+    ];
+    let scripted = Scripted::from_steps([
+        ScriptStep::fault(ExecutionFault::Timeout),
+        ScriptStep::fault(ExecutionFault::Timeout),
+        ScriptStep::fault(ExecutionFault::Timeout),
+        ScriptStep::ok_exit(0, ""),
+    ]);
+    let dispatcher = Dispatcher::with_scripted(subscriptions, scripted.clone());
+
+    dispatcher
+        .dispatch_at(
+            stop(9),
+            HookDispatchContext::new("/tmp/aemeath-stop-workspace"),
+            &CancellationToken::new(),
+        )
+        .await;
+
+    let calls = scripted.calls();
+    assert_eq!(calls.len(), 4);
+    assert_eq!(calls[3].env["AEMEATH_HOOK_EVENT"], "\"StopFailure\"");
+    assert_eq!(
+        calls[3].env["AEMEATH_PROJECT_DIR"],
+        "/tmp/aemeath-stop-workspace"
+    );
+    assert!(!calls[3].env.contains_key("AEMEATH_STOP_TURNS"));
+    assert_eq!(calls[3].stdin["StopFailure"]["turns"], 9);
 }
 
 // 各测试直接内联构造 Dispatcher + Scripted，以保持调用顺序与步骤入队的可读性。

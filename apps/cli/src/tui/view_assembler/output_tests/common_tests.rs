@@ -1,4 +1,3 @@
-use super::OutputViewAssembler;
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::model::ConversationModel;

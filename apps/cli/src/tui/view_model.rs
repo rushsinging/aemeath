@@ -16,7 +16,8 @@ pub use nesting::{allowed_child, MAX_BLOCK_DEPTH};
 pub use output::{
     AgentMetaView, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
     HookNoticeBlockView, HookNoticeSemanticKind, ModelStreamPlaceholderBlockView, OutputBlockKind,
-    OutputViewModel, TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
+    OutputRenderWindow, OutputViewModel, TextBlockView, ToolCallBlockView, ToolResultBlockView,
+    ToolSemanticStatus,
 };
 pub use status::{
     StatusContextViewModel, StatusLineViewModel, StatusNoticeViewKind, StatusNoticeViewModel,
@@ -57,11 +58,7 @@ mod tests {
             kind,
             children: Vec::new(),
         };
-        let model = OutputViewModel {
-            roots: vec![node],
-            version: 1,
-            follow_tail_hint: true,
-        };
+        let model = OutputViewModel::from_roots(vec![node], 1, true);
         assert_eq!(model.roots.len(), 1);
     }
 }
