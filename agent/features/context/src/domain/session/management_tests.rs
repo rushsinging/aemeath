@@ -38,8 +38,9 @@ fn session() -> CanonicalSession {
                     AcceptedInputProjection::new(vec![Message::user("visible preview")], "fp-2", 0),
                 )],
             ),
-        ],
-        committed_steps: vec![],
+        ]
+        .into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     }
 }

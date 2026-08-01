@@ -4,6 +4,7 @@
 
 mod chat_chain;
 mod envelope;
+mod generation;
 mod management;
 mod message_integrity;
 mod restore;
@@ -12,9 +13,14 @@ mod types;
 pub use chat_chain::{ChatChain, ChatSegment, SegmentKind};
 pub use envelope::{
     AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
-    CommittedRunStep, CommittedStep, CommittedStepMessages, DecodedSession,
-    FinalizedOutcomeProjection, RunStepCursor, SessionCodec, SessionCodecError, SkillLoadRecord,
-    SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
+    CommittedRunStep, CommittedStep, CommittedStepLedger, CommittedStepMessages, DecodedSession,
+    FinalizedOutcomeProjection, RunStepCursor, SessionCodec, SessionCodecError, SessionHistory,
+    SkillLoadRecord, SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
+};
+pub use generation::{
+    SessionChangeSet, SessionGenerationCodec, SessionGenerationManifest,
+    SessionGenerationWireError, SessionMemberBytes, SessionMetadataMember, SessionStateMember,
+    SessionStepMember,
 };
 pub use management::{
     same_project_identity, session_matches_project, SessionListEntry, SessionManagementError,

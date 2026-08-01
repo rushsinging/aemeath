@@ -39,6 +39,96 @@ impl CommittedStep {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommittedStepLedger {
+    entries: Arc<[Arc<CommittedStep>]>,
+}
+
+impl CommittedStepLedger {
+    pub fn from_steps(steps: Vec<CommittedStep>) -> Self {
+        Self {
+            entries: steps.into_iter().map(Arc::new).collect(),
+        }
+    }
+
+    pub fn entries(&self) -> &[Arc<CommittedStep>] {
+        &self.entries
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, Arc<CommittedStep>> {
+        self.entries.iter()
+    }
+
+    pub fn find(&self, run_id: &str, step_id: &str) -> Option<&CommittedStep> {
+        self.entries
+            .iter()
+            .find(|entry| entry.run_id == run_id && entry.step_id == step_id)
+            .map(Arc::as_ref)
+    }
+
+    pub fn append(&self, step: CommittedStep) -> Self {
+        let mut entries = self.entries.to_vec();
+        entries.push(Arc::new(step));
+        Self {
+            entries: entries.into(),
+        }
+    }
+
+    pub fn cleared(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::ops::Index<usize> for CommittedStepLedger {
+    type Output = CommittedStep;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.entries[index]
+    }
+}
+
+impl Serialize for CommittedStepLedger {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.entries
+            .iter()
+            .map(Arc::as_ref)
+            .collect::<Vec<_>>()
+            .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CommittedStepLedger {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Vec::<CommittedStep>::deserialize(deserializer).map(Self::from_steps)
+    }
+}
+
+impl From<Vec<CommittedStep>> for CommittedStepLedger {
+    fn from(steps: Vec<CommittedStep>) -> Self {
+        Self::from_steps(steps)
+    }
+}
+
+impl FromIterator<CommittedStep> for CommittedStepLedger {
+    fn from_iter<I: IntoIterator<Item = CommittedStep>>(steps: I) -> Self {
+        Self::from_steps(steps.into_iter().collect())
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CommittedStepMessages(Arc<[Message]>);
 
@@ -219,6 +309,235 @@ pub struct SkillLoadRecord {
     pub revision: String,
 }
 
+impl std::ops::Index<usize> for SessionHistory {
+    type Output = CommittedRunSlice;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.slices[index]
+    }
+}
+
+impl Serialize for SessionHistory {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.slices
+            .iter()
+            .map(Arc::as_ref)
+            .collect::<Vec<_>>()
+            .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionHistory {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Vec::<CommittedRunSlice>::deserialize(deserializer).map(Self::from_slices)
+    }
+}
+
+impl From<Vec<CommittedRunSlice>> for SessionHistory {
+    fn from(slices: Vec<CommittedRunSlice>) -> Self {
+        Self::from_slices(slices)
+    }
+}
+
+impl FromIterator<CommittedRunSlice> for SessionHistory {
+    fn from_iter<I: IntoIterator<Item = CommittedRunSlice>>(slices: I) -> Self {
+        Self::from_slices(slices.into_iter().collect())
+    }
+}
+
+impl<'history> IntoIterator for &'history SessionHistory {
+    type Item = &'history Arc<CommittedRunSlice>;
+    type IntoIter = std::slice::Iter<'history, Arc<CommittedRunSlice>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.slices.iter()
+    }
+}
+
+#[cfg(test)]
+#[path = "envelope_tests.rs"]
+mod tests;
+
+#[derive(Clone, Debug, Default)]
+pub struct SessionHistory {
+    slices: Arc<[Arc<CommittedRunSlice>]>,
+}
+
+impl SessionHistory {
+    pub fn from_slices(slices: Vec<CommittedRunSlice>) -> Self {
+        Self {
+            slices: slices.into_iter().map(Arc::new).collect(),
+        }
+    }
+
+    pub fn slices(&self) -> &[Arc<CommittedRunSlice>] {
+        &self.slices
+    }
+
+    pub fn len(&self) -> usize {
+        self.slices.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.slices.is_empty()
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, Arc<CommittedRunSlice>> {
+        self.slices.iter()
+    }
+
+    pub fn append_accepted_input(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        accepted_input: AcceptedInputProjection,
+    ) -> Self {
+        self.replace_or_append_step(run_id, step_id, |step| {
+            step.accepted_input = Some(accepted_input);
+        })
+    }
+
+    pub fn append_finalized_outcome(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        outcome: FinalizedOutcomeProjection,
+    ) -> Self {
+        self.replace_or_append_step(run_id, step_id, |step| {
+            step.outcome = Some(outcome);
+        })
+    }
+
+    pub fn accepted_input(&self, run_id: &str, step_id: &str) -> Option<&AcceptedInputProjection> {
+        self.step(run_id, step_id)?.accepted_input.as_ref()
+    }
+
+    pub fn tool_receipt(&self, mutation: &ToolReceiptMutation) -> Option<&ToolCallReceipt> {
+        self.step(
+            mutation.identity.run_id.as_ref(),
+            mutation.identity.step_id.as_str(),
+        )?
+        .tool_receipts
+        .iter()
+        .find(|receipt| receipt.identity == mutation.identity)
+    }
+
+    pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<StepReceipt> {
+        let mut receipts = self
+            .step(run_id, step_id)
+            .map(|step| {
+                step.tool_receipts
+                    .iter()
+                    .filter_map(ToolCallReceipt::to_step_receipt)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        receipts.sort_by_key(StepReceipt::index);
+        receipts
+    }
+
+    pub fn advance_tool_receipt(
+        &self,
+        mutation: ToolReceiptMutation,
+    ) -> Result<
+        (Self, crate::domain::ToolReceiptMutationReceipt),
+        crate::domain::ToolReceiptMutationError,
+    > {
+        if let Some(receipt) = self.tool_receipt(&mutation) {
+            let advanced = receipt.clone().advance(mutation.clone())?;
+            if !advanced.changed {
+                return Ok((self.clone(), advanced));
+            }
+            let updated_receipt = advanced.receipt.clone();
+            let updated = self.replace_or_append_step(
+                mutation.identity.run_id.as_ref(),
+                mutation.identity.step_id.as_str(),
+                |step| {
+                    let receipt_index = step
+                        .tool_receipts
+                        .iter()
+                        .position(|receipt| receipt.identity == mutation.identity)
+                        .expect("existing receipt must remain in the same step");
+                    step.tool_receipts[receipt_index] = updated_receipt;
+                },
+            );
+            return Ok((updated, advanced));
+        }
+
+        let input_preview = mutation.input_preview.clone().unwrap_or_default();
+        let mut receipt = ToolCallReceipt::pending(mutation.identity.clone(), input_preview);
+        if mutation.next != crate::domain::ToolCallState::Pending {
+            receipt = receipt.advance(mutation.clone())?.receipt;
+        }
+        let advanced = crate::domain::ToolReceiptMutationReceipt {
+            receipt: receipt.clone(),
+            changed: true,
+        };
+        let updated = self.replace_or_append_step(
+            mutation.identity.run_id.as_ref(),
+            mutation.identity.step_id.as_str(),
+            |step| step.tool_receipts.push(receipt),
+        );
+        Ok((updated, advanced))
+    }
+
+    pub fn cleared(&self) -> Self {
+        Self::default()
+    }
+
+    fn step(&self, run_id: &str, step_id: &str) -> Option<&CommittedRunStep> {
+        self.slices
+            .iter()
+            .find(|slice| slice.run_id == run_id)?
+            .steps
+            .iter()
+            .find(|step| step.step_id == step_id)
+    }
+
+    fn replace_or_append_step(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        update: impl FnOnce(&mut CommittedRunStep),
+    ) -> Self {
+        let mut slices = self.slices.to_vec();
+        if let Some(slice_index) = slices.iter().position(|slice| slice.run_id == run_id) {
+            let mut slice = (*slices[slice_index]).clone();
+            if let Some(step) = slice.steps.iter_mut().find(|step| step.step_id == step_id) {
+                update(step);
+            } else {
+                let mut step = CommittedRunStep {
+                    step_id: step_id.to_string(),
+                    accepted_input: None,
+                    outcome: None,
+                    tool_receipts: Vec::new(),
+                };
+                update(&mut step);
+                slice.steps.push(step);
+            }
+            slices[slice_index] = Arc::new(slice);
+        } else {
+            let mut step = CommittedRunStep {
+                step_id: step_id.to_string(),
+                accepted_input: None,
+                outcome: None,
+                tool_receipts: Vec::new(),
+            };
+            update(&mut step);
+            slices.push(Arc::new(CommittedRunSlice::new(run_id, vec![step])));
+        }
+        Self {
+            slices: slices.into(),
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CanonicalSession {
     pub id: String,
@@ -240,9 +559,9 @@ pub struct CanonicalSession {
     #[serde(default)]
     pub compact: Option<ActiveCompactMarker>,
     #[serde(default)]
-    pub run_slices: Vec<CommittedRunSlice>,
+    pub run_slices: SessionHistory,
     #[serde(default)]
-    pub committed_steps: Vec<CommittedStep>,
+    pub committed_steps: CommittedStepLedger,
     #[serde(default)]
     pub skill_load_records: Vec<SkillLoadRecord>,
 }
@@ -305,80 +624,22 @@ impl CanonicalSession {
     }
 
     pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<StepReceipt> {
-        let mut receipts = self
-            .run_slices
-            .iter()
-            .find(|slice| slice.run_id == run_id)
-            .and_then(|slice| slice.steps.iter().find(|step| step.step_id == step_id))
-            .map(|step| {
-                step.tool_receipts
-                    .iter()
-                    .filter_map(ToolCallReceipt::to_step_receipt)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        receipts.sort_by_key(StepReceipt::index);
-        receipts
+        self.run_slices.step_receipts(run_id, step_id)
     }
 
     pub fn tool_receipt(&self, mutation: &ToolReceiptMutation) -> Option<&ToolCallReceipt> {
-        self.run_slices
-            .iter()
-            .find(|slice| slice.run_id == mutation.identity.run_id.as_ref())?
-            .steps
-            .iter()
-            .find(|step| step.step_id == mutation.identity.step_id.as_str())?
-            .tool_receipts
-            .iter()
-            .find(|receipt| receipt.identity == mutation.identity)
+        self.run_slices.tool_receipt(mutation)
     }
 
     pub fn advance_tool_receipt(
         &mut self,
         mutation: ToolReceiptMutation,
     ) -> Result<bool, crate::domain::ToolReceiptMutationError> {
-        let run_id = mutation.identity.run_id.to_string();
-        let step_id = mutation.identity.step_id.as_str().to_string();
-        let slice_index = self
-            .run_slices
-            .iter()
-            .position(|slice| slice.run_id == run_id)
-            .unwrap_or_else(|| {
-                self.run_slices
-                    .push(CommittedRunSlice::new(run_id.clone(), Vec::new()));
-                self.run_slices.len() - 1
-            });
-        let step_index = self.run_slices[slice_index]
-            .steps
-            .iter()
-            .position(|step| step.step_id == step_id)
-            .unwrap_or_else(|| {
-                self.run_slices[slice_index].steps.push(CommittedRunStep {
-                    step_id: step_id.clone(),
-                    accepted_input: None,
-                    outcome: None,
-                    tool_receipts: Vec::new(),
-                });
-                self.run_slices[slice_index].steps.len() - 1
-            });
-        let receipts = &mut self.run_slices[slice_index].steps[step_index].tool_receipts;
-        if let Some(receipt_index) = receipts
-            .iter()
-            .position(|receipt| receipt.identity == mutation.identity)
-        {
-            let advanced = receipts[receipt_index].clone().advance(mutation)?;
-            if advanced.changed {
-                receipts[receipt_index] = advanced.receipt;
-            }
-            return Ok(advanced.changed);
+        let (history, advanced) = self.run_slices.advance_tool_receipt(mutation)?;
+        if advanced.changed {
+            self.run_slices = history;
         }
-        let input_preview = mutation.input_preview.clone().unwrap_or_default();
-        let mut receipt = ToolCallReceipt::pending(mutation.identity.clone(), input_preview);
-        if mutation.next != crate::domain::ToolCallState::Pending {
-            receipt = receipt.advance(mutation)?.receipt;
-        }
-        receipts.push(receipt);
-        Ok(true)
+        Ok(advanced.changed)
     }
 
     pub fn append_accepted_input(
@@ -391,24 +652,9 @@ impl CanonicalSession {
             run_id: run_id.to_string(),
             step_id: step_id.to_string(),
         };
-        if let Some(slice) = self
+        self.run_slices = self
             .run_slices
-            .iter_mut()
-            .find(|slice| slice.run_id == run_id)
-        {
-            if let Some(step) = slice.steps.iter_mut().find(|step| step.step_id == step_id) {
-                step.accepted_input = Some(accepted_input);
-            } else {
-                slice
-                    .steps
-                    .push(CommittedRunStep::accepted_only(step_id, accepted_input));
-            }
-        } else {
-            self.run_slices.push(CommittedRunSlice::new(
-                run_id,
-                vec![CommittedRunStep::accepted_only(step_id, accepted_input)],
-            ));
-        }
+            .append_accepted_input(run_id, step_id, accepted_input);
         if self
             .compact
             .as_ref()
@@ -419,14 +665,7 @@ impl CanonicalSession {
     }
 
     pub fn accepted_input(&self, run_id: &str, step_id: &str) -> Option<&AcceptedInputProjection> {
-        self.run_slices
-            .iter()
-            .find(|slice| slice.run_id == run_id)?
-            .steps
-            .iter()
-            .find(|step| step.step_id == step_id)?
-            .accepted_input
-            .as_ref()
+        self.run_slices.accepted_input(run_id, step_id)
     }
 
     pub fn append_finalized_outcome(
@@ -439,24 +678,9 @@ impl CanonicalSession {
             run_id: run_id.to_string(),
             step_id: step_id.to_string(),
         };
-        if let Some(slice) = self
+        self.run_slices = self
             .run_slices
-            .iter_mut()
-            .find(|slice| slice.run_id == run_id)
-        {
-            if let Some(step) = slice.steps.iter_mut().find(|step| step.step_id == step_id) {
-                step.outcome = Some(outcome);
-            } else {
-                slice
-                    .steps
-                    .push(CommittedRunStep::outcome_only(step_id, outcome));
-            }
-        } else {
-            self.run_slices.push(CommittedRunSlice::new(
-                run_id,
-                vec![CommittedRunStep::outcome_only(step_id, outcome)],
-            ));
-        }
+            .append_finalized_outcome(run_id, step_id, outcome);
         if self
             .compact
             .as_ref()
@@ -604,8 +828,8 @@ impl CanonicalSession {
             workspace: SnapshotState::Missing,
             revision: 0,
             compact: None,
-            run_slices: Vec::new(),
-            committed_steps: Vec::new(),
+            run_slices: Default::default(),
+            committed_steps: Default::default(),
             skill_load_records: Vec::new(),
         }
     }
@@ -697,7 +921,7 @@ impl From<V2CanonicalSession> for CanonicalSession {
                     )
                 })
                 .collect(),
-            committed_steps: session.committed_steps,
+            committed_steps: session.committed_steps.into(),
             skill_load_records: Vec::new(),
         }
     }
@@ -810,11 +1034,11 @@ fn upgrade_legacy_task_snapshot(legacy: Value) -> Result<TaskSnapshot, SessionCo
 /// payload through a `serde_json::Value` produced by that canonical codec, so
 /// the envelope stays a plain typed field while the Task BC keeps sole ownership
 /// of its wire format.
-mod task_snapshot_state {
+pub(super) mod task_snapshot_state {
     use super::{SnapshotState, TaskSnapshot, Value};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub(super) fn serialize<S>(
+    pub(in crate::domain::session) fn serialize<S>(
         state: &SnapshotState<TaskSnapshot>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
@@ -834,7 +1058,7 @@ mod task_snapshot_state {
         wire.serialize(serializer)
     }
 
-    pub(super) fn deserialize<'de, D>(
+    pub(in crate::domain::session) fn deserialize<'de, D>(
         deserializer: D,
     ) -> Result<SnapshotState<TaskSnapshot>, D::Error>
     where
@@ -930,8 +1154,8 @@ impl SessionCodec {
                         workspace: legacy.workspace,
                         revision: legacy.revision,
                         compact,
-                        run_slices,
-                        committed_steps: legacy.committed_steps,
+                        run_slices: run_slices.into(),
+                        committed_steps: legacy.committed_steps.into(),
                         skill_load_records: Vec::new(),
                     },
                     upgraded_from_legacy: true,
@@ -1026,8 +1250,8 @@ impl SessionCodec {
                 workspace: workspace.map_or(SnapshotState::Missing, SnapshotState::Captured),
                 revision: 0,
                 compact,
-                run_slices,
-                committed_steps: Vec::new(),
+                run_slices: run_slices.into(),
+                committed_steps: Default::default(),
                 skill_load_records: Vec::new(),
             },
             upgraded_from_legacy: true,

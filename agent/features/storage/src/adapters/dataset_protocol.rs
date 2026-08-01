@@ -88,6 +88,17 @@ pub(super) struct DatasetJournal {
     pub 阶段: JournalPhase,
 }
 
+/// manifest 中持久化的单成员复用证据。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(super) struct DatasetManifestMemberRecord {
+    #[serde(rename = "名称")]
+    pub 名称: String,
+    #[serde(rename = "字节数")]
+    pub 字节数: u64,
+    #[serde(rename = "修订摘要")]
+    pub 修订摘要: String,
+}
+
 /// manifest 的私有持久化 schema（字段为中文）。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(super) struct DatasetManifestRecord {
@@ -95,6 +106,8 @@ pub(super) struct DatasetManifestRecord {
     pub 修订号: String,
     #[serde(rename = "成员集合")]
     pub 成员集合: Vec<String>,
+    #[serde(default, rename = "成员证据")]
+    pub 成员证据: Vec<DatasetManifestMemberRecord>,
 }
 
 /// 将 32 字节修订号编码为十六进制字符串。

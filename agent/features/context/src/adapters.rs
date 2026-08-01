@@ -4,6 +4,9 @@ mod atomic_blob_session;
 mod atomic_blob_session_management;
 mod canonical_session;
 pub(crate) mod compact_summary;
+mod dataset_session_management;
+mod dataset_session_reader;
+mod dataset_session_writer;
 mod in_memory_session;
 pub mod memory_injection;
 pub mod prompt;
@@ -21,6 +24,9 @@ pub use canonical_session::{
     AtomicBlobCanonicalSessionWriter, CanonicalSessionRepository, CanonicalSessionWriter,
     NoOpCanonicalSessionWriter, ProductionMainContextFactory,
 };
+pub use dataset_session_management::DatasetSessionManagement;
+pub use dataset_session_reader::DatasetSessionReader;
+pub use dataset_session_writer::DatasetCanonicalSessionWriter;
 pub use in_memory_session::InMemorySessionRepository;
 pub use memory_injection::{
     CommittedMemoryRetrieveAdapter, MemoryRetrieveAdapter, NoOpContextMemorySource,

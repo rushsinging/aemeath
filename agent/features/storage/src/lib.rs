@@ -6,13 +6,14 @@ mod ports;
 
 pub mod api {
     pub use crate::{
-        AtomicBlobPort, AtomicDatasetPort, BlobRead, CommitWarning, DatasetCommitReceipt,
-        DatasetCommitVisibility, DatasetKey, DatasetManifest, DatasetMember, DatasetRead,
-        DatasetReadOutcome, DatasetRevision, DeleteOptions, DeleteOutcome, Durability, Generation,
-        PreviousPolicy, PromoteOutcome, QuarantineOutcome, QuarantineReason, QuarantineReceipt,
-        ReadOutcome, SafeOpenOptions, SafePathSegment, SafeStorageDir, SafeStorageEntry,
-        SafeStorageFileType, SafeStorageRoot, StorageEntry, StorageError, StorageErrorKind,
-        StorageKey, StorageNamespace, TransactionScope, WriteOptions, WriteReceipt,
+        AtomicBlobPort, AtomicDatasetPort, BlobRead, CommitWarning, DatasetChangeSet,
+        DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey, DatasetManifest, DatasetMember,
+        DatasetMemberChange, DatasetMemberReference, DatasetRead, DatasetReadOutcome,
+        DatasetRevision, DeleteOptions, DeleteOutcome, Durability, Generation, PreviousPolicy,
+        PromoteOutcome, QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome,
+        SafeOpenOptions, SafePathSegment, SafeStorageDir, SafeStorageEntry, SafeStorageFileType,
+        SafeStorageRoot, StorageEntry, StorageError, StorageErrorKind, StorageKey,
+        StorageNamespace, TransactionScope, WriteOptions, WriteReceipt,
     };
 
     pub fn file_system_blob(
@@ -38,12 +39,13 @@ pub use adapters::{
 };
 pub use domain::{
     decide_blob_recovery, decide_orphan_previous, BlobRead, CommitWarning, CorruptTransactionError,
-    CorruptionReason, DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey, DatasetManifest,
-    DatasetMember, DatasetRead, DatasetReadOutcome, DatasetRevision, DeleteOptions, DeleteOutcome,
-    DigestObservation, Durability, Generation, JournalPhase, PreviousPolicy, PromoteOutcome,
-    QuarantineDisposition, QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome,
-    RecoveryDecision, SafePathSegment, StorageEntry, StorageError, StorageErrorKind, StorageKey,
-    StorageNamespace, TransactionDigest, TransactionScope, WriteOptions, WriteReceipt,
+    CorruptionReason, DatasetChangeSet, DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey,
+    DatasetManifest, DatasetMember, DatasetMemberChange, DatasetMemberReference, DatasetRead,
+    DatasetReadOutcome, DatasetRevision, DeleteOptions, DeleteOutcome, DigestObservation,
+    Durability, Generation, JournalPhase, PreviousPolicy, PromoteOutcome, QuarantineDisposition,
+    QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome, RecoveryDecision,
+    SafePathSegment, StorageEntry, StorageError, StorageErrorKind, StorageKey, StorageNamespace,
+    TransactionDigest, TransactionScope, WriteOptions, WriteReceipt,
 };
 pub use ports::{AtomicBlobPort, AtomicDatasetPort};
 

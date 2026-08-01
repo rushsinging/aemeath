@@ -21,17 +21,18 @@ use uuid::Uuid;
 
 use super::dataset_protocol as proto;
 use super::dataset_protocol::{
-    DatasetJournal, DatasetManifestRecord, JournalKind, JournalMember, JournalPhase, BLOBS_DIR,
-    CORRUPTION_MARKER, JOURNAL_FILE, LOCK_FILE, MANIFEST_FILE, PREVIOUS_DIR, PREVIOUS_NEXT_DIR,
-    PRIMARY_DIR,
+    DatasetJournal, DatasetManifestMemberRecord, DatasetManifestRecord, JournalKind, JournalMember,
+    JournalPhase, BLOBS_DIR, CORRUPTION_MARKER, JOURNAL_FILE, LOCK_FILE, MANIFEST_FILE,
+    PREVIOUS_DIR, PREVIOUS_NEXT_DIR, PRIMARY_DIR,
 };
 use crate::domain::revision_member_digest;
 use crate::{
-    AtomicDatasetPort, CommitWarning, CorruptTransactionError, CorruptionReason,
+    AtomicDatasetPort, CommitWarning, CorruptTransactionError, CorruptionReason, DatasetChangeSet,
     DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey, DatasetManifest, DatasetMember,
-    DatasetRead, DatasetReadOutcome, DatasetRevision, Generation, QuarantineDisposition,
-    QuarantineOutcome, QuarantineReason, QuarantineReceipt, SafePathSegment, StorageError,
-    StorageErrorKind, TransactionScope, WriteOptions,
+    DatasetMemberReference, DatasetRead, DatasetReadOutcome, DatasetRevision, DeleteOptions,
+    DeleteOutcome, Generation, QuarantineDisposition, QuarantineOutcome, QuarantineReason,
+    QuarantineReceipt, SafePathSegment, StorageError, StorageErrorKind, TransactionScope,
+    WriteOptions,
 };
 
 // ---- 私有、仅供 crash 测试驱动的故障注入接缝（不对外导出） ----
@@ -123,6 +124,102 @@ impl FileSystemDatasetAdapter {
         self.root.open_dir(&rel).map_err(proto::map_io)
     }
 
+    fn open_existing_dataset_dir(&self, key: &DatasetKey) -> Result<Option<Dir>, StorageError> {
+        let rel = Self::dataset_rel(key);
+        match self.root.symlink_metadata(&rel) {
+            Ok(metadata) if metadata.file_type().is_symlink() => Err(StorageError::new(
+                StorageErrorKind::InvalidKey,
+                "数据集路径是符号链接",
+            )),
+            Ok(metadata) if !metadata.file_type().is_dir() => Err(StorageError::new(
+                StorageErrorKind::InvalidKey,
+                "数据集路径不是目录",
+            )),
+            Ok(_) => self.root.open_dir(&rel).map(Some).map_err(proto::map_io),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(proto::map_io(error)),
+        }
+    }
+
+    fn collect_dataset_keys(
+        &self,
+        directory: &Dir,
+        namespace: crate::domain::StorageNamespace,
+        segments: &mut Vec<SafePathSegment>,
+        result: &mut Vec<DatasetKey>,
+    ) -> Result<(), StorageError> {
+        for entry in directory.entries().map_err(proto::map_io)? {
+            let entry = entry.map_err(proto::map_io)?;
+            let name = entry.file_name();
+            let metadata = entry.metadata().map_err(proto::map_io)?;
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+                continue;
+            }
+            let name = match SafePathSegment::from_str(&name.to_string_lossy()) {
+                Ok(name) => name,
+                Err(_) => continue,
+            };
+            let child = directory
+                .open_dir(Path::new(name.as_str()))
+                .map_err(proto::map_io)?;
+            segments.push(name);
+            if proto::exists(&child, Path::new(PRIMARY_DIR).join(MANIFEST_FILE).as_path())? {
+                result.push(DatasetKey::new(namespace, segments.clone())?);
+            }
+            self.collect_dataset_keys(&child, namespace, segments, result)?;
+            segments.pop();
+        }
+        Ok(())
+    }
+
+    fn list_datasets_sync(
+        &self,
+        namespace: crate::domain::StorageNamespace,
+    ) -> Result<Vec<DatasetKey>, StorageError> {
+        let namespace_path = Path::new(namespace.as_str());
+        let namespace_dir = match self.root.open_dir(namespace_path) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(proto::map_io(error)),
+        };
+        let mut result = Vec::new();
+        self.collect_dataset_keys(&namespace_dir, namespace, &mut Vec::new(), &mut result)?;
+        result.sort_by(|left, right| left.segments().cmp(right.segments()));
+        Ok(result)
+    }
+
+    fn delete_all_generations_sync(
+        &self,
+        key: &DatasetKey,
+        options: DeleteOptions,
+    ) -> Result<DeleteOutcome, StorageError> {
+        let rel = Self::dataset_rel(key);
+        let Some(dir) = self.open_existing_dataset_dir(key)? else {
+            return Ok(DeleteOutcome::new(false, false, false));
+        };
+        let lock = self.lock(&dir)?;
+        self.recover(&dir)?;
+        let deleted_primary = proto::exists(&dir, Path::new(PRIMARY_DIR))?;
+        let deleted_previous = proto::exists(&dir, Path::new(PREVIOUS_DIR))?;
+        let deleted_quarantine = false;
+        if options.include_quarantine() {
+            drop(lock);
+            self.root.remove_dir_all(&rel).map_err(proto::map_io)?;
+        } else {
+            for generation in [PRIMARY_DIR, PREVIOUS_DIR] {
+                if proto::exists(&dir, Path::new(generation))? {
+                    dir.remove_dir_all(generation).map_err(proto::map_io)?;
+                }
+            }
+            proto::sync_dir(&dir)?;
+            drop(lock);
+        }
+        Ok(DeleteOutcome::new(
+            deleted_primary,
+            deleted_previous,
+            deleted_quarantine,
+        ))
+    }
     fn lock(&self, dir: &Dir) -> Result<std::fs::File, StorageError> {
         proto::reject_symlink(dir, Path::new(LOCK_FILE))?;
         let mut options = OpenOptions::new();
@@ -266,6 +363,15 @@ impl FileSystemDatasetAdapter {
         let record = DatasetManifestRecord {
             修订号: journal.新修订号.clone(),
             成员集合: journal.成员集合.iter().map(|m| m.名称.clone()).collect(),
+            成员证据: journal
+                .成员集合
+                .iter()
+                .map(|member| DatasetManifestMemberRecord {
+                    名称: member.名称.clone(),
+                    字节数: member.字节数,
+                    修订摘要: member.修订摘要.clone(),
+                })
+                .collect(),
         };
         proto::write_manifest(dir, &primary_dir, &record, &journal.随机数)?;
         proto::sync_generation(dir, &primary_dir)?;
@@ -682,7 +788,7 @@ impl FileSystemDatasetAdapter {
 
     fn current_manifest(&self, dir: &Dir) -> Result<DatasetManifest, StorageError> {
         match proto::read_manifest(dir, Path::new(PRIMARY_DIR))? {
-            Some(record) => manifest_from_record(&record),
+            Some(record) => manifest_from_record(dir, PRIMARY_DIR, &record),
             None => DatasetManifest::new(Vec::new()),
         }
     }
@@ -714,6 +820,276 @@ impl FileSystemDatasetAdapter {
 
     // ---- 提交（CAS 先行；Prepared 落盘为逻辑提交点） ----
 
+    fn commit_incremental_sync(
+        &self,
+        dir: &Dir,
+        changes: &DatasetChangeSet,
+    ) -> Result<DatasetCommitReceipt, StorageError> {
+        let current = self.current_manifest(dir)?;
+        if current.revision() != changes.expected_revision() {
+            return Err(StorageError::new(
+                StorageErrorKind::ConcurrentWrite,
+                "数据集修订号已变更，增量提交被拒绝",
+            ));
+        }
+
+        let current_names = current.members().iter().collect::<BTreeSet<_>>();
+        let removed_names = changes.removed_members().iter().collect::<BTreeSet<_>>();
+        if changes
+            .removed_members()
+            .iter()
+            .any(|name| !current_names.contains(name))
+        {
+            return Err(StorageError::new(
+                StorageErrorKind::InvalidKey,
+                "待删除的数据集成员不存在于期望代",
+            ));
+        }
+
+        let primary_blobs = PathBuf::from(PRIMARY_DIR).join(BLOBS_DIR);
+        for reference in changes.reused_members() {
+            if !current_names.contains(reference.name()) || removed_names.contains(reference.name())
+            {
+                return Err(dataset_member_mismatch());
+            }
+            let Some(bytes) =
+                proto::read_file(dir, &primary_blobs.join(reference.name().as_str()))?
+            else {
+                return Err(dataset_member_mismatch());
+            };
+            if bytes.len() as u64 != reference.byte_len()
+                || revision_member_digest(&bytes) != *reference.member_digest()
+            {
+                return Err(dataset_member_mismatch());
+            }
+        }
+
+        let target_names = changes
+            .new_members()
+            .iter()
+            .map(|change| change.member().name())
+            .chain(
+                changes
+                    .reused_members()
+                    .iter()
+                    .map(|reference| reference.name()),
+            )
+            .collect::<BTreeSet<_>>();
+        if current
+            .members()
+            .iter()
+            .any(|name| !target_names.contains(name) && !removed_names.contains(name))
+        {
+            return Err(StorageError::new(
+                StorageErrorKind::InvalidKey,
+                "增量提交必须明确复用、替换或删除每个当前成员",
+            ));
+        }
+
+        self.commit_incremental_verified(dir, &current, changes)
+    }
+
+    fn commit_incremental_verified(
+        &self,
+        dir: &Dir,
+        current: &DatasetManifest,
+        changes: &DatasetChangeSet,
+    ) -> Result<DatasetCommitReceipt, StorageError> {
+        let new_members = changes
+            .new_members()
+            .iter()
+            .map(|change| change.member())
+            .collect::<Vec<_>>();
+        let mut revision_evidence = new_members
+            .iter()
+            .map(|member| {
+                (
+                    member.name().as_str(),
+                    member.bytes().len() as u64,
+                    revision_member_digest(member.bytes()),
+                )
+            })
+            .chain(changes.reused_members().iter().map(|reference| {
+                (
+                    reference.name().as_str(),
+                    reference.byte_len(),
+                    *reference.member_digest(),
+                )
+            }))
+            .collect::<Vec<_>>();
+        revision_evidence.sort_by(|left, right| left.0.cmp(right.0));
+        let new_revision = DatasetRevision::from_member_digests(&revision_evidence);
+        let member_names = revision_evidence
+            .iter()
+            .map(|(name, _, _)| SafePathSegment::from_str(name))
+            .collect::<Result<Vec<_>, _>>()?;
+        let member_evidence = revision_evidence
+            .iter()
+            .zip(member_names)
+            .map(|((_, byte_len, member_digest), name)| {
+                DatasetMemberReference::from_manifest_member(
+                    new_revision.clone(),
+                    name,
+                    *byte_len,
+                    *member_digest,
+                )
+            })
+            .collect::<Vec<_>>();
+        let new_manifest =
+            DatasetManifest::from_verified_members(new_revision.clone(), member_evidence)?;
+        let record = manifest_record(&new_manifest);
+        let nonce = Uuid::new_v4().simple().to_string();
+        let mut journal_members = new_members
+            .iter()
+            .map(|member| JournalMember {
+                名称: member.name().as_str().to_string(),
+                摘要: proto::digest_bytes(member.bytes()),
+                字节数: member.bytes().len() as u64,
+                修订摘要: proto::revision_member_digest_hex(member.bytes()),
+            })
+            .collect::<Vec<_>>();
+        let primary_blobs = PathBuf::from(PRIMARY_DIR).join(BLOBS_DIR);
+        for reference in changes.reused_members() {
+            let digest = proto::digest_file(dir, &primary_blobs.join(reference.name().as_str()))?
+                .ok_or_else(dataset_member_mismatch)?;
+            journal_members.push(JournalMember {
+                名称: reference.name().as_str().to_string(),
+                摘要: digest,
+                字节数: reference.byte_len(),
+                修订摘要: proto::encode_revision(reference.member_digest()),
+            });
+        }
+        journal_members.sort_by(|left, right| left.名称.cmp(&right.名称));
+        let journal = DatasetJournal {
+            随机数: nonce.clone(),
+            操作: JournalKind::Commit,
+            旧修订号: proto::encode_revision(current.revision().as_bytes()),
+            新修订号: proto::encode_revision(new_revision.as_bytes()),
+            成员集合: journal_members,
+            阶段: JournalPhase::Prepared,
+        };
+        let stage_dir = PathBuf::from(format!(".stage-{nonce}"));
+        let stage_blobs = stage_dir.join(BLOBS_DIR);
+        let primary_dir = PathBuf::from(PRIMARY_DIR);
+
+        let mut crossed_commit = false;
+        let result = (|| -> Result<(), StorageError> {
+            dir.create_dir_all(&stage_blobs).map_err(proto::map_io)?;
+            for member in &new_members {
+                proto::write_new_file(
+                    dir,
+                    &stage_blobs.join(member.name().as_str()),
+                    member.bytes(),
+                )?;
+            }
+            for reference in changes.reused_members() {
+                let source = primary_blobs.join(reference.name().as_str());
+                proto::reject_symlink(dir, &source)?;
+                dir.hard_link(&source, dir, stage_blobs.join(reference.name().as_str()))
+                    .map_err(proto::map_io)?;
+            }
+            proto::write_manifest(dir, &stage_dir, &record, &nonce)?;
+            proto::sync_generation(dir, &stage_dir)?;
+
+            self.stage_previous_generation(dir, current)?;
+            proto::write_journal(dir, &journal)?;
+            proto::sync_dir(dir)?;
+            crossed_commit = true;
+            inject_post_prepared_fault(&FaultPoint::AfterPrepared)?;
+
+            dir.create_dir_all(&primary_blobs).map_err(proto::map_io)?;
+            for member in &journal.成员集合 {
+                let destination = primary_blobs.join(&member.名称);
+                proto::reject_symlink(dir, &destination)?;
+                dir.rename(stage_blobs.join(&member.名称), dir, &destination)
+                    .map_err(proto::map_io)?;
+                proto::sync_subdir(dir, &stage_blobs)?;
+                proto::sync_generation(dir, &primary_dir)?;
+                inject_post_prepared_fault(&FaultPoint::AfterMemberPublish(member.名称.clone()))?;
+            }
+            let mut removed_omitted = false;
+            for name in current.omitted_members(&new_manifest) {
+                match dir.remove_file(primary_blobs.join(name.as_str())) {
+                    Ok(()) => removed_omitted = true,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(proto::map_io(error)),
+                }
+            }
+            if removed_omitted {
+                proto::sync_subdir(dir, &primary_blobs)?;
+            }
+            proto::write_manifest(dir, &primary_dir, &record, &nonce)?;
+            proto::sync_generation(dir, &primary_dir)?;
+            self.validate_generation(dir, &journal)?;
+            proto::write_journal(
+                dir,
+                &DatasetJournal {
+                    阶段: JournalPhase::Committed,
+                    ..journal.clone()
+                },
+            )?;
+            proto::sync_dir(dir)?;
+            self.finalize_previous_swap(dir)?;
+            proto::sync_dir(dir)?;
+            let _ = dir.remove_dir_all(&stage_dir);
+            proto::remove_journal(dir)?;
+            proto::sync_dir(dir)
+        })();
+
+        match result {
+            Ok(()) => Ok(DatasetCommitReceipt::committed(
+                new_revision,
+                DatasetCommitVisibility::Visible,
+                None,
+            )),
+            Err(error) if matches!(error.kind(), StorageErrorKind::CorruptTransaction(_)) => {
+                Err(error)
+            }
+            Err(_) if crossed_commit => {
+                log::warn!(target: crate::LOG_TARGET, "dataset_commit recovery_pending");
+                Ok(DatasetCommitReceipt::committed(
+                    new_revision,
+                    DatasetCommitVisibility::RecoveryPending,
+                    Some(CommitWarning::MemberPublishRecoveryPending),
+                ))
+            }
+            Err(error) => {
+                let _ = dir.remove_dir_all(&stage_dir);
+                let _ = dir.remove_dir_all(PathBuf::from(PREVIOUS_NEXT_DIR));
+                Err(error)
+            }
+        }
+    }
+
+    fn stage_previous_generation(
+        &self,
+        dir: &Dir,
+        current: &DatasetManifest,
+    ) -> Result<(), StorageError> {
+        let previous_next = PathBuf::from(PREVIOUS_NEXT_DIR);
+        if proto::exists(dir, &previous_next)? {
+            dir.remove_dir_all(&previous_next).map_err(proto::map_io)?;
+            proto::sync_dir(dir)?;
+        }
+        let primary_dir = PathBuf::from(PRIMARY_DIR);
+        if !proto::exists(dir, &primary_dir.join(MANIFEST_FILE))? {
+            return proto::sync_dir(dir);
+        }
+        let primary_blobs = primary_dir.join(BLOBS_DIR);
+        let next_blobs = previous_next.join(BLOBS_DIR);
+        dir.create_dir_all(&next_blobs).map_err(proto::map_io)?;
+        for name in current.members() {
+            let source = primary_blobs.join(name.as_str());
+            proto::reject_symlink(dir, &source)?;
+            dir.hard_link(&source, dir, next_blobs.join(name.as_str()))
+                .map_err(proto::map_io)?;
+        }
+        if let Some(bytes) = proto::read_file(dir, &primary_dir.join(MANIFEST_FILE))? {
+            proto::write_new_file(dir, &previous_next.join(MANIFEST_FILE), &bytes)?;
+        }
+        proto::sync_generation(dir, &previous_next)
+    }
+
     fn commit_sync(
         &self,
         dir: &Dir,
@@ -733,14 +1109,7 @@ impl FileSystemDatasetAdapter {
         let new_revision = new_manifest.revision().clone();
         let mut canonical = members.to_vec();
         canonical.sort_by(|left, right| left.name().cmp(right.name()));
-        let record = DatasetManifestRecord {
-            修订号: proto::encode_revision(new_revision.as_bytes()),
-            成员集合: new_manifest
-                .members()
-                .iter()
-                .map(|name| name.as_str().to_string())
-                .collect(),
-        };
+        let record = manifest_record(&new_manifest);
         let nonce = Uuid::new_v4().simple().to_string();
         let journal = DatasetJournal {
             随机数: nonce.clone(),
@@ -1196,18 +1565,97 @@ fn dataset_member_mismatch() -> StorageError {
     )
 }
 
-fn manifest_from_record(record: &DatasetManifestRecord) -> Result<DatasetManifest, StorageError> {
+fn manifest_record(manifest: &DatasetManifest) -> DatasetManifestRecord {
+    DatasetManifestRecord {
+        修订号: proto::encode_revision(manifest.revision().as_bytes()),
+        成员集合: manifest
+            .members()
+            .iter()
+            .map(|name| name.as_str().to_string())
+            .collect(),
+        成员证据: manifest
+            .members()
+            .iter()
+            .filter_map(|name| manifest.member_evidence(name))
+            .map(|member| DatasetManifestMemberRecord {
+                名称: member.name().as_str().to_string(),
+                字节数: member.byte_len(),
+                修订摘要: proto::encode_revision(member.member_digest()),
+            })
+            .collect(),
+    }
+}
+
+fn manifest_from_record(
+    dir: &Dir,
+    generation_dir: &str,
+    record: &DatasetManifestRecord,
+) -> Result<DatasetManifest, StorageError> {
     let revision = DatasetRevision::from_bytes(proto::decode_revision(&record.修订号)?);
-    let members = record
+    let member_evidence = if record.成员证据.is_empty() && !record.成员集合.is_empty() {
+        let blobs = PathBuf::from(generation_dir).join(BLOBS_DIR);
+        record
+            .成员集合
+            .iter()
+            .map(|name| {
+                let safe_name = SafePathSegment::from_str(name)?;
+                let bytes = proto::read_file(dir, &blobs.join(name))?.ok_or_else(|| {
+                    StorageError::new(StorageErrorKind::Io, "数据集 manifest 引用的成员不存在")
+                })?;
+                Ok(DatasetMemberReference::from_manifest_member(
+                    revision.clone(),
+                    safe_name,
+                    bytes.len() as u64,
+                    revision_member_digest(&bytes),
+                ))
+            })
+            .collect::<Result<Vec<_>, StorageError>>()?
+    } else {
+        record
+            .成员证据
+            .iter()
+            .map(|member| {
+                Ok(DatasetMemberReference::from_manifest_member(
+                    revision.clone(),
+                    SafePathSegment::from_str(&member.名称)?,
+                    member.字节数,
+                    proto::decode_revision(&member.修订摘要)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, StorageError>>()?
+    };
+    let manifest = DatasetManifest::from_verified_members(revision, member_evidence)?;
+    let persisted_names = record
         .成员集合
         .iter()
         .map(|name| SafePathSegment::from_str(name))
         .collect::<Result<Vec<_>, _>>()?;
-    DatasetManifest::from_revision(revision, members)
+    if manifest.members() != persisted_names {
+        return Err(StorageError::new(
+            StorageErrorKind::Io,
+            "数据集 manifest 成员集合与复用证据不一致",
+        ));
+    }
+    Ok(manifest)
 }
 
 #[async_trait]
 impl AtomicDatasetPort for FileSystemDatasetAdapter {
+    async fn list_datasets(
+        &self,
+        namespace: crate::domain::StorageNamespace,
+    ) -> Result<Vec<DatasetKey>, StorageError> {
+        self.list_datasets_sync(namespace)
+    }
+
+    async fn delete_all_generations(
+        &self,
+        dataset: &DatasetKey,
+        options: DeleteOptions,
+    ) -> Result<DeleteOutcome, StorageError> {
+        self.delete_all_generations_sync(dataset, options)
+    }
+
     async fn read_manifest(&self, dataset: &DatasetKey) -> Result<DatasetManifest, StorageError> {
         let (dir, _lock) = self.locked(dataset)?;
         self.current_manifest(&dir)
@@ -1240,6 +1688,16 @@ impl AtomicDatasetPort for FileSystemDatasetAdapter {
     ) -> Result<DatasetCommitReceipt, StorageError> {
         let (dir, _lock) = self.locked(dataset)?;
         self.commit_sync(&dir, expected, members)
+    }
+
+    async fn commit_incremental(
+        &self,
+        dataset: &DatasetKey,
+        changes: &DatasetChangeSet,
+        _options: WriteOptions,
+    ) -> Result<DatasetCommitReceipt, StorageError> {
+        let (dir, _lock) = self.locked(dataset)?;
+        self.commit_incremental_sync(&dir, changes)
     }
 
     async fn promote_previous(

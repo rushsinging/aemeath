@@ -27,34 +27,20 @@ use tools::{SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadState
 #[derive(Default)]
 struct RecordingWriter {
     saved: Mutex<Vec<CanonicalSession>>,
-    saved_tool_receipts: Mutex<Vec<(String, u64, context::domain::ToolCallReceipt)>>,
     fail: bool,
 }
 
 #[async_trait]
 impl CanonicalSessionWriter for RecordingWriter {
-    async fn save(&self, session: &CanonicalSession) -> Result<(), String> {
-        if self.fail {
-            return Err("disk full".to_string());
-        }
-        self.saved.lock().unwrap().push(session.clone());
-        Ok(())
-    }
-
-    async fn save_tool_receipt(
+    async fn save(
         &self,
-        session_id: &str,
-        revision: u64,
-        receipt: &context::domain::ToolCallReceipt,
+        _before: &CanonicalSession,
+        session: &CanonicalSession,
     ) -> Result<(), String> {
         if self.fail {
             return Err("disk full".to_string());
         }
-        self.saved_tool_receipts.lock().unwrap().push((
-            session_id.to_string(),
-            revision,
-            receipt.clone(),
-        ));
+        self.saved.lock().unwrap().push(session.clone());
         Ok(())
     }
 }
@@ -208,8 +194,8 @@ fn repository(
             workspace: SnapshotState::Captured(workspace()),
             revision: 0,
             compact: None,
-            run_slices: vec![],
-            committed_steps: vec![],
+            run_slices: vec![].into(),
+            committed_steps: Default::default(),
             skill_load_records: Vec::new(),
         },
     )
@@ -244,8 +230,8 @@ fn ten_step_session(
         workspace: SnapshotState::Captured(workspace()),
         revision,
         compact: None,
-        run_slices: ten_step_slices(),
-        committed_steps: vec![],
+        run_slices: ten_step_slices().into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     }
 }
@@ -325,7 +311,6 @@ async fn skill_load_revision_is_atomic_idempotent_and_failure_safe() {
 
     let failing_writer = Arc::new(RecordingWriter {
         saved: Mutex::new(Vec::new()),
-        saved_tool_receipts: Mutex::new(Vec::new()),
         fail: true,
     });
     let (failing, failing_holder) = repository(failing_writer);
@@ -499,7 +484,8 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
             step_id: "step".to_string(),
             fingerprint: "outcome".to_string(),
             committed_revision: revision,
-        }],
+        }]
+        .into(),
         skill_load_records: Vec::new(),
     }
 }
@@ -656,7 +642,7 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
             revision: step_count as u64,
             compact: None,
             run_slices,
-            committed_steps: vec![],
+            committed_steps: Default::default(),
             skill_load_records: Vec::new(),
         };
         let (repository, _) = repository_with_session(writer, session);
@@ -897,8 +883,9 @@ async fn snapshot_reads_structured_projection_not_legacy_chats() {
                 "step",
                 AcceptedInputProjection::new(vec![Message::user("structured-only")], "fp", 0),
             )],
-        )],
-        committed_steps: vec![],
+        )]
+        .into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
     let (repository, _) = repository_with_session(writer, session);
@@ -907,6 +894,86 @@ async fn snapshot_reads_structured_projection_not_legacy_chats() {
     assert_eq!(snapshot.messages.len(), 1);
     assert_eq!(snapshot.messages[0].text_content(), "structured-only");
     assert!(snapshot.active_summary.is_none());
+}
+
+#[tokio::test]
+async fn finalized_append_reuses_existing_committed_step_entry_backing() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("shared-ledger");
+    let mut session = CanonicalSession::fixture(session_id.as_str());
+    session.revision = 1;
+    session.committed_steps = vec![context::domain::session::CommittedStep::fixture(
+        "run-existing",
+        "step-existing",
+        "existing",
+        1,
+    )]
+    .into();
+    let existing_entry = Arc::clone(&session.committed_steps.entries()[0]);
+    let (repository, holder) = repository_with_session(writer, session);
+    let mut mutation = append("new");
+    mutation.session_id = session_id;
+    mutation.expected_revision = SessionRevision::new(1);
+    mutation.run_id = RunId::new("run-new");
+    mutation.step_id = RunStepId::new("step-new");
+
+    repository
+        .append_finalized(&mutation)
+        .await
+        .expect("append finalized outcome");
+
+    let committed = holder.read().unwrap();
+    assert!(Arc::ptr_eq(
+        &existing_entry,
+        &committed.committed_steps.entries()[0]
+    ));
+    assert_eq!(committed.committed_steps.len(), 2);
+}
+
+#[tokio::test]
+async fn finalized_append_reuses_unchanged_run_slice_backing() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("shared-history");
+    let session = CanonicalSession {
+        id: session_id.to_string(),
+        chats: vec![],
+        created_at: "2026-01-01T00:00:00Z".to_string(),
+        updated_at: "2026-01-01T00:00:00Z".to_string(),
+        metadata: Default::default(),
+        tasks: SnapshotState::Missing,
+        workspace: SnapshotState::Captured(workspace()),
+        revision: 1,
+        compact: None,
+        run_slices: vec![CommittedRunSlice::new(
+            "run-existing",
+            vec![CommittedRunStep::accepted_only(
+                "step-existing",
+                AcceptedInputProjection::new(vec![Message::user("existing")], "existing", 1),
+            )],
+        )]
+        .into(),
+        committed_steps: Default::default(),
+        skill_load_records: Vec::new(),
+    };
+    let existing_slice = Arc::clone(&session.run_slices.slices()[0]);
+    let (repository, holder) = repository_with_session(writer, session);
+    let mut mutation = append("new");
+    mutation.session_id = session_id;
+    mutation.expected_revision = SessionRevision::new(1);
+    mutation.run_id = RunId::new("run-new");
+    mutation.step_id = RunStepId::new("step-new");
+
+    repository
+        .append_finalized(&mutation)
+        .await
+        .expect("append finalized outcome");
+
+    let committed = holder.read().unwrap();
+    assert!(Arc::ptr_eq(
+        &existing_slice,
+        &committed.run_slices.slices()[0]
+    ));
+    assert_eq!(committed.run_slices.len(), 2);
 }
 
 #[tokio::test]
@@ -941,17 +1008,11 @@ async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
     assert!(first.changed);
     assert!(!second.changed);
     assert_eq!(holder.read().unwrap().revision, 1);
-    assert!(
-        writer.saved.lock().unwrap().is_empty(),
-        "Tool receipt 更新不得重编码完整 CanonicalSession"
-    );
-    let saved_receipts = writer.saved_tool_receipts.lock().unwrap();
-    assert_eq!(saved_receipts.len(), 1);
     assert_eq!(
-        saved_receipts[0].0,
-        first.receipt.identity.session_id.as_str()
+        writer.saved.lock().unwrap().len(),
+        1,
+        "Tool receipt 更新应通过增量 Session writer 提交 before/after generation"
     );
-    assert_eq!(saved_receipts[0].1, 1);
     assert_eq!(
         holder.read().unwrap().run_slices[0].steps[0].tool_receipts[0].state,
         ToolCallState::Pending
@@ -962,7 +1023,6 @@ async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
 async fn advance_tool_receipt_write_failure_does_not_publish_candidate() {
     let writer = Arc::new(RecordingWriter {
         saved: Mutex::new(vec![]),
-        saved_tool_receipts: Mutex::new(vec![]),
         fail: true,
     });
     let (repository, holder) = repository(writer);
@@ -1010,7 +1070,6 @@ async fn concurrent_appends_with_same_revision_allow_one_commit_and_reject_one_c
 async fn failed_durable_write_does_not_publish_candidate() {
     let writer = Arc::new(RecordingWriter {
         saved: Mutex::new(vec![]),
-        saved_tool_receipts: Mutex::new(vec![]),
         fail: true,
     });
     let (repository, holder) = repository(writer);

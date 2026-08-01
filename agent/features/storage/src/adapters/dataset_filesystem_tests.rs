@@ -4,8 +4,9 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use super::FileSystemDatasetAdapter;
 use crate::domain::{
-    DatasetCommitVisibility, DatasetKey, DatasetMember, DatasetRevision, Durability,
-    SafePathSegment, StorageNamespace, WriteOptions,
+    revision_member_digest, DatasetChangeSet, DatasetCommitVisibility, DatasetKey, DatasetMember,
+    DatasetMemberChange, DatasetMemberReference, DatasetReadOutcome, DatasetRevision, Durability,
+    SafePathSegment, StorageErrorKind, StorageNamespace, WriteOptions,
 };
 use crate::test_log;
 use crate::AtomicDatasetPort;
@@ -60,6 +61,324 @@ fn key() -> DatasetKey {
 
 fn member(name: &str, bytes: &[u8]) -> DatasetMember {
     DatasetMember::new(SafePathSegment::from_str(name).unwrap(), bytes.to_vec())
+}
+
+fn member_reference(
+    revision: &DatasetRevision,
+    name: &str,
+    bytes: &[u8],
+) -> DatasetMemberReference {
+    DatasetMemberReference::from_manifest_member(
+        revision.clone(),
+        SafePathSegment::from_str(name).expect("safe member name"),
+        bytes.len() as u64,
+        revision_member_digest(bytes),
+    )
+}
+
+#[tokio::test]
+async fn incremental_commit_reuses_verified_member_and_publishes_complete_generation() {
+    let root = root();
+    let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+    let key = key();
+    let empty_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read empty manifest")
+        .revision()
+        .clone();
+    adapter
+        .commit_atomic(
+            &key,
+            &empty_revision,
+            &[member("active", b"a1"), member("archive", b"z1")],
+            WriteOptions::new(Durability::BestEffort),
+        )
+        .await
+        .expect("seed generation");
+    let current_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read current manifest")
+        .revision()
+        .clone();
+    let changes = DatasetChangeSet::new(
+        current_revision.clone(),
+        vec![DatasetMemberChange::Replace(member("active", b"a2"))],
+        vec![member_reference(&current_revision, "archive", b"z1")],
+    )
+    .expect("valid incremental change set");
+
+    adapter
+        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .await
+        .expect("incremental commit");
+
+    let requested = [
+        SafePathSegment::from_str("active").expect("safe member name"),
+        SafePathSegment::from_str("archive").expect("safe member name"),
+    ];
+    let DatasetReadOutcome::Found(read) = adapter
+        .read_consistent(&key, &requested)
+        .await
+        .expect("read complete generation")
+    else {
+        panic!("complete generation should exist");
+    };
+    assert_eq!(
+        read.members(),
+        &[member("active", b"a2"), member("archive", b"z1")]
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        let dataset_path = root.join("memory").join("conv-log");
+        let primary_inode =
+            std::fs::metadata(dataset_path.join("primary").join("blobs").join("archive"))
+                .expect("primary reused member metadata")
+                .ino();
+        let previous_inode =
+            std::fs::metadata(dataset_path.join("previous").join("blobs").join("archive"))
+                .expect("previous source member metadata")
+                .ino();
+        assert_eq!(
+            primary_inode, previous_inode,
+            "reused member must retain the immutable source inode instead of being rewritten"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn incremental_commit_rejects_reused_member_when_primary_bytes_do_not_match_evidence() {
+    let root = root();
+    let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+    let key = key();
+    let empty_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read empty manifest")
+        .revision()
+        .clone();
+    adapter
+        .commit_atomic(
+            &key,
+            &empty_revision,
+            &[member("active", b"a1"), member("archive", b"z1")],
+            WriteOptions::new(Durability::BestEffort),
+        )
+        .await
+        .expect("seed generation");
+    let current_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read current manifest")
+        .revision()
+        .clone();
+    let invalid_reference = member_reference(&current_revision, "archive", b"other");
+    let changes = DatasetChangeSet::new(
+        current_revision,
+        vec![DatasetMemberChange::Replace(member("active", b"a2"))],
+        vec![invalid_reference],
+    )
+    .expect("domain-valid reference");
+
+    let error = adapter
+        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .await
+        .expect_err("mismatched reuse evidence must be rejected");
+
+    assert!(matches!(
+        error.kind(),
+        StorageErrorKind::CorruptTransaction(_)
+    ));
+    let requested = [SafePathSegment::from_str("active").expect("safe member name")];
+    let DatasetReadOutcome::Found(read) = adapter
+        .read_consistent(&key, &requested)
+        .await
+        .expect("read unchanged primary")
+    else {
+        panic!("primary should remain readable");
+    };
+    assert_eq!(read.members(), &[member("active", b"a1")]);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn incremental_commit_rejects_reused_member_missing_from_primary_manifest() {
+    let root = root();
+    let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+    let key = key();
+    let empty_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read empty manifest")
+        .revision()
+        .clone();
+    adapter
+        .commit_atomic(
+            &key,
+            &empty_revision,
+            &[member("active", b"a1")],
+            WriteOptions::new(Durability::BestEffort),
+        )
+        .await
+        .expect("seed generation");
+    let current_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read current manifest")
+        .revision()
+        .clone();
+    let changes = DatasetChangeSet::new(
+        current_revision.clone(),
+        Vec::new(),
+        vec![member_reference(&current_revision, "archive", b"z1")],
+    )
+    .expect("domain-valid reference");
+
+    let error = adapter
+        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .await
+        .expect_err("missing source member must be rejected");
+
+    assert!(matches!(
+        error.kind(),
+        StorageErrorKind::CorruptTransaction(_)
+    ));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn incremental_commit_removes_only_explicit_omitted_member() {
+    let root = root();
+    let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+    let key = key();
+    let empty_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read empty manifest")
+        .revision()
+        .clone();
+    adapter
+        .commit_atomic(
+            &key,
+            &empty_revision,
+            &[
+                member("active", b"a1"),
+                member("archive", b"z1"),
+                member("index", b"i1"),
+            ],
+            WriteOptions::new(Durability::BestEffort),
+        )
+        .await
+        .expect("seed generation");
+    let current_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read current manifest")
+        .revision()
+        .clone();
+    let changes = DatasetChangeSet::new(
+        current_revision.clone(),
+        Vec::new(),
+        vec![
+            member_reference(&current_revision, "active", b"a1"),
+            member_reference(&current_revision, "index", b"i1"),
+        ],
+    )
+    .expect("valid incremental change set")
+    .with_removed_members(vec![
+        SafePathSegment::from_str("archive").expect("safe member name")
+    ])
+    .expect("valid removal");
+
+    adapter
+        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .await
+        .expect("incremental removal");
+
+    let manifest = adapter.read_manifest(&key).await.expect("read manifest");
+    let names = manifest
+        .members()
+        .iter()
+        .map(SafePathSegment::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["active", "index"]);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[allow(
+    clippy::await_holding_lock,
+    reason = "故障环境变量是进程全局状态，测试必须在整个异步提交期间独占它"
+)]
+#[tokio::test(flavor = "current_thread")]
+async fn incremental_commit_after_prepared_recovers_complete_generation() {
+    let root = root();
+    let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+    let key = key();
+    let empty_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read empty manifest")
+        .revision()
+        .clone();
+    adapter
+        .commit_atomic(
+            &key,
+            &empty_revision,
+            &[member("active", b"a1"), member("archive", b"z1")],
+            WriteOptions::new(Durability::BestEffort),
+        )
+        .await
+        .expect("seed generation");
+    let current_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read current manifest")
+        .revision()
+        .clone();
+    let changes = DatasetChangeSet::new(
+        current_revision.clone(),
+        vec![DatasetMemberChange::Replace(member("active", b"a2"))],
+        vec![member_reference(&current_revision, "archive", b"z1")],
+    )
+    .expect("valid incremental change set");
+
+    let fault = FaultEnvGuard::after_prepared();
+    let receipt = adapter
+        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .await
+        .expect("post-Prepared failure is committed");
+    assert_eq!(
+        receipt.visibility(),
+        DatasetCommitVisibility::RecoveryPending
+    );
+    drop(fault);
+
+    let requested = [
+        SafePathSegment::from_str("active").expect("safe member name"),
+        SafePathSegment::from_str("archive").expect("safe member name"),
+    ];
+    let DatasetReadOutcome::Found(read) = adapter
+        .read_consistent(&key, &requested)
+        .await
+        .expect("next lock entry rolls generation forward")
+    else {
+        panic!("recovered generation should exist");
+    };
+    assert_eq!(
+        read.members(),
+        &[member("active", b"a2"), member("archive", b"z1")]
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]

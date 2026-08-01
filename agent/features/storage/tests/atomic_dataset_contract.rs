@@ -10,9 +10,10 @@
 use std::str::FromStr;
 
 use storage::{
-    AtomicDatasetPort, DatasetCommitVisibility, DatasetKey, DatasetMember, DatasetReadOutcome,
-    Durability, FileSystemDatasetAdapter, Generation, QuarantineOutcome, QuarantineReason,
-    SafePathSegment, StorageErrorKind, StorageNamespace, TransactionScope, WriteOptions,
+    AtomicDatasetPort, DatasetChangeSet, DatasetCommitVisibility, DatasetKey, DatasetMember,
+    DatasetMemberChange, DatasetReadOutcome, DeleteOptions, Durability, FileSystemDatasetAdapter,
+    Generation, QuarantineOutcome, QuarantineReason, SafePathSegment, StorageErrorKind,
+    StorageNamespace, TransactionScope, WriteOptions,
 };
 use uuid::Uuid;
 
@@ -74,6 +75,55 @@ async fn seed_generation(
     assert_eq!(receipt.visibility(), DatasetCommitVisibility::Visible);
     assert_eq!(receipt.warning(), None);
     receipt.revision().clone()
+}
+
+#[tokio::test]
+async fn read_manifest_exposes_verified_member_reuse_evidence() {
+    let (adapter, root) = adapter("manifest-member-evidence");
+    let key = key();
+    seed_generation(
+        &adapter,
+        &key,
+        &[member("active", b"a1"), member("archive", b"z1")],
+    )
+    .await;
+
+    let manifest = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read_manifest must expose the committed generation");
+    let active_evidence = manifest
+        .member_evidence(&name("active"))
+        .expect("manifest must expose evidence for each committed member");
+
+    assert_eq!(active_evidence.source_revision(), manifest.revision());
+    assert_eq!(active_evidence.name(), &name("active"));
+    assert_eq!(active_evidence.byte_len(), 2);
+
+    let changes = DatasetChangeSet::new(
+        manifest.revision().clone(),
+        vec![DatasetMemberChange::Replace(member("archive", b"z2"))],
+        vec![active_evidence.clone()],
+    )
+    .expect("manifest evidence must be directly consumable by incremental commit");
+    adapter
+        .commit_incremental(&key, &changes, options())
+        .await
+        .expect("verified manifest evidence must safely reuse the member");
+
+    let DatasetReadOutcome::Found(read) = adapter
+        .read_consistent(&key, &[name("active"), name("archive")])
+        .await
+        .expect("committed generation must remain readable")
+    else {
+        panic!("incremental generation must exist");
+    };
+    assert_eq!(
+        read.members(),
+        &[member("active", b"a1"), member("archive", b"z2")]
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]
@@ -421,6 +471,63 @@ async fn promote_previous_restores_prior_generation() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[tokio::test]
+async fn list_datasets_returns_only_live_dataset_keys() {
+    let (adapter, root) = adapter("list-datasets");
+    let first = key();
+    let second = DatasetKey::new(
+        StorageNamespace::Session,
+        vec![name("conversation-2.dataset")],
+    )
+    .unwrap();
+    seed_generation(&adapter, &first, &[member("active", b"a1")]).await;
+    seed_generation(&adapter, &second, &[member("active", b"a2")]).await;
+
+    let keys = adapter
+        .list_datasets(StorageNamespace::Memory)
+        .await
+        .expect("dataset enumeration must succeed");
+    assert_eq!(keys, vec![first.clone()]);
+    let session_keys = adapter
+        .list_datasets(StorageNamespace::Session)
+        .await
+        .expect("dataset enumeration must support every namespace");
+    assert_eq!(session_keys, vec![second]);
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[tokio::test]
+async fn delete_all_generations_removes_dataset_and_is_idempotent() {
+    let (adapter, root) = adapter("delete-dataset");
+    let key = key();
+    seed_generation(&adapter, &key, &[member("active", b"a1")]).await;
+
+    let deleted = adapter
+        .delete_all_generations(&key, DeleteOptions::default())
+        .await
+        .expect("dataset deletion must succeed");
+    assert!(deleted.deleted_primary());
+    assert!(
+        !deleted.deleted_previous(),
+        "a single-generation dataset has no retained previous generation"
+    );
+
+    assert_eq!(
+        adapter
+            .read_consistent(&key, &[name("active")])
+            .await
+            .unwrap(),
+        DatasetReadOutcome::NotFound
+    );
+    let absent = adapter
+        .delete_all_generations(&key, DeleteOptions::default())
+        .await
+        .expect("deleting an absent dataset must be idempotent");
+    assert!(!absent.deleted_primary());
+    assert!(!absent.deleted_previous());
+
+    std::fs::remove_dir_all(root).unwrap();
+}
 #[tokio::test]
 async fn quarantine_moves_requested_dataset_generation() {
     let (adapter, root) = adapter("quarantine-dataset");

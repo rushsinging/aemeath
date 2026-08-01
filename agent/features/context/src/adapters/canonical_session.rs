@@ -16,17 +16,8 @@ use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSn
 
 #[async_trait]
 pub trait CanonicalSessionWriter: Send + Sync {
-    async fn save(&self, session: &CanonicalSession) -> Result<(), String>;
-
-    async fn save_tool_receipt(
-        &self,
-        session_id: &str,
-        revision: u64,
-        receipt: &crate::domain::ToolCallReceipt,
-    ) -> Result<(), String> {
-        let _ = (session_id, revision, receipt);
-        Err("此 CanonicalSessionWriter 未实现 Tool receipt ledger".to_string())
-    }
+    async fn save(&self, before: &CanonicalSession, after: &CanonicalSession)
+        -> Result<(), String>;
 }
 
 pub struct AtomicBlobCanonicalSessionWriter {
@@ -37,11 +28,29 @@ impl AtomicBlobCanonicalSessionWriter {
     pub fn new(blob: Arc<dyn storage::api::AtomicBlobPort>) -> Self {
         Self { blob }
     }
+
+    pub async fn save_tool_receipt(
+        &self,
+        session_id: &str,
+        revision: u64,
+        receipt: &crate::domain::ToolCallReceipt,
+    ) -> Result<(), String> {
+        crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
+            Arc::clone(&self.blob),
+            session_id,
+        )?
+        .save(revision, receipt)
+        .await
+    }
 }
 
 #[async_trait]
 impl CanonicalSessionWriter for AtomicBlobCanonicalSessionWriter {
-    async fn save(&self, session: &CanonicalSession) -> Result<(), String> {
+    async fn save(
+        &self,
+        _before: &CanonicalSession,
+        session: &CanonicalSession,
+    ) -> Result<(), String> {
         use crate::ports::SessionSnapshotStore;
 
         let store =
@@ -60,35 +69,16 @@ impl CanonicalSessionWriter for AtomicBlobCanonicalSessionWriter {
         .delete()
         .await
     }
-
-    async fn save_tool_receipt(
-        &self,
-        session_id: &str,
-        revision: u64,
-        receipt: &crate::domain::ToolCallReceipt,
-    ) -> Result<(), String> {
-        crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
-            Arc::clone(&self.blob),
-            session_id,
-        )?
-        .save(revision, receipt)
-        .await
-    }
 }
 
 pub struct NoOpCanonicalSessionWriter;
 
 #[async_trait]
 impl CanonicalSessionWriter for NoOpCanonicalSessionWriter {
-    async fn save(&self, _session: &CanonicalSession) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn save_tool_receipt(
+    async fn save(
         &self,
-        _session_id: &str,
-        _revision: u64,
-        _receipt: &crate::domain::ToolCallReceipt,
+        _before: &CanonicalSession,
+        _after: &CanonicalSession,
     ) -> Result<(), String> {
         Ok(())
     }
@@ -281,7 +271,7 @@ impl SessionRepository for CanonicalSessionRepository {
             ),
         );
         self.writer
-            .save(&candidate)
+            .save(&current, &candidate)
             .await
             .map_err(AcceptedInputError::Storage)?;
         let revision = SessionRevision::new(candidate.revision);
@@ -332,7 +322,7 @@ impl SessionRepository for CanonicalSessionRepository {
             .expect("advanced receipt must exist")
             .clone();
         self.writer
-            .save_tool_receipt(&candidate.id, candidate.revision, &receipt)
+            .save(&current, &candidate)
             .await
             .map_err(ToolReceiptMutationError::Storage)?;
         self.publish_generation(&current, candidate)
@@ -372,7 +362,7 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
         self.writer
-            .save(&candidate)
+            .save(&current, &candidate)
             .await
             .map_err(tools::SkillLoadStateError::Storage)?;
         self.publish_generation(&current, candidate)
@@ -395,10 +385,10 @@ impl SessionRepository for CanonicalSessionRepository {
                 append.session_id.clone(),
             ));
         }
-        if let Some(committed) = current.committed_steps.iter().find(|committed| {
-            committed.run_id == append.run_id.to_string()
-                && committed.step_id == append.step_id.as_str()
-        }) {
+        if let Some(committed) = current
+            .committed_steps
+            .find(append.run_id.as_ref(), append.step_id.as_str())
+        {
             if committed.fingerprint == append.fingerprint.as_str() {
                 return Ok(Self::receipt(
                     append,
@@ -454,7 +444,7 @@ impl SessionRepository for CanonicalSessionRepository {
                 committed_revision: candidate.revision,
             },
         );
-        candidate.committed_steps.push(CommittedStep {
+        candidate.committed_steps = candidate.committed_steps.append(CommittedStep {
             run_id: append.run_id.to_string(),
             step_id: append.step_id.as_str().to_string(),
             fingerprint: append.fingerprint.as_str().to_string(),
@@ -462,7 +452,7 @@ impl SessionRepository for CanonicalSessionRepository {
         });
 
         self.writer
-            .save(&candidate)
+            .save(&current, &candidate)
             .await
             .map_err(ContextAppendError::Storage)?;
         let revision = SessionRevision::new(candidate.revision);
@@ -528,7 +518,7 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         self.writer
-            .save(&candidate)
+            .save(&current, &candidate)
             .await
             .map_err(ContextPortError::Compact)?;
         self.publish_generation(&current, candidate)
@@ -592,7 +582,7 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         self.writer
-            .save(&candidate)
+            .save(&current, &candidate)
             .await
             .map_err(ContextPortError::Compact)?;
         self.publish_generation(&current, candidate)
@@ -617,15 +607,15 @@ impl SessionRepository for CanonicalSessionRepository {
         let mut candidate = (*current).clone();
         candidate.chats.clear();
         candidate.compact = None;
-        candidate.run_slices.clear();
-        candidate.committed_steps.clear();
+        candidate.run_slices = candidate.run_slices.cleared();
+        candidate.committed_steps = candidate.committed_steps.cleared();
         candidate.skill_load_records.clear();
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
         self.writer
-            .save(&candidate)
+            .save(&current, &candidate)
             .await
             .map_err(ContextPortError::SessionRepository)?;
         self.publish_generation(&current, candidate)
@@ -636,7 +626,11 @@ impl SessionRepository for CanonicalSessionRepository {
 
 #[async_trait]
 impl CanonicalSessionWriter for crate::application::SessionPersistenceService {
-    async fn save(&self, session: &CanonicalSession) -> Result<(), String> {
+    async fn save(
+        &self,
+        _before: &CanonicalSession,
+        session: &CanonicalSession,
+    ) -> Result<(), String> {
         crate::application::SessionPersistenceService::save(self, session)
             .await
             .map_err(|error| error.to_string())

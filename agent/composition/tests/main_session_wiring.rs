@@ -270,8 +270,11 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let session_management: Arc<dyn SessionManagementPort> = Arc::new(
         context::adapters::AtomicBlobSessionManagement::new(session_blob.clone()),
     );
-    let writer = Arc::new(context::adapters::AtomicBlobCanonicalSessionWriter::new(
-        session_blob,
+    let writer = Arc::new(context::adapters::DatasetCanonicalSessionWriter::new(
+        Arc::new(
+            storage::FileSystemDatasetAdapter::new(agents_dir.clone())
+                .expect("create session dataset adapter"),
+        ),
     ));
     let session_project = workspace.read().project_identity();
     let wiring = context::wire_main_session(MainSessionDependencies {
@@ -600,4 +603,26 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
 
     // config_writer() returns a gate-aware façade (just verify it exists).
     let _writer = wiring.config_writer();
+}
+
+#[test]
+fn production_session_wiring_uses_dataset_writer_instead_of_blob_writer() {
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/runtime.rs"))
+        .expect("read composition runtime wiring");
+    assert!(
+        source.contains("DatasetSessionManagement::new"),
+        "production Session wiring must construct Dataset-aware management"
+    );
+    assert!(
+        !source.contains("AtomicBlobSessionManagement::new"),
+        "production Session wiring must not construct legacy-only management"
+    );
+    assert!(
+        source.contains("DatasetCanonicalSessionWriter::new"),
+        "production Session wiring must construct the incremental Dataset writer"
+    );
+    assert!(
+        !source.contains("AtomicBlobCanonicalSessionWriter::new"),
+        "production Session wiring must not construct the retired full-blob writer"
+    );
 }

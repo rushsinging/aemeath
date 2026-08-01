@@ -70,7 +70,8 @@ async fn unavailable_tool_result_projection_survives_save_and_resume() {
                 metadata: None,
             }],
         )],
-    )];
+    )]
+    .into();
     let service = SessionPersistenceService::new(store.clone(), Arc::new(LegacySessionDecoder));
 
     service.save(&session).await.unwrap();

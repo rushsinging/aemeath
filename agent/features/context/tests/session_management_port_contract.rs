@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use context::adapters::{decode_session, CanonicalSessionWriter};
+use context::adapters::decode_session;
 use context::domain::session::{CanonicalSession, SessionCodec, SnapshotState};
 use context::domain::{SessionId, ToolCallIdentity};
 use context::ports::SessionManagementPort;

@@ -207,8 +207,8 @@ fn build_harness() -> Harness {
         workspace: SnapshotState::Captured(ws_ctx),
         revision: 0,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 
@@ -260,8 +260,8 @@ fn session_with_workspace(
         workspace: SnapshotState::Captured(ws.clone()),
         revision: 1,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     }
 }
@@ -772,8 +772,8 @@ async fn workspace_missing_returns_typed_error() {
         workspace: SnapshotState::Missing,
         revision: 1,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 
@@ -806,8 +806,8 @@ async fn workspace_captured_empty_returns_typed_error() {
         workspace: SnapshotState::CapturedEmpty,
         revision: 1,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 
