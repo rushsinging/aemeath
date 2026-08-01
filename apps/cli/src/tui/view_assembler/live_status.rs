@@ -1,9 +1,5 @@
-//! 由 `SpinnerModel`（chat_active + phase）+ view_state 动画（frame/verb）
-//! 派生 `LiveStatusViewModel`。phase 语义→文案集中在此（DRY），文案与既有
-//! `app/update/ui_event.rs` 字面量对齐。
-//!
-//! #536: spinner 可见性由 `chat_active` 驱动（跟 StartChat/CompleteChat 生命周期），
-//! phase 仅控制显示文案。`chat_active=true` 但 `phase=None` 时文案兜底 `Thinking`。
+//! 由 typed Main Run snapshot + view_state 纯动画态派生 `LiveStatusViewModel`。
+//! Run status 到展示文案的转换集中在此；旧 spinner 业务生命周期不参与组装。
 //!
 //! 本层可依赖 model（边界守卫只禁渲染库/副作用），但 ViewModel 输出仅含基本类型。
 

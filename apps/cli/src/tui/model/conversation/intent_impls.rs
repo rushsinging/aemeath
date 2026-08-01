@@ -588,20 +588,6 @@ impl ConversationUpdate for SetCompactProgress {
     }
 }
 
-impl ConversationUpdate for SetSpinnerPhase {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.set_spinner_phase(self.phase);
-        vec![ConversationChange::SpinnerPhaseChanged]
-    }
-}
-
-impl ConversationUpdate for StopSpinner {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.stop_spinner();
-        vec![ConversationChange::SpinnerStopped]
-    }
-}
-
 impl ConversationUpdate for SyncQueuedSubmissions {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.sync_queued_submissions(self.queued)
@@ -756,8 +742,6 @@ impl ConversationUpdate for ConversationIntent {
             Self::SetTransientStatusNotice(s) => s.update(model),
             Self::SetGraphPhase(s) => s.update(model),
             Self::SetCompactProgress(s) => s.update(model),
-            Self::SetSpinnerPhase(s) => s.update(model),
-            Self::StopSpinner(s) => s.update(model),
             Self::SyncQueuedSubmissions(s) => s.update(model),
             Self::ClearCompactRuntime(s) => s.update(model),
         }

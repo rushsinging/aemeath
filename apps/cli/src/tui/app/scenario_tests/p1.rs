@@ -78,7 +78,6 @@ fn error_and_compact_progress_converge_through_frame_driver() {
     );
 
     harness.ui(UiEvent::Error("provider unavailable".into()));
-    assert!(!harness.app.model.conversation.runtime.spinner.chat_active);
     assert!(harness.effects().iter().any(
         |effect| matches!(effect, Effect::RunHook { name, message } if name == "error" && message == "provider unavailable")
     ));

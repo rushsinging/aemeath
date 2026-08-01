@@ -7,7 +7,6 @@ mod key_scroll;
 mod notice;
 mod reminder;
 mod spawn_context;
-mod spinner;
 mod ui_event;
 
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
@@ -19,7 +18,6 @@ use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::block::AskUserSlot;
 use crate::tui::model::conversation::intent::*;
-use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::output::rendered::RenderedLineAnchor;
 use crate::tui::render::output::tool_display::format_subagent_tool_header;
@@ -285,17 +283,16 @@ impl App {
                 }
                 let request_render = self.view_state.run_activity.is_active();
                 crate::tui::log_trace!(
-                  "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} phase={:?} verb={} dirty_output={}",
-                  before_frame,
-                  self.view_state.animation.spinner_frame,
-                  before_version,
-                  self.view_state.animation.version,
-                  self.view_state.spinner.frame,
-                  self.view_state.run_activity.is_active(),
-                  self.model.conversation.runtime.spinner.phase,
-                  self.view_state.spinner.verb,
-                  self.view_state.dirty.output
-              );
+                    "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} verb={} dirty_output={}",
+                    before_frame,
+                    self.view_state.animation.spinner_frame,
+                    before_version,
+                    self.view_state.animation.version,
+                    self.view_state.spinner.frame,
+                    self.view_state.run_activity.is_active(),
+                    self.view_state.spinner.verb,
+                    self.view_state.dirty.output
+                );
                 if request_render {
                     UpdateResult::one(Effect::RequestRender)
                 } else {
@@ -380,11 +377,9 @@ impl App {
                 self.mark_output_dirty();
             }
             TuiRuntimeEvent::TurnStarted { .. } => {
-                self.spinner_phase(SpinnerPhase::Thinking);
                 self.mark_output_dirty();
             }
             TuiRuntimeEvent::ApiError { error, .. } => {
-                self.spinner_stop();
                 self.append_system_notice(error);
                 self.mark_output_dirty();
             }
@@ -448,10 +443,6 @@ impl App {
                 };
             }
             TuiRuntimeEvent::InteractionRequested(ref req) => {
-                // InteractionRequested 走 Runtime 路径，但 spinner_stop / mark_output_dirty
-                // 是 App 级副作用，map_runtime_event 只返回 conversation intent。
-                // 必须在此处理，否则 spinner 不停。
-                self.spinner_stop();
                 self.mark_output_dirty();
                 // 桥接到已有的 ask_user_batch inline block 渲染
                 if let TuiInteractionBody::UserQuestions(questions) = &req.body {
@@ -489,9 +480,7 @@ impl App {
                 }
             }
             TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {
-                // Done/Cancelled 走 Runtime 路径，但 stop_processing 是 App 级副作用；
-                // 不执行会让 is_processing 永远保持 true。
-                self.spinner_stop();
+                // Done/Cancelled 只收敛 App 级 processing；活动展示由 typed Run status 收敛。
                 self.chat.stop_processing();
                 self.mark_output_dirty();
             }
@@ -842,8 +831,8 @@ impl App {
         )
     }
 
-    /// 据 Model 业务态（spinner.chat_active + phase / task lines / queued submissions）
-    /// + view_state 动画态（frame/verb）派生实时状态行 ViewModel。
+    /// 据 typed Main Run snapshot、task lines、queued submissions 与纯动画态
+    /// 派生实时状态行 ViewModel。
     pub(crate) fn live_status_view_model(&self) -> crate::tui::view_model::LiveStatusViewModel {
         let queued_texts: Vec<String> = self
             .model

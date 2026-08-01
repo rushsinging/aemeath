@@ -35,7 +35,6 @@ pub mod run_state;
 #[path = "conversation/run_state_tests.rs"]
 mod run_state_tests;
 pub mod runtime_state;
-pub mod spinner;
 pub mod status_notice;
 pub mod stop_hook_notice;
 pub mod stream;

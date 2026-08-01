@@ -687,55 +687,21 @@ fn test_stop_hook_blocked_without_stop_hook_message_does_not_render_notice() {
 }
 
 #[test]
-fn stop_hook_running_maps_to_hook_spinner_phase() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
-        hook_name: "Stop".to_string(),
-        status: TuiHookStatus::Running,
-        matcher: None,
-        command: None,
-        result: None,
-    }));
-
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::SetSpinnerPhase(SetSpinnerPhase { phase })]
-            if matches!(
-                phase,
-                crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
-                    event,
-                    outcome: crate::tui::model::conversation::spinner::HookOutcome::Running,
-                    ..
-                } if event == "Stop"
-            )
-    ));
+fn running_and_succeeded_hook_events_do_not_write_activity_state() {
+    for status in [TuiHookStatus::Running, TuiHookStatus::Succeeded] {
+        let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
+            hook_name: "Stop".to_string(),
+            status,
+            matcher: None,
+            command: None,
+            result: None,
+        }));
+        assert!(mapping.conversation.is_empty());
+    }
 }
 
 #[test]
-fn stop_hook_succeeded_maps_to_done_hook_spinner_phase() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
-        hook_name: "Stop".to_string(),
-        status: TuiHookStatus::Succeeded,
-        matcher: None,
-        command: None,
-        result: None,
-    }));
-
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::SetSpinnerPhase(SetSpinnerPhase { phase })]
-            if matches!(
-                phase,
-                crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
-                    event,
-                    outcome: crate::tui::model::conversation::spinner::HookOutcome::Done,
-                    ..
-                } if event == "Stop"
-            )
-    ));
-}
-
-#[test]
-fn stop_hook_failed_maps_to_failed_spinner_and_notice() {
+fn failed_hook_maps_only_to_notice() {
     let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
         hook_name: "Stop".to_string(),
         status: TuiHookStatus::Failed,
@@ -746,22 +712,12 @@ fn stop_hook_failed_maps_to_failed_spinner_and_notice() {
 
     assert!(matches!(
         mapping.conversation.as_slice(),
-        [
-            ConversationIntent::SetSpinnerPhase(SetSpinnerPhase { phase }),
-            ConversationIntent::AppendHookNotice(_),
-        ] if matches!(
-            phase,
-            crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
-                event,
-                outcome: crate::tui::model::conversation::spinner::HookOutcome::Failed,
-                ..
-            } if event == "Stop"
-        )
+        [ConversationIntent::AppendHookNotice(_)]
     ));
 }
 
 #[test]
-fn blocked_stop_hook_event_updates_spinner_without_duplicate_notice() {
+fn blocked_stop_hook_event_does_not_duplicate_notice_or_write_activity_state() {
     let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
         hook_name: "Stop".to_string(),
         status: TuiHookStatus::Blocked,
@@ -770,26 +726,11 @@ fn blocked_stop_hook_event_updates_spinner_without_duplicate_notice() {
         result: None,
     }));
 
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::SetSpinnerPhase(SetSpinnerPhase { phase })]
-            if matches!(
-                phase,
-                crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
-                    event,
-                    outcome: crate::tui::model::conversation::spinner::HookOutcome::Blocked,
-                    ..
-                } if event == "Stop"
-            )
-    ));
-    assert!(!mapping
-        .conversation
-        .iter()
-        .any(|intent| { matches!(intent, ConversationIntent::AppendHookNotice(_)) }));
+    assert!(mapping.conversation.is_empty());
 }
 
 #[test]
-fn post_compact_does_not_override_compact_spinner_with_hook_phase() {
+fn post_compact_does_not_write_activity_state() {
     let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
         hook_name: "PostCompact".to_string(),
         status: TuiHookStatus::Succeeded,

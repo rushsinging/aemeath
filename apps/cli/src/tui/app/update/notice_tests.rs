@@ -287,7 +287,6 @@ fn test_spinner_tick_idle_does_not_mark_output_dirty() {
     use crate::tui::effect::session::processing::SpawnContextRefs;
     use crate::tui::update::msg::TuiMsg;
     let mut app = make_app();
-    app.model.conversation.runtime.spinner.phase = None; // idle / 已完成
     app.view_state.dirty.clear_output();
     let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(8);
     let spawn_refs = SpawnContextRefs { agent_client: None };

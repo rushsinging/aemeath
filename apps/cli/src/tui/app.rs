@@ -374,8 +374,7 @@ impl App {
         #[cfg(test)]
         crate::tui::render::performance::record_terminal_draw(draw_duration);
         crate::tui::log_trace!(
-            "tui.draw.complete elapsed_ms={} terminal={}x{} output_rect={:?} input_rect={:?} status_rect={:?} spinner_active={} spinner_phase={:?} spinner_frame={} output_lines={}",
-            draw_duration.as_millis(),
+            "tui.draw.complete elapsed_ms={} terminal={}x{} output_rect={:?} input_rect={:?} status_rect={:?} run_activity_active={} spinner_frame={} output_lines={}",            draw_duration.as_millis(),
             self.layout
                 .last_terminal_size
                 .map(|size| size.width)
@@ -387,10 +386,8 @@ impl App {
             output_rect,
             input_rect,
             status_rect,
-            self.model.conversation.runtime.spinner.chat_active,
-            self.model.conversation.runtime.spinner.phase,
-            self.view_state.animation.spinner_frame,
-            self.output_area.document().total_lines()
+            self.view_state.run_activity.is_active(),
+            self.view_state.animation.spinner_frame,            self.output_area.document().total_lines()
         );
         self.finish_frame_diagnostics(draw_duration);
         Ok(())

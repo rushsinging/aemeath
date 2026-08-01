@@ -7,7 +7,6 @@ use crate::tui::adapter::tui_runtime_event::{
 };
 use crate::tui::app::event::UiEvent;
 use crate::tui::model::conversation::intent::ConversationIntent;
-use crate::tui::model::conversation::spinner::{HookOutcome, SpinnerPhase};
 use crate::tui::model::root::TuiModel;
 use crate::tui::update::root_reducer::reduce_agent_event;
 
@@ -50,10 +49,8 @@ fn stop_hook_feedback_scenario_projects_one_structured_notice() {
 }
 
 #[test]
-fn stop_hook_retry_success_finishes_without_failure_notice_end_to_end() {
+fn stop_hook_retry_success_does_not_write_activity_state_or_failure_notice() {
     let mut model = TuiModel::default();
-    model.conversation.runtime.spinner.chat_active = true;
-    model.conversation.runtime.spinner.phase = Some(SpinnerPhase::Thinking);
 
     let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
         hook_name: "Stop".to_string(),
@@ -70,21 +67,10 @@ fn stop_hook_retry_success_finishes_without_failure_notice_end_to_end() {
         }),
     }));
 
-    assert!(!mapping
-        .conversation
-        .iter()
-        .any(|intent| matches!(intent, ConversationIntent::AppendHookNotice(_))));
+    assert!(mapping.conversation.is_empty());
     let result = reduce_agent_event(&mut model, mapping);
-
-    assert_eq!(
-        model.conversation.runtime.spinner.phase,
-        Some(SpinnerPhase::Hook {
-            event: "Stop".to_string(),
-            detail: "check-agent-stop.sh".to_string(),
-            outcome: HookOutcome::Done,
-        })
-    );
-    assert!(result.dirty.status);
+    assert!(!result.dirty.output);
+    assert!(!result.dirty.status);
     assert!(model
         .conversation
         .timeline
@@ -94,11 +80,8 @@ fn stop_hook_retry_success_finishes_without_failure_notice_end_to_end() {
 }
 
 #[test]
-fn stop_hook_running_event_replaces_thinking_spinner_end_to_end() {
+fn stop_hook_running_event_does_not_write_activity_state() {
     let mut model = TuiModel::default();
-    model.conversation.runtime.spinner.chat_active = true;
-    model.conversation.runtime.spinner.phase = Some(SpinnerPhase::Thinking);
-
     let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
         hook_name: "Stop".to_string(),
         status: TuiHookStatus::Running,
@@ -106,15 +89,9 @@ fn stop_hook_running_event_replaces_thinking_spinner_end_to_end() {
         command: None,
         result: None,
     }));
-    let result = reduce_agent_event(&mut model, mapping);
 
-    assert_eq!(
-        model.conversation.runtime.spinner.phase,
-        Some(SpinnerPhase::Hook {
-            event: "Stop".to_string(),
-            detail: String::new(),
-            outcome: HookOutcome::Running,
-        })
-    );
-    assert!(result.dirty.status);
+    assert!(mapping.conversation.is_empty());
+    let result = reduce_agent_event(&mut model, mapping);
+    assert!(!result.dirty.output);
+    assert!(!result.dirty.status);
 }

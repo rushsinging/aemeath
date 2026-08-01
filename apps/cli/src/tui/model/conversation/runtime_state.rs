@@ -5,18 +5,16 @@
 
 use super::compact_progress::CompactProgressModel;
 use super::processing_job::{ProcessingJob, ProcessingStatus};
-use super::spinner::{SpinnerModel, SpinnerPhase};
 use super::status_notice::StatusNotice;
 use super::task_status::TaskStatusSnapshot;
 use super::usage::UsageSummary;
 use std::time::Instant;
 
-/// 会话运行态聚合——spinner / usage / workspace / status 等基础设施关注点。
+/// 会话运行态聚合——usage / workspace / status 等基础设施关注点。
 ///
 /// TODO: 字段将逐步私有化，改为只经业务方法操作。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RuntimeState {
-    pub spinner: SpinnerModel,
     pub usage: UsageSummary,
     pub live_tps: Option<f64>,
     pub task_status: TaskStatusSnapshot,
@@ -30,9 +28,6 @@ pub struct RuntimeState {
 // ── 只读访问器（供 view assembler 读取） ──
 
 impl RuntimeState {
-    pub fn spinner(&self) -> &SpinnerModel {
-        &self.spinner
-    }
     pub fn usage(&self) -> &UsageSummary {
         &self.usage
     }
@@ -53,115 +48,6 @@ impl RuntimeState {
     }
     pub fn compact_progress(&self) -> Option<&CompactProgressModel> {
         self.compact_progress.as_ref()
-    }
-}
-
-// ── 对话生命周期驱动的状态转换 ──
-
-impl RuntimeState {
-    /// 对话开始：激活 spinner。
-    pub fn start_chat(&mut self) {
-        self.spinner.chat_active = true;
-        self.spinner.phase = Some(SpinnerPhase::Thinking);
-    }
-
-    /// 对话完成：停 spinner。
-    pub fn complete_chat(&mut self) {
-        self.spinner.chat_active = false;
-        self.spinner.running_tool_count = 0;
-        self.spinner.phase = None;
-    }
-
-    /// 生成文本中：phase → Generating。
-    pub fn generate(&mut self) {
-        self.spinner.phase = Some(SpinnerPhase::Generating);
-    }
-
-    /// 思考中：phase → Thinking。
-    pub fn think(&mut self) {
-        self.spinner.phase = Some(SpinnerPhase::Thinking);
-    }
-
-    /// 工具调用开始：running_tool_count++ + phase → CallingTool。
-    pub fn start_tool_call(&mut self, name: &str) {
-        self.spinner.running_tool_count += 1;
-        self.spinner.phase = Some(SpinnerPhase::CallingTool(name.to_string()));
-    }
-
-    /// 工具调用完成：running_tool_count-- + 归零判断。
-    pub fn complete_tool_call(&mut self) {
-        self.spinner.running_tool_count = self.spinner.running_tool_count.saturating_sub(1);
-        if self.spinner.running_tool_count == 0 {
-            self.spinner.phase = Some(SpinnerPhase::Thinking);
-        } else {
-            self.spinner.phase = Some(SpinnerPhase::CallingTools {
-                remaining: self.spinner.running_tool_count,
-            });
-        }
-    }
-
-    /// Agent 进度报告：phase → AgentWorking。
-    pub fn report_agent_progress(&mut self) {
-        self.spinner.phase = Some(SpinnerPhase::AgentWorking);
-    }
-
-    /// 暂停对话（AskUser）：spinner inactive。
-    pub fn pause_chat(&mut self) {
-        self.spinner.chat_active = false;
-        self.spinner.phase = None;
-    }
-
-    /// 恢复对话（AskUser 应答后）：spinner active + Thinking。
-    pub fn resume_chat(&mut self) {
-        self.spinner.chat_active = true;
-        self.spinner.phase = Some(SpinnerPhase::Thinking);
-    }
-
-    /// 异常中止：与 complete_chat 相同效果。
-    pub fn abort_chat(&mut self) {
-        self.spinner.chat_active = false;
-        self.spinner.running_tool_count = 0;
-        self.spinner.phase = None;
-    }
-
-    /// 强制空闲（resume 场景覆盖副作用）。
-    pub fn force_idle(&mut self) {
-        self.spinner.chat_active = false;
-        self.spinner.phase = None;
-        self.spinner.running_tool_count = 0;
-    }
-
-    /// UI 触发的 spinner phase 变更，经 ConversationIntent 统一进入 reducer。
-    pub fn set_spinner_phase(&mut self, phase: SpinnerPhase) {
-        self.spinner.chat_active = true;
-        self.spinner.phase = Some(phase);
-    }
-
-    /// UI 触发的 spinner 停止，经 ConversationIntent 统一进入 reducer。
-    pub fn stop_spinner(&mut self) {
-        self.spinner.chat_active = false;
-        self.spinner.phase = None;
-        self.spinner.running_tool_count = 0;
-    }
-
-    /// Compact 开始：spinner active + Compacting。
-    pub fn start_compact(&mut self) {
-        self.spinner.chat_active = true;
-        self.spinner.phase = Some(SpinnerPhase::Compacting);
-    }
-
-    /// Compact 结束（或异常中止）兜底清理（#540）：
-    ///
-    /// 集中清空 compact 关联的运行态字段，避免 MessagesSync 兜底路径遗漏：
-    /// - `compact_progress` 清空 → 进度条消失
-    /// - `running_tool_count` 清零 → 防止残留工具计数
-    ///
-    /// **不**触碰 `chat_active` / `phase`——这两个字段归 `spinner_stop()` / `pause_chat()` /
-    /// `complete_chat()` 等对话生命周期方法管理，调用方按需叠加（#540 重构后
-    /// MessagesSync 路径统一复用 `spinner_stop()` + 本方法）。
-    pub fn clear_compact_runtime(&mut self) {
-        self.compact_progress = None;
-        self.spinner.running_tool_count = 0;
     }
 }
 
@@ -269,6 +155,10 @@ impl RuntimeState {
         }
     }
 
+    pub fn clear_compact_runtime(&mut self) {
+        self.compact_progress = None;
+    }
+
     pub fn set_compact_progress(
         &mut self,
         stage: String,
@@ -280,7 +170,6 @@ impl RuntimeState {
             current,
             total,
         });
-        self.start_compact();
     }
 }
 

@@ -28,7 +28,6 @@ mod tests {
         let anim = SpinnerAnim {
             frame: 12,
             phase_frame: 4,
-            phase: None,
             verb: "Forging".to_string(),
         };
         let queued = vec!["queued input".to_string()];

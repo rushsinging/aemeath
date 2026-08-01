@@ -47,6 +47,43 @@ fn production_source(source: &str) -> String {
 }
 
 #[test]
+fn run_activity_has_no_legacy_business_state_source() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
+    let forbidden_symbols = [
+        "SpinnerModel",
+        "SpinnerPhase",
+        "chat_active",
+        "running_tool_count",
+        "SetSpinnerPhase",
+        "StopSpinner",
+        "spinner_phase(",
+        "spinner_stop(",
+        "pause_chat(",
+        "resume_chat(",
+        "set_spinner_phase(",
+        "stop_spinner(",
+    ];
+
+    for file in rust_files_under(&root) {
+        if file
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().contains("test"))
+            || file == root.join("architecture_tests.rs")
+        {
+            continue;
+        }
+        let source = production_source(&fs::read_to_string(&file).expect("read rust source"));
+        for forbidden in forbidden_symbols {
+            assert!(
+                !source.contains(forbidden),
+                "{} must not retain legacy run activity state symbol {forbidden}",
+                file.display()
+            );
+        }
+    }
+}
+
+#[test]
 fn test_phase_one_root_reducer_intent_entrypoint_exists() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let intent = fs::read_to_string(root.join("update/intent.rs")).expect("read AgentIntent");

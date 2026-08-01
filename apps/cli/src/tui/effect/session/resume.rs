@@ -216,12 +216,7 @@ mod tests {
             "2026-01-01T00:00:00Z".to_string(),
         );
 
-        assert!(
-            !app.model.conversation.runtime.spinner.chat_active,
-            "SessionResumed 仅恢复历史，不能表示 Runtime 正在执行"
-        );
-        assert_eq!(app.model.conversation.runtime.spinner.phase, None);
-        assert_eq!(app.model.conversation.runtime.spinner.running_tool_count, 0);
+        assert!(app.model.conversation.active_main_run_snapshot().is_none());
     }
     #[test]
     fn test_apply_resume_input_history_populates_app_history() {

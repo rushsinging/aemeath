@@ -322,8 +322,7 @@ pub struct RunStepCompleted {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  Runtime intent structs（原 RuntimeIntent enum 的 14 个 variant，
-//  排除 SetSpinnerPhase / StopSpinner —— 它们的功能已被其他 intent 附带维护）
+//  Runtime intent structs
 // ════════════════════════════════════════════════════════════════════
 
 #[derive(Clone, Debug, PartialEq)]
@@ -382,14 +381,6 @@ pub struct SetCompactProgress {
     pub current: Option<u32>,
     pub total: Option<u32>,
 }
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SetSpinnerPhase {
-    pub phase: super::spinner::SpinnerPhase,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StopSpinner;
 
 #[derive(Clone, Debug)]
 pub struct SyncQueuedSubmissions {
@@ -478,8 +469,6 @@ pub enum ConversationIntent {
     SetTransientStatusNotice(SetTransientStatusNotice),
     SetGraphPhase(SetGraphPhase),
     SetCompactProgress(SetCompactProgress),
-    SetSpinnerPhase(SetSpinnerPhase),
-    StopSpinner(StopSpinner),
     SyncQueuedSubmissions(SyncQueuedSubmissions),
     ClearCompactRuntime(ClearCompactRuntime),
 }

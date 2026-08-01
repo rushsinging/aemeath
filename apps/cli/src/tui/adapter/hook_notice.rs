@@ -40,29 +40,6 @@ pub fn hook_message_notice(message: &TuiHookMessage) -> Option<HookNoticeContent
     })
 }
 
-pub fn hook_spinner_phase(
-    event: &TuiHookEvent,
-) -> crate::tui::model::conversation::spinner::SpinnerPhase {
-    use crate::tui::model::conversation::spinner::{HookOutcome, SpinnerPhase};
-
-    // PreCompact 事件使用专门的 Compacting phase
-    if event.hook_name == "PreCompact" {
-        return SpinnerPhase::Compacting;
-    }
-
-    let outcome = match event.status {
-        TuiHookStatus::Running => HookOutcome::Running,
-        TuiHookStatus::Succeeded => HookOutcome::Done,
-        TuiHookStatus::Blocked => HookOutcome::Blocked,
-        TuiHookStatus::Failed => HookOutcome::Failed,
-    };
-    SpinnerPhase::Hook {
-        event: event.hook_name.clone(),
-        detail: hook_spinner_detail(event),
-        outcome,
-    }
-}
-
 fn hook_failure_body(event: &TuiHookEvent) -> String {
     event
         .result
@@ -84,34 +61,6 @@ fn hook_summary_details(event: &TuiHookEvent) -> Option<String> {
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-fn hook_spinner_detail(event: &TuiHookEvent) -> String {
-    if let Some(command) = event.command.as_deref().and_then(non_empty) {
-        return truncate_for_spinner(&display_command_name(&command), 48);
-    }
-    event
-        .result
-        .as_ref()
-        .and_then(|result| {
-            result
-                .reason
-                .as_deref()
-                .and_then(non_empty)
-                .or_else(|| non_empty(result.stderr.as_str()))
-                .map(|text| truncate_for_spinner(&text, 48))
-        })
-        .unwrap_or_default()
-}
-
-fn display_command_name(command: &str) -> String {
-    command
-        .rsplit('/')
-        .find(|segment| !segment.trim().is_empty())
-        .unwrap_or(command)
-        .trim()
-        .trim_matches('"')
-        .to_string()
-}
-
 fn push_field(lines: &mut Vec<String>, label: &str, value: Option<&str>) {
     if let Some(value) = value.and_then(non_empty) {
         lines.push(format!("{label}: {value}"));
@@ -122,15 +71,6 @@ fn non_empty(text: &str) -> Option<String> {
     let stripped = strip_system_reminder_envelope(text);
     let trimmed = stripped.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
-}
-
-fn truncate_for_spinner(text: &str, limit: usize) -> String {
-    if text.chars().count() <= limit {
-        return text.to_string();
-    }
-    let mut truncated: String = text.chars().take(limit.saturating_sub(1)).collect();
-    truncated.push('…');
-    truncated
 }
 
 #[cfg(test)]
@@ -221,50 +161,6 @@ mod tests {
     #[test]
     fn succeeded_event_does_not_build_notice() {
         assert!(hook_event_notice(&event(TuiHookStatus::Succeeded, result())).is_none());
-    }
-
-    #[test]
-    fn spinner_detail_displays_command_basename_for_project_template_path() {
-        let event = TuiHookEvent {
-            hook_name: "Stop".to_string(),
-            status: TuiHookStatus::Running,
-            matcher: None,
-            command: Some("{AEMEATH_PROJECT_DIR}/build_cli.sh".to_string()),
-            result: None,
-        };
-
-        let phase = hook_spinner_phase(&event);
-
-        assert_eq!(
-            phase,
-            crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
-                event: "Stop".to_string(),
-                detail: "build_cli.sh".to_string(),
-                outcome: crate::tui::model::conversation::spinner::HookOutcome::Running,
-            }
-        );
-    }
-
-    #[test]
-    fn spinner_detail_strips_wrapping_quote_after_basename() {
-        let event = TuiHookEvent {
-            hook_name: "Stop".to_string(),
-            status: TuiHookStatus::Running,
-            matcher: None,
-            command: Some("\"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-verify.sh\"".to_string()),
-            result: None,
-        };
-
-        let phase = hook_spinner_phase(&event);
-
-        assert_eq!(
-            phase,
-            crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
-                event: "Stop".to_string(),
-                detail: "stop-verify.sh".to_string(),
-                outcome: crate::tui::model::conversation::spinner::HookOutcome::Running,
-            }
-        );
     }
 
     #[test]

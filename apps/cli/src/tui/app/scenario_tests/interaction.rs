@@ -84,7 +84,12 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
             "resume framebuffer 缺少 {expected}\n{screen}"
         );
     }
-    assert!(!harness.app.model.conversation.runtime.spinner.chat_active);
+    assert!(harness
+        .app
+        .model
+        .conversation
+        .active_main_run_snapshot()
+        .is_none());
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
         steps: vec![TuiResumedSessionStep {
