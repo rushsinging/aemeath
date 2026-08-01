@@ -6,7 +6,7 @@
 //! #1385: ChatLoopContext no longer duplicates service contracts (binding, tools,
 //! policy, hooks, memory, reflection, reasoning, etc.).  All service-level state
 //! lives in [`SessionRuntime`]; per-Run contracts come from [`RuntimeContext`]
-//! assembled via `shell.runtime_context_factory.create()`.
+//! assembled via `RunFactory::create()`.
 
 use crate::application::loop_engine::chat::events::ChatEventSink;
 use crate::application::loop_engine::input_strategy::SessionInputPort;
@@ -37,7 +37,7 @@ pub type SwitchClientFn = Arc<
 ///
 /// #1385: Service contracts (policy, tools, hook, memory, task, reasoning, provider,
 /// interaction, reflection) are now assembled per-run via
-/// `shell.runtime_context_factory.create()`.  ChatLoopContext no longer
+/// `RunFactory::create()`. ChatLoopContext no longer
 /// duplicates them.
 ///
 /// Remaining fields are I/O channels, the session shell, initial user messages,

@@ -1,4 +1,4 @@
-//! #1248 Task 3: RuntimeContextFactory — domain-responsible RuntimeContext assembly.
+//! RuntimeContextFactory — domain-responsible RuntimeContext assembly.
 //!
 //! The factory holds [`RuntimeServices`] (session-scoped shared ports) and
 //! assembles a per-Run [`RuntimeContext`] from a [`RunSpec`], a
@@ -124,7 +124,7 @@ struct RunCreationResources {
     workspace: WorkspaceSelection,
 }
 
-/// #1248 Task 3 domain-responsible RuntimeContext assembly.
+/// Domain-responsible RuntimeContext assembly.
 ///
 /// Holds [`RuntimeServices`] (session-scoped shared ports) and assembles
 /// per-Run [`RuntimeContext`] instances from a [`RunSpec`], grouped
@@ -136,7 +136,7 @@ pub struct RuntimeContextFactory {
 }
 
 impl RuntimeContextFactory {
-    /// #1248 Task 3: Narrow crate-root construction entry.
+    /// Narrow crate-root construction entry.
     ///
     /// Accepts six explicit session-scoped port parameters — no opaque
     /// service bag. This is the only constructor callable from outside the
@@ -606,102 +606,5 @@ impl RuntimeContextFactory {
             });
         }
         Ok(role)
-    }
-}
-
-// ── Test-only helpers ──
-// #1248 Task 3: Tests that need to inject a specific hook port should
-// construct a new RuntimeContextFactory with the desired RuntimeServices
-// rather than mutating SessionRuntime fields directly.
-
-#[cfg(test)]
-impl RuntimeContextFactory {
-    pub(crate) fn create(
-        &self,
-        spec: &RunSpec,
-        bindings: impl Into<RunCapabilityBindings>,
-        parent: Option<&RuntimeContext>,
-    ) -> Result<RuntimeContext, crate::application::client::RuntimeContextAssemblyError> {
-        use crate::application::client::RuntimeContextAssemblyError;
-
-        let mut bindings = bindings.into();
-        bindings.model.interaction = match spec.interaction_binding() {
-            InteractionBindingMode::Client => bindings.model.interaction.clone(),
-            InteractionBindingMode::ParentMediated => Arc::new(ParentMediatedInteractionPort::new(
-                parent
-                    .ok_or(RuntimeContextAssemblyError::InteractionUnavailable)?
-                    .interaction(),
-            )),
-            InteractionBindingMode::Unavailable => Arc::new(UnavailableInteractionPort),
-        };
-        let hooks = match spec.hook_binding() {
-            HookBindingMode::Full => self.services.hooks.clone(),
-            HookBindingMode::BoundaryOnly => {
-                parent.ok_or(RuntimeContextAssemblyError::HookUnavailable)?;
-                Arc::new(BoundaryHookPort::new(self.services.hooks.clone()))
-            }
-        };
-        let services = RuntimeServices {
-            tool_catalog: bindings
-                .model
-                .tool_catalog
-                .clone()
-                .unwrap_or_else(|| self.services.tool_catalog.clone()),
-            hooks,
-            ..self.services.clone()
-        };
-        Ok(RuntimeContext::new(
-            services,
-            bindings.clone(),
-            Arc::new(
-                crate::application::context::skill_load_state::ContextSkillLoadState::new(
-                    bindings.model.context.clone(),
-                ),
-            ),
-            RuntimeContextAssemblyToken::new(),
-        ))
-    }
-
-    pub fn select_interaction(&self, spec: &RunSpec) -> InteractionBindingMode {
-        spec.interaction_binding()
-    }
-
-    pub fn select_interaction_with_parent(
-        &self,
-        spec: &RunSpec,
-        parent: Option<&RunSpec>,
-    ) -> Result<InteractionBindingMode, crate::application::client::RuntimeContextAssemblyError>
-    {
-        if spec.interaction_binding() == InteractionBindingMode::ParentMediated && parent.is_none()
-        {
-            return Err(
-                crate::application::client::RuntimeContextAssemblyError::InteractionUnavailable,
-            );
-        }
-        Ok(spec.interaction_binding())
-    }
-
-    pub fn select_hook(&self, spec: &RunSpec) -> HookBindingMode {
-        spec.hook_binding()
-    }
-
-    pub fn select_reasoning(
-        &self,
-        _spec: &RunSpec,
-    ) -> crate::domain::agent_run::ReasoningBindingMode {
-        crate::domain::agent_run::ReasoningBindingMode::Fixed
-    }
-
-    /// Test-only: create a factory with the given hook port replacing the
-    /// default.  Prefer this over mutating `shell.hook_runner`.
-    pub(crate) fn with_hooks(&self, hooks: std::sync::Arc<dyn hook::HookPort>) -> Self {
-        Self {
-            services: RuntimeServices {
-                hooks,
-                ..self.services.clone()
-            },
-            provider_factory: self.provider_factory.clone(),
-            skill_catalog: self.skill_catalog.clone(),
-        }
     }
 }

@@ -541,6 +541,38 @@ struct ScriptedPorts {
     plan_approval: PlanApprovalFake,
 }
 
+pub(crate) struct ScenarioLoopHarness {
+    scenario: ScriptedScenario,
+}
+
+impl ScenarioLoopHarness {
+    pub(crate) fn completes_with(text: impl Into<String>) -> Self {
+        Self {
+            scenario: ScriptedScenario {
+                model_steps: VecDeque::from([ModelStep::Complete { text: text.into() }]),
+                ..Default::default()
+            },
+        }
+    }
+
+    pub(crate) fn run_loop(&mut self) -> RunLoop<'_> {
+        scripted_run_loop(&mut self.scenario)
+    }
+
+    pub(crate) fn saw_input_and_model(&self) -> bool {
+        let calls = self.scenario.calls();
+        calls.contains(&"input") && calls.contains(&"model")
+    }
+
+    pub(crate) fn terminal_event_count(&self) -> usize {
+        self.scenario
+            .events()
+            .iter()
+            .filter(|event| matches!(event, RunDomainEvent::Completed { .. }))
+            .count()
+    }
+}
+
 struct ScriptedScenario {
     model_steps: VecDeque<ModelStep>,
     model_errors: VecDeque<LoopEngineError>,

@@ -78,7 +78,7 @@ if grep -q 'run_instance\.into_parts()' "$MAIN" ||
 fi
 
 if grep -RInE 'context::session::|\bChatChain\b|\bChatSegment\b|save_chain|current_chain|frozen_chats|active_summary|SessionProjectionParticipant|projection_start_index|microcompact_(chain|messages)|compact_messages_with_llm' \
-    agent/features/runtime/src --include='*.rs' --exclude='*_tests.rs'; then # guard-registry:scope.runtime.shared-loop-tests
+    agent/features/runtime/src --include='*.rs' --exclude='*_tests.rs' --exclude-dir='tests'; then # guard-registry:scope.runtime.shared-loop-tests
   echo '{"decision":"block","reason":"Runtime 生产代码必须只经 Context crate-root Published Language / ContextPort 使用 Session，禁止内部类型、第二投影 backing、save callback 与 legacy compact helper。"}'
   exit 2
 fi

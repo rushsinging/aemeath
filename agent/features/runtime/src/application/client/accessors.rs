@@ -51,9 +51,10 @@ impl SessionModelState {
 
 /// Session-level runtime container that holds state live across all runs.
 ///
-/// #1385: Separated from per-Run [`RuntimeContext`] so that each Run gets its own
-/// frozen provider binding, cancellation scope, and bound context/memory ports
-/// via [`RuntimeContextFactory::create`] (held in `runtime_context_factory`).
+/// Session state is separated from per-Run [`RuntimeContext`] so that each Run
+/// gets its own frozen provider binding, cancellation scope, and bound
+/// context/memory ports through [`crate::application::run::factory::RunFactory::create`], which
+/// delegates Context assembly to the held `runtime_context_factory`.
 ///
 /// Fields are grouped by §2.2 categories:
 /// - Session identity, wiring, workspace
@@ -239,12 +240,6 @@ impl SessionRuntime {
 /// 子 Run 派生 façade 的错误。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RuntimeContextAssemblyError {
-    #[cfg(test)]
-    #[error("interaction is unavailable — ParentMediated requires a parent")]
-    InteractionUnavailable,
-    #[cfg(test)]
-    #[error("hooks are unavailable — BoundaryOnly requires a parent")]
-    HookUnavailable,
     #[error("sub-agent role `{role}` not found in config")]
     SubRoleNotFound { role: String },
     #[error("sub derivation failed: {reason}")]
