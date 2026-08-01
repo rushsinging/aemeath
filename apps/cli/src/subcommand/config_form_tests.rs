@@ -103,31 +103,20 @@ fn custom_model_view() -> sdk::ConfigFormView {
 }
 
 #[test]
-fn multi_field_form_preserves_model_id_and_enter_moves_to_next_field() {
-    let mut model = ConfigFormModel::new(custom_model_view());
+fn model_id_enter_submits_page_without_advancing_focus() {
+    let mut view = custom_model_view();
+    view.page.fields[1].display_value = Some("128000".to_string());
+    view.page.fields[2].display_value = Some("4096".to_string());
+    let mut model = ConfigFormModel::new(view);
     for character in "custom-model".chars() {
         model.update(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
     }
 
-    assert!(model
-        .update(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .is_none());
-    assert_eq!(model.interaction().focused_field, 1);
-
-    for character in "128000".chars() {
-        model.update(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
-    }
-    assert!(model
-        .update(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .is_none());
-    assert_eq!(model.interaction().focused_field, 2);
-
-    for character in "4096".chars() {
-        model.update(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
-    }
     let effect = model
         .update(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .unwrap();
+        .expect("Model ID 输入后 Enter 应提交页面");
+
+    assert_eq!(model.interaction().focused_field, 0);
     assert!(matches!(
         effect,
         ConfigFormEffect::SubmitPage { command }

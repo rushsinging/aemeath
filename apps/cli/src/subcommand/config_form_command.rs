@@ -163,7 +163,7 @@ impl ConfigFormModel {
                 }
                 None
             }
-            KeyCode::Enter => self.submit_or_advance(),
+            KeyCode::Enter => self.submit_or_invoke(),
             _ => None,
         }
     }
@@ -180,29 +180,10 @@ impl ConfigFormModel {
         })
     }
 
-    fn submit_or_advance(&mut self) -> Option<ConfigFormEffect> {
-        if self.view.page.fields.len() > 1 && self.focused_field + 1 < self.view.page.fields.len() {
-            self.save_focused_field_input();
-            self.focused_field += 1;
-            self.load_focused_field_input();
-            return None;
-        }
-        self.submit_or_invoke()
-    }
-
     fn save_focused_field_input(&mut self) {
         if let Some(field_input) = self.field_inputs.get_mut(self.focused_field) {
             *field_input = self.input.clone();
         }
-    }
-
-    fn load_focused_field_input(&mut self) {
-        self.input = self
-            .field_inputs
-            .get(self.focused_field)
-            .cloned()
-            .unwrap_or_default();
-        self.input_cursor = self.input.chars().count();
     }
 
     fn submit_or_invoke(&mut self) -> Option<ConfigFormEffect> {
@@ -385,7 +366,12 @@ impl ConfigFormModel {
         self.clear_sensitive_input();
         self.focused_field = (self.focused_field + 1) % self.view.page.fields.len();
         self.selected_option = 0;
-        self.load_focused_field_input();
+        self.input = self
+            .field_inputs
+            .get(self.focused_field)
+            .cloned()
+            .unwrap_or_default();
+        self.input_cursor = self.input.chars().count();
     }
 
     fn focus_previous_field(&mut self) {
@@ -405,7 +391,12 @@ impl ConfigFormModel {
             .checked_sub(1)
             .unwrap_or(self.view.page.fields.len() - 1);
         self.selected_option = 0;
-        self.load_focused_field_input();
+        self.input = self
+            .field_inputs
+            .get(self.focused_field)
+            .cloned()
+            .unwrap_or_default();
+        self.input_cursor = self.input.chars().count();
     }
 
     fn select_next(&mut self) {
