@@ -6,159 +6,9 @@
 
 use share::message::{ContentBlock, Message};
 
-/// Token estimation service
-pub struct TokenEstimation {
-    /// Context size limit
-    context_size: usize,
-    /// Warning threshold (percentage)
-    warning_threshold: u8,
-    /// Bytes per token ratio (default 4, varies by model)
-    bytes_per_token: f64,
-}
-
-impl TokenEstimation {
-    /// Create a new token estimation service
-    pub fn new(context_size: usize) -> Self {
-        Self {
-            context_size,
-            warning_threshold: 80,
-            bytes_per_token: 4.0, // Default for most models
-        }
-    }
-
-    /// Set warning threshold (percentage of context used)
-    pub fn with_warning_threshold(mut self, threshold: u8) -> Self {
-        self.warning_threshold = threshold.min(100);
-        self
-    }
-
-    /// Set bytes per token ratio based on model
-    /// Some models use different ratios (e.g., 3.5 for efficient models)
-    pub fn with_model_ratio(mut self, bytes_per_token: f64) -> Self {
-        self.bytes_per_token = bytes_per_token.clamp(2.0, 6.0);
-        self
-    }
-
-    /// Estimate tokens for text content
-    pub fn estimate_text(&self, text: &str) -> usize {
-        estimate_tokens(text)
-    }
-
-    /// Estimate tokens for a message
-    pub fn estimate_message(&self, message: &Message) -> usize {
-        estimate_message_tokens(message)
-    }
-
-    /// Estimate tokens for a list of messages
-    pub fn estimate_messages(&self, messages: &[Message]) -> usize {
-        estimate_messages_tokens(messages)
-    }
-
-    /// Estimate tokens for JSON content
-    pub fn estimate_json(&self, json: &str) -> usize {
-        estimate_json_tokens(json)
-    }
-
-    /// Check if messages exceed warning threshold
-    pub fn is_near_limit(&self, messages: &[Message], system_prompt: &str) -> bool {
-        let total = self.total_tokens(messages, system_prompt);
-        total > self.context_size * self.warning_threshold as usize / 100
-    }
-
-    /// Get total tokens including system prompt
-    pub fn total_tokens(&self, messages: &[Message], system_prompt: &str) -> usize {
-        let system_tokens = self.estimate_text(system_prompt);
-        let message_tokens = self.estimate_messages(messages);
-        system_tokens + message_tokens
-    }
-
-    /// Get context usage statistics
-    pub fn usage_stats(&self, messages: &[Message], system_prompt: &str) -> ContextUsage {
-        let system_tokens = self.estimate_text(system_prompt);
-        let message_tokens = self.estimate_messages(messages);
-        let total = system_tokens + message_tokens;
-        let available = self.context_size.saturating_sub(total);
-        let percentage = (total as f64 / self.context_size as f64 * 100.0) as u8;
-
-        ContextUsage {
-            total_tokens: total,
-            system_tokens,
-            message_tokens,
-            context_size: self.context_size,
-            available_tokens: available,
-            usage_percentage: percentage,
-            needs_compaction: percentage >= self.warning_threshold,
-        }
-    }
-}
-
-impl Default for TokenEstimation {
-    fn default() -> Self {
-        Self::new(128000) // Default context size
-    }
-}
-
-/// Context usage statistics
-#[derive(Debug, Clone)]
-pub struct ContextUsage {
-    /// Total tokens used
-    pub total_tokens: usize,
-    /// Tokens in system prompt
-    pub system_tokens: usize,
-    /// Tokens in messages
-    pub message_tokens: usize,
-    /// Maximum context size
-    pub context_size: usize,
-    /// Available tokens remaining
-    pub available_tokens: usize,
-    /// Usage percentage
-    pub usage_percentage: u8,
-    /// Whether compaction is needed
-    pub needs_compaction: bool,
-}
-
-impl ContextUsage {
-    /// Format as human-readable string
-    pub fn format(&self) -> String {
-        let status = if self.needs_compaction {
-            "⚠️ Near limit"
-        } else {
-            "✓ OK"
-        };
-
-        format!(
-            "Context Usage: {} / {} tokens ({}%)\n  System: {} tokens\n  Messages: {} tokens\n  Available: {} tokens\n  Status: {}",
-            format_tokens(self.total_tokens),
-            format_tokens(self.context_size),
-            self.usage_percentage,
-            format_tokens(self.system_tokens),
-            format_tokens(self.message_tokens),
-            format_tokens(self.available_tokens),
-            status
-        )
-    }
-}
-
-/// Format token count with k/m suffix
-pub fn format_tokens(n: usize) -> String {
-    if n >= 1_000_000 {
-        let m = n as f64 / 1_000_000.0;
-        if m.fract() < 0.05 {
-            format!("{:.0}m", m)
-        } else {
-            format!("{:.1}m", m)
-        }
-    } else if n >= 1000 {
-        let k = n as f64 / 1000.0;
-        if k.fract() < 0.05 {
-            format!("{:.0}k", k)
-        } else {
-            format!("{:.1}k", k)
-        }
-    } else {
-        n.to_string()
-    }
-}
+// ── 预算与估算函数 ──────────────────────────────────────────────
+// （历史遗留的 TokenEstimation / ContextUsage 包装类型无任何消费者，
+// 已在 #1486 修复中删除；以下为仍在使用的纯函数。）
 
 /// Estimate token count for a string.
 /// Uses CJK-aware estimation: CJK characters average ~2 tokens each,
@@ -253,6 +103,17 @@ pub fn summary_budget(context_size: usize) -> usize {
 /// 定义在 domain 层，供 adapter（compact_summary）与 application
 /// （active_summary 注入护栏）共同引用，避免 COLA 分层越界。
 pub const FALLBACK_PREVIOUS_SUMMARY_CAP: usize = 20_000;
+
+/// map-reduce 分块摘要的单块目标 token 数（#1486）。
+///
+/// 按上下文总长度比例切（context_size / 8），大窗口模型允许更大的块，
+/// 小窗口模型自动收紧；带上下限保护：
+/// - 上限 40k：保证单块摘要请求（COMPACT_PROMPT + chunk + previous_summary）
+///   不会超出常见 provider 的输入限制；
+/// - 下限 8k：块太小没有分块意义。
+pub fn compact_chunk_target_tokens(context_size: usize) -> usize {
+    (context_size / 8).clamp(8_000, 40_000)
+}
 
 /// Calculate the effective context window size (after reserving output tokens
 /// and summary budget).

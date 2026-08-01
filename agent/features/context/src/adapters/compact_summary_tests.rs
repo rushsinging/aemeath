@@ -1,6 +1,99 @@
 use super::*;
 use std::sync::Arc;
 
+/// #1486：分块目标按上下文总长度比例切（context_size / 8），
+/// 带上下限保护，不固定 30k。
+#[test]
+fn chunk_target_scales_with_context_size() {
+    use crate::domain::token_budget::compact_chunk_target_tokens;
+
+    // 中窗口：272000 / 8 = 34000
+    assert_eq!(compact_chunk_target_tokens(272_000), 34_000);
+    // 小窗口：128000 / 8 = 16000
+    assert_eq!(compact_chunk_target_tokens(128_000), 16_000);
+    // 超大窗口：上限 40k（防止单块摘要请求超 provider 输入限制）
+    assert_eq!(compact_chunk_target_tokens(1_048_576), 40_000);
+    // 极小窗口：下限 8k（太小没有分块意义）
+    assert_eq!(compact_chunk_target_tokens(32_000), 8_000);
+    assert_eq!(compact_chunk_target_tokens(64_000), 8_000);
+}
+
+/// 分块数量应随 context_size 变化：同量消息，窗口越大块数越少。
+#[tokio::test]
+async fn map_reduce_chunk_count_follows_context_size_ratio() {
+    use crate::domain::token_budget::compact_chunk_target_tokens;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let messages = (0..600)
+        .map(|index| {
+            Message::user(format!(
+                "这是一个用于触发分块压缩的测试消息编号 {index}。{}",
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+            ))
+        })
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+
+    struct CountingGenerator {
+        calls: Arc<AtomicUsize>,
+    }
+    #[async_trait::async_trait]
+    impl CompactGenerator for CountingGenerator {
+        async fn generate(
+            &self,
+            request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let text = request
+                .first()
+                .map(|msg| msg.text_content())
+                .unwrap_or_default();
+            Ok(format!("<summary>chunk of {} chars</summary>", text.len()))
+        }
+    }
+
+    // 小窗口（64k → target 8k）：块数多
+    let small_calls = Arc::new(AtomicUsize::new(0));
+    let small = compact_messages_with_llm(
+        &messages,
+        None,
+        64_000,
+        Some(&CountingGenerator {
+            calls: small_calls.clone(),
+        }),
+        None,
+        &cancel,
+    )
+    .await
+    .expect("compact should run");
+    let small_chunks = small_calls.load(Ordering::SeqCst);
+
+    // 大窗口（1M → target 40k，clamp 上限）：块数少
+    let large_calls = Arc::new(AtomicUsize::new(0));
+    let large = compact_messages_with_llm(
+        &messages,
+        None,
+        1_048_576,
+        Some(&CountingGenerator {
+            calls: large_calls.clone(),
+        }),
+        None,
+        &cancel,
+    )
+    .await
+    .expect("compact should run");
+    let large_chunks = large_calls.load(Ordering::SeqCst);
+
+    assert!(
+        small_chunks > large_chunks,
+        "窗口越小块数应越多: small={small_chunks} large={large_chunks} (target small={}, large={})",
+        compact_chunk_target_tokens(64_000),
+        compact_chunk_target_tokens(1_048_576),
+    );
+    let _ = (small, large);
+}
+
 #[test]
 fn compact_execution_does_not_repeat_threshold_decision() {
     let messages = (0..10)

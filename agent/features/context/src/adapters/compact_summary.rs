@@ -155,10 +155,6 @@ Rules:
 Here is the PAST conversation history to compress:
 "#;
 
-/// 单个 compact chunk 的目标 token 数。
-/// 超过此值的 early_messages 会触发 map-reduce（分块独立摘要 → 合并）。
-const COMPACT_CHUNK_TARGET_TOKENS: usize = 30_000;
-
 /// previous_summary 允许嵌入的最大字符数（domain 单一真相，见 token_budget）。
 pub const FALLBACK_PREVIOUS_SUMMARY_CAP: usize =
     crate::domain::token_budget::FALLBACK_PREVIOUS_SUMMARY_CAP;
@@ -525,7 +521,7 @@ pub async fn compact_messages_with_llm(
     );
     let summary = match generator {
         Some(generator) => {
-            let result = if early_tokens > COMPACT_CHUNK_TARGET_TOKENS {
+            let result = if early_tokens > chunk_target_tokens(context_size) {
                 compact_messages_map_reduce(
                     generator,
                     early_messages,
@@ -609,6 +605,11 @@ async fn llm_compact(
     llm_generate(generator, request, cancel).await
 }
 
+/// 单块摘要目标 token 数：按上下文总长度比例切（#1486，见 token_budget）。
+fn chunk_target_tokens(context_size: usize) -> usize {
+    crate::domain::token_budget::compact_chunk_target_tokens(context_size)
+}
+
 /// 将消息列表按 token 预算分块（不拆分单条消息）。
 fn split_messages_into_chunks(messages: &[Message], target_tokens: usize) -> Vec<Vec<Message>> {
     use crate::domain::token_budget::estimate_message_tokens;
@@ -650,7 +651,8 @@ async fn compact_messages_map_reduce(
 ) -> Result<String, String> {
     use crate::domain::token_budget::estimate_messages_tokens;
 
-    let chunks = split_messages_into_chunks(early_messages, COMPACT_CHUNK_TARGET_TOKENS);
+    let chunk_target = chunk_target_tokens(context_size);
+    let chunks = split_messages_into_chunks(early_messages, chunk_target);
     let total_chunks = chunks.len();
     // map: 每个 chunk 独立摘要，按块数决定并发上限（3-5）。
     // 块数越多并发越高，但不超过 5；避免同时打爆 provider。
@@ -662,7 +664,7 @@ async fn compact_messages_map_reduce(
     };
     log::info!(
         target: crate::LOG_TARGET,
-        "[compact] map-reduce：{total_chunks} chunks，{} messages，{} tokens，并发上限 {concurrency}",
+        "[compact] map-reduce：{total_chunks} chunks，{} messages，{} tokens，单块目标 {chunk_target}，并发上限 {concurrency}",
         early_messages.len(),
         estimate_messages_tokens(early_messages),
     );
