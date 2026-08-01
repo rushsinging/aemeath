@@ -1451,7 +1451,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
     });
 
     let mut shell = test_shell_with_hooks(Arc::new(
-        hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap(),
+        hook::build_dispatcher(&HooksConfig { events }).unwrap(),
     ));
     shell.workspace = workspace;
     shell.model_state.update_binding(
