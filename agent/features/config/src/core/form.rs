@@ -1,6 +1,6 @@
-#[path = "provider_connect.rs"]
+#[path = "form/provider_connect.rs"]
 mod provider_connect;
-#[path = "service.rs"]
+#[path = "form/service.rs"]
 mod service;
 
 pub use provider_connect::{
@@ -318,9 +318,9 @@ impl ConfigFormError {
 }
 
 #[cfg(test)]
-#[path = "provider_connect_tests.rs"]
+#[path = "form/provider_connect_tests.rs"]
 mod provider_connect_tests;
 
 #[cfg(test)]
-#[path = "service_tests.rs"]
+#[path = "form/service_tests.rs"]
 mod service_tests;

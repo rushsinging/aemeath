@@ -3,8 +3,8 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 
 use crate::domain::session::{
-    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedStep,
-    FinalizedOutcomeProjection, SnapshotState,
+    AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedStep,
+    FinalizedOutcomeRecord, SnapshotState,
 };
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
@@ -274,7 +274,7 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.append_accepted_input(
             append.run_id.as_ref(),
             append.step_id.as_str(),
-            AcceptedInputProjection::new(
+            AcceptedInputRecord::new(
                 append.messages.clone(),
                 append.fingerprint.as_str(),
                 candidate.revision,
@@ -444,7 +444,7 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.append_finalized_outcome(
             append.run_id.as_ref(),
             append.step_id.as_str(),
-            FinalizedOutcomeProjection {
+            FinalizedOutcomeRecord {
                 finalize_cause: append.finalize_cause,
                 duration_ms: append.duration_ms,
                 messages: append.messages.clone().into(),

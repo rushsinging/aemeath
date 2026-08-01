@@ -81,13 +81,13 @@ impl<'de> Deserialize<'de> for CommittedStepMessages {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AcceptedInputProjection {
+pub struct AcceptedInputRecord {
     pub messages: CommittedStepMessages,
     pub fingerprint: String,
     pub committed_revision: u64,
 }
 
-impl AcceptedInputProjection {
+impl AcceptedInputRecord {
     pub fn new(
         messages: Vec<Message>,
         fingerprint: impl Into<String>,
@@ -116,7 +116,7 @@ pub struct ActiveCompactMarker {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FinalizedOutcomeProjection {
+pub struct FinalizedOutcomeRecord {
     pub finalize_cause: FinalizeCause,
     #[serde(default)]
     pub duration_ms: Option<u64>,
@@ -127,7 +127,7 @@ pub struct FinalizedOutcomeProjection {
     pub committed_revision: u64,
 }
 
-impl FinalizedOutcomeProjection {
+impl FinalizedOutcomeRecord {
     pub fn compatibility(messages: Vec<Message>) -> Self {
         Self {
             finalize_cause: FinalizeCause::Completed,
@@ -145,18 +145,15 @@ impl FinalizedOutcomeProjection {
 pub struct CommittedRunStep {
     pub step_id: String,
     #[serde(default)]
-    pub accepted_input: Option<AcceptedInputProjection>,
+    pub accepted_input: Option<AcceptedInputRecord>,
     #[serde(default)]
-    pub outcome: Option<FinalizedOutcomeProjection>,
+    pub outcome: Option<FinalizedOutcomeRecord>,
     #[serde(default)]
     pub tool_receipts: Vec<ToolCallReceipt>,
 }
 
 impl CommittedRunStep {
-    pub fn accepted_only(
-        step_id: impl Into<String>,
-        accepted_input: AcceptedInputProjection,
-    ) -> Self {
+    pub fn accepted_only(step_id: impl Into<String>, accepted_input: AcceptedInputRecord) -> Self {
         Self {
             step_id: step_id.into(),
             accepted_input: Some(accepted_input),
@@ -165,7 +162,7 @@ impl CommittedRunStep {
         }
     }
 
-    pub fn outcome_only(step_id: impl Into<String>, outcome: FinalizedOutcomeProjection) -> Self {
+    pub fn outcome_only(step_id: impl Into<String>, outcome: FinalizedOutcomeRecord) -> Self {
         Self {
             step_id: step_id.into(),
             accepted_input: None,
@@ -175,7 +172,7 @@ impl CommittedRunStep {
     }
 
     pub fn compatibility_outcome_only(step_id: impl Into<String>, messages: Vec<Message>) -> Self {
-        Self::outcome_only(step_id, FinalizedOutcomeProjection::compatibility(messages))
+        Self::outcome_only(step_id, FinalizedOutcomeRecord::compatibility(messages))
     }
 }
 
@@ -196,7 +193,7 @@ impl CommittedRunSlice {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RestoreStepProjection {
+pub(crate) struct SessionRestoreStepRecord {
     pub cursor: RunStepCursor,
     pub messages: Vec<Message>,
     pub tool_receipts: Vec<ToolCallReceipt>,
@@ -390,7 +387,7 @@ impl CanonicalSession {
         &mut self,
         run_id: &str,
         step_id: &str,
-        accepted_input: AcceptedInputProjection,
+        accepted_input: AcceptedInputRecord,
     ) {
         let cursor = RunStepCursor {
             run_id: run_id.to_string(),
@@ -423,7 +420,7 @@ impl CanonicalSession {
         }
     }
 
-    pub fn accepted_input(&self, run_id: &str, step_id: &str) -> Option<&AcceptedInputProjection> {
+    pub fn accepted_input(&self, run_id: &str, step_id: &str) -> Option<&AcceptedInputRecord> {
         self.run_slices
             .iter()
             .find(|slice| slice.run_id == run_id)?
@@ -438,7 +435,7 @@ impl CanonicalSession {
         &mut self,
         run_id: &str,
         step_id: &str,
-        outcome: FinalizedOutcomeProjection,
+        outcome: FinalizedOutcomeRecord,
     ) {
         let cursor = RunStepCursor {
             run_id: run_id.to_string(),
@@ -471,11 +468,11 @@ impl CanonicalSession {
         }
     }
 
-    pub(crate) fn all_restore_steps(&self) -> Vec<RestoreStepProjection> {
+    pub(crate) fn all_restore_steps(&self) -> Vec<SessionRestoreStepRecord> {
         self.run_slices
             .iter()
             .flat_map(|slice| {
-                slice.steps.iter().map(|step| RestoreStepProjection {
+                slice.steps.iter().map(|step| SessionRestoreStepRecord {
                     cursor: RunStepCursor {
                         run_id: slice.run_id.clone(),
                         step_id: step.step_id.clone(),
@@ -492,7 +489,7 @@ impl CanonicalSession {
             .collect()
     }
 
-    pub(crate) fn restore_steps_from_marker(&self) -> Vec<RestoreStepProjection> {
+    pub(crate) fn restore_steps_from_marker(&self) -> Vec<SessionRestoreStepRecord> {
         let start_at = self
             .compact
             .as_ref()
@@ -509,7 +506,7 @@ impl CanonicalSession {
                     visible = true;
                 }
                 if visible {
-                    steps.push(RestoreStepProjection {
+                    steps.push(SessionRestoreStepRecord {
                         cursor: RunStepCursor {
                             run_id: slice.run_id.clone(),
                             step_id: step.step_id.clone(),
@@ -648,7 +645,7 @@ struct V2CommittedRunSlice {
 struct V2CommittedRunStep {
     step_id: String,
     #[serde(default)]
-    accepted_input: Option<AcceptedInputProjection>,
+    accepted_input: Option<AcceptedInputRecord>,
     #[serde(default)]
     outcome: Option<Vec<Message>>,
 }
@@ -677,9 +674,7 @@ impl From<V2CanonicalSession> for CanonicalSession {
                             .map(|step| CommittedRunStep {
                                 step_id: step.step_id,
                                 accepted_input: step.accepted_input,
-                                outcome: step
-                                    .outcome
-                                    .map(FinalizedOutcomeProjection::compatibility),
+                                outcome: step.outcome.map(FinalizedOutcomeRecord::compatibility),
                                 tool_receipts: Vec::new(),
                             })
                             .collect(),
@@ -942,7 +937,7 @@ impl SessionCodec {
                 let step = match segment.kind {
                     super::SegmentKind::Normal => CommittedRunStep::accepted_only(
                         step_id,
-                        AcceptedInputProjection::new(segment.messages.clone(), run_id.clone(), 0),
+                        AcceptedInputRecord::new(segment.messages.clone(), run_id.clone(), 0),
                     ),
                     super::SegmentKind::Compact => CommittedRunStep::compatibility_outcome_only(
                         step_id,

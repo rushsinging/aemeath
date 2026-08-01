@@ -1,6 +1,6 @@
 //! Canonical Session 恢复投影。
 
-use super::envelope::RestoreStepProjection;
+use super::envelope::SessionRestoreStepRecord;
 use super::message_integrity::{check_message_integrity, deep_clean_messages, sanitize_messages};
 use crate::domain::session::CanonicalSession;
 use crate::domain::{ToolCallReceipt, ToolCallState};
@@ -43,11 +43,13 @@ impl SessionRestore {
     }
 }
 
-fn clean_steps(raw_steps: Vec<RestoreStepProjection>) -> (Vec<SessionRestoreStep>, usize, usize) {
+fn clean_steps(
+    raw_steps: Vec<SessionRestoreStepRecord>,
+) -> (Vec<SessionRestoreStep>, usize, usize) {
     let mut steps = Vec::with_capacity(raw_steps.len());
     let mut trimmed = 0;
     let mut repaired = 0;
-    for RestoreStepProjection {
+    for SessionRestoreStepRecord {
         cursor,
         mut messages,
         tool_receipts,

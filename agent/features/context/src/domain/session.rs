@@ -11,10 +11,10 @@ mod types;
 
 pub use chat_chain::{ChatChain, ChatSegment, SegmentKind};
 pub use envelope::{
-    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
-    CommittedRunStep, CommittedStep, CommittedStepMessages, DecodedSession,
-    FinalizedOutcomeProjection, RunStepCursor, SessionCodec, SessionCodecError, SkillLoadRecord,
-    SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
+    AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
+    CommittedRunStep, CommittedStep, CommittedStepMessages, DecodedSession, FinalizedOutcomeRecord,
+    RunStepCursor, SessionCodec, SessionCodecError, SkillLoadRecord, SnapshotState,
+    CURRENT_SESSION_SCHEMA_VERSION,
 };
 pub use management::{
     same_project_identity, session_matches_project, SessionListEntry, SessionManagementError,

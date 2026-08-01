@@ -5,7 +5,7 @@ mod application;
 pub mod catalog;
 pub mod connect;
 mod contract;
-#[path = "core/form/mod.rs"]
+#[path = "core/form.rs"]
 pub mod form;
 #[path = "gateway/global_store.rs"]
 mod global_store;
