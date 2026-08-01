@@ -76,7 +76,7 @@ impl ActivityCoordinator {
             self.finish_live_run_phase(ActivityTerminal::Succeeded)?;
         }
         let root_id = self
-            .live_activity_id(&ActivitySource::Run, None)
+            .live_run_root_id()
             .ok_or_else(|| ActivityError::UnknownActivity(ActivityId::new("run-root")))?;
         self.start(StartActivity {
             run_step_id: Some(phase_source_id.clone()),

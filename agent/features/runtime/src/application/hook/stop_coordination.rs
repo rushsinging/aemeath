@@ -179,6 +179,37 @@ pub struct StopHookOutcome {
     pub feedback_message: Option<Message>,
 }
 
+pub(crate) fn hook_point_view(point: HookPoint) -> sdk::HookPointView {
+    match point {
+        HookPoint::PreToolUse => sdk::HookPointView::PreToolUse,
+        HookPoint::UserPromptSubmit => sdk::HookPointView::UserPromptSubmit,
+        HookPoint::PreCompact => sdk::HookPointView::PreCompact,
+        HookPoint::PermissionRequest => sdk::HookPointView::PermissionRequest,
+        HookPoint::Elicitation => sdk::HookPointView::Elicitation,
+        HookPoint::UserPromptExpansion => sdk::HookPointView::UserPromptExpansion,
+        HookPoint::Stop => sdk::HookPointView::Stop,
+        HookPoint::PostToolUse => sdk::HookPointView::PostToolUse,
+        HookPoint::PostToolUseFailure => sdk::HookPointView::PostToolUseFailure,
+        HookPoint::PostCompact => sdk::HookPointView::PostCompact,
+        HookPoint::PostToolBatch => sdk::HookPointView::PostToolBatch,
+        HookPoint::ElicitationResult => sdk::HookPointView::ElicitationResult,
+        HookPoint::SessionStart => sdk::HookPointView::SessionStart,
+        HookPoint::SessionEnd => sdk::HookPointView::SessionEnd,
+        HookPoint::SubRunStart => sdk::HookPointView::SubRunStart,
+        HookPoint::SubRunStop => sdk::HookPointView::SubRunStop,
+        HookPoint::TaskCreated => sdk::HookPointView::TaskCreated,
+        HookPoint::TaskCompleted => sdk::HookPointView::TaskCompleted,
+        HookPoint::Notification => sdk::HookPointView::Notification,
+        HookPoint::InstructionsLoaded => sdk::HookPointView::InstructionsLoaded,
+        HookPoint::StopFailure => sdk::HookPointView::StopFailure,
+        HookPoint::PermissionDenied => sdk::HookPointView::PermissionDenied,
+        HookPoint::ConfigChange => sdk::HookPointView::ConfigChange,
+        HookPoint::CwdChanged => sdk::HookPointView::CwdChanged,
+        HookPoint::FileChanged => sdk::HookPointView::FileChanged,
+        HookPoint::TeammateIdle => sdk::HookPointView::TeammateIdle,
+    }
+}
+
 pub async fn orchestrate_stop_hook(
     hook_port: &Arc<dyn HookPort>,
     context: StopHookContext,

@@ -5,6 +5,7 @@ mod coordinator;
 mod model;
 mod model_tool;
 mod run_events;
+mod runtime_work;
 
 #[cfg(test)]
 #[path = "activity/coordinator_tests.rs"]

@@ -75,14 +75,27 @@ impl<'a> RunLoop<'a> {
     }
 
     #[cfg(test)]
+    pub(crate) fn activities_are_unbound(&self) -> bool {
+        self.activities.is_none()
+    }
+
+    #[cfg(test)]
     pub(crate) fn bind_test_activity_context(&mut self) {
-        self.activities = None;
         self.model_name = Some("test-model".to_string());
     }
 
     #[cfg(test)]
+    pub(crate) fn clear_test_activities(&mut self) {
+        self.activities = None;
+    }
+
+    #[cfg(test)]
     pub(crate) fn ensure_test_activities(&mut self, run_id: &sdk::RunId) {
-        if self.activities.is_none() {
+        let needs_coordinator = self
+            .activities
+            .as_ref()
+            .is_none_or(|activities| activities.run_id() != run_id);
+        if needs_coordinator {
             self.activities = Some(std::sync::Arc::new(ActivityCoordinator::production(
                 run_id.clone(),
             )));
@@ -103,6 +116,7 @@ impl<'a> RunLoop<'a> {
 
     pub(super) fn activity_parent_id(&self) -> Result<sdk::ActivityId, ActivityError> {
         let activities = self.activities()?;
+        activities.ensure_run_observation_started()?;
         activities
             .live_run_phase_id()
             .or_else(|| activities.live_run_root_id())
@@ -163,6 +177,63 @@ impl<'a> RunLoop<'a> {
     ) -> Result<(), ActivityError> {
         self.activities()?
             .finish_tool_call_by_source(call_id, terminal)
+    }
+
+    pub(super) fn start_compaction_activity(
+        &self,
+        run_step_id: sdk::RunStepId,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?.start_compaction(
+            run_step_id,
+            self.activity_parent_id()?,
+            sdk::CompactStageView::Preparing,
+        )
+    }
+
+    pub(super) fn update_compaction_activity(
+        &self,
+        activity_id: sdk::ActivityId,
+        stage: sdk::CompactStageView,
+    ) -> Result<(), ActivityError> {
+        self.activities()?
+            .update_compaction(activity_id, stage, None, None)
+    }
+
+    pub(super) fn start_interaction_activity(
+        &self,
+        run_step_id: sdk::RunStepId,
+        request_id: sdk::InteractionRequestId,
+        kind: sdk::InteractionKindView,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?.start_interaction(
+            run_step_id,
+            self.activity_parent_id()?,
+            request_id,
+            kind,
+        )
+    }
+
+    pub(super) fn finish_interaction_activity(
+        &self,
+        request_id: &sdk::InteractionRequestId,
+        terminal: ActivityTerminal,
+    ) -> Result<(), ActivityError> {
+        self.activities()?
+            .finish_interaction_by_source(request_id, terminal)
+    }
+
+    pub(super) fn start_hook_activity(
+        &self,
+        run_step_id: sdk::RunStepId,
+        point: sdk::HookPointView,
+        attempt: u8,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?.start_hook_dispatch(
+            run_step_id,
+            self.activity_parent_id()?,
+            point,
+            attempt,
+        )
     }
 
     pub(super) fn input_mut(&mut self) -> &mut dyn InputPort {

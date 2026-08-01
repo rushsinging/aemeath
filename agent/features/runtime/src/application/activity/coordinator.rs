@@ -183,12 +183,27 @@ impl ActivityCoordinator {
         &self,
         source: &ActivitySource,
     ) -> Option<ActivityId> {
-        self.registry
-            .lock()
+        let registry = self.registry.lock();
+        registry
             .activities
             .values()
             .find(|activity| !activity.state.is_terminal() && &activity.source == source)
             .map(|activity| activity.id.clone())
+    }
+
+    pub(crate) fn ensure_run_observation_started(&self) -> Result<(), ActivityError> {
+        if self.live_run_root_id().is_some() {
+            return Ok(());
+        }
+        self.start(StartActivity {
+            run_step_id: None,
+            parent_activity_id: None,
+            source: ActivitySource::Run,
+            kind: ActivityKind::Run,
+            detail: ActivityDetail::Run,
+            audience: ActivityAudienceView::User,
+        })?;
+        Ok(())
     }
 
     pub(crate) fn live_run_root_id(&self) -> Option<ActivityId> {

@@ -2,7 +2,8 @@ use super::coordinator::{ActivityClock, ActivityIdSource};
 use super::ActivityCoordinator;
 use crate::application::tool::agent::ToolCall;
 use sdk::{
-    ActivityDetailView, ActivityKindView, ActivityStateView, ModelInvocationId,
+    ActivityAudienceView, ActivityDetailView, ActivityKindView, ActivityStateView,
+    CompactStageView, HookPointView, InteractionKindView, InteractionRequestId, ModelInvocationId,
     ModelStreamStateView, RunId, RunStepId, ToolCallId,
 };
 use std::sync::{Arc, Mutex};
@@ -100,6 +101,101 @@ fn model_activity_preserves_identity_retry_detail_and_terminal() {
             stream: ModelStreamStateView::Retrying,
         }
     );
+}
+
+#[test]
+fn hook_compaction_and_interaction_activities_preserve_typed_detail_and_lifecycle() {
+    let coordinator = coordinator();
+    let step_id = RunStepId::new("remaining-step");
+    let parent_id = root_and_phase(&coordinator, &step_id);
+
+    let hook_id = coordinator
+        .start_hook_dispatch(step_id.clone(), parent_id.clone(), HookPointView::Stop, 1)
+        .expect("start hook");
+    coordinator
+        .finish(hook_id.clone(), super::ActivityTerminal::Failed)
+        .expect("finish hook");
+
+    let compact_id = coordinator
+        .start_compaction(
+            step_id.clone(),
+            parent_id.clone(),
+            CompactStageView::Preparing,
+        )
+        .expect("start compaction");
+    coordinator
+        .update_compaction(
+            compact_id.clone(),
+            CompactStageView::Summarizing,
+            Some(2),
+            Some(4),
+        )
+        .expect("update compaction");
+    coordinator
+        .finish(compact_id.clone(), super::ActivityTerminal::Succeeded)
+        .expect("finish compaction");
+
+    let request_id = InteractionRequestId::new("interaction-1");
+    let interaction_id = coordinator
+        .start_interaction(
+            step_id,
+            parent_id,
+            request_id,
+            InteractionKindView::UserQuestion,
+        )
+        .expect("start interaction");
+    coordinator
+        .wait(super::UpdateActivity {
+            activity_id: interaction_id.clone(),
+            detail: None,
+        })
+        .expect("wait interaction");
+    coordinator
+        .resume(super::UpdateActivity {
+            activity_id: interaction_id.clone(),
+            detail: None,
+        })
+        .expect("resume interaction");
+    coordinator
+        .finish(interaction_id.clone(), super::ActivityTerminal::Cancelled)
+        .expect("finish interaction");
+
+    let snapshot = coordinator.snapshot();
+    let hook = snapshot.find(&hook_id).expect("hook activity");
+    assert_eq!(hook.kind, ActivityKindView::HookDispatch);
+    assert_eq!(hook.state, ActivityStateView::Failed);
+    assert_eq!(
+        hook.detail,
+        ActivityDetailView::Hook {
+            point: HookPointView::Stop,
+            attempt: 1,
+        }
+    );
+
+    let compact = snapshot.find(&compact_id).expect("compact activity");
+    assert_eq!(compact.kind, ActivityKindView::Compaction);
+    assert_eq!(compact.state, ActivityStateView::Succeeded);
+    assert_eq!(
+        compact.detail,
+        ActivityDetailView::Compact {
+            stage: CompactStageView::Summarizing,
+            current: Some(2),
+            total: Some(4),
+        }
+    );
+
+    let interaction = snapshot
+        .find(&interaction_id)
+        .expect("interaction activity");
+    assert_eq!(interaction.kind, ActivityKindView::Interaction);
+    assert_eq!(interaction.state, ActivityStateView::Cancelled);
+    assert_eq!(
+        interaction.detail,
+        ActivityDetailView::Interaction {
+            kind: InteractionKindView::UserQuestion,
+        }
+    );
+    assert_eq!(interaction.audience, ActivityAudienceView::User);
 }
 
 #[test]

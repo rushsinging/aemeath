@@ -832,7 +832,23 @@ pub async fn run_loop(
     port: &mut RunLoop<'_>,
 ) -> Result<LoopDirective, LoopEngineError> {
     #[cfg(test)]
+    let uses_ephemeral_test_activities = port.activities_are_unbound();
+    #[cfg(test)]
     port.ensure_test_activities(run.id());
+    let directive = run_loop_body(run, execution, cancel, port).await;
+    #[cfg(test)]
+    if uses_ephemeral_test_activities {
+        port.clear_test_activities();
+    }
+    directive
+}
+
+async fn run_loop_body(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    cancel: &CancellationToken,
+    port: &mut RunLoop<'_>,
+) -> Result<LoopDirective, LoopEngineError> {
     if run.status() == RunStatus::Created {
         run.start_draining()?;
         emit_events(run, execution, port).await?;
@@ -1163,14 +1179,27 @@ async fn execute_step(
         };
     if needs_compaction {
         transition_and_emit(run, execution, port, RunTransition::BeginCompaction).await?;
+        let compact_activity_id = port.start_compaction_activity(step_id.clone())?;
+        port.update_compaction_activity(
+            compact_activity_id.clone(),
+            sdk::CompactStageView::Summarizing,
+        )?;
         match run_context_compaction_phase(run, execution, &step_cancel, port.compaction_mut())
             .await?
         {
-            ContextCompactionOutcome::Ready => {}
+            ContextCompactionOutcome::Ready => {
+                port.update_compaction_activity(
+                    compact_activity_id.clone(),
+                    sdk::CompactStageView::Finalizing,
+                )?;
+                port.finish_activity(compact_activity_id, ActivityTerminal::Succeeded)?;
+            }
             ContextCompactionOutcome::Cancelled => {
+                port.finish_activity(compact_activity_id, ActivityTerminal::Cancelled)?;
                 return handle_step_control(run, execution, port).await;
             }
             ContextCompactionOutcome::TimedOut => {
+                port.finish_activity(compact_activity_id, ActivityTerminal::Terminated)?;
                 timeout_run(run, execution, port).await?;
                 return Ok(());
             }
@@ -1224,6 +1253,11 @@ async fn execute_step(
                 }
                 transition_and_emit(run, execution, port, RunTransition::ModelContextExceeded)
                     .await?;
+                let compact_activity_id = port.start_compaction_activity(step_id.clone())?;
+                port.update_compaction_activity(
+                    compact_activity_id.clone(),
+                    sdk::CompactStageView::Summarizing,
+                )?;
                 match run_context_compaction_phase(
                     run,
                     execution,
@@ -1232,12 +1266,20 @@ async fn execute_step(
                 )
                 .await?
                 {
-                    ContextCompactionOutcome::Ready => {}
+                    ContextCompactionOutcome::Ready => {
+                        port.update_compaction_activity(
+                            compact_activity_id.clone(),
+                            sdk::CompactStageView::Finalizing,
+                        )?;
+                        port.finish_activity(compact_activity_id, ActivityTerminal::Succeeded)?;
+                    }
                     ContextCompactionOutcome::Cancelled => {
+                        port.finish_activity(compact_activity_id, ActivityTerminal::Cancelled)?;
                         handle_step_control(run, execution, port).await?;
                         return Ok(());
                     }
                     ContextCompactionOutcome::TimedOut => {
+                        port.finish_activity(compact_activity_id, ActivityTerminal::Terminated)?;
                         timeout_run(run, execution, port).await?;
                         return Ok(());
                     }
@@ -1331,9 +1373,27 @@ async fn execute_step(
             // A blocking stop hook with repeated output should continue
             // (feedback may change the model's behavior); text stall
             // detection runs only when the stop hook allows proceeding.
-            let stop_outcome = port
+            let hook_activity_id = port.start_hook_activity(
+                step_id.clone(),
+                crate::application::hook::stop_coordination::hook_point_view(hook::HookPoint::Stop),
+                1,
+            )?;
+            let stop_outcome = match port
                 .coordinate_stop_hook(execution, run.steps().len(), &step_cancel)
-                .await?;
+                .await
+            {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    port.finish_activity(hook_activity_id, ActivityTerminal::Failed)?;
+                    return Err(error);
+                }
+            };
+            let hook_terminal = if matches!(stop_outcome.decision, StopHookDecision::Block(_)) {
+                ActivityTerminal::Failed
+            } else {
+                ActivityTerminal::Succeeded
+            };
+            port.finish_activity(hook_activity_id, hook_terminal)?;
             match stop_outcome.decision {
                 StopHookDecision::Proceed => {
                     // Normal completion — fall through to text stall check.
@@ -1795,6 +1855,12 @@ async fn handle_suspensions(
             tool_call_id: Some(first.call.id.to_string()),
             body: body.clone(),
         };
+        let _interaction_activity_id = port.start_interaction_activity(
+            run.active_step_id()
+                .ok_or_else(|| LoopEngineError::Adapter("no active step".to_string()))?,
+            first_request_id.clone(),
+            sdk::InteractionKindView::UserQuestion,
+        )?;
         port.publish_interaction(execution, &request).await?;
 
         let metadata = crate::application::interaction::port::InteractionRequestMetadata::new(
@@ -1912,6 +1978,12 @@ async fn handle_tool_approvals(
             tool_call_id: None,
             body: body.clone(),
         };
+        let _interaction_activity_id = port.start_interaction_activity(
+            run.active_step_id()
+                .ok_or_else(|| LoopEngineError::Adapter("no active step".to_string()))?,
+            first_request_id.clone(),
+            sdk::InteractionKindView::ToolApproval,
+        )?;
         port.publish_interaction(execution, &request).await?;
         let metadata = crate::application::interaction::port::InteractionRequestMetadata::new(
             first_request_id.clone(),
@@ -1951,6 +2023,18 @@ async fn handle_interaction_completion(
     let metadata = resolution.metadata().clone();
     let request_id = metadata.request_id.clone();
     let run_id = metadata.run_id.clone();
+    let interaction_terminal = match &resolution {
+        InteractionResolution::Resolved {
+            completion: InteractionCompletion::Replied(_),
+            ..
+        } => ActivityTerminal::Succeeded,
+        InteractionResolution::Resolved {
+            completion: InteractionCompletion::Cancelled(_),
+            ..
+        }
+        | InteractionResolution::Closed { .. } => ActivityTerminal::Cancelled,
+    };
+    port.finish_interaction_activity(&request_id, interaction_terminal)?;
 
     match &resolution {
         InteractionResolution::Resolved {
@@ -2218,6 +2302,11 @@ async fn handle_interaction_outcome(
                         tool_call_id: Some(suspended.call.id.to_string()),
                         body: body.clone(),
                     };
+                    let _interaction_activity_id = port.start_interaction_activity(
+                        step_id.clone(),
+                        next.request_id.clone(),
+                        sdk::InteractionKindView::UserQuestion,
+                    )?;
                     port.publish_interaction(execution, &request).await?;
                     let metadata =
                         crate::application::interaction::port::InteractionRequestMetadata::new(
@@ -2267,6 +2356,11 @@ async fn handle_interaction_outcome(
                         tool_call_id: None,
                         body: body.clone(),
                     };
+                    let _interaction_activity_id = port.start_interaction_activity(
+                        step_id.clone(),
+                        next.request_id.clone(),
+                        sdk::InteractionKindView::ToolApproval,
+                    )?;
                     port.publish_interaction(execution, &request).await?;
                     let metadata =
                         crate::application::interaction::port::InteractionRequestMetadata::new(
@@ -2347,6 +2441,11 @@ async fn handle_hard_pause(
         tool_call_id: None,
         body: body.clone(),
     };
+    let _interaction_activity_id = port.start_interaction_activity(
+        step_id.clone(),
+        request_id.clone(),
+        sdk::InteractionKindView::StuckDiagnostic,
+    )?;
     port.publish_interaction(execution, &request).await?;
     let metadata = crate::application::interaction::port::InteractionRequestMetadata::new(
         request_id.clone(),
@@ -2417,6 +2516,11 @@ async fn handle_plan_approval(
         tool_call_id: None,
         body: body.clone(),
     };
+    let _interaction_activity_id = port.start_interaction_activity(
+        step_id.clone(),
+        request_id.clone(),
+        sdk::InteractionKindView::PlanApproval,
+    )?;
     port.publish_interaction(execution, &request).await?;
     let metadata = crate::application::interaction::port::InteractionRequestMetadata::new(
         request_id.clone(),
