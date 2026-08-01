@@ -6,8 +6,12 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::adapter::tui_runtime_event::TuiRunStatus;
-    use crate::tui::model::conversation::intent::*;
+    use crate::tui::adapter::tui_runtime_event::{
+        TuiActivityAudience, TuiActivityDetail, TuiActivityKind, TuiActivityObservation,
+        TuiActivitySource, TuiActivityState, TuiActivityTiming, TuiModelStreamState, TuiRunPurpose,
+        UiActivityId,
+    };
+    use crate::tui::model::conversation::intent::UpdateTaskLines;
     use crate::tui::model::conversation::interaction::UiRunId;
     use crate::tui::model::conversation::model::ConversationModel;
     use crate::tui::view_assembler::live_status::LiveStatusAssembler;
@@ -16,16 +20,57 @@ mod tests {
     #[test]
     fn live_status_projection_includes_spinner_task_and_queued_lines() {
         let mut model = ConversationModel::default();
-        model.apply(ObserveRunStatus {
-            run_id: UiRunId::from("main-1"),
-            parent_run_id: None,
-            status: TuiRunStatus::InvokingModel,
-            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
-                observation_revision: 1,
-                total_elapsed_ms: 12_345,
-                phase_elapsed_ms: 678,
-            },
-        });
+        let run_id = UiRunId::from("main-1");
+        model.activity_observations_mut().replace_for_test(
+            run_id.clone(),
+            2,
+            vec![
+                TuiActivityObservation {
+                    id: UiActivityId::from("root"),
+                    run_id: run_id.clone(),
+                    run_step_id: None,
+                    parent_activity_id: None,
+                    source: TuiActivitySource::Run,
+                    kind: TuiActivityKind::Run,
+                    state: TuiActivityState::Running,
+                    detail: TuiActivityDetail::Run {
+                        purpose: TuiRunPurpose::Main,
+                    },
+                    audience: TuiActivityAudience::User,
+                    revision: 1,
+                    timing: TuiActivityTiming {
+                        total_elapsed_ms: 12_345,
+                        active_elapsed_ms: 12_345,
+                        state_elapsed_ms: 12_345,
+                        started_at_unix_ms: None,
+                        finished_at_unix_ms: None,
+                    },
+                },
+                TuiActivityObservation {
+                    id: UiActivityId::from("model"),
+                    run_id: run_id.clone(),
+                    run_step_id: None,
+                    parent_activity_id: Some(UiActivityId::from("root")),
+                    source: TuiActivitySource::Run,
+                    kind: TuiActivityKind::ModelInvocation,
+                    state: TuiActivityState::Running,
+                    detail: TuiActivityDetail::Model {
+                        model: "claude".to_string(),
+                        attempt: 1,
+                        stream: TuiModelStreamState::Streaming,
+                    },
+                    audience: TuiActivityAudience::User,
+                    revision: 2,
+                    timing: TuiActivityTiming {
+                        total_elapsed_ms: 678,
+                        active_elapsed_ms: 678,
+                        state_elapsed_ms: 678,
+                        started_at_unix_ms: None,
+                        finished_at_unix_ms: None,
+                    },
+                },
+            ],
+        );
         model.apply(UpdateTaskLines(vec![
             "━━ Tasks: 1/2 ━━".to_string(),
             "✓ #1 done".to_string(),
@@ -39,7 +84,7 @@ mod tests {
 
         let now = std::time::Instant::now();
         let mut activity = RunActivityState::default();
-        activity.sync_main_run(Some(&UiRunId::from("main-1")), true, 1, 12_345, 678, now);
+        activity.sync_main_run(Some(&run_id), true, 2, 12_345, 678, now);
         let vm = LiveStatusAssembler::assemble(&model, &activity, &anim, &queued);
         let spinner = vm.spinner.expect("spinner projected");
         assert_eq!(spinner.frame, 12);

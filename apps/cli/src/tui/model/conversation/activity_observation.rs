@@ -34,6 +34,19 @@ impl ActivityObservationModel {
             .any(|stale_run_id| stale_run_id == run_id)
     }
 
+    #[cfg(test)]
+    pub(crate) fn replace_for_test(
+        &mut self,
+        run_id: UiRunId,
+        revision: u64,
+        activities: Vec<TuiActivityObservation>,
+    ) {
+        self.activities.retain(|activity| activity.run_id != run_id);
+        self.activities.extend(activities);
+        self.set_revision(run_id.clone(), revision);
+        self.clear_stale(&run_id);
+    }
+
     pub(crate) fn observe_increment(
         &mut self,
         activity: TuiActivityObservation,

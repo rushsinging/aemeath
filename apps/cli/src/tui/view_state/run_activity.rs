@@ -17,6 +17,25 @@ pub struct RunActivityState {
 }
 
 impl RunActivityState {
+    pub fn sync_activity_summary(
+        &mut self,
+        summary: Option<&crate::tui::view_assembler::activity_summary::ActivitySummary>,
+        now: Instant,
+    ) {
+        let Some(summary) = summary else {
+            self.sync_main_run(None, false, 0, 0, 0, now);
+            return;
+        };
+        self.sync_main_run(
+            Some(&summary.run_id),
+            summary.invoking_model,
+            summary.revision,
+            summary.total_elapsed_ms,
+            summary.phase_elapsed_ms,
+            now,
+        );
+    }
+
     pub fn sync_main_run(
         &mut self,
         run_id: Option<&UiRunId>,

@@ -859,24 +859,14 @@ impl App {
     /// verb/active 检测属 effectful 边界（rng/激活检测），故放在此渲染前的副作用处，
     /// 而非纯 reducer。
     pub(crate) fn refresh_live_status_from_model(&mut self) {
-        let main_run = self.model.conversation.active_main_run_snapshot();
-        let main_run_id = main_run.map(|snapshot| &snapshot.run_id);
-        let timing_observation_revision =
-            main_run.map_or(0, |snapshot| snapshot.timing_observation_revision);
-        let total_elapsed_ms = main_run.map_or(0, |snapshot| snapshot.total_elapsed_ms);
-        let phase_elapsed_ms = main_run.map_or(0, |snapshot| snapshot.phase_elapsed_ms);
-        let invoking_model = main_run.is_some_and(|snapshot| {
-            snapshot.status == crate::tui::adapter::tui_runtime_event::TuiRunStatus::InvokingModel
-        });
-        self.view_state.run_activity.sync_main_run(
-            main_run_id,
-            invoking_model,
-            timing_observation_revision,
-            total_elapsed_ms,
-            phase_elapsed_ms,
-            std::time::Instant::now(),
-        );
-        if self.view_state.run_activity.verb.is_empty() && main_run.is_some() {
+        let activity_summary =
+            crate::tui::view_assembler::activity_summary::ActivitySummaryAssembler::assemble(
+                self.model.conversation.activity_observations(),
+            );
+        self.view_state
+            .run_activity
+            .sync_activity_summary(activity_summary.as_ref(), std::time::Instant::now());
+        if self.view_state.run_activity.verb.is_empty() && activity_summary.is_some() {
             self.view_state.spinner.pick_verb();
             self.view_state.run_activity.verb = self.view_state.spinner.verb.clone();
         }

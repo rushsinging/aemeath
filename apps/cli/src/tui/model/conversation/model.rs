@@ -150,6 +150,11 @@ impl ConversationModel {
         &self.activity_observations
     }
 
+    #[cfg(test)]
+    pub(crate) fn activity_observations_mut(&mut self) -> &mut ActivityObservationModel {
+        &mut self.activity_observations
+    }
+
     pub(super) fn observe_activity_change(
         &mut self,
         activity: crate::tui::adapter::tui_runtime_event::TuiActivityObservation,

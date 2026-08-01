@@ -4,7 +4,7 @@
 //! 本层可依赖 model（边界守卫只禁渲染库/副作用），但 ViewModel 输出仅含基本类型。
 
 use crate::tui::model::conversation::model::ConversationModel;
-use crate::tui::model::conversation::run_state::is_terminal;
+use crate::tui::view_assembler::activity_summary::ActivitySummaryAssembler;
 use crate::tui::view_model::{LiveStatusViewModel, SpinnerLineView};
 use crate::tui::view_state::{RunActivityState, SpinnerAnim};
 use std::time::Instant;
@@ -23,61 +23,20 @@ impl LiveStatusAssembler {
         queued_texts: &[String],
     ) -> LiveStatusViewModel {
         let now = Instant::now();
-        let spinner = conversation
-            .active_main_run_snapshot()
-            .filter(|snapshot| !is_terminal(snapshot.status))
-            .and_then(|snapshot| {
-                let phase_text = match snapshot.status {
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::Created
-                    | crate::tui::adapter::tui_runtime_event::TuiRunStatus::AwaitingToolApproval
-                    | crate::tui::adapter::tui_runtime_event::TuiRunStatus::AwaitingUser => None,
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::DrainingInput => {
-                        Some("Preparing input…".to_string())
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::PreparingContext => {
-                        Some("Preparing context…".to_string())
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::InvokingModel => {
-                        Some("Thinking…".to_string())
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::ApplyingResponse => {
-                        Some("Applying response…".to_string())
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::ExecutingTools => {
-                        Some("Calling tools…".to_string())
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::Compacting => {
-                        Some("Compacting…".to_string())
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::CancellingStep => {
-                        Some("Cancelling step…".to_string())
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::FinalizingStep => {
-                        Some("Finalizing step…".to_string())
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::Cancelling => {
-                        Some("Cancelling…".to_string())
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::Terminating => {
-                        Some("Terminating…".to_string())
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiRunStatus::Completed
-                    | crate::tui::adapter::tui_runtime_event::TuiRunStatus::Failed
-                    | crate::tui::adapter::tui_runtime_event::TuiRunStatus::Cancelled
-                    | crate::tui::adapter::tui_runtime_event::TuiRunStatus::Terminated => None,
-                }?;
-                Some(SpinnerLineView {
-                    frame: activity.frame.max(anim.frame),
-                    verb: if activity.verb.is_empty() {
-                        anim.verb.clone()
-                    } else {
-                        activity.verb.clone()
-                    },
-                    elapsed_secs: activity.total_elapsed_secs(now),
-                    phase_elapsed_secs: activity.phase_elapsed_secs(now),
-                    phase_text: Some(phase_text),
-                })
-            });
+        let activity_summary =
+            ActivitySummaryAssembler::assemble(conversation.activity_observations());
+        let spinner = activity_summary.map(|summary| SpinnerLineView {
+            frame: activity.frame.max(anim.frame),
+            verb: if activity.verb.is_empty() {
+                anim.verb.clone()
+            } else {
+                activity.verb.clone()
+            },
+            elapsed_secs: activity.total_elapsed_secs(now),
+            phase_elapsed_secs: activity.phase_elapsed_secs(now),
+            phase_text: Some(summary.phase_text),
+            detail_text: summary.detail,
+        });
         let queued_lines = queued_texts
             .iter()
             .flat_map(|text| queued_preview_lines(text))
@@ -116,86 +75,154 @@ fn queued_preview_lines(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::adapter::tui_runtime_event::TuiRunStatus;
-    use crate::tui::model::conversation::intent::{ObserveRunStatus, UpdateTaskLines};
+    use crate::tui::adapter::tui_runtime_event::{
+        TuiActivityAudience, TuiActivityDetail, TuiActivityKind, TuiActivityObservation,
+        TuiActivitySource, TuiActivityState, TuiActivityTiming, TuiModelStreamState,
+        TuiRunPhaseKind, TuiRunPurpose, UiActivityId,
+    };
+    use crate::tui::model::conversation::intent::UpdateTaskLines;
     use crate::tui::model::conversation::interaction::UiRunId;
 
-    fn conversation_at(status: TuiRunStatus) -> ConversationModel {
-        let mut conversation = ConversationModel::default();
-        conversation.apply(ObserveRunStatus {
+    fn activity(
+        id: &str,
+        revision: u64,
+        kind: TuiActivityKind,
+        detail: TuiActivityDetail,
+        timing: TuiActivityTiming,
+    ) -> TuiActivityObservation {
+        TuiActivityObservation {
+            id: UiActivityId::from(id),
             run_id: UiRunId::from("main-1"),
-            parent_run_id: None,
-            status,
-            timing: crate::tui::adapter::tui_runtime_event::TuiRunTiming {
-                observation_revision: 1,
-                total_elapsed_ms: 12_345,
-                phase_elapsed_ms: 6_789,
-            },
-        });
+            run_step_id: None,
+            parent_activity_id: (!matches!(kind, TuiActivityKind::Run))
+                .then(|| UiActivityId::from("root")),
+            source: TuiActivitySource::Run,
+            kind,
+            state: TuiActivityState::Running,
+            detail,
+            audience: TuiActivityAudience::User,
+            revision,
+            timing,
+        }
+    }
+
+    fn conversation_with_observations(
+        revision: u64,
+        activities: Vec<TuiActivityObservation>,
+    ) -> ConversationModel {
+        let mut conversation = ConversationModel::default();
+        conversation.activity_observations_mut().replace_for_test(
+            UiRunId::from("main-1"),
+            revision,
+            activities,
+        );
         conversation
     }
 
-    #[test]
-    fn typed_status_controls_activity_visibility() {
-        let anim = SpinnerAnim::default();
-        let mut activity = RunActivityState::default();
-        activity.sync_main_run(
+    fn conversation_with_activities(
+        primary_kind: TuiActivityKind,
+        primary_detail: TuiActivityDetail,
+    ) -> ConversationModel {
+        conversation_with_observations(
+            2,
+            vec![
+                activity(
+                    "root",
+                    1,
+                    TuiActivityKind::Run,
+                    TuiActivityDetail::Run {
+                        purpose: TuiRunPurpose::Main,
+                    },
+                    TuiActivityTiming {
+                        total_elapsed_ms: 12_345,
+                        active_elapsed_ms: 12_345,
+                        state_elapsed_ms: 12_345,
+                        ..TuiActivityTiming::default()
+                    },
+                ),
+                activity(
+                    "primary",
+                    2,
+                    primary_kind,
+                    primary_detail,
+                    TuiActivityTiming {
+                        total_elapsed_ms: 6_789,
+                        active_elapsed_ms: 6_789,
+                        state_elapsed_ms: 6_789,
+                        ..TuiActivityTiming::default()
+                    },
+                ),
+            ],
+        )
+    }
+
+    fn activity_state() -> RunActivityState {
+        let mut state = RunActivityState::default();
+        state.sync_main_run(
             Some(&UiRunId::from("main-1")),
-            true,
-            1,
+            false,
+            2,
             12_345,
             6_789,
             Instant::now(),
         );
-        let invoking = LiveStatusAssembler::assemble(
-            &conversation_at(TuiRunStatus::InvokingModel),
-            &activity,
-            &anim,
-            &[],
-        );
-        assert_eq!(
-            invoking
-                .spinner
-                .as_ref()
-                .and_then(|view| view.phase_text.clone()),
-            Some("Thinking…".to_string())
-        );
-        let spinner = invoking.spinner.expect("runtime-timed activity");
-        assert_eq!(spinner.elapsed_secs, 12);
-        assert_eq!(spinner.phase_elapsed_secs, 6);
-
-        for status in [
-            TuiRunStatus::Created,
-            TuiRunStatus::AwaitingToolApproval,
-            TuiRunStatus::AwaitingUser,
-            TuiRunStatus::Completed,
-            TuiRunStatus::Failed,
-            TuiRunStatus::Cancelled,
-            TuiRunStatus::Terminated,
-        ] {
-            let view =
-                LiveStatusAssembler::assemble(&conversation_at(status), &activity, &anim, &[]);
-            assert!(view.spinner.is_none(), "{status:?} must not show activity");
-        }
+        state
     }
 
     #[test]
-    fn status_matrix_produces_expected_activity_text() {
+    fn activity_model_controls_visibility_and_runtime_timing() {
+        let anim = SpinnerAnim::default();
+        let model = conversation_with_activities(
+            TuiActivityKind::ModelInvocation,
+            TuiActivityDetail::Model {
+                model: "claude".to_string(),
+                attempt: 1,
+                stream: TuiModelStreamState::Streaming,
+            },
+        );
+        let view = LiveStatusAssembler::assemble(&model, &activity_state(), &anim, &[]);
+        assert_eq!(
+            view.spinner
+                .as_ref()
+                .and_then(|spinner| spinner.phase_text.as_deref()),
+            Some("Thinking…")
+        );
+        let spinner = view.spinner.expect("activity spinner");
+        assert_eq!(spinner.elapsed_secs, 12);
+        assert_eq!(spinner.phase_elapsed_secs, 6);
+
+        let empty = LiveStatusAssembler::assemble(
+            &ConversationModel::default(),
+            &RunActivityState::default(),
+            &anim,
+            &[],
+        );
+        assert!(empty.spinner.is_none());
+    }
+
+    #[test]
+    fn phase_matrix_produces_expected_activity_text() {
         let cases = [
-            (TuiRunStatus::DrainingInput, "Preparing input…"),
-            (TuiRunStatus::PreparingContext, "Preparing context…"),
-            (TuiRunStatus::Compacting, "Compacting…"),
-            (TuiRunStatus::ApplyingResponse, "Applying response…"),
-            (TuiRunStatus::ExecutingTools, "Calling tools…"),
-            (TuiRunStatus::CancellingStep, "Cancelling step…"),
-            (TuiRunStatus::FinalizingStep, "Finalizing step…"),
-            (TuiRunStatus::Cancelling, "Cancelling…"),
-            (TuiRunStatus::Terminating, "Terminating…"),
+            (TuiRunPhaseKind::DrainingInput, "Preparing input…"),
+            (TuiRunPhaseKind::PreparingContext, "Preparing context…"),
+            (TuiRunPhaseKind::ApplyingResponse, "Applying response…"),
+            (
+                TuiRunPhaseKind::AwaitingToolApproval,
+                "Waiting for approval…",
+            ),
+            (TuiRunPhaseKind::ExecutingTools, "Calling tools…"),
+            (TuiRunPhaseKind::CancellingStep, "Cancelling step…"),
+            (TuiRunPhaseKind::FinalizingStep, "Finalizing step…"),
+            (TuiRunPhaseKind::Terminating, "Terminating…"),
         ];
-        for (status, expected) in cases {
+        for (phase, expected) in cases {
+            let model = conversation_with_activities(
+                TuiActivityKind::RunPhase(phase),
+                TuiActivityDetail::Phase { phase },
+            );
             let view = LiveStatusAssembler::assemble(
-                &conversation_at(status),
-                &RunActivityState::default(),
+                &model,
+                &activity_state(),
                 &SpinnerAnim::default(),
                 &[],
             );
@@ -204,6 +231,117 @@ mod tests {
                 Some(expected.to_string())
             );
         }
+    }
+
+    #[test]
+    fn user_tool_detail_is_gated_and_parallel_tools_use_stable_summary() {
+        let root = activity(
+            "root",
+            1,
+            TuiActivityKind::Run,
+            TuiActivityDetail::Run {
+                purpose: TuiRunPurpose::Main,
+            },
+            TuiActivityTiming {
+                total_elapsed_ms: 2_000,
+                state_elapsed_ms: 2_000,
+                ..TuiActivityTiming::default()
+            },
+        );
+        let tool = |revision, elapsed_ms, parallel_count| {
+            activity(
+                "tool",
+                revision,
+                TuiActivityKind::ToolCall,
+                TuiActivityDetail::Tool {
+                    name: "Read".to_string(),
+                    summary: Some("src/runtime.rs".to_string()),
+                    parallel_count,
+                },
+                TuiActivityTiming {
+                    total_elapsed_ms: elapsed_ms,
+                    state_elapsed_ms: elapsed_ms,
+                    ..TuiActivityTiming::default()
+                },
+            )
+        };
+
+        let short = conversation_with_observations(2, vec![root.clone(), tool(2, 499, 1)]);
+        assert_eq!(
+            LiveStatusAssembler::assemble(&short, &activity_state(), &SpinnerAnim::default(), &[],)
+                .spinner
+                .and_then(|spinner| spinner.detail_text),
+            None
+        );
+
+        let single = conversation_with_observations(2, vec![root.clone(), tool(2, 500, 1)]);
+        assert_eq!(
+            LiveStatusAssembler::assemble(
+                &single,
+                &activity_state(),
+                &SpinnerAnim::default(),
+                &[],
+            )
+            .spinner
+            .and_then(|spinner| spinner.detail_text),
+            Some("Read src/runtime.rs".to_string())
+        );
+
+        let parallel = conversation_with_observations(2, vec![root, tool(2, 500, 3)]);
+        assert_eq!(
+            LiveStatusAssembler::assemble(
+                &parallel,
+                &activity_state(),
+                &SpinnerAnim::default(),
+                &[],
+            )
+            .spinner
+            .and_then(|spinner| spinner.detail_text),
+            Some("Running 3 tools".to_string())
+        );
+    }
+
+    #[test]
+    fn diagnostic_leaf_never_enters_default_summary() {
+        let mut hook = activity(
+            "hook",
+            2,
+            TuiActivityKind::HookDispatch,
+            TuiActivityDetail::Hook {
+                point: crate::tui::adapter::tui_runtime_event::TuiHookPoint::Stop,
+                attempt: 1,
+            },
+            TuiActivityTiming {
+                total_elapsed_ms: 5_000,
+                state_elapsed_ms: 5_000,
+                ..TuiActivityTiming::default()
+            },
+        );
+        hook.audience = TuiActivityAudience::Diagnostic;
+        let model = conversation_with_observations(
+            2,
+            vec![
+                activity(
+                    "root",
+                    1,
+                    TuiActivityKind::Run,
+                    TuiActivityDetail::Run {
+                        purpose: TuiRunPurpose::Main,
+                    },
+                    TuiActivityTiming::default(),
+                ),
+                hook,
+            ],
+        );
+
+        assert!(LiveStatusAssembler::assemble(
+            &model,
+            &activity_state(),
+            &SpinnerAnim::default(),
+            &[],
+        )
+        .spinner
+        .is_none());
     }
 
     #[test]

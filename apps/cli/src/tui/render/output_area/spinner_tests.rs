@@ -10,6 +10,7 @@ fn line_text(elapsed_secs: u64, phase_elapsed_secs: u64) -> String {
         elapsed_secs,
         phase_elapsed_secs,
         phase_text: Some("Running tool".to_string()),
+        detail_text: None,
     };
 
     output
@@ -18,6 +19,31 @@ fn line_text(elapsed_secs: u64, phase_elapsed_secs: u64) -> String {
         .iter()
         .map(|span| span.content.as_ref())
         .collect()
+}
+
+fn line_text_with_detail(detail_text: Option<&str>) -> String {
+    let output = OutputArea::new();
+    let view = SpinnerLineView {
+        frame: 0,
+        verb: "Thinking".to_string(),
+        elapsed_secs: 12,
+        phase_elapsed_secs: 6,
+        phase_text: Some("Running tool".to_string()),
+        detail_text: detail_text.map(str::to_string),
+    };
+
+    output
+        .build_spinner_line(&view, None)
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
+}
+
+#[test]
+fn spinner_appends_at_most_one_stable_activity_detail() {
+    assert!(line_text_with_detail(None).ends_with(')'));
+    assert!(line_text_with_detail(Some("Running 3 tools")).ends_with("·  Running 3 tools"));
 }
 
 #[test]

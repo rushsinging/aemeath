@@ -17,6 +17,8 @@ pub struct SpinnerLineView {
     pub phase_elapsed_secs: u64,
     /// 细分阶段文案（已由 phase 语义转换；None 表示无括号阶段）。
     pub phase_text: Option<String>,
+    /// 最多一条通过稳定性门槛的用户可见 Activity 摘要。
+    pub detail_text: Option<String>,
 }
 
 /// Compact 进度视图（spinner 行内嵌渲染用）。
@@ -63,6 +65,7 @@ mod tests {
             elapsed_secs: 0,
             phase_elapsed_secs: 0,
             phase_text: Some("Thinking...".to_string()),
+            detail_text: None,
         };
         assert_eq!(view.frame, 9);
         assert_eq!(view.elapsed_secs, 0);
@@ -79,6 +82,7 @@ mod tests {
                 elapsed_secs: 0,
                 phase_elapsed_secs: 0,
                 phase_text: None,
+                detail_text: None,
             }),
             queued_lines: vec!["> hello".to_string()],
             task_lines: vec!["□ #1".to_string()],
