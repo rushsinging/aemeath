@@ -6,6 +6,50 @@ use crate::application::loop_engine::chat::{
 };
 
 #[test]
+fn activity_events_map_without_losing_change_or_snapshot_facts() {
+    let activity = sdk::ActivityView {
+        id: sdk::ActivityId::new("activity-map"),
+        run_id: sdk::RunId::new("run-map"),
+        run_step_id: None,
+        parent_activity_id: None,
+        source: sdk::ActivitySourceView::Run,
+        kind: sdk::ActivityKindView::Run,
+        state: sdk::ActivityStateView::Running,
+        detail: sdk::ActivityDetailView::Run {
+            purpose: sdk::RunPurposeView::Main,
+        },
+        audience: sdk::ActivityAudienceView::User,
+        revision: 3,
+        timing: sdk::ActivityTimingView::default(),
+    };
+
+    let changed = map_stream_event(RuntimeStreamEvent::ActivityChanged {
+        kind: sdk::ActivityChangeKind::Updated,
+        activity: activity.clone(),
+    });
+    let snapshot = map_stream_event(RuntimeStreamEvent::ActivitySnapshot(
+        sdk::ActivitySnapshotView {
+            run_id: activity.run_id.clone(),
+            revision: 3,
+            activities: vec![activity.clone()],
+        },
+    ));
+
+    assert!(matches!(
+        changed,
+        sdk::ChatEvent::ActivityChanged {
+            kind: sdk::ActivityChangeKind::Updated,
+            activity: mapped,
+        } if mapped == activity
+    ));
+    assert!(matches!(
+        snapshot,
+        sdk::ChatEvent::ActivitySnapshot(mapped)
+            if mapped.revision == 3 && mapped.activities == vec![activity]
+    ));
+}
+
+#[test]
 fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
     let source_context = RuntimeTurnContext::new(
         sdk::ids::ChatId::new("child-chat"),

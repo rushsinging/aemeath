@@ -284,7 +284,9 @@ fn make_parent_context() -> RuntimeContext {
                 FakeContextPort,
             )),
         ),
-        Arc::new(crate::application::activity::ActivityCoordinator::production(run_id)),
+        Arc::new(
+            crate::application::activity::ActivityCoordinator::production_without_publisher(run_id),
+        ),
         crate::application::run::context::RuntimeContextAssemblyToken::new_for_test(),
     )
 }
@@ -294,7 +296,8 @@ fn runtime_context_factory_assembles_activity_coordinator_for_bound_run_identity
     let source = include_str!("context_factory.rs");
 
     assert!(source.contains(".run_id()"));
-    assert!(source.contains("ActivityCoordinator::production(run_id.clone())"));
+    assert!(source.contains("ActivityCoordinator::production("));
+    assert!(source.contains("Arc::new(event_sink.clone())"));
 }
 
 #[test]

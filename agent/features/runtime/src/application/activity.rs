@@ -20,6 +20,7 @@ mod model_tool_tests;
 mod run_events_tests;
 
 pub(crate) use coordinator::{
-    ActivityCoordinator, ActivityError, ActivityTerminal, StartActivity, UpdateActivity,
+    ActivityChangePublisher, ActivityCoordinator, ActivityError, ActivityTerminal, StartActivity,
+    UpdateActivity,
 };
 pub(crate) use model::{ActivityDetail, ActivityKind, ActivitySource};

@@ -535,6 +535,12 @@ impl ChatEventSink for RecordingSink {
 impl RecordingSink {
     fn record(&self, event: RuntimeStreamEvent) {
         let name = match &event {
+            RuntimeStreamEvent::ActivityChanged { kind, activity } => {
+                format!("ActivityChanged:{kind:?}:{}", activity.id)
+            }
+            RuntimeStreamEvent::ActivitySnapshot(snapshot) => {
+                format!("ActivitySnapshot:{}", snapshot.revision)
+            }
             RuntimeStreamEvent::TurnStarted { messages }
             | RuntimeStreamEvent::MicrocompactDone { messages, .. }
             | RuntimeStreamEvent::StopHookBlocked { messages }

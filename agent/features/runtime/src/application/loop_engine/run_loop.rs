@@ -96,9 +96,9 @@ impl<'a> RunLoop<'a> {
             .as_ref()
             .is_none_or(|activities| activities.run_id() != run_id);
         if needs_coordinator {
-            self.activities = Some(std::sync::Arc::new(ActivityCoordinator::production(
-                run_id.clone(),
-            )));
+            self.activities = Some(std::sync::Arc::new(
+                ActivityCoordinator::production_without_publisher(run_id.clone()),
+            ));
         }
     }
 

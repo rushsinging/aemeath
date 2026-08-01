@@ -1,5 +1,7 @@
 use sdk::{ChangeSet, ChatEvent};
 
+use crate::application::loop_engine::chat::ChatEventSink;
+
 use crate::adapters::sdk_event_mapper::map_stream_event;
 
 #[derive(Clone)]
@@ -24,6 +26,25 @@ impl SdkChatEventSink {
             self.change_tx.send_replace(previous | ChangeSet::PROJECT);
         }
         projected
+    }
+}
+
+impl crate::application::activity::ActivityChangePublisher
+    for crate::application::loop_engine::chat::ChatEventSinkHandle
+{
+    fn publish_change(&self, kind: sdk::ActivityChangeKind, activity: sdk::ActivityView) {
+        self.try_send_event(
+            crate::application::loop_engine::chat::RuntimeStreamEvent::ActivityChanged {
+                kind,
+                activity,
+            },
+        );
+    }
+
+    fn publish_snapshot(&self, snapshot: sdk::ActivitySnapshotView) {
+        self.try_send_event(
+            crate::application::loop_engine::chat::RuntimeStreamEvent::ActivitySnapshot(snapshot),
+        );
     }
 }
 

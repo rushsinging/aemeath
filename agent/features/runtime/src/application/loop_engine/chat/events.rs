@@ -89,6 +89,11 @@ pub struct RuntimeResumedSessionStep {
 
 #[derive(Debug)]
 pub enum RuntimeStreamEvent {
+    ActivityChanged {
+        kind: sdk::ActivityChangeKind,
+        activity: sdk::ActivityView,
+    },
+    ActivitySnapshot(sdk::ActivitySnapshotView),
     Text {
         context: RuntimeTurnContext,
         text: String,

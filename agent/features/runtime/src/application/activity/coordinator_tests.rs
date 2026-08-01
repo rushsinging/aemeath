@@ -1,9 +1,11 @@
 use super::coordinator::{
-    ActivityClock, ActivityCoordinator, ActivityIdSource, ActivityTerminal, StartActivity,
-    UpdateActivity,
+    ActivityChangePublisher, ActivityClock, ActivityCoordinator, ActivityIdSource,
+    ActivityTerminal, StartActivity, UpdateActivity,
 };
 use super::model::{ActivityDetail, ActivityKind, ActivitySource, RunPhaseKind};
-use sdk::{ActivityAudienceView, ActivityId, RunId};
+use sdk::{
+    ActivityAudienceView, ActivityChangeKind, ActivityId, ActivitySnapshotView, ActivityView, RunId,
+};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -271,6 +273,123 @@ fn snapshot_is_parent_before_child_and_then_start_order() {
     assert_eq!(snapshot.revision, 2);
     assert_eq!(snapshot.activities[0].id, root_id);
     assert_eq!(snapshot.activities[1].id, child_id);
+}
+
+#[derive(Clone, Default)]
+struct RecordingActivityPublisher {
+    changes: Arc<Mutex<Vec<(ActivityChangeKind, ActivityView)>>>,
+    snapshots: Arc<Mutex<Vec<ActivitySnapshotView>>>,
+}
+
+impl ActivityChangePublisher for RecordingActivityPublisher {
+    fn publish_change(&self, kind: ActivityChangeKind, activity: ActivityView) {
+        self.changes
+            .lock()
+            .expect("activity changes lock")
+            .push((kind, activity));
+    }
+
+    fn publish_snapshot(&self, snapshot: ActivitySnapshotView) {
+        self.snapshots
+            .lock()
+            .expect("activity snapshots lock")
+            .push(snapshot);
+    }
+}
+
+#[test]
+fn coordinator_publishes_complete_change_after_each_successful_mutation() {
+    let clock = FixedActivityClock::new();
+    let publisher = RecordingActivityPublisher::default();
+    let coordinator = ActivityCoordinator::new_with_publisher(
+        RunId::new("run-publish"),
+        Arc::new(clock.clone()),
+        Arc::new(FixedActivityIdSource::default()),
+        Arc::new(publisher.clone()),
+    );
+
+    let activity_id = coordinator.start(start_tool()).expect("start activity");
+    coordinator
+        .wait(UpdateActivity {
+            activity_id: activity_id.clone(),
+            detail: None,
+        })
+        .expect("wait activity");
+    coordinator
+        .resume(UpdateActivity {
+            activity_id: activity_id.clone(),
+            detail: None,
+        })
+        .expect("resume activity");
+    coordinator
+        .finish(activity_id.clone(), ActivityTerminal::Succeeded)
+        .expect("finish activity");
+
+    let changes = publisher.changes.lock().expect("activity changes lock");
+    assert_eq!(changes.len(), 4);
+    assert_eq!(changes[0].0, ActivityChangeKind::Started);
+    assert_eq!(changes[0].1.revision, 1);
+    assert_eq!(changes[1].0, ActivityChangeKind::Updated);
+    assert_eq!(changes[1].1.state, sdk::ActivityStateView::Waiting);
+    assert_eq!(changes[2].0, ActivityChangeKind::Updated);
+    assert_eq!(changes[2].1.state, sdk::ActivityStateView::Running);
+    assert_eq!(changes[3].0, ActivityChangeKind::Finished);
+    assert_eq!(changes[3].1.id, activity_id);
+    assert_eq!(changes[3].1.state, sdk::ActivityStateView::Succeeded);
+    assert_eq!(changes[3].1.revision, 4);
+}
+
+#[test]
+fn coordinator_publishes_initial_and_recovery_snapshots() {
+    let clock = FixedActivityClock::new();
+    let publisher = RecordingActivityPublisher::default();
+    let coordinator = ActivityCoordinator::new_with_publisher(
+        RunId::new("run-snapshot"),
+        Arc::new(clock),
+        Arc::new(FixedActivityIdSource::default()),
+        Arc::new(publisher.clone()),
+    );
+
+    coordinator.publish_snapshot();
+    coordinator.start(start_tool()).expect("start activity");
+    coordinator.publish_snapshot();
+
+    let snapshots = publisher.snapshots.lock().expect("activity snapshots lock");
+    assert_eq!(snapshots.len(), 2);
+    assert_eq!(snapshots[0].run_id, RunId::new("run-snapshot"));
+    assert_eq!(snapshots[0].revision, 0);
+    assert!(snapshots[0].activities.is_empty());
+    assert_eq!(snapshots[1].revision, 1);
+    assert_eq!(snapshots[1].activities.len(), 1);
+}
+
+#[test]
+fn idempotent_transition_does_not_publish_a_duplicate_change() {
+    let clock = FixedActivityClock::new();
+    let publisher = RecordingActivityPublisher::default();
+    let coordinator = ActivityCoordinator::new_with_publisher(
+        RunId::new("run-idempotent"),
+        Arc::new(clock),
+        Arc::new(FixedActivityIdSource::default()),
+        Arc::new(publisher.clone()),
+    );
+
+    let activity_id = coordinator.start(start_tool()).expect("start activity");
+    coordinator
+        .resume(UpdateActivity {
+            activity_id,
+            detail: None,
+        })
+        .expect("idempotent resume");
+
+    assert_eq!(
+        publisher
+            .changes
+            .lock()
+            .expect("activity changes lock")
+            .len(),
+        1
+    );
 }
 
 #[test]

@@ -224,7 +224,7 @@ impl RuntimeContextFactory {
         let hook = self.select_hook_port(request.spec(), parent.as_deref())?;
         let reasoning = self.select_reasoning_port(bindings, parent.as_deref())?;
         let event_route = self.select_event_route(bindings)?;
-        let activities = self.select_activity_coordinator(request)?;
+        let activities = self.select_activity_coordinator(request, &event_route.sink)?;
         let lifecycle = self.select_lifecycle(request, parent.as_deref())?;
         let skill_load = self.select_skill_load(&context, parent.as_deref(), &session);
         let bindings = RunCapabilityBindings {
@@ -555,9 +555,13 @@ impl RuntimeContextFactory {
     fn select_activity_coordinator(
         &self,
         request: &RunCreationRequest,
+        event_sink: &crate::application::loop_engine::chat::ChatEventSinkHandle,
     ) -> Result<Arc<ActivityCoordinator>, RunCreationError> {
         let run_id = request.run_id().ok_or(RunCreationError::ContextAssembly)?;
-        Ok(Arc::new(ActivityCoordinator::production(run_id.clone())))
+        Ok(Arc::new(ActivityCoordinator::production(
+            run_id.clone(),
+            Arc::new(event_sink.clone()),
+        )))
     }
 
     fn select_lifecycle(
@@ -671,7 +675,7 @@ impl RuntimeContextFactory {
                     bindings.model.context.clone(),
                 ),
             ),
-            Arc::new(ActivityCoordinator::production(
+            Arc::new(ActivityCoordinator::production_without_publisher(
                 crate::domain::agent_run::RunId::new_v7(),
             )),
             RuntimeContextAssemblyToken::new(),

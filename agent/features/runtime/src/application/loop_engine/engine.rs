@@ -818,7 +818,11 @@ pub async fn execute_prepared_loop(
     cancel: &CancellationToken,
     loop_context: &mut RunLoop<'_>,
 ) -> Result<LoopDirective, LoopEngineError> {
-    loop_context.bind_activity_context(activities, context.provider_ref().model.model.clone());
+    loop_context.bind_activity_context(
+        activities.clone(),
+        context.provider_ref().model.model.clone(),
+    );
+    activities.publish_snapshot();
     let result = run_loop(run, execution, cancel, loop_context).await;
 
     let _event_sink = context.event_sink();

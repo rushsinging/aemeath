@@ -207,6 +207,13 @@ pub(crate) fn map_stream_event(
     event: crate::application::loop_engine::chat::RuntimeStreamEvent,
 ) -> ChatEvent {
     match event {
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ActivityChanged {
+            kind,
+            activity,
+        } => ChatEvent::ActivityChanged { kind, activity },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ActivitySnapshot(snapshot) => {
+            ChatEvent::ActivitySnapshot(snapshot)
+        }
         crate::application::loop_engine::chat::RuntimeStreamEvent::Text { context, text } => {
             ChatEvent::Token {
                 context: turn_context_to_sdk(context),

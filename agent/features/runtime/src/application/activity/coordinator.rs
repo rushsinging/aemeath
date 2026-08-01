@@ -2,7 +2,10 @@ use super::model::{
     ActivityDetail, ActivityKind, ActivityObservation, ActivitySource, ActivityState,
     ActivityTiming,
 };
-use sdk::{ActivityAudienceView, ActivityId, ActivityTimingView, ActivityView, RunId, RunStepId};
+use sdk::{
+    ActivityAudienceView, ActivityChangeKind, ActivityId, ActivitySnapshotView, ActivityTimingView,
+    ActivityView, RunId, RunStepId,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -117,30 +120,77 @@ impl ActivitySnapshot {
     }
 }
 
+impl From<ActivitySnapshot> for ActivitySnapshotView {
+    fn from(snapshot: ActivitySnapshot) -> Self {
+        Self {
+            run_id: snapshot.run_id,
+            revision: snapshot.revision,
+            activities: snapshot.activities,
+        }
+    }
+}
+
+pub(crate) trait ActivityChangePublisher: Send + Sync {
+    fn publish_change(&self, kind: ActivityChangeKind, activity: ActivityView);
+    fn publish_snapshot(&self, snapshot: ActivitySnapshotView);
+}
+
+#[cfg(test)]
+struct NoopActivityChangePublisher;
+
+#[cfg(test)]
+impl ActivityChangePublisher for NoopActivityChangePublisher {
+    fn publish_change(&self, _kind: ActivityChangeKind, _activity: ActivityView) {}
+
+    fn publish_snapshot(&self, _snapshot: ActivitySnapshotView) {}
+}
+
 pub(crate) struct ActivityCoordinator {
     run_id: RunId,
     clock: Arc<dyn ActivityClock>,
     ids: Arc<dyn ActivityIdSource>,
+    publisher: Arc<dyn ActivityChangePublisher>,
     registry: parking_lot::Mutex<ActivityRegistry>,
     revision: parking_lot::Mutex<u64>,
 }
 
 impl ActivityCoordinator {
+    #[cfg(test)]
     pub(crate) fn new(
         run_id: RunId,
         clock: Arc<dyn ActivityClock>,
         ids: Arc<dyn ActivityIdSource>,
     ) -> Self {
+        Self::new_with_publisher(run_id, clock, ids, Arc::new(NoopActivityChangePublisher))
+    }
+
+    pub(crate) fn new_with_publisher(
+        run_id: RunId,
+        clock: Arc<dyn ActivityClock>,
+        ids: Arc<dyn ActivityIdSource>,
+        publisher: Arc<dyn ActivityChangePublisher>,
+    ) -> Self {
         Self {
             run_id,
             clock,
             ids,
+            publisher,
             registry: parking_lot::Mutex::new(ActivityRegistry::default()),
             revision: parking_lot::Mutex::new(0),
         }
     }
 
-    pub(crate) fn production(run_id: RunId) -> Self {
+    pub(crate) fn production(run_id: RunId, publisher: Arc<dyn ActivityChangePublisher>) -> Self {
+        Self::new_with_publisher(
+            run_id,
+            Arc::new(SystemActivityClock),
+            Arc::new(UuidV7ActivityIdSource),
+            publisher,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn production_without_publisher(run_id: RunId) -> Self {
         Self::new(
             run_id,
             Arc::new(SystemActivityClock),
@@ -247,28 +297,30 @@ impl ActivityCoordinator {
         }
         let activity_id = self.ids.next_activity_id();
         let revision = self.next_revision();
-        registry.activities.insert(
-            activity_id.clone(),
-            ActivityObservation {
-                id: activity_id.clone(),
-                run_id: self.run_id.clone(),
-                run_step_id: command.run_step_id,
-                parent_activity_id: command.parent_activity_id,
-                source: command.source,
-                kind: command.kind,
-                state: ActivityState::Running,
-                detail: command.detail,
-                audience: command.audience,
-                revision,
-                timing: ActivityTiming {
-                    started_at_unix_ms: Some(self.clock.now_unix_ms()),
-                    ..ActivityTimingView::default().into()
-                },
-                started_at_monotonic_ms: now,
-                last_transition_monotonic_ms: now,
-                active_started_monotonic_ms: Some(now),
+        let observation = ActivityObservation {
+            id: activity_id.clone(),
+            run_id: self.run_id.clone(),
+            run_step_id: command.run_step_id,
+            parent_activity_id: command.parent_activity_id,
+            source: command.source,
+            kind: command.kind,
+            state: ActivityState::Running,
+            detail: command.detail,
+            audience: command.audience,
+            revision,
+            timing: ActivityTiming {
+                started_at_unix_ms: Some(self.clock.now_unix_ms()),
+                ..ActivityTimingView::default().into()
             },
-        );
+            started_at_monotonic_ms: now,
+            last_transition_monotonic_ms: now,
+            active_started_monotonic_ms: Some(now),
+        };
+        let published = observation.to_sdk(now);
+        registry.activities.insert(activity_id.clone(), observation);
+        drop(registry);
+        self.publisher
+            .publish_change(ActivityChangeKind::Started, published);
         Ok(activity_id)
     }
 
@@ -286,19 +338,21 @@ impl ActivityCoordinator {
             activity.detail = detail;
         }
         activity.revision = self.next_revision();
+        let published = activity.to_sdk(self.clock.now_monotonic_ms());
+        drop(registry);
+        self.publisher
+            .publish_change(ActivityChangeKind::Updated, published);
         Ok(())
     }
 
     #[allow(dead_code)]
     pub(crate) fn wait(&self, command: UpdateActivity) -> Result<(), ActivityError> {
-        self.update_detail(&command)?;
-        self.transition(command.activity_id, ActivityState::Waiting)
+        self.transition(command.activity_id, ActivityState::Waiting, command.detail)
     }
 
     #[allow(dead_code)]
     pub(crate) fn resume(&self, command: UpdateActivity) -> Result<(), ActivityError> {
-        self.update_detail(&command)?;
-        self.transition(command.activity_id, ActivityState::Running)
+        self.transition(command.activity_id, ActivityState::Running, command.detail)
     }
 
     pub(crate) fn finish(
@@ -330,6 +384,10 @@ impl ActivityCoordinator {
         activity.last_transition_monotonic_ms = now;
         activity.state = terminal.state();
         activity.revision = self.next_revision();
+        let published = activity.to_sdk(now);
+        drop(registry);
+        self.publisher
+            .publish_change(ActivityChangeKind::Finished, published);
         Ok(())
     }
 
@@ -365,20 +423,15 @@ impl ActivityCoordinator {
         }
     }
 
-    fn update_detail(&self, command: &UpdateActivity) -> Result<(), ActivityError> {
-        let Some(detail) = command.detail.clone() else {
-            return Ok(());
-        };
-        self.update(UpdateActivity {
-            activity_id: command.activity_id.clone(),
-            detail: Some(detail),
-        })
+    pub(crate) fn publish_snapshot(&self) {
+        self.publisher.publish_snapshot(self.snapshot().into());
     }
 
     fn transition(
         &self,
         activity_id: ActivityId,
         state: ActivityState,
+        detail: Option<ActivityDetail>,
     ) -> Result<(), ActivityError> {
         let now = self.clock.now_monotonic_ms();
         let mut registry = self.registry.lock();
@@ -389,19 +442,28 @@ impl ActivityCoordinator {
         if activity.state.is_terminal() {
             return Err(ActivityError::TerminalActivity(activity_id));
         }
-        if activity.state == state {
+        if activity.state == state && detail.is_none() {
             return Ok(());
         }
-        if state == ActivityState::Running {
-            activity.active_started_monotonic_ms = Some(now);
-        } else if activity.state == ActivityState::Running {
-            activity.timing.active_elapsed_ms += current_active_elapsed(activity, now)
-                .saturating_sub(activity.timing.active_elapsed_ms);
-            activity.active_started_monotonic_ms = None;
+        if let Some(detail) = detail {
+            activity.detail = detail;
         }
-        activity.state = state;
-        activity.last_transition_monotonic_ms = now;
+        if activity.state != state {
+            if state == ActivityState::Running {
+                activity.active_started_monotonic_ms = Some(now);
+            } else if activity.state == ActivityState::Running {
+                activity.timing.active_elapsed_ms += current_active_elapsed(activity, now)
+                    .saturating_sub(activity.timing.active_elapsed_ms);
+                activity.active_started_monotonic_ms = None;
+            }
+            activity.state = state;
+            activity.last_transition_monotonic_ms = now;
+        }
         activity.revision = self.next_revision();
+        let published = activity.to_sdk(now);
+        drop(registry);
+        self.publisher
+            .publish_change(ActivityChangeKind::Updated, published);
         Ok(())
     }
 
