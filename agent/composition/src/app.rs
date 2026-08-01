@@ -14,6 +14,9 @@ use config::connect::{
     ConnectAppService, ConnectCommitError, ConnectCommitPort, ConnectCommitReceipt,
     ConnectCommitRequest, ConnectError, ConnectOrigin, ConnectView, ExistingProviderSnapshot,
 };
+use config::form::{
+    connect_command_for_form, provider_connect_form_view, PROVIDER_CONNECT_WORKFLOW_ID,
+};
 
 pub struct ConnectFacade {
     service: Arc<ConnectAppService>,
@@ -123,6 +126,129 @@ impl ConnectFacade {
 }
 
 #[async_trait::async_trait]
+impl sdk::ConfigFormClient for ConnectFacade {
+    async fn start_form(
+        &self,
+        workflow_id: sdk::ConfigFormWorkflowId,
+        origin: sdk::ConfigFormOrigin,
+    ) -> Result<sdk::ConfigFormView, SdkError> {
+        if workflow_id.as_str() != PROVIDER_CONNECT_WORKFLOW_ID {
+            return Err(SdkError::Internal("未知 Config Form workflow".to_string()));
+        }
+        let document = self
+            .store
+            .load_global_document()
+            .await
+            .map_err(|error| SdkError::Internal(error.to_string()))?
+            .ok_or_else(|| SdkError::Internal("全局配置不存在".to_string()))?;
+        let connect_view = self
+            .service
+            .start_connect(config_form_origin(origin), document.revision, None)
+            .await;
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map_err(form_sdk_error)
+    }
+
+    async fn submit_page(
+        &self,
+        command: sdk::ConfigFormSubmitPage,
+    ) -> Result<sdk::ConfigFormView, SdkError> {
+        let session_id =
+            config::connect::ConnectSessionId::from_transport_str(command.session_id.as_str())
+                .map_err(SdkError::Internal)?;
+        let current = self
+            .service
+            .view(session_id)
+            .await
+            .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
+        let form_command = sdk_form_command(command.values, &current)?;
+        let connect_view = self
+            .service
+            .apply(
+                session_id,
+                config::connect::ConnectRevision::from_value(command.expected_revision.0),
+                form_command,
+            )
+            .await
+            .map_err(connect_sdk_error)?;
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map_err(form_sdk_error)
+    }
+
+    async fn invoke_action(
+        &self,
+        command: sdk::ConfigFormInvokeAction,
+    ) -> Result<sdk::ConfigFormView, SdkError> {
+        let session_id =
+            config::connect::ConnectSessionId::from_transport_str(command.session_id.as_str())
+                .map_err(SdkError::Internal)?;
+        let current = self
+            .service
+            .view(session_id)
+            .await
+            .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
+        let form_command = connect_command_for_form(
+            &current,
+            config::form::ConfigFormCommand::InvokeAction {
+                action_id: config::form::ConfigFormActionId::new(command.action_id.0)
+                    .map_err(|error| SdkError::Internal(error.display_message()))?,
+            },
+            config::catalog::PROVIDER_CATALOG,
+        )
+        .map_err(form_sdk_error)?;
+        let connect_view = self
+            .service
+            .apply(
+                session_id,
+                config::connect::ConnectRevision::from_value(command.expected_revision.0),
+                form_command,
+            )
+            .await
+            .map_err(connect_sdk_error)?;
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map_err(form_sdk_error)
+    }
+
+    async fn cancel_form(
+        &self,
+        session_id: sdk::ConfigFormSessionId,
+        revision: sdk::ConfigFormRevision,
+    ) -> Result<sdk::ConfigFormView, SdkError> {
+        let session_id = config::connect::ConnectSessionId::from_transport_str(session_id.as_str())
+            .map_err(SdkError::Internal)?;
+        let connect_view = self
+            .service
+            .cancel(
+                session_id,
+                config::connect::ConnectRevision::from_value(revision.0),
+            )
+            .await
+            .map_err(connect_sdk_error)?;
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map_err(form_sdk_error)
+    }
+
+    async fn refresh_form(
+        &self,
+        session_id: sdk::ConfigFormSessionId,
+    ) -> Result<Option<sdk::ConfigFormView>, SdkError> {
+        let session_id = config::connect::ConnectSessionId::from_transport_str(session_id.as_str())
+            .map_err(SdkError::Internal)?;
+        let Some(connect_view) = self.service.view(session_id).await else {
+            return Ok(None);
+        };
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map(Some)
+            .map_err(form_sdk_error)
+    }
+}
+
+#[async_trait::async_trait]
 impl sdk::ConnectClient for ConnectFacade {
     async fn start_connect(
         &self,
@@ -184,6 +310,7 @@ impl ConnectCommitPort for GlobalConnectCommitAdapter {
 
 pub struct FirstChatConnectBootstrap {
     pub connect: Arc<dyn sdk::ConnectClient>,
+    pub forms: Arc<dyn sdk::ConfigFormClient>,
     store: Arc<dyn config::GlobalConfigConnectStore>,
     receipt: config::BootstrapConfigReceipt,
 }
@@ -230,6 +357,7 @@ pub async fn prepare_first_chat_with_agents_dir(
         .map_err(global_connect_store_sdk_error)?;
     Ok(Some(FirstChatConnectBootstrap {
         connect: wire_connect_with_store(store.clone()),
+        forms: wire_connect_with_store(store.clone()),
         store,
         receipt,
     }))
@@ -237,6 +365,7 @@ pub async fn prepare_first_chat_with_agents_dir(
 
 pub struct ConnectBootstrap {
     pub connect: Arc<dyn sdk::ConnectClient>,
+    pub forms: Arc<dyn sdk::ConfigFormClient>,
 }
 
 pub async fn build_connect_bootstrap() -> Result<ConnectBootstrap, SdkError> {
@@ -262,7 +391,8 @@ pub async fn build_connect_bootstrap_with_agents_dir(
             .map_err(global_connect_store_sdk_error)?;
     }
     Ok(ConnectBootstrap {
-        connect: wire_connect_with_store(store),
+        connect: wire_connect_with_store(store.clone()),
+        forms: wire_connect_with_store(store),
     })
 }
 
@@ -554,6 +684,162 @@ fn sdk_error_view(error: ConnectError) -> sdk::ConnectErrorView {
         },
         message: error.display_message(),
     }
+}
+
+fn config_form_origin(origin: sdk::ConfigFormOrigin) -> ConnectOrigin {
+    match origin {
+        sdk::ConfigFormOrigin::ExplicitCommand => ConnectOrigin::ExplicitCommand,
+        sdk::ConfigFormOrigin::FirstChatBootstrap => ConnectOrigin::FirstChatBootstrap,
+    }
+}
+
+fn sdk_form_command(
+    values: Vec<sdk::ConfigFormFieldValue>,
+    current: &config::connect::ConnectView,
+) -> Result<config::connect::ConnectCommand, SdkError> {
+    let values = values
+        .into_iter()
+        .map(|value| {
+            Ok(config::form::ConfigFormFieldValue {
+                field_id: config::form::ConfigFormFieldId::new(value.field_id.0)
+                    .map_err(|error| SdkError::Internal(error.display_message()))?,
+                value: match value.value {
+                    sdk::ConfigFormValue::Text(value) => config::form::ConfigFormValue::Text(value),
+                    sdk::ConfigFormValue::Secret(value) => {
+                        config::form::ConfigFormValue::Secret(value)
+                    }
+                    sdk::ConfigFormValue::Number(value) => {
+                        config::form::ConfigFormValue::Number(value)
+                    }
+                    sdk::ConfigFormValue::Boolean(value) => {
+                        config::form::ConfigFormValue::Boolean(value)
+                    }
+                    sdk::ConfigFormValue::SelectedOption(value) => {
+                        config::form::ConfigFormValue::SelectedOption(
+                            config::form::ConfigFormOptionId::new(value.0)
+                                .map_err(|error| SdkError::Internal(error.display_message()))?,
+                        )
+                    }
+                },
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    config::form::connect_command_for_form(
+        current,
+        config::form::ConfigFormCommand::SubmitPage { values },
+        config::catalog::PROVIDER_CATALOG,
+    )
+    .map_err(form_sdk_error)
+}
+
+fn sdk_form_view(view: config::form::ConfigFormView) -> sdk::ConfigFormView {
+    sdk::ConfigFormView {
+        workflow_id: sdk::ConfigFormWorkflowId(view.workflow_id.as_str().to_string()),
+        session_id: sdk::ConfigFormSessionId(view.session_id.as_str().to_string()),
+        revision: sdk::ConfigFormRevision(view.revision.value()),
+        origin: match view.origin {
+            config::form::ConfigFormOrigin::ExplicitCommand => {
+                sdk::ConfigFormOrigin::ExplicitCommand
+            }
+            config::form::ConfigFormOrigin::FirstChatBootstrap => {
+                sdk::ConfigFormOrigin::FirstChatBootstrap
+            }
+        },
+        page: sdk_form_page(view.page),
+        busy: view.busy.map(|busy| sdk::ConfigFormBusy {
+            message: busy.message,
+            cancellable: busy.cancellable,
+            refresh_policy: match busy.refresh_policy {
+                config::form::ConfigFormRefreshPolicy::Manual => {
+                    sdk::ConfigFormRefreshPolicy::Manual
+                }
+                config::form::ConfigFormRefreshPolicy::Poll { interval_ms } => {
+                    sdk::ConfigFormRefreshPolicy::Poll { interval_ms }
+                }
+            },
+        }),
+        terminal: view.terminal.map(|terminal| match terminal {
+            config::form::ConfigFormTerminal::Completed { applied_revision } => {
+                sdk::ConfigFormTerminal::Completed { applied_revision }
+            }
+            config::form::ConfigFormTerminal::Cancelled => sdk::ConfigFormTerminal::Cancelled,
+        }),
+    }
+}
+
+fn sdk_form_page(page: config::form::ConfigFormPage) -> sdk::ConfigFormPage {
+    sdk::ConfigFormPage {
+        id: sdk::ConfigFormPageId(page.id.as_str().to_string()),
+        title: page.title,
+        description: page.description,
+        step: page.step.map(|step| sdk::ConfigFormStep {
+            current: step.current,
+            total: step.total,
+        }),
+        fields: page.fields.into_iter().map(sdk_form_field).collect(),
+        error: page.error.map(|error| sdk::ConfigFormPageError {
+            message: error.message,
+        }),
+        actions: page
+            .actions
+            .into_iter()
+            .map(|action| sdk::ConfigFormAction {
+                id: sdk::ConfigFormActionId(action.id.as_str().to_string()),
+                label: action.label,
+                style: match action.style {
+                    config::form::ConfigFormActionStyle::Primary => {
+                        sdk::ConfigFormActionStyle::Primary
+                    }
+                    config::form::ConfigFormActionStyle::Secondary => {
+                        sdk::ConfigFormActionStyle::Secondary
+                    }
+                    config::form::ConfigFormActionStyle::Destructive => {
+                        sdk::ConfigFormActionStyle::Destructive
+                    }
+                },
+                shortcut: action.shortcut,
+            })
+            .collect(),
+    }
+}
+
+fn sdk_form_field(field: config::form::ConfigFormField) -> sdk::ConfigFormField {
+    sdk::ConfigFormField {
+        id: sdk::ConfigFormFieldId(field.id.as_str().to_string()),
+        label: field.label,
+        description: field.description,
+        field_type: match field.field_type {
+            config::form::ConfigFormFieldType::Text => sdk::ConfigFormFieldType::Text,
+            config::form::ConfigFormFieldType::Secret => sdk::ConfigFormFieldType::Secret,
+            config::form::ConfigFormFieldType::Number => sdk::ConfigFormFieldType::Number,
+            config::form::ConfigFormFieldType::SingleSelect => {
+                sdk::ConfigFormFieldType::SingleSelect
+            }
+            config::form::ConfigFormFieldType::Boolean => sdk::ConfigFormFieldType::Boolean,
+            config::form::ConfigFormFieldType::Summary => sdk::ConfigFormFieldType::Summary,
+            config::form::ConfigFormFieldType::Status => sdk::ConfigFormFieldType::Status,
+        },
+        required: field.required,
+        has_value: field.has_value,
+        display_value: field.display_value,
+        options: field
+            .options
+            .into_iter()
+            .map(|option| sdk::ConfigFormOption {
+                id: sdk::ConfigFormOptionId(option.id.as_str().to_string()),
+                label: option.label,
+                description: option.description,
+            })
+            .collect(),
+        error: field.error.map(|error| sdk::ConfigFormFieldError {
+            field_id: sdk::ConfigFormFieldId(error.field_id.as_str().to_string()),
+            message: error.message,
+        }),
+    }
+}
+
+fn form_sdk_error(error: impl std::fmt::Display) -> SdkError {
+    SdkError::Internal(error.to_string())
 }
 
 fn connect_sdk_error(error: ConnectError) -> sdk::SdkError {

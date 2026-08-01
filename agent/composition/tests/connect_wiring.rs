@@ -5,6 +5,31 @@ use config::connect::{ConnectAppService, ConnectOrigin};
 use std::sync::Arc;
 
 #[tokio::test]
+async fn connect_bootstrap_exposes_provider_connect_as_generic_form_workflow() {
+    let temp = tempfile::tempdir().unwrap();
+    let bootstrap = build_connect_bootstrap_with_agents_dir(temp.path())
+        .await
+        .unwrap();
+
+    let view = bootstrap
+        .forms
+        .start_form(
+            sdk::ConfigFormWorkflowId("provider_connect".to_string()),
+            sdk::ConfigFormOrigin::ExplicitCommand,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(view.workflow_id.as_str(), "provider_connect");
+    assert_eq!(view.page.id.as_str(), "select_provider");
+    assert!(view
+        .page
+        .fields
+        .iter()
+        .any(|field| field.id.as_str() == "provider_source"));
+}
+
+#[tokio::test]
 async fn first_chat_rollback_refuses_to_delete_externally_modified_default() {
     let temp = tempfile::tempdir().unwrap();
     let bootstrap = composition::app::prepare_first_chat_with_agents_dir(temp.path(), true)

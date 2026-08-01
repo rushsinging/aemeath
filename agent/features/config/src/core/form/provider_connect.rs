@@ -13,6 +13,16 @@ pub enum ProviderConnectFormError {
     InvalidSubmission(String),
 }
 
+impl std::fmt::Display for ProviderConnectFormError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Form(error) => formatter.write_str(&error.display_message()),
+            Self::UnknownProvider(source) => write!(formatter, "未知 Provider：{source}"),
+            Self::InvalidSubmission(message) => formatter.write_str(message),
+        }
+    }
+}
+
 impl From<ConfigFormError> for ProviderConnectFormError {
     fn from(error: ConfigFormError) -> Self {
         Self::Form(error)
