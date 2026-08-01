@@ -326,21 +326,17 @@ pub async fn from_args_with_workspace(
                     "resume_lifecycle boundary=startup_view stage=view_created session_id={} steps={} messages={}",
                     resume_view.session_id,
                     resume_view.display_steps.len(),
-                    resume_view.display_steps.iter().map(|step| step.messages.len()).sum::<usize>(),
+                    resume_view.display_steps.iter().map(|step| step.messages().count()).sum::<usize>(),
                 );
                 let session_id = resume_view.session_id.clone();
-                let startup_resume = sdk::SessionResumeView {
+                let startup_resume = sdk::LocalSessionResumeBacking {
                     steps: resume_view
                         .display_steps
                         .into_iter()
-                        .map(|step| sdk::ResumedSessionStep {
+                        .map(|step| sdk::LocalResumedSessionStep {
                             run_id: step.run_id,
                             step_id: step.step_id,
-                            messages: step
-                                .messages
-                                .into_iter()
-                                .map(crate::application::client::message_to_sdk)
-                                .collect(),
+                            message_segments: step.message_segments,
                             finalize_cause: step
                                 .finalize_cause
                                 .map(super::mapping::map_finalize_cause_to_sdk),

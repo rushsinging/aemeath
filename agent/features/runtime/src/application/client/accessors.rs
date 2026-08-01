@@ -105,7 +105,7 @@ pub struct SessionRuntime {
     /// #1385 Task 7: resume session-id，从 `ChatRuntimeContext` 迁移至 shell。
     pub resume: Option<String>,
     /// 启动 `--resume` 已完成的单次恢复投影；供 Composition/TUI 初始化历史。
-    pub startup_resume: Option<sdk::SessionResumeView>,
+    pub startup_resume: Option<sdk::LocalSessionResumeBacking>,
 
     // ── Cross-run shared resources ──
     pub(crate) agent_runner: Arc<dyn AgentRunner>,
@@ -165,7 +165,7 @@ impl SessionRuntime {
         allow_all: bool,
         verbose: bool,
         resume: Option<String>,
-        startup_resume: Option<sdk::SessionResumeView>,
+        startup_resume: Option<sdk::LocalSessionResumeBacking>,
         agent_runner: Arc<dyn AgentRunner>,
         parent_context_source: ParentRunContextSource,
         tool_result_materializer: Arc<

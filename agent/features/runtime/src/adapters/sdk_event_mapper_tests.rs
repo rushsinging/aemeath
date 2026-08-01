@@ -55,7 +55,7 @@ fn session_resume_mapping_preserves_context_run_step_boundaries() {
         steps: vec![RuntimeResumedSessionStep {
             run_id: "run-1".into(),
             step_id: "step-1".into(),
-            messages: vec![share::message::Message::user("hello")],
+            message_segments: vec![vec![share::message::Message::user("hello")].into()],
             finalize_cause: None,
             duration_ms: None,
         }],

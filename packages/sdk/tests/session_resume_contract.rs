@@ -1,4 +1,31 @@
 use sdk::{ChatMessage, ResumedSessionStep};
+use std::sync::Arc;
+
+#[test]
+fn local_resume_backing_clone_reuses_shared_step_messages() {
+    let shared_messages: Arc<[share::message::Message]> =
+        vec![share::message::Message::user("large history")].into();
+    let step = sdk::LocalResumedSessionStep {
+        run_id: "run-shared".to_string(),
+        step_id: "step-shared".to_string(),
+        message_segments: vec![Arc::clone(&shared_messages)],
+        finalize_cause: Some(sdk::ResumedStepFinalizeCause::Completed),
+        duration_ms: Some(42),
+    };
+    let backing = sdk::LocalSessionResumeBacking {
+        steps: vec![step],
+        session_id: "session-shared".to_string(),
+        created_at: 42,
+    };
+
+    let cloned = backing.clone();
+
+    assert!(Arc::ptr_eq(
+        &shared_messages,
+        &cloned.steps[0].message_segments[0]
+    ));
+    assert_eq!(cloned.steps[0].messages().count(), 1);
+}
 
 #[test]
 fn resumed_session_step_round_trip_preserves_run_step_boundaries() {

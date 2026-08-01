@@ -143,6 +143,11 @@ impl OutputWindowIndex {
         }
     }
 
+    pub(crate) fn estimated_lines_for_history_item(
+        item: &crate::tui::model::conversation::resumed_history::ResumedHistoryItem,
+    ) -> usize {
+        item.estimated_lines
+    }
     #[cfg(test)]
     pub(crate) fn record_exact_lines(&mut self, item_id: &str, width: u16, line_count: usize) {
         let Some(position) = self.positions.get(item_id).copied() else {
