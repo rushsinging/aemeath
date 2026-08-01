@@ -2,11 +2,10 @@ use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::output_view_change::{
     OutputViewChange, OutputViewChanges, OutputViewCursor,
 };
-use crate::tui::render::output::document_renderer::OutputRenderWindow;
 use crate::tui::view_assembler::output::OutputViewAssembler;
 use crate::tui::view_assembler::output_tool_lookup::ConversationToolLookup;
 use crate::tui::view_assembler::output_window_index::{OutputWindowIndex, OutputWindowIndexChange};
-use crate::tui::view_model::BlockNode;
+use crate::tui::view_model::{BlockNode, OutputRenderWindow};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

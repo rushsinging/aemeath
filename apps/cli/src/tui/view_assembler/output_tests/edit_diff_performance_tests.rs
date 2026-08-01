@@ -5,10 +5,11 @@ use crate::tui::model::conversation::intent::{
 };
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
-use crate::tui::render::output::document_renderer::{OutputDocumentRenderer, OutputRenderWindow};
+use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
 use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
 use crate::tui::render::performance::{capture, percentiles_ns, RenderPerformanceSnapshot};
 use crate::tui::view_model::OutputBlockKind;
+use crate::tui::view_model::OutputRenderWindow;
 use std::time::Instant;
 
 fn source_lines(count: usize, changed_index: Option<usize>) -> String {

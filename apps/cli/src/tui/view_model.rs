@@ -16,7 +16,8 @@ pub use nesting::{allowed_child, MAX_BLOCK_DEPTH};
 pub use output::{
     AgentMetaView, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
     HookNoticeBlockView, HookNoticeSemanticKind, ModelStreamPlaceholderBlockView, OutputBlockKind,
-    OutputViewModel, TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
+    OutputRenderWindow, OutputViewModel, TextBlockView, ToolCallBlockView, ToolResultBlockView,
+    ToolSemanticStatus,
 };
 pub use status::{
     StatusContextViewModel, StatusLineViewModel, StatusNoticeViewKind, StatusNoticeViewModel,

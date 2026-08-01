@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use crate::tui::render::output::document_renderer::OutputRenderWindow;
+use crate::tui::view_model::OutputRenderWindow;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct OutputWindowSelection {

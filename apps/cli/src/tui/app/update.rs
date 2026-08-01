@@ -578,12 +578,12 @@ impl App {
         let width = self.output_document_width();
         let cache = &mut self.output_view;
         let workspace_root = current_workspace_root.as_deref().map(std::path::Path::new);
-        let requested_window = crate::tui::render::output::document_renderer::OutputRenderWindow {
+        let requested_window = crate::tui::view_model::OutputRenderWindow {
             line_limit: self.view_state.output.render_line_limit(),
             tail_offset: self.view_state.output.history_window_tail_offset,
         };
         let requested_window = if requested_window.line_limit >= usize::MAX / 2 {
-            crate::tui::render::output::document_renderer::OutputRenderWindow::all()
+            crate::tui::view_model::OutputRenderWindow::all()
         } else {
             requested_window
         };

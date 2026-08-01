@@ -7,7 +7,7 @@ use crate::tui::model::conversation::intent::{
     UpsertModelStreamPlaceholder,
 };
 use crate::tui::model::conversation::model::ConversationModel;
-use crate::tui::render::output::document_renderer::OutputRenderWindow;
+use crate::tui::view_model::OutputRenderWindow;
 use std::sync::Arc;
 
 fn full_window() -> OutputRenderWindow {

@@ -10,32 +10,11 @@ use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, Rend
 use crate::tui::render::output::tool_display::{result_policy, ResultPolicy, ResultRender};
 use crate::tui::render::theme;
 use crate::tui::view_model::output::{
-    AskUserPhaseView, BlockNode, OutputBlockKind, OutputViewModel,
+    AskUserPhaseView, BlockNode, OutputBlockKind, OutputRenderWindow, OutputViewModel,
 };
 use ratatui::style::Style;
 use ratatui::text::Span;
 use std::rc::Rc;
-
-/// 输出文档渲染请求。窗口从完整语义树的最新端按完整 root group 选择。
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct OutputRenderWindow {
-    pub line_limit: usize,
-    pub tail_offset: usize,
-}
-
-impl OutputRenderWindow {
-    /// 不限制 root 选择，供不需要历史窗口的独立 renderer 调用方使用。
-    pub(crate) const fn all() -> Self {
-        Self {
-            line_limit: usize::MAX,
-            tail_offset: 0,
-        }
-    }
-
-    pub(crate) const fn all_for_internal() -> Self {
-        Self::all()
-    }
-}
 
 /// 单次窗口渲染结果。`source_total_lines` 来自全部 root 布局索引，
 /// `document` 只持请求窗口内的 rendered blocks。

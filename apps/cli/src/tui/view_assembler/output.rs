@@ -335,7 +335,7 @@ fn push_child_checked(parent: &mut BlockNode, child: BlockNode, depth: usize) {
 fn assemble_output_window(
     conversation: &ConversationModel,
     workspace_root: Option<&std::path::Path>,
-    window: crate::tui::render::output::document_renderer::OutputRenderWindow,
+    window: crate::tui::view_model::OutputRenderWindow,
 ) -> OutputViewModel {
     super::retained_output_view::RetainedOutputView::default()
         .materialize_window(conversation, workspace_root, window)
@@ -350,7 +350,7 @@ fn assemble_output_view(
     assemble_output_window(
         conversation,
         workspace_root,
-        crate::tui::render::output::document_renderer::OutputRenderWindow {
+        crate::tui::view_model::OutputRenderWindow {
             line_limit: usize::MAX,
             tail_offset: 0,
         },

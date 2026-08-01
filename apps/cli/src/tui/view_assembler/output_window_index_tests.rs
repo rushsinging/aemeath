@@ -1,5 +1,5 @@
 use super::{OutputWindowIndex, OutputWindowIndexChange};
-use crate::tui::render::output::document_renderer::OutputRenderWindow;
+use crate::tui::view_model::OutputRenderWindow;
 
 fn ids(index: &OutputWindowIndex) -> Vec<&str> {
     index
