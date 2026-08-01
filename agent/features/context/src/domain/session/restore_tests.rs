@@ -109,11 +109,22 @@ fn restore_preserves_run_step_boundaries_for_display_projection() {
     assert_eq!(restore.display_steps.len(), 2);
     assert_eq!(restore.display_steps[0].run_id, "run-1");
     assert_eq!(restore.display_steps[0].step_id, "step-1");
-    assert_eq!(restore.display_steps[0].messages[0].text_content(), "first");
+    assert_eq!(
+        restore.display_steps[0]
+            .messages()
+            .next()
+            .expect("first message")
+            .text_content(),
+        "first"
+    );
     assert_eq!(restore.display_steps[1].run_id, "run-1");
     assert_eq!(restore.display_steps[1].step_id, "step-2");
     assert_eq!(
-        restore.display_steps[1].messages[0].text_content(),
+        restore.display_steps[1]
+            .messages()
+            .next()
+            .expect("second message")
+            .text_content(),
         "second"
     );
 }
@@ -133,8 +144,11 @@ fn restore_projects_unfinished_tool_receipts_as_unconfirmed_results() {
             Some(crate::domain::FinalizeCause::UserCancelledStep)
         );
         assert_eq!(restore.display_steps[0].duration_ms, Some(7_325_000));
-        assert_eq!(restore.display_steps[0].messages.len(), 2);
-        let result = &restore.display_steps[0].messages[1];
+        assert_eq!(restore.display_steps[0].messages().count(), 2);
+        let result = restore.display_steps[0]
+            .messages()
+            .nth(1)
+            .expect("tool result");
         assert_eq!(result.role, Role::User);
         let [ContentBlock::ToolResult {
             tool_use_id,
@@ -171,12 +185,12 @@ fn restore_reconstructs_receipt_only_unfinished_tool_as_terminated_message_pair(
             step.finalize_cause,
             Some(crate::domain::FinalizeCause::RunTerminated)
         );
-        assert_eq!(step.messages.len(), 2);
-        let [ContentBlock::ToolUse { id, name, input }] = step.messages[0].content.as_slice()
-        else {
+        assert_eq!(step.messages().count(), 2);
+        let messages = step.messages().collect::<Vec<_>>();
+        let [ContentBlock::ToolUse { id, name, input }] = messages[0].content.as_slice() else {
             panic!("receipt-only Step 应重建最小 ToolUse");
         };
-        assert_eq!(step.messages[0].role, Role::Assistant);
+        assert_eq!(messages[0].role, Role::Assistant);
         assert_eq!(id, "provider-call-1");
         assert_eq!(name, "Bash");
         assert_eq!(input["command"], "sleep 180");
@@ -185,11 +199,11 @@ fn restore_reconstructs_receipt_only_unfinished_tool_as_terminated_message_pair(
             content,
             is_error,
             ..
-        }] = step.messages[1].content.as_slice()
+        }] = messages[1].content.as_slice()
         else {
             panic!("receipt-only Step 应补充 CancellationUnconfirmed ToolResult");
         };
-        assert_eq!(step.messages[1].role, Role::User);
+        assert_eq!(messages[1].role, Role::User);
         assert_eq!(tool_use_id, "provider-call-1");
         assert!(*is_error);
         assert!(content.to_string().contains("CancellationUnconfirmed"));
@@ -209,15 +223,14 @@ fn restore_uses_safe_empty_input_when_receipt_preview_is_invalid() {
 
     assert_eq!(first.display_steps.len(), 1);
     assert_eq!(second.display_steps.len(), 1);
-    let [ContentBlock::ToolUse { input, .. }] =
-        first.display_steps[0].messages[0].content.as_slice()
-    else {
+    let messages = first.display_steps[0].messages().collect::<Vec<_>>();
+    let [ContentBlock::ToolUse { input, .. }] = messages[0].content.as_slice() else {
         panic!("无效 input preview 仍应重建 ToolUse");
     };
     assert_eq!(input, &serde_json::json!({}));
     assert_eq!(
-        serde_json::to_value(&first.display_steps[0].messages).unwrap(),
-        serde_json::to_value(&second.display_steps[0].messages).unwrap()
+        serde_json::to_value(messages).unwrap(),
+        serde_json::to_value(second.display_steps[0].messages().collect::<Vec<_>>()).unwrap()
     );
 }
 
@@ -256,12 +269,11 @@ fn real_terminated_session_restores_every_unfinished_bash_receipt() {
             .display_steps
             .iter()
             .find(|step| {
-                step.messages
-                    .iter()
+                step.messages()
                     .any(|message| message.tool_use_ids().contains(&call_id.as_str()))
             })
             .expect("每个未完成 Bash receipt 都应出现在恢复投影");
-        assert!(step.messages.iter().any(|message| {
+        assert!(step.messages().any(|message| {
             message
                 .tool_result_ids()
                 .into_iter()
@@ -269,6 +281,58 @@ fn real_terminated_session_restores_every_unfinished_bash_receipt() {
         }));
         assert!(step.finalize_cause.is_some());
     }
+}
+
+#[test]
+fn restore_reuses_canonical_message_backing_for_clean_steps() {
+    let session = two_step_session();
+    let canonical_first = session.run_slices[0].steps[0]
+        .accepted_input
+        .as_ref()
+        .expect("first accepted input")
+        .messages
+        .as_arc();
+    let canonical_second = session.run_slices[0].steps[1]
+        .accepted_input
+        .as_ref()
+        .expect("second accepted input")
+        .messages
+        .as_arc();
+
+    let restore = SessionRestore::from_canonical(&session);
+
+    assert_eq!(restore.display_steps.len(), 2);
+    assert_eq!(restore.display_steps[0].message_segments.len(), 1);
+    assert_eq!(restore.display_steps[1].message_segments.len(), 1);
+    assert!(std::sync::Arc::ptr_eq(
+        &canonical_first,
+        &restore.display_steps[0].message_segments[0]
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        &canonical_second,
+        &restore.display_steps[1].message_segments[0]
+    ));
+}
+
+#[test]
+fn restore_allocates_repaired_backing_only_for_unfinished_step() {
+    let session = unfinished_tool_session(crate::domain::ToolCallState::Running);
+    let canonical = session.run_slices[0].steps[0]
+        .outcome
+        .as_ref()
+        .expect("outcome")
+        .messages
+        .as_arc();
+
+    let restore = SessionRestore::from_canonical(&session);
+
+    assert_eq!(restore.display_steps.len(), 1);
+    assert_eq!(restore.display_steps[0].message_segments.len(), 1);
+    assert!(!std::sync::Arc::ptr_eq(
+        &canonical,
+        &restore.display_steps[0].message_segments[0]
+    ));
+    assert_eq!(restore.display_steps[0].messages().count(), 2);
 }
 
 #[test]
@@ -318,13 +382,21 @@ fn restore_reads_only_steps_from_active_marker() {
     assert_eq!(restore.display_steps[0].run_id, "run-1");
     assert_eq!(restore.display_steps[0].step_id, "step-1");
     assert_eq!(
-        restore.display_steps[0].messages[0].text_content(),
+        restore.display_steps[0]
+            .messages()
+            .next()
+            .expect("first message")
+            .text_content(),
         "hidden"
     );
     assert_eq!(restore.display_steps[1].run_id, "run-2");
     assert_eq!(restore.display_steps[1].step_id, "step-2");
     assert_eq!(
-        restore.display_steps[1].messages[0].text_content(),
+        restore.display_steps[1]
+            .messages()
+            .next()
+            .expect("second message")
+            .text_content(),
         "visible"
     );
 }

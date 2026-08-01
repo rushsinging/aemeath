@@ -519,8 +519,9 @@ pub(crate) fn map_stream_event(
                     run_id: step.run_id,
                     step_id: step.step_id,
                     messages: step
-                        .messages
+                        .message_segments
                         .into_iter()
+                        .flat_map(|segment| segment.iter().cloned().collect::<Vec<_>>())
                         .map(crate::application::client::message_to_sdk)
                         .collect(),
                     finalize_cause: step

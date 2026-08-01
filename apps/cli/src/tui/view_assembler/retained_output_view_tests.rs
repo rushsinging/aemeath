@@ -17,8 +17,8 @@ fn full_window() -> OutputRenderWindow {
     }
 }
 
-fn materialize_all<'a>(
-    view: &'a mut RetainedOutputView,
+fn materialize_all(
+    view: &mut RetainedOutputView,
     model: &ConversationModel,
     workspace_root: Option<&std::path::Path>,
 ) -> super::MaterializedOutputWindow {
@@ -63,6 +63,38 @@ fn cold_window_materializes_only_tail_candidates() {
             .map(|root| root.block_id.as_str()),
         Some("user-100000")
     );
+}
+
+#[test]
+fn moving_window_retires_roots_outside_current_selection() {
+    let mut model = ConversationModel::default();
+    for index in 0..128 {
+        model.apply(AppendUserMessage {
+            text: format!("message-{index}"),
+        });
+    }
+    let mut view = RetainedOutputView::default();
+    let latest = view.materialize_window(
+        &model,
+        None,
+        OutputRenderWindow {
+            line_limit: 10,
+            tail_offset: 0,
+        },
+    );
+    assert_eq!(view.cached_root_count(), latest.view_model.roots.len());
+
+    let older = view.materialize_window(
+        &model,
+        None,
+        OutputRenderWindow {
+            line_limit: 10,
+            tail_offset: 80,
+        },
+    );
+
+    assert_eq!(view.cached_root_count(), older.view_model.roots.len());
+    assert!(view.cached_root_count() <= 10);
 }
 
 #[test]
