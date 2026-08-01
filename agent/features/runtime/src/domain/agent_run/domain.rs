@@ -46,6 +46,7 @@ pub struct Run {
 }
 
 impl Run {
+    #[allow(dead_code)]
     pub fn new(spec: RunSpec, parent_id: Option<RunId>) -> Self {
         Self::with_id(RunId::new_v7(), spec, parent_id)
     }

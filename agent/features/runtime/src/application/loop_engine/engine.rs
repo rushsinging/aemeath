@@ -4,6 +4,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
+use crate::application::activity::ActivityCoordinator;
 use crate::application::hook::stop_coordination::StopHookDecision;
 use crate::application::loop_engine::RunLoop;
 use crate::application::run::context::RuntimeContext;
@@ -811,9 +812,11 @@ pub async fn execute_prepared_loop(
     run: &mut Run,
     execution: &mut RunExecutionState,
     context: &RuntimeContext,
+    activities: std::sync::Arc<ActivityCoordinator>,
     cancel: &CancellationToken,
     loop_context: &mut RunLoop<'_>,
 ) -> Result<LoopDirective, LoopEngineError> {
+    loop_context.bind_activities(activities);
     let result = run_loop(run, execution, cancel, loop_context).await;
 
     let _event_sink = context.event_sink();

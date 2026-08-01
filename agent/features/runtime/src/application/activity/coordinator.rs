@@ -72,6 +72,7 @@ pub(crate) struct StartActivity {
     pub(crate) audience: ActivityAudienceView,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct UpdateActivity {
     pub(crate) activity_id: ActivityId,
@@ -98,12 +99,14 @@ struct ActivityRegistry {
     activities: HashMap<ActivityId, ActivityObservation>,
 }
 
+#[allow(dead_code)]
 pub(crate) struct ActivitySnapshot {
     pub(crate) run_id: RunId,
     pub(crate) revision: u64,
     pub(crate) activities: Vec<ActivityView>,
 }
 
+#[allow(dead_code)]
 impl ActivitySnapshot {
     pub(crate) fn find(&self, activity_id: &ActivityId) -> Option<&ActivityView> {
         self.activities
@@ -145,6 +148,44 @@ impl ActivityCoordinator {
 
     pub(crate) fn run_id(&self) -> &RunId {
         &self.run_id
+    }
+
+    pub(super) fn has_activity_source(
+        &self,
+        source: &ActivitySource,
+        run_step_id: Option<&RunStepId>,
+    ) -> bool {
+        self.registry.lock().activities.values().any(|activity| {
+            &activity.source == source && activity.run_step_id.as_ref() == run_step_id
+        })
+    }
+
+    pub(super) fn live_activity_id(
+        &self,
+        source: &ActivitySource,
+        run_step_id: Option<&RunStepId>,
+    ) -> Option<ActivityId> {
+        self.registry
+            .lock()
+            .activities
+            .values()
+            .find(|activity| {
+                !activity.state.is_terminal()
+                    && &activity.source == source
+                    && activity.run_step_id.as_ref() == run_step_id
+            })
+            .map(|activity| activity.id.clone())
+    }
+
+    pub(super) fn live_run_phase_id(&self) -> Option<ActivityId> {
+        self.registry
+            .lock()
+            .activities
+            .values()
+            .find(|activity| {
+                !activity.state.is_terminal() && matches!(activity.kind, ActivityKind::RunPhase(_))
+            })
+            .map(|activity| activity.id.clone())
     }
 
     pub(crate) fn start(&self, command: StartActivity) -> Result<ActivityId, ActivityError> {
@@ -198,10 +239,12 @@ impl ActivityCoordinator {
         Ok(activity_id)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn wait(&self, command: UpdateActivity) -> Result<(), ActivityError> {
         self.transition(command.activity_id, ActivityState::Waiting)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn resume(&self, command: UpdateActivity) -> Result<(), ActivityError> {
         self.transition(command.activity_id, ActivityState::Running)
     }
@@ -253,6 +296,7 @@ impl ActivityCoordinator {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn snapshot(&self) -> ActivitySnapshot {
         let now = self.clock.now_monotonic_ms();
         let registry = self.registry.lock();

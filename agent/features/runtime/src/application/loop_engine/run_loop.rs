@@ -1,5 +1,6 @@
 use tokio_util::sync::CancellationToken;
 
+use crate::application::activity::ActivityCoordinator;
 use crate::application::hook::stop_coordination::{StopHookObserver, StopHookOutcome};
 use crate::application::loop_engine::{
     CompactionPort, EventSinkPort, InputPort, InteractionMailboxPort, InternalContinuationKind,
@@ -26,6 +27,7 @@ pub struct RunLoop<'a> {
     tools: &'a mut dyn ToolOrchestrationPort,
     stuck: &'a mut dyn StuckHandlingPort,
     plan_approval: &'a dyn PlanApprovalPort,
+    activities: Option<std::sync::Arc<ActivityCoordinator>>,
 }
 
 impl<'a> RunLoop<'a> {
@@ -57,7 +59,12 @@ impl<'a> RunLoop<'a> {
             tools,
             stuck,
             plan_approval,
+            activities: None,
         }
+    }
+
+    pub(crate) fn bind_activities(&mut self, activities: std::sync::Arc<ActivityCoordinator>) {
+        self.activities = Some(activities);
     }
 
     pub(super) fn input_mut(&mut self) -> &mut dyn InputPort {
@@ -89,6 +96,11 @@ impl<'a> RunLoop<'a> {
         execution: &mut RunExecutionState,
         events: Vec<RunDomainEvent>,
     ) -> Result<(), LoopEngineError> {
+        if let Some(activities) = self.activities.as_ref() {
+            activities
+                .observe_run_events(&events)
+                .map_err(|error| LoopEngineError::Adapter(format!("Activity 观测失败: {error}")))?;
+        }
         self.events.emit(execution, events).await
     }
 

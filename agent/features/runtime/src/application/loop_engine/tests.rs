@@ -24,6 +24,24 @@ fn execution_state_is_owned_by_engine_and_not_exposed_as_a_port() {
 }
 
 #[test]
+fn domain_events_are_observed_by_activity_before_external_publish() {
+    let source = include_str!("run_loop.rs");
+
+    assert!(source.contains(".observe_run_events(&events)"));
+    assert!(source.contains("self.events.emit(execution, events).await"));
+    assert!(
+        source
+            .find(".observe_run_events(&events)")
+            .expect("activity observation")
+            < source
+                .find("self.events.emit(execution, events).await")
+                .expect("external event publish")
+    );
+    let engine_source = include_str!("engine.rs");
+    assert!(engine_source.contains("run.restore_events(events)"));
+}
+
+#[test]
 fn engine_state_transitions_use_the_immediate_publish_boundary() {
     let source = include_str!("engine.rs");
     let direct_transition_count = source.matches("run.transition(RunTransition::").count();
