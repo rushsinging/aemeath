@@ -325,6 +325,7 @@ async fn skill_load_revision_is_atomic_idempotent_and_failure_safe() {
 
     let failing_writer = Arc::new(RecordingWriter {
         saved: Mutex::new(Vec::new()),
+        saved_tool_receipts: Mutex::new(Vec::new()),
         fail: true,
     });
     let (failing, failing_holder) = repository(failing_writer);
