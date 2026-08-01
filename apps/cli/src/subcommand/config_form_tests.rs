@@ -61,6 +61,82 @@ fn view_replacement_clears_secret_and_uses_server_revision() {
     assert_eq!(model.view().revision, sdk::ConfigFormRevision(2));
 }
 
+fn custom_model_view() -> sdk::ConfigFormView {
+    let mut view = secret_view();
+    view.page.id = sdk::ConfigFormPageId("edit_custom_model".to_string());
+    view.page.fields = vec![
+        sdk::ConfigFormField {
+            id: sdk::ConfigFormFieldId("model_id".to_string()),
+            label: "Model ID".to_string(),
+            description: None,
+            field_type: sdk::ConfigFormFieldType::Text,
+            required: true,
+            has_value: false,
+            display_value: None,
+            options: Vec::new(),
+            error: None,
+        },
+        sdk::ConfigFormField {
+            id: sdk::ConfigFormFieldId("context_window".to_string()),
+            label: "Context Window".to_string(),
+            description: None,
+            field_type: sdk::ConfigFormFieldType::Number,
+            required: true,
+            has_value: false,
+            display_value: None,
+            options: Vec::new(),
+            error: None,
+        },
+        sdk::ConfigFormField {
+            id: sdk::ConfigFormFieldId("max_tokens".to_string()),
+            label: "Max Tokens".to_string(),
+            description: None,
+            field_type: sdk::ConfigFormFieldType::Number,
+            required: true,
+            has_value: false,
+            display_value: None,
+            options: Vec::new(),
+            error: None,
+        },
+    ];
+    view
+}
+
+#[test]
+fn multi_field_form_preserves_model_id_and_enter_moves_to_next_field() {
+    let mut model = ConfigFormModel::new(custom_model_view());
+    for character in "custom-model".chars() {
+        model.update(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
+    }
+
+    assert!(model
+        .update(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .is_none());
+    assert_eq!(model.interaction().focused_field, 1);
+
+    for character in "128000".chars() {
+        model.update(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
+    }
+    assert!(model
+        .update(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .is_none());
+    assert_eq!(model.interaction().focused_field, 2);
+
+    for character in "4096".chars() {
+        model.update(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
+    }
+    let effect = model
+        .update(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .unwrap();
+    assert!(matches!(
+        effect,
+        ConfigFormEffect::SubmitPage { command }
+            if matches!(&command.values[0].value, sdk::ConfigFormValue::Text(value) if value == "custom-model")
+                && matches!(&command.values[1].value, sdk::ConfigFormValue::Number(value) if *value == 128_000)
+                && matches!(&command.values[2].value, sdk::ConfigFormValue::Number(value) if *value == 4_096)
+    ));
+}
+
 fn select_view() -> sdk::ConfigFormView {
     let mut view = secret_view();
     view.page.fields[0] = sdk::ConfigFormField {

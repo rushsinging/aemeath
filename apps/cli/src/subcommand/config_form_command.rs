@@ -23,6 +23,7 @@ pub(crate) struct ConfigFormModel {
     view: sdk::ConfigFormView,
     focused_field: usize,
     input: String,
+    field_inputs: Vec<String>,
     input_cursor: usize,
     selected_option: usize,
     focused_action: usize,
@@ -31,12 +32,17 @@ pub(crate) struct ConfigFormModel {
 
 impl ConfigFormModel {
     pub(crate) fn new(view: sdk::ConfigFormView) -> Self {
-        let input = initial_input(&view, 0);
+        let input = initial_field_inputs(&view)
+            .first()
+            .cloned()
+            .unwrap_or_default();
         let input_cursor = input.chars().count();
+        let field_inputs = initial_field_inputs(&view);
         Self {
             view,
             focused_field: 0,
             input,
+            field_inputs,
             input_cursor,
             selected_option: 0,
             focused_action: 0,
@@ -55,7 +61,8 @@ impl ConfigFormModel {
         self.selected_option = 0;
         self.focused_action = 0;
         self.scroll = 0;
-        self.input = initial_input(&self.view, self.focused_field);
+        self.field_inputs = initial_field_inputs(&self.view);
+        self.input = self.field_inputs.first().cloned().unwrap_or_default();
         self.input_cursor = self.input.chars().count();
     }
 
@@ -156,7 +163,7 @@ impl ConfigFormModel {
                 }
                 None
             }
-            KeyCode::Enter => self.submit_or_invoke(),
+            KeyCode::Enter => self.submit_or_advance(),
             _ => None,
         }
     }
@@ -171,6 +178,31 @@ impl ConfigFormModel {
                 session_id: self.view.session_id.clone(),
             })
         })
+    }
+
+    fn submit_or_advance(&mut self) -> Option<ConfigFormEffect> {
+        if self.view.page.fields.len() > 1 && self.focused_field + 1 < self.view.page.fields.len() {
+            self.save_focused_field_input();
+            self.focused_field += 1;
+            self.load_focused_field_input();
+            return None;
+        }
+        self.submit_or_invoke()
+    }
+
+    fn save_focused_field_input(&mut self) {
+        if let Some(field_input) = self.field_inputs.get_mut(self.focused_field) {
+            *field_input = self.input.clone();
+        }
+    }
+
+    fn load_focused_field_input(&mut self) {
+        self.input = self
+            .field_inputs
+            .get(self.focused_field)
+            .cloned()
+            .unwrap_or_default();
+        self.input_cursor = self.input.chars().count();
     }
 
     fn submit_or_invoke(&mut self) -> Option<ConfigFormEffect> {
@@ -191,6 +223,7 @@ impl ConfigFormModel {
                     },
                 });
         }
+        self.save_focused_field_input();
         let values = self.page_values()?;
         let effect = ConfigFormEffect::SubmitPage {
             command: sdk::ConfigFormSubmitPage {
@@ -202,7 +235,6 @@ impl ConfigFormModel {
         self.clear_sensitive_input();
         Some(effect)
     }
-
     fn page_values(&self) -> Option<Vec<sdk::ConfigFormFieldValue>> {
         self.view
             .page
@@ -216,11 +248,11 @@ impl ConfigFormModel {
                 )
             })
             .map(|(index, field)| {
-                let value = if index == self.focused_field {
-                    self.input.clone()
-                } else {
-                    field.display_value.clone().unwrap_or_default()
-                };
+                let value = self
+                    .field_inputs
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| field.display_value.clone().unwrap_or_default());
                 let value = match field.field_type {
                     sdk::ConfigFormFieldType::Text => sdk::ConfigFormValue::Text(value),
                     sdk::ConfigFormFieldType::Secret => sdk::ConfigFormValue::Secret(value),
@@ -349,11 +381,11 @@ impl ConfigFormModel {
             }
             return;
         }
+        self.save_focused_field_input();
         self.clear_sensitive_input();
         self.focused_field = (self.focused_field + 1) % self.view.page.fields.len();
         self.selected_option = 0;
-        self.input = initial_input(&self.view, self.focused_field);
-        self.input_cursor = self.input.chars().count();
+        self.load_focused_field_input();
     }
 
     fn focus_previous_field(&mut self) {
@@ -366,14 +398,14 @@ impl ConfigFormModel {
             }
             return;
         }
+        self.save_focused_field_input();
         self.clear_sensitive_input();
         self.focused_field = self
             .focused_field
             .checked_sub(1)
             .unwrap_or(self.view.page.fields.len() - 1);
         self.selected_option = 0;
-        self.input = initial_input(&self.view, self.focused_field);
-        self.input_cursor = self.input.chars().count();
+        self.load_focused_field_input();
     }
 
     fn select_next(&mut self) {
@@ -418,6 +450,9 @@ impl ConfigFormModel {
             Some(sdk::ConfigFormFieldType::Secret)
         ) {
             self.input.clear();
+            if let Some(field_input) = self.field_inputs.get_mut(self.focused_field) {
+                field_input.clear();
+            }
         }
     }
 }
@@ -442,13 +477,18 @@ fn remove_character(value: &mut String, character_index: usize) {
     }
 }
 
-fn initial_input(view: &sdk::ConfigFormView, focused_field: usize) -> String {
+fn initial_field_inputs(view: &sdk::ConfigFormView) -> Vec<String> {
     view.page
         .fields
-        .get(focused_field)
-        .filter(|field| field.field_type != sdk::ConfigFormFieldType::Secret)
-        .and_then(|field| field.display_value.clone())
-        .unwrap_or_default()
+        .iter()
+        .map(|field| {
+            if field.field_type == sdk::ConfigFormFieldType::Secret {
+                String::new()
+            } else {
+                field.display_value.clone().unwrap_or_default()
+            }
+        })
+        .collect()
 }
 
 fn parse_boolean(value: &str) -> Option<bool> {
