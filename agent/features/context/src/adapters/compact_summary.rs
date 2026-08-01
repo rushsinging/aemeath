@@ -5,8 +5,9 @@
 
 use crate::domain::compact::{sanitize_tool_pairs, CompactStage};
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
-use share::string_idx::slice_head;
+use share::string_idx::{slice_head, slice_tail};
 use tokio_util::sync::CancellationToken;
 
 /// 将 recent_messages 中所有 ToolResult 文本替换为占位符。
@@ -157,6 +158,16 @@ Here is the PAST conversation history to compress:
 /// 单个 compact chunk 的目标 token 数。
 /// 超过此值的 early_messages 会触发 map-reduce（分块独立摘要 → 合并）。
 const COMPACT_CHUNK_TARGET_TOKENS: usize = 30_000;
+
+/// fallback summary 中 previous_summary 允许嵌入的最大字符数（#1486）。
+///
+/// 多次 compact 时 previous_summary 若被全文 verbatim 嵌入会线性累加，
+/// 最终撑爆 system prompt（真实事故：92 万字符 summary）。超过此上限时
+/// 只保留 previous_summary 的关键尾部（最新状态），头部信息允许丢弃。
+pub const FALLBACK_PREVIOUS_SUMMARY_CAP: usize = 20_000;
+
+/// 汇总后的最终摘要超过预算时，最多再压的迭代次数（#1486 收敛迭代）。
+const MAX_REDUCE_REFRESH_ROUNDS: usize = 3;
 
 /// 使用本地文本提取压缩消息（LLM 不可用时的回退方案）。
 ///
@@ -364,10 +375,28 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
     let previous_summary = previous_summary
         .filter(|summary| !summary.trim().is_empty())
         .map(|summary| {
-            format!(
-                "- Previous compact summary (authoritative context; preserved verbatim):\n\
-                 <previous_summary>\n{summary}\n</previous_summary>"
-            )
+            // #1486：禁止全文累加。超大 previous_summary 只保留关键尾部
+            // （最新状态：Next Action / Continuation Status 等），否则多次
+            // compact 会线性叠加，最终撑爆 system prompt。
+            if summary.len() > FALLBACK_PREVIOUS_SUMMARY_CAP {
+                let tail = slice_tail(summary, FALLBACK_PREVIOUS_SUMMARY_CAP);
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[compact] previous_summary {} chars 超过上限 {FALLBACK_PREVIOUS_SUMMARY_CAP}，仅保留尾部 {} chars（#1486 防累加膨胀）",
+                    summary.len(),
+                    tail.len(),
+                );
+                format!(
+                    "- Previous compact summary tail (truncated to {} chars; older head discarded):\n\
+                     <previous_summary_tail>\n{tail}\n</previous_summary_tail>",
+                    FALLBACK_PREVIOUS_SUMMARY_CAP
+                )
+            } else {
+                format!(
+                    "- Previous compact summary (preserved):\n\
+                     <previous_summary>\n{summary}\n</previous_summary>"
+                )
+            }
         })
         .unwrap_or_else(|| "- No previous compact summary was supplied.".to_string());
     let (next_action, continuation_status) = fallback_continuation(last_text.as_ref());
@@ -376,11 +405,11 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
         "## User Requests\n{user_requests}\n\n\
          ## Goal\n- Continue the user-requested work without changing its action level.\n\n\
          ## Work Completed\n{work_completed}\n\n\
-         ## Problems / Findings\n- Semantic LLM compaction failed; this is a deterministic fallback and may not classify findings precisely.\n\n\
+         ## Problems / Findings\n- Local text-compaction path used (no LLM summary was available); findings may be imprecise.\n\n\
          ## Key Decisions\n- Preserve the chronological user requests and recent messages; do not invent decisions.\n\n\
-         ## Relevant Files\n- Unknown from deterministic fallback.\n\n\
+         ## Relevant Files\n- Unknown from local text compaction.\n\n\
          ## Current State\n{previous_summary}\n\
-         - Earlier messages were compacted into this fallback summary; recent messages remain available verbatim.\n\n\
+         - Earlier messages were compacted into this summary; recent messages remain available verbatim.\n\n\
          ## Next Action\n- {next_action}\n\n\
          ## Continuation Status\n{continuation_status}"
     )
@@ -490,10 +519,17 @@ pub async fn compact_messages_with_llm(
 
     // 尝试 LLM 摘要，失败则回退到本地
     let early_tokens = crate::domain::token_budget::estimate_messages_tokens(early_messages);
+    let previous_len = previous_summary.map(str::len).unwrap_or(0);
+    log::info!(
+        target: crate::LOG_TARGET,
+        "[compact] 开始：messages={total} early={} early_tokens={early_tokens} previous_summary={previous_len} chars mode={}",
+        early_messages.len(),
+        if generator.is_some() { "llm" } else { "local" },
+    );
     let summary = match generator {
         Some(generator) => {
-            if early_tokens > COMPACT_CHUNK_TARGET_TOKENS {
-                match compact_messages_map_reduce(
+            let result = if early_tokens > COMPACT_CHUNK_TARGET_TOKENS {
+                compact_messages_map_reduce(
                     generator,
                     early_messages,
                     previous_summary,
@@ -502,13 +538,9 @@ pub async fn compact_messages_with_llm(
                     cancel,
                 )
                 .await
-                {
-                    Ok(text) => text,
-                    Err(_) => build_summary_text(early_messages, previous_summary),
-                }
             } else {
                 emit_progress(progress, CompactStage::Summarizing);
-                match llm_compact(
+                llm_compact(
                     generator,
                     early_messages,
                     previous_summary,
@@ -516,9 +548,17 @@ pub async fn compact_messages_with_llm(
                     cancel,
                 )
                 .await
-                {
-                    Ok(text) => text,
-                    Err(_) => build_summary_text(early_messages, previous_summary),
+            };
+            match result {
+                Ok(text) => text,
+                Err(error) => {
+                    // #1486 可跟踪性：LLM 摘要失败原因必须记录，否则无法判断
+                    // 为何回退本地路径（超限 / 空摘要 / provider 错误）。
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "[compact] LLM 摘要失败，回退本地路径：{error}",
+                    );
+                    build_summary_text(early_messages, previous_summary)
                 }
             }
         }
@@ -532,6 +572,13 @@ pub async fn compact_messages_with_llm(
     sanitize_tool_pairs(&mut recent);
     // 截断 recent tail 中超阈值的 ToolResult，避免大输出导致 compact 后仍超 context 阈值。
     placeholder_tool_results(&mut recent);
+
+    log::info!(
+        target: crate::LOG_TARGET,
+        "[compact] 完成：summary={} chars recent_messages={}",
+        summary.len(),
+        recent.len(),
+    );
 
     Some(CompactResult {
         summary,
@@ -592,8 +639,10 @@ fn split_messages_into_chunks(messages: &[Message], target_tokens: usize) -> Vec
 ///
 /// 当 early_messages 很大时，单次 LLM compact 会因输入过长而摘要质量下降。
 /// 改为分块（map）再合并（reduce）：
-/// 1. map: 按 token 预算分 N 块，每块独立调用 `llm_compact`。
+/// 1. map: 按 token 预算分 N 块，每块独立调用 `llm_compact`，**并发 3-5**（视块数而定）。
 /// 2. reduce: 把 N 个子摘要合并，再次调用 LLM 生成连贯的最终摘要。
+/// 3. 收敛：最终摘要超过预算时再压一次（最多 `MAX_REDUCE_REFRESH_ROUNDS` 轮），
+///    避免超大摘要直接注入 system（#1486）。
 async fn compact_messages_map_reduce(
     generator: &dyn CompactGenerator,
     early_messages: &[Message],
@@ -606,32 +655,39 @@ async fn compact_messages_map_reduce(
 
     let chunks = split_messages_into_chunks(early_messages, COMPACT_CHUNK_TARGET_TOKENS);
     let total_chunks = chunks.len();
+    // map: 每个 chunk 独立摘要，按块数决定并发上限（3-5）。
+    // 块数越多并发越高，但不超过 5；避免同时打爆 provider。
+    let concurrency = match total_chunks {
+        0 => 1,
+        1..=3 => 3,
+        4..=6 => 4,
+        _ => 5,
+    };
     log::info!(
         target: crate::LOG_TARGET,
-        "map-reduce compact: {} chunks from {} messages ({} tokens)",
-        total_chunks,
+        "[compact] map-reduce：{total_chunks} chunks，{} messages，{} tokens，并发上限 {concurrency}",
         early_messages.len(),
         estimate_messages_tokens(early_messages),
     );
 
-    // map: 每个 chunk 独立摘要
-    let mut sub_summaries = Vec::with_capacity(chunks.len());
-    for (i, chunk) in chunks.iter().enumerate() {
-        emit_progress_chunk(progress, CompactStage::Summarizing, i + 1, total_chunks);
-        let summary = llm_compact(
-            generator,
-            chunk,
-            (i == 0).then_some(previous_summary).flatten(),
-            context_size,
-            cancel,
-        )
-        .await?;
-        sub_summaries.push(summary);
-        log::info!(
+    let mut sub_summaries = Vec::with_capacity(total_chunks);
+    let futures = chunks
+        .iter()
+        .enumerate()
+        .map(|(i, chunk)| {
+            emit_progress_chunk(progress, CompactStage::Summarizing, i + 1, total_chunks);
+            let previous_for_chunk = (i == 0).then_some(previous_summary).flatten();
+            llm_compact(generator, chunk, previous_for_chunk, context_size, cancel)
+        })
+        .collect::<Vec<_>>();
+    let mut in_flight = futures_util::stream::iter(futures).buffer_unordered(concurrency);
+    let mut index = 0usize;
+    while let Some(summary) = in_flight.next().await {
+        sub_summaries.push(summary?);
+        index += 1;
+        log::debug!(
             target: crate::LOG_TARGET,
-            "map-reduce compact: chunk {}/{} done",
-            i + 1,
-            total_chunks,
+            "[compact] chunk {index}/{total_chunks} 摘要完成",
         );
     }
 
@@ -640,7 +696,7 @@ async fn compact_messages_map_reduce(
         return Ok(sub_summaries.into_iter().next().unwrap_or_default());
     }
 
-    // reduce: 合并子摘要
+    // reduce: 合并子摘要，调用 LLM 生成连贯最终摘要
     let combined = sub_summaries
         .iter()
         .enumerate()
@@ -651,8 +707,48 @@ async fn compact_messages_map_reduce(
     let prompt = format!(
         "{COMPACT_PROMPT}\n\n以下是对话的多个分段摘要，请合并为一份连贯的最终摘要：\n\n<sub-summaries>\n{combined}\n</sub-summaries>\n\nWrite your summary inside <summary> tags."
     );
+    let mut final_summary = llm_generate(generator, vec![Message::user(prompt)], cancel).await?;
+    log::info!(
+        target: crate::LOG_TARGET,
+        "[compact] reduce 合并完成：{} chars（预算 {} tokens）",
+        final_summary.len(),
+        crate::domain::token_budget::summary_budget(context_size),
+    );
 
-    llm_generate(generator, vec![Message::user(prompt)], cancel).await
+    // 收敛迭代：合并结果超预算时再压一次，直到有界或达到轮数上限（#1486）。
+    // 再压把当前合并摘要当作"待压缩历史"走 llm_compact 语义（而非再次
+    // 拼接 sub-summaries），避免 prompt 形态重复导致 LLM 输出同构长摘要。
+    let budget = crate::domain::token_budget::summary_budget(context_size);
+    for round in 1..=MAX_REDUCE_REFRESH_ROUNDS {
+        if crate::domain::token_budget::estimate_tokens(&final_summary) <= budget {
+            break;
+        }
+        let refreshed = llm_compact(
+            generator,
+            &[Message::user(final_summary.clone())],
+            None,
+            context_size,
+            cancel,
+        )
+        .await?;
+        log::info!(
+            target: crate::LOG_TARGET,
+            "[compact] 汇总超预算，再压 round {round}：{} -> {} chars",
+            final_summary.len(),
+            refreshed.len(),
+        );
+        if refreshed.len() >= final_summary.len() {
+            // 再压没有变小，停止迭代避免死循环；保留新结果但不再重试。
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "[compact] 再压未收敛（{} chars 未变小），停止迭代",
+                refreshed.len(),
+            );
+            return Ok(refreshed);
+        }
+        final_summary = refreshed;
+    }
+    Ok(final_summary)
 }
 
 #[cfg(test)]

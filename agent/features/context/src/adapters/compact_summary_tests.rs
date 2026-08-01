@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 #[test]
 fn compact_execution_does_not_repeat_threshold_decision() {
@@ -235,6 +236,214 @@ async fn second_compact_fallback_preserves_previous_summary() {
     );
 }
 
+/// 复现 #1486：超大 previous_summary（92 万字符场景）不得全文嵌入新 summary，
+/// 否则多次 compact 线性累加，最终撑爆 system prompt。
+#[tokio::test]
+async fn fallback_never_embeds_oversized_previous_summary_verbatim() {
+    let messages = (0..10)
+        .map(|index| Message::user(format!("message-{index}")))
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+
+    // 模拟真实事故：previous_summary 已达 92 万字符
+    let huge_previous = "x".repeat(900_000);
+
+    let result = compact_messages_with_llm(
+        &messages,
+        Some(huge_previous.as_str()),
+        100_000,
+        None,
+        None,
+        &cancel,
+    )
+    .await
+    .expect("compact should run");
+
+    let cap = crate::adapters::compact_summary::FALLBACK_PREVIOUS_SUMMARY_CAP;
+    assert!(
+        result.summary.len() <= cap + 2_000,
+        "summary 必须保持有界: {} chars (cap={cap})",
+        result.summary.len()
+    );
+}
+
+/// 超大 previous_summary 只保留关键尾部，长度有界（#1486）。
+#[test]
+fn fallback_keeps_previous_summary_tail_when_oversized() {
+    // 构造一个头部是噪声、尾部是关键信息的 previous_summary
+    let head = "HEAD-NOISE-".repeat(50_000);
+    let tail = "## Next Action\n- Continue the merge.\n\n## Continuation Status\nContinue";
+    let previous = format!("{head}{tail}");
+
+    let summary = crate::adapters::compact_summary::build_summary_text(&[], Some(&previous));
+
+    assert!(
+        summary.contains("Continue the merge."),
+        "尾部关键信息必须保留: {summary}"
+    );
+    let cap = crate::adapters::compact_summary::FALLBACK_PREVIOUS_SUMMARY_CAP;
+    assert!(
+        summary.len() <= cap + 2_000,
+        "previous_summary 超大时 summary 必须保持有界: {} chars (cap={cap})",
+        summary.len()
+    );
+}
+
+/// map-reduce 分块摘要必须并发执行（3-5 并发，视块数而定），
+/// 而不是串行逐个调用（#1486）。
+#[tokio::test]
+async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // 构造足够大的消息集触发 map-reduce（> COMPACT_CHUNK_TARGET_TOKENS），
+    // 每条消息约 100 个 CJK 字符 → 单条约 ~270 tokens，600 条 ≈ 16 万 tokens → 5+ 块
+    let messages = (0..600)
+        .map(|index| {
+            Message::user(format!(
+                "这是一个用于触发分块压缩的测试消息编号 {index}。{}",
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+            ))
+        })
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+
+    let current = Arc::new(AtomicUsize::new(0));
+    let max_concurrent = Arc::new(AtomicUsize::new(0));
+    let call_count = Arc::new(AtomicUsize::new(0));
+
+    struct ObservingGenerator {
+        current: Arc<AtomicUsize>,
+        max_concurrent: Arc<AtomicUsize>,
+        call_count: Arc<AtomicUsize>,
+    }
+    #[async_trait::async_trait]
+    impl CompactGenerator for ObservingGenerator {
+        async fn generate(
+            &self,
+            request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, String> {
+            let active = self.current.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_concurrent.fetch_max(active, Ordering::SeqCst);
+            self.call_count.fetch_add(1, Ordering::SeqCst);
+            // 让并发窗口真实展开
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            let text = request
+                .first()
+                .map(|msg| msg.text_content())
+                .unwrap_or_default();
+            self.current.fetch_sub(1, Ordering::SeqCst);
+            Ok(format!(
+                "<summary>chunk summary: {}</summary>",
+                &text[..text.len().min(30)]
+            ))
+        }
+    }
+
+    let generator = ObservingGenerator {
+        current,
+        max_concurrent,
+        call_count,
+    };
+
+    let result =
+        compact_messages_with_llm(&messages, None, 100_000, Some(&generator), None, &cancel)
+            .await
+            .expect("map-reduce compact should run");
+
+    let chunks = generator.call_count.load(Ordering::SeqCst);
+    assert!(
+        chunks >= 3,
+        "消息集应产生至少 3 个 chunk（map 阶段调用次数），实际 {chunks}"
+    );
+    assert!(
+        generator.max_concurrent.load(Ordering::SeqCst) >= 2,
+        "map 阶段必须并发执行，实际最大并发 {}",
+        generator.max_concurrent.load(Ordering::SeqCst)
+    );
+    assert!(
+        generator.max_concurrent.load(Ordering::SeqCst) <= 5,
+        "map 阶段并发不得超过 5，实际 {}",
+        generator.max_concurrent.load(Ordering::SeqCst)
+    );
+    assert!(
+        result.summary.contains("chunk summary"),
+        "reduce 合并结果应来自子摘要: {}",
+        result.summary
+    );
+}
+
+/// 汇总后的最终摘要若超过预算，必须再压一次（收敛迭代，#1486）。
+#[tokio::test]
+async fn reduce_compresses_again_when_final_summary_exceeds_budget() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    // 与并发测试相同规模的 600 条消息，确保触发 map-reduce（5+ 块）
+    let messages = (0..600)
+        .map(|index| {
+            Message::user(format!(
+                "触发分块压缩的测试消息编号 {index}。{}",
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+            ))
+        })
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let seen_reduce = Arc::new(AtomicBool::new(false));
+
+    /// 阶段区分（map/reduce/refresh 串行执行，安全）：
+    /// - reduce（含 "sub-summaries"）→ 标记 seen_reduce，返回超长摘要
+    /// - map / refresh（含 "conversation_history"）→ 返回短摘要
+    /// 最终 summary 来自 refresh 的收敛结果。
+    struct ShrinkingGenerator {
+        call_count: Arc<AtomicUsize>,
+        seen_reduce: Arc<AtomicBool>,
+    }
+    #[async_trait::async_trait]
+    impl CompactGenerator for ShrinkingGenerator {
+        async fn generate(
+            &self,
+            request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, String> {
+            self.call_count.fetch_add(1, Ordering::SeqCst);
+            let text = request
+                .first()
+                .map(|msg| msg.text_content())
+                .unwrap_or_default();
+            if text.contains("sub-summaries") {
+                self.seen_reduce.store(true, Ordering::SeqCst);
+                // reduce：返回超长摘要（模拟 LLM 不听预算）
+                Ok(format!("<summary>{}</summary>", "y".repeat(80_000)))
+            } else {
+                Ok("<summary>收敛后的最终摘要</summary>".to_string())
+            }
+        }
+    }
+
+    let generator = ShrinkingGenerator {
+        call_count,
+        seen_reduce,
+    };
+
+    let result =
+        compact_messages_with_llm(&messages, None, 100_000, Some(&generator), None, &cancel)
+            .await
+            .expect("compact should run");
+
+    assert_eq!(result.summary, "收敛后的最终摘要");
+    assert!(
+        generator.seen_reduce.load(Ordering::SeqCst),
+        "reduce 阶段必须发生"
+    );
+    assert!(
+        generator.call_count.load(Ordering::SeqCst) >= 6,
+        "超预算时必须再压，调用次数应更多（map 5+ 块 + reduce + 再压）: {}",
+        generator.call_count.load(Ordering::SeqCst)
+    );
+}
+
 /// Mock `CompactGenerator` that returns a canned response regardless of input.
 struct MockGenerator {
     text: String,
@@ -302,7 +511,8 @@ async fn compact_falls_back_when_generator_errors() {
     .await
     .expect("compact should still run with fallback");
 
-    // Fallback summary should contain the deterministic-fallback marker.
+    // Fallback summary 使用本地压缩模板（#1486：文案如实描述本地路径）。
     assert!(result.summary.contains("## User Requests"));
-    assert!(result.summary.contains("deterministic fallback"));
+    assert!(result.summary.contains("Local text-compaction path"));
+    assert!(!result.summary.contains("Semantic LLM compaction failed"));
 }

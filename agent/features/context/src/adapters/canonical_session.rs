@@ -2,6 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 
+use crate::adapters::compact_summary::{compact_messages_with_llm, CompactGenerator};
 use crate::domain::session::{
     AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedStep,
     FinalizedOutcomeProjection, SnapshotState,
@@ -99,6 +100,8 @@ pub struct ProductionMainContextFactory {
     /// 可选注入的 Skill metadata catalog 与 Context-owned query factory。
     skill_catalog: Option<Arc<dyn tools::SkillCatalogPort>>,
     query_factory: Option<Arc<dyn crate::ports::SkillQueryFactory>>,
+    /// 可选注入的 LLM 摘要生成器（#1486）；None 时 compact 走本地压缩。
+    generator: Option<Arc<dyn CompactGenerator>>,
 }
 
 impl ProductionMainContextFactory {
@@ -107,6 +110,7 @@ impl ProductionMainContextFactory {
             writer,
             skill_catalog: None,
             query_factory: None,
+            generator: None,
         }
     }
 
@@ -118,6 +122,12 @@ impl ProductionMainContextFactory {
     ) -> Self {
         self.skill_catalog = Some(catalog);
         self.query_factory = Some(query_factory);
+        self
+    }
+
+    /// 注入 LLM 摘要生成器（#1486），compact 优先走 LLM 语义压缩。
+    pub fn with_generator(mut self, generator: Arc<dyn CompactGenerator>) -> Self {
+        self.generator = Some(generator);
         self
     }
 }
@@ -141,14 +151,18 @@ impl MainContextFactory for ProductionMainContextFactory {
                 }
                 _ => Arc::new(crate::adapters::BaselinePromptSource),
             };
+        let mut repository = CanonicalSessionRepository::new(
+            session,
+            task_persist,
+            workspace_persist,
+            Arc::clone(&self.writer),
+            mutation_gate,
+        );
+        if let Some(generator) = &self.generator {
+            repository = repository.with_generator(Arc::clone(generator));
+        }
         Arc::new(crate::application::ContextApplicationService::new(
-            Arc::new(CanonicalSessionRepository::new(
-                session,
-                task_persist,
-                workspace_persist,
-                Arc::clone(&self.writer),
-                mutation_gate,
-            )),
+            Arc::new(repository),
             prompt,
             Arc::new(crate::adapters::CommittedMemoryRetrieveAdapter::new(memory)),
         ))
@@ -161,6 +175,9 @@ pub struct CanonicalSessionRepository {
     workspace_persist: Arc<dyn project::WorkspacePersist>,
     writer: Arc<dyn CanonicalSessionWriter>,
     mutation_gate: Arc<tokio::sync::Mutex<()>>,
+    /// 可选注入的 LLM 摘要生成器（#1486）。Some 时 compact 走 LLM 语义压缩，
+    /// 失败自动 fallback 本地；None 时直接走本地文本压缩。
+    generator: Option<Arc<dyn CompactGenerator>>,
 }
 
 impl CanonicalSessionRepository {
@@ -177,6 +194,64 @@ impl CanonicalSessionRepository {
             workspace_persist,
             writer,
             mutation_gate,
+            generator: None,
+        }
+    }
+
+    /// 注入 LLM 摘要生成器（#1486），compact 优先走 LLM 语义压缩。
+    pub fn with_generator(mut self, generator: Arc<dyn CompactGenerator>) -> Self {
+        self.generator = Some(generator);
+        self
+    }
+
+    /// 压缩可见消息（#1486）：
+    /// - 注入 generator 时走 LLM 语义压缩（`compact_messages_with_llm`，
+    ///   内部失败自动 fallback 本地，分块并发 + 汇总收敛）；
+    /// - 未注入时走本地文本压缩 `compact_messages`，并手动补齐
+    ///   previous_summary（`build_summary_text` 已保证不全文累加）。
+    ///
+    /// 返回 `(summary, recent_messages)`；消息太少无法压缩时返回 `None`。
+    async fn compact_visible_messages(
+        &self,
+        messages: &[share::message::Message],
+        previous_summary: Option<&str>,
+        context_size: usize,
+    ) -> Option<(String, Vec<share::message::Message>)> {
+        match &self.generator {
+            Some(generator) => {
+                let result = compact_messages_with_llm(
+                    messages,
+                    previous_summary,
+                    context_size,
+                    Some(generator.as_ref()),
+                    None,
+                    &tokio_util::sync::CancellationToken::new(),
+                )
+                .await;
+                result.map(|compacted| {
+                    log::info!(
+                        target: crate::LOG_TARGET,
+                        "[compact] LLM 路径提交：summary={} chars recent={}",
+                        compacted.summary.len(),
+                        compacted.recent_messages.len(),
+                    );
+                    (compacted.summary, compacted.recent_messages)
+                })
+            }
+            None => {
+                let compacted = crate::adapters::compact_summary::compact_messages(messages)?;
+                let window = crate::adapters::compact_summary::compact_window(messages.len())?;
+                let early = &messages[..window.split_point];
+                let summary =
+                    crate::adapters::compact_summary::build_summary_text(early, previous_summary);
+                log::info!(
+                    target: crate::LOG_TARGET,
+                    "[compact] 本地路径提交：summary={} chars recent={}",
+                    summary.len(),
+                    compacted.recent_messages.len(),
+                );
+                Some((summary, compacted.recent_messages))
+            }
         }
     }
 
@@ -498,12 +573,19 @@ impl SessionRepository for CanonicalSessionRepository {
             .iter()
             .flat_map(|(_, messages)| messages.iter().cloned())
             .collect();
-        let Some(compacted) = crate::adapters::compact_summary::compact_messages(&messages) else {
+        let previous_summary = current
+            .compact
+            .as_ref()
+            .map(|marker| marker.summary.as_str());
+        let Some((summary, recent_messages)) = self
+            .compact_visible_messages(&messages, previous_summary, request.source.context_size)
+            .await
+        else {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         };
         let mut candidate = (*current).clone();
         let source_revision = SessionRevision::new(candidate.revision);
-        let keep_messages = compacted.recent_messages.len();
+        let keep_messages = recent_messages.len();
         let mut retained = 0usize;
         let mut start_at = None;
         for (cursor, step_messages) in visible_steps.iter().rev() {
@@ -513,13 +595,6 @@ impl SessionRepository for CanonicalSessionRepository {
                 break;
             }
         }
-        let summary = crate::adapters::compact_summary::build_summary_text(
-            &messages[..messages.len().saturating_sub(retained)],
-            candidate
-                .compact
-                .as_ref()
-                .map(|marker| marker.summary.as_str()),
-        );
         candidate.compact = Some(ActiveCompactMarker {
             summary: summary.clone(),
             start_at,
@@ -535,7 +610,7 @@ impl SessionRepository for CanonicalSessionRepository {
             .map_err(ContextPortError::SessionRepository)?;
         Ok(CompactOutcome::Committed(crate::domain::CompactResult {
             summary,
-            recent_messages: compacted.recent_messages,
+            recent_messages,
             source_revision,
         }))
     }
@@ -562,12 +637,19 @@ impl SessionRepository for CanonicalSessionRepository {
         if messages.len() <= 4 {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         }
-        let Some(compacted) = crate::adapters::compact_summary::compact_messages(&messages) else {
+        let previous_summary = current
+            .compact
+            .as_ref()
+            .map(|marker| marker.summary.as_str());
+        let Some((summary, recent_messages)) = self
+            .compact_visible_messages(&messages, previous_summary, request.context_size)
+            .await
+        else {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         };
         let mut candidate = (*current).clone();
         let source_revision = SessionRevision::new(candidate.revision);
-        let keep_messages = compacted.recent_messages.len();
+        let keep_messages = recent_messages.len();
         let mut retained = 0usize;
         let mut start_at = None;
         for (cursor, step_messages) in visible_steps.iter().rev() {
@@ -577,13 +659,6 @@ impl SessionRepository for CanonicalSessionRepository {
                 break;
             }
         }
-        let summary = crate::adapters::compact_summary::build_summary_text(
-            &messages[..messages.len().saturating_sub(retained)],
-            candidate
-                .compact
-                .as_ref()
-                .map(|marker| marker.summary.as_str()),
-        );
         candidate.compact = Some(ActiveCompactMarker {
             summary: summary.clone(),
             start_at,
@@ -599,7 +674,7 @@ impl SessionRepository for CanonicalSessionRepository {
             .map_err(ContextPortError::SessionRepository)?;
         Ok(CompactOutcome::Committed(crate::domain::CompactResult {
             summary,
-            recent_messages: compacted.recent_messages,
+            recent_messages,
             source_revision,
         }))
     }

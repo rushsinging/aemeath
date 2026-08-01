@@ -20,6 +20,7 @@ pub use application::client::{
     PromptAssembly, ResumeError, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
     RuntimeToolAssemblyDependencies, SessionBootstrapAssembly, SkillBootstrapAssembly,
 };
+pub use application::compact_generator::ProviderCompactGenerator;
 // #1248 Task 3: RuntimeContextFactory is the narrow crate-root construction
 // entry.  RuntimeServices stays internal; callers construct via
 // RuntimeContextFactory::new(…).
@@ -51,6 +52,7 @@ mod boundary_tests {
         let application = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application");
         let allowed = [
             "client",
+            "compact_generator",
             "context",
             "hook",
             "interaction",
