@@ -105,13 +105,16 @@ fn test_skill_bootstrap_assembly() -> runtime::SkillBootstrapAssembly {
     runtime::SkillBootstrapAssembly::new(tools::SkillCatalogSnapshot::from_descriptors(Vec::new()))
 }
 
-fn test_agent_runner_assembly() -> runtime::AgentRunnerAssembly {
+fn test_agent_runner_assembly(
+    runtime_context_factory: Arc<runtime::RuntimeContextFactory>,
+) -> runtime::AgentRunnerAssembly {
     runtime::AgentRunnerAssembly {
         runner: Arc::new(NoopAgentRunner),
         parent_context_source: runtime::ParentRunContextSource::new(),
         max_tool_concurrency: 10,
         max_agent_concurrency: 4,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+        runtime_context_factory,
     }
 }
 
@@ -251,6 +254,14 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         Arc::new(hook::build_dispatcher(&share::config::hooks::HooksConfig::default()).unwrap());
 
     let wiring_clone = wiring.clone();
+    let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
+        tools.catalog_port(),
+        tools.execution(),
+        Arc::new(policy::AllowAllPolicy),
+        history.clone(),
+        access.clone(),
+        hook_runner.clone(),
+    ));
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         runtime::RuntimeCoreDependencies::new(
             workspace,
@@ -268,18 +279,13 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         test_session_bootstrap_assembly(temp.path()),
         test_prompt_assembly(),
         test_skill_bootstrap_assembly(),
-        test_agent_runner_assembly(),
-        {
-            Arc::new(runtime::RuntimeContextFactory::new(
-                tools.catalog_port(),
-                tools.execution(),
-                Arc::new(policy::AllowAllPolicy),
-                history.clone(),
-                access.clone(),
-                hook_runner.clone(),
-            ))
-        },
+        test_agent_runner_assembly(runtime_context_factory.clone()),
     );
+
+    assert!(Arc::ptr_eq(
+        dependencies.runtime_context_factory(),
+        &runtime_context_factory,
+    ));
 
     // Core dependencies that also live in RuntimeServices are intentionally
     // not projected again by RuntimeBootstrapDependencies.

@@ -488,6 +488,20 @@ TUI completion 的 idle/busy 回归应作为首个真实场景验收：Esc 在�
 
 ## 11. 实现状态与验证证据
 
+### 11.0 Runtime 单一创建链证据矩阵
+
+Runtime 的创建链必须保持：`RunCreationRequest + SessionRunBindings / ParentRunBindings → RunFactory::create → RuntimeContextFactory::prepare → RuntimeContext::new → RunInstance → RunLauncher::launch → single Loop Engine`。各层证据不得互相替代：
+
+| 层级 | 稳定证据 | 证明范围 |
+|---|---|---|
+| L0 | `check-runtime-capability-assembly.sh` 与 deliberate probes | Context 构造、assembly token、Factory/RunInstance 调用点唯一；纯值 request/facts 无 live capability；Main/Derived 不绕过 Factory 与 Launcher |
+| L1 | RunSpec ceiling、RunCreationRequest、SessionSnapshot 测试 | parent capability ceiling、纯值创建请求、committed session/config revision 冻结 |
+| L2 | Session/Derived production-chain fixture | 两种 Run 都由 production `RunFactory::create` 返回完整 `RunInstance`，字段无丢失、覆写或第二装配算法 |
+| L3 | Composition same-factory 契约 | 同一 `RuntimeContextFactory` 实例注入 Main Session 与 Derived runner，供应 BC concrete adapter 只在 Composition 构造 |
+| L4 | Main/Derived same-launcher/same-Loop 场景 | 两条用户可执行旅程都把完整 `RunInstance` 交给统一 launcher，并进入同一 Loop Engine |
+
+测试 fixture 只允许位于 owning layer 的显式 `tests/` 目录或同级 `*_tests.rs` 文件；生产目录中的普通模块不得借 `#[cfg(test)]` 形成第二套 Context 创建入口。
+
 ### 11.1 #1013 已对齐范围
 
 `specs/3.2-rust-coding.md` 已承接本文的测试组织约束：

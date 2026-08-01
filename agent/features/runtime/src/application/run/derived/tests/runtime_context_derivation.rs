@@ -1,91 +1,13 @@
-use crate::application::interaction::port::InteractionBridge;
 use crate::application::run::config::RunConfigSnapshot;
-use crate::application::run::context::{
-    IoBindings, LifecycleBindings, ModelBindings, RunCancellationScope, RunCapabilityBindings,
-    RunInputBufferHandle, RunUsageTracker, RuntimeContext,
-};
+use crate::application::run::context::RuntimeContext;
 use crate::application::run::context_factory::RuntimeContextFactory;
-use crate::application::run::test_task_access;
+use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{
-    ContextPort, PolicyDecision, PolicyPort, PolicyRequest, ProviderBinding, ProviderPort,
-};
+use crate::ports::{PolicyDecision, PolicyPort, PolicyRequest};
 use std::sync::Arc;
 use std::time::Duration;
 use tools::{ToolCatalogPort, ToolProfileName};
-
-// ── Minimal fake ports for standalone derivation tests ──
-
-struct FakeCtxPort;
-#[async_trait::async_trait]
-impl ContextPort for FakeCtxPort {
-    async fn build_window(
-        &self,
-        _request: &crate::ports::ContextRequest,
-    ) -> Result<crate::ports::ContextWindow, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn needs_compaction(
-        &self,
-        _request: &crate::ports::ContextRequest,
-    ) -> Result<crate::ports::CompactionDecision, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn compact(
-        &self,
-        _request: &crate::ports::CompactRequest,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn manual_compact(
-        &self,
-        _request: &crate::ports::ManualCompactRequest,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-    async fn clear_session(
-        &self,
-        _session_id: &crate::ports::SessionId,
-    ) -> Result<(), crate::ports::ContextPortError> {
-        Ok(())
-    }
-    async fn append_and_persist(
-        &self,
-        _append: &crate::ports::ContextAppend,
-    ) -> Result<crate::ports::AppendReceipt, crate::ports::ContextAppendError> {
-        Err(crate::ports::ContextAppendError::Storage("fake".into()))
-    }
-}
-
-struct FakeProvPort;
-#[async_trait::async_trait]
-impl ProviderPort for FakeProvPort {
-    fn capabilities(
-        &self,
-        _model: &crate::ports::ModelId,
-    ) -> Result<crate::ports::ModelCapability, crate::ports::ProviderError> {
-        Ok(crate::ports::ModelCapability {
-            model: crate::ports::ModelId {
-                provider: "test".into(),
-                model: "test".into(),
-            },
-            supports_tools: true,
-            supports_parallel_tool_calls: false,
-            supports_streaming: true,
-            reasoning: crate::ports::ReasoningCapability::none(),
-            context_limit: None,
-            output_limit: None,
-        })
-    }
-    async fn invoke(
-        &self,
-        _request: crate::ports::InvocationRequest,
-        _cancellation: &dyn provider::CancellationSignal,
-    ) -> Result<crate::ports::InvocationStream, crate::ports::ProviderError> {
-        Err(crate::ports::ProviderError::cancelled())
-    }
-}
 
 pub(super) struct FakeToolCat;
 impl ToolCatalogPort for FakeToolCat {
@@ -158,78 +80,22 @@ impl hook::HookPort for FakeHookPort {
         hook::HookOutcome::proceed()
     }
 }
-// ── Helper: build a parent RuntimeContext ──
+// ── Helper: build a parent RuntimeContext through RunFactory ──
 
-/// Minimal no-op [`ChatEventSinkHandle`] for test assembly.
-fn noop_event_sink() -> crate::application::loop_engine::chat::ChatEventSinkHandle {
-    #[derive(Clone)]
-    struct NoOp;
-    impl crate::application::loop_engine::chat::ChatEventSink for NoOp {
-        fn send_event<'a>(
-            &'a self,
-            _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-        ) -> crate::application::loop_engine::chat::EventFuture<'a> {
-            Box::pin(std::future::ready(()))
-        }
-        fn try_send_event(
-            &self,
-            _event: crate::application::loop_engine::chat::RuntimeStreamEvent,
-        ) {
-        }
-    }
-    crate::application::loop_engine::chat::ChatEventSinkHandle::new(NoOp)
-}
-
-/// #1248 Task 3: shared factory-based helper for parent context construction.
 fn assemble_parent_context(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
     config: RunConfigSnapshot,
 ) -> RuntimeContext {
-    let provider_port: Arc<dyn ProviderPort> = Arc::new(FakeProvPort);
-    let binding = ProviderBinding {
-        provider: provider_port.clone(),
-        model: crate::ports::ModelId {
-            provider: "test-provider".into(),
-            model: "test-model".into(),
-        },
-        max_tokens: 8192,
-        requested_reasoning: provider::ReasoningLevel::Medium,
-        context_window: None,
-    };
-
-    let factory = RuntimeContextFactory::new(
-        tool_catalog,
-        tool_execution,
-        Arc::new(FakePolicyPort),
-        Arc::new(FakeReflHist),
-        test_task_access(),
-        Arc::new(FakeHookPort),
-    );
-
-    let bindings = RunCapabilityBindings {
-        model: ModelBindings {
-            context: Arc::new(FakeCtxPort),
-            provider: Arc::new(binding),
-            interaction: Arc::new(InteractionBridge::new()),
-            memory: Arc::new(memory::NoOpMemory),
-            config,
-            reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
-            tool_catalog: None,
-        },
-        io: IoBindings {
-            event_sink: noop_event_sink(),
-            input: RunInputBufferHandle::new(),
-        },
-        lifecycle: LifecycleBindings {
-            cancel: RunCancellationScope::new(),
-            usage: RunUsageTracker::new(),
-        },
-        skill_load_session_id: "session".to_string(),
-    };
-    factory
-        .create(&crate::domain::agent_run::RunSpec::main(), bindings, None)
-        .expect("test parent context assembly")
+    SessionRunFixture::builder()
+        .with_tool_catalog(tool_catalog)
+        .with_tool_execution(tool_execution)
+        .with_config(config.config().clone())
+        .build()
+        .create(RunSpec::main())
+        .expect("test parent run creation")
+        .context()
+        .clone()
 }
 
 #[derive(Clone, Default)]
@@ -276,53 +142,14 @@ fn make_parent_context_with_event_sink(
             ..Default::default()
         },
     );
-    let config =
-        RunConfigSnapshot::capture(share::config::domain::snapshot::ConfigSnapshot::new(config));
-    let provider_port: Arc<dyn ProviderPort> = Arc::new(FakeProvPort);
-    let binding = ProviderBinding {
-        provider: provider_port,
-        model: crate::ports::ModelId {
-            provider: "test-provider".into(),
-            model: "test-model".into(),
-        },
-        max_tokens: 8192,
-        requested_reasoning: provider::ReasoningLevel::Medium,
-        context_window: None,
-    };
-    let factory = RuntimeContextFactory::new(
-        Arc::new(FakeToolCat),
-        Arc::new(FakeToolExec),
-        Arc::new(FakePolicyPort),
-        Arc::new(FakeReflHist),
-        test_task_access(),
-        Arc::new(FakeHookPort),
-    );
-    factory
-        .create(
-            &RunSpec::main(),
-            RunCapabilityBindings {
-                model: ModelBindings {
-                    context: Arc::new(FakeCtxPort),
-                    provider: Arc::new(binding),
-                    interaction: Arc::new(InteractionBridge::new()),
-                    memory: Arc::new(memory::NoOpMemory),
-                    config,
-                    reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
-                    tool_catalog: None,
-                },
-                io: IoBindings {
-                    event_sink,
-                    input: RunInputBufferHandle::new(),
-                },
-                lifecycle: LifecycleBindings {
-                    cancel: RunCancellationScope::new(),
-                    usage: RunUsageTracker::new(),
-                },
-                skill_load_session_id: "session".to_string(),
-            },
-            None,
-        )
-        .expect("test parent context assembly")
+    SessionRunFixture::builder()
+        .with_config(share::config::domain::snapshot::ConfigSnapshot::new(config))
+        .with_event_sink_handle(event_sink)
+        .build()
+        .create(RunSpec::main())
+        .expect("test parent run creation")
+        .context()
+        .clone()
 }
 
 #[tokio::test]
@@ -472,59 +299,32 @@ pub(super) fn make_parent_workspace() -> RuntimeWorkspaceAccess {
     RuntimeWorkspaceAccess::new(views)
 }
 
-/// #1248 Task 3: shared test factory for derive_sub_run calls.
+/// Shared test factory for Derived Run creation.
 fn make_test_factory() -> RuntimeContextFactory {
     RuntimeContextFactory::new(
         Arc::new(FakeToolCat),
         Arc::new(FakeToolExec),
         Arc::new(FakePolicyPort),
         Arc::new(FakeReflHist),
-        test_task_access(),
+        crate::application::run::test_task_access(),
         Arc::new(FakeHookPort),
     )
 }
 
-/// #1248 Task 3: Build a parent RuntimeContext using the given factory
-/// so that static ports (policy, hooks, etc.) are Arc-identical to
-/// what derive_sub_run sees.
+/// Build a parent RuntimeContext using the given factory so static ports
+/// remain Arc-identical to the services seen by Derived Run creation.
 fn make_parent_context_with_factory(
-    factory: &RuntimeContextFactory,
+    factory: &Arc<RuntimeContextFactory>,
     config_snapshot: RunConfigSnapshot,
 ) -> RuntimeContext {
-    let provider_port: Arc<dyn ProviderPort> = Arc::new(FakeProvPort);
-    let binding = ProviderBinding {
-        provider: provider_port.clone(),
-        model: crate::ports::ModelId {
-            provider: "test-provider".into(),
-            model: "test-model".into(),
-        },
-        max_tokens: 8192,
-        requested_reasoning: provider::ReasoningLevel::Medium,
-        context_window: None,
-    };
-    let bindings = RunCapabilityBindings {
-        model: ModelBindings {
-            context: Arc::new(FakeCtxPort),
-            provider: Arc::new(binding),
-            interaction: Arc::new(InteractionBridge::new()),
-            memory: Arc::new(memory::NoOpMemory),
-            config: config_snapshot,
-            reasoning: Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::Medium)),
-            tool_catalog: None,
-        },
-        io: IoBindings {
-            event_sink: noop_event_sink(),
-            input: RunInputBufferHandle::new(),
-        },
-        lifecycle: LifecycleBindings {
-            cancel: RunCancellationScope::new(),
-            usage: RunUsageTracker::new(),
-        },
-        skill_load_session_id: "session".to_string(),
-    };
-    factory
-        .create(&RunSpec::main(), bindings, None)
-        .expect("test parent context assembly")
+    SessionRunFixture::builder()
+        .with_context_factory(factory.clone())
+        .with_config(config_snapshot.config().clone())
+        .build()
+        .create(RunSpec::main())
+        .expect("test parent run creation")
+        .context()
+        .clone()
 }
 
 // ── Test 1: cancellation ──
@@ -685,11 +485,11 @@ fn sub_context_derivation_uses_isolated_context() {
 
 #[test]
 fn sub_context_derivation_does_not_widen_policy_or_interaction() {
-    // #1248 Task 3: Share the factory between parent and sub so that
-    // static ports (policy, etc.) are Arc-identical.
+    // Parent 与 Derived 共用基础 factory，保证 policy 等静态服务保持
+    // Arc 身份一致。
     let factory = Arc::new(make_test_factory());
     let parent_ctx = make_parent_context_with_factory(
-        factory.as_ref(),
+        &factory,
         RunConfigSnapshot::capture(super::test_config_snapshot()),
     );
     let parent_spec = RunSpec::main();

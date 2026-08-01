@@ -150,6 +150,17 @@ impl RunUsageTracker {
         }
     }
 
+    /// Test-only fault injection used by the poison-recovery unit tests.
+    #[cfg(test)]
+    pub(crate) fn poison_for_test(&self) {
+        let inner = self.last_api_total_tokens.clone();
+        let handle = std::thread::spawn(move || {
+            let _guard = inner.write().unwrap();
+            panic!("deliberate poison");
+        });
+        assert!(handle.join().is_err());
+    }
+
     /// Return the most recently recorded token count, if any.
     pub fn get(&self) -> Option<u64> {
         match self.last_api_total_tokens.read() {
@@ -353,25 +364,11 @@ pub struct RuntimeContext {
 
 /// Token that gates [`RuntimeContext::new`] — only [`RuntimeContextFactory`]
 /// can construct one, preventing sibling modules from bypassing the factory.
-///
-/// #1248 Task 3: `RuntimeContext::new` must go through the factory so that
-/// assembly rules (interaction/hook/reasoning binding modes) are validated.
 pub struct RuntimeContextAssemblyToken(());
 
 impl RuntimeContextAssemblyToken {
-    /// Construct a token.  Only [`RuntimeContextFactory`] calls this in
-    /// production; test code uses [`RuntimeContextAssemblyToken::new_for_test`].
+    /// Construct the token used by the factory's production assembly path.
     pub(crate) fn new() -> Self {
-        Self(())
-    }
-}
-
-#[cfg(test)]
-impl RuntimeContextAssemblyToken {
-    /// Test-only constructor so factory tests can build parent
-    /// [`RuntimeContext`] instances directly.  Production code must
-    /// go through [`RuntimeContextFactory::create`].
-    pub(crate) fn new_for_test() -> Self {
         Self(())
     }
 }
@@ -652,6 +649,17 @@ impl ParentRunContextSource {
             source: self.clone(),
             generation: inner.generation,
         }
+    }
+
+    /// Test-only fault injection used by the poison-recovery unit tests.
+    #[cfg(test)]
+    pub(crate) fn poison_for_test(&self) {
+        let inner = self.inner.clone();
+        let handle = std::thread::spawn(move || {
+            let _guard = inner.write().unwrap();
+            panic!("deliberate poison");
+        });
+        assert!(handle.join().is_err());
     }
 
     /// Read the current parent frame (if set).  Sub-agent derivation MUST

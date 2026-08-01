@@ -892,7 +892,7 @@ pub struct AgentClientBootstrap {
     pub client: AgentClientHandle,
     pub connect: Arc<dyn sdk::ConnectClient>,
     pub session_id: String,
-    pub startup_resume: Option<sdk::SessionResumeView>,
+    pub startup_resume: Option<sdk::LocalSessionResumeBacking>,
     pub cwd: PathBuf,
     pub model_display: String,
     pub allow_all: bool,

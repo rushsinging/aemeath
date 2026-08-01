@@ -66,6 +66,38 @@ fn cold_window_materializes_only_tail_candidates() {
 }
 
 #[test]
+fn moving_window_retires_roots_outside_current_selection() {
+    let mut model = ConversationModel::default();
+    for index in 0..128 {
+        model.apply(AppendUserMessage {
+            text: format!("message-{index}"),
+        });
+    }
+    let mut view = RetainedOutputView::default();
+    let latest = view.materialize_window(
+        &model,
+        None,
+        OutputRenderWindow {
+            line_limit: 10,
+            tail_offset: 0,
+        },
+    );
+    assert_eq!(view.cached_root_count(), latest.view_model.roots.len());
+
+    let older = view.materialize_window(
+        &model,
+        None,
+        OutputRenderWindow {
+            line_limit: 10,
+            tail_offset: 80,
+        },
+    );
+
+    assert_eq!(view.cached_root_count(), older.view_model.roots.len());
+    assert!(view.cached_root_count() <= 10);
+}
+
+#[test]
 fn append_reuses_existing_roots_and_creates_only_the_new_root() {
     let mut model = ConversationModel::default();
     for index in 0..128 {

@@ -48,6 +48,12 @@ def strip_comments(text: str) -> str:
         lines.append(line)
     return '\n'.join(lines)
 
+def strip_string_literals(source: str) -> str:
+    """Mask Rust string and character literals before call-site scans."""
+    literal_pattern = re.compile(r'r(?P<hashes>#+)?".*?"(?P=hashes)|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', re.S)
+    return literal_pattern.sub('""', source)
+
+
 def remove_cfg_test_items(text: str) -> str:
     """Remove each item annotated with ``#[cfg(test)]`` without truncating later code."""
     marker = "#[cfg(test)]"
@@ -56,36 +62,57 @@ def remove_cfg_test_items(text: str) -> str:
         if item_start < 0:
             return text
 
-        cursor = item_start + len(marker)
-        while True:
-            while cursor < len(text) and text[cursor].isspace():
-                cursor += 1
-            if cursor >= len(text) or not text.startswith("#[", cursor):
-                break
-            attribute_end = text.find("]", cursor + 2)
-            if attribute_end < 0:
-                return text[:item_start]
-            cursor = attribute_end + 1
-
-        semicolon = text.find(";", cursor)
-        opening_brace = text.find("{", cursor)
-        if semicolon >= 0 and (opening_brace < 0 or semicolon < opening_brace):
-            item_end = semicolon + 1
-        elif opening_brace >= 0:
-            depth = 1
-            item_end = opening_brace + 1
-            while item_end < len(text) and depth > 0:
-                if text[item_end] == "{":
-                    depth += 1
-                elif text[item_end] == "}":
-                    depth -= 1
-                item_end += 1
-            if depth > 0:
-                return text[:item_start]
-        else:
+        item_end = cfg_test_item_end(text, item_start)
+        if item_end is None:
             return text[:item_start]
-
         text = text[:item_start] + text[item_end:]
+
+
+def cfg_test_item_end(text: str, item_start: int) -> int | None:
+    marker = "#[cfg(test)]"
+    cursor = item_start + len(marker)
+    while True:
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if cursor >= len(text) or not text.startswith("#[", cursor):
+            break
+        attribute_end = text.find("]", cursor + 2)
+        if attribute_end < 0:
+            return None
+        cursor = attribute_end + 1
+
+    semicolon = text.find(";", cursor)
+    opening_brace = text.find("{", cursor)
+    if semicolon >= 0 and (opening_brace < 0 or semicolon < opening_brace):
+        return semicolon + 1
+    if opening_brace < 0:
+        return None
+
+    depth = 1
+    item_end = opening_brace + 1
+    while item_end < len(text) and depth > 0:
+        if text[item_end] == "{":
+            depth += 1
+        elif text[item_end] == "}":
+            depth -= 1
+        item_end += 1
+    return item_end if depth == 0 else None
+
+
+def cfg_test_items(text: str) -> list[str]:
+    """Return complete items annotated with ``#[cfg(test)]``."""
+    items = []
+    marker = "#[cfg(test)]"
+    search_from = 0
+    while True:
+        item_start = text.find(marker, search_from)
+        if item_start < 0:
+            return items
+        item_end = cfg_test_item_end(text, item_start)
+        if item_end is None:
+            return items
+        items.append(text[item_start:item_end])
+        search_from = item_end
 
 
 def production_text(path: Path) -> str:
@@ -148,22 +175,72 @@ def root_exported_names(source: str) -> set[str]:
 
 import glob as _glob
 
-# ── 1. RuntimeContext::new( only in factory (production-only) ──
-for candidate in _glob.glob("agent/features/runtime/src/application/**/*.rs", recursive=True):
-    candidate_path = Path(candidate)
-    if "_test" in candidate_path.stem or candidate_path.stem == "tests":
-        continue
-    if candidate_path.resolve() == FACTORY.resolve():
-        continue
-    production_source = production_text(candidate_path)
-    if re.search(r'RuntimeContext::new\s*\(', production_source):
-        violations.append(f"1. RuntimeContext::new( outside factory: {candidate_path}")
+# ── 1. RuntimeContext creation has one production algorithm and no test alternate ──
+for source_path in rust_source_paths():
+    source = source_path.read_text()
+    source_without_literals = strip_string_literals(source)
+    production_source = production_text(source_path)
+    if (
+        source_path.resolve() != FACTORY.resolve()
+        and re.search(
+            r'RuntimeContext::new\s*\(',
+            strip_string_literals(production_source),
+        )
+    ):
+        violations.append(f"1. RuntimeContext::new( outside factory: {source_path}")
+    if source_path.resolve() == FACTORY.resolve():
+        for test_item in cfg_test_items(source_without_literals):
+            if "alternate_context_creator" in test_item and (
+                re.search(r'RuntimeContext::new\s*\(', test_item)
+                or re.search(r'->\s*(?:Result\s*<\s*)?RuntimeContext\b', test_item)
+            ):
+                violations.append(
+                    "1. RuntimeContext creation must not have a test-only alternate entry"
+                )
+                break
 
-# ── 2. Factory's assemble() must construct the gating token ──
+# ── 2. RuntimeContextAssemblyToken creation stays in the production factory algorithm ──
+for source_path in rust_source_paths():
+    source = source_path.read_text()
+    source_without_literals = strip_string_literals(source)
+    production_source = strip_string_literals(production_text(source_path))
+    test_source = "\n".join(cfg_test_items(source_without_literals))
+    if (
+        "RuntimeContextAssemblyToken::new_for_test" in source_without_literals
+        or (
+            source_path.resolve() != FACTORY.resolve()
+            and re.search(r'RuntimeContextAssemblyToken::new\s*\(\)', production_source)
+        )
+        or (
+            source_path.resolve() != FACTORY.resolve()
+            and re.search(r'RuntimeContextAssemblyToken::new\s*\(\)', test_source)
+        )
+    ):
+        violations.append(
+            f"2. RuntimeContextAssemblyToken::new has an unapproved caller: {source_path}"
+        )
+
 if FACTORY.is_file():
     prod = production_text(FACTORY)
     if not re.search(r'RuntimeContextAssemblyToken::new\s*\(\)', prod):
         violations.append("2. Factory must construct RuntimeContextAssemblyToken")
+
+# ── 2a. RuntimeContextFactory::prepare has one approved caller ──
+for source_path in rust_source_paths():
+    source = strip_string_literals(strip_comments(source_path.read_text()))
+    if source_path.resolve() == FACTORY.resolve():
+        source = re.sub(r'fn\s+prepare\s*\(', 'fn approved_prepare_definition(', source, count=1)
+    prepare_calls = re.findall(r'(?:\.|::)prepare\s*\(', source)
+    if prepare_calls and source_path.resolve() != RUN_FACTORY.resolve():
+        violations.append(
+            f"2a. RuntimeContextFactory::prepare has an unapproved caller: {source_path}"
+        )
+
+# ── 2b. RunInstance::new has one approved caller ──
+for source_path in rust_source_paths():
+    source = strip_string_literals(strip_comments(source_path.read_text()))
+    if re.search(r'RunInstance::new\s*\(', source) and source_path.resolve() != RUN_FACTORY.resolve():
+        violations.append(f"2b. RunInstance::new has an unapproved caller: {source_path}")
 
 # ── 3. Retired symbols absent from production code ──
 RETIRED = {

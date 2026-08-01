@@ -42,6 +42,11 @@ impl RetainedOutputView {
         &self.current_window.roots
     }
 
+    #[cfg(test)]
+    pub(crate) fn cached_root_count(&self) -> usize {
+        self.root_cache.len()
+    }
+
     pub(crate) fn view_model(&self) -> &crate::tui::view_model::OutputViewModel {
         &self.current_window
     }
@@ -61,6 +66,14 @@ impl RetainedOutputView {
         }
 
         let selection = self.window_index.select_window(request);
+        let visible_item_ids = selection
+            .item_range
+            .clone()
+            .filter_map(|position| self.window_index.entry_id(position))
+            .map(str::to_string)
+            .collect::<HashSet<_>>();
+        self.root_cache
+            .retain(|item_id, _| visible_item_ids.contains(item_id));
         let lookup = ConversationToolLookup::new(conversation);
         let mut reused_roots = 0;
         let roots = selection
@@ -74,6 +87,11 @@ impl RetainedOutputView {
                 }
                 let root = if item_id == PLACEHOLDER_ID {
                     OutputViewAssembler::assemble_placeholder(conversation)
+                } else if let Some(item) = conversation.resumed_history_item(item_id) {
+                    crate::tui::view_assembler::resumed_history::assemble_resumed_history_item(
+                        conversation,
+                        item,
+                    )
                 } else {
                     let item = conversation.timeline.item(item_id)?;
                     OutputViewAssembler::assemble_item(item, &lookup, workspace_root)
@@ -109,16 +127,27 @@ impl RetainedOutputView {
         stats: &mut RetainedOutputViewStats,
     ) {
         let mut entries = conversation
-            .timeline
-            .items()
+            .resumed_history_items()
             .iter()
-            .filter(|item| OutputWindowIndex::estimated_lines_for_item(item) > 0)
             .map(|item| {
                 (
-                    item.id().into_owned(),
-                    OutputWindowIndex::estimated_lines_for_item(item),
+                    item.id.clone(),
+                    OutputWindowIndex::estimated_lines_for_history_item(item),
                 )
             })
+            .chain(
+                conversation
+                    .timeline
+                    .items()
+                    .iter()
+                    .filter(|item| OutputWindowIndex::estimated_lines_for_item(item) > 0)
+                    .map(|item| {
+                        (
+                            item.id().into_owned(),
+                            OutputWindowIndex::estimated_lines_for_item(item),
+                        )
+                    }),
+            )
             .collect::<Vec<_>>();
         if conversation.model_stream_placeholder.is_some() {
             entries.push((PLACEHOLDER_ID.to_string(), 1));

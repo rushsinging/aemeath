@@ -82,7 +82,7 @@ pub use context::compact::CompactStage;
 pub struct RuntimeResumedSessionStep {
     pub run_id: String,
     pub step_id: String,
-    pub messages: Vec<Message>,
+    pub message_segments: Vec<std::sync::Arc<[Message]>>,
     pub finalize_cause: Option<context::domain::FinalizeCause>,
     pub duration_ms: Option<u64>,
 }

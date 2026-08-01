@@ -146,8 +146,8 @@ pub(crate) async fn from_args_with_gateways(
         agents_dir,
     )?;
 
-    // #1248 Task 3: Construct RuntimeContextFactory via its narrow crate-root
-    // entry — six explicit port parameters, no opaque RuntimeServices bag.
+    // 构造一次基础 RuntimeContextFactory，并将同一 Arc 注入 Main bootstrap
+    // 与 Derived Agent Runner；Derived 仅追加受限 binding，不重建基础服务。
     let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
         tool_assembly.catalog.clone(),
         tool_assembly.execution.clone(),
@@ -308,7 +308,6 @@ pub(crate) async fn from_args_with_gateways(
         prompt,
         skills,
         agent_runner,
-        runtime_context_factory,
     );
     runtime::from_args_with_workspace(args, dependencies).await
 }

@@ -140,6 +140,48 @@ pub(crate) fn classify_http_status(status: reqwest::StatusCode) -> HttpFailureKi
     }
 }
 
+/// 用错误响应 body 细化纯状态码分类（#1484）。
+///
+/// OpenAI 兼容网关（Wanaka、OpenAI 等）对上下文超限返回 **HTTP 400 + body**
+/// `{"error":{"code":"context_length_exceeded",...}}`，仅靠状态码会被归为
+/// `Client → InvalidRequest`（fatal），永远无法触发 runtime 的 auto compact。
+/// 此函数在 body 读取完成后调用：只有基础分类为 `Client` 时才尝试提升，
+/// 其余分类（413/401/403/429/404/5xx）原样短路，避免误伤既有语义。
+pub(crate) fn refine_http_failure_kind(kind: HttpFailureKind, body_text: &str) -> HttpFailureKind {
+    if kind != HttpFailureKind::Client {
+        return kind;
+    }
+    if error_body_indicates_context_exceeded(body_text) {
+        return HttpFailureKind::ContextTooLong;
+    }
+    kind
+}
+
+/// 解析 OpenAI 兼容错误 body，识别上下文超限特征。
+///
+/// 优先匹配结构化 `error.code == "context_length_exceeded"`（OpenAI 标准）；
+/// 无 code 时兜底匹配 `error.message` 中的上下文窗口特征文案
+/// （如 Wanaka 的 "Input exceeds the context window for ..."）。
+fn error_body_indicates_context_exceeded(body_text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body_text) else {
+        return false;
+    };
+    if let Some(code) = value
+        .pointer("/error/code")
+        .and_then(serde_json::Value::as_str)
+    {
+        return code == "context_length_exceeded";
+    }
+    value
+        .pointer("/error/message")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|message| {
+            message.contains("context window")
+                || message.contains("context length")
+                || message.contains("maximum context length")
+        })
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HttpAttemptContext<'a> {
     pub driver: &'a str,
@@ -397,10 +439,19 @@ impl HttpAttemptExecutor {
         }
 
         let headers = SafeResponseHeaders::from_headers(response.headers());
-        let kind = classify_http_status(status);
-        let body =
-            Self::read_error_body(response, status, kind, &headers, context, started, cancel)
-                .await?;
+        // 先读 body 再分类（#1484）：OpenAI 兼容网关用 400 + body error.code
+        // 表达上下文超限，纯状态码分类无法识别，会漏掉 auto compact 自救链路。
+        let body = Self::read_error_body(
+            response,
+            status,
+            classify_http_status(status),
+            &headers,
+            context,
+            started,
+            cancel,
+        )
+        .await?;
+        let kind = refine_http_failure_kind(classify_http_status(status), body.text());
         let receipt = DiagnosticReceipt::capture(context, started.elapsed());
         Err(HttpAttemptFailure::Http {
             status,
@@ -600,6 +651,68 @@ mod tests {
         }
     }
 
+    #[test]
+    fn refine_http_failure_kind_upgrades_openai_compatible_context_exceeded() {
+        // #1484：400 + 结构化 code 应提升为 ContextTooLong
+        let body = r#"{"error":{"code":"context_length_exceeded","message":"Input exceeds the context window","type":"invalid_request_error"}}"#;
+        assert_eq!(
+            refine_http_failure_kind(HttpFailureKind::Client, body),
+            HttpFailureKind::ContextTooLong
+        );
+
+        // 兜底：无 code 时按 message 特征识别
+        let message_only = r#"{"error":{"type":"invalid_request_error","message":"Input exceeds the context window for codex/gpt-5.6-sol: estimated 278455 input tokens, limit 272000"}}"#;
+        assert_eq!(
+            refine_http_failure_kind(HttpFailureKind::Client, message_only),
+            HttpFailureKind::ContextTooLong
+        );
+
+        // 普通 invalid request 不应被提升
+        let plain = r#"{"error":{"code":"invalid_prompt","message":"bad request","type":"invalid_request_error"}}"#;
+        assert_eq!(
+            refine_http_failure_kind(HttpFailureKind::Client, plain),
+            HttpFailureKind::Client
+        );
+
+        // 非 JSON body 不应被提升
+        assert_eq!(
+            refine_http_failure_kind(HttpFailureKind::Client, "<html>502 Bad Gateway</html>"),
+            HttpFailureKind::Client
+        );
+    }
+
+    #[test]
+    fn refine_http_failure_kind_never_changes_non_client_classifications() {
+        // 413 已由状态码正确分类，body 不参与；其余分类也一律短路（#1484 不误伤）。
+        let context_body = r#"{"error":{"code":"context_length_exceeded"}}"#;
+        for (kind, expected) in [
+            (
+                HttpFailureKind::ContextTooLong,
+                HttpFailureKind::ContextTooLong,
+            ),
+            (
+                HttpFailureKind::Authentication,
+                HttpFailureKind::Authentication,
+            ),
+            (
+                HttpFailureKind::PermissionDenied,
+                HttpFailureKind::PermissionDenied,
+            ),
+            (HttpFailureKind::RateLimited, HttpFailureKind::RateLimited),
+            (
+                HttpFailureKind::ModelUnavailable,
+                HttpFailureKind::ModelUnavailable,
+            ),
+            (HttpFailureKind::Server, HttpFailureKind::Server),
+        ] {
+            assert_eq!(
+                refine_http_failure_kind(kind, context_body),
+                expected,
+                "kind={kind:?}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn attempt_failure_maps_to_safe_provider_error_contract() {
         let cases = [
@@ -668,6 +781,58 @@ mod tests {
         let error = HttpAttemptFailure::Cancelled.into_provider_error();
         assert_eq!(error.kind, crate::ProviderErrorKind::Cancelled);
         assert!(!error.retryable);
+    }
+
+    /// 复现 #1484：OpenAI 兼容网关（Wanaka）对上下文超限返回
+    /// HTTP 400 + `{"error":{"code":"context_length_exceeded",...}}`。
+    /// 该错误必须分类为 ContextTooLong（触发 runtime auto compact），
+    /// 而非 InvalidRequest（fatal，报 "provider rejected the request" 中断会话）。
+    #[tokio::test]
+    async fn attempt_400_context_length_exceeded_maps_to_context_too_long() {
+        let body = r#"{"error":{"code":"context_length_exceeded","message":"Input exceeds the context window for codex/gpt-5.6-sol: estimated 278455 input tokens, limit 272000. Reduce the prompt or route to a model with a larger context window.","type":"invalid_request_error"}}"#;
+        let response = format!(
+            "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let server = TestServer::start(&response).await;
+        let failure = HttpAttemptExecutor::execute(
+            reqwest::Client::new().get(server.url()),
+            &test_context(&server.url()),
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+
+        let error = failure.into_provider_error();
+        assert_eq!(
+            error.kind,
+            crate::ProviderErrorKind::ContextTooLong,
+            "400 context_length_exceeded 应分类为 ContextTooLong: {error:?}"
+        );
+        assert!(!error.retryable);
+    }
+
+    /// 400 + 普通 invalid request（无上下文特征）不应被提升分类。
+    #[tokio::test]
+    async fn attempt_400_plain_invalid_request_stays_client_error() {
+        let body = r#"{"error":{"code":"invalid_prompt","message":"bad request","type":"invalid_request_error"}}"#;
+        let response = format!(
+            "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let server = TestServer::start(&response).await;
+        let failure = HttpAttemptExecutor::execute(
+            reqwest::Client::new().get(server.url()),
+            &test_context(&server.url()),
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+
+        let error = failure.into_provider_error();
+        assert_eq!(error.kind, crate::ProviderErrorKind::InvalidRequest);
     }
 
     #[test]
