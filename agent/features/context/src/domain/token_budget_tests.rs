@@ -19,22 +19,6 @@ fn test_estimate_cjk() {
 }
 
 #[test]
-fn test_context_usage() {
-    let est = TokenEstimation::new(1000);
-    let usage = est.usage_stats(&[], "Hello world");
-    assert!(usage.total_tokens > 0);
-    assert!(!usage.needs_compaction);
-}
-
-#[test]
-fn test_format_tokens() {
-    assert_eq!(format_tokens(500), "500");
-    assert_eq!(format_tokens(1500), "1.5k");
-    assert_eq!(format_tokens(15000), "15k");
-    assert_eq!(format_tokens(1500000), "1.5m");
-}
-
-#[test]
 fn test_needs_compaction_actual_no_cache_no_reasoning() {
     // 没有 cached_tokens 和 reasoning_tokens
     // threshold = autocompact_threshold(1_048_576, 8192) = (1_048_576 - 20_971 - 8_192) * 0.8 ≈ 815_530

@@ -86,6 +86,26 @@ impl ContextApplicationService {
         let mut blocks = prompt.cacheable;
         blocks.extend(memory.blocks);
         if let Some(summary) = snapshot.active_summary {
+            // #1486 系统护栏：任何来源的 active_summary 注入 system 前都必须
+            // 有界。历史缺陷曾让 summary 膨胀到 92 万字符撑爆 system prompt；
+            // 此处按预算校验，超限只保留关键尾部并告警。
+            let budget = crate::domain::token_budget::summary_budget(request.context_size);
+            let summary = if crate::domain::token_budget::estimate_tokens(&summary) > budget {
+                let tail = share::string_idx::slice_tail(
+                    &summary,
+                    crate::domain::token_budget::FALLBACK_PREVIOUS_SUMMARY_CAP,
+                )
+                .to_string();
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "active_summary 超出预算（{} tokens > budget {budget}），截断为 {} chars 尾部",
+                    crate::domain::token_budget::estimate_tokens(&summary),
+                    tail.len(),
+                );
+                tail
+            } else {
+                summary
+            };
             blocks.push(SystemBlock {
                 kind: "active_summary".into(),
                 content: summary,
