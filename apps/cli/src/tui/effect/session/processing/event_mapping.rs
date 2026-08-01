@@ -3,6 +3,9 @@ use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 
 pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
     match event {
+        sdk::ChatEvent::ActivityChanged { .. } | sdk::ChatEvent::ActivitySnapshot(_) => {
+            UiEvent::SessionReset
+        }
         sdk::ChatEvent::SkillsUpdated { event } => UiEvent::SkillsUpdated(event),
         sdk::ChatEvent::Token { context, text } => UiEvent::Text {
             context: context.into(),

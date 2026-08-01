@@ -47,6 +47,25 @@ fn interaction_request_maps_all_body_fields_without_sdk_payload() {
 }
 
 #[test]
+fn activity_acl_types_are_tui_owned_and_preserve_identifiers_as_values() {
+    let source = include_str!("tui_runtime_event.rs");
+    for required in [
+        "struct UiActivityId",
+        "struct TuiActivityObservation",
+        "struct TuiActivitySnapshot",
+        "enum TuiActivitySource",
+        "enum TuiActivityKind",
+        "enum TuiActivityDetail",
+        "enum TuiActivityAudience",
+    ] {
+        assert!(
+            source.contains(required),
+            "missing TUI Activity ACL type: {required}"
+        );
+    }
+}
+
+#[test]
 fn runtime_event_source_does_not_reference_sdk_or_sender() {
     let source = include_str!("tui_runtime_event.rs");
     for forbidden in ["sdk::", "oneshot::Sender", "mpsc::Sender", "AgentClient"] {

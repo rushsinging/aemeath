@@ -359,6 +359,9 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
     };
 
     match event {
+        TuiRuntimeEvent::ActivityChanged { .. } | TuiRuntimeEvent::ActivitySnapshot(_) => {
+            AgentEventMapping::default()
+        }
         TuiRuntimeEvent::SkillsUpdated { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::Text { context, text } => {
             conversation(ConversationIntent::AssistantText(AssistantText {

@@ -12,6 +12,206 @@ use super::runtime_view::{TuiChatMessage, TuiToolResultImage};
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
 use crate::tui::view_model::markdown_spacing::MarkdownSpacingPolicy;
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct UiActivityId(String);
+
+impl From<&str> for UiActivityId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl UiActivityId {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivityChangeKind {
+    Started,
+    Updated,
+    Finished,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivitySource {
+    Run,
+    RunStep(UiRunStepId),
+    ModelInvocation(String),
+    ToolCall(String),
+    HookDispatch(UiActivityId),
+    Interaction(String),
+    ChildRun(UiRunId),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiRunPhaseKind {
+    DrainingInput,
+    PreparingContext,
+    ApplyingResponse,
+    AwaitingToolApproval,
+    ExecutingTools,
+    FinalizingStep,
+    CancellingStep,
+    Terminating,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivityKind {
+    Run,
+    RunPhase(TuiRunPhaseKind),
+    ModelInvocation,
+    ToolCall,
+    HookDispatch,
+    Compaction,
+    Interaction,
+    ChildRun,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivityState {
+    Running,
+    Waiting,
+    Succeeded,
+    Failed,
+    Cancelled,
+    Terminated,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivityAudience {
+    User,
+    Operational,
+    Diagnostic,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiRunPurpose {
+    Main,
+    Derived,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiModelStreamState {
+    Invoking,
+    WaitingForFirstToken,
+    Streaming,
+    Retrying,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiHookPoint {
+    PreToolUse,
+    UserPromptSubmit,
+    PreCompact,
+    PermissionRequest,
+    Elicitation,
+    UserPromptExpansion,
+    Stop,
+    PostToolUse,
+    PostToolUseFailure,
+    PostCompact,
+    PostToolBatch,
+    ElicitationResult,
+    SessionStart,
+    SessionEnd,
+    SubRunStart,
+    SubRunStop,
+    TaskCreated,
+    TaskCompleted,
+    Notification,
+    InstructionsLoaded,
+    StopFailure,
+    PermissionDenied,
+    ConfigChange,
+    CwdChanged,
+    FileChanged,
+    TeammateIdle,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiCompactStage {
+    Preparing,
+    Summarizing,
+    Finalizing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiInteractionKind {
+    ToolApproval,
+    UserQuestion,
+    PlanApproval,
+    StuckDiagnostic,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivityDetail {
+    Run {
+        purpose: TuiRunPurpose,
+    },
+    Phase {
+        phase: TuiRunPhaseKind,
+    },
+    Model {
+        model: String,
+        attempt: u32,
+        stream: TuiModelStreamState,
+    },
+    Tool {
+        name: String,
+        summary: Option<String>,
+        parallel_count: u16,
+    },
+    Hook {
+        point: TuiHookPoint,
+        attempt: u8,
+    },
+    Compact {
+        stage: TuiCompactStage,
+        current: Option<u32>,
+        total: Option<u32>,
+    },
+    Interaction {
+        kind: TuiInteractionKind,
+    },
+    ChildRun {
+        role: String,
+        model: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TuiActivityTiming {
+    pub(crate) total_elapsed_ms: u64,
+    pub(crate) active_elapsed_ms: u64,
+    pub(crate) state_elapsed_ms: u64,
+    pub(crate) started_at_unix_ms: Option<u64>,
+    pub(crate) finished_at_unix_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiActivityObservation {
+    pub(crate) id: UiActivityId,
+    pub(crate) run_id: UiRunId,
+    pub(crate) run_step_id: Option<UiRunStepId>,
+    pub(crate) parent_activity_id: Option<UiActivityId>,
+    pub(crate) source: TuiActivitySource,
+    pub(crate) kind: TuiActivityKind,
+    pub(crate) state: TuiActivityState,
+    pub(crate) detail: TuiActivityDetail,
+    pub(crate) audience: TuiActivityAudience,
+    pub(crate) revision: u64,
+    pub(crate) timing: TuiActivityTiming,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiActivitySnapshot {
+    pub(crate) run_id: UiRunId,
+    pub(crate) revision: u64,
+    pub(crate) activities: Vec<TuiActivityObservation>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiTurnContext {
     pub(crate) chat_id: String,
@@ -365,6 +565,11 @@ pub(crate) struct TuiSkillSlashRoute {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum TuiRuntimeEvent {
+    ActivityChanged {
+        kind: TuiActivityChangeKind,
+        activity: TuiActivityObservation,
+    },
+    ActivitySnapshot(TuiActivitySnapshot),
     SkillsUpdated {
         revision: String,
         skills: Vec<TuiSkillView>,
