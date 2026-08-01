@@ -71,6 +71,74 @@ async fn first_chat_preflight_creates_full_default_and_can_rollback_unchanged_re
 }
 
 #[tokio::test]
+async fn generic_form_selection_preserves_identity_revision_and_server_navigation() {
+    let temp = tempfile::tempdir().unwrap();
+    let bootstrap = build_connect_bootstrap_with_agents_dir(temp.path())
+        .await
+        .unwrap();
+    let initial = bootstrap
+        .forms
+        .start_form(
+            sdk::ConfigFormWorkflowId("provider_connect".to_string()),
+            sdk::ConfigFormOrigin::ExplicitCommand,
+        )
+        .await
+        .unwrap();
+
+    let next = bootstrap
+        .forms
+        .submit_page(sdk::ConfigFormSubmitPage {
+            session_id: initial.session_id.clone(),
+            expected_revision: initial.revision,
+            values: vec![sdk::ConfigFormFieldValue {
+                field_id: sdk::ConfigFormFieldId("provider_source".to_string()),
+                value: sdk::ConfigFormValue::SelectedOption(sdk::ConfigFormOptionId(
+                    "Anthropic".to_string(),
+                )),
+            }],
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(next.session_id, initial.session_id);
+    assert_eq!(next.revision, sdk::ConfigFormRevision(1));
+    assert_eq!(next.page.id.as_str(), "edit_endpoint");
+    assert!(next
+        .page
+        .fields
+        .iter()
+        .any(|field| field.id.as_str() == "base_url"));
+}
+
+#[tokio::test]
+async fn generic_form_cancel_publishes_only_cancelled_terminal() {
+    let temp = tempfile::tempdir().unwrap();
+    let bootstrap = build_connect_bootstrap_with_agents_dir(temp.path())
+        .await
+        .unwrap();
+    let initial = bootstrap
+        .forms
+        .start_form(
+            sdk::ConfigFormWorkflowId("provider_connect".to_string()),
+            sdk::ConfigFormOrigin::ExplicitCommand,
+        )
+        .await
+        .unwrap();
+
+    let cancelled = bootstrap
+        .forms
+        .cancel_form(initial.session_id, initial.revision)
+        .await
+        .unwrap();
+
+    assert_eq!(cancelled.terminal, Some(sdk::ConfigFormTerminal::Cancelled));
+    assert!(!matches!(
+        cancelled.terminal,
+        Some(sdk::ConfigFormTerminal::Completed { .. })
+    ));
+}
+
+#[tokio::test]
 async fn first_chat_preflight_rejects_non_interactive_missing_config_without_creating_it() {
     let temp = tempfile::tempdir().unwrap();
 
