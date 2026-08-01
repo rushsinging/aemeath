@@ -185,6 +185,97 @@ fn session_identity_and_revision_round_trip_through_transport_values() {
 }
 
 #[tokio::test]
+async fn selecting_provider_prefills_catalog_endpoint_in_server_draft() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+
+    for (source, expected_endpoint) in [
+        ("OpenAI", "https://api.openai.com"),
+        ("Zhipu", "https://open.bigmodel.cn/api/paas/v4"),
+        (
+            "ZhipuCodingPlan",
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+        ),
+    ] {
+        let view = service
+            .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+            .await;
+        let endpoint = advance(
+            &service,
+            view,
+            ConnectCommand::SelectProvider {
+                source: find_by_source(source).unwrap().source,
+            },
+        )
+        .await;
+
+        assert_eq!(endpoint.stage, ConnectStage::EditEndpoint);
+        assert_eq!(endpoint.draft.base_url(), Some(expected_endpoint));
+    }
+}
+
+#[tokio::test]
+async fn selecting_each_recommended_model_copies_its_own_parameters_to_draft() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let entry = find_by_source("Anthropic").unwrap();
+    assert!(entry.recommended_models.len() >= 2);
+
+    for (index, expected_model) in entry.recommended_models.iter().enumerate() {
+        let initial = service
+            .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+            .await;
+        let endpoint = advance(
+            &service,
+            initial,
+            ConnectCommand::SelectProvider {
+                source: entry.source,
+            },
+        )
+        .await;
+        let credential = advance(
+            &service,
+            endpoint,
+            ConnectCommand::SetEndpoint {
+                base_url: "https://api.anthropic.com".into(),
+            },
+        )
+        .await;
+        let user_agent = advance(
+            &service,
+            credential,
+            ConnectCommand::SetCredential {
+                api_key: String::new(),
+            },
+        )
+        .await;
+        let models = advance(
+            &service,
+            user_agent,
+            ConnectCommand::SetProviderUserAgent { raw: None },
+        )
+        .await;
+        let selected = advance(
+            &service,
+            models,
+            ConnectCommand::SelectRecommendedModel { index },
+        )
+        .await;
+        let selected_model = selected.draft.model.expect("推荐模型必须写入服务端 draft");
+        assert_eq!(selected_model.model_id, expected_model.model_id);
+        assert_eq!(
+            selected_model.context_window,
+            Some(expected_model.context_window)
+        );
+        assert_eq!(selected_model.max_tokens, Some(expected_model.max_tokens));
+    }
+}
+
+#[tokio::test]
 async fn selecting_verified_provider_prefills_catalog_endpoint_and_recommended_model() {
     let service = ConnectAppService::builder()
         .with_catalog(PROVIDER_CATALOG)
@@ -240,7 +331,7 @@ async fn selecting_verified_provider_prefills_catalog_endpoint_and_recommended_m
             .model
             .as_ref()
             .map(|model| model.model_id.as_str()),
-        Some("claude-sonnet-5")
+        Some("claude-opus-4-1-20250805")
     );
 }
 
@@ -275,6 +366,54 @@ async fn custom_model_skip_probe_save_completes_without_exposing_api_key() {
             .as_str(),
         test_global_revision().as_str()
     );
+}
+
+#[tokio::test]
+async fn invalid_endpoint_keeps_session_on_endpoint_page_with_visible_error() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let initial = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .await;
+    let endpoint = advance(
+        &service,
+        initial,
+        ConnectCommand::SelectProvider {
+            source: find_by_source("Anthropic").unwrap().source,
+        },
+    )
+    .await;
+
+    let error = service
+        .apply(
+            endpoint.session_id,
+            endpoint.revision,
+            ConnectCommand::SetEndpoint {
+                base_url: String::new(),
+            },
+        )
+        .await
+        .expect_err("空 endpoint 必须被拒绝");
+
+    assert!(matches!(
+        error,
+        ConnectError::Validation {
+            field: "endpoint",
+            ..
+        }
+    ));
+    let current = service.view(endpoint.session_id).await.unwrap();
+    assert_eq!(current.stage, ConnectStage::EditEndpoint);
+    assert!(matches!(
+        current.last_error,
+        Some(ConnectError::Validation {
+            field: "endpoint",
+            ..
+        })
+    ));
+    assert_eq!(current.terminal, None);
 }
 
 #[tokio::test]

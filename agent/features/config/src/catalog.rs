@@ -5,7 +5,8 @@
 //! - 提供 Config domain 唯一的内置 Provider 默认值集合（base URL、推荐模型、
 //!   API key env、官方 SDK User-Agent 证据）；
 //! - 固定 source 名称（`Anthropic`、`OpenAI` 等）作为 `models.providers` 的稳定 key；
-//! - 拒绝重复 source、重复 driver、非法 URL、非法 HeaderValue 与无效模型窗口；
+//! - 拒绝重复 source、非法 URL、非法 HeaderValue 与无效模型窗口；同一 runtime
+//!   driver 可服务多个拥有不同 endpoint 的内置 Provider 配置；
 //! - **NEVER** 依赖 provider crate；driver 字符串与 Config domain `driver_env`
 //!   单一真相一致；
 //! - 官方 SDK User-Agent 没有可靠证据时**必须** `None`，绝不猜测。
@@ -25,7 +26,8 @@
 //! `default_endpoint` 与 `recommended_models` 必须有可核验证据，缺一不可：
 //! - 没有证据时**必须**把字段留空（`None` / `&[]`）；
 //! - 禁止把“待复核/示例”伪装为正式默认；
-//! - 当前已核验 Anthropic、OpenAI、DeepSeek；其余条目继续要求用户显式填写。
+//! - 当前已核验 Anthropic 官方 endpoint；产品内置模型与用户明确指定的 OpenAI、
+//!   Zhipu 默认值使用各自记录的来源。其余条目继续要求用户显式填写。
 
 /// Config-owned 固定 source 名称。
 ///
@@ -134,12 +136,11 @@ pub struct ProviderCatalogEntry {
 }
 
 // ---------------------------------------------------------------------------
-// 静态 Catalog：10 个 driver，固定 source 名称（首字母大写）。
+// 静态 Catalog：覆盖 10 个 runtime driver；同一 driver 可对应多个稳定 source。
 //
 // 所有条目字段都是 `&'static str` / `Option<&'static str>` / `&'static [..]`，零拷贝。
 // 构建期由 `static_assert_catalog_invariants` 验证：
 //   - source 唯一；
-//   - driver 唯一；
 //   - 推荐模型窗口合法（context_window > 0, max_tokens in (0, context_window]）；
 //   - 官方 SDK UA 字段配套完整、HeaderValue 可解析。
 //
@@ -148,13 +149,22 @@ pub struct ProviderCatalogEntry {
 
 const VERIFIED_AT: chrono::NaiveDate = chrono::NaiveDate::from_ymd_opt(2026, 7, 21).unwrap();
 
-const ANTHROPIC_MODELS: &[RecommendedModel] = &[RecommendedModel {
-    model_id: "claude-sonnet-5",
-    context_window: 1_000_000,
-    max_tokens: 128_000,
-    evidence_url: "https://platform.claude.com/docs/en/about-claude/models/overview.md",
-    verified_at: VERIFIED_AT,
-}];
+const ANTHROPIC_MODELS: &[RecommendedModel] = &[
+    RecommendedModel {
+        model_id: "claude-opus-4-1-20250805",
+        context_window: 200_000,
+        max_tokens: 32_000,
+        evidence_url: "https://platform.claude.com/docs/en/about-claude/models/overview.md",
+        verified_at: VERIFIED_AT,
+    },
+    RecommendedModel {
+        model_id: "claude-sonnet-4-20250514",
+        context_window: 200_000,
+        max_tokens: 64_000,
+        evidence_url: "https://platform.claude.com/docs/en/about-claude/models/overview.md",
+        verified_at: VERIFIED_AT,
+    },
+];
 
 /// Anthropic Catalog 条目。
 const ANTHROPIC_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
@@ -171,10 +181,10 @@ const ANTHROPIC_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
 };
 
 const OPENAI_MODELS: &[RecommendedModel] = &[RecommendedModel {
-    model_id: "gpt-4o",
-    context_window: 128_000,
+    model_id: "gpt-5.6-sol",
+    context_window: 1_000_000,
     max_tokens: 16_384,
-    evidence_url: "https://developers.openai.com/api/docs/models/gpt-4o",
+    evidence_url: "https://developers.openai.com/api/docs/models",
     verified_at: VERIFIED_AT,
 }];
 
@@ -192,15 +202,39 @@ const OPENAI_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     official_sdk_user_agent: None,
 };
 
-/// Zhipu (智谱) Catalog 条目。
-///
-/// 当前没有可核验的官方 base URL / 推荐模型证据，留空。
+const ZHIPU_MODELS: &[RecommendedModel] = &[RecommendedModel {
+    model_id: "glm-5.2",
+    context_window: 1_000_000,
+    max_tokens: 16_384,
+    evidence_url: "https://open.bigmodel.cn/dev/api/normal-model/glm-5",
+    verified_at: VERIFIED_AT,
+}];
+
+/// Zhipu（智谱开放平台）Catalog 条目。
 const ZHIPU_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     source: ProviderSource::new("Zhipu"),
     driver: DriverId::new("zhipu"),
-    default_endpoint: None,
-    recommended_models: &[],
+    default_endpoint: Some(DefaultEndpoint {
+        url: "https://open.bigmodel.cn/api/paas/v4",
+        evidence_url: "https://open.bigmodel.cn/dev/api/thirdparty-frame/openai-sdk",
+        verified_at: VERIFIED_AT,
+    }),
+    recommended_models: ZHIPU_MODELS,
     api_key_hint: Some("智谱开放平台 → API Keys"),
+    official_sdk_user_agent: None,
+};
+
+/// Zhipu Coding Plan 使用相同 runtime driver，但拥有独立稳定 source 与 endpoint。
+const ZHIPU_CODING_PLAN_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
+    source: ProviderSource::new("ZhipuCodingPlan"),
+    driver: DriverId::new("zhipu"),
+    default_endpoint: Some(DefaultEndpoint {
+        url: "https://open.bigmodel.cn/api/coding/paas/v4",
+        evidence_url: "https://docs.bigmodel.cn/cn/coding-plan/third-party-integration",
+        verified_at: VERIFIED_AT,
+    }),
+    recommended_models: ZHIPU_MODELS,
+    api_key_hint: Some("智谱 Coding Plan → API Keys"),
     official_sdk_user_agent: None,
 };
 
@@ -308,6 +342,7 @@ pub static PROVIDER_CATALOG: &[ProviderCatalogEntry] = &[
     ANTHROPIC_ENTRY,
     OPENAI_ENTRY,
     ZHIPU_ENTRY,
+    ZHIPU_CODING_PLAN_ENTRY,
     LITELLM_ENTRY,
     VOLCENGINE_ENTRY,
     MINIMAX_ENTRY,
@@ -385,11 +420,7 @@ pub fn static_assert_catalog_invariants() -> Result<(), &'static str> {
     static CACHE: OnceLock<Result<(), &'static str>> = OnceLock::new();
     // `Result<(), &'static str>` 本身不是 `Copy`（discriminant + 变体大小异质），
     // 但内部字符串字面量是 `'static`，因此这里只需在首次失败时把消息搬到外面。
-    match CACHE.get_or_init(|| {
-        check_unique_sources()
-            .and(check_unique_drivers())
-            .and(check_recommended_models())
-    }) {
+    match CACHE.get_or_init(|| check_unique_sources().and(check_recommended_models())) {
         Ok(()) => Ok(()),
         Err(_) => Err("Catalog 不变量校验失败"),
     }
@@ -401,17 +432,6 @@ fn check_unique_sources() -> Result<(), &'static str> {
     for entry in PROVIDER_CATALOG {
         if !seen.insert(entry.source.as_str()) {
             return Err("Catalog source 重复");
-        }
-    }
-    Ok(())
-}
-
-fn check_unique_drivers() -> Result<(), &'static str> {
-    use std::collections::HashSet;
-    let mut seen: HashSet<&'static str> = HashSet::new();
-    for entry in PROVIDER_CATALOG {
-        if !seen.insert(entry.driver.as_str()) {
-            return Err("Catalog driver 重复");
         }
     }
     Ok(())

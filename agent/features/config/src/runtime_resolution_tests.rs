@@ -74,6 +74,21 @@ fn runtime_resolution_uses_catalog_endpoint_when_provider_endpoint_is_empty() {
 }
 
 #[test]
+fn runtime_resolution_uses_source_specific_endpoint_for_shared_driver() {
+    for (source, expected_endpoint) in [
+        ("Zhipu", "https://open.bigmodel.cn/api/paas/v4"),
+        (
+            "ZhipuCodingPlan",
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+        ),
+    ] {
+        let snapshot = snapshot(source, "zhipu", "", None);
+        let resolved = resolve(&snapshot, source, "zhipu", None);
+        assert_eq!(resolved.base_url.as_deref(), Some(expected_endpoint));
+    }
+}
+
+#[test]
 fn runtime_resolution_uses_explicit_endpoint_override_before_catalog() {
     let snapshot = snapshot("Anthropic", "anthropic", "", None);
 

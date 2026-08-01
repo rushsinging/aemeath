@@ -133,7 +133,23 @@ fn confirm_overwrite_page_exposes_both_server_actions() {
 }
 
 #[test]
-fn custom_model_page_prefills_catalog_model_defaults() {
+fn model_page_publishes_every_catalog_model_before_custom_option() {
+    let mut view = connect_view(ConnectStage::SelectModel);
+    view.draft.source = Some(crate::catalog::ProviderSource::new("Anthropic"));
+
+    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+    let model_options = &form.page.fields[0].options;
+
+    assert!(model_options.len() >= 3);
+    assert_eq!(model_options[0].id.as_str(), "recommended-0");
+    assert_eq!(model_options[0].label, "claude-opus-4-1-20250805");
+    assert_eq!(model_options[1].id.as_str(), "recommended-1");
+    assert_eq!(model_options[1].label, "claude-sonnet-4-20250514");
+    assert_eq!(model_options.last().unwrap().id.as_str(), "custom");
+}
+
+#[test]
+fn custom_model_page_prefills_first_catalog_model_defaults() {
     let mut view = connect_view(ConnectStage::EditCustomModel);
     view.draft.source = Some(crate::catalog::ProviderSource::new("Anthropic"));
 
@@ -141,20 +157,39 @@ fn custom_model_page_prefills_catalog_model_defaults() {
 
     assert_eq!(
         form.page.fields[0].display_value.as_deref(),
-        Some("claude-sonnet-5")
+        Some("claude-opus-4-1-20250805")
     );
-    assert_eq!(
-        form.page.fields[1].display_value.as_deref(),
-        Some("1000000")
-    );
-    assert_eq!(form.page.fields[2].display_value.as_deref(), Some("128000"));
+    assert_eq!(form.page.fields[1].display_value.as_deref(), Some("200000"));
+    assert_eq!(form.page.fields[2].display_value.as_deref(), Some("32000"));
     assert!(form.page.fields.iter().all(|field| field.has_value));
+}
+
+#[test]
+fn zhipu_endpoint_pages_publish_distinct_default_urls() {
+    for (source, expected_url) in [
+        ("Zhipu", "https://open.bigmodel.cn/api/paas/v4"),
+        (
+            "ZhipuCodingPlan",
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+        ),
+    ] {
+        let mut view = connect_view(ConnectStage::EditEndpoint);
+        view.draft.source = Some(crate::catalog::find_by_source(source).unwrap().source);
+
+        let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+        assert_eq!(
+            form.page.fields[0].display_value.as_deref(),
+            Some(expected_url),
+            "{source} 必须显示自己的内置 endpoint"
+        );
+    }
 }
 
 #[test]
 fn custom_model_page_keeps_fields_empty_without_catalog_defaults() {
     let mut view = connect_view(ConnectStage::EditCustomModel);
-    view.draft.source = Some(crate::catalog::ProviderSource::new("Zhipu"));
+    view.draft.source = Some(crate::catalog::ProviderSource::new("LiteLLM"));
 
     let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
 

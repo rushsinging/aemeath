@@ -2,7 +2,7 @@
 //!
 //! 覆盖目标：
 //! - 当前 ProviderDriverKind 的 10 个 driver 全部映射；
-//! - source / driver 唯一性；
+//! - source 唯一，同一 runtime driver 可对应多个内置 Provider 配置；
 //! - 按 `ProviderSource` / `DriverId` 查询；
 //! - 推荐模型窗口合法性（context_window > 0, max_tokens > 0）；
 //! - 官方 SDK UA 证据元数据完整性（evidence_url、verified_at 与 value 配套）；
@@ -16,6 +16,20 @@ use crate::catalog::{
     ProviderSource, PROVIDER_CATALOG,
 };
 use share::config::domain::driver_env;
+
+const EXPECTED_SOURCES: &[(&str, &str)] = &[
+    ("Anthropic", "anthropic"),
+    ("OpenAI", "openai"),
+    ("Zhipu", "zhipu"),
+    ("ZhipuCodingPlan", "zhipu"),
+    ("LiteLLM", "litellm"),
+    ("Volcengine", "volcengine"),
+    ("Minimax", "minimax"),
+    ("Mimo", "mimo"),
+    ("DeepSeek", "deepseek"),
+    ("Agnes", "agnes"),
+    ("Ollama", "ollama"),
+];
 
 const EXPECTED_DRIVERS: &[&str] = &[
     "anthropic",
@@ -45,9 +59,13 @@ fn catalog_covers_every_supported_provider_driver() {
     }
     assert_eq!(
         PROVIDER_CATALOG.len(),
-        EXPECTED_DRIVERS.len(),
-        "Catalog 条目数必须恰好等于 10 个 driver，禁止多写漏写"
+        EXPECTED_SOURCES.len(),
+        "Catalog 条目数必须覆盖全部内置 Provider 配置"
     );
+    for (source, driver) in EXPECTED_SOURCES {
+        let entry = find_by_source(source).expect("内置 Provider source 必须存在");
+        assert_eq!(entry.driver.as_str(), *driver);
+    }
 }
 
 #[test]
@@ -73,17 +91,25 @@ fn catalog_sources_are_unique_and_use_title_case_names() {
 }
 
 #[test]
-fn catalog_drivers_are_unique() {
+fn catalog_drivers_cover_supported_runtime_drivers_without_requiring_uniqueness() {
     use std::collections::HashSet;
 
-    let mut seen_drivers = HashSet::new();
-    for entry in PROVIDER_CATALOG {
-        let driver = entry.driver.as_str();
-        assert!(
-            seen_drivers.insert(driver),
-            "driver 必须唯一，重复 {driver}"
-        );
+    let drivers: HashSet<&str> = PROVIDER_CATALOG
+        .iter()
+        .map(|entry| entry.driver.as_str())
+        .collect();
+    assert_eq!(drivers.len(), EXPECTED_DRIVERS.len());
+    for expected in EXPECTED_DRIVERS {
+        assert!(drivers.contains(expected));
     }
+    assert_eq!(
+        PROVIDER_CATALOG
+            .iter()
+            .filter(|entry| entry.driver.as_str() == "zhipu")
+            .count(),
+        2,
+        "同一 runtime driver 必须允许承载普通版与 Coding Plan 等不同内置配置"
+    );
 }
 
 #[test]
@@ -143,12 +169,20 @@ fn catalog_find_by_unknown_driver_returns_none() {
 }
 
 #[test]
-fn catalog_provider_source_for_driver_matches_static_entry() {
-    for entry in PROVIDER_CATALOG {
-        let source =
-            provider_source_for_driver(entry.driver.as_str()).expect("按 driver 必须能取得 source");
-        assert_eq!(source.as_str(), entry.source.as_str());
+fn catalog_provider_source_for_driver_returns_canonical_source() {
+    for driver in EXPECTED_DRIVERS {
+        let source = provider_source_for_driver(driver).expect("按 driver 必须能取得 source");
+        let first_entry = PROVIDER_CATALOG
+            .iter()
+            .find(|entry| entry.driver.as_str() == *driver)
+            .expect("driver 必须存在");
+        assert_eq!(source, first_entry.source);
     }
+    assert_eq!(
+        provider_source_for_driver("zhipu").map(ProviderSource::as_str),
+        Some("Zhipu"),
+        "driver-only 兼容入口必须稳定返回普通 Zhipu；精确配置应按 source 查询"
+    );
 }
 
 #[test]
@@ -223,53 +257,64 @@ fn catalog_recommended_models_carry_evidence_metadata_when_present() {
 }
 
 #[test]
-fn verified_catalog_defaults_match_official_sources() {
+fn configured_catalog_defaults_match_product_requirements() {
     let cases = [
         (
             "Anthropic",
             "https://api.anthropic.com",
-            "claude-sonnet-5",
-            1_000_000,
-            128_000,
+            &[
+                ("claude-opus-4-1-20250805", 200_000, 32_000),
+                ("claude-sonnet-4-20250514", 200_000, 64_000),
+            ][..],
         ),
         (
             "OpenAI",
             "https://api.openai.com",
-            "gpt-4o",
-            128_000,
-            16_384,
+            &[("gpt-5.6-sol", 1_000_000, 16_384)][..],
         ),
         (
-            "DeepSeek",
-            "https://api.deepseek.com",
-            "deepseek-v4-pro",
-            1_000_000,
-            393_216,
+            "Zhipu",
+            "https://open.bigmodel.cn/api/paas/v4",
+            &[("glm-5.2", 1_000_000, 16_384)][..],
+        ),
+        (
+            "ZhipuCodingPlan",
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+            &[("glm-5.2", 1_000_000, 16_384)][..],
         ),
     ];
 
-    for (source, endpoint, model_id, context_window, max_tokens) in cases {
-        let entry = find_by_source(source).expect("已核验 Provider 必须存在");
+    for (source, endpoint, expected_models) in cases {
+        let entry = find_by_source(source).expect("内置 Provider 必须存在");
         assert_eq!(
             entry.default_endpoint.as_ref().map(|value| value.url),
             Some(endpoint),
-            "{source} 必须使用官方默认 endpoint"
+            "{source} 必须使用已确认的默认 endpoint"
         );
-        assert!(
-            entry.recommended_models.iter().any(|model| {
-                model.model_id == model_id
-                    && model.context_window == context_window
-                    && model.max_tokens == max_tokens
-            }),
-            "{source} 必须发布已核验推荐模型 {model_id}"
-        );
+        assert_eq!(entry.recommended_models.len(), expected_models.len());
+        for (model, (model_id, context_window, max_tokens)) in
+            entry.recommended_models.iter().zip(expected_models)
+        {
+            assert_eq!(model.model_id, *model_id);
+            assert_eq!(model.context_window, *context_window);
+            assert_eq!(model.max_tokens, *max_tokens);
+        }
     }
+}
+
+#[test]
+fn provider_catalog_can_publish_multiple_recommended_models() {
+    let anthropic = find_by_source("Anthropic").expect("Anthropic 必须存在");
+    assert!(anthropic.recommended_models.len() >= 2);
+    assert_ne!(
+        anthropic.recommended_models[0].model_id,
+        anthropic.recommended_models[1].model_id
+    );
 }
 
 #[test]
 fn self_hosted_or_unverified_catalog_defaults_remain_explicitly_absent() {
     for source in [
-        "Zhipu",
         "LiteLLM",
         "Volcengine",
         "Minimax",
@@ -429,31 +474,10 @@ fn catalog_api_key_hint_is_human_readable_and_references_driver_env() {
 
 #[test]
 fn catalog_fixed_source_names_are_stable_title_case() {
-    // spec §2.1 要求 source 使用固定内置名称（大写开头）作为稳定 key。
-    let expected_sources = [
-        ("anthropic", "Anthropic"),
-        ("openai", "OpenAI"),
-        ("zhipu", "Zhipu"),
-        ("litellm", "LiteLLM"),
-        ("volcengine", "Volcengine"),
-        ("minimax", "Minimax"),
-        ("mimo", "Mimo"),
-        ("deepseek", "DeepSeek"),
-        ("agnes", "Agnes"),
-        ("ollama", "Ollama"),
-    ];
-    for (driver, source) in expected_sources {
-        let entry = find_by_driver(driver).expect("Catalog 必须包含 driver");
-        assert_eq!(
-            entry.source.as_str(),
-            source,
-            "driver {driver} 必须映射到稳定 source {source}"
-        );
-        assert_eq!(
-            ProviderSource::new(source),
-            entry.source,
-            "ProviderSource::new 必须保留稳定大写 key"
-        );
+    for (source, driver) in EXPECTED_SOURCES {
+        let entry = find_by_source(source).expect("Catalog 必须包含稳定 source");
+        assert_eq!(entry.driver.as_str(), *driver);
+        assert_eq!(ProviderSource::new(source), entry.source);
     }
 }
 
@@ -469,5 +493,5 @@ fn catalog_entries_expose_borrowed_str_for_zero_copy_access() {
 #[test]
 fn catalog_static_invariants_hold_at_runtime() {
     static_assert_catalog_invariants()
-        .expect("Catalog 启动期不变量必须通过（source 唯一、driver 唯一、推荐模型合法）");
+        .expect("Catalog 启动期不变量必须通过（source 唯一、推荐模型合法）");
 }

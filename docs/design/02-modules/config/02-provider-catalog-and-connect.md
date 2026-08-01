@@ -68,7 +68,7 @@ struct OfficialSdkUserAgent {
 }
 ```
 
-`source` 使用固定内置名称（例如 `Anthropic`、`OpenAI`），作为 `models.providers` 的稳定 key。TUI 只能展示 Catalog DTO，禁止自行拼接 source、base URL 或模型默认值。
+`source` 使用固定内置名称（例如 `Anthropic`、`OpenAI`），作为 `models.providers` 的稳定 key。一个条目可以发布多个 `recommended_models`，向导必须完整展示并按用户选择复制对应的 Model ID、Context Window 与 Max Tokens。同一 runtime driver 可以服务多个拥有不同 endpoint 的稳定 source（例如普通 Zhipu 与 Zhipu Coding Plan）；按 driver 查询仅用于需要 canonical driver 默认值的兼容路径，精确配置解析必须优先按 source。TUI 只能展示 Catalog DTO，禁止自行拼接 source、base URL 或模型默认值。
 
 ### 2.2 Catalog 治理
 
@@ -79,7 +79,7 @@ struct OfficialSdkUserAgent {
 - SDK 版本更新必须同时更新 Catalog 条目、证据、核验日期和契约测试；运行时禁止联网查询最新版。
 - Provider Adapter 只消费已解析值，禁止保留另一份默认 base URL、模型或 UA。若协议实现需要 wire 常量，该常量不得重新表达用户配置默认值。
 - `ProviderModelsConfig` 必须新增可选 `userAgent` 字段；缺失字段与旧配置兼容并进入回退链，空白值在 load/Connect candidate 归一为 `None`。该字段只属于 Provider source，不复用 legacy `api.user_agent`。
-- Catalog API 必须能按 `ProviderSource` 和 `DriverId` 查询，并拒绝重复 source、重复 driver 映射、非法 URL、非法 HeaderValue 与无效模型窗口。`find_by_driver` 必须就地完成大小写不敏感比较，不得先分配 `String`。
+- Catalog API 必须能按 `ProviderSource` 和 `DriverId` 查询，并拒绝重复 source、非法 URL、非法 HeaderValue 与无效模型窗口；driver 可以重复，但其首个条目是 driver-only 兼容查询的 canonical source。`find_by_driver` 必须就地完成大小写不敏感比较，不得先分配 `String`。
 
 ## 3. Connect 应用模型
 
@@ -128,7 +128,7 @@ struct ConnectDraft {
 4. 编辑 base URL，Catalog 有默认值时预填且允许覆盖；
 5. 编辑 API Key，允许空值；空值不触发环境变量检查；
 6. 编辑 Provider 专属 UA，允许空值；空白归一为清除覆盖；
-7. 选择推荐模型，或选择“自定义模型”并填写 Model ID、Context Window、Max Tokens；
+7. 完整列出当前 Provider 的全部推荐模型，选择任一模型后使用该条目的完整参数；列表末尾始终提供“自定义模型”，其初始模板取首个推荐模型（若存在），并允许编辑 Model ID、Context Window、Max Tokens；
 8. 选择是否将本次模型设为全局默认；
 9. 选择跳过或执行连接探测；探测成功时直接进入 review，探测失败时停留在结果页，并且必须显式选择返回编辑或继续保存；
 10. 展示不含密钥明文的 review 页面并提交；

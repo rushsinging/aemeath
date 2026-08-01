@@ -163,7 +163,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
             .await
             .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
         let form_command = sdk_form_command(command.values, &current)?;
-        let connect_view = self
+        let connect_view = match self
             .service
             .apply(
                 session_id,
@@ -171,7 +171,15 @@ impl sdk::ConfigFormClient for ConnectFacade {
                 form_command,
             )
             .await
-            .map_err(connect_sdk_error)?;
+        {
+            Ok(view) => view,
+            Err(config::connect::ConnectError::Validation { .. }) => self
+                .service
+                .view(session_id)
+                .await
+                .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?,
+            Err(error) => return Err(connect_sdk_error(error)),
+        };
         provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
             .map(sdk_form_view)
             .map_err(form_sdk_error)

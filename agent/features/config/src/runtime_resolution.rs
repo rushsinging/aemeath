@@ -3,7 +3,7 @@
 //! Runtime 只消费本模块返回的已解析值，不再自行读取 Provider Catalog、Provider
 //! source 配置或拼接 User-Agent。
 
-use crate::catalog::find_by_driver;
+use crate::catalog::{find_by_driver, find_by_source};
 use crate::ports::SystemInformation;
 use crate::user_agent::{resolve_provider_user_agent_str, ProviderUserAgentInputs};
 use share::config::domain::models::ResolvedModel;
@@ -92,7 +92,8 @@ impl ProviderRuntimeResolver {
         base_url_override: Option<&str>,
     ) -> ResolvedProviderRuntimeConfig {
         let provider_base_url = non_empty(resolved_model.source_config.base_url.as_str());
-        let catalog = find_by_driver(&resolved_model.driver);
+        let catalog = find_by_source(&resolved_model.source_key)
+            .or_else(|| find_by_driver(&resolved_model.driver));
         let base_url = base_url_override
             .and_then(non_empty)
             .or(provider_base_url)

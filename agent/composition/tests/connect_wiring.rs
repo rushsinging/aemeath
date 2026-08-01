@@ -111,6 +111,59 @@ async fn generic_form_selection_preserves_identity_revision_and_server_navigatio
 }
 
 #[tokio::test]
+async fn invalid_form_submission_returns_same_page_with_server_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let bootstrap = build_connect_bootstrap_with_agents_dir(temp.path())
+        .await
+        .unwrap();
+    let initial = bootstrap
+        .forms
+        .start_form(
+            sdk::ConfigFormWorkflowId("provider_connect".to_string()),
+            sdk::ConfigFormOrigin::ExplicitCommand,
+        )
+        .await
+        .unwrap();
+    let endpoint = bootstrap
+        .forms
+        .submit_page(sdk::ConfigFormSubmitPage {
+            session_id: initial.session_id,
+            expected_revision: initial.revision,
+            values: vec![sdk::ConfigFormFieldValue {
+                field_id: sdk::ConfigFormFieldId("provider_source".to_string()),
+                value: sdk::ConfigFormValue::SelectedOption(sdk::ConfigFormOptionId(
+                    "Anthropic".to_string(),
+                )),
+            }],
+        })
+        .await
+        .unwrap();
+
+    let invalid = bootstrap
+        .forms
+        .submit_page(sdk::ConfigFormSubmitPage {
+            session_id: endpoint.session_id.clone(),
+            expected_revision: endpoint.revision,
+            values: vec![sdk::ConfigFormFieldValue {
+                field_id: sdk::ConfigFormFieldId("base_url".to_string()),
+                value: sdk::ConfigFormValue::Text(String::new()),
+            }],
+        })
+        .await
+        .expect("业务校验失败必须返回可继续交互的表单 view");
+
+    assert_eq!(invalid.session_id, endpoint.session_id);
+    assert_eq!(invalid.revision, endpoint.revision);
+    assert_eq!(invalid.page.id.as_str(), "edit_endpoint");
+    assert!(invalid
+        .page
+        .error
+        .as_ref()
+        .is_some_and(|error| error.message.contains("Base URL 不能为空")));
+    assert!(invalid.terminal.is_none());
+}
+
+#[tokio::test]
 async fn generic_form_cancel_publishes_only_cancelled_terminal() {
     let temp = tempfile::tempdir().unwrap();
     let bootstrap = build_connect_bootstrap_with_agents_dir(temp.path())
