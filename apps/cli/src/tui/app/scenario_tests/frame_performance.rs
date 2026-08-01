@@ -57,9 +57,10 @@ fn appending_after_cold_frame_touches_only_the_new_root() {
     assert_eq!(update.assemble_calls, 0);
     assert_eq!(update.retained_view_touched_roots, 1);
     assert_eq!(update.retained_view_created_roots, 1);
-    assert_eq!(
-        update.retained_view_reused_roots,
-        u64::try_from(prior_roots).unwrap()
+    assert!(update.retained_view_reused_roots > 0);
+    assert!(
+        update.retained_view_reused_roots <= u64::try_from(prior_roots).unwrap(),
+        "窗口滑动时只复用新窗口内仍可见的旧 roots"
     );
 }
 

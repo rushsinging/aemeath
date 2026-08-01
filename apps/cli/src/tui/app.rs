@@ -111,8 +111,8 @@ pub struct App {
     pub input_area: InputArea,
     pub status_bar: StatusBar,
     pub(crate) output_document_renderer: OutputDocumentRenderer,
-    /// memo：缓存上次 assemble 的 (revision, view_model)。revision 不变即复用，
-    /// 跳过 `assemble_from_conversation` 的全量遍历+clone（大会话伪卡死根治）。
+    /// 输出窗口状态：缓存轻量历史索引、当前物化窗口和渲染结果；
+    /// revision 不变时复用，避免重新同步和装配历史。
     pub(crate) output_view: OutputViewState,
     frame_diagnostics: FrameDiagnostics,
     process_memory: ProcessMemoryBaseline,

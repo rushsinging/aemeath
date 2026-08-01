@@ -2,7 +2,7 @@ use super::agent_progress::AgentProgressEntry;
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
 use super::chat_turn::ChatTurn;
-use super::ids::{ChatId, ChatTurnId};
+use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::interaction::{AgentRunState, InteractionState, UiRunId};
 use super::output_view_change::{
     OutputViewChange, OutputViewChanges, OutputViewCursor, OutputViewJournal,
@@ -42,7 +42,7 @@ pub struct ConversationModel {
     next_chat_sequence: usize,
     next_block_sequence: usize,
     /// 单调递增的内容版本号；每次产生 change 的 apply +1。
-    /// 供渲染层 memo `assemble_from_conversation`：revision 不变即可复用上次 view_model。
+    /// 供输出窗口同步判断当前物化结果是否仍可复用。
     revision: u64,
     output_view_journal: OutputViewJournal,
     pub(super) active_text_block_id: Option<String>,
@@ -119,6 +119,23 @@ impl ConversationModel {
 
     pub(crate) fn output_view_changes_since(&self, cursor: OutputViewCursor) -> OutputViewChanges {
         self.output_view_journal.changes_since(cursor)
+    }
+
+    pub(crate) fn tool_call(
+        &self,
+        chat_id: &ChatId,
+        turn_id: &ChatTurnId,
+        tool_call_id: &ToolCallId,
+    ) -> Option<&super::tool_call::ToolCall> {
+        self.chats
+            .iter()
+            .find(|chat| &chat.id == chat_id)?
+            .turns
+            .iter()
+            .find(|turn| &turn.id == turn_id)?
+            .tool_calls
+            .iter()
+            .find(|call| call.id.as_ref() == Some(tool_call_id))
     }
 
     fn publish_output_view_changes(

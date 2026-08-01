@@ -4,5 +4,6 @@ pub mod live_status;
 pub mod output;
 mod output_tool_lookup;
 pub mod output_tool_view;
+pub(crate) mod output_window_index;
 pub mod retained_output_view;
 pub mod status;

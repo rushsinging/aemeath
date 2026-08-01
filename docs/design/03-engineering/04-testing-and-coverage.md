@@ -565,14 +565,15 @@ Memory active+archive 与 legacy key migration 的跨 BC 场景不属于 #983；
 - **落盘 / Resume**：`session_envelope_codec.rs` 与 `session_recovery_scenarios.rs` 验证 persisted/unavailable projection、locator/reason 和 text 在 canonical envelope round-trip / Resume 后无损，完整 payload sentinel 不进入 Session bytes。
 - **兼容边界**：短 ToolResult 保持既有 typed content；旧 session 无 projection metadata 仍按 legacy content 读取；已有 `.txt` 绝对引用仍是普通文本且不被迁移或删除，新 AtomicBlob locator 不承诺复用旧物理布局。
 
-### 11.7a TUI Retained Output View 覆盖证据
+### 11.7a TUI 统一输出窗口覆盖证据
 
-- **L1**：`output_view_change_tests.rs` 验证模型 mutation 只发布稳定 identity，不携带正文或 ToolResult payload；journal 超出固定容量后返回 `RebuildRequired`。
-- **L2**：`retained_output_view_tests.rs` 验证初次 rebuild、append、流式 update、reset、placeholder 与 workspace 变化；append 后旧 `Arc<BlockNode>` backing 全部复用，update 只替换目标 root。
-- **L2 / L3**：完整 `assemble_from_conversation` 仅作为测试语义参考；生产 `RetainedOutputView` 通过按 timeline item 的 lookup 装配单 root，增量路径不构造完整 `ToolIndex`。
-- **L4**：`app/scenario_tests/frame_performance.rs` 在 5000 roots 场景验证 append 只 touched/created 1 个 root、旧 roots 全复用；tool lifecycle snapshot 验证工具完成状态不回退或重复显示。
-- **L0**：`check-tui-retained-output-view.sh` 禁止生产刷新恢复完整会话装配、旧 cache/Projection 命名或无界 journal；对应 guard fixture 覆盖三类故意违规。
-- **验证边界**：该证据证明 revision 更新不再重建 owned 全历史；renderer 的 viewport window、resize 惰性重排和有界 block/gutted cache 继续由既有 document renderer 测试覆盖。现场 RSS 与 Release P50/P95 仍须在固定大 Session 上单独复测，不能由确定性计数替代。
+- **L1**：`output_view_change_tests.rs` 验证模型 mutation 只发布稳定 identity，不携带正文或 ToolResult payload，journal 超出固定容量后返回 `RebuildRequired`；`output_window_index_tests.rs` 验证轻量顺序摘要、append/update/remove/reset、尾部窗口、offset、root 分隔行估算与精确行数失效。
+- **L2**：`retained_output_view_tests.rs` 验证冷启动 100,000 items 只物化请求窗口、append/stream update/reset/placeholder/workspace 变化共用 `materialize_window`，以及窗口内稳定 root backing 复用；`document_renderer` 测试验证只渲染已物化窗口、折叠历史提示、anchor 与缓存复用。
+- **L2 / L3**：`ConversationModel::find_tool_call` 是按 chat/turn/tool identity 的唯一窗口工具定位入口；`OutputViewAssembler::assemble_item` 只装配索引选中的 item，生产路径不构造完整 `ToolIndex` 或完整历史 roots。
+- **L4**：`frame_performance.rs` 验证冷帧、append、spinner 和 resize 都走同一窗口管线且静止帧不重建 document；`history_window.rs` 覆盖采用 Resume 历史后追加用户消息返回最新窗口；既有 selection/link/tool lifecycle 场景继续验证交互和终态显示不回归。
+- **性能门禁**：100,000 items 冷窗口断言 retained `BlockNode` 数受 20 行请求约束；ignored Release workload 在 100/1,000/5,000 roots 下记录 warm P50/P95，窗口 source lines 在大历史下保持有界。
+- **L0 / 退役**：`check-tui-retained-output-view.sh` 禁止完整历史 owner、完整 roots 装配、renderer 全历史 identity 扫描、旧 cache/Projection 命名和无界 journal；fixture 覆盖每类故意违规，非测试构建无 test-only dead-code warning。
+- **验证边界**：确定性计数与 Release workload 证明物化和渲染工作受窗口约束；真实 allocator RSS、physical footprint 与系统内存回收行为仍必须绑定 PID、binary SHA、Session 和采样窗口现场复测，不能由进程内测试替代。
 
 ### 11.8 #1062 Policy L0–L5 覆盖证据
 

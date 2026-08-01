@@ -14,9 +14,6 @@ use crate::tui::view_model::output::{
 };
 use ratatui::style::Style;
 use ratatui::text::Span;
-use std::collections::{HashMap, HashSet};
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::ops::Range;
 use std::rc::Rc;
 
 /// 输出文档渲染请求。窗口从完整语义树的最新端按完整 root group 选择。
@@ -28,11 +25,15 @@ pub struct OutputRenderWindow {
 
 impl OutputRenderWindow {
     /// 不限制 root 选择，供不需要历史窗口的独立 renderer 调用方使用。
-    const fn all() -> Self {
+    pub(crate) const fn all() -> Self {
         Self {
             line_limit: usize::MAX,
             tail_offset: 0,
         }
+    }
+
+    pub(crate) const fn all_for_internal() -> Self {
+        Self::all()
     }
 }
 
@@ -42,13 +43,6 @@ pub struct OutputRenderResult {
     pub document: RenderedDocument,
     pub source_total_lines: usize,
     pub folded_earlier_lines: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct SelectedRootWindow {
-    root_range: Range<usize>,
-    source_total_lines: usize,
-    folded_earlier_lines: usize,
 }
 
 /// gutted 缓存的 key：唯一决定 gutted block 内容（含 gutter）的所有参数。
@@ -61,48 +55,17 @@ struct GuttedKey {
     markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct RootLayoutKey {
-    fingerprint: u64,
-    outer_width: u16,
-    markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
-}
-
-impl RootLayoutKey {
-    fn matches_semantics(self, other: Self) -> bool {
-        self.fingerprint == other.fingerprint && self.markdown_spacing == other.markdown_spacing
-    }
-}
-
-#[derive(Clone, Copy)]
-struct RootLayoutEntry {
-    key: RootLayoutKey,
-    line_count: usize,
-    exact: bool,
-}
-
-#[derive(Clone, Copy, Default)]
-struct RootLayoutState {
-    line_count: usize,
-    needs_exact_layout: bool,
-}
-
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct RendererRetainedCacheCapacity {
     pub block_entries: usize,
     pub gutted_entries: usize,
-    pub root_layout_entries: usize,
     pub peak_block_entries: usize,
     pub peak_gutted_entries: usize,
-    pub peak_root_layout_entries: usize,
 }
 
 pub struct OutputDocumentRenderer {
     cache: BlockCache,
-    /// root 子树的轻量布局索引。只保留 key 与总行数，不持有 rendered lines。
-    /// 用于在执行 Markdown/diff/syntax render 前选择请求的历史窗口。
-    root_layouts: HashMap<String, RootLayoutEntry>,
     /// 带 gutter 的 block 缓存：key = block_id，value = (GuttedKey, gutted RenderedBlock)。
     /// 命中时直接 clone（lines 为 Rc，廉价）；未命中则走完整 render_self + apply_gutter 路径。
     gutted: BoundedLruMap<String, (GuttedKey, RenderedBlock)>,
@@ -125,7 +88,6 @@ impl OutputDocumentRenderer {
     fn with_render_cache_capacity(capacity: usize) -> Self {
         Self {
             cache: BlockCache::with_capacity(capacity),
-            root_layouts: HashMap::new(),
             gutted: BoundedLruMap::with_capacity(capacity),
             #[cfg(test)]
             retained_cache_peak: RendererRetainedCacheCapacity::default(),
@@ -226,110 +188,25 @@ impl OutputDocumentRenderer {
         outer_width: u16,
         animation_frame: u64,
         markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
-        window: OutputRenderWindow,
+        _window: OutputRenderWindow,
     ) -> OutputRenderResult {
         #[cfg(test)]
         let started = std::time::Instant::now();
-        let semantic_root_ids: HashSet<&str> = view_model
-            .roots
-            .iter()
-            .map(|root| root.block_id.as_str())
-            .collect();
-        self.root_layouts
-            .retain(|id, _| semantic_root_ids.contains(id.as_str()));
-
-        let mut root_layout_states = Vec::with_capacity(view_model.roots.len());
+        let mut groups = Vec::with_capacity(view_model.roots.len());
         for root in &view_model.roots {
-            let key = root_layout_key(root, outer_width, animation_frame, markdown_spacing);
-            let state = match self.root_layouts.get(&root.block_id).copied() {
-                Some(entry) if entry.key == key && entry.exact => RootLayoutState {
-                    line_count: entry.line_count,
-                    needs_exact_layout: false,
-                },
-                Some(entry) if entry.key.matches_semantics(key) => RootLayoutState {
-                    line_count: entry.line_count,
-                    needs_exact_layout: true,
-                },
-                _ => {
-                    let line_count = estimate_root_group_lines(root, outer_width);
-                    self.root_layouts.insert(
-                        root.block_id.clone(),
-                        RootLayoutEntry {
-                            key,
-                            line_count,
-                            exact: false,
-                        },
-                    );
-                    RootLayoutState {
-                        line_count,
-                        needs_exact_layout: true,
-                    }
-                }
-            };
-            root_layout_states.push(state);
-        }
-
-        let mut selected = select_root_window(&root_layout_states, window);
-        let mut selected_groups = HashMap::new();
-        loop {
-            let selected_stale = selected
-                .root_range
-                .clone()
-                .filter(|index| root_layout_states[*index].needs_exact_layout)
-                .collect::<Vec<_>>();
-            if selected_stale.is_empty() {
-                break;
-            }
-            for index in selected_stale {
-                let root = &view_model.roots[index];
-                let key = root_layout_key(root, outer_width, animation_frame, markdown_spacing);
-                let group =
-                    self.render_root_group(root, outer_width, animation_frame, markdown_spacing);
-                let line_count = root_group_line_count(&group);
-                self.root_layouts.insert(
-                    root.block_id.clone(),
-                    RootLayoutEntry {
-                        key,
-                        line_count,
-                        exact: true,
-                    },
-                );
-                root_layout_states[index] = RootLayoutState {
-                    line_count,
-                    needs_exact_layout: false,
-                };
-                selected_groups.insert(root.block_id.clone(), group);
-            }
-            selected = select_root_window(&root_layout_states, window);
-        }
-
-        let mut groups = Vec::with_capacity(selected.root_range.len());
-        for root in &view_model.roots[selected.root_range.clone()] {
-            if let Some(group) = selected_groups.remove(&root.block_id) {
-                groups.push(group);
-            } else {
-                groups.push(self.render_root_group(
-                    root,
-                    outer_width,
-                    animation_frame,
-                    markdown_spacing,
-                ));
-            }
+            groups.push(self.render_root_group(
+                root,
+                outer_width,
+                animation_frame,
+                markdown_spacing,
+            ));
         }
         let mut document = RenderedDocument::with_root_groups(groups);
-        if selected.folded_earlier_lines > 0 {
-            prepend_folded_history_hint(&mut document, selected.folded_earlier_lines);
+        let folded_earlier_lines = view_model.folded_earlier_lines;
+        if folded_earlier_lines > 0 {
+            prepend_folded_history_hint(&mut document, folded_earlier_lines);
             document.rebuild_line_index();
         }
-        let semantic_block_ids = collect_semantic_block_ids(&view_model.roots);
-        self.cache.retain(&semantic_block_ids);
-        let gutted_evictions = self
-            .gutted
-            .retain(|id, _| semantic_block_ids.contains(id.as_str()));
-        #[cfg(test)]
-        crate::tui::render::performance::record_gutted_cache_retain_evictions(gutted_evictions);
-        #[cfg(not(test))]
-        let _ = gutted_evictions;
         #[cfg(test)]
         {
             self.retained_cache_peak.peak_block_entries = self
@@ -340,16 +217,17 @@ impl OutputDocumentRenderer {
                 .retained_cache_peak
                 .peak_gutted_entries
                 .max(self.gutted.len());
-            self.retained_cache_peak.peak_root_layout_entries = self
-                .retained_cache_peak
-                .peak_root_layout_entries
-                .max(self.root_layouts.len());
             crate::tui::render::performance::record_document_render(started.elapsed());
         }
+        let source_total_lines = view_model.source_total_lines.unwrap_or_else(|| {
+            document
+                .total_lines()
+                .saturating_sub(usize::from(folded_earlier_lines > 0))
+        });
         OutputRenderResult {
             document,
-            source_total_lines: selected.source_total_lines,
-            folded_earlier_lines: selected.folded_earlier_lines,
+            source_total_lines,
+            folded_earlier_lines,
         }
     }
 
@@ -509,7 +387,6 @@ impl OutputDocumentRenderer {
         RendererRetainedCacheCapacity {
             block_entries: self.cache.len(),
             gutted_entries: self.gutted.len(),
-            root_layout_entries: self.root_layouts.len(),
             ..self.retained_cache_peak
         }
     }
@@ -524,31 +401,6 @@ impl OutputDocumentRenderer {
     pub fn gutted_render_count(&self) -> usize {
         self.gutted_render_count.get()
     }
-}
-
-fn root_group_line_count(group: &[RenderedBlock]) -> usize {
-    group
-        .iter()
-        .map(|block| block.lines.len())
-        .fold(0usize, usize::saturating_add)
-}
-
-fn estimate_root_group_lines(root: &BlockNode, outer_width: u16) -> usize {
-    fn estimate(node: &BlockNode, outer_width: u16, depth: usize) -> usize {
-        let effective_depth = if gutter::is_gutter_suppressed(outer_width) || outer_width < 50 {
-            0
-        } else {
-            depth
-        };
-        let text_width = gutter::effective_block_width(outer_width, effective_depth) as usize;
-        let own_lines =
-            estimate_block_lines(&node.kind, text_width).saturating_add(usize::from(depth == 0));
-        node.children.iter().fold(own_lines, |total, child| {
-            total.saturating_add(estimate(child, outer_width, depth + 1))
-        })
-    }
-
-    estimate(root, outer_width, 0).max(1)
 }
 
 fn estimate_block_lines(kind: &OutputBlockKind, text_width: usize) -> usize {
@@ -668,125 +520,6 @@ fn estimate_wrapped_line_count(line: &str, width: usize) -> usize {
     }
     let width = width.max(1);
     str_display_width(line).max(1).div_ceil(width)
-}
-
-fn collect_semantic_block_ids(roots: &[std::sync::Arc<BlockNode>]) -> HashSet<&str> {
-    fn collect<'a>(node: &'a BlockNode, ids: &mut HashSet<&'a str>) {
-        ids.insert(node.block_id.as_str());
-        for child in &node.children {
-            collect(child, ids);
-        }
-    }
-
-    let mut ids = HashSet::new();
-    for root in roots {
-        collect(root, &mut ids);
-    }
-    ids
-}
-
-fn root_layout_key(
-    root: &BlockNode,
-    outer_width: u16,
-    _animation_frame: u64,
-    markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
-) -> RootLayoutKey {
-    let mut hasher = DefaultHasher::new();
-    hash_node_layout(root, &mut hasher);
-    RootLayoutKey {
-        fingerprint: hasher.finish(),
-        outer_width,
-        markdown_spacing,
-    }
-}
-
-fn hash_node_layout(node: &BlockNode, hasher: &mut DefaultHasher) {
-    node.block_id.hash(hasher);
-    node.block_version.hash(hasher);
-    node.children.len().hash(hasher);
-    for child in &node.children {
-        hash_node_layout(child, hasher);
-    }
-}
-
-/// 根据已知 root group 行数，从最新端跳过 `tail_offset` 覆盖的完整 root，
-/// 再向旧端选择 `line_limit` 覆盖的完整 root。边界 root 永不拆分。
-fn select_root_window_from_counts(
-    root_line_counts: &[usize],
-    window: OutputRenderWindow,
-) -> SelectedRootWindow {
-    let source_total_lines = root_line_counts
-        .iter()
-        .fold(0usize, |total, lines| total.saturating_add(*lines));
-    select_root_range(root_line_counts, window, source_total_lines)
-}
-
-fn select_root_window(
-    root_layout_states: &[RootLayoutState],
-    window: OutputRenderWindow,
-) -> SelectedRootWindow {
-    let source_total_lines = root_layout_states.iter().fold(0usize, |total, state| {
-        total.saturating_add(state.line_count)
-    });
-    if window.tail_offset >= source_total_lines {
-        let exact_prefix_lines = root_layout_states
-            .iter()
-            .scan(true, |prefix_exact, state| {
-                *prefix_exact &= !state.needs_exact_layout;
-                Some(if *prefix_exact { state.line_count } else { 0 })
-            })
-            .collect::<Vec<_>>();
-        return select_root_range(&exact_prefix_lines, window, source_total_lines);
-    }
-    let estimated_lines = root_layout_states
-        .iter()
-        .map(|state| state.line_count)
-        .collect::<Vec<_>>();
-    select_root_range(&estimated_lines, window, source_total_lines)
-}
-
-fn select_root_range(
-    root_line_counts: &[usize],
-    window: OutputRenderWindow,
-    source_total_lines: usize,
-) -> SelectedRootWindow {
-    if window.line_limit == 0 || root_line_counts.is_empty() {
-        return SelectedRootWindow {
-            root_range: root_line_counts.len()..root_line_counts.len(),
-            source_total_lines,
-            folded_earlier_lines: source_total_lines,
-        };
-    }
-
-    let mut end = root_line_counts.len();
-    let mut skipped_newer_lines = 0usize;
-    while end > 0 && skipped_newer_lines < window.tail_offset {
-        end -= 1;
-        skipped_newer_lines = skipped_newer_lines.saturating_add(root_line_counts[end]);
-    }
-
-    let mut start = end;
-    let mut selected_lines = 0usize;
-    while start > 0 {
-        let candidate_lines = root_line_counts[start - 1];
-        if selected_lines > 0 && selected_lines.saturating_add(candidate_lines) > window.line_limit
-        {
-            break;
-        }
-        start -= 1;
-        selected_lines = selected_lines.saturating_add(candidate_lines);
-        if selected_lines > window.line_limit {
-            break;
-        }
-    }
-
-    SelectedRootWindow {
-        root_range: start..end,
-        source_total_lines,
-        folded_earlier_lines: root_line_counts[..start]
-            .iter()
-            .fold(0usize, |total, lines| total.saturating_add(*lines)),
-    }
 }
 
 fn prepend_folded_history_hint(document: &mut RenderedDocument, folded_lines: usize) {

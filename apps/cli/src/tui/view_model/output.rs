@@ -8,6 +8,8 @@ pub struct OutputViewModel {
     pub roots: Vec<Arc<BlockNode>>,
     pub version: u64,
     pub follow_tail_hint: bool,
+    pub source_total_lines: Option<usize>,
+    pub folded_earlier_lines: usize,
 }
 
 impl OutputViewModel {
@@ -17,6 +19,8 @@ impl OutputViewModel {
             roots: roots.into_iter().map(Arc::new).collect(),
             version,
             follow_tail_hint,
+            source_total_lines: None,
+            folded_earlier_lines: 0,
         }
     }
 }
@@ -27,6 +31,8 @@ impl Default for OutputViewModel {
             roots: Vec::new(),
             version: 0,
             follow_tail_hint: true,
+            source_total_lines: None,
+            folded_earlier_lines: 0,
         }
     }
 }

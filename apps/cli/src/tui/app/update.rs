@@ -575,9 +575,22 @@ impl App {
         let width = self.output_document_width();
         let cache = &mut self.output_view;
         let workspace_root = current_workspace_root.as_deref().map(std::path::Path::new);
-        let sync_stats = cache
-            .retained
-            .sync(&self.model.conversation, workspace_root);
+        let requested_window = crate::tui::render::output::document_renderer::OutputRenderWindow {
+            line_limit: self.view_state.output.render_line_limit(),
+            tail_offset: self.view_state.output.history_window_tail_offset,
+        };
+        let requested_window = if requested_window.line_limit >= usize::MAX / 2 {
+            crate::tui::render::output::document_renderer::OutputRenderWindow::all()
+        } else {
+            requested_window
+        };
+        let materialized = cache.retained.materialize_window(
+            &self.model.conversation,
+            workspace_root,
+            requested_window,
+        );
+        let indexed_items = materialized.indexed_items;
+        let sync_stats = materialized.stats;
         #[cfg(test)]
         crate::tui::render::performance::record_retained_view_sync(
             sync_stats.touched_roots,
@@ -589,15 +602,9 @@ impl App {
         if need_rebuild {
             self.assemble_count = self.assemble_count.saturating_add(1);
         }
-        let view_model = cache.retained.view_model();
+        let view_model = &materialized.view_model;
         let root_count = view_model.roots.len();
         // 文档构建（含各 block 的字符串处理）放在 draw 之外，draw 循环的 catch_unwind
-        // 只保护「把已构建文档画进 buffer」，无法兜住这里的 panic。对称地在构建侧兜底：
-        // 一旦构建 panic（已落 panic.log），保留旧文档并提示用户，避免崩溃与糊屏。
-        let requested_window = crate::tui::render::output::document_renderer::OutputRenderWindow {
-            line_limit: self.view_state.output.render_line_limit(),
-            tail_offset: self.view_state.output.history_window_tail_offset,
-        };
         let rebuilt_anchor: Option<(RenderedLineAnchor, usize)> =
             if !self.view_state.output.auto_scroll {
                 let old_total_lines = self.output_area.document().total_lines();
@@ -616,12 +623,12 @@ impl App {
                 None
             };
         crate::tui::log_debug!(
-            "tui.output.window_rebuild stage=request revision={} width={} term_width={} roots={} before_document_lines={} requested_line_limit={} requested_tail_offset={} scroll_offset={} auto_scroll={} visible_height={} source_total_lines={} need_view_model_rebuild={}",
+            "tui.output.window_rebuild stage=request revision={} width={} term_width={} indexed_items={} roots={} before_document_lines={} requested_line_limit={} requested_tail_offset={} scroll_offset={} auto_scroll={} visible_height={} source_total_lines={} need_view_model_rebuild={}",
             revision,
             width,
             self.output_area.term_width,
-            root_count,
-            before_lines,
+            indexed_items,
+            root_count,            before_lines,
             requested_window.line_limit,
             requested_window.tail_offset,
             self.view_state.output.scroll_offset,

@@ -28,15 +28,6 @@ impl ToolCallLookup for ConversationToolLookup<'_> {
         turn_id: &ChatTurnId,
         tool_id: &ToolCallId,
     ) -> Option<&'a ToolCall> {
-        self.conversation
-            .chats
-            .iter()
-            .find(|chat| &chat.id == chat_id)?
-            .turns
-            .iter()
-            .find(|turn| &turn.id == turn_id)?
-            .tool_calls
-            .iter()
-            .find(|call| call.id.as_ref() == Some(tool_id))
+        self.conversation.tool_call(chat_id, turn_id, tool_id)
     }
 }
