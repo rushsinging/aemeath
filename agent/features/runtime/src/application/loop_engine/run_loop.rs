@@ -120,6 +120,10 @@ impl<'a> RunLoop<'a> {
         self.lifecycle.clear_step_scope(run_id, step_id);
     }
 
+    pub(super) fn clear_cancelled_step_scope(&self, run_id: &sdk::RunId, step_id: &sdk::RunStepId) {
+        self.lifecycle.clear_cancelled_step_scope(run_id, step_id);
+    }
+
     pub(super) fn interaction_port(
         &self,
     ) -> &dyn crate::application::interaction::port::InteractionPort {

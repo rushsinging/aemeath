@@ -2,7 +2,7 @@ use super::*;
 use crate::domain::agent_run::{ActiveRunPort, RunControl};
 
 #[test]
-fn cancel_current_run_without_step_terminates_session_run() {
+fn cancel_current_run_without_step_is_noop_without_terminating() {
     let registry = ActiveRunRegistry::default();
     let run_id = sdk::RunId::new_v7();
     let root = CancellationToken::new();
@@ -12,18 +12,35 @@ fn cancel_current_run_without_step_terminates_session_run() {
 
     assert_eq!(
         registry.cancel_current_run(deadline),
-        sdk::CancelCurrentRunOutcome::Accepted
+        sdk::CancelCurrentRunOutcome::AlreadyCancelling
     );
-    assert!(root.is_cancelled());
-    assert_eq!(
-        registry.take_control(&run_id),
-        Some(RunControl::Terminate {
-            reason: sdk::RunTerminationReason::UserExit,
-            deadline,
-        })
-    );
+    assert!(!root.is_cancelled());
+    assert_eq!(registry.take_control(&run_id), None);
 }
 
+#[test]
+fn repeated_identity_free_cancel_while_step_is_cancelling_remains_step_scoped() {
+    let registry = ActiveRunRegistry::default();
+    let run_id = sdk::RunId::new_v7();
+    let step_id = sdk::RunStepId::new_v7();
+    let root = CancellationToken::new();
+    let step = root.child_token();
+    let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
+
+    registry.activate_session(run_id.clone(), root.clone());
+    registry.set_active_step(&run_id, step_id, step.clone());
+
+    assert_eq!(
+        registry.cancel_current_run(deadline),
+        sdk::CancelCurrentRunOutcome::Accepted
+    );
+    assert_eq!(
+        registry.cancel_current_run(deadline),
+        sdk::CancelCurrentRunOutcome::AlreadyCancelling
+    );
+    assert!(step.is_cancelled());
+    assert!(!root.is_cancelled());
+}
 #[test]
 fn derived_run_does_not_replace_current_session_run() {
     let registry = ActiveRunRegistry::default();
@@ -62,36 +79,29 @@ fn clearing_old_session_run_preserves_new_current_run() {
 
     assert_eq!(
         registry.cancel_current_run(deadline),
-        sdk::CancelCurrentRunOutcome::Accepted
+        sdk::CancelCurrentRunOutcome::AlreadyCancelling
     );
-    assert!(current_root.is_cancelled());
+    assert!(!current_root.is_cancelled());
 }
 
 #[test]
-fn clearing_active_step_makes_identity_free_cancel_terminate_session_run() {
+fn cancel_during_drain_interrupts_root_without_terminate_control() {
     let registry = ActiveRunRegistry::default();
     let run_id = sdk::RunId::new_v7();
     let step_id = sdk::RunStepId::new_v7();
     let root = CancellationToken::new();
-    let step = root.child_token();
     let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
 
     registry.activate_session(run_id.clone(), root.clone());
-    registry.set_active_step(&run_id, step_id.clone(), step.clone());
-    registry.clear_active_step(&run_id, &step_id);
+    registry.set_active_step(&run_id, step_id.clone(), root.child_token());
+    ActiveRunPort::clear_cancelled_step(&registry, &run_id, &step_id);
 
     assert_eq!(
         registry.cancel_current_run(deadline),
-        sdk::CancelCurrentRunOutcome::Accepted
+        sdk::CancelCurrentRunOutcome::AlreadyCancelling
     );
     assert!(root.is_cancelled());
-    assert_eq!(
-        registry.take_control(&run_id),
-        Some(RunControl::Terminate {
-            reason: sdk::RunTerminationReason::UserExit,
-            deadline,
-        })
-    );
+    assert_eq!(registry.take_control(&run_id), None);
 }
 
 #[test]

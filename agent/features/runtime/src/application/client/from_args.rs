@@ -1176,9 +1176,9 @@ mod tests {
 
         assert_eq!(
             client.cancel_current_run(deadline),
-            sdk::CancelCurrentRunOutcome::Accepted
+            sdk::CancelCurrentRunOutcome::AlreadyCancelling
         );
-        assert!(cancel.is_cancelled());
+        assert!(!cancel.is_cancelled());
     }
 
     /// #1385 Task 7: `tui_launch_context()` reads binding from

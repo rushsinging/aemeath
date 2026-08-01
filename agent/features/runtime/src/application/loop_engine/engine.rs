@@ -324,6 +324,7 @@ pub trait RunLifecyclePort: Send + Sync {
         cancel: CancellationToken,
     );
     fn clear_step_scope(&self, run_id: &sdk::RunId, step_id: &sdk::RunStepId);
+    fn clear_cancelled_step_scope(&self, run_id: &sdk::RunId, step_id: &sdk::RunStepId);
 }
 
 #[async_trait]
@@ -2456,6 +2457,7 @@ async fn finish_cancelled_step(
     )
     .await?;
     run.finish_cancelled_step(step_id)?;
+    port.clear_cancelled_step_scope(run.id(), step_id);
     emit_events(run, execution, port).await
 }
 

@@ -80,6 +80,12 @@ impl RunLifecyclePort for ActiveRunLifecycle<'_> {
             active_run.clear_active_step(run_id, step_id);
         }
     }
+
+    fn clear_cancelled_step_scope(&self, run_id: &sdk::RunId, step_id: &sdk::RunStepId) {
+        if let StepScopeRegistration::Active(active_run) = self.step_scope {
+            active_run.clear_cancelled_step(run_id, step_id);
+        }
+    }
 }
 
 pub(crate) struct FixedPlanApproval {

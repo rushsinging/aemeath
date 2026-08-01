@@ -30,6 +30,22 @@ fn busy_cancel_effect_carries_no_runtime_identity() {
 }
 
 #[test]
+fn busy_repeated_ctrl_c_sends_cancel_again_without_quitting() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.app.chat.start_processing();
+    harness.app.chat.start_cancelling();
+    harness.expect_effect(ExpectedEffect::CancelCurrentRun { replies: vec![] });
+
+    harness.key(input::press(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+    assert!(matches!(
+        harness.effects(),
+        [crate::tui::effect::effect::Effect::CancelCurrentRun]
+    ));
+    assert!(!harness.app.layout.should_exit);
+    harness.assert_idle();
+}
+#[test]
 fn cancel_and_quit_effects_are_explicit() {
     let mut busy = TuiScenarioHarness::new(100, 30);
     busy.app.chat.start_processing();

@@ -555,10 +555,13 @@ impl ScenarioLoopHarness {
         }
     }
 
-    pub(crate) fn blocks_in_model() -> Self {
+    pub(crate) fn cancels_in_model_then_seals() -> Self {
         Self {
             scenario: ScriptedScenario {
-                block_model_forever: true,
+                cancel_when_model_starts: true,
+                model_steps: VecDeque::from([ModelStep::Complete {
+                    text: "cancelled".to_string(),
+                }]),
                 ..Default::default()
             },
         }
@@ -919,6 +922,11 @@ impl RunLifecyclePort for RunLifecycleFake {
     }
 
     fn clear_step_scope(&self, _run_id: &sdk::RunId, _step_id: &sdk::RunStepId) {}
+
+    fn clear_cancelled_step_scope(&self, _run_id: &sdk::RunId, step_id: &sdk::RunStepId) {
+        self.state.lock().unwrap().registered_step = None;
+        let _ = step_id;
+    }
 }
 
 #[async_trait::async_trait]

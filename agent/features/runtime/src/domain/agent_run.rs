@@ -23,6 +23,9 @@ pub trait ActiveRunPort: Send + Sync {
     fn activate_session(&self, run_id: RunId, cancel: CancellationToken);
     fn set_active_step(&self, _run_id: &RunId, _step_id: RunStepId, _cancel: CancellationToken) {}
     fn clear_active_step(&self, _run_id: &RunId, _step_id: &RunStepId) {}
+    fn clear_cancelled_step(&self, run_id: &RunId, step_id: &RunStepId) {
+        self.clear_active_step(run_id, step_id);
+    }
     fn take_control(&self, _run_id: &RunId) -> Option<RunControl> {
         None
     }
