@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use async_trait::async_trait;
 use context::adapters::{CanonicalSessionRepository, CanonicalSessionWriter};
 use context::domain::session::{
-    AcceptedInputProjection, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
+    AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
     SnapshotState,
 };
 use context::domain::{
@@ -481,13 +481,13 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
             "run",
             vec![CommittedRunStep {
                 step_id: "step".to_string(),
-                accepted_input: Some(AcceptedInputProjection::new(
+                accepted_input: Some(AcceptedInputRecord::new(
                     vec![Message::user("accepted")],
                     "input",
                     revision,
                 )),
                 outcome: Some(
-                    context::domain::session::FinalizedOutcomeProjection::compatibility(vec![
+                    context::domain::session::FinalizedOutcomeRecord::compatibility(vec![
                         tool_result,
                     ]),
                 ),
@@ -895,7 +895,7 @@ async fn snapshot_reads_structured_projection_not_legacy_chats() {
             "run",
             vec![CommittedRunStep::accepted_only(
                 "step",
-                AcceptedInputProjection::new(vec![Message::user("structured-only")], "fp", 0),
+                AcceptedInputRecord::new(vec![Message::user("structured-only")], "fp", 0),
             )],
         )],
         committed_steps: vec![],

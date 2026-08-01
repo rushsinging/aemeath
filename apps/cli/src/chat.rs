@@ -1,4 +1,5 @@
 use crate::args::Args;
+use std::io::IsTerminal;
 
 pub(crate) mod no_tui;
 
@@ -26,6 +27,37 @@ fn should_emit_quiet_cli_diagnostic_log(quiet: bool) -> bool {
 /// 主聊天逻辑 — 瘦身入口（CLI 通过 composition 装配 runtime）。
 pub(crate) async fn run_chat(args: Args) {
     let quiet = args.quiet;
+    let interactive = !quiet && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    match composition::app::prepare_first_chat(interactive).await {
+        Ok(Some(first_chat)) => {
+            match crate::subcommand::connect_command::run_connect_command_with_origin(
+                first_chat.forms.clone(),
+                sdk::ConfigFormOrigin::FirstChatBootstrap,
+            )
+            .await
+            {
+                Ok(sdk::ConfigFormTerminal::Completed { .. }) => {}
+                Ok(sdk::ConfigFormTerminal::Cancelled) => {
+                    if let Err(error) = first_chat.rollback().await {
+                        eprintln!("Error: {error}");
+                    }
+                    return;
+                }
+                Err(error) => {
+                    if let Err(rollback_error) = first_chat.rollback().await {
+                        eprintln!("Error: {rollback_error}");
+                    }
+                    eprintln!("Error: {error}");
+                    return;
+                }
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("Error: {error}");
+            return;
+        }
+    }
     let bootstrap = composition::app::build_agent_bootstrap(args.into())
         .await
         .unwrap_or_else(|e| {

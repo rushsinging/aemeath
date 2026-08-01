@@ -89,7 +89,7 @@ Context Management 构建 Context Window；Provider 只接收已经装配完成�
 
 ### Workflow / Config
 
-Workflow 根据 Reasoning Node 发布固定默认 desired effort（Config `reasoning_graph` 含 `max_reasoning` 已退役，#921）。Runtime 在构建 Context Window 前调用 Provider resolver；Provider 根据目标模型能力做最后一道 clamp，并返回带 capability fingerprint 的不可变 options。Runtime 把同一个 effective 档位交给 Prompt 与 `InvocationRequest`，Provider `invoke` 只校验后映射到 wire 字段。Provider 不读取散点 env，也不拥有用户默认值。
+Workflow 根据 Reasoning Node 发布固定默认 desired effort（Config `reasoning_graph` 含 `max_reasoning` 已退役，#921）。Runtime 在构建 Context Window 前调用 Provider resolver；Provider 根据目标模型能力做最后一道 clamp，并返回带 capability fingerprint 的不可变 options。Runtime 把同一个 effective 档位交给 Prompt 与 `InvocationRequest`，Provider `invoke` 只校验后映射到 wire 字段。Provider 不读取散点 env，也不拥有用户默认值。Provider Catalog、Provider 专属/官方 SDK/全局 UA 四级解析与 Connect 状态属于 Config；Provider 仅实现 Config-owned 最小 Probe port，并让 Probe 与正式调用复用 request ACL。完整边界见 [Config Connect 设计](../config/02-provider-catalog-and-connect.md)。
 
 > **v0.1.0 scope（#921 收缩）**：resolver 领域模型已完成迁移但 Runtime 尚未在生产链路调用 resolver；端到端 clamp 链是 Target 设计，v0.1.0 未接生产链路。是否接线由 v0.2.0 #1142 决策；#1142 仍延期，**NEVER** 冒充完成。
 

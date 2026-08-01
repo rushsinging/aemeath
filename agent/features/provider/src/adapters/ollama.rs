@@ -64,14 +64,14 @@ impl OllamaProvider {
         timeout_secs: u64,
         user_agent: String,
     ) -> Self {
+        let base_url = base_url.expect("Provider construction 必须传入已解析 base URL");
+        let model = model.expect("Provider construction 必须传入已解析模型");
         Self {
-            base_url: {
-                let url = base_url.unwrap_or_else(|| "http://localhost:11434".to_string());
-                url.trim_end_matches('/')
-                    .trim_end_matches("/v1")
-                    .to_string()
-            },
-            model: model.unwrap_or_else(|| "llama3.2".to_string()),
+            base_url: base_url
+                .trim_end_matches('/')
+                .trim_end_matches("/v1")
+                .to_string(),
+            model,
             api_key,
             user_agent,
             http: reqwest::Client::builder()
@@ -234,8 +234,8 @@ mod tests {
     fn custom_user_agent_is_sent_in_ollama_headers() {
         let provider = OllamaProvider::new_with_user_agent(
             "ollama".to_string(),
-            None,
-            None,
+            Some("http://localhost:11434".to_string()),
+            Some("test-model".to_string()),
             8192,
             false,
             60,
@@ -274,7 +274,7 @@ mod tests {
                 reasoning: false,
                 reasoning_config: None,
                 timeout_secs: 60,
-                user_agent: None,
+                user_agent: Some("aemeath-test/1.0".to_string()),
             })
             .expect("valid ollama config");
         let scope = InvocationScope::new(

@@ -18,6 +18,7 @@ fn resolver_config() -> ModelsConfig {
                 api_style: None,
                 ..Default::default()
             }],
+            user_agent: None,
         },
     );
     providers.insert(
@@ -36,6 +37,7 @@ fn resolver_config() -> ModelsConfig {
                 api_style: None,
                 ..Default::default()
             }],
+            user_agent: None,
         },
     );
     ModelsConfig {

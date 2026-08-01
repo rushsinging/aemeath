@@ -20,6 +20,7 @@ fn test_config() -> ModelsConfig {
                 reasoning_effort: None,
                 api_style: None,
             }],
+            user_agent: None,
         },
     );
     ModelsConfig {

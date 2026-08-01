@@ -152,7 +152,7 @@ impl LlmClient {
             driver: ProviderDriverKind::Anthropic,
             api_key,
             base_url: None,
-            model: None,
+            model: Some("claude-sonnet-5".to_string()),
             max_tokens: 8192,
             reasoning: false,
             reasoning_config: None,
@@ -241,37 +241,63 @@ impl LlmClient {
     pub fn from_config(options: LlmConfigOptions) -> Result<Self, crate::LlmError> {
         use crate::domain::driver_acl::{ApiStyle, DriverSpec, ProtocolFamily};
 
+        if options
+            .base_url
+            .as_deref()
+            .is_none_or(|base_url| base_url.trim().is_empty())
+        {
+            return Err(crate::LlmError::Config(
+                "Provider base URL 未解析：调用方必须传入 Config Catalog 或用户配置值".to_string(),
+            ));
+        }
+        if options.model.trim().is_empty() {
+            return Err(crate::LlmError::Config(
+                "Provider 模型未解析：调用方必须传入 Config Catalog 或用户配置值".to_string(),
+            ));
+        }
+        if options
+            .user_agent
+            .as_deref()
+            .is_none_or(|user_agent| user_agent.trim().is_empty())
+        {
+            return Err(crate::LlmError::Config(
+                "Provider User-Agent 未解析：调用方必须传入 Config resolver 的最终值".to_string(),
+            ));
+        }
+
         let spec = DriverSpec::parse(&options.driver, options.api_style.as_deref())
             .map_err(|error| crate::LlmError::Config(error.to_string()))?;
         let driver = spec.kind();
         let requested_reasoning =
             reasoning_level_from_options(options.reasoning, options.reasoning_config.as_ref());
-        let model = options.model.clone();
+        let user_agent = options
+            .user_agent
+            .expect("Provider User-Agent 已在 from_config 入口校验");
+        let base_url = options
+            .base_url
+            .expect("Provider base URL 已在 from_config 入口校验");
+        let model = options.model;
         let provider_impl: Arc<dyn LlmProvider> = match spec.family() {
             ProtocolFamily::AnthropicMessages => {
                 Arc::new(crate::adapters::AnthropicProvider::new_with_user_agent(
                     options.api_key,
-                    options.base_url,
-                    Some(options.model),
+                    Some(base_url),
+                    Some(model.clone()),
                     options.max_tokens,
                     crate::ports::ReasoningLevel::Off,
                     options.timeout_secs,
-                    options
-                        .user_agent
-                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
+                    user_agent,
                 ))
             }
             ProtocolFamily::OllamaNative => {
                 Arc::new(crate::adapters::OllamaProvider::new_with_user_agent(
                     options.api_key,
-                    options.base_url,
-                    Some(options.model),
+                    Some(base_url),
+                    Some(model.clone()),
                     options.max_tokens,
                     options.reasoning,
                     options.timeout_secs,
-                    options
-                        .user_agent
-                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
+                    user_agent,
                 ))
             }
             ProtocolFamily::OpenAi(api_style) => {
@@ -281,15 +307,13 @@ impl LlmClient {
                     crate::adapters::OpenAICompatibleProvider::new_with_user_agent(
                         config,
                         options.api_key,
-                        options.base_url,
-                        Some(options.model),
+                        Some(base_url),
+                        Some(model.clone()),
                         options.max_tokens,
                         options.reasoning,
                         options.reasoning_config,
                         options.timeout_secs,
-                        options
-                            .user_agent
-                            .unwrap_or_else(|| share::config::Config::default().api.user_agent),
+                        user_agent,
                     ),
                 )
             }

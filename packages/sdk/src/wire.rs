@@ -9,11 +9,12 @@ use serde_json::{json, Map, Value};
 use crate::{
     CancelCurrentRunOutcome, CancelRunOutcome, CancelRunStepOutcome, ChatEventContext, ChatMessage,
     ConfigChangedEvent, ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView,
-    ControlDeadline, ElementSpacingView, HookMessageView, InteractionCancelReason,
-    InteractionCommandOutcome, InteractionReply, InteractionRequest, InteractionRequestBody,
-    MarkdownSpacingModeView, MarkdownSpacingOverridesView, ModelSummary, ProjectContext,
-    ReflectionHistoryView, RunTerminationReason, SessionResumeFailureKind, SessionSnapshot,
-    SessionSummary, TerminateRunOutcome, WorkspaceContextView,
+    ConnectCommand, ConnectErrorView, ConnectOutcome, ConnectView, ControlDeadline,
+    ElementSpacingView, HookMessageView, InteractionCancelReason, InteractionCommandOutcome,
+    InteractionReply, InteractionRequest, InteractionRequestBody, MarkdownSpacingModeView,
+    MarkdownSpacingOverridesView, ModelSummary, ProjectContext, ReflectionHistoryView,
+    RunTerminationReason, SessionResumeFailureKind, SessionSnapshot, SessionSummary,
+    TerminateRunOutcome, WorkspaceContextView,
 };
 
 /// 生成供未来 Server adapter 组装 OpenAPI components 的 JSON Schema 文档。
@@ -40,6 +41,10 @@ pub fn components_document() -> Value {
     register::<ConfigUpdateResult>(&mut definitions);
     register::<ConfigChangedEvent>(&mut definitions);
     register::<ConfigReloadedEvent>(&mut definitions);
+    register::<ConnectCommand>(&mut definitions);
+    register::<ConnectView>(&mut definitions);
+    register::<ConnectErrorView>(&mut definitions);
+    register::<ConnectOutcome>(&mut definitions);
     register::<ProjectContext>(&mut definitions);
     register::<ModelSummary>(&mut definitions);
     register::<ReflectionHistoryView>(&mut definitions);
