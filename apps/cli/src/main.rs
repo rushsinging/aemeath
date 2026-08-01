@@ -55,7 +55,7 @@ async fn main() {
                     eprintln!("Error: {error}");
                     std::process::exit(1);
                 });
-            subcommand::connect_command::run_connect_command(bootstrap.connect)
+            subcommand::connect_command::run_connect_command(bootstrap.forms)
                 .await
                 .unwrap_or_else(|error| {
                     eprintln!("Error: {error}");

@@ -295,6 +295,81 @@ pub(crate) async fn execute_form_effect(
     }
 }
 
+pub(crate) async fn run_config_form(
+    client: std::sync::Arc<dyn sdk::ConfigFormClient>,
+    workflow_id: sdk::ConfigFormWorkflowId,
+    origin: sdk::ConfigFormOrigin,
+) -> Result<sdk::ConfigFormTerminal, sdk::SdkError> {
+    use crossterm::event::{self, Event, KeyEventKind};
+    use crossterm::execute;
+    use crossterm::terminal::{
+        disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    };
+    use ratatui::backend::CrosstermBackend;
+    use ratatui::Terminal;
+    use std::io;
+
+    struct FormTerminalGuard {
+        terminal: Terminal<CrosstermBackend<io::Stdout>>,
+    }
+    impl Drop for FormTerminalGuard {
+        fn drop(&mut self) {
+            let _ = disable_raw_mode();
+            let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+            let _ = self.terminal.show_cursor();
+        }
+    }
+
+    enable_raw_mode().map_err(|error| sdk::SdkError::Internal(error.to_string()))?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)
+        .map_err(|error| sdk::SdkError::Internal(error.to_string()))?;
+    let terminal = Terminal::new(CrosstermBackend::new(stdout))
+        .map_err(|error| sdk::SdkError::Internal(error.to_string()))?;
+    let mut guard = FormTerminalGuard { terminal };
+    let view = client.start_form(workflow_id, origin).await?;
+    let mut model = ConfigFormModel::new(view);
+
+    loop {
+        guard
+            .terminal
+            .draw(|frame| {
+                super::config_form_render::render_config_form(
+                    frame,
+                    model.view(),
+                    &model.visible_input(),
+                    model.scroll(),
+                )
+            })
+            .map_err(|error| sdk::SdkError::Internal(error.to_string()))?;
+        if let Some(terminal) = model.view().terminal.clone() {
+            return Ok(terminal);
+        }
+        if let Some(effect) = model.refresh_effect() {
+            let view = execute_form_effect(client.as_ref(), effect)
+                .await?
+                .ok_or_else(|| sdk::SdkError::Internal("Config Form 会话不存在".to_string()))?;
+            model.replace_view(view);
+            continue;
+        }
+        let Event::Key(key) =
+            event::read().map_err(|error| sdk::SdkError::Internal(error.to_string()))?
+        else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        let Some(effect) = model.update(key) else {
+            continue;
+        };
+        let view = execute_form_effect(client.as_ref(), effect)
+            .await?
+            .ok_or_else(|| sdk::SdkError::Internal("Config Form 会话不存在".to_string()))?;
+        model.replace_view(view);
+    }
+}
+
 #[cfg(test)]
 #[path = "config_form_tests.rs"]
 mod tests;

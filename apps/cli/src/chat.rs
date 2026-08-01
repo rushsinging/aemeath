@@ -31,13 +31,13 @@ pub(crate) async fn run_chat(args: Args) {
     match composition::app::prepare_first_chat(interactive).await {
         Ok(Some(first_chat)) => {
             match crate::subcommand::connect_command::run_connect_command_with_origin(
-                first_chat.connect.clone(),
-                sdk::ConnectOrigin::FirstChatBootstrap,
+                first_chat.forms.clone(),
+                sdk::ConfigFormOrigin::FirstChatBootstrap,
             )
             .await
             {
-                Ok(sdk::ConnectOutcome::Completed { .. }) => {}
-                Ok(sdk::ConnectOutcome::Cancelled) => {
+                Ok(sdk::ConfigFormTerminal::Completed { .. }) => {}
+                Ok(sdk::ConfigFormTerminal::Cancelled) => {
                     if let Err(error) = first_chat.rollback().await {
                         eprintln!("Error: {error}");
                     }
