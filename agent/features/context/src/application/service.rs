@@ -93,7 +93,7 @@ impl ContextApplicationService {
             let summary = if crate::domain::token_budget::estimate_tokens(&summary) > budget {
                 let tail = share::string_idx::slice_tail(
                     &summary,
-                    crate::adapters::compact_summary::FALLBACK_PREVIOUS_SUMMARY_CAP,
+                    crate::domain::token_budget::FALLBACK_PREVIOUS_SUMMARY_CAP,
                 )
                 .to_string();
                 log::warn!(

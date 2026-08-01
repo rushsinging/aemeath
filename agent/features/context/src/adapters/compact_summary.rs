@@ -159,12 +159,9 @@ Here is the PAST conversation history to compress:
 /// 超过此值的 early_messages 会触发 map-reduce（分块独立摘要 → 合并）。
 const COMPACT_CHUNK_TARGET_TOKENS: usize = 30_000;
 
-/// fallback summary 中 previous_summary 允许嵌入的最大字符数（#1486）。
-///
-/// 多次 compact 时 previous_summary 若被全文 verbatim 嵌入会线性累加，
-/// 最终撑爆 system prompt（真实事故：92 万字符 summary）。超过此上限时
-/// 只保留 previous_summary 的关键尾部（最新状态），头部信息允许丢弃。
-pub const FALLBACK_PREVIOUS_SUMMARY_CAP: usize = 20_000;
+/// previous_summary 允许嵌入的最大字符数（domain 单一真相，见 token_budget）。
+pub const FALLBACK_PREVIOUS_SUMMARY_CAP: usize =
+    crate::domain::token_budget::FALLBACK_PREVIOUS_SUMMARY_CAP;
 
 /// 汇总后的最终摘要超过预算时，最多再压的迭代次数（#1486 收敛迭代）。
 const MAX_REDUCE_REFRESH_ROUNDS: usize = 3;

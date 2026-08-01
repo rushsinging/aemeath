@@ -245,6 +245,15 @@ pub fn summary_budget(context_size: usize) -> usize {
     context_size / 50
 }
 
+/// fallback/护栏中 previous_summary 允许嵌入的最大字符数（#1486）。
+///
+/// 多次 compact 时 previous_summary 若被全文 verbatim 嵌入会线性累加，
+/// 最终撑爆 system prompt（真实事故：92 万字符 summary）。超过此上限时
+/// 只保留 previous_summary 的关键尾部（最新状态），头部信息允许丢弃。
+/// 定义在 domain 层，供 adapter（compact_summary）与 application
+/// （active_summary 注入护栏）共同引用，避免 COLA 分层越界。
+pub const FALLBACK_PREVIOUS_SUMMARY_CAP: usize = 20_000;
+
 /// Calculate the effective context window size (after reserving output tokens
 /// and summary budget).
 pub fn effective_context_window(context_size: usize, max_output_tokens: usize) -> usize {
