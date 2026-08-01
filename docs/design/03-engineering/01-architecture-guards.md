@@ -77,12 +77,15 @@
 | 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution、Skill Catalog/Load ports、Tool Result materializer 与 ActiveRunRegistry，并把 Execution 注入 `application/run/context_factory.rs` 的 `RuntimeContextFactory`；factory 通过 `RuntimeServices` 单一持有静态能力，Runtime bootstrap 只持 injected factory，不得重复保存 Execution，也禁止恢复已退役的 Tool context binding、Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
 | 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher 并注入 `RuntimeContextFactory`；Runtime bootstrap 只携带 injected factory，Main/Sub 只消费其中的 HookPort，禁止恢复 HookRunner / dispatcher factory |
 | 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 RuntimeContext 唯一生产构造入口；RunKind 不驱动控制流；退役符号不存在；stop hook、Interaction、Hook、Reasoning 与 Main/Sub 统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名 |
+| 23f | `check-runtime-activity-observation.sh` | Runtime Activity 观测 | `ActivityObservation` 只能由 `ActivityCoordinator` 构造；TUI Activity 事实镜像只能经 root reducer 变更；LiveStatus 禁止依赖旧 Run status；旧活动字段保持零生产引用；Runtime/TUI 日志必须包含 identity、类型、状态、revision 与 timing，且禁止原始参数、stdout、response payload |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
+
+`check-runtime-activity-observation.sh` 固化统一 Activity 观测链：Runtime 生产代码仅 `ActivityCoordinator` 可构造完整 `ActivityObservation`，领域模型文件只定义事实类型；TUI 事实镜像只允许 root reducer 触发变更；LiveStatus 只从 Activity 摘要派生，不得恢复 Run status 驱动。该 Guard 同时要求 Runtime 发布侧与 TUI 接收侧记录 `run_id`、`activity_id`（增量）、source/kind/state、revision 与三类 elapsed timing，并拒绝 `raw_args`、`stdout`、`response` payload。Guard 为零迁移例外的 Target policy，注册于 `policy.runtime.activity-observation`。
 
 `check-runtime-capability-assembly.sh` 同时承担 Runtime 命名边界：生产源码中的类型、trait、模块、函数、方法与变量不得使用 `Projection` / `projection` 宽泛命名。真正的单向值转换必须使用目标或用途明确的 mapper/view/record 名称；职责混合必须通过类型拆分解决，不能用命名白名单放行。该规则不扫描测试文件，测试中的退役符号断言可继续存在。
 

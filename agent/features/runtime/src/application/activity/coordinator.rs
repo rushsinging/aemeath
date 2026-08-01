@@ -130,6 +130,33 @@ impl From<ActivitySnapshot> for ActivitySnapshotView {
     }
 }
 
+fn log_activity_change(kind: ActivityChangeKind, activity: &ActivityView) {
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "activity_change change={:?} run_id={} activity_id={} source={:?} kind={:?} state={:?} revision={} total_elapsed_ms={} active_elapsed_ms={} state_elapsed_ms={}",
+        kind,
+        activity.run_id,
+        activity.id,
+        activity.source,
+        activity.kind,
+        activity.state,
+        activity.revision,
+        activity.timing.total_elapsed_ms,
+        activity.timing.active_elapsed_ms,
+        activity.timing.state_elapsed_ms,
+    );
+}
+
+fn log_activity_snapshot(snapshot: &ActivitySnapshotView) {
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "activity_snapshot run_id={} revision={} activity_count={}",
+        snapshot.run_id,
+        snapshot.revision,
+        snapshot.activities.len(),
+    );
+}
+
 pub(crate) trait ActivityChangePublisher: Send + Sync {
     fn publish_change(&self, kind: ActivityChangeKind, activity: ActivityView);
     fn publish_snapshot(&self, snapshot: ActivitySnapshotView);
@@ -319,6 +346,7 @@ impl ActivityCoordinator {
         let published = observation.to_sdk(now);
         registry.activities.insert(activity_id.clone(), observation);
         drop(registry);
+        log_activity_change(ActivityChangeKind::Started, &published);
         self.publisher
             .publish_change(ActivityChangeKind::Started, published);
         Ok(activity_id)
@@ -340,6 +368,7 @@ impl ActivityCoordinator {
         activity.revision = self.next_revision();
         let published = activity.to_sdk(self.clock.now_monotonic_ms());
         drop(registry);
+        log_activity_change(ActivityChangeKind::Updated, &published);
         self.publisher
             .publish_change(ActivityChangeKind::Updated, published);
         Ok(())
@@ -386,6 +415,7 @@ impl ActivityCoordinator {
         activity.revision = self.next_revision();
         let published = activity.to_sdk(now);
         drop(registry);
+        log_activity_change(ActivityChangeKind::Finished, &published);
         self.publisher
             .publish_change(ActivityChangeKind::Finished, published);
         Ok(())
@@ -424,7 +454,9 @@ impl ActivityCoordinator {
     }
 
     pub(crate) fn publish_snapshot(&self) {
-        self.publisher.publish_snapshot(self.snapshot().into());
+        let snapshot = ActivitySnapshotView::from(self.snapshot());
+        log_activity_snapshot(&snapshot);
+        self.publisher.publish_snapshot(snapshot);
     }
 
     fn transition(
@@ -462,6 +494,7 @@ impl ActivityCoordinator {
         activity.revision = self.next_revision();
         let published = activity.to_sdk(now);
         drop(registry);
+        log_activity_change(ActivityChangeKind::Updated, &published);
         self.publisher
             .publish_change(ActivityChangeKind::Updated, published);
         Ok(())

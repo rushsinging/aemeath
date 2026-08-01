@@ -298,6 +298,23 @@ impl ActivityChangePublisher for RecordingActivityPublisher {
 }
 
 #[test]
+fn coordinator_source_keeps_structured_activity_diagnostic_fields_without_payloads() {
+    let source = include_str!("coordinator.rs");
+    for field in [
+        "activity_change change={:?} run_id={} activity_id={} source={:?} kind={:?} state={:?} revision={} total_elapsed_ms={} active_elapsed_ms={} state_elapsed_ms={}",
+        "activity_snapshot run_id={} revision={} activity_count={}",
+    ] {
+        assert!(source.contains(field), "missing activity diagnostic: {field}");
+    }
+    for sensitive in ["raw_args", "stdout", "response="] {
+        assert!(
+            !source.contains(sensitive),
+            "activity diagnostics must not log payload field {sensitive}"
+        );
+    }
+}
+
+#[test]
 fn coordinator_publishes_complete_change_after_each_successful_mutation() {
     let clock = FixedActivityClock::new();
     let publisher = RecordingActivityPublisher::default();

@@ -322,10 +322,29 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             stage,
             records.len()
         ),
+        sdk::ChatEvent::ActivityChanged { kind, activity } => crate::tui::log_debug!(
+            "{} activity_changed run_id={} activity_id={} source={:?} kind={:?} state={:?} change={:?} revision={} total_elapsed_ms={} active_elapsed_ms={} state_elapsed_ms={}",
+            stage,
+            activity.run_id,
+            activity.id,
+            activity.source,
+            activity.kind,
+            activity.state,
+            kind,
+            activity.revision,
+            activity.timing.total_elapsed_ms,
+            activity.timing.active_elapsed_ms,
+            activity.timing.state_elapsed_ms,
+        ),
+        sdk::ChatEvent::ActivitySnapshot(snapshot) => crate::tui::log_debug!(
+            "{} activity_snapshot run_id={} revision={} activity_count={}",
+            stage,
+            snapshot.run_id,
+            snapshot.revision,
+            snapshot.activities.len(),
+        ),
         // These metadata/list events are intentionally omitted from trace logging.
-        sdk::ChatEvent::ActivityChanged { .. }
-        | sdk::ChatEvent::ActivitySnapshot(_)
-        | sdk::ChatEvent::SkillsUpdated { .. }
+        sdk::ChatEvent::SkillsUpdated { .. }
         | sdk::ChatEvent::ModelList { .. }
          | sdk::ChatEvent::ReminderList { .. }
          | sdk::ChatEvent::SessionList { .. }

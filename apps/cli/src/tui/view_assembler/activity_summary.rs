@@ -40,7 +40,12 @@ impl ActivitySummaryAssembler {
             .iter()
             .filter(|activity| activity.run_id == run_id && is_visible_leaf(activity))
             .max_by_key(|activity| activity.revision);
-        let primary = phase.or(leaf)?;
+        let primary = match (phase, leaf) {
+            (Some(phase), Some(leaf)) if leaf.revision > phase.revision => leaf,
+            (Some(phase), _) => phase,
+            (None, Some(leaf)) => leaf,
+            (None, None) => return None,
+        };
         let phase_text = phase_label(primary)?;
 
         Some(ActivitySummary {
