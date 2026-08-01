@@ -100,7 +100,7 @@ Feedback 经 Runtime 的系统输入 lane 在当前 Step 提交后进入下一�
 
 > 状态：#926 已完成 legacy 发送点与 façade 退役；发现来源：[#1106](https://github.com/rushsinging/aemeath/issues/1106)
 >
-> #926 已将 `HookOutcome.messages → RuntimeStreamEvent::HookMessage → ChatEvent::HookMessage → TUI HookMessage → AppendHookNotice` 接入 Main/Sub、工具后置和批处理调用点；TUI 以状态色标题、主文本正文、弱化归因详情展示非空 message，保留 point/source/ordinal/attempt/kind。`HookRunner`、`HookUi`、`emit_json_hook_context` 与通用 `SystemMessage` 兼容链已删除。每次 invocation 从当前 workspace 显式传递 cwd，Hook adapter 负责按次环境投影。Stop 的 15 次上限、`StopHookRetryExhausted` typed 终态及 out-of-band 控制仍由 #878 承接；env_clear / 白名单由 #1216 承接；Hook retry / Stop 上限 ConfigSnapshot 注入由 #1312 承接。
+> Hook 输出展示链已完成：`HookOutcome.messages → RuntimeStreamEvent::HookMessage → ChatEvent::HookMessage → TUI HookMessage → AppendHookNotice` 覆盖 Main/Sub、工具后置和批处理调用点；TUI 以状态色标题、主文本正文、弱化归因详情展示非空 message，保留 point/source/ordinal/attempt/kind。`HookRunner`、`HookUi`、`emit_json_hook_context` 与通用 `SystemMessage` 兼容链已删除。Runtime 每次 invocation 只传当前 workspace cwd；Hook adapter 使用固定基础环境白名单、按当前 invocation 生成兼容变量，并在 ProcessDriver 创建子进程时清空父环境。Stop 的 15 次上限、`StopHookRetryExhausted` typed 终态及 out-of-band 控制仍由 Runtime 拥有；Hook retry / Stop 上限 ConfigSnapshot 注入由对应配置能力承接。
 
 Hook BC 在 `HookOutcome.messages` 中逐条保留 JSON `additional_context` / `system_message`，字段包含 HookPoint、稳定非秘密来源、execution ordinal、attempt、message kind 与原始文本。Runtime adapter 将其投影为独立 `RuntimeStreamEvent::HookMessage`，SDK 继续结构化透传为 `ChatEvent::HookMessage`；该链路 **NEVER** 复用通用 `SystemMessage`。
 

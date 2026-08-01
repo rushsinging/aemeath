@@ -34,10 +34,20 @@ impl AtomicBlobSessionManagement {
     }
 
     async fn load_canonical(&self, id: &str) -> Result<CanonicalSession, SessionManagementError> {
-        self.persistence(id)?
+        let mut session = self
+            .persistence(id)?
             .load()
             .await
-            .map_err(|error| map_load(id, error))
+            .map_err(|error| map_load(id, error))?;
+        crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
+            Arc::clone(&self.blob),
+            id,
+        )
+        .map_err(SessionManagementError::Storage)?
+        .overlay(&mut session)
+        .await
+        .map_err(SessionManagementError::Storage)?;
+        Ok(session)
     }
 }
 
@@ -155,6 +165,14 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
             .delete_all()
             .await
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+        crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
+            Arc::clone(&self.blob),
+            id,
+        )
+        .map_err(SessionManagementError::Storage)?
+        .delete()
+        .await
+        .map_err(SessionManagementError::Storage)?;
         if !outcome.deleted_primary() && !outcome.deleted_previous() {
             return Err(SessionManagementError::NotFound(id.to_string()));
         }

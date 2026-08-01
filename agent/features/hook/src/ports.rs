@@ -3,42 +3,28 @@
 //! 对应设计：`docs/design/02-modules/hook/README.md` §2。
 //! 一个类型化端口——Sub Run 使用 `BoundaryOnly`（仅 start/stop），过滤由 point metadata 完成。
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
 use crate::domain::{HookInvocation, HookOutcome};
 
-/// Hook 一次 dispatch 的运行时环境。
+/// Hook 一次 dispatch 的工作区上下文。
 ///
-/// Runtime 每次调用从当前 Workspace 读取 cwd；Hook adapter 根据 invocation 派生
-/// 兼容环境变量。环境清空及白名单策略由 #1216 收口。
+/// Runtime 每次调用只提供当前 Workspace 的 cwd；Hook adapter 根据当前 invocation
+/// 生成兼容环境变量并执行环境隔离。
 #[derive(Debug, Clone)]
 pub struct HookDispatchContext {
     cwd: PathBuf,
-    env: HashMap<String, String>,
 }
 
 impl HookDispatchContext {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
-        Self {
-            cwd: cwd.into(),
-            env: HashMap::new(),
-        }
-    }
-
-    pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
-        self.env = env;
-        self
+        Self { cwd: cwd.into() }
     }
 
     pub fn cwd(&self) -> &Path {
         &self.cwd
-    }
-
-    pub fn env(&self) -> &HashMap<String, String> {
-        &self.env
     }
 }
 

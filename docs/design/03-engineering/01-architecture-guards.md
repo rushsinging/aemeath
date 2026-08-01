@@ -57,6 +57,7 @@
 | 11 | `check-tui-effect-boundary.sh` | TUI 架构 | model/update 不直接执行 Effect |
 | 12 | `check-tui-model-view-boundaries.sh` | TUI 架构 | model/render/view 边界 + 物理遗留 |
 | 13 | `check-tui-output-legacy-guards.sh` | TUI 遗留 | TUI M2 后选区/工具状态旁路守卫 |
+| 13a | `check-tui-retained-output-view.sh` | TUI 性能架构 | 生产输出刷新只经统一窗口物化入口；保留视图不得拥有完整历史节点，渲染器不得扫描完整语义历史；变更日志保持有界 |
 | 14 | `check-tui-block-nesting.sh` | TUI 组件 | gutter 仅由 document_renderer 注入 |
 | 15a | `check-render-pure.sh` | TUI 渲染 | render 禁止直读 conversation/runtime domain model，测试与登记 display bridge 除外 |
 | 15 | `check-render-isolation.sh` | TUI 渲染 | render/output 纯函数边界 |
@@ -446,6 +447,14 @@
   - 整个 `apps/cli/src/tui` 不得出现 `find_last_running` / `last running` / `最后一个 running`。
   - `apps/cli/src/tui/output_area` + `apps/cli/src/tui/render` 不得在非 `if matches!(line.style, LineStyle::ToolCallRunning)` 上下文中调 `cell.set_char('●')`（防覆盖已完成 tool 的状态图标）。
 - **白名单**：cell 写入的 `if matches!(line.style, LineStyle::ToolCallRunning)` 守卫条件本身。
+
+### 13a. check-tui-retained-output-view.sh
+
+- **功能**：锁定统一输出窗口物化生产路径，防止长会话输出刷新重新回退到完整历史节点常驻、完整历史装配或渲染前全量语义扫描。
+- **正向约束**：`app/update.rs` 必须调用 `RetainedOutputView::materialize_window`；`RetainedOutputView` 只拥有轻量 `OutputWindowIndex` 与同步状态；模型侧 journal 必须具有固定容量并在超限时移除最旧 entry。
+- **禁用规则**：生产输出刷新调用 `assemble_from_conversation`；`RetainedOutputView` 持有完整 `OutputViewModel` 或 `Vec<Arc<BlockNode>>`；保留视图调用 `assemble_shared_roots` 或维护重复完整历史 ID；renderer 构造 `semantic_root_ids` / `root_layout_states` 扫描完整语义历史；恢复 `OutputViewCache`、`OutputProjection` 或 `output_projection` 命名；移除 journal 的容量常量或淘汰逻辑。
+- **测试**：`check-tui-retained-output-view-tests.sh` 在隔离 fixture 中验证合法窗口入口，并分别注入完整历史 owner、完整 roots 装配、renderer 全量语义扫描、生产完整装配、旧 cache 与无界 journal 等违规。
+- **白名单**：守卫 fixture 中的禁止模式字符串；无生产路径例外。
 
 ## 14. check-tui-block-nesting.sh
 

@@ -92,11 +92,8 @@ pub(crate) async fn from_args_with_gateways(
 
     let task_wiring = task::wire_task();
     let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-        hook::build_dispatcher(
-            config.reader().committed_snapshot().hooks(),
-            std::collections::HashMap::new(),
-        )
-        .map_err(|errors| sdk::SdkError::Init(format!("Hook 配置初始化失败：{errors:?}")))?,
+        hook::build_dispatcher(config.reader().committed_snapshot().hooks())
+            .map_err(|errors| sdk::SdkError::Init(format!("Hook 配置初始化失败：{errors:?}")))?,
     );
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();

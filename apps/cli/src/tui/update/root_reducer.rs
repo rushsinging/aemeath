@@ -189,9 +189,8 @@ fn apply_conversation_changes(
             ConversationChange::ErrorAppended { .. } => runtime.abort_chat(),
             ConversationChange::AgentProgressRecorded { .. } => runtime.report_agent_progress(),
             ConversationChange::AskUserShown { .. } => runtime.pause_chat(),
-            ConversationChange::AskUserUpdated { .. } | ConversationChange::AskUserDismissed => {
-                runtime.resume_chat()
-            }
+            ConversationChange::AskUserUpdated { .. }
+            | ConversationChange::AskUserDismissed { .. } => runtime.resume_chat(),
             _ => {}
         }
     }
@@ -223,7 +222,7 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::BlockCompleted { .. }
             | ConversationChange::AskUserShown { .. }
             | ConversationChange::AskUserUpdated { .. }
-            | ConversationChange::AskUserDismissed
+            | ConversationChange::AskUserDismissed { .. }
             | ConversationChange::InteractionShown { .. }
             | ConversationChange::InteractionUpdated { .. }
             | ConversationChange::InteractionReplyRequested { .. }

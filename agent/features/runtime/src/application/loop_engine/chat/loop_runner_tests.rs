@@ -263,12 +263,9 @@ impl ::tools::AgentRunner for NoopAgentRunner {
 /// #1385: Hook port that delegates to a real dispatcher with empty config.
 fn noop_hook_port() -> Arc<dyn hook::HookPort> {
     Arc::new(
-        hook::build_dispatcher(
-            &HooksConfig {
-                events: HashMap::new(),
-            },
-            HashMap::new(),
-        )
+        hook::build_dispatcher(&HooksConfig {
+            events: HashMap::new(),
+        })
         .expect("empty hook dispatcher"),
     )
 }
@@ -996,7 +993,7 @@ fn test_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
 }
 
 fn blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookPort> {
@@ -1016,7 +1013,7 @@ fn blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookP
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
 }
 
 fn delayed_blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookPort> {
@@ -1036,7 +1033,7 @@ fn delayed_blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<d
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
 }
 
 #[tokio::test]
@@ -1592,7 +1589,7 @@ fn continue_false_then_allow_hook_port(flag_path: &std::path::Path) -> Arc<dyn H
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
 }
 
 /// Hook 前 `n` 次阻断 (exit 2)，之后放行。用计数器文件跟踪调用次数。
@@ -1616,7 +1613,7 @@ fn block_n_times_hook_port(counter_path: &std::path::Path, n: usize) -> Arc<dyn 
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
 }
 
 /// Hook 每次都阻断 (exit 2)。用于验证连续阻断超上限强制停止（#372 缺陷 3）。
@@ -1630,7 +1627,7 @@ fn always_blocking_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }, HashMap::new()).unwrap())
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
 }
 
 #[tokio::test]

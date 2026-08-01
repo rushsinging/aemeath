@@ -7,6 +7,11 @@ pub(crate) struct RenderPerformanceSnapshot {
     pub assemble_ns: u64,
     pub assemble_source_items: u64,
     pub assemble_output_roots: u64,
+    pub retained_view_sync_calls: u64,
+    pub retained_view_touched_roots: u64,
+    pub retained_view_created_roots: u64,
+    pub retained_view_reused_roots: u64,
+    pub retained_view_rebuilt_roots: u64,
     pub viewport_render_calls: u64,
     pub viewport_render_ns: u64,
     pub viewport_source_lines: u64,
@@ -119,6 +124,29 @@ pub(crate) fn record_assemble(source_items: usize, output_roots: usize, duration
         snapshot.assemble_output_roots = snapshot
             .assemble_output_roots
             .saturating_add(u64::try_from(output_roots).unwrap_or(u64::MAX));
+    });
+}
+
+pub(crate) fn record_retained_view_sync(
+    touched_roots: usize,
+    created_roots: usize,
+    reused_roots: usize,
+    rebuilt_roots: usize,
+) {
+    update(|snapshot| {
+        snapshot.retained_view_sync_calls += 1;
+        snapshot.retained_view_touched_roots = snapshot
+            .retained_view_touched_roots
+            .saturating_add(u64::try_from(touched_roots).unwrap_or(u64::MAX));
+        snapshot.retained_view_created_roots = snapshot
+            .retained_view_created_roots
+            .saturating_add(u64::try_from(created_roots).unwrap_or(u64::MAX));
+        snapshot.retained_view_reused_roots = snapshot
+            .retained_view_reused_roots
+            .saturating_add(u64::try_from(reused_roots).unwrap_or(u64::MAX));
+        snapshot.retained_view_rebuilt_roots = snapshot
+            .retained_view_rebuilt_roots
+            .saturating_add(u64::try_from(rebuilt_roots).unwrap_or(u64::MAX));
     });
 }
 

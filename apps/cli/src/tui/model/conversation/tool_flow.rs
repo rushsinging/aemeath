@@ -88,6 +88,8 @@ impl ConversationModel {
             );
             return vec![
                 ConversationChange::ToolCallCompleted {
+                    chat_id: chat_id.to_string(),
+                    turn_id: turn_id.to_string(),
                     id: id.to_string(),
                     status,
                 },

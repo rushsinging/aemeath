@@ -251,6 +251,21 @@ fn find_tool_call<'a>(
 }
 
 #[test]
+fn tool_call_lookup_matches_full_runtime_identity() {
+    let (model, chat_id, turn_id, tool_id) = setup_turn_with_agent_tool();
+
+    let found = model.tool_call(&chat_id, &turn_id, &tool_id);
+
+    assert_eq!(found.and_then(|call| call.id.as_ref()), Some(&tool_id));
+    assert!(model
+        .tool_call(&chat_id, &ChatTurnId::new("other-turn"), &tool_id)
+        .is_none());
+    assert!(model
+        .tool_call(&ChatId::new("other-chat"), &turn_id, &tool_id)
+        .is_none());
+}
+
+#[test]
 fn test_update_agent_meta_writes_role_and_model() {
     let (mut model, chat_id, turn_id, tool_id) = setup_turn_with_agent_tool();
 

@@ -250,10 +250,11 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 
 ## 11. 环境变量与安全
 
-- **env_clear**：Hook 子进程 **MUST** 默认只继承白名单变量，不继承全部父进程 env；
-- **白名单**：`PATH` / `HOME` / `SHELL` / `LANG` / `LC_ALL` / `TERM` / `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`；
-- **Config 可扩展**：ConfigSnapshot.hooks 可添加额外 env 变量到白名单；
-- **NEVER 泄漏密钥**：API key、token 等 **NEVER** 进入 Hook 子进程 env；
+- **env_clear**：Hook 子进程 **MUST** 清空父进程环境，只接收 Hook adapter 构造的环境；
+- **基础白名单**：只从父进程复制 `PATH` / `HOME` / `SHELL` / `LANG` / `LC_ALL` / `TERM`，缺失项不注入；
+- **按次变量**：`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`、`AEMEATH_HOOK_EVENT` 与已发布 payload 兼容变量 **MUST** 根据当前 invocation 重新生成；
+- **无 Config 扩展**：当前不支持 Config 自定义 Hook 环境变量；未知父环境变量默认不可见；
+- **NEVER 泄漏密钥**：API key、token、secret 等 **NEVER** 进入 Hook 子进程 env；
 - **stdin**：结构化 JSON（含 HookPoint、input payload、session metadata），**NEVER** 包含 ConfigSnapshot 原文。
 - **MUST NOT** 让用户配置非法 HookPoint 能力组合。
 - **MUST NOT** timeout 后遗留未回收子进程。
@@ -264,7 +265,7 @@ Hook 采用 Hexagonal + Clean 组织（`domain + ports + adapters`）。单一 H
 
 ```text
 src/
-├── lib.rs                 # 窄 façade：稳定 PL + HookPort；迁移期保留私有 api 兼容模块
+├── lib.rs                 # 窄 façade：稳定 PL + HookPort
 ├── domain.rs              # 领域 Published Language 与纯策略入口
 ├── domain/
 │   ├── invocation.rs       #   HookInvocation 枚举 + 各 point typed payload
@@ -274,11 +275,13 @@ src/
 ├── ports.rs               # HookPort trait 签名，仅依赖 domain
 ├── adapters.rs            # 技术实现入口
 └── adapters/
-    ├── process.rs          # 受管进程组、完整 deadline、有界并发 IO、TERM/KILL/wait
-    └── legacy/             # #926 前保留的 HookRunner / wire compatibility
+    ├── config.rs           # HooksConfig → HookSubscription 与生产 Dispatcher 构造
+    ├── dispatcher.rs       # 匹配、重试、聚合与按 invocation 环境构造
+    ├── environment.rs      # 固定基础环境白名单捕获
+    └── process.rs          # env_clear、受管进程组、有界并发 IO、TERM/KILL/wait
 ```
 
-`domain/` 承载 Hook 对外稳定语言、能力矩阵和无 I/O 的协议分类规则；这些类型被 `HookPort` 签名直接使用，因而 **NEVER** 放入 adapters 形成 `ports → adapters` 反向依赖。`adapters/` 承载子进程 spawn、timeout/cancel、kill+wait、环境白名单、输出截断和外部 wire 映射；技术类型与具体 runner **NEVER** 成为最终 façade 的稳定 Published Language。#987 只迁移目录时，旧 `HookRunner` 及 `hook::api` 消费面可在 adapters 内作为迁移兼容面保留，必须由 #926 删除。单文件即可讲清时 **MUST** 保持为 `.rs` 文件而非空壳目录。
+`domain/` 承载 Hook 对外稳定语言、能力矩阵和无 I/O 的协议分类规则；这些类型被 `HookPort` 签名直接使用，因而 **NEVER** 放入 adapters 形成 `ports → adapters` 反向依赖。`adapters/` 承载子进程 spawn、timeout/cancel、kill+wait、固定环境白名单、按 invocation 兼容变量、输出截断和外部 wire 映射；技术类型与具体 runner **NEVER** 成为最终 façade 的稳定 Published Language。单文件即可讲清时 **MUST** 保持为 `.rs` 文件而非空壳目录。
 
 ## 13. 相关文档
 

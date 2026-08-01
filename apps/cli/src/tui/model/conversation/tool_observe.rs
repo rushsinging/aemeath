@@ -141,6 +141,8 @@ impl ConversationModel {
         );
         vec![
             ConversationChange::ToolCallBound {
+                chat_id: chat_id.to_string(),
+                turn_id: turn_id.to_string(),
                 id: bound_id.to_string(),
                 name,
                 running,
@@ -202,6 +204,8 @@ impl ConversationModel {
                 if call.agent_meta.is_none() {
                     call.agent_meta = Some(AgentMeta { role, model });
                     changes.push(ConversationChange::AgentMetaUpdated {
+                        chat_id: chat_id.to_string(),
+                        turn_id: turn_id.to_string(),
                         tool_id: tool_id.to_string(),
                     });
                     changes.push(ConversationChange::OutputDirty);

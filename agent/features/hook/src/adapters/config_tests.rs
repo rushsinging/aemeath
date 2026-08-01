@@ -5,8 +5,15 @@ use std::time::Duration;
 
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 
-use crate::adapters::config::subscriptions_from_config;
+use crate::adapters::config::{build_dispatcher, subscriptions_from_config};
 use crate::{HookMatcher, HookPoint};
+
+#[test]
+fn build_dispatcher_owns_process_environment_policy() {
+    let dispatcher =
+        build_dispatcher(&HooksConfig::default()).expect("默认 Hook 配置应构造生产 Dispatcher");
+    let _hook_port: &dyn crate::HookPort = &dispatcher;
+}
 
 #[test]
 fn subscriptions_from_config_preserves_event_entry_order_and_wire_fields() {
