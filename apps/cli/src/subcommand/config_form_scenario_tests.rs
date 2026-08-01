@@ -1,0 +1,120 @@
+use ratatui::backend::TestBackend;
+use ratatui::Terminal;
+
+use super::*;
+
+fn provider_view() -> sdk::ConfigFormView {
+    sdk::ConfigFormView {
+        workflow_id: sdk::ConfigFormWorkflowId("provider_connect".to_string()),
+        session_id: sdk::ConfigFormSessionId("session-1".to_string()),
+        revision: sdk::ConfigFormRevision(0),
+        origin: sdk::ConfigFormOrigin::ExplicitCommand,
+        page: sdk::ConfigFormPage {
+            id: sdk::ConfigFormPageId("select_provider".to_string()),
+            title: "选择 Provider".to_string(),
+            description: Some("选择一个内置 Provider".to_string()),
+            step: Some(sdk::ConfigFormStep {
+                current: 1,
+                total: 8,
+            }),
+            fields: vec![sdk::ConfigFormField {
+                id: sdk::ConfigFormFieldId("provider_source".to_string()),
+                label: "Provider".to_string(),
+                description: None,
+                field_type: sdk::ConfigFormFieldType::SingleSelect,
+                required: true,
+                has_value: false,
+                display_value: None,
+                options: vec![
+                    sdk::ConfigFormOption {
+                        id: sdk::ConfigFormOptionId("Anthropic".to_string()),
+                        label: "Anthropic".to_string(),
+                        description: Some("anthropic".to_string()),
+                    },
+                    sdk::ConfigFormOption {
+                        id: sdk::ConfigFormOptionId("OpenAI".to_string()),
+                        label: "OpenAI".to_string(),
+                        description: Some("openai".to_string()),
+                    },
+                ],
+                error: None,
+            }],
+            error: None,
+            actions: vec![sdk::ConfigFormAction {
+                id: sdk::ConfigFormActionId("cancel".to_string()),
+                label: "取消".to_string(),
+                style: sdk::ConfigFormActionStyle::Destructive,
+                shortcut: Some("Esc".to_string()),
+            }],
+        },
+        busy: None,
+        terminal: None,
+    }
+}
+
+fn screen(view: &sdk::ConfigFormView, width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| render_config_form(frame, view, "", 0))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    (0..height)
+        .map(|row| {
+            (0..width)
+                .map(|column| buffer[(column, row)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn wide_screen_renders_two_columns_without_row_drift() {
+    let screen = screen(&provider_view(), 100, 24);
+    assert!(screen.contains("Anthropic"));
+    assert!(screen.contains("1/8"));
+    assert!(screen.lines().all(|line| line.chars().count() == 100));
+}
+
+#[test]
+fn narrow_screen_falls_back_to_single_column() {
+    let screen = screen(&provider_view(), 44, 24);
+    assert!(screen.contains("Anthropic"));
+    assert!(screen.lines().all(|line| line.chars().count() == 44));
+}
+
+#[test]
+fn replacing_page_clears_previous_frame_content() {
+    let backend = TestBackend::new(80, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| render_config_form(frame, &provider_view(), "", 0))
+        .unwrap();
+    let mut next = provider_view();
+    next.page.title = "设置 Base URL".to_string();
+    next.page.fields.clear();
+    terminal
+        .draw(|frame| render_config_form(frame, &next, "https://example.test", 0))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let screen = (0..20)
+        .map(|row| {
+            (0..80)
+                .map(|column| buffer[(column, row)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(screen.contains("Base URL"));
+    assert!(!screen.contains("Anthropic"));
+}
+
+#[test]
+fn secret_input_never_reaches_screen() {
+    let mut view = provider_view();
+    view.page.fields[0].field_type = sdk::ConfigFormFieldType::Secret;
+    view.page.fields[0].options.clear();
+    let screen = screen(&view, 80, 20);
+    assert!(!screen.contains("secret-key"));
+}
