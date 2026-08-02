@@ -55,12 +55,25 @@ pub(crate) enum OutputWindowIndexChange {
 pub(crate) struct OutputWindowIndex {
     entries: Vec<OutputWindowEntry>,
     positions: HashMap<String, usize>,
+    prefix_lines: Vec<usize>,
+    #[cfg(test)]
+    selection_entry_reads: std::cell::Cell<usize>,
 }
 
 impl OutputWindowIndex {
     #[cfg(test)]
     pub(crate) fn entries(&self) -> &[OutputWindowEntry] {
         &self.entries
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reset_selection_entry_reads(&self) {
+        self.selection_entry_reads.set(0);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn selection_entry_reads(&self) -> usize {
+        self.selection_entry_reads.get()
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -78,6 +91,9 @@ impl OutputWindowIndex {
                     return;
                 }
                 self.positions.insert(item_id.clone(), self.entries.len());
+                let prefix_total = self.prefix_lines.last().copied().unwrap_or(0);
+                self.prefix_lines
+                    .push(prefix_total.saturating_add(estimated_lines));
                 self.entries.push(OutputWindowEntry {
                     item_id,
                     estimated_lines,
@@ -94,6 +110,7 @@ impl OutputWindowIndex {
                 };
                 self.entries.remove(position);
                 self.reindex_from(position);
+                self.rebuild_prefix_from(position);
             }
             OutputWindowIndexChange::Reset { entries } => {
                 self.entries = entries
@@ -105,6 +122,7 @@ impl OutputWindowIndex {
                     })
                     .collect();
                 self.reindex_from(0);
+                self.rebuild_prefix_from(0);
             }
         }
     }
@@ -157,28 +175,23 @@ impl OutputWindowIndex {
     }
 
     pub(crate) fn select_window(&self, request: OutputRenderWindow) -> OutputWindowSelection {
-        self.select_window_with_counts(
-            request,
-            self.entries.iter().map(|entry| entry.estimated_lines),
-        )
+        self.select_window_from_prefix(request, &self.prefix_lines)
     }
-
     #[cfg(test)]
     pub(crate) fn select_window_for_width(
         &self,
         request: OutputRenderWindow,
         width: u16,
     ) -> OutputWindowSelection {
-        self.select_window_with_counts(
-            request,
-            self.entries.iter().map(|entry| {
-                entry
-                    .exact_lines_for_width(width)
-                    .unwrap_or(entry.estimated_lines)
-            }),
-        )
+        let counts = self.entries.iter().map(|entry| {
+            entry
+                .exact_lines_for_width(width)
+                .unwrap_or(entry.estimated_lines)
+        });
+        self.select_window_with_counts(request, counts)
     }
 
+    #[cfg(test)]
     fn select_window_with_counts(
         &self,
         request: OutputRenderWindow,
@@ -195,14 +208,12 @@ impl OutputWindowIndex {
                 folded_earlier_lines: source_total_lines,
             };
         }
-
         let mut end = counts.len();
         let mut skipped_newer_lines = 0usize;
         while end > 0 && skipped_newer_lines < request.tail_offset {
             end -= 1;
             skipped_newer_lines = skipped_newer_lines.saturating_add(counts[end]);
         }
-
         let mut start = end;
         let mut selected_lines = 0usize;
         while start > 0 {
@@ -228,6 +239,49 @@ impl OutputWindowIndex {
         }
     }
 
+    fn select_window_from_prefix(
+        &self,
+        request: OutputRenderWindow,
+        prefix_lines: &[usize],
+    ) -> OutputWindowSelection {
+        let source_total_lines = prefix_lines.last().copied().unwrap_or(0);
+        if request.line_limit == 0 || prefix_lines.is_empty() {
+            return OutputWindowSelection {
+                item_range: prefix_lines.len()..prefix_lines.len(),
+                source_total_lines,
+                folded_earlier_lines: source_total_lines,
+            };
+        }
+
+        let target_end_lines = source_total_lines.saturating_sub(request.tail_offset);
+        let end = if request.tail_offset == 0 {
+            prefix_lines.len()
+        } else {
+            first_prefix_at_least(prefix_lines, target_end_lines).saturating_add(1)
+        };
+        let selected_end_lines = prefix_lines
+            .get(end.saturating_sub(1))
+            .copied()
+            .unwrap_or(0);
+        let target_start_lines = selected_end_lines.saturating_sub(request.line_limit);
+        let start = first_prefix_greater_than(prefix_lines, target_start_lines).min(end);
+        #[cfg(test)]
+        self.selection_entry_reads.set(
+            self.selection_entry_reads
+                .get()
+                .saturating_add(binary_search_read_bound(prefix_lines.len()).saturating_mul(2)),
+        );
+        let folded_earlier_lines = prefix_lines
+            .get(start.saturating_sub(1))
+            .copied()
+            .filter(|_| start > 0)
+            .unwrap_or(0);
+        OutputWindowSelection {
+            item_range: start..end,
+            source_total_lines,
+            folded_earlier_lines,
+        }
+    }
     #[cfg(test)]
     pub(crate) fn retained_block_nodes(&self) -> usize {
         0
@@ -244,6 +298,16 @@ impl OutputWindowIndex {
         let entry = &mut self.entries[position];
         entry.estimated_lines = estimated_lines;
         entry.exact_layout = None;
+        self.rebuild_prefix_from(position);
+    }
+
+    fn rebuild_prefix_from(&mut self, start: usize) {
+        self.prefix_lines.truncate(start);
+        let mut total = self.prefix_lines.last().copied().unwrap_or(0);
+        for entry in self.entries.iter().skip(start) {
+            total = total.saturating_add(entry.estimated_lines);
+            self.prefix_lines.push(total);
+        }
     }
 
     fn reindex_from(&mut self, start: usize) {
@@ -254,6 +318,19 @@ impl OutputWindowIndex {
             self.positions.insert(entry.item_id.clone(), position);
         }
     }
+}
+
+fn first_prefix_at_least(prefix_lines: &[usize], target: usize) -> usize {
+    prefix_lines.partition_point(|prefix| *prefix < target)
+}
+
+fn first_prefix_greater_than(prefix_lines: &[usize], target: usize) -> usize {
+    prefix_lines.partition_point(|prefix| *prefix <= target)
+}
+
+#[cfg(test)]
+fn binary_search_read_bound(entry_count: usize) -> usize {
+    (usize::BITS as usize - entry_count.max(1).leading_zeros() as usize).saturating_add(1)
 }
 
 #[cfg(test)]
