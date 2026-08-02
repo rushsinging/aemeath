@@ -16,6 +16,7 @@
 //!
 //! 实现由 #875 负责。
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -128,6 +129,13 @@ pub(crate) trait ModelInvocationSource: Send {
     fn context_size(&self, execution: &RunExecutionState) -> usize;
     fn committed_delta(&self) -> bool;
     fn build_reducer(&self) -> InvocationEventReducer<ChatEventSinkHandle>;
+    /// #1494：边流边执行句柄（默认无；Main observer 装配后提供）。
+    fn streaming_tool(
+        &self,
+    ) -> Option<&Arc<crate::application::loop_engine::chat::streaming_tool::StreamingToolExecutor>>
+    {
+        None
+    }
     fn waiting_event_context(&self) -> Option<(ChatEventSinkHandle, RuntimeTurnContext)> {
         None
     }
@@ -149,9 +157,10 @@ where
     pub(crate) async fn invoke(
         self,
         execution: &mut RunExecutionState,
+        step_id: &sdk::RunStepId,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
-        invoke_model_impl(self.observer, execution, cancel).await
+        invoke_model_impl(self.observer, execution, step_id, cancel).await
     }
 }
 
@@ -185,18 +194,25 @@ pub(crate) trait ModelInvocationObserver: ModelInvocationSource {
 pub(crate) async fn orchestrate_model_invocation(
     observer: &mut impl ModelInvocationObserver,
     execution: &mut RunExecutionState,
+    step_id: &sdk::RunStepId,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
     ModelInvocationContext::new(observer)
-        .invoke(execution, cancel)
+        .invoke(execution, step_id, cancel)
         .await
 }
 
 async fn invoke_model_impl(
     observer: &mut impl ModelInvocationObserver,
     execution: &mut RunExecutionState,
+    step_id: &sdk::RunStepId,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
+    // #1494：每次 invoke 开头重置边流边执行缓冲——上次 invoke（retry / compact）
+    // 残留的旁路结果丢弃：异常时 step 作废，重试请求不带已执行工具结果。
+    if let Some(executor) = observer.streaming_tool() {
+        executor.reset_for_invocation(step_id);
+    }
     if execution.context_window().is_none() {
         if let Some(request) = execution.context_request() {
             let coordinator = ContextCoordinator::new(observer.runtime_context().context());
