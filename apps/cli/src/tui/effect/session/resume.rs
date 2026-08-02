@@ -31,7 +31,12 @@ impl App {
                 duration_ms: step.duration_ms,
             })
             .collect();
-        self.resume_session_messages(&resume.session_id, steps, resume.created_at.to_string());
+        self.resume_session_messages(
+            &resume.session_id,
+            steps,
+            resume.created_at.to_string(),
+            resume.compacted,
+        );
     }
 
     pub(crate) fn resume_session_messages(
@@ -39,6 +44,7 @@ impl App {
         session_id: &str,
         steps: Vec<TuiResumedSessionStep>,
         created_at: String,
+        compacted: bool,
     ) {
         let messages = steps
             .iter()
@@ -74,6 +80,9 @@ impl App {
                 crate::tui::model::conversation::intent::ResumeConversation { steps },
             ),
         ));
+        if compacted {
+            self.append_system_notice("✓ 上下文压缩完成");
+        }
         apply_resume_input_history(self, &messages);
         self.append_system_notice(format!(
             "[resumed session {} ({} messages)]",
@@ -137,6 +146,7 @@ mod tests {
             }],
             session_id: "session-resumed".to_string(),
             created_at: 42,
+            compacted: false,
         });
 
         assert_eq!(app.session.session_id(), "session-resumed");
@@ -214,8 +224,8 @@ mod tests {
                 duration_ms: None,
             }],
             "2026-01-01T00:00:00Z".to_string(),
+            false,
         );
-
         assert!(app
             .model
             .conversation

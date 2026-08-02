@@ -417,6 +417,7 @@ impl App {
                 steps,
                 session_id,
                 created_at,
+                compacted,
             } => {
                 crate::tui::log_debug!(
                     "resume_lifecycle boundary=tui_runtime stage=session_resumed_received session_id={} steps={} messages={}",
@@ -424,7 +425,12 @@ impl App {
                     steps.len(),
                     steps.iter().map(|step| step.messages.len()).sum::<usize>()
                 );
-                self.resume_session_messages(session_id, steps.clone(), created_at.to_string());
+                self.resume_session_messages(
+                    session_id,
+                    steps.clone(),
+                    created_at.to_string(),
+                    *compacted,
+                );
                 crate::tui::log_debug!(
                     "resume_lifecycle boundary=tui_runtime stage=session_resumed_applied session_id={} timeline_items={} chats={} revision={}",
                     session_id,

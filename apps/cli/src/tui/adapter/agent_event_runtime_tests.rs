@@ -111,6 +111,21 @@ fn runtime_interaction_maps_to_sender_free_show_interaction() {
 }
 
 #[test]
+fn compact_finished_syncs_messages_and_appends_runtime_notice_once() {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::CompactFinished {
+        messages: Vec::new(),
+        notice: "✓ 上下文压缩完成".to_string(),
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::AppendSystemMessage(message)]
+            if message.text == "✓ 上下文压缩完成"
+    ));
+    assert_eq!(mapping.session.len(), 1);
+}
+
+#[test]
 fn runtime_workspace_snapshot_maps_without_git_metadata() {
     let mapping = map_runtime_event(&TuiRuntimeEvent::WorkspaceSnapshot(TuiWorkspaceSnapshot {
         path_base: "/repo/.worktrees/feature".to_string(),

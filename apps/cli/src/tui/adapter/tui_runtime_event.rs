@@ -574,6 +574,7 @@ pub(crate) enum TuiRuntimeEvent {
     },
     CompactFinished {
         messages: Vec<TuiChatMessage>,
+        notice: String,
     },
     UserMessagesAdopted {
         items: Vec<TuiChatMessage>,
@@ -648,6 +649,7 @@ pub(crate) enum TuiRuntimeEvent {
         steps: Vec<super::runtime_view::TuiResumedSessionStep>,
         session_id: String,
         created_at: u64,
+        compacted: bool,
     },
     SessionResumeFailed {
         kind: TuiSessionResumeFailureKind,

@@ -116,7 +116,7 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         | sdk::ChatEvent::MicrocompactDone { messages, .. }
         | sdk::ChatEvent::PostToolExecutionSync { messages }
         | sdk::ChatEvent::CompactRollback { messages }
-        | sdk::ChatEvent::CompactFinished { messages } => {
+        | sdk::ChatEvent::CompactFinished { messages, .. } => {
             crate::tui::log_trace!("{} messages_sync count={}", stage, messages.len())
         }
         sdk::ChatEvent::ApiError { messages, error } => {

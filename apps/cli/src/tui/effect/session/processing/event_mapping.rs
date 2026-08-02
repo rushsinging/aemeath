@@ -109,8 +109,9 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::CompactRollback { messages } => UiEvent::CompactRollback {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        sdk::ChatEvent::CompactFinished { messages } => UiEvent::CompactFinished {
+        sdk::ChatEvent::CompactFinished { messages, notice } => UiEvent::CompactFinished {
             messages: messages.into_iter().map(chat_message).collect(),
+            notice,
         },
         sdk::ChatEvent::UserMessagesAdopted { items, queued } => UiEvent::UserMessagesAdopted {
             items: items.into_iter().map(chat_message).collect(),
@@ -235,8 +236,8 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             steps,
             session_id,
             created_at,
-        } => UiEvent::SessionResumed {
-            steps: steps
+            compacted,
+        } => UiEvent::SessionResumed {            steps: steps
                 .into_iter()
                 .map(
                     |step| crate::tui::adapter::runtime_view::TuiResumedSessionStep {
@@ -254,8 +255,8 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
                 .collect(),
             session_id,
             created_at,
-        },
-        sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
+            compacted,
+        },        sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
             UiEvent::SessionResumeFailed { kind, id, message }
         }
         sdk::ChatEvent::ReflectionHistory { records } => UiEvent::ReflectionHistory { records },

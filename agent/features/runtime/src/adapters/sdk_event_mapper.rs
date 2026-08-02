@@ -352,14 +352,16 @@ pub(crate) fn map_stream_event(
                     .collect(),
             }
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactFinished { messages } => {
-            ChatEvent::CompactFinished {
-                messages: messages
-                    .into_iter()
-                    .map(crate::application::client::message_to_sdk)
-                    .collect(),
-            }
-        }
+        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactFinished {
+            messages,
+            notice,
+        } => ChatEvent::CompactFinished {
+            messages: messages
+                .into_iter()
+                .map(crate::application::client::message_to_sdk)
+                .collect(),
+            notice,
+        },
         crate::application::loop_engine::chat::RuntimeStreamEvent::UserMessagesAdopted {
             items,
             queued,
@@ -522,6 +524,7 @@ pub(crate) fn map_stream_event(
             steps,
             session_id,
             created_at,
+            compacted,
         } => ChatEvent::SessionResumed {
             steps: steps
                 .into_iter()
@@ -542,6 +545,7 @@ pub(crate) fn map_stream_event(
                 .collect(),
             session_id,
             created_at,
+            compacted,
         },
         crate::application::loop_engine::chat::RuntimeStreamEvent::SessionResumeFailed {
             kind,

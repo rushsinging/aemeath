@@ -92,6 +92,22 @@ fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
 }
 
 #[test]
+fn compact_finished_preserves_runtime_owned_notice() {
+    let mapped = map_stream_event(RuntimeStreamEvent::CompactFinished {
+        messages: vec![share::message::Message::user("recent")],
+        notice: "✓ 上下文压缩完成".to_string(),
+    });
+
+    assert!(matches!(
+        mapped,
+        sdk::ChatEvent::CompactFinished { messages, notice }
+            if messages.len() == 1
+                && messages[0].text_content() == "recent"
+                && notice == "✓ 上下文压缩完成"
+    ));
+}
+
+#[test]
 fn session_resume_mapping_preserves_context_run_step_boundaries() {
     let event = RuntimeStreamEvent::SessionResumed {
         steps: vec![RuntimeResumedSessionStep {
@@ -103,6 +119,7 @@ fn session_resume_mapping_preserves_context_run_step_boundaries() {
         }],
         session_id: "session-1".into(),
         created_at: 0,
+        compacted: false,
     };
 
     match map_stream_event(event) {

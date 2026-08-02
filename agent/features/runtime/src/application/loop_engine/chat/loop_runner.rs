@@ -200,6 +200,7 @@ where
                             messages = result.recent_messages.clone();
                             sink.send_event(RuntimeStreamEvent::CompactFinished {
                                 messages: result.recent_messages,
+                                notice: "✓ 上下文压缩完成".to_string(),
                             }).await;
                         }
                         Ok(crate::ports::CompactOutcome::Skipped(_)) => {
@@ -397,7 +398,7 @@ where
                                     )
                                     .map(|dt| dt.timestamp_millis() as u64)
                                     .unwrap_or(0),
-                                })
+                                    compacted: resume_view.compacted,                                })
                                 .await;
                         }
                         Err(error) => {

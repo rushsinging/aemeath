@@ -373,7 +373,10 @@ fn test_messages_sync_clears_compact_runtime_state() {
     );
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::CompactFinished { messages: vec![] }),
+        TuiMsg::Runtime(TuiRuntimeEvent::CompactFinished {
+            messages: vec![],
+            notice: "✓ 上下文压缩完成".to_string(),
+        }),
         &ui_tx,
         &spawn_refs,
     );

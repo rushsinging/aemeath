@@ -173,8 +173,9 @@ impl App {
                 steps,
                 session_id,
                 created_at,
+                compacted,
             } => {
-                self.resume_session_messages(&session_id, steps, created_at.to_string());
+                self.resume_session_messages(&session_id, steps, created_at.to_string(), compacted);
             }
             UiEvent::SessionResumeFailed { kind, id, message } => {
                 use sdk::SessionResumeFailureKind;

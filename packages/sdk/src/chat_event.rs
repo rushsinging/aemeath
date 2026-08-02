@@ -220,6 +220,7 @@ pub struct LocalSessionResumeBacking {
     pub steps: Vec<LocalResumedSessionStep>,
     pub session_id: String,
     pub created_at: u64,
+    pub compacted: bool,
 }
 
 impl LocalSessionResumeBacking {
@@ -232,6 +233,7 @@ impl LocalSessionResumeBacking {
                 .collect(),
             session_id: view.session_id,
             created_at: view.created_at,
+            compacted: view.compacted,
         }
     }
 
@@ -244,6 +246,7 @@ impl LocalSessionResumeBacking {
                 .collect(),
             session_id: self.session_id.clone(),
             created_at: self.created_at,
+            compacted: self.compacted,
         }
     }
 }
@@ -267,6 +270,8 @@ pub struct SessionResumeView {
     pub steps: Vec<ResumedSessionStep>,
     pub session_id: String,
     pub created_at: u64,
+    #[serde(default)]
+    pub compacted: bool,
 }
 
 /// Runtime stream context used to bind UI events to the authoritative chat/turn.
@@ -474,9 +479,10 @@ pub enum ChatEvent {
     CompactRollback {
         messages: Vec<ChatMessage>,
     },
-    /// Compact（LLM 摘要）成功完成，替换消息列表。TUI 同步消息 + 清 compact 状态。
+    /// Compact 成功完成；notice 是 Runtime-owned 的用户可见持久提示。
     CompactFinished {
         messages: Vec<ChatMessage>,
+        notice: String,
     },
     /// 用户输入被 gate 接纳（idle 直发或 batch drain）。
     /// items = 本批接纳的消息；queued = gate 处理后仍留在 buffer 中的排队消息快照（一般空）。
@@ -662,6 +668,7 @@ pub enum ChatEvent {
         steps: Vec<ResumedSessionStep>,
         session_id: String,
         created_at: u64,
+        compacted: bool,
     },
     /// 会话恢复失败（#636 D2）。`kind` 区分 not_found / corrupt / io，
     /// TUI 据此显示对应错误并恢复到空 session。

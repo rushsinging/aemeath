@@ -305,10 +305,20 @@ where
         UiEvent::TurnStarted { messages }
         | UiEvent::MicrocompactDone { messages, .. }
         | UiEvent::PostToolExecutionSync { messages }
-        | UiEvent::CompactRollback { messages }
-        | UiEvent::CompactFinished { messages } => session(SessionIntent::MessagesSynced {
+        | UiEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
+        UiEvent::CompactFinished { messages, notice } => {
+            let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
+                AppendSystemMessage {
+                    text: notice.clone(),
+                },
+            ));
+            mapping.session.push(SessionIntent::MessagesSynced {
+                message_count: messages.len(),
+            });
+            mapping
+        }
         UiEvent::ApiError { messages, .. } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
@@ -484,10 +494,20 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         TuiRuntimeEvent::TurnStarted { messages }
         | TuiRuntimeEvent::MicrocompactDone { messages, .. }
         | TuiRuntimeEvent::PostToolExecutionSync { messages }
-        | TuiRuntimeEvent::CompactRollback { messages }
-        | TuiRuntimeEvent::CompactFinished { messages } => session(SessionIntent::MessagesSynced {
+        | TuiRuntimeEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
+        TuiRuntimeEvent::CompactFinished { messages, notice } => {
+            let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
+                AppendSystemMessage {
+                    text: notice.clone(),
+                },
+            ));
+            mapping.session.push(SessionIntent::MessagesSynced {
+                message_count: messages.len(),
+            });
+            mapping
+        }
         TuiRuntimeEvent::ApiError { messages, error } => {
             let mut mapping = session(SessionIntent::MessagesSynced {
                 message_count: messages.len(),

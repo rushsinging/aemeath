@@ -112,6 +112,7 @@ pub enum RuntimeStreamEvent {
     },
     CompactFinished {
         messages: Vec<Message>,
+        notice: String,
     },
     TurnStarted {
         messages: Vec<Message>,
@@ -217,6 +218,7 @@ pub enum RuntimeStreamEvent {
         steps: Vec<RuntimeResumedSessionStep>,
         session_id: String,
         created_at: u64,
+        compacted: bool,
     },
     /// 会话恢复失败（#636 D2）。区分 not_found / corrupt / io，前端展示对应错误。
     SessionResumeFailed {

@@ -319,6 +319,31 @@ fn activity_revision_gap_hides_summary_until_snapshot_repairs_mirror() {
 }
 
 #[test]
+fn live_and_resumed_compact_render_one_persistent_notice_without_chat_message() {
+    let notice = "✓ 上下文压缩完成";
+
+    let mut live = TuiScenarioHarness::new(100, 30);
+    live.runtime_event(TuiRuntimeEvent::CompactFinished {
+        messages: vec![],
+        notice: notice.into(),
+    });
+    live.render();
+
+    let mut resumed = TuiScenarioHarness::new(100, 30);
+    resumed.runtime_event(TuiRuntimeEvent::SessionResumed {
+        steps: vec![],
+        session_id: "session-compact".into(),
+        created_at: 0,
+        compacted: true,
+    });
+    resumed.render();
+
+    let rendered_notice = "✓ 上 下 文 压 缩 完 成";
+    assert_eq!(live.screen().matches(rendered_notice).count(), 1);
+    assert_eq!(resumed.screen().matches(rendered_notice).count(), 1);
+}
+
+#[test]
 fn terminal_text_after_thinking_matches_resume_projection() {
     let terminal_text = "Final answer survives the terminal event.";
 
@@ -357,6 +382,7 @@ fn terminal_text_after_thinking_matches_resume_projection() {
         }],
         session_id: "session-p0".into(),
         created_at: 0,
+        compacted: false,
     });
     resumed.render();
 

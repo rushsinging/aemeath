@@ -364,8 +364,8 @@ fn session_resume_keeps_context_run_step_boundaries() {
         }],
         session_id: "session-1".into(),
         created_at: 0,
+        compacted: false,
     });
-
     assert!(matches!(
         mapped,
         SdkEventMapping::Runtime(TuiRuntimeEvent::SessionResumed { steps, .. })

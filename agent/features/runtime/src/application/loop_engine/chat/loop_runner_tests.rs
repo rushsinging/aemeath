@@ -559,7 +559,7 @@ impl RecordingSink {
             RuntimeStreamEvent::TurnStarted { messages }
             | RuntimeStreamEvent::MicrocompactDone { messages, .. }
             | RuntimeStreamEvent::PostToolExecutionSync { messages }
-            | RuntimeStreamEvent::CompactFinished { messages } => {
+            | RuntimeStreamEvent::CompactFinished { messages, .. } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
                 let tag = match &event {
                     RuntimeStreamEvent::TurnStarted { .. } => {
@@ -4065,6 +4065,13 @@ async fn idle_compact_command_reaches_context_and_emits_result() {
             .count(),
         1,
         "manual compact must emit exactly one visible result"
+    );
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|event| event.as_str() == "CommandResultText"),
+        "跳过 compact 不得伪报成功"
     );
 }
 

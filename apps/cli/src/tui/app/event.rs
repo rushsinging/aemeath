@@ -116,9 +116,10 @@ pub enum AppEvent {
     CompactRollback {
         messages: Vec<TuiChatMessage>,
     },
-    /// Compact 成功完成，TUI 同步消息 + 清 compact 状态。
+    /// Compact 成功完成，TUI 同步消息并显示 Runtime-owned 提示。
     CompactFinished {
         messages: Vec<TuiChatMessage>,
+        notice: String,
     },
     /// 批量用户输入归宿通知（#507 修复）。每条 ChatMessage 由 runtime 端 share::Message
     /// 映射而来，含 typed blocks + image placeholder + input_id；TUI 用 ChatMessage.input_id
@@ -215,6 +216,7 @@ pub enum AppEvent {
         session_id: String,
         #[allow(dead_code)]
         created_at: u64,
+        compacted: bool,
     },
     /// 会话恢复失败（#636 D2）。TUI 显示错误并退回空 session。
     SessionResumeFailed {

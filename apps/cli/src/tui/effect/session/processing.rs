@@ -168,12 +168,13 @@ mod tests {
     fn sdk_event_to_tui_runtime_event_maps_compact_finished() {
         let event = sdk_event_to_tui_event(sdk::ChatEvent::CompactFinished {
             messages: vec![sdk::ChatMessage::user_text("hello")],
+            notice: "✓ 上下文压缩完成".to_string(),
         });
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::CompactFinished { messages })
-                if messages[0].text_content() == "hello"
+            SdkEventMapping::Runtime(TuiRuntimeEvent::CompactFinished { messages, notice })
+                if messages[0].text_content() == "hello" && notice == "✓ 上下文压缩完成"
         ));
     }
 

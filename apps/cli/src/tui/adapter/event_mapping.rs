@@ -155,8 +155,9 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::CompactRollback { messages } => TuiRuntimeEvent::CompactRollback {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        ChatEvent::CompactFinished { messages } => TuiRuntimeEvent::CompactFinished {
+        ChatEvent::CompactFinished { messages, notice } => TuiRuntimeEvent::CompactFinished {
             messages: messages.into_iter().map(chat_message).collect(),
+            notice,
         },
         ChatEvent::UserMessagesAdopted { items, queued } => TuiRuntimeEvent::UserMessagesAdopted {
             items: items.into_iter().map(chat_message).collect(),
@@ -369,6 +370,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             steps,
             session_id,
             created_at,
+            compacted,
         } => TuiRuntimeEvent::SessionResumed {
             steps: steps
                 .into_iter()
@@ -392,6 +394,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                 .collect(),
             session_id,
             created_at,
+            compacted,
         },
         ChatEvent::SessionResumeFailed { kind, id, message } => {
             TuiRuntimeEvent::SessionResumeFailed {
