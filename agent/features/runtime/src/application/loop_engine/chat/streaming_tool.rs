@@ -88,9 +88,17 @@ impl StreamingToolExecutor {
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
+        let dropped_results = state.results.len();
+        let dropped_pending = state.pending.len();
         state.step_id = Some(step_id.clone());
         state.pending.clear();
         state.results.clear();
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[streaming_tool] reset_for_invocation dropped_results={} pending={}",
+            dropped_results,
+            dropped_pending
+        );
     }
 
     /// 流中 `ToolCallCompleted` → 立即执行（spawn，semaphore 限并发）。
@@ -111,6 +119,13 @@ impl StreamingToolExecutor {
             );
             return;
         };
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[streaming_tool] submit tool={} id={} index={}",
+            call.name,
+            call.id,
+            call.index
+        );
         let spawn_inner = inner.clone();
         let handle = tokio::spawn(async move {
             let _permit = match spawn_inner.semaphore.clone().acquire_owned().await {
@@ -137,6 +152,14 @@ impl StreamingToolExecutor {
                 &guarded,
             )
             .await;
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[streaming_tool] round completed tool={} results={} suspensions={} approvals={}",
+                call.name,
+                round.results.len(),
+                round.suspensions.len(),
+                round.approvals.len()
+            );
             spawn_inner
                 .state
                 .lock()
@@ -170,7 +193,13 @@ impl StreamingToolExecutor {
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        std::mem::take(&mut state.results)
+        let results = std::mem::take(&mut state.results);
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[streaming_tool] take_results rounds={}",
+            results.len()
+        );
+        results
     }
 }
 

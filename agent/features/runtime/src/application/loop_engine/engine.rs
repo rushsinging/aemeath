@@ -1471,7 +1471,7 @@ async fn execute_step(
             }
             log::debug!(
                 target: crate::LOG_TARGET,
-                "[run_loop] execute_tools count={} run_id={}",
+                "[run_loop] tool round path=standard count={} run_id={}",
                 guarded_calls.len(),
                 short(run.id()),
             );
@@ -1508,7 +1508,7 @@ async fn execute_step(
             } else {
                 log::debug!(
                     target: crate::LOG_TARGET,
-                    "[run_loop] streaming tool rounds={} run_id={} (bypassed execute_tools)",
+                    "[run_loop] tool round path=streaming rounds={} run_id={} (bypassed execute_tools)",
                     streaming_rounds.len(),
                     short(run.id()),
                 );

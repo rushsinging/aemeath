@@ -27,6 +27,9 @@ pub(crate) async fn parse_responses_stream(
     // (output_index → (call_id, name, arguments))
     let mut function_calls: std::collections::HashMap<usize, (String, String, String)> =
         std::collections::HashMap::new();
+    // #1494：已发出 ToolCallCompleted 的 output_index（arguments.done 先发，流结束兜底跳过）。
+    let mut completed_tool_indices: std::collections::HashSet<usize> =
+        std::collections::HashSet::new();
     let mut usage = Usage {
         input_tokens: 0,
         output_tokens: 0,
@@ -159,6 +162,20 @@ pub(crate) async fn parse_responses_stream(
                 if let Some(args) = event.get("arguments").and_then(|d| d.as_str()) {
                     if let Some(entry) = function_calls.get_mut(&output_index) {
                         entry.2 = args.to_string();
+                        // #1494：Responses 协议级"参数完整"信号——立即解析并发出
+                        // ToolCallCompleted，runtime 据此边流边执行。
+                        let (call_id, name, full_args) = entry.clone();
+                        let parsed = serde_json::from_str::<serde_json::Value>(&full_args)
+                            .unwrap_or_else(|_| {
+                                crate::adapters::json_recovery::try_complete_truncated_json(
+                                    &full_args,
+                                )
+                                .unwrap_or_else(|| {
+                                    serde_json::Value::Object(serde_json::Map::new())
+                                })
+                            });
+                        handler.emit_tool_call_completed(output_index, call_id, name, parsed);
+                        completed_tool_indices.insert(output_index);
                     }
                 }
             }
@@ -215,7 +232,15 @@ pub(crate) async fn parse_responses_stream(
         if let Some((id, name, args_str)) = function_calls.remove(&idx) {
             let input: serde_json::Value =
                 serde_json::from_str(&args_str).unwrap_or(serde_json::json!({}));
-            content_blocks.push(ContentBlock::ToolUse { id, name, input });
+            content_blocks.push(ContentBlock::ToolUse {
+                id: id.clone(),
+                name: name.clone(),
+                input: input.clone(),
+            });
+            // #1494 兜底：arguments.done 未发出（事件缺失 / 解析失败）时补发。
+            if !completed_tool_indices.contains(&idx) {
+                handler.emit_tool_call_completed(idx, id, name, input);
+            }
         }
     }
 
