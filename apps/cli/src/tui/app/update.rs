@@ -25,7 +25,6 @@ use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
 use crate::tui::update::intent::AgentIntent;
 use crate::tui::update::msg::TuiMsg;
 use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
-use crate::tui::view_assembler::output::OutputViewAssembler;
 use crate::tui::view_model::LiveStatusViewModel;
 use tokio::sync::mpsc;
 
@@ -537,7 +536,6 @@ impl App {
                     .observe_main_model_activity(run_id, std::time::Instant::now())
                 {
                     self.mark_output_dirty();
-                    self.output_document_memo = None;
                 }
             }
         }
@@ -619,61 +617,39 @@ impl App {
             .workspace_provider
             .workspace_root()
             .map(ToOwned::to_owned);
-        // memo：conversation revision 不变 且 workspace_root 不变 则复用上次 view_model，跳过全量 assemble。
-        // workspace_root 来自 /worktree enter，不推进 revision，需单独纳入 key（#425 review Fix 1）。
-        let activity_frame = self.view_state.run_activity.frame;
-        let model_silent = self
-            .view_state
-            .run_activity
-            .is_model_silent(std::time::Instant::now());
-        let need_rebuild = self
-            .output_document_memo
-            .as_ref()
-            .map(|cache| {
-                cache.revision != revision
-                    || cache.workspace_root.as_deref() != current_workspace_root.as_deref()
-                    || cache.model_silent != model_silent
-                    || (model_silent && cache.activity_frame != activity_frame)
-            })
-            .unwrap_or(true);
-        if need_rebuild {
-            self.assemble_count = self.assemble_count.saturating_add(1);
-            let workspace_root = current_workspace_root.as_deref().map(std::path::Path::new);
-            let view_model = OutputViewAssembler::assemble_from_conversation_with_activity(
-                &self.model.conversation,
-                &self.view_state.run_activity,
-                std::time::Instant::now(),
-                revision,
-                workspace_root,
-            );
-            self.output_document_memo = Some(OutputDocumentMemo {
-                revision,
-                activity_frame,
-                model_silent,
-                workspace_root: current_workspace_root.clone(),
-                view_model,
-            });
-        }
-        // take 出 owned view_model，render 期间释放对 cache 的不可变借用，render 后放回。
-        let cache = self
-            .output_document_memo
-            .take()
-            .expect("memo cache filled above");
-        let _ = cache.materialize_window();
-        let view_model = cache.view_model;
-        let cached_revision = cache.revision;
-        let cached_activity_frame = cache.activity_frame;
-        let cached_model_silent = cache.model_silent;
-        let cached_workspace_root = cache.workspace_root;
-        let root_count = view_model.roots.len();
         let width = self.output_document_width();
-        // 文档构建（含各 block 的字符串处理）放在 draw 之外，draw 循环的 catch_unwind
-        // 只保护「把已构建文档画进 buffer」，无法兜住这里的 panic。对称地在构建侧兜底：
-        // 一旦构建 panic（已落 panic.log），保留旧文档并提示用户，避免崩溃与糊屏。
-        let requested_window = crate::tui::view_model::output::OutputRenderWindow {
+        let cache = &mut self.output_view;
+        let workspace_root = current_workspace_root.as_deref().map(std::path::Path::new);
+        let requested_window = crate::tui::view_model::OutputRenderWindow {
             line_limit: self.view_state.output.render_line_limit(),
             tail_offset: self.view_state.output.history_window_tail_offset,
         };
+        let requested_window = if requested_window.line_limit >= usize::MAX / 2 {
+            crate::tui::view_model::OutputRenderWindow::all()
+        } else {
+            requested_window
+        };
+        let materialized = cache.retained.materialize_window(
+            &self.model.conversation,
+            workspace_root,
+            requested_window,
+        );
+        let indexed_items = materialized.indexed_items;
+        let sync_stats = materialized.stats;
+        #[cfg(test)]
+        crate::tui::render::performance::record_retained_view_sync(
+            sync_stats.touched_roots,
+            sync_stats.created_roots,
+            sync_stats.reused_roots,
+            sync_stats.rebuilt_roots,
+        );
+        let need_rebuild = sync_stats.did_rebuild || sync_stats.touched_roots > 0;
+        if need_rebuild {
+            self.assemble_count = self.assemble_count.saturating_add(1);
+        }
+        let view_model = &materialized.view_model;
+        let root_count = view_model.roots.len();
+        // 文档构建（含各 block 的字符串处理）放在 draw 之外，draw 循环的 catch_unwind
         let rebuilt_anchor: Option<(RenderedLineAnchor, usize)> =
             if !self.view_state.output.auto_scroll {
                 let old_total_lines = self.output_area.document().total_lines();
@@ -692,12 +668,12 @@ impl App {
                 None
             };
         crate::tui::log_debug!(
-            "tui.output.window_rebuild stage=request revision={} width={} term_width={} roots={} before_document_lines={} requested_line_limit={} requested_tail_offset={} scroll_offset={} auto_scroll={} visible_height={} source_total_lines={} need_view_model_rebuild={}",
+            "tui.output.window_rebuild stage=request revision={} width={} term_width={} indexed_items={} roots={} before_document_lines={} requested_line_limit={} requested_tail_offset={} scroll_offset={} auto_scroll={} visible_height={} source_total_lines={} need_view_model_rebuild={}",
             revision,
             width,
             self.output_area.term_width,
-            root_count,
-            before_lines,
+            indexed_items,
+            root_count,            before_lines,
             requested_window.line_limit,
             requested_window.tail_offset,
             self.view_state.output.scroll_offset,
@@ -708,7 +684,7 @@ impl App {
         );
         let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.output_document_renderer.render_model_window(
-                &view_model,
+                view_model,
                 width,
                 self.output_area.term_width,
                 self.view_state.animation.spinner_frame,
@@ -716,14 +692,6 @@ impl App {
                 requested_window,
             )
         }));
-        // 无论渲染成败都把 view_model 放回 cache，保留 memo。
-        self.output_document_memo = Some(OutputDocumentMemo {
-            revision: cached_revision,
-            activity_frame: cached_activity_frame,
-            model_silent: cached_model_silent,
-            workspace_root: cached_workspace_root,
-            view_model,
-        });
         let document = match render_result {
             Ok(result) => {
                 let source_total_lines = result.source_total_lines;
@@ -905,4 +873,3 @@ impl App {
 
 /// Type alias so update.rs can use `App` without circular path
 use super::App;
-use super::OutputDocumentMemo;

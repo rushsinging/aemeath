@@ -49,7 +49,7 @@ fn busy_paste_classifies_text_empty_and_image_without_real_clipboard() {
 }
 
 #[test]
-fn error_and_compact_progress_converge_through_frame_driver() {
+fn legacy_compact_progress_event_does_not_create_parallel_tui_state() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.runtime_event(TuiRuntimeEvent::CompactProgress {
         stage: "Summarizing".into(),
@@ -62,20 +62,7 @@ fn error_and_compact_progress_converge_through_frame_driver() {
         .conversation
         .runtime
         .compact_progress
-        .is_some());
-    assert!(harness.app.view_state.dirty.output);
-    harness.render();
-    assert_eq!(
-        harness
-            .app
-            .model
-            .conversation
-            .runtime
-            .compact_progress
-            .as_ref()
-            .map(|progress| progress.stage.as_str()),
-        Some("Summarizing")
-    );
+        .is_none());
 
     harness.ui(UiEvent::Error("provider unavailable".into()));
     assert!(harness.effects().iter().any(

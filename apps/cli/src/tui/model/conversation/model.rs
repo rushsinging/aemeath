@@ -3,8 +3,11 @@ use super::agent_progress::AgentProgressEntry;
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
 use super::chat_turn::ChatTurn;
-use super::ids::{ChatId, ChatTurnId};
+use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::interaction::{AgentRunState, InteractionState, UiRunId};
+use super::output_view_change::{
+    OutputViewChange, OutputViewChanges, OutputViewCursor, OutputViewJournal,
+};
 use super::queued_submission::QueuedSubmission;
 use super::runtime_state::RuntimeState;
 use super::update::ConversationUpdate;
@@ -23,6 +26,8 @@ pub(crate) struct ConversationRetainedStateSnapshot {
     pub agent_runs: usize,
     pub agent_run_steps: usize,
     pub terminal_agent_runs: usize,
+    pub output_view_journal_entries: usize,
+    pub output_view_journal_item_id_bytes: usize,
     pub has_active_interaction: bool,
 }
 
@@ -30,6 +35,7 @@ pub(crate) struct ConversationRetainedStateSnapshot {
 pub struct ConversationModel {
     // ── 对话内容 ──
     pub chats: Vec<Chat>,
+    pub(crate) resumed_history: super::resumed_history::ResumedHistoryBacking,
     pub active_chat_id: Option<ChatId>,
     pub timeline: OutputTimelineModel,
     pub queued_submissions: Vec<QueuedSubmission>,
@@ -37,8 +43,9 @@ pub struct ConversationModel {
     next_chat_sequence: usize,
     next_block_sequence: usize,
     /// 单调递增的内容版本号；每次产生 change 的 apply +1。
-    /// 供渲染层 memo `assemble_from_conversation`：revision 不变即可复用上次 view_model。
+    /// 供输出窗口同步判断当前物化结果是否仍可复用。
     revision: u64,
+    output_view_journal: OutputViewJournal,
     pub(super) active_text_block_id: Option<String>,
     pub(super) active_text_context: Option<(ChatId, ChatTurnId)>,
     pub(super) active_thinking_block_id: Option<String>,
@@ -55,6 +62,7 @@ impl Default for ConversationModel {
     fn default() -> Self {
         Self {
             chats: Vec::new(),
+            resumed_history: super::resumed_history::ResumedHistoryBacking::default(),
             active_chat_id: None,
             timeline: OutputTimelineModel::default(),
             queued_submissions: Vec::new(),
@@ -62,6 +70,7 @@ impl Default for ConversationModel {
             next_chat_sequence: 0,
             next_block_sequence: 0,
             revision: 0,
+            output_view_journal: OutputViewJournal::default(),
             active_text_block_id: None,
             active_text_context: None,
             active_thinking_block_id: None,
@@ -75,15 +84,52 @@ impl Default for ConversationModel {
 }
 
 impl ConversationModel {
+    pub(crate) fn resumed_history_steps(&self) -> usize {
+        self.resumed_history.steps().len()
+    }
+
+    pub(crate) fn resumed_history_step(
+        &self,
+        index: usize,
+    ) -> Option<&super::resumed_history::ResumedHistoryStep> {
+        self.resumed_history.steps().get(index)
+    }
+
+    pub(crate) fn resumed_history_items(&self) -> &[super::resumed_history::ResumedHistoryItem] {
+        self.resumed_history.items()
+    }
+
+    pub(crate) fn resumed_history_item(
+        &self,
+        id: &str,
+    ) -> Option<&super::resumed_history::ResumedHistoryItem> {
+        self.resumed_history.item(id)
+    }
+
+    pub(crate) fn replace_resumed_history(
+        &mut self,
+        backing: super::resumed_history::ResumedHistoryBacking,
+    ) {
+        self.reset();
+        self.resumed_history = backing;
+        self.revision = self.revision.wrapping_add(1);
+    }
+
     /// 清空整段对话，回到初始空状态。用于 `/clear` 等需要重置单一真相源的场景。
     pub fn reset(&mut self) {
+        let mut journal = std::mem::take(&mut self.output_view_journal);
         *self = Self::default();
+        journal.publish(OutputViewChange::Reset);
+        self.output_view_journal = journal;
     }
 
     pub fn apply<U: ConversationUpdate>(&mut self, update: U) -> Vec<ConversationChange> {
         let changes = update.update(self);
         if !changes.is_empty() {
             self.revision = self.revision.wrapping_add(1);
+            self.publish_output_view_changes(&changes);
+        } else {
+            let _ = self.timeline.take_pending_view_changes();
         }
         changes
     }
@@ -97,6 +143,54 @@ impl ConversationModel {
     /// 当前内容版本号，供渲染层 memo。
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    pub(crate) fn output_view_cursor(&self) -> OutputViewCursor {
+        self.output_view_journal.cursor()
+    }
+
+    pub(crate) fn output_view_changes_since(&self, cursor: OutputViewCursor) -> OutputViewChanges {
+        self.output_view_journal.changes_since(cursor)
+    }
+
+    pub(crate) fn tool_call(
+        &self,
+        chat_id: &ChatId,
+        turn_id: &ChatTurnId,
+        tool_call_id: &ToolCallId,
+    ) -> Option<&super::tool_call::ToolCall> {
+        self.chats
+            .iter()
+            .find(|chat| &chat.id == chat_id)?
+            .turns
+            .iter()
+            .find(|turn| &turn.id == turn_id)?
+            .tool_calls
+            .iter()
+            .find(|call| call.id.as_ref() == Some(tool_call_id))
+    }
+
+    fn publish_output_view_changes(&mut self, changes: &[ConversationChange]) {
+        let timeline_changes = self.timeline.take_pending_view_changes();
+        let mut changed_item_ids = std::collections::HashSet::new();
+        for change in &timeline_changes {
+            match change {
+                OutputViewChange::Append { item_id }
+                | OutputViewChange::Update { item_id }
+                | OutputViewChange::Remove { item_id } => {
+                    changed_item_ids.insert(item_id.clone());
+                }
+                OutputViewChange::Reset => {}
+            }
+            self.output_view_journal.publish(change.clone());
+        }
+
+        for item_id in changes.iter().filter_map(output_view_item_id_for_change) {
+            if !changed_item_ids.contains(&item_id) {
+                self.output_view_journal
+                    .publish(OutputViewChange::Update { item_id });
+            }
+        }
     }
 
     #[cfg(test)]
@@ -127,6 +221,9 @@ impl ConversationModel {
             })
             .count();
 
+        let (output_view_journal_entries, output_view_journal_item_id_bytes) =
+            self.output_view_journal.retained_metrics();
+
         ConversationRetainedStateSnapshot {
             chats: self.chats.len(),
             turns,
@@ -137,6 +234,8 @@ impl ConversationModel {
             agent_runs: self.agent_runs.len(),
             agent_run_steps,
             terminal_agent_runs,
+            output_view_journal_entries,
+            output_view_journal_item_id_bytes,
             has_active_interaction: self.active_interaction.is_some(),
         }
     }
@@ -237,7 +336,7 @@ impl ConversationModel {
         let user_block_id = self.next_block_id("user");
         let turn_id = ChatTurnId::new_v7();
         self.timeline.push(OutputTimelineItem::UserMessage {
-            id: user_block_id,
+            id: user_block_id.clone(),
             text: submission,
         });
         vec![
@@ -247,6 +346,9 @@ impl ConversationModel {
             ConversationChange::ChatTurnStarted {
                 chat_id: chat_id.to_string(),
                 turn_id: turn_id.to_string(),
+            },
+            ConversationChange::UserMessageAppended {
+                block_id: user_block_id,
             },
             ConversationChange::OutputDirty,
         ]
@@ -415,6 +517,52 @@ impl ConversationModel {
         self.chats.iter_mut().find(|chat| chat.id == active)
     }
 }
+
+fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String> {
+    match change {
+        ConversationChange::UserMessageAppended { block_id }
+        | ConversationChange::AssistantTextAppended { block_id }
+        | ConversationChange::ThinkingTextAppended { block_id }
+        | ConversationChange::SystemMessageAppended { block_id }
+        | ConversationChange::ErrorAppended { block_id, .. }
+        | ConversationChange::QueuedSubmissionAdded { id: block_id }
+        | ConversationChange::BlockCompleted {
+            block_id: Some(block_id),
+        }
+        | ConversationChange::AskUserShown { id: block_id }
+        | ConversationChange::AskUserUpdated { id: block_id }
+        | ConversationChange::OrphanToolResultObserved { id: block_id } => Some(block_id.clone()),
+        ConversationChange::AskUserDismissed { .. } => None,
+        ConversationChange::ToolCallObserved { .. } => None,
+        ConversationChange::OutputDirty => None,
+        ConversationChange::ToolCallBound {
+            chat_id,
+            turn_id,
+            id,
+            ..
+        }
+        | ConversationChange::ToolCallCompleted {
+            chat_id,
+            turn_id,
+            id,
+            ..
+        }
+        | ConversationChange::AgentMetaUpdated {
+            chat_id,
+            turn_id,
+            tool_id: id,
+        } => Some(format!("tool-call-{chat_id}/{turn_id}/{id}")),
+        ConversationChange::AgentProgressRecorded { .. } => None,
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+use super::output_view_change::OUTPUT_VIEW_JOURNAL_CAPACITY;
+
+#[cfg(test)]
+#[path = "output_view_change_tests.rs"]
+mod output_view_change_tests;
 
 #[cfg(test)]
 mod tests {

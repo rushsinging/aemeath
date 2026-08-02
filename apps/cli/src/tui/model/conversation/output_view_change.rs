@@ -11,7 +11,6 @@ pub(crate) enum OutputViewChange {
     Update { item_id: String },
     Remove { item_id: String },
     Reset,
-    Placeholder,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,7 +61,7 @@ impl OutputViewJournal {
                 OutputViewChange::Append { item_id }
                 | OutputViewChange::Update { item_id }
                 | OutputViewChange::Remove { item_id } => item_id.len(),
-                OutputViewChange::Reset | OutputViewChange::Placeholder => 0,
+                OutputViewChange::Reset => 0,
             })
             .sum();
         (self.entries.len(), item_id_bytes)

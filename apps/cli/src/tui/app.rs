@@ -40,20 +40,10 @@ const RSS_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 use event::StatusContextUpdate;
 pub use event::UiEvent;
 
-/// `refresh_output_document_from_model` 的 assemble 产物 memo。
-pub(crate) struct OutputDocumentMemo {
-    pub(crate) revision: u64,
-    pub(crate) activity_frame: u64,
-    pub(crate) model_silent: bool,
-    /// memo key 第二维：workspace_root 变化时强制重 assemble，使工具标题路径立即刷新。
-    pub(crate) workspace_root: Option<String>,
-    pub(crate) view_model: crate::tui::view_model::OutputViewModel,
-}
-
-impl OutputDocumentMemo {
-    pub(crate) fn materialize_window(&self) -> &crate::tui::view_model::OutputViewModel {
-        &self.view_model
-    }
+/// `refresh_output_document_from_model` 的增量装配结果 owner。
+#[derive(Default)]
+pub(crate) struct OutputViewState {
+    pub(crate) retained: crate::tui::view_assembler::retained_output_view::RetainedOutputView,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -121,9 +111,9 @@ pub struct App {
     pub input_area: InputArea,
     pub status_bar: StatusBar,
     pub(crate) output_document_renderer: OutputDocumentRenderer,
-    /// memo：缓存上次 assemble 的 (revision, view_model)。revision 不变即复用，
-    /// 跳过 `assemble_from_conversation` 的全量遍历+clone（大会话伪卡死根治）。
-    pub(crate) output_document_memo: Option<OutputDocumentMemo>,
+    /// 输出窗口状态：缓存轻量历史索引、当前物化窗口和渲染结果；
+    /// revision 不变时复用，避免重新同步和装配历史。
+    pub(crate) output_view: OutputViewState,
     frame_diagnostics: FrameDiagnostics,
     process_memory: ProcessMemoryBaseline,
     started_at: Instant,
@@ -234,7 +224,7 @@ impl App {
             input_area: InputArea::new(),
             status_bar,
             output_document_renderer: OutputDocumentRenderer::default(),
-            output_document_memo: None,
+            output_view: OutputViewState::default(),
             frame_diagnostics: FrameDiagnostics::new(SLOW_FRAME_THRESHOLD, SLOW_FRAME_LOG_COOLDOWN),
             process_memory: ProcessMemoryBaseline::new(RSS_SAMPLE_INTERVAL),
             started_at: Instant::now(),
@@ -380,7 +370,8 @@ impl App {
         #[cfg(test)]
         crate::tui::render::performance::record_terminal_draw(draw_duration);
         crate::tui::log_trace!(
-            "tui.draw.complete elapsed_ms={} terminal={}x{} output_rect={:?} input_rect={:?} status_rect={:?} run_activity_active={} spinner_frame={} output_lines={}",            draw_duration.as_millis(),
+            "tui.draw.complete elapsed_ms={} terminal={}x{} output_rect={:?} input_rect={:?} status_rect={:?} run_activity_active={} spinner_frame={} output_lines={}",
+            draw_duration.as_millis(),
             self.layout
                 .last_terminal_size
                 .map(|size| size.width)
@@ -393,7 +384,8 @@ impl App {
             input_rect,
             status_rect,
             self.view_state.run_activity.is_active(),
-            self.view_state.animation.spinner_frame,            self.output_area.document().total_lines()
+            self.view_state.animation.spinner_frame,
+            self.output_area.document().total_lines()
         );
         self.finish_frame_diagnostics(draw_duration);
         Ok(())
@@ -431,10 +423,7 @@ impl App {
             output_dirty,
             revision: self.model.conversation.revision(),
             timeline_items: self.model.conversation.timeline.items().len(),
-            output_roots: self
-                .output_document_memo
-                .as_ref()
-                .map_or(0, |cache| cache.view_model.roots.len()),
+            output_roots: self.output_view.retained.view_model().roots.len(),
             document_lines: self.output_area.document().total_lines(),
             assemble_calls: 0,
         }

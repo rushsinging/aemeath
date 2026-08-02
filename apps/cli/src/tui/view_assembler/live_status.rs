@@ -25,6 +25,9 @@ impl LiveStatusAssembler {
         let now = Instant::now();
         let activity_summary =
             ActivitySummaryAssembler::assemble(conversation.activity_observations());
+        let compact_progress = activity_summary
+            .as_ref()
+            .and_then(|summary| compact_progress_from_activity(conversation, &summary.run_id));
         let spinner = activity_summary.map(|summary| SpinnerLineView {
             frame: activity.frame.max(anim.frame),
             verb: if activity.verb.is_empty() {
@@ -41,16 +44,6 @@ impl LiveStatusAssembler {
             .iter()
             .flat_map(|text| queued_preview_lines(text))
             .collect();
-        let compact_progress = conversation.runtime.compact_progress.as_ref().map(|p| {
-            use crate::tui::view_model::live_status::CompactProgressView;
-            let ratio = p.ratio().clamp(0.0, 1.0);
-            CompactProgressView {
-                ratio_millis: (ratio * 1000.0).round() as u32,
-                stage: p.stage.clone(),
-                current: p.current,
-                total: p.total,
-            }
-        });
         LiveStatusViewModel {
             spinner,
             queued_lines,
@@ -58,6 +51,57 @@ impl LiveStatusAssembler {
             compact_progress,
         }
     }
+}
+
+fn compact_progress_from_activity(
+    conversation: &ConversationModel,
+    run_id: &crate::tui::model::conversation::interaction::UiRunId,
+) -> Option<crate::tui::view_model::live_status::CompactProgressView> {
+    use crate::tui::adapter::tui_runtime_event::{
+        TuiActivityDetail, TuiActivityKind, TuiActivityState, TuiCompactStage,
+    };
+
+    let activity = conversation
+        .activity_observations()
+        .activities()
+        .iter()
+        .filter(|activity| {
+            activity.run_id == *run_id
+                && activity.kind == TuiActivityKind::Compaction
+                && matches!(
+                    activity.state,
+                    TuiActivityState::Running | TuiActivityState::Waiting
+                )
+        })
+        .max_by_key(|activity| activity.revision)?;
+    let TuiActivityDetail::Compact {
+        stage,
+        current,
+        total,
+    } = activity.detail
+    else {
+        return None;
+    };
+    let (stage, ratio_millis) = match stage {
+        TuiCompactStage::Preparing => ("preparing", 50),
+        TuiCompactStage::Summarizing => {
+            let ratio_millis = match (current, total) {
+                (Some(current), Some(total)) if total > 0 => {
+                    150u32.saturating_add(700u32.saturating_mul(current) / total)
+                }
+                _ => 500,
+            };
+            ("summarizing", ratio_millis)
+        }
+        TuiCompactStage::Finalizing => ("finalizing", 900),
+    };
+
+    Some(crate::tui::view_model::live_status::CompactProgressView {
+        ratio_millis: ratio_millis.min(1_000),
+        stage: stage.to_string(),
+        current,
+        total,
+    })
 }
 
 fn queued_preview_lines(text: &str) -> Vec<String> {
@@ -77,8 +121,8 @@ mod tests {
     use super::*;
     use crate::tui::adapter::tui_runtime_event::{
         TuiActivityAudience, TuiActivityDetail, TuiActivityKind, TuiActivityObservation,
-        TuiActivitySource, TuiActivityState, TuiActivityTiming, TuiModelStreamState,
-        TuiRunPhaseKind, TuiRunPurpose, UiActivityId,
+        TuiActivitySource, TuiActivityState, TuiActivityTiming, TuiCompactStage,
+        TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose, UiActivityId,
     };
     use crate::tui::model::conversation::intent::UpdateTaskLines;
     use crate::tui::model::conversation::interaction::UiRunId;
@@ -198,6 +242,35 @@ mod tests {
             &[],
         );
         assert!(empty.spinner.is_none());
+    }
+
+    #[test]
+    fn compact_activity_drives_inline_progress_without_legacy_runtime_state() {
+        let conversation = conversation_with_activities(
+            TuiActivityKind::Compaction,
+            TuiActivityDetail::Compact {
+                stage: TuiCompactStage::Summarizing,
+                current: Some(2),
+                total: Some(4),
+            },
+        );
+
+        let view = LiveStatusAssembler::assemble(
+            &conversation,
+            &activity_state(),
+            &SpinnerAnim::default(),
+            &[],
+        );
+
+        assert_eq!(
+            view.compact_progress,
+            Some(crate::tui::view_model::live_status::CompactProgressView {
+                ratio_millis: 500,
+                stage: "summarizing".to_string(),
+                current: Some(2),
+                total: Some(4),
+            })
+        );
     }
 
     #[test]

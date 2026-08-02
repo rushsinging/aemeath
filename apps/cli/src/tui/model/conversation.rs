@@ -26,11 +26,13 @@ mod model_extra_tests;
 #[cfg(test)]
 mod model_tests;
 pub mod notice;
+pub(crate) mod output_view_change;
 pub mod processing_job;
 pub mod queued_submission;
 #[cfg(test)]
 #[path = "conversation/resume_performance_tests.rs"]
 mod resume_performance_tests;
+pub(crate) mod resumed_history;
 #[cfg(test)]
 #[path = "conversation/retained_state_tests.rs"]
 mod retained_state_tests;

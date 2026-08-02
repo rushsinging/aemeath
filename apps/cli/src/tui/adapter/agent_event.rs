@@ -546,15 +546,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 (node != "idle").then(|| node.clone()),
             )))
         }
-        TuiRuntimeEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        } => conversation(ConversationIntent::SetCompactProgress(SetCompactProgress {
-            stage: stage.clone(),
-            current: *current,
-            total: *total,
-        })),
+        TuiRuntimeEvent::CompactProgress { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::TasksSnapshot { lines } => conversation(
             ConversationIntent::UpdateTaskLines(UpdateTaskLines(lines.clone())),
         ),
