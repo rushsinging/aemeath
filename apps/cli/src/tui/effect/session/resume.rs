@@ -47,6 +47,20 @@ impl App {
             .iter()
             .flat_map(|step| step.messages.iter().cloned())
             .collect::<Vec<_>>();
+        let input_history = if display_history.is_some() {
+            display_history
+                .as_ref()
+                .map(|index| {
+                    index
+                        .steps
+                        .iter()
+                        .flat_map(|step| step.user_input_history.iter().cloned())
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            extract_user_input_history(&messages)
+        };
         let msg_count = messages.len();
         let last_role = messages
             .last()
@@ -86,7 +100,9 @@ impl App {
                 ),
             ));
         }
-        apply_resume_input_history(self, &messages);
+        self.apply_agent_intent(AgentIntent::Input(InputIntent::ReplaceHistory(
+            input_history,
+        )));
         self.append_system_notice(format!(
             "[resumed session {} ({} messages)]",
             session_id, msg_count
@@ -198,6 +214,51 @@ mod tests {
         assert_eq!(app.model.conversation.timeline.items().len(), 1);
         assert_eq!(app.model.display_history.steps().len(), 1);
         assert!(app.model.conversation.revision() > 0);
+    }
+
+    #[test]
+    fn startup_index_restores_input_history_from_all_display_steps() {
+        let mut app = App::new(
+            "session-bootstrap".to_string(),
+            PathBuf::from("/tmp"),
+            "model".to_string(),
+        );
+        app.restore_startup_backing(sdk::LocalSessionResumeBacking {
+            steps: Vec::new(),
+            display_history: Some(sdk::DisplayHistoryIndex {
+                session_id: "session-resumed".to_string(),
+                generation_revision: 42,
+                steps: vec![
+                    sdk::DisplayHistoryStepReference {
+                        run_id: "run-1".to_string(),
+                        step_id: "step-1".to_string(),
+                        member_name: "step-1.json".to_string(),
+                        estimated_lines: 1,
+                        user_input_history: vec!["older input".to_string()],
+                        finalize_cause: None,
+                        duration_ms: None,
+                    },
+                    sdk::DisplayHistoryStepReference {
+                        run_id: "run-2".to_string(),
+                        step_id: "step-2".to_string(),
+                        member_name: "step-2.json".to_string(),
+                        estimated_lines: 1,
+                        user_input_history: vec!["latest input".to_string()],
+                        finalize_cause: None,
+                        duration_ms: None,
+                    },
+                ],
+            }),
+            session_id: "session-resumed".to_string(),
+            created_at: 42,
+        });
+
+        assert_eq!(
+            app.model.input.history.entries,
+            vec!["older input".to_string(), "latest input".to_string()]
+        );
+        assert_eq!(app.model.input.history.selected_index, None);
+        assert_eq!(app.model.input.history.saved_input, "");
     }
 
     #[test]

@@ -23,16 +23,16 @@ use super::dataset_protocol as proto;
 use super::dataset_protocol::{
     DatasetJournal, DatasetManifestMemberRecord, DatasetManifestRecord, JournalKind, JournalMember,
     JournalPhase, BLOBS_DIR, CORRUPTION_MARKER, JOURNAL_FILE, LOCK_FILE, MANIFEST_FILE,
-    PREVIOUS_DIR, PREVIOUS_NEXT_DIR, PRIMARY_DIR,
+    MEMBERS_DIR, PREVIOUS_DIR, PREVIOUS_NEXT_DIR, PRIMARY_DIR,
 };
 use crate::domain::revision_member_digest;
 use crate::{
     AtomicDatasetPort, CommitWarning, CorruptTransactionError, CorruptionReason, DatasetChangeSet,
     DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey, DatasetManifest, DatasetMember,
-    DatasetMemberReference, DatasetRead, DatasetReadOutcome, DatasetRevision, DeleteOptions,
-    DeleteOutcome, Generation, QuarantineDisposition, QuarantineOutcome, QuarantineReason,
-    QuarantineReceipt, SafePathSegment, StorageError, StorageErrorKind, TransactionScope,
-    WriteOptions,
+    DatasetMemberChange, DatasetMemberReference, DatasetRead, DatasetReadOutcome, DatasetRevision,
+    DeleteOptions, DeleteOutcome, Generation, QuarantineDisposition, QuarantineOutcome,
+    QuarantineReason, QuarantineReceipt, SafePathSegment, StorageError, StorageErrorKind,
+    TransactionScope, WriteOptions,
 };
 
 // ---- 私有、仅供 crash 测试驱动的故障注入接缝（不对外导出） ----
@@ -292,91 +292,37 @@ impl FileSystemDatasetAdapter {
         self.validate_commit_journal_semantics(dir, journal)?;
 
         let primary_dir = PathBuf::from(PRIMARY_DIR);
-        let primary_blobs = primary_dir.join(BLOBS_DIR);
         let stage_dir = PathBuf::from(format!(".stage-{}", journal.随机数));
-        let stage_blobs = stage_dir.join(BLOBS_DIR);
+        let stage_members = stage_dir.join(MEMBERS_DIR);
+        let member_store = PathBuf::from(MEMBERS_DIR);
 
-        // 阶段一：整代校验并规划哪些成员仍需从 stage 发布。
-        let mut to_publish: Vec<&JournalMember> = Vec::new();
+        dir.create_dir_all(&member_store).map_err(proto::map_io)?;
         for member in &journal.成员集合 {
-            let stage_digest = proto::digest_file(dir, &stage_blobs.join(&member.名称))?;
-            if let Some(stage_digest) = stage_digest {
-                if stage_digest == member.摘要 {
-                    to_publish.push(member);
-                    continue;
-                }
-                // stage 存在但摘要不符：篡改或撕裂写入。矛盾代整体隔离（含 primary）。
+            let stored_content = member_store.join(&member.摘要);
+            if proto::exists(dir, &stored_content)? {
+                continue;
+            }
+            let staged_content = stage_members.join(&member.摘要);
+            let digest = proto::digest_file(dir, &staged_content)?;
+            if digest.as_deref() != Some(member.摘要.as_str()) {
                 return Err(self.quarantine_corrupt(
                     dir,
                     CorruptionReason::DatasetMemberDigestMismatch,
-                    true,
+                    false,
                 ));
             }
-            // stage 缺失：该成员必须已作为新代发布。
-            let primary_digest = proto::digest_file(dir, &primary_blobs.join(&member.名称))?;
-            if primary_digest.as_deref() == Some(member.摘要.as_str()) {
-                continue;
-            }
-            // stage 缺失且已发布字节与新代矛盾（旧代或第三方值均视为矛盾）：
-            // 已发布进 primary 的矛盾代本身就是证据，整代（含 primary）一并隔离。
-            return Err(self.quarantine_corrupt(
-                dir,
-                CorruptionReason::DatasetMemberDigestMismatch,
-                true,
-            ));
-        }
-
-        // 阶段二：执行。逐 member 发布。
-        dir.create_dir_all(&primary_blobs).map_err(proto::map_io)?;
-        for member in to_publish {
-            let dst = primary_blobs.join(&member.名称);
-            proto::reject_symlink(dir, &dst)?;
-            dir.rename(stage_blobs.join(&member.名称), dir, &dst)
+            dir.rename(&staged_content, dir, &stored_content)
                 .map_err(proto::map_io)?;
         }
-        // 跨目录 rename 后自底向上同步 stage 与 primary 两侧父目录。
-        proto::sync_generation(dir, &stage_dir)?;
-        proto::sync_generation(dir, &primary_dir)?;
-        // 删除 omitted：任何不在新代成员集合中的 primary 成员。
-        let new_names: BTreeSet<&str> = journal.成员集合.iter().map(|m| m.名称.as_str()).collect();
-        let mut omitted: Vec<OsString> = Vec::new();
-        if let Ok(entries) = dir.read_dir(&primary_blobs) {
-            for entry in entries {
-                let name = entry.map_err(proto::map_io)?.file_name();
-                if !new_names.contains(name.to_string_lossy().as_ref()) {
-                    omitted.push(name);
-                }
-            }
-        }
-        let removed_omitted = !omitted.is_empty();
-        for name in omitted {
-            match dir.remove_file(primary_blobs.join(&name)) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(proto::map_io(error)),
-            }
-        }
-        if removed_omitted {
-            proto::sync_subdir(dir, &primary_blobs)?;
-        }
-        // 写 primary manifest（新代权威）。
-        let record = DatasetManifestRecord {
-            修订号: journal.新修订号.clone(),
-            成员集合: journal.成员集合.iter().map(|m| m.名称.clone()).collect(),
-            成员证据: journal
-                .成员集合
-                .iter()
-                .map(|member| DatasetManifestMemberRecord {
-                    名称: member.名称.clone(),
-                    字节数: member.字节数,
-                    修订摘要: member.修订摘要.clone(),
-                })
-                .collect(),
-        };
-        proto::write_manifest(dir, &primary_dir, &record, &journal.随机数)?;
-        proto::sync_generation(dir, &primary_dir)?;
+        proto::sync_subdir(dir, &stage_members)?;
+        proto::sync_subdir(dir, &member_store)?;
 
-        // Committed marker。
+        let record = manifest_record_from_journal(journal);
+        proto::write_manifest(dir, &primary_dir, &record, &journal.随机数)?;
+        proto::sync_subdir(dir, &primary_dir)?;
+        proto::sync_dir(dir)?;
+        self.validate_shared_generation(dir, &record)?;
+
         let committed = DatasetJournal {
             阶段: JournalPhase::Committed,
             ..journal.clone()
@@ -384,8 +330,8 @@ impl FileSystemDatasetAdapter {
         proto::write_journal(dir, &committed)?;
         proto::sync_dir(dir)?;
 
-        // 提升 previous 并 cleanup。
         self.finalize_previous_swap(dir)?;
+        self.remove_legacy_generation_blobs(dir)?;
         proto::sync_dir(dir)?;
         let _ = dir.remove_dir_all(&stage_dir);
         proto::remove_journal(dir)?;
@@ -425,20 +371,20 @@ impl FileSystemDatasetAdapter {
         dir: &Dir,
         journal: &DatasetJournal,
     ) -> Result<(), StorageError> {
-        let stage_blobs = PathBuf::from(format!(".stage-{}", journal.随机数)).join(BLOBS_DIR);
-        let primary_blobs = PathBuf::from(PRIMARY_DIR).join(BLOBS_DIR);
+        let stage_members = PathBuf::from(format!(".stage-{}", journal.随机数)).join(MEMBERS_DIR);
+        let shared_members = PathBuf::from(MEMBERS_DIR);
         let mut actual_evidence = Vec::with_capacity(journal.成员集合.len());
         for member in &journal.成员集合 {
-            let (bytes, from_primary) =
-                match proto::read_file(dir, &stage_blobs.join(&member.名称))? {
+            let (bytes, from_shared_store) =
+                match proto::read_file(dir, &stage_members.join(&member.摘要))? {
                     Some(bytes) => (bytes, false),
                     None => (
-                        proto::read_file(dir, &primary_blobs.join(&member.名称))?.ok_or_else(
+                        proto::read_file(dir, &shared_members.join(&member.摘要))?.ok_or_else(
                             || {
                                 self.quarantine_corrupt(
                                     dir,
                                     CorruptionReason::DatasetMemberDigestMismatch,
-                                    true,
+                                    false,
                                 )
                             },
                         )?,
@@ -450,7 +396,7 @@ impl FileSystemDatasetAdapter {
                 return Err(self.quarantine_corrupt(
                     dir,
                     CorruptionReason::DatasetMemberDigestMismatch,
-                    from_primary,
+                    from_shared_store,
                 ));
             }
             if bytes.len() as u64 != member.字节数
@@ -555,9 +501,24 @@ impl FileSystemDatasetAdapter {
                 generation == Path::new(PRIMARY_DIR),
             ));
         }
-        let blobs = generation.join(BLOBS_DIR);
         for member in &journal.成员集合 {
-            let Some(bytes) = proto::read_file(dir, &blobs.join(&member.名称))? else {
+            let member_record = record
+                .成员证据
+                .iter()
+                .find(|record_member| record_member.名称 == member.名称)
+                .ok_or_else(|| {
+                    self.quarantine_corrupt(
+                        dir,
+                        CorruptionReason::DatasetMemberDigestMismatch,
+                        generation == Path::new(PRIMARY_DIR),
+                    )
+                })?;
+            let content_path = if member_record.内容摘要.is_empty() {
+                generation.join(BLOBS_DIR).join(&member.名称)
+            } else {
+                PathBuf::from(MEMBERS_DIR).join(&member_record.内容摘要)
+            };
+            let Some(bytes) = proto::read_file(dir, &content_path)? else {
                 return Err(self.quarantine_corrupt(
                     dir,
                     CorruptionReason::DatasetMemberDigestMismatch,
@@ -799,18 +760,53 @@ impl FileSystemDatasetAdapter {
         generation_dir: &str,
         members: &[SafePathSegment],
     ) -> Result<DatasetReadOutcome, StorageError> {
-        let gen_path = PathBuf::from(generation_dir);
-        let Some(record) = proto::read_manifest(dir, &gen_path)? else {
+        let generation_path = PathBuf::from(generation_dir);
+        let Some(record) = proto::read_manifest(dir, &generation_path)? else {
             return Ok(DatasetReadOutcome::NotFound);
         };
         let revision = DatasetRevision::from_bytes(proto::decode_revision(&record.修订号)?);
-        let blobs = gen_path.join(BLOBS_DIR);
+        let legacy_blobs = generation_path.join(BLOBS_DIR);
+        let uses_legacy_member_layout = !record.成员集合.is_empty()
+            && (record.成员证据.is_empty()
+                || record
+                    .成员证据
+                    .iter()
+                    .all(|member| member.内容摘要.is_empty()));
         let mut result = Vec::with_capacity(members.len());
         for name in members {
-            let Some(bytes) = proto::read_file(dir, &blobs.join(name.as_str()))? else {
-                // 请求了当前代不存在的成员：绝不回退到上一代。
+            let content_path = if uses_legacy_member_layout {
+                if !record
+                    .成员集合
+                    .iter()
+                    .any(|member_name| member_name == name.as_str())
+                {
+                    return Ok(DatasetReadOutcome::NotFound);
+                }
+                legacy_blobs.join(name.as_str())
+            } else {
+                let Some(member_record) = record
+                    .成员证据
+                    .iter()
+                    .find(|member| member.名称 == name.as_str())
+                else {
+                    return Ok(DatasetReadOutcome::NotFound);
+                };
+                PathBuf::from(MEMBERS_DIR).join(&member_record.内容摘要)
+            };
+            let Some(bytes) = proto::read_file(dir, &content_path)? else {
                 return Ok(DatasetReadOutcome::NotFound);
             };
+            if !uses_legacy_member_layout
+                && proto::digest_bytes(&bytes)
+                    != record
+                        .成员证据
+                        .iter()
+                        .find(|member| member.名称 == name.as_str())
+                        .map(|member| member.内容摘要.as_str())
+                        .unwrap_or_default()
+            {
+                return Err(dataset_member_mismatch());
+            }
             result.push(DatasetMember::new(name.clone(), bytes));
         }
         Ok(DatasetReadOutcome::Found(DatasetRead::new(
@@ -847,22 +843,53 @@ impl FileSystemDatasetAdapter {
         }
 
         let primary_blobs = PathBuf::from(PRIMARY_DIR).join(BLOBS_DIR);
+        let current_record = proto::read_manifest(dir, Path::new(PRIMARY_DIR))?;
+        let current_members_by_name = current_record
+            .as_ref()
+            .into_iter()
+            .flat_map(|record| record.成员证据.iter())
+            .map(|member| (member.名称.as_str(), member))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let uses_legacy_member_layout = current_record
+            .as_ref()
+            .is_some_and(|record| record.成员证据.is_empty() && !record.成员集合.is_empty());
+        let mut reused_content = Vec::with_capacity(changes.reused_members().len());
+        let member_store = PathBuf::from(MEMBERS_DIR);
+        dir.create_dir_all(&member_store).map_err(proto::map_io)?;
         for reference in changes.reused_members() {
             if !current_names.contains(reference.name()) || removed_names.contains(reference.name())
             {
                 return Err(dataset_member_mismatch());
             }
-            let Some(bytes) =
-                proto::read_file(dir, &primary_blobs.join(reference.name().as_str()))?
-            else {
-                return Err(dataset_member_mismatch());
+            let content_path = if uses_legacy_member_layout {
+                primary_blobs.join(reference.name().as_str())
+            } else {
+                let member_record = current_members_by_name
+                    .get(reference.name().as_str())
+                    .copied()
+                    .ok_or_else(dataset_member_mismatch)?;
+                if member_record.内容摘要.is_empty() {
+                    primary_blobs.join(reference.name().as_str())
+                } else {
+                    PathBuf::from(MEMBERS_DIR).join(&member_record.内容摘要)
+                }
             };
+            let bytes =
+                proto::read_file(dir, &content_path)?.ok_or_else(dataset_member_mismatch)?;
             if bytes.len() as u64 != reference.byte_len()
                 || revision_member_digest(&bytes) != *reference.member_digest()
             {
                 return Err(dataset_member_mismatch());
             }
+            let content_digest = proto::digest_bytes(&bytes);
+            let stored_content = member_store.join(&content_digest);
+            if !proto::exists(dir, &stored_content)? {
+                proto::write_new_file(dir, &stored_content, &bytes)?;
+            }
+            reused_content.push((reference.name().clone(), content_digest));
         }
+
+        proto::sync_subdir(dir, &member_store)?;
 
         let target_names = changes
             .new_members()
@@ -886,7 +913,7 @@ impl FileSystemDatasetAdapter {
             ));
         }
 
-        self.commit_incremental_verified(dir, &current, changes)
+        self.commit_incremental_verified(dir, &current, changes, &reused_content)
     }
 
     fn commit_incremental_verified(
@@ -894,7 +921,9 @@ impl FileSystemDatasetAdapter {
         dir: &Dir,
         current: &DatasetManifest,
         changes: &DatasetChangeSet,
+        reused_content: &[(SafePathSegment, String)],
     ) -> Result<DatasetCommitReceipt, StorageError> {
+        let current_record = proto::read_manifest(dir, Path::new(PRIMARY_DIR))?;
         let new_members = changes
             .new_members()
             .iter()
@@ -935,9 +964,8 @@ impl FileSystemDatasetAdapter {
                 )
             })
             .collect::<Vec<_>>();
-        let new_manifest =
+        let _new_manifest =
             DatasetManifest::from_verified_members(new_revision.clone(), member_evidence)?;
-        let record = manifest_record(&new_manifest);
         let nonce = Uuid::new_v4().simple().to_string();
         let mut journal_members = new_members
             .iter()
@@ -948,9 +976,11 @@ impl FileSystemDatasetAdapter {
                 修订摘要: proto::revision_member_digest_hex(member.bytes()),
             })
             .collect::<Vec<_>>();
-        let primary_blobs = PathBuf::from(PRIMARY_DIR).join(BLOBS_DIR);
         for reference in changes.reused_members() {
-            let digest = proto::digest_file(dir, &primary_blobs.join(reference.name().as_str()))?
+            let digest = reused_content
+                .iter()
+                .find(|(name, _)| name == reference.name())
+                .map(|(_, digest)| digest.clone())
                 .ok_or_else(dataset_member_mismatch)?;
             journal_members.push(JournalMember {
                 名称: reference.name().as_str().to_string(),
@@ -960,6 +990,22 @@ impl FileSystemDatasetAdapter {
             });
         }
         journal_members.sort_by(|left, right| left.名称.cmp(&right.名称));
+        let record = DatasetManifestRecord {
+            修订号: proto::encode_revision(new_revision.as_bytes()),
+            成员集合: journal_members
+                .iter()
+                .map(|member| member.名称.clone())
+                .collect(),
+            成员证据: journal_members
+                .iter()
+                .map(|member| DatasetManifestMemberRecord {
+                    名称: member.名称.clone(),
+                    字节数: member.字节数,
+                    修订摘要: member.修订摘要.clone(),
+                    内容摘要: member.摘要.clone(),
+                })
+                .collect(),
+        };
         let journal = DatasetJournal {
             随机数: nonce.clone(),
             操作: JournalKind::Commit,
@@ -968,59 +1014,67 @@ impl FileSystemDatasetAdapter {
             成员集合: journal_members,
             阶段: JournalPhase::Prepared,
         };
+        let existing_content_by_digest = current_record
+            .as_ref()
+            .into_iter()
+            .flat_map(|record| record.成员证据.iter())
+            .filter(|member| !member.内容摘要.is_empty())
+            .map(|member| member.内容摘要.as_str())
+            .collect::<BTreeSet<_>>();
         let stage_dir = PathBuf::from(format!(".stage-{nonce}"));
-        let stage_blobs = stage_dir.join(BLOBS_DIR);
+        let stage_members = stage_dir.join(MEMBERS_DIR);
         let primary_dir = PathBuf::from(PRIMARY_DIR);
 
         let mut crossed_commit = false;
         let result = (|| -> Result<(), StorageError> {
-            dir.create_dir_all(&stage_blobs).map_err(proto::map_io)?;
+            dir.create_dir_all(&stage_members).map_err(proto::map_io)?;
             for member in &new_members {
-                proto::write_new_file(
-                    dir,
-                    &stage_blobs.join(member.name().as_str()),
-                    member.bytes(),
-                )?;
-            }
-            for reference in changes.reused_members() {
-                let source = primary_blobs.join(reference.name().as_str());
-                proto::reject_symlink(dir, &source)?;
-                dir.hard_link(&source, dir, stage_blobs.join(reference.name().as_str()))
-                    .map_err(proto::map_io)?;
+                let content_digest = proto::digest_bytes(member.bytes());
+                let stored_content = PathBuf::from(MEMBERS_DIR).join(&content_digest);
+                if !proto::exists(dir, &stored_content)?
+                    && !existing_content_by_digest.contains(content_digest.as_str())
+                {
+                    proto::write_new_file(
+                        dir,
+                        &stage_members.join(content_digest),
+                        member.bytes(),
+                    )?;
+                }
             }
             proto::write_manifest(dir, &stage_dir, &record, &nonce)?;
-            proto::sync_generation(dir, &stage_dir)?;
+            proto::sync_subdir(dir, &stage_members)?;
+            proto::sync_subdir(dir, &stage_dir)?;
+            proto::sync_dir(dir)?;
 
-            self.stage_previous_generation(dir, current)?;
+            self.stage_previous_manifest(dir)?;
+            if !proto::exists(dir, &primary_dir)? {
+                dir.create_dir_all(&primary_dir).map_err(proto::map_io)?;
+            }
             proto::write_journal(dir, &journal)?;
             proto::sync_dir(dir)?;
             crossed_commit = true;
             inject_post_prepared_fault(&FaultPoint::AfterPrepared)?;
 
-            dir.create_dir_all(&primary_blobs).map_err(proto::map_io)?;
-            for member in &journal.成员集合 {
-                let destination = primary_blobs.join(&member.名称);
-                proto::reject_symlink(dir, &destination)?;
-                dir.rename(stage_blobs.join(&member.名称), dir, &destination)
-                    .map_err(proto::map_io)?;
-                proto::sync_subdir(dir, &stage_blobs)?;
-                proto::sync_generation(dir, &primary_dir)?;
-                inject_post_prepared_fault(&FaultPoint::AfterMemberPublish(member.名称.clone()))?;
-            }
-            let mut removed_omitted = false;
-            for name in current.omitted_members(&new_manifest) {
-                match dir.remove_file(primary_blobs.join(name.as_str())) {
-                    Ok(()) => removed_omitted = true,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(proto::map_io(error)),
+            let member_store = PathBuf::from(MEMBERS_DIR);
+            dir.create_dir_all(&member_store).map_err(proto::map_io)?;
+            for member in &new_members {
+                let content_digest = proto::digest_bytes(member.bytes());
+                let staged_content = stage_members.join(&content_digest);
+                let stored_content = member_store.join(&content_digest);
+                if !proto::exists(dir, &stored_content)? {
+                    dir.rename(&staged_content, dir, &stored_content)
+                        .map_err(proto::map_io)?;
+                    proto::sync_subdir(dir, &stage_members)?;
+                    proto::sync_subdir(dir, &member_store)?;
                 }
-            }
-            if removed_omitted {
-                proto::sync_subdir(dir, &primary_blobs)?;
+                inject_post_prepared_fault(&FaultPoint::AfterMemberPublish(
+                    member.name().as_str().to_string(),
+                ))?;
             }
             proto::write_manifest(dir, &primary_dir, &record, &nonce)?;
-            proto::sync_generation(dir, &primary_dir)?;
-            self.validate_generation(dir, &journal)?;
+            proto::sync_subdir(dir, &primary_dir)?;
+            proto::sync_dir(dir)?;
+            self.validate_shared_generation(dir, &record)?;
             proto::write_journal(
                 dir,
                 &DatasetJournal {
@@ -1030,6 +1084,7 @@ impl FileSystemDatasetAdapter {
             )?;
             proto::sync_dir(dir)?;
             self.finalize_previous_swap(dir)?;
+            self.remove_legacy_generation_blobs(dir)?;
             proto::sync_dir(dir)?;
             let _ = dir.remove_dir_all(&stage_dir);
             proto::remove_journal(dir)?;
@@ -1061,45 +1116,50 @@ impl FileSystemDatasetAdapter {
         }
     }
 
-    fn stage_previous_generation(
-        &self,
-        dir: &Dir,
-        current: &DatasetManifest,
-    ) -> Result<(), StorageError> {
-        let started = std::time::Instant::now();
+    fn stage_previous_manifest(&self, dir: &Dir) -> Result<(), StorageError> {
         let previous_next = PathBuf::from(PREVIOUS_NEXT_DIR);
         if proto::exists(dir, &previous_next)? {
             dir.remove_dir_all(&previous_next).map_err(proto::map_io)?;
             proto::sync_dir(dir)?;
         }
-        let primary_dir = PathBuf::from(PRIMARY_DIR);
-        if !proto::exists(dir, &primary_dir.join(MANIFEST_FILE))? {
+        let primary_manifest = PathBuf::from(PRIMARY_DIR).join(MANIFEST_FILE);
+        let Some(bytes) = proto::read_file(dir, &primary_manifest)? else {
             return proto::sync_dir(dir);
+        };
+        dir.create_dir_all(&previous_next).map_err(proto::map_io)?;
+        proto::write_new_file(dir, &previous_next.join(MANIFEST_FILE), &bytes)?;
+        proto::sync_subdir(dir, &previous_next)?;
+        proto::sync_dir(dir)
+    }
+
+    fn remove_legacy_generation_blobs(&self, dir: &Dir) -> Result<(), StorageError> {
+        for generation in [PRIMARY_DIR, PREVIOUS_DIR] {
+            let blobs = PathBuf::from(generation).join(BLOBS_DIR);
+            if proto::exists(dir, &blobs)? {
+                dir.remove_dir_all(&blobs).map_err(proto::map_io)?;
+            }
         }
-        log::debug!(
-            target: crate::LOG_TARGET,
-            "dataset_previous_stage_started members={}",
-            current.members().len()
-        );
-        let primary_blobs = primary_dir.join(BLOBS_DIR);
-        let next_blobs = previous_next.join(BLOBS_DIR);
-        dir.create_dir_all(&next_blobs).map_err(proto::map_io)?;
-        for name in current.members() {
-            let source = primary_blobs.join(name.as_str());
-            proto::reject_symlink(dir, &source)?;
-            dir.hard_link(&source, dir, next_blobs.join(name.as_str()))
-                .map_err(proto::map_io)?;
+        Ok(())
+    }
+
+    fn validate_shared_generation(
+        &self,
+        dir: &Dir,
+        record: &DatasetManifestRecord,
+    ) -> Result<(), StorageError> {
+        for member in &record.成员证据 {
+            if member.内容摘要.is_empty() {
+                return Err(dataset_member_mismatch());
+            }
+            let bytes = proto::read_file(dir, &PathBuf::from(MEMBERS_DIR).join(&member.内容摘要))?
+                .ok_or_else(dataset_member_mismatch)?;
+            if proto::digest_bytes(&bytes) != member.内容摘要
+                || bytes.len() as u64 != member.字节数
+                || proto::revision_member_digest_hex(&bytes) != member.修订摘要
+            {
+                return Err(dataset_member_mismatch());
+            }
         }
-        if let Some(bytes) = proto::read_file(dir, &primary_dir.join(MANIFEST_FILE))? {
-            proto::write_new_file(dir, &previous_next.join(MANIFEST_FILE), &bytes)?;
-        }
-        proto::sync_generation(dir, &previous_next)?;
-        log::debug!(
-            target: crate::LOG_TARGET,
-            "dataset_previous_stage_completed members={} elapsed_ms={}",
-            current.members().len(),
-            started.elapsed().as_secs_f64() * 1000.0
-        );
         Ok(())
     }
 
@@ -1110,183 +1170,30 @@ impl FileSystemDatasetAdapter {
         members: &[DatasetMember],
     ) -> Result<DatasetCommitReceipt, StorageError> {
         let current = self.current_manifest(dir)?;
-        // CAS 在创建任何事务 artifacts 之前。
         if current.revision() != expected {
             return Err(StorageError::new(
                 StorageErrorKind::ConcurrentWrite,
                 "数据集修订号已变更，提交被拒绝",
             ));
         }
-
-        let new_manifest = DatasetManifest::new(members.to_vec())?;
-        let new_revision = new_manifest.revision().clone();
-        let mut canonical = members.to_vec();
-        canonical.sort_by(|left, right| left.name().cmp(right.name()));
-        let record = manifest_record(&new_manifest);
-        let nonce = Uuid::new_v4().simple().to_string();
-        let journal = DatasetJournal {
-            随机数: nonce.clone(),
-            操作: JournalKind::Commit,
-            旧修订号: proto::encode_revision(current.revision().as_bytes()),
-            新修订号: proto::encode_revision(new_revision.as_bytes()),
-            成员集合: canonical
-                .iter()
-                .map(|member| JournalMember {
-                    名称: member.name().as_str().to_string(),
-                    摘要: proto::digest_bytes(member.bytes()),
-                    字节数: member.bytes().len() as u64,
-                    修订摘要: proto::revision_member_digest_hex(member.bytes()),
-                })
-                .collect(),
-            阶段: JournalPhase::Prepared,
-        };
-
-        let primary_dir = PathBuf::from(PRIMARY_DIR);
-        let primary_blobs = primary_dir.join(BLOBS_DIR);
-        let stage_dir = PathBuf::from(format!(".stage-{nonce}"));
-        let stage_blobs = stage_dir.join(BLOBS_DIR);
-
-        let mut crossed_commit = false;
-        let result = (|| -> Result<(), StorageError> {
-            // 1. stage：写入完整新代并自底向上（blobs → stage → 顶层）fsync，
-            //    保证 stage 完整 durable。
-            dir.create_dir_all(&stage_blobs).map_err(proto::map_io)?;
-            for member in &canonical {
-                proto::write_new_file(
-                    dir,
-                    &stage_blobs.join(member.name().as_str()),
-                    member.bytes(),
-                )?;
-            }
-            proto::write_manifest(dir, &stage_dir, &record, &nonce)?;
-            proto::sync_generation(dir, &stage_dir)?;
-
-            // 2. 完整保留上一代（硬链接旧 blobs + 复制旧 manifest），自底向上 fsync，
-            //    保证 previous.next 完整 durable。
-            let previous_next = PathBuf::from(PREVIOUS_NEXT_DIR);
-            if proto::exists(dir, &previous_next)? {
-                dir.remove_dir_all(&previous_next).map_err(proto::map_io)?;
-                proto::sync_dir(dir)?;
-            }
-            let primary_exists = proto::exists(dir, &primary_dir.join(MANIFEST_FILE))?;
-            if primary_exists {
-                let next_blobs = previous_next.join(BLOBS_DIR);
-                dir.create_dir_all(&next_blobs).map_err(proto::map_io)?;
-                for name in current.members() {
-                    let src = primary_blobs.join(name.as_str());
-                    proto::reject_symlink(dir, &src)?;
-                    dir.hard_link(&src, dir, next_blobs.join(name.as_str()))
-                        .map_err(proto::map_io)?;
-                }
-                if let Some(bytes) = proto::read_file(dir, &primary_dir.join(MANIFEST_FILE))? {
-                    proto::write_new_file(dir, &previous_next.join(MANIFEST_FILE), &bytes)?;
-                }
-                proto::sync_generation(dir, &previous_next)?;
-            } else {
-                proto::sync_dir(dir)?;
-            }
-
-            // 3. Prepared journal 落盘 = 逻辑提交点。此前 stage 与 previous.next 均已
-            //    证明完整 durable。
-            proto::write_journal(dir, &journal)?;
-            proto::sync_dir(dir)?;
-            crossed_commit = true;
-            inject_post_prepared_fault(&FaultPoint::AfterPrepared)?;
-
-            // 4. 逐 member 发布进 primary，每次跨目录 rename 后自底向上同步两侧父目录。
-            dir.create_dir_all(&primary_blobs).map_err(proto::map_io)?;
-            for member in &canonical {
-                let dst = primary_blobs.join(member.name().as_str());
-                proto::reject_symlink(dir, &dst)?;
-                dir.rename(stage_blobs.join(member.name().as_str()), dir, &dst)
-                    .map_err(proto::map_io)?;
-                proto::sync_subdir(dir, &stage_blobs)?;
-                proto::sync_generation(dir, &primary_dir)?;
-                inject_post_prepared_fault(&FaultPoint::AfterMemberPublish(
-                    member.name().as_str().to_string(),
-                ))?;
-            }
-            // 5. 删除 omitted。
-            let mut removed_omitted = false;
-            for name in current.omitted_members(&new_manifest) {
-                match dir.remove_file(primary_blobs.join(name.as_str())) {
-                    Ok(()) => removed_omitted = true,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(proto::map_io(error)),
-                }
-            }
-            if removed_omitted {
-                proto::sync_subdir(dir, &primary_blobs)?;
-            }
-            // 6. 写 primary manifest，自底向上 fsync。
-            proto::write_manifest(dir, &primary_dir, &record, &nonce)?;
-            proto::sync_generation(dir, &primary_dir)?;
-            // 7. validate 全代。
-            self.validate_generation(dir, &journal)?;
-            // 8. Committed marker。
-            let committed = DatasetJournal {
-                阶段: JournalPhase::Committed,
-                ..journal.clone()
-            };
-            proto::write_journal(dir, &committed)?;
-            proto::sync_dir(dir)?;
-            // 9. 提升 previous。
-            self.finalize_previous_swap(dir)?;
-            proto::sync_dir(dir)?;
-            // 10. cleanup。
-            let _ = dir.remove_dir_all(&stage_dir);
-            proto::remove_journal(dir)?;
-            proto::sync_dir(dir)?;
-            Ok(())
-        })();
-
-        match result {
-            Ok(()) => Ok(DatasetCommitReceipt::committed(
-                new_revision,
-                DatasetCommitVisibility::Visible,
-                None,
-            )),
-            Err(error) => {
-                // 事务证据矛盾永远上抛 typed Err，压过普通 I/O。
-                if matches!(error.kind(), StorageErrorKind::CorruptTransaction(_)) {
-                    return Err(error);
-                }
-                if crossed_commit {
-                    // 越过 Prepared 逻辑提交点：任何普通 post-Prepared I/O 都返回
-                    // committed 收据，交由后续锁内恢复机械前滚。不清理证据。
-                    log::warn!(
-                        target: crate::LOG_TARGET,
-                        "dataset_commit recovery_pending"
-                    );
-                    Ok(DatasetCommitReceipt::committed(
-                        new_revision,
-                        DatasetCommitVisibility::RecoveryPending,
-                        Some(CommitWarning::MemberPublishRecoveryPending),
-                    ))
-                } else {
-                    // Prepared 之前失败：回滚 stage / previous.next 残留并上抛。
-                    let _ = dir.remove_dir_all(&stage_dir);
-                    let _ = dir.remove_dir_all(PathBuf::from(PREVIOUS_NEXT_DIR));
-                    Err(error)
-                }
-            }
-        }
-    }
-
-    /// 整代校验：每个成员的已发布字节须与 journal 记录的新代摘要一致。
-    fn validate_generation(&self, dir: &Dir, journal: &DatasetJournal) -> Result<(), StorageError> {
-        let primary_blobs = PathBuf::from(PRIMARY_DIR).join(BLOBS_DIR);
-        for member in &journal.成员集合 {
-            let digest = proto::digest_file(dir, &primary_blobs.join(&member.名称))?;
-            if digest.as_deref() != Some(member.摘要.as_str()) {
-                return Err(self.quarantine_corrupt(
-                    dir,
-                    CorruptionReason::DatasetMemberDigestMismatch,
-                    true,
-                ));
-            }
-        }
-        Ok(())
+        let replacements = members
+            .iter()
+            .cloned()
+            .map(DatasetMemberChange::Replace)
+            .collect();
+        let target_names = members
+            .iter()
+            .map(|member| member.name().clone())
+            .collect::<BTreeSet<_>>();
+        let removed_members = current
+            .members()
+            .iter()
+            .filter(|name| !target_names.contains(*name))
+            .cloned()
+            .collect();
+        let changes = DatasetChangeSet::new(expected.clone(), replacements, Vec::new())?
+            .with_removed_members(removed_members)?;
+        self.commit_incremental_sync(dir, &changes)
     }
 
     /// 提升前完整验证上一代：每个成员字节必须存在，且据其重算的
@@ -1297,13 +1204,26 @@ impl FileSystemDatasetAdapter {
         dir: &Dir,
         record: &DatasetManifestRecord,
     ) -> Result<(), StorageError> {
-        let previous_blobs = PathBuf::from(PREVIOUS_DIR).join(BLOBS_DIR);
         let mut members = Vec::with_capacity(record.成员集合.len());
         for name in &record.成员集合 {
             let segment = SafePathSegment::from_str(name)?;
-            let Some(bytes) = proto::read_file(dir, &previous_blobs.join(name))? else {
-                return Err(dataset_member_mismatch());
+            let member_record = record
+                .成员证据
+                .iter()
+                .find(|member| member.名称 == *name)
+                .ok_or_else(dataset_member_mismatch)?;
+            let content_path = if member_record.内容摘要.is_empty() {
+                PathBuf::from(PREVIOUS_DIR).join(BLOBS_DIR).join(name)
+            } else {
+                PathBuf::from(MEMBERS_DIR).join(&member_record.内容摘要)
             };
+            let bytes =
+                proto::read_file(dir, &content_path)?.ok_or_else(dataset_member_mismatch)?;
+            if !member_record.内容摘要.is_empty()
+                && proto::digest_bytes(&bytes) != member_record.内容摘要
+            {
+                return Err(dataset_member_mismatch());
+            }
             members.push(DatasetMember::new(segment, bytes));
         }
         let recomputed = DatasetManifest::new(members)?;
@@ -1332,13 +1252,17 @@ impl FileSystemDatasetAdapter {
             DatasetRevision::from_bytes(proto::decode_revision(&previous_record.修订号)?);
         let current = self.current_manifest(dir)?;
 
-        let previous_blobs = previous_dir.join(BLOBS_DIR);
         let mut journal_members = Vec::with_capacity(previous_record.成员集合.len());
-        for name in &previous_record.成员集合 {
-            // 上一代已验证完整，此处成员字节必然存在。
-            let bytes = proto::read_file(dir, &previous_blobs.join(name))?.unwrap_or_default();
+        for member_record in &previous_record.成员证据 {
+            let content_path = if member_record.内容摘要.is_empty() {
+                previous_dir.join(BLOBS_DIR).join(&member_record.名称)
+            } else {
+                PathBuf::from(MEMBERS_DIR).join(&member_record.内容摘要)
+            };
+            let bytes =
+                proto::read_file(dir, &content_path)?.ok_or_else(dataset_member_mismatch)?;
             journal_members.push(JournalMember {
-                名称: name.clone(),
+                名称: member_record.名称.clone(),
                 摘要: proto::digest_bytes(&bytes),
                 字节数: bytes.len() as u64,
                 修订摘要: proto::revision_member_digest_hex(&bytes),
@@ -1578,22 +1502,22 @@ fn dataset_member_mismatch() -> StorageError {
     )
 }
 
-fn manifest_record(manifest: &DatasetManifest) -> DatasetManifestRecord {
+fn manifest_record_from_journal(journal: &DatasetJournal) -> DatasetManifestRecord {
     DatasetManifestRecord {
-        修订号: proto::encode_revision(manifest.revision().as_bytes()),
-        成员集合: manifest
-            .members()
+        修订号: journal.新修订号.clone(),
+        成员集合: journal
+            .成员集合
             .iter()
-            .map(|name| name.as_str().to_string())
+            .map(|member| member.名称.clone())
             .collect(),
-        成员证据: manifest
-            .members()
+        成员证据: journal
+            .成员集合
             .iter()
-            .filter_map(|name| manifest.member_evidence(name))
             .map(|member| DatasetManifestMemberRecord {
-                名称: member.name().as_str().to_string(),
-                字节数: member.byte_len(),
-                修订摘要: proto::encode_revision(member.member_digest()),
+                名称: member.名称.clone(),
+                字节数: member.字节数,
+                修订摘要: member.修订摘要.clone(),
+                内容摘要: member.摘要.clone(),
             })
             .collect(),
     }

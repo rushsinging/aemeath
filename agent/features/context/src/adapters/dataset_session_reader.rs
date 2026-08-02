@@ -224,6 +224,23 @@ impl DatasetSessionReader {
                         })
                 })
                 .collect(),
+        )?
+        .with_step_metadata(
+            &session
+                .run_slices
+                .iter()
+                .flat_map(|slice| {
+                    slice.steps.iter().map(|step| {
+                        crate::domain::session::SessionStepMember::new(
+                            crate::domain::session::RunStepCursor {
+                                run_id: slice.run_id.clone(),
+                                step_id: step.step_id.clone(),
+                            },
+                            step.clone(),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         )?;
         Ok(PreparedDatasetResume {
             display_history: DisplayHistoryStepIndex::from_session_and_manifest(

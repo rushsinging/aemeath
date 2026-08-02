@@ -141,6 +141,7 @@ fn resumed_history_initial_window_loads_through_display_query_effect() {
                 step_id: "resume-query-step".into(),
                 member_name: "steps/0001.json".into(),
                 estimated_lines: 12,
+                user_input_history: Vec::new(),
                 finalize_cause: None,
                 duration_ms: None,
             }],

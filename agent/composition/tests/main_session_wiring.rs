@@ -141,9 +141,8 @@ fn production_runtime_has_no_direct_active_memory_construction() {
         .collect::<Vec<_>>();
     assert_eq!(
         reflection_adapter_new.len(),
-        2,
-        "production runtime must construct exactly 2 dataset adapters: \
-         one for reflection (agents_dir), one for MemoryOpener (agents_dir)"
+        3,
+        "production runtime must construct exactly 3 dataset adapters: one for reflection, one for Session, and one for MemoryOpener"
     );
     // Verify neither uses `join("memory")` for FileSystemDatasetAdapter.
     // Legacy memory uses `agents_dir.join("memory")` via
@@ -267,14 +266,17 @@ async fn production_context_append_reopens_from_atomic_blob() {
         )),
     ));
     let session_blob = storage::api::file_system_blob(&agents_dir).expect("create session blob");
-    let session_management: Arc<dyn SessionManagementPort> = Arc::new(
-        context::adapters::AtomicBlobSessionManagement::new(session_blob.clone()),
+    let session_dataset = Arc::new(
+        storage::FileSystemDatasetAdapter::new(agents_dir.clone())
+            .expect("create session dataset adapter"),
     );
+    let session_management: Arc<dyn SessionManagementPort> =
+        Arc::new(context::adapters::DatasetSessionManagement::new(
+            session_dataset.clone(),
+            session_blob.clone(),
+        ));
     let writer = Arc::new(context::adapters::DatasetCanonicalSessionWriter::new(
-        Arc::new(
-            storage::FileSystemDatasetAdapter::new(agents_dir.clone())
-                .expect("create session dataset adapter"),
-        ),
+        session_dataset,
     ));
     let session_project = workspace.read().project_identity();
     let wiring = context::wire_main_session(MainSessionDependencies {

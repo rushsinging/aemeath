@@ -78,6 +78,7 @@ pub(crate) struct TuiDisplayHistoryStepReference {
     pub(crate) step_id: String,
     pub(crate) member_name: String,
     pub(crate) estimated_lines: usize,
+    pub(crate) user_input_history: Vec<String>,
     pub(crate) finalize_cause: Option<TuiResumedStepFinalizeCause>,
     pub(crate) duration_ms: Option<u64>,
 }

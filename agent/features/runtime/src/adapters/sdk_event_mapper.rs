@@ -187,6 +187,7 @@ pub(crate) fn map_display_history_index(
                 step_id: step.step_id().to_string(),
                 member_name: step.member_name().to_string(),
                 estimated_lines: step.estimated_lines(),
+                user_input_history: step.user_input_history().to_vec(),
                 finalize_cause: step
                     .finalize_cause()
                     .map(crate::application::client::map_finalize_cause_to_sdk),

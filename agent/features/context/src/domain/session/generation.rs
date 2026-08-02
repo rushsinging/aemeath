@@ -59,6 +59,7 @@ pub struct DisplayHistoryStepReference {
     step_id: String,
     member_name: String,
     estimated_lines: usize,
+    user_input_history: Vec<String>,
     finalize_cause: Option<crate::domain::FinalizeCause>,
     duration_ms: Option<u64>,
 }
@@ -78,6 +79,10 @@ impl DisplayHistoryStepReference {
 
     pub fn estimated_lines(&self) -> usize {
         self.estimated_lines
+    }
+
+    pub fn user_input_history(&self) -> &[String] {
+        &self.user_input_history
     }
 
     pub fn finalize_cause(&self) -> Option<crate::domain::FinalizeCause> {
@@ -114,6 +119,7 @@ impl DisplayHistoryStepIndex {
                         step_id: step_id.to_string(),
                         member_name: member_name.to_string(),
                         estimated_lines,
+                        user_input_history: Vec::new(),
                         finalize_cause: None,
                         duration_ms: None,
                     }
@@ -154,6 +160,7 @@ impl DisplayHistoryStepIndex {
                         step_id: reference.cursor.step_id.clone(),
                         member_name: reference.member_name.clone(),
                         estimated_lines: step.map(estimated_step_lines).unwrap_or(1),
+                        user_input_history: step.map(step_user_input_history).unwrap_or_default(),
                         finalize_cause: step
                             .and_then(|step| step.outcome.as_ref())
                             .map(|outcome| outcome.finalize_cause),
@@ -178,6 +185,7 @@ impl DisplayHistoryStepIndex {
                     step_id: reference.cursor.step_id.clone(),
                     member_name: reference.member_name.clone(),
                     estimated_lines: reference.estimated_lines,
+                    user_input_history: reference.user_input_history.clone(),
                     finalize_cause: reference.finalize_cause,
                     duration_ms: reference.duration_ms,
                 })
@@ -202,6 +210,20 @@ fn default_estimated_lines() -> usize {
     1
 }
 
+fn step_user_input_history(step: &CommittedRunStep) -> Vec<String> {
+    step.accepted_input
+        .iter()
+        .flat_map(|input| input.messages.iter())
+        .filter(|message| {
+            message.role == share::message::Role::User
+                && message.source() == share::message::MessageSource::User
+                && !message.has_tool_results()
+        })
+        .map(|message| message.text_content())
+        .filter(|text| !text.trim().is_empty())
+        .collect()
+}
+
 fn estimated_step_lines(step: &CommittedRunStep) -> usize {
     step.accepted_input
         .iter()
@@ -223,6 +245,8 @@ pub struct SessionStepReference {
     #[serde(default = "default_estimated_lines")]
     estimated_lines: usize,
     #[serde(default)]
+    user_input_history: Vec<String>,
+    #[serde(default)]
     finalize_cause: Option<crate::domain::FinalizeCause>,
     #[serde(default)]
     duration_ms: Option<u64>,
@@ -239,6 +263,10 @@ impl SessionStepReference {
 
     pub fn estimated_lines(&self) -> usize {
         self.estimated_lines
+    }
+
+    pub fn user_input_history(&self) -> &[String] {
+        &self.user_input_history
     }
 
     pub fn finalize_cause(&self) -> Option<crate::domain::FinalizeCause> {
@@ -280,6 +308,7 @@ impl SessionGenerationManifest {
                 member_name: Self::step_member_name(&cursor),
                 cursor,
                 estimated_lines: default_estimated_lines(),
+                user_input_history: Vec::new(),
                 finalize_cause: None,
                 duration_ms: None,
             });
@@ -324,6 +353,7 @@ impl SessionGenerationManifest {
                     )
                 })?;
             reference.estimated_lines = estimated_step_lines(step);
+            reference.user_input_history = step_user_input_history(step);
             reference.finalize_cause = step.outcome.as_ref().map(|outcome| outcome.finalize_cause);
             reference.duration_ms = step
                 .outcome
@@ -618,6 +648,7 @@ impl SessionChangeSet {
                 reference.cursor.step_id.as_str(),
             )) {
                 reference.estimated_lines = estimated_step_lines(step.step());
+                reference.user_input_history = step_user_input_history(step.step());
                 reference.finalize_cause = step
                     .step()
                     .outcome
@@ -649,6 +680,7 @@ impl SessionChangeSet {
                 cursor: step.cursor.clone(),
                 member_name: SessionGenerationManifest::step_member_name(&step.cursor),
                 estimated_lines: estimated_step_lines(step.step()),
+                user_input_history: step_user_input_history(step.step()),
                 finalize_cause: step
                     .step()
                     .outcome

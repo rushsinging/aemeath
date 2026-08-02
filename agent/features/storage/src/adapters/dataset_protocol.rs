@@ -5,13 +5,14 @@
 //!
 //! 磁盘布局（每个 DatasetKey 一个目录）：
 //! - `dataset.lock`            每 DatasetKey 的 OS 排他锁文件
-//! - `primary/manifest.json`   当前代权威 manifest（成员名的完整集合）
-//! - `primary/blobs/<成员>`     当前代各成员字节
-//! - `previous/...`            完整保留的上一代
+//! - `members/<内容摘要>`       跨代共享的不可变成员内容
+//! - `primary/manifest.json`   当前代权威 manifest（名称到内容摘要的完整映射）
+//! - `previous/manifest.json`  上一代权威 manifest
 //! - `journal.json`            事务 journal（阶段：已准备 → 已提交）
-//! - `.stage-<随机数>/...`      新代暂存区
+//! - `.stage-<随机数>/members`  本次新增内容暂存区
 //!
-//! manifest 是权威的完整成员集合；一致性读取按 manifest 取回成员字节。
+//! manifest 是权威的完整成员集合；一致性读取按内容摘要从共享 member store 取回字节。
+//! 旧版 `primary|previous/blobs/<成员>` 仅用于首次增量提交时迁移。
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -27,6 +28,7 @@ pub(super) const LOCK_FILE: &str = "dataset.lock";
 pub(super) const JOURNAL_FILE: &str = "journal.json";
 pub(super) const MANIFEST_FILE: &str = "manifest.json";
 pub(super) const BLOBS_DIR: &str = "blobs";
+pub(super) const MEMBERS_DIR: &str = "members";
 pub(super) const PRIMARY_DIR: &str = "primary";
 pub(super) const PREVIOUS_DIR: &str = "previous";
 pub(super) const PREVIOUS_NEXT_DIR: &str = "previous.next";
@@ -97,6 +99,8 @@ pub(super) struct DatasetManifestMemberRecord {
     pub 字节数: u64,
     #[serde(rename = "修订摘要")]
     pub 修订摘要: String,
+    #[serde(default, rename = "内容摘要")]
+    pub 内容摘要: String,
 }
 
 /// manifest 的私有持久化 schema（字段为中文）。
@@ -362,16 +366,6 @@ pub(super) fn sync_subdir(dir: &Dir, path: &Path) -> Result<(), StorageError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(map_io(error)),
     }
-}
-
-/// 自底向上同步一个完整代目录：`<代>/blobs` → `<代>` → 顶层。
-///
-/// 保证代内 blob 文件、blobs 目录条目、代目录条目与顶层条目全部落盘，
-/// 是「跨越 Prepared 前证明 stage/previous 完整 durable」的基础原语。
-pub(super) fn sync_generation(dir: &Dir, gen_dir: &Path) -> Result<(), StorageError> {
-    sync_subdir(dir, &gen_dir.join(BLOBS_DIR))?;
-    sync_subdir(dir, gen_dir)?;
-    sync_dir(dir)
 }
 
 pub(super) fn map_io(error: std::io::Error) -> StorageError {

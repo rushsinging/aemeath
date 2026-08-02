@@ -35,6 +35,7 @@ fn display_history_index_round_trip_contains_no_message_bodies() {
             step_id: "step-1".to_string(),
             member_name: "step-run-step.json".to_string(),
             estimated_lines: 23,
+            user_input_history: vec!["historical input".to_string()],
             finalize_cause: Some(sdk::ResumedStepFinalizeCause::Completed),
             duration_ms: Some(42),
         }],

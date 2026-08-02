@@ -48,6 +48,7 @@ fn indexed_resume_requests_only_selected_window_members() {
                     step_id: format!("step-{step_index}"),
                     member_name: format!("step-{step_index}.json"),
                     estimated_lines: 10,
+                    user_input_history: Vec::new(),
                     finalize_cause: None,
                     duration_ms: None,
                 })
@@ -88,6 +89,7 @@ fn loaded_display_history_rebuilds_the_same_window_without_conversation_change()
                 step_id: "step-1".to_string(),
                 member_name: "step-1.json".to_string(),
                 estimated_lines: 10,
+                user_input_history: Vec::new(),
                 finalize_cause: None,
                 duration_ms: None,
             }],

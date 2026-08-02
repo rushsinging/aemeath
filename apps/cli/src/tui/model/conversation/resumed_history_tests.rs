@@ -10,6 +10,7 @@ fn index(session_id: &str, revision: u64, count: usize) -> sdk::DisplayHistoryIn
                 step_id: format!("step-{step_index}"),
                 member_name: format!("step-{step_index}.json"),
                 estimated_lines: 10,
+                user_input_history: Vec::new(),
                 finalize_cause: None,
                 duration_ms: None,
             })

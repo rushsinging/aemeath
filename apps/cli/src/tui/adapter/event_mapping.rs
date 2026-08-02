@@ -766,6 +766,7 @@ pub(crate) fn tui_display_history_index(
                 step_id: step.step_id,
                 member_name: step.member_name,
                 estimated_lines: step.estimated_lines,
+                user_input_history: step.user_input_history,
                 finalize_cause: step.finalize_cause.map(|cause| match cause {
                     sdk::ResumedStepFinalizeCause::Completed => {
                         super::runtime_view::TuiResumedStepFinalizeCause::Completed

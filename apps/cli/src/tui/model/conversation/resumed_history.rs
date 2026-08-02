@@ -14,6 +14,7 @@ pub(crate) struct DisplayHistoryStepSlot {
     pub(crate) step_id: String,
     pub(crate) member_name: String,
     pub(crate) estimated_lines: usize,
+    pub(crate) user_input_history: Vec<String>,
     pub(crate) finalize_cause: Option<TuiResumedStepFinalizeCause>,
     pub(crate) duration_ms: Option<u64>,
 }
@@ -134,6 +135,7 @@ impl ResumedHistoryBacking {
                         step_id: step.step_id,
                         member_name: step.member_name,
                         estimated_lines: step.estimated_lines,
+                        user_input_history: step.user_input_history,
                         finalize_cause: step.finalize_cause.map(map_finalize_cause),
                         duration_ms: step.duration_ms,
                     },
@@ -153,6 +155,7 @@ impl ResumedHistoryBacking {
                 step_id: step.step_id,
                 member_name: step.member_name,
                 estimated_lines: step.estimated_lines,
+                user_input_history: step.user_input_history,
                 finalize_cause: step.finalize_cause,
                 duration_ms: step.duration_ms,
             })
@@ -305,6 +308,13 @@ impl ResumedHistoryBacking {
     }
 
     pub(crate) fn user_input_history(&self) -> Vec<String> {
+        if !self.step_slots.is_empty() {
+            return self
+                .step_slots
+                .iter()
+                .flat_map(|step| step.user_input_history.iter().cloned())
+                .collect();
+        }
         self.steps
             .iter()
             .flat_map(ResumedHistoryStep::messages)

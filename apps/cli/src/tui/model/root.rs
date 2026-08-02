@@ -36,6 +36,7 @@ mod tests {
                         step_id: "step-1".to_string(),
                         member_name: "step-1.json".to_string(),
                         estimated_lines: 1,
+                        user_input_history: Vec::new(),
                         finalize_cause: None,
                         duration_ms: None,
                     }],

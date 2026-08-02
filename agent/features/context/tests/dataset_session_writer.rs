@@ -56,20 +56,27 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
         .expect("initial generation must commit");
 
     let unchanged_name = "step-72756e2d61-737465702d61.json";
-    let unchanged_path = root
-        .path()
-        .join("session")
-        .join("session.dataset")
-        .join("primary")
-        .join("blobs")
-        .join(unchanged_name);
-    #[cfg(unix)]
-    let initial_inode = {
-        use std::os::unix::fs::MetadataExt;
-        std::fs::metadata(&unchanged_path)
-            .expect("initial unchanged member")
-            .ino()
-    };
+    let initial_manifest = dataset
+        .read_manifest(&dataset_key("session"))
+        .await
+        .expect("read initial manifest");
+    let unchanged_member = initial_manifest
+        .member_evidence(
+            &unchanged_name
+                .parse::<SafePathSegment>()
+                .expect("safe unchanged member name"),
+        )
+        .expect("initial unchanged member evidence");
+    let initial_content_files = std::fs::read_dir(
+        root.path()
+            .join("session")
+            .join("session.dataset")
+            .join("members"),
+    )
+    .expect("shared member store")
+    .filter_map(Result::ok)
+    .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_file()))
+    .count();
 
     let mut after = before.clone();
     after.revision = 2;
@@ -107,14 +114,28 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
         ]
     );
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        let current_inode = std::fs::metadata(&unchanged_path)
-            .expect("reused unchanged member")
-            .ino();
-        assert_eq!(current_inode, initial_inode);
-    }
+    let reused_member = manifest
+        .member_evidence(
+            &unchanged_name
+                .parse::<SafePathSegment>()
+                .expect("safe unchanged member name"),
+        )
+        .expect("reused unchanged member evidence");
+    assert_eq!(
+        reused_member.member_digest(),
+        unchanged_member.member_digest()
+    );
+    let current_content_files = std::fs::read_dir(
+        root.path()
+            .join("session")
+            .join("session.dataset")
+            .join("members"),
+    )
+    .expect("shared member store")
+    .filter_map(Result::ok)
+    .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_file()))
+    .count();
+    assert!(current_content_files > initial_content_files);
 }
 
 #[tokio::test]

@@ -215,6 +215,8 @@ pub struct DisplayHistoryStepReference {
     pub member_name: String,
     pub estimated_lines: usize,
     #[serde(default)]
+    pub user_input_history: Vec<String>,
+    #[serde(default)]
     pub finalize_cause: Option<ResumedStepFinalizeCause>,
     #[serde(default)]
     pub duration_ms: Option<u64>,
