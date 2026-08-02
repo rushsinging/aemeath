@@ -1233,3 +1233,43 @@ async fn duplicate_key_is_idempotent_and_conflicting_content_is_typed() {
         Err(ContextAppendError::ContentConflict { .. })
     ));
 }
+
+/// #1486：注入 generator 后 commit_compaction 走 LLM 语义压缩，
+/// summary 来自生成器而非本地 fallback 模板。
+#[tokio::test]
+async fn commit_compaction_with_generator_uses_llm_summary() {
+    use context::compact::CompactGenerator;
+    use tokio_util::sync::CancellationToken;
+
+    struct FixedGenerator(&'static str);
+    #[async_trait::async_trait]
+    impl CompactGenerator for FixedGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, String> {
+            Ok(format!("<summary>{}</summary>", self.0))
+        }
+    }
+
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("session");
+    let (base_repository, _holder) =
+        repository_with_session(writer.clone(), ten_step_session(&session_id, vec![], 0));
+    let repository_under_test =
+        base_repository.with_generator(Arc::new(FixedGenerator("LLM 生成的语义摘要")));
+
+    compact(&repository_under_test, session_id.clone(), 0).await;
+
+    let saved = writer.saved.lock().unwrap().last().cloned().unwrap();
+    let summary = saved.compact.expect("compact marker 应已写入").summary;
+    assert!(
+        summary.contains("LLM 生成的语义摘要"),
+        "summary 应来自 LLM 生成器: {summary}"
+    );
+    assert!(
+        !summary.contains("## User Requests"),
+        "不应使用本地 fallback 模板: {summary}"
+    );
+}
