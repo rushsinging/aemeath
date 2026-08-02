@@ -162,6 +162,67 @@ pub const FALLBACK_PREVIOUS_SUMMARY_CAP: usize =
 /// 汇总后的最终摘要超过预算时，最多再压的迭代次数（#1486 收敛迭代）。
 const MAX_REDUCE_REFRESH_ROUNDS: usize = 3;
 
+/// 再压提示词的预算缩减系数（#1490）：给 LLM 的提示预算 =
+/// `summary_budget × REFRESH_BUDGET_RATIO`，为 LLM 实际输出超出提示预算
+/// 留余量，保证真实输出落在 summary_budget 内。
+const REFRESH_BUDGET_RATIO: usize = 8; // × 0.8
+
+/// 再压（refresh）专用提示词（#1490）。
+///
+/// 与通用 [`COMPACT_PROMPT`] 相反：再压必须**激进压缩**，丢弃细节，
+/// 只保留决策/状态实质；预算为硬约束（MUST NOT exceed），且按
+/// `summary_budget × 0.8` 提示，为 LLM 实际输出超出提示预算留余量，
+/// 保证真实输出落在 summary_budget 内。
+const COMPACT_REFRESH_PROMPT: &str = r#"You are compressing an existing conversation summary. The summary below is TOO LONG and must be reduced.
+
+CRITICAL BUDGET: The compressed output MUST NOT exceed {BUDGET} tokens. If you cannot fit everything, drop details — the summary is context, not a transcript.
+
+<instructions>
+Produce a compressed summary using the EXACT structure below inside <summary> tags.
+
+## User Requests
+## Goal
+## Work Completed
+## Problems / Findings
+## Key Decisions
+## Relevant Files
+## Current State
+## Next Action
+## Continuation Status
+
+Rules:
+- Compress aggressively: keep only essential facts, decisions, file paths, and the immediate next action.
+- Preserve the requested action level exactly. NEVER upgrade inspect, diagnose, explain, review, or design into implement, edit, commit, push, merge, or close.
+- Each section can be empty if not applicable, but include the heading.
+- The output MUST be shorter than the input and MUST NOT exceed {BUDGET} tokens.
+</instructions>
+
+Here is the summary to compress:
+"#;
+
+/// 构建再压提示词（#1490）：硬预算 + 激进压缩指令。
+///
+/// `budget` 为真实 summary 预算；提示词内按 `× REFRESH_BUDGET_RATIO` 缩减，
+/// 为 LLM 实际输出超出提示预算留余量，保证真实输出落在 `budget` 内。
+pub(crate) fn build_refresh_prompt(summary: &str, budget: usize) -> String {
+    let prompt_budget = budget * REFRESH_BUDGET_RATIO / 10;
+    format!(
+        "{COMPACT_REFRESH_PROMPT}\n<current_summary>\n{summary}\n</current_summary>\n\nWrite your summary inside <summary> tags."
+    )
+    .replace("{BUDGET}", &prompt_budget.to_string())
+}
+
+/// 调用 LLM 对当前 summary 再压一次（#1490）。
+async fn llm_refresh(
+    generator: &dyn CompactGenerator,
+    summary: &str,
+    budget: usize,
+    cancel: &CancellationToken,
+) -> Result<String, String> {
+    let prompt = build_refresh_prompt(summary, budget);
+    llm_generate(generator, vec![Message::user(prompt)], cancel).await
+}
+
 /// 使用本地文本提取压缩消息（LLM 不可用时的回退方案）。
 ///
 /// 调用方已经根据归一化的 Provider usage 或无 usage 时的完整估算完成决策；
@@ -734,37 +795,41 @@ async fn compact_messages_map_reduce(
         crate::domain::token_budget::summary_budget(context_size),
     );
 
-    // 收敛迭代：合并结果超预算时再压一次，直到有界或达到轮数上限（#1486）。
-    // 再压把当前合并摘要当作"待压缩历史"走 llm_compact 语义（而非再次
-    // 拼接 sub-summaries），避免 prompt 形态重复导致 LLM 输出同构长摘要。
+    // 收敛迭代：合并结果超预算时再压一次，直到有界或达到轮数上限（#1486/#1490）。
+    // 再压使用专用提示词（硬预算 + 激进压缩），提示预算按 summary_budget×0.8
+    // 留余量；收敛判定统一用 estimate_tokens，连续两轮未缩小才停（容忍 LLM
+    // 输出噪音一轮），且未缩小轮次不采用更差的输出。
     let budget = crate::domain::token_budget::summary_budget(context_size);
+    let mut rounds_without_shrink = 0usize;
     for round in 1..=MAX_REDUCE_REFRESH_ROUNDS {
         if crate::domain::token_budget::estimate_tokens(&final_summary) <= budget {
             break;
         }
-        let refreshed = llm_compact(
-            generator,
-            &[Message::user(final_summary.clone())],
-            None,
-            context_size,
-            cancel,
-        )
-        .await?;
+        let tokens_before = crate::domain::token_budget::estimate_tokens(&final_summary);
+        let refreshed = llm_refresh(generator, &final_summary, budget, cancel).await?;
+        let tokens_after = crate::domain::token_budget::estimate_tokens(&refreshed);
         log::info!(
             target: crate::LOG_TARGET,
-            "[compact] 汇总超预算，再压 round {round}：{} -> {} chars",
-            final_summary.len(),
-            refreshed.len(),
+            "[compact] 汇总超预算，再压 round {round}：{tokens_before} -> {tokens_after} tokens（预算 {budget}）",
         );
-        if refreshed.len() >= final_summary.len() {
-            // 再压没有变小，停止迭代避免死循环；保留新结果但不再重试。
-            log::warn!(
+        if tokens_after >= tokens_before {
+            rounds_without_shrink += 1;
+            if rounds_without_shrink >= 2 {
+                // 连续两轮未缩小：停止迭代，保持当前（更优）summary，避免采用更差输出。
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[compact] 再压连续两轮未缩小（{tokens_after} tokens），停止迭代，保留 {tokens_before} tokens 的当前 summary",
+                );
+                break;
+            }
+            // 第一轮噪音：不采用 refreshed，基于原 summary 再试一轮。
+            log::debug!(
                 target: crate::LOG_TARGET,
-                "[compact] 再压未收敛（{} chars 未变小），停止迭代",
-                refreshed.len(),
+                "[compact] 再压本轮未缩小（{tokens_after} >= {tokens_before}），下一轮重试",
             );
-            return Ok(refreshed);
+            continue;
         }
+        rounds_without_shrink = 0;
         final_summary = refreshed;
     }
     Ok(final_summary)

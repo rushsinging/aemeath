@@ -634,3 +634,106 @@ async fn compact_falls_back_when_generator_errors() {
     assert!(result.summary.contains("Local text-compaction path"));
     assert!(!result.summary.contains("Semantic LLM compaction failed"));
 }
+
+/// #1490：再压提示词必须使用缩减预算（summary_budget × 0.8）并硬约束，
+/// 替代通用 COMPACT_PROMPT 的 "more detail is better" 反效果措辞。
+#[test]
+fn refresh_prompt_enforces_shrunk_budget() {
+    use crate::domain::token_budget::summary_budget;
+
+    let budget = summary_budget(272_000); // 5440
+    let prompt = crate::adapters::compact_summary::build_refresh_prompt(
+        "## User Requests\n- 继续 issue",
+        budget,
+    );
+
+    assert!(
+        prompt.contains("MUST NOT exceed"),
+        "再压提示词必须有硬预算约束: {prompt}"
+    );
+    let expected_prompt_budget = budget * 8 / 10; // ×0.8 留余量
+    assert!(
+        prompt.contains(&expected_prompt_budget.to_string()),
+        "提示预算应为 summary_budget×0.8（{expected_prompt_budget}）: {prompt}"
+    );
+    assert!(
+        !prompt.contains("More detail is better"),
+        "再压不应使用通用模板的鼓励细节措辞"
+    );
+    assert!(prompt.contains("## User Requests"));
+}
+
+/// #1490：收敛判定容忍一轮噪音——第一轮未缩小继续，第二轮才停；
+/// 且未缩小轮次不采用更差输出。
+#[tokio::test]
+async fn refresh_stops_after_two_non_shrinking_rounds_without_worsening() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    // 构造足以触发 map-reduce 的消息
+    let messages = (0..600)
+        .map(|index| {
+            Message::user(format!(
+                "触发分块压缩的测试消息编号 {index}。{}",
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+            ))
+        })
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+
+    let reduce_seen = Arc::new(AtomicBool::new(false));
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    /// reduce 返回超长摘要；refresh 阶段始终返回与输入等长（未缩小）的摘要。
+    struct NeverShrinkingGenerator {
+        reduce_seen: Arc<AtomicBool>,
+        calls: Arc<AtomicUsize>,
+    }
+    #[async_trait::async_trait]
+    impl CompactGenerator for NeverShrinkingGenerator {
+        async fn generate(
+            &self,
+            request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let text = request
+                .first()
+                .map(|msg| msg.text_content())
+                .unwrap_or_default();
+            if text.contains("sub-summaries") {
+                self.reduce_seen.store(true, Ordering::SeqCst);
+                Ok(format!("<summary>{}</summary>", "y".repeat(40_000)))
+            } else if text.contains("compress an existing conversation summary") {
+                // refresh：返回与输入等长的摘要（模拟 LLM 不缩小）
+                let input = text
+                    .find("<current_summary>")
+                    .and_then(|start| text.find("</current_summary>").map(|end| &text[start..end]))
+                    .unwrap_or("");
+                Ok(format!("<summary>{input}</summary>"))
+            } else {
+                Ok("<summary>chunk</summary>".to_string())
+            }
+        }
+    }
+
+    let generator = NeverShrinkingGenerator {
+        reduce_seen: reduce_seen.clone(),
+        calls: calls.clone(),
+    };
+    let result =
+        compact_messages_with_llm(&messages, None, 100_000, Some(&generator), None, &cancel)
+            .await
+            .expect("compact should run");
+
+    assert!(reduce_seen.load(Ordering::SeqCst), "reduce 阶段必须发生");
+    assert!(
+        result.summary.len() < 41_000,
+        "未缩小轮次不应采用更差输出（保持原 reduce 结果）: {} chars",
+        result.summary.len()
+    );
+    assert!(
+        calls.load(Ordering::SeqCst) >= 3,
+        "至少 reduce + 两轮 refresh: {}",
+        calls.load(Ordering::SeqCst)
+    );
+}
