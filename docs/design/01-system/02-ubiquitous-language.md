@@ -14,7 +14,7 @@
 
 | 术语 | 定义 |
 |---|---|
-| **Run** | 一次由用户输入（或父 Run 派生 SubAgent）触发的**一轮 agent 执行**，包含多个 Run Step；可在 `AwaitingUser` 暂停并由匹配答复恢复，最终进入完成 / 失败 / 取消之一。全系统唯一的 **Agent 执行生命周期状态机**，**内存态、不持久化**。标识 `RunId`。 |
+| **Run** | 一次由用户输入（或父 Run 派生 SubAgent）触发的**一轮 agent 执行**，包含多个 Run Step；可在 `AwaitingUser` 暂停并由匹配答复恢复，最终进入完成 / 失败 / 终止之一。全系统唯一的 **Agent 执行生命周期状态机**，**内存态、不持久化**。标识 `RunId`。 |
 | **Run Step** | Run 内的一次「模型调用 → 应用响应 →（可选）工具执行」往返。 |
 | **Model Invocation** | 一次具体的 LLM 调用（请求 + 流式响应 + usage）。 |
 | **Tool Call** | 一次工具调用。双 ID：领域 `ToolCallId`（UUIDv7）+ provider 边界标识。 |
@@ -27,11 +27,13 @@
 ### Run 状态机（内存态）
 
 ```
-Created → PreparingContext → InvokingModel → ApplyingResponse
-        → AwaitingToolApproval → ExecutingTools → (下一 Run Step)
+Created → DrainingInput → PreparingContext → InvokingModel → ApplyingResponse
+        → AwaitingToolApproval → ExecutingTools → FinalizingStep → DrainingInput
         → AwaitingUser（可恢复暂停，内存存活，不落盘）→ 原 continuation
-        → Compacting → Finishing → Completed / Failed
-任意非终态（除 Cancelling）→ Cancelling → Cancelled
+        → Compacting → PreparingContext
+active Step → CancellingStep → FinalizingStep → DrainingInput
+任意非终态 → Terminating → Terminated
+终态：Completed / Failed / Terminated
 ```
 
 > 崩溃后不恢复中间状态；用户重新发起即新建 Run。

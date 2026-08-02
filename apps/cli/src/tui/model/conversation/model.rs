@@ -3,7 +3,7 @@ use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
 use super::chat_turn::ChatTurn;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
-use super::interaction::{AgentRunState, InteractionState, UiRunId};
+use super::interaction::InteractionState;
 use super::output_view_change::{
     OutputViewChange, OutputViewChanges, OutputViewCursor, OutputViewJournal,
 };
@@ -23,9 +23,6 @@ pub(crate) struct ConversationRetainedStateSnapshot {
     pub timeline_items: usize,
     pub agent_progress_entries: usize,
     pub agent_progress_bytes: usize,
-    pub agent_runs: usize,
-    pub agent_run_steps: usize,
-    pub terminal_agent_runs: usize,
     pub output_view_journal_entries: usize,
     pub output_view_journal_item_id_bytes: usize,
     pub has_active_interaction: bool,
@@ -52,7 +49,6 @@ pub struct ConversationModel {
     pub(super) active_thinking_context: Option<(ChatId, ChatTurnId)>,
     pub model_stream_placeholder: Option<ModelStreamWaitingView>,
     pub(super) active_interaction: Option<InteractionState>,
-    pub(super) agent_runs: Vec<AgentRunState>,
 
     // ── 运行态 ──
     pub runtime: RuntimeState,
@@ -77,7 +73,6 @@ impl Default for ConversationModel {
             active_thinking_context: None,
             model_stream_placeholder: None,
             active_interaction: None,
-            agent_runs: Vec::new(),
             runtime: RuntimeState::default(),
         }
     }
@@ -209,8 +204,6 @@ impl ConversationModel {
 
     #[cfg(test)]
     pub(crate) fn retained_state_snapshot(&self) -> ConversationRetainedStateSnapshot {
-        use super::interaction::AgentRunPhase;
-
         let turns = self.chats.iter().map(|chat| chat.turns.len()).sum();
         let tool_calls = self
             .chats
@@ -223,18 +216,6 @@ impl ConversationModel {
             .iter()
             .map(|entry| entry.tool_id.len().saturating_add(entry.message.len()))
             .sum();
-        let agent_run_steps = self.agent_runs.iter().map(|run| run.steps().len()).sum();
-        let terminal_agent_runs = self
-            .agent_runs
-            .iter()
-            .filter(|run| {
-                matches!(
-                    run.phase(),
-                    AgentRunPhase::Cancelled | AgentRunPhase::Completed | AgentRunPhase::Failed
-                )
-            })
-            .count();
-
         let (output_view_journal_entries, output_view_journal_item_id_bytes) =
             self.output_view_journal.retained_metrics();
 
@@ -245,59 +226,10 @@ impl ConversationModel {
             timeline_items: self.timeline.items().len(),
             agent_progress_entries: self.agent_progress.len(),
             agent_progress_bytes,
-            agent_runs: self.agent_runs.len(),
-            agent_run_steps,
-            terminal_agent_runs,
             output_view_journal_entries,
             output_view_journal_item_id_bytes,
             has_active_interaction: self.active_interaction.is_some(),
         }
-    }
-
-    pub(crate) fn agent_run(&self, run_id: &UiRunId) -> Option<&AgentRunState> {
-        self.agent_runs.iter().find(|run| run.run_id() == run_id)
-    }
-
-    pub(super) fn start_agent_run(&mut self, run_id: UiRunId) -> bool {
-        if self.agent_run(&run_id).is_some() {
-            return false;
-        }
-        self.agent_runs.push(AgentRunState::new(run_id));
-        true
-    }
-
-    pub(super) fn transition_agent_run(
-        &mut self,
-        run_id: &UiRunId,
-        phase: super::interaction::AgentRunPhase,
-    ) -> bool {
-        self.agent_runs
-            .iter_mut()
-            .find(|run| run.run_id() == run_id)
-            .is_some_and(|run| run.transition_to(phase))
-    }
-
-    pub(super) fn start_agent_run_step(
-        &mut self,
-        run_id: &UiRunId,
-        step_id: super::interaction::UiRunStepId,
-        tool_reference: Option<String>,
-    ) -> bool {
-        self.agent_runs
-            .iter_mut()
-            .find(|run| run.run_id() == run_id)
-            .is_some_and(|run| run.start_step(step_id, tool_reference))
-    }
-
-    pub(super) fn complete_agent_run_step(
-        &mut self,
-        run_id: &UiRunId,
-        step_id: &super::interaction::UiRunStepId,
-    ) -> bool {
-        self.agent_runs
-            .iter_mut()
-            .find(|run| run.run_id() == run_id)
-            .is_some_and(|run| run.complete_step(step_id))
     }
 
     pub(super) fn clear_model_stream_placeholder(&mut self) -> Vec<ConversationChange> {

@@ -63,7 +63,6 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ToolResult { .. } => "ToolResult",
         UiEvent::Usage { .. } => "Usage",
         UiEvent::Error(_) => "Error",
-        UiEvent::RunCancelled => "RunCancelled",
         UiEvent::Cancelled { .. } => "Cancelled",
         UiEvent::TurnStarted { .. } => "TurnStarted",
         UiEvent::MicrocompactDone { .. } => "MicrocompactDone",

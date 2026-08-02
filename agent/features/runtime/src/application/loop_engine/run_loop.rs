@@ -99,14 +99,6 @@ impl<'a> RunLoop<'a> {
         self.control.take_control(run_id)
     }
 
-    pub(super) fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
-        self.lifecycle.claim_terminal(run_id)
-    }
-
-    pub(super) fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
-        self.lifecycle.claim_cancellation(run_id)
-    }
-
     pub(super) fn register_step_scope(
         &self,
         run_id: &sdk::RunId,

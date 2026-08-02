@@ -36,19 +36,10 @@
         "AlreadyCancelling",
         "RunTerminating",
         "RunTerminal",
+        "NoActiveStep",
         "NoActiveRun"
       ],
       "title": "CancelCurrentRunOutcome",
-      "type": "string"
-    },
-    "CancelRunOutcome": {
-      "enum": [
-        "Accepted",
-        "AlreadyCancelling",
-        "AlreadyTerminal",
-        "NotFound"
-      ],
-      "title": "CancelRunOutcome",
       "type": "string"
     },
     "CancelRunStepOutcome": {

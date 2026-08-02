@@ -126,7 +126,7 @@ enum AgentIntent {
 | Context | UiEvent 变体 | Intent / 关键规则 |
 |---|---|---|
 | Conversation | `Text` / `Thinking` / `BlockComplete` / `ToolCallStart` / `ToolCallUpdate` / `ToolResult` / `AgentProgress` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `ModelStreamWaiting` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` / `CompactProgress` | 清 placeholder、sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 投影与派生输入；turn-level `Cancelled` **NEVER** 代替 Run 终态 |
-| Conversation | `RunStarted` / `RunAwaitingUser` / `RunResumed` / `RunCompleting` / `RunCompleted` / `RunFailed` / `RunCancelling` / `RunCancelled` | 按 `run_id` 投影 Runtime 权威生命周期；`RunCancelling` 进入非终态 Cancelling，只有 `RunCancelled` 进入 Cancelled；Interaction command result Intent 不参与此状态机；Created admission 阶段被拒绝时 `RunFailed` 单阶段直转 Failed，`RunCancelling` 仍先进入非终态 Cancelling（**NEVER** 直接跳到 Cancelled），完整 Created → Failed / Cancelling 映射见 [02-model.md §3.2](02-model.md#32-run-投影与-runstatus-状态机) |
+| Runtime observation | `Run` / `RunStep` lifecycle DTO | ACL 保留 typed identity 与局部 step cancellation 语义；Conversation mapper 显式返回 no-op，**NEVER** 创建 `ConversationIntent::Run*` 或第二套生命周期状态 |
 | Conversation | `InteractionRequested { request_id, run_id, body }` | 穷尽映射四种 body 为 `ShowInteraction { request_id, run_id, body }`；保留 Runtime run/request identity，只携 TUI DTO，**NEVER** 携 sender |
 | Conversation + Diagnostic | `Error` / `ApiError` | Conversation 追加错误块；Diagnostic 记录结构化 notice |
 | Conversation + Diagnostic | `HookEvent` | Conversation 追加 sanitize 后的 hook notice；阻断 / 失败同时记录 Diagnostic Intent；PostCompact 也必须显式映射为 no-visual-state Intent，**NEVER** 静默丢弃 |
@@ -297,10 +297,15 @@ enum UiEvent {
         run_id: RunId,
         body: UiInteractionBody,
     },
-    RunResumed { run_id: RunId },
-    RunCancelling { run_id: RunId },
-    RunCancelled { run_id: RunId },
-    // ...
+    Run {
+        run_id: RunId,
+        event: TuiRunEvent,
+    },
+    RunStep {
+        run_id: RunId,
+        step_id: RunStepId,
+        event: TuiRunStepEvent,
+    },    // ...
 }
 ```
 
@@ -358,25 +363,23 @@ sdk::ChatEvent::InteractionRequested {
 7. `InteractionReplySent` / `InteractionCancelled` 只更新匹配 Interaction 块的本地阶段，**NEVER** 把 Run 从 `AwaitingUser` 改为 `Running` 或 `Cancelled`；Runtime 完成 continuation 后发布 `RunResumed`，TUI 才恢复 Running。
 8. UserQuestions 渲染问题与答案；ToolApproval / PlanApproval 渲染 Approve / Deny；HardPause 渲染 diagnostic 与 Continue / Cancel。所有选择只形成 TUI draft，业务结果仍由 Runtime continuation 决定。
 
-### 4.5 Run 取消的两阶段投影
+### 4.5 current-run cancel 与 lifecycle 观察边界
 
 ```text
-用户打断 → reducer Change → Coordinator → RequestRunCancellation Effect
-  → effect runner 调 Runtime cancel port
-  → 请求已投递 / 失败 result Intent（不伪造 Run 终态）
+用户打断 → reducer Change → Coordinator → CancelCurrentRun Effect
+  → effect runner 调 `cancel_current_run`
+  → typed command outcome 只描述当前 active Step 是否收到取消请求
 
-Runtime 接受请求 → SDK RunCancelling { run_id }
-  → event_mapping → UiEvent::RunCancelling
-  → ConversationIntent::ProjectRunCancelling
-  → reducer：live → Cancelling
+Runtime `RunStepCancellationRequested / RunStepCancelled`
+  → SDK / TUI ACL 保留 step identity 与 confirmed 语义
+  → Conversation mapper 返回 no-op，不建立 Run / RunStep phase
 
-Runtime 停止在途工作并完成回滚 → SDK RunCancelled { run_id }
-  → event_mapping → UiEvent::RunCancelled
-  → ConversationIntent::ProjectRunCancelled
-  → reducer：Cancelling → Cancelled
+Runtime `Completed / Failed / Terminated`
+  → 保持 Runtime typed lifecycle 唯一权威
+  → structured terminal turn event 只结束对应 chat processing 并渲染一次 notice
 ```
 
-`RunCancelling` 是取消 accepted 的权威 Published Language 事件；它必须立即让 TUI 展示 Cancelling，但仍是 live 非终态。仅 `RunCancelled` 可进入 Cancelled / Idle。`CancelInteraction` 发送 typed `InteractionCancelReason::UserCancelled`，只取消当前 interaction，**NEVER** 发送空答案，也 **NEVER** 等价为 `RequestRunCancellation`。
+`cancel_current_run` 是当前前台 Main Run 的无身份请求入口；identity-scoped `cancel_run_step` / `terminate_run` 是独立 Run control API。command accepted、Interaction cancel、Step cancellation 或 stream teardown 均 **NEVER** 伪造 Run 终态。`CancelInteraction` 发送 typed `InteractionCancelReason::UserCancelled`，只取消当前 interaction，也 **NEVER** 等价为 current-run cancel。
 
 > **AgentClient trait 的特殊性**：`AgentClient` 是 Runtime-owned 入站 OHS，由 SDK 发布。TUI 的 processing / effect 边界 **MUST** 依赖此 trait（R4 允许），但 trait 方法返回的 `ChatEvent` / `ChatStream` **MUST** 在 ACL 层转换为 TUI 自有类型后才能进入 UiEvent。
 
@@ -392,7 +395,7 @@ Runtime `AgentClient::reply_interaction` / `cancel_interaction` 返回封闭枚�
 | `CancelRejected { reason }` | `InteractionCancelRejected { request_id, reason }` | **回** `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / PlanApproval / HardPause）；**NEVER** 进入终态 | **保留**，用户可继续原 draft 或重新发起取消 | **否** |
 | `NotFound { request_id }` | Diagnostic-only Intent（无 Interaction Change） | 不改当前活跃 Interaction 投影（陈旧 request） | 静默丢弃 | n/a |
 | `AlreadyCompleted { request_id }` | Diagnostic-only Intent | 不改投影（协议冲突） | 静默丢弃 | n/a |
-| `RunCancelling { run_id }` | `InteractionReplyDeferred { request_id, run_id }`；**NEVER** 推进交互终态 | 保持 `ReplyPending` / `Confirming`，等 Run 终态事件（§4.5） | 保留 | 否 |
+| `RunCancelling { run_id }` | `InteractionReplyDeferred { request_id, run_id }`；**NEVER** 推进交互终态 | 保持 `ReplyPending` / `Confirming`，等待 Runtime 清理 pending interaction | 保留 | 否 |
 | `IrrecoverableError { message }` | `InteractionReplyFailed { request_id, message }` | → `ReplyFailed { message }` | 丢弃 | **是**（唯一进入 `ReplyFailed` 的路径） |
 
 规则：
@@ -400,13 +403,13 @@ Runtime `AgentClient::reply_interaction` / `cancel_interaction` 返回封闭枚�
 1. **MUST** `InvalidReply` **NEVER** 映射到 `ReplyFailed` 或 `Cancelled`——它是可恢复的验证失败：Runtime 不消费 pending request，用户修正 draft 后可对同一 `request_id` 重试。
 2. **MUST** reducer 收到 `InteractionReplyRejected` 时把 phase 回退到 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / PlanApproval / HardPause），**保留** draft 与光标位置，并把 `reason` 追加为 Diagnostic notice。
 3. **MUST** `NotFound` / `AlreadyCompleted` 只产生 Diagnostic Intent，**NEVER** 改变当前活跃 Interaction 的 phase 或消费 draft；二者表示陈旧 / 协议冲突，effect runner **MUST** 记录结构化诊断日志后静默丢弃。
-4. **MUST** `RunCancelling` 不伪造交互终态——交互保持等待，直到 Runtime 发布 `RunCancelled` / `RunCompleted`；`CancelInteraction` 已发 typed `UserCancelled`，Runtime 在 cancellation scope 内清理 pending continuation。
+4. **MUST** `RunCancelling` command outcome 不伪造交互或 Run 终态——它只表示 interaction command 遇到正在收口的 Run；Runtime 负责清理 pending continuation，ConversationModel 不等待或投影旧 Run cancellation event。
 5. **MUST** 只有 `IrrecoverableError` 才进入 `ReplyFailed { message }`；该终态意味着 request 已无法重试（如对应 Run 已死、连接永久断开），且 **MUST** 在 Diagnostic 记录结构化错误。
 6. **MUST** effect runner 对封闭 `InteractionCommandOutcome` 做穷尽 match，**NEVER** 把未知 / wildcard outcome 默认到 `ReplyFailed`；新增 variant **MUST** 先扩展此表与对应 result Intent。
 7. **MUST** 状态机场景测试覆盖每个 outcome variant：证明 `InvalidReply` 不进入终态且 draft 保留；`NotFound` / `AlreadyCompleted` 不改活跃投影；`RunCancelling` 保持等待；只有 `IrrecoverableError` 进入 `ReplyFailed`。
 8. **MUST** `cancel_interaction` 与 `reply_interaction` 共享同一 `InteractionCommandOutcome` 封闭枚举；取消被拒绝时返回 `CancelRejected { reason }`（**NEVER** 复用 `InvalidReply` 语义），reducer 按与规则 2 对称的方式把 phase 回退到 `Collecting` / `Confirming` 并保留 draft，**NEVER** 进入终态。
 
-> **关键**：`ReplyFailed` 是 **Interaction 块** 的终态（用户看到失败块），**NOT** Run 终态。Run 生命周期只由 `Run*` Published Language 事件驱动（§4.5）。
+> **关键**：`ReplyFailed` 是 **Interaction 块** 的终态（用户看到失败块），**NOT** Run 终态。Run 生命周期只由 Runtime typed lifecycle 驱动；ConversationModel 不复制该状态机（§4.5）。
 
 ## 5. 事件 identity 与 agent_id（R8）
 
@@ -591,7 +594,7 @@ impl EffectRunner {
 | 9 | Event exhaustiveness | 构造每个 UiEvent 变体，断言第二层 ACL 产生显式 Context Intent；禁止 wildcard 与默认空 mapping |
 | 10 | Model write isolation | arch test：六 Context 核心字段私有；`apply` / `reduce_*` 生产调用点只有 `update/root_reducer.rs`，adapter / Coordinator / ViewAssembler 只取得不可变 projection |
 
-状态机场景测试 **MUST** 穷尽四种 Interaction body，并证明：`InteractionReplySent` / `InteractionCancelled` 不改变 Run；`RunResumed` 才把 `AwaitingUser` 投影为 `Running`；`RunCancelling` 只进入非终态 `Cancelling`；`RunCancelled` 才进入终态。该证明必须覆盖 event mapping → Intent、Intent → Change 两层，**NEVER** 只测最终渲染。
+状态机场景测试 **MUST** 穷尽四种 Interaction body，并证明：`InteractionReplySent` / `InteractionCancelled` 不改变 Run；Runtime Run / RunStep lifecycle DTO 在 Conversation mapping 边界显式 no-op；structured `Cancelled` turn notice 恰好结束对应 chat 一次。该证明必须覆盖 event mapping → Intent 与 reducer / scenario 相邻层，**NEVER** 只测最终渲染。
 
 ### 8.2 门禁 #6 详细规则
 

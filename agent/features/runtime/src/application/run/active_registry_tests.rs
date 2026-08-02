@@ -2,6 +2,48 @@ use super::*;
 use crate::domain::agent_run::{ActiveRunPort, RunControl};
 
 #[test]
+fn registry_does_not_duplicate_run_lifecycle_or_expose_legacy_cancel() {
+    let registry_source = include_str!("active_registry.rs");
+    let active_run_port_source = include_str!("../../domain/agent_run.rs");
+
+    for retired in [
+        "pub cancelling: bool",
+        "pub terminal: bool",
+        "fn claim_terminal(",
+        "fn claim_cancellation(",
+        "pub fn cancel(&self",
+        "sdk::CancelRunOutcome",
+    ] {
+        assert!(
+            !registry_source.contains(retired),
+            "ActiveRunRegistry retains a second Run lifecycle source: {retired}"
+        );
+    }
+
+    for retired in ["fn claim_terminal(", "fn claim_cancellation("] {
+        assert!(
+            !active_run_port_source.contains(retired),
+            "ActiveRunPort retains lifecycle arbitration: {retired}"
+        );
+    }
+}
+
+#[test]
+fn cancel_current_main_without_active_step_is_explicit_and_preserves_root_scope() {
+    let registry = ActiveRunRegistry::default();
+    let run_id = sdk::RunId::new_v7();
+    let root = CancellationToken::new();
+
+    registry.activate_main(run_id, root.clone());
+
+    assert_eq!(
+        registry.cancel_current_main(sdk::ControlDeadline::from_unix_millis(1)),
+        sdk::CancelCurrentRunOutcome::NoActiveStep
+    );
+    assert!(!root.is_cancelled());
+}
+
+#[test]
 fn cancel_current_main_step_does_not_require_run_identity() {
     let registry = ActiveRunRegistry::default();
     let run_id = sdk::RunId::new_v7();
@@ -189,72 +231,11 @@ fn registry_tracks_runs_independently() {
     registry.activate(sub_b.clone(), sub_b_token.clone());
 
     assert_eq!(registry.active_ids().len(), 3);
-    assert_eq!(registry.cancel(&sub_a), sdk::CancelRunOutcome::Accepted);
-    assert!(sub_a_token.is_cancelled());
-    assert!(!parent_token.is_cancelled());
-    assert!(!sub_b_token.is_cancelled());
-
     registry.clear(&sub_a);
     assert_eq!(registry.active_ids().len(), 2);
-    assert_eq!(registry.cancel(&parent), sdk::CancelRunOutcome::Accepted);
-    assert!(parent_token.is_cancelled());
-    assert!(sub_b_token.is_cancelled());
-}
-
-#[test]
-fn cancel_is_synchronous_and_id_scoped() {
-    let registry = ActiveRunRegistry::default();
-    let run_id = sdk::RunId::new_v7();
-    let other = sdk::RunId::new_v7();
-    let token = CancellationToken::new();
-    registry.activate(run_id.clone(), token.clone());
-
-    assert_eq!(registry.cancel(&other), sdk::CancelRunOutcome::NotFound);
-    assert!(!token.is_cancelled());
-    assert_eq!(registry.cancel(&run_id), sdk::CancelRunOutcome::Accepted);
-    assert!(
-        token.is_cancelled(),
-        "token must be cancelled before return"
-    );
-    assert_eq!(
-        registry.cancel(&run_id),
-        sdk::CancelRunOutcome::AlreadyCancelling
-    );
-}
-
-#[test]
-fn terminal_claim_is_visible_to_late_cancel_until_clear() {
-    let registry = ActiveRunRegistry::default();
-    let run_id = sdk::RunId::new_v7();
-    registry.activate(run_id.clone(), CancellationToken::new());
-
-    assert!(registry.claim_terminal(&run_id));
-    assert_eq!(
-        registry.cancel(&run_id),
-        sdk::CancelRunOutcome::AlreadyTerminal
-    );
-    registry.clear(&run_id);
-    assert_eq!(registry.cancel(&run_id), sdk::CancelRunOutcome::NotFound);
-}
-
-#[test]
-fn terminal_claim_blocks_late_cancellation_claim() {
-    let registry = ActiveRunRegistry::default();
-    let run_id = sdk::RunId::new_v7();
-    registry.activate(run_id.clone(), CancellationToken::new());
-
-    assert!(registry.claim_terminal(&run_id));
-    assert!(!registry.claim_cancellation(&run_id));
-}
-
-#[test]
-fn cancellation_wins_over_terminal_claim() {
-    let registry = ActiveRunRegistry::default();
-    let run_id = sdk::RunId::new_v7();
-    registry.activate(run_id.clone(), CancellationToken::new());
-
-    assert_eq!(registry.cancel(&run_id), sdk::CancelRunOutcome::Accepted);
-    assert!(!registry.claim_terminal(&run_id));
+    assert!(!parent_token.is_cancelled());
+    assert!(!sub_a_token.is_cancelled());
+    assert!(!sub_b_token.is_cancelled());
 }
 
 #[test]

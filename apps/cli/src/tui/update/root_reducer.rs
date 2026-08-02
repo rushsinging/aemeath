@@ -229,9 +229,7 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::InteractionCancelRequested { .. }
             | ConversationChange::InteractionCompleted { .. }
             | ConversationChange::InteractionCommandRejected { .. }
-            | ConversationChange::InteractionConflict { .. }
-            | ConversationChange::AgentRunChanged { .. }
-            | ConversationChange::AgentRunStepChanged { .. } => {
+            | ConversationChange::InteractionConflict { .. } => {
                 ModelChange::output_and_status_dirty()
             }
             ConversationChange::CompactProgressChanged

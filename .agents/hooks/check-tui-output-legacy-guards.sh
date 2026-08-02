@@ -20,4 +20,19 @@ if grep -R "cell\.set_char('●')" "$ROOT/apps/cli/src/tui/output_area" "$ROOT/a
   fail=1
 fi
 
+TUI_CONVERSATION="$ROOT/apps/cli/src/tui/model/conversation"
+TUI_RUNTIME_MAPPER="$ROOT/apps/cli/src/tui/adapter/agent_event.rs"
+
+if grep -R -nE 'AgentRun(Phase|State|StepPhase|StepState)|AgentRunChanged|AgentRunStepChanged|agent_runs|terminal_agent_runs' \
+  "$TUI_CONVERSATION" --include='*.rs'; then
+  echo "[architecture] ConversationModel must not retain a parallel Run lifecycle state source" >&2
+  fail=1
+fi
+
+if grep -nE 'ConversationIntent::Run(Started|AwaitingUser|Resumed|Cancelling|Cancelled|Completed|Failed|StepStarted|StepCompleted)' \
+  "$TUI_RUNTIME_MAPPER"; then
+  echo "[architecture] Runtime Run lifecycle observations must not mutate ConversationModel" >&2
+  fail=1
+fi
+
 exit "$fail"

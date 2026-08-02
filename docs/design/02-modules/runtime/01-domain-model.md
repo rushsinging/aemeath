@@ -245,7 +245,7 @@ Provider ACL **MUST** 在 `InvocationResponse` 进入 Runtime 前完成 token �
 
 `RunStarted · RunDrainingInput · RunAwaitingInput/RunInputResumed · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunInteractionRequested{request_id}/RunInteractionResumed{request_id} · CompactionStarted/Completed · StuckDetected · RunStepCancellationRequested · RunStepFinalizationStarted · RunStepCancelled{confirmed} · RunTerminationRequested{reason,deadline} · RunCompleted/Failed/Terminated{reason}`
 
-> **Step 取消与 Run 终止分离**：`RunStepCancellationRequested` 在同步入口接受 `CancelRunStep` 时产生；`RunStepFinalizationStarted` / `RunStepCancelled` 描述确定性收口，随后 `RunDrainingInput`。`RunTerminationRequested` 在接受 `TerminateRun` 时产生，最终只有 `RunTerminated`。迁移期旧 `RunCancellationRequested/RunCancelled` 只用于现有生产兼容路径，必须由 #878/#879 与旧 `cancel_run` 一并退役。
+> **Step 取消与 Run 终止分离**：`RunStepCancellationRequested` 在同步入口接受 `CancelRunStep` 时产生；`RunStepFinalizationStarted` / `RunStepCancelled` 描述确定性收口，随后 `RunDrainingInput`。`RunTerminationRequested` 在接受 `TerminateRun` 时产生，最终只有 `RunTerminated`。Run 级 cancellation 状态、事件与投影已经退役，**NEVER** 作为第二套终态语义恢复。
 
 > **终态事实与业务返回分离**：目标终态 `RunCompleted { result }` / `RunFailed { error }` / `RunTerminated { reason }` 是 Run 聚合产生并经 `EventSink` 投影的权威领域事件；同时 `run_loop` / `derive_sub_run` 直接返回 typed `AgentRunTerminal`。Main 使用事件通知 TUI；Sub 的父 Run **MUST** 消费 typed return 继续业务编排，**NEVER** 反向订阅 EventSink 或遍历 message 提取结果。事件载荷与 typed return 来自同一次终态 mutation，必须一致。
 

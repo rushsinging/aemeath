@@ -194,14 +194,7 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::RunAwaitingUser { run_id, .. } => crate::tui::log_trace!("{} run_awaiting_user run_id={}", stage, run_id),
         sdk::ChatEvent::RunResumed { run_id, .. } => crate::tui::log_trace!("{} run_resumed run_id={}", stage, run_id),
         sdk::ChatEvent::InteractionRequested { request } => crate::tui::log_trace!("{} interaction_requested request_id={} run_id={}", stage, request.id, request.run_id),
-        sdk::ChatEvent::RunCancelling { run_id } => {
-            crate::tui::log_trace!("{} run_cancelling run_id={}", stage, run_id)
-        }
-        sdk::ChatEvent::RunCancelled { run_id } => {
-            crate::tui::log_trace!("{} run_cancelled run_id={}", stage, run_id)
-        }
-        sdk::ChatEvent::Cancelled { context, .. } => crate::tui::log_trace!(
-            "{} cancelled chat_id={} turn_id={}",
+        sdk::ChatEvent::Cancelled { context, .. } => crate::tui::log_trace!(            "{} cancelled chat_id={} turn_id={}",
             stage,
             context.chat_id,
             context.turn_id

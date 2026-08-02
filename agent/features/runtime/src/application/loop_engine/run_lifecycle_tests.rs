@@ -5,8 +5,6 @@ use crate::domain::agent_run::{RunControl, RunId};
 
 #[derive(Default)]
 struct RecordingActiveRun {
-    terminal_claims: Mutex<Vec<RunId>>,
-    cancellation_claims: Mutex<Vec<RunId>>,
     step_scopes: Mutex<Vec<(RunId, sdk::RunStepId)>>,
 }
 
@@ -29,38 +27,7 @@ impl ActiveRunPort for RecordingActiveRun {
         None
     }
 
-    fn claim_terminal(&self, run_id: &RunId) -> bool {
-        self.terminal_claims.lock().unwrap().push(run_id.clone());
-        true
-    }
-
-    fn claim_cancellation(&self, run_id: &RunId) -> bool {
-        self.cancellation_claims
-            .lock()
-            .unwrap()
-            .push(run_id.clone());
-        true
-    }
-
     fn clear(&self, _run_id: &RunId) {}
-}
-
-#[test]
-fn coordinator_delegates_terminal_and_cancellation_claims_to_active_run() {
-    let active_run = RecordingActiveRun::default();
-    let coordinator = RunLifecycleCoordinator::new(&active_run, NoopStepScopeObserver);
-    let run_id = RunId::new_v7();
-
-    assert!(coordinator.claim_terminal(&run_id));
-    assert!(coordinator.claim_cancellation(&run_id));
-    assert_eq!(
-        active_run.terminal_claims.lock().unwrap().as_slice(),
-        std::slice::from_ref(&run_id)
-    );
-    assert_eq!(
-        active_run.cancellation_claims.lock().unwrap().as_slice(),
-        std::slice::from_ref(&run_id)
-    );
 }
 
 #[test]

@@ -1,23 +1,5 @@
 use super::super::event_mapping::{sdk_event_to_tui_event, SdkEventMapping};
-use super::{TuiRunEvent, TuiRuntimeEvent};
-
-#[test]
-fn run_cancelling_keeps_identity_instead_of_becoming_empty_message() {
-    let run_id = sdk::RunId::new("run-1");
-
-    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::RunCancelling {
-        run_id: run_id.clone(),
-    });
-
-    assert!(matches!(
-        mapped,
-        SdkEventMapping::Runtime(TuiRuntimeEvent::Run {
-            run_id: actual,
-            parent_run_id: None,
-            event: TuiRunEvent::Cancelling,
-        }) if actual.as_str() == run_id.as_str()
-    ));
-}
+use super::TuiRuntimeEvent;
 
 #[test]
 fn interaction_request_maps_all_body_fields_without_sdk_payload() {

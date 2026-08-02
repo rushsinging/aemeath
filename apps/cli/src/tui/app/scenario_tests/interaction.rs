@@ -18,9 +18,7 @@ use super::super::testing::{input, ExpectedEffect, TuiScenarioHarness};
 fn cancel_and_quit_effects_are_explicit() {
     let mut busy = TuiScenarioHarness::new(100, 30);
     busy.app.chat.start_processing();
-    busy.expect_effect(ExpectedEffect::CancelCurrentRun {
-        replies: vec![TuiMsg::Ui(UiEvent::RunCancelled)],
-    });
+    busy.expect_effect(ExpectedEffect::CancelCurrentRun { replies: vec![] });
     busy.key(input::press(KeyCode::Esc, KeyModifiers::NONE));
     assert!(busy
         .effects()

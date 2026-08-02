@@ -130,7 +130,7 @@ async fn coordinator_begin_user_questions() {
     assert!(port.contains(&request_id));
 }
 
-// ── Atomic begin: compensation tests (Task 4.1) ──
+// ── Atomic begin: compensation tests ──
 
 #[tokio::test]
 async fn coordinator_begin_fails_when_port_unavailable() {
@@ -235,7 +235,7 @@ async fn coordinator_begin_fails_on_domain_rejection_with_compensation() {
     assert!(!port.contains(&request_id));
 }
 
-// ── Shared validate_reply via the public fn (Task 4.4) ──
+// ── Shared validate_reply via the public function ──
 
 #[test]
 fn shared_validate_user_questions_accepts_matching_reply() {
@@ -415,10 +415,10 @@ async fn coordinator_begin_then_cancel() {
     assert!(run.pending_interaction().is_none());
 }
 
-// ── Cancel-and-drain (Task 4.2): complete disconnect handling ──
+// ── Cleanup: disconnect handling ──
 
 #[test]
-fn coordinator_cancel_and_drain_transitions_run_to_cancelling() {
+fn coordinator_cleanup_run_clears_pending_interaction_without_changing_run_lifecycle() {
     let mut run = run_in_executing_tools();
     let port = InteractionBridge::new();
     let (body, continuation) = question_body();
@@ -439,112 +439,44 @@ fn coordinator_cancel_and_drain_transitions_run_to_cancelling() {
     assert!(run.pending_interaction().is_some());
     assert!(port.contains(&request_id));
 
-    // Cancel and drain — full disconnect
-    InteractionCoordinator::cancel_and_drain(
-        &mut run,
-        &mut RunExecutionState::new(),
-        &port,
-        &run_id,
-        InteractionCancelReason::RunCancelled,
-    )
-    .unwrap();
-
-    // Run must be in Cancelling, with no pending interaction
-    assert_eq!(run.status(), RunStatus::Cancelling);
-    assert!(run.pending_interaction().is_none());
-    // Port must be drained
-    assert!(!port.contains(&request_id));
-}
-
-#[test]
-fn coordinator_cancel_and_drain_idempotent_on_terminal_run() {
-    let mut run = run_in_executing_tools();
-    let port = InteractionBridge::new();
-    let (body, continuation) = question_body();
-    let request_id = InteractionRequestId::new_v7();
-    let run_id = RunId::new_v7();
-
-    let (_rid, _receiver) = InteractionCoordinator::begin(
-        &mut run,
-        &port,
-        request_id.clone(),
-        run_id.clone(),
-        body,
-        continuation,
-    )
-    .unwrap();
-
-    // First cancel
-    InteractionCoordinator::cancel_and_drain(
-        &mut run,
-        &mut RunExecutionState::new(),
-        &port,
-        &run_id,
-        InteractionCancelReason::RunCancelled,
-    )
-    .unwrap();
-    assert_eq!(run.status(), RunStatus::Cancelling);
-
-    // Complete the cancellation to make it terminal
-    run.finish_cancellation().unwrap();
-    assert!(run.status().is_terminal());
-
-    // Second cancel_and_drain on already-terminal Run — must not panic
-    let result = InteractionCoordinator::cancel_and_drain(
+    InteractionCoordinator::cleanup_run(
         &mut run,
         &mut RunExecutionState::new(),
         &port,
         &run_id,
         InteractionCancelReason::RunCancelled,
     );
-    assert!(result.is_ok());
-    assert!(run.status().is_terminal());
+
+    assert_eq!(run.status(), RunStatus::AwaitingUser);
+    assert!(run.pending_interaction().is_none());
+    assert!(!port.contains(&request_id));
 }
 
 #[test]
-fn coordinator_cancel_and_drain_does_not_leave_awaiting_user_without_pending() {
+fn coordinator_cleanup_run_is_idempotent_on_terminal_run() {
     let mut run = run_in_executing_tools();
     let port = InteractionBridge::new();
-    let (body, continuation) = question_body();
-    let request_id = InteractionRequestId::new_v7();
     let run_id = RunId::new_v7();
 
-    let (_rid, _receiver) = InteractionCoordinator::begin(
-        &mut run,
-        &port,
-        request_id.clone(),
-        run_id.clone(),
-        body,
-        continuation,
-    )
-    .unwrap();
+    run.request_termination(
+        sdk::RunTerminationReason::SessionShutdown,
+        sdk::ControlDeadline::from_unix_millis(0),
+    );
+    run.finish_termination().unwrap();
+    assert!(run.status().is_terminal());
 
-    assert_eq!(run.status(), RunStatus::AwaitingUser);
-    assert!(run.pending_interaction().is_some());
-
-    InteractionCoordinator::cancel_and_drain(
+    InteractionCoordinator::cleanup_run(
         &mut run,
         &mut RunExecutionState::new(),
         &port,
         &run_id,
         InteractionCancelReason::RunCancelled,
-    )
-    .unwrap();
-
-    // MUST NOT be AwaitingUser with no pending (the critical bug)
-    if run.status() == RunStatus::AwaitingUser {
-        assert!(
-            run.pending_interaction().is_some(),
-            "AwaitingUser must have pending_interaction"
-        );
-    }
-    // Should be Cancelling
-    assert_eq!(run.status(), RunStatus::Cancelling);
-    assert!(run.pending_interaction().is_none());
+    );
+    assert_eq!(run.status(), RunStatus::Terminated);
 }
 
 #[test]
-fn cancel_and_drain_clears_execution_mailbox_and_queued_work() {
+fn cleanup_run_clears_execution_mailbox_and_queued_work() {
     let mut run = run_in_executing_tools();
     let port = InteractionBridge::new();
     let (body, continuation) = question_body();
@@ -568,30 +500,28 @@ fn cancel_and_drain_clears_execution_mailbox_and_queued_work() {
     .unwrap();
     execution.set_pending_interaction_work(Default::default());
 
-    InteractionCoordinator::cancel_and_drain(
+    InteractionCoordinator::cleanup_run(
         &mut run,
         &mut execution,
         &port,
         &run_id,
         InteractionCancelReason::RunCancelled,
-    )
-    .unwrap();
+    );
 
     assert!(execution.active_interaction_metadata().is_none());
     assert!(execution.pending_interaction_work().is_none());
     assert!(!port.contains(&request_id));
     assert!(run.pending_interaction().is_none());
+    assert_eq!(run.status(), RunStatus::AwaitingUser);
 }
 
-// ── Parent adapter / channel drop via coordinator (Task 4.5) ──
+// ── Parent adapter / channel drop via coordinator ──
 
 #[tokio::test]
 async fn parent_adapter_drop_via_coordinator_does_not_hang_run() {
     use std::sync::Arc;
 
     let parent_port: Arc<dyn InteractionPort> = Arc::new(InteractionBridge::new());
-    // ParentMediated reuses the parent port directly (no wrapper adapter).
-
     let mut run = run_in_executing_tools();
     let (body, continuation) = question_body();
     let request_id = InteractionRequestId::new_v7();
@@ -607,13 +537,8 @@ async fn parent_adapter_drop_via_coordinator_does_not_hang_run() {
     )
     .unwrap();
 
-    assert_eq!(run.status(), RunStatus::AwaitingUser);
-    assert!(run.pending_interaction().is_some());
-
-    // Simulate parent dropping — drain the parent port
     parent_port.drain_run(&run_id, InteractionCancelReason::RunCancelled);
 
-    // The child's receiver should resolve with Cancelled
     let completion = InteractionCoordinator::wait(receiver).await.unwrap();
     assert_eq!(
         completion,
@@ -622,17 +547,15 @@ async fn parent_adapter_drop_via_coordinator_does_not_hang_run() {
         )
     );
 
-    // Now cancel_and_drain via coordinator to clean up Run
-    InteractionCoordinator::cancel_and_drain(
+    InteractionCoordinator::cleanup_run(
         &mut run,
         &mut RunExecutionState::new(),
         &*parent_port,
         &run_id,
         InteractionCancelReason::RunCancelled,
-    )
-    .unwrap();
+    );
 
-    assert_eq!(run.status(), RunStatus::Cancelling);
+    assert_eq!(run.status(), RunStatus::AwaitingUser);
     assert!(run.pending_interaction().is_none());
 }
 
@@ -641,54 +564,39 @@ async fn parent_adapter_drop_does_not_hang_run_with_full_coordinator_api() {
     use std::sync::Arc;
 
     let parent_port: Arc<dyn InteractionPort> = Arc::new(InteractionBridge::new());
-    // ParentMediated reuses the parent port directly (no wrapper adapter).
-
     let mut run = run_in_executing_tools();
     let (body, continuation) = question_body();
     let request_id = InteractionRequestId::new_v7();
     let run_id = RunId::new_v7();
 
-    // Begin through coordinator with parent port
     let (_rid, receiver) = InteractionCoordinator::begin(
         &mut run,
         &*parent_port,
-        request_id.clone(),
-        run_id.clone(),
+        request_id,
+        run_id,
         body,
         continuation,
     )
     .unwrap();
 
-    assert_eq!(run.status(), RunStatus::AwaitingUser);
-
-    // Drop the parent port entirely — simulates parent process exit while
-    // the child's coordinator registration is still active.
-    // With ParentMediated directly reusing the parent port, dropping the
-    // last Arc should trigger WaiterDropped or resolve without hanging.
     drop(parent_port);
 
-    // The receiver should return WaiterDropped since the port is gone
     let result = InteractionCoordinator::wait(receiver).await;
     assert!(
         matches!(result, Err(CoordinationError::WaiterDropped) | Ok(_)),
         "waiter should resolve or error, not hang"
     );
 
-    // Run should still be recoverable — cancel_and_drain via a new port
     let port = InteractionBridge::new();
     let run_id = RunId::new_v7();
-    InteractionCoordinator::cancel_and_drain(
+    InteractionCoordinator::cleanup_run(
         &mut run,
         &mut RunExecutionState::new(),
         &port,
         &run_id,
         InteractionCancelReason::RunCancelled,
-    )
-    .unwrap();
+    );
 
-    assert!(matches!(
-        run.status(),
-        RunStatus::Cancelling | RunStatus::Cancelled
-    ));
+    assert_eq!(run.status(), RunStatus::AwaitingUser);
     assert!(run.pending_interaction().is_none());
 }

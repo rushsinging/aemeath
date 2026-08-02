@@ -36,7 +36,7 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 
 `AwaitingInput` 与 `AwaitingInteraction` 是正交状态：前者只等待普通 `UserMessage`，后者只等待匹配 interaction identity 的 reply/cancel。普通输入不得恢复 interaction continuation；interaction reply 不得进入 InputQueue。
 
-迁移期仍保留旧 `cancel_run → Cancelling → Cancelled` 兼容路径；它不属于目标状态机。正常 finalized Step 与 CancelRunStep 收口后均进入 `DrainingInput`：有输入（`Ready`/`InternalContinuation`）继续下一 Step；队列保持 Open 且暂无输入时进入 `AwaitingInput`；admission 已 seal 且为空时由 `EmptyAndSealed` 正常 `Completed`。`TerminateRun` 才终止整个 Run，并在退出前完成同等质量的 Step 收口和 Session flush。
+正常 finalized Step 与 `CancelRunStep` 收口后均进入 `DrainingInput`：有输入（`Ready`/`InternalContinuation`）继续下一 Step；队列保持 Open 且暂无输入时进入 `AwaitingInput`；admission 已 seal 且为空时由 `EmptyAndSealed` 正常 `Completed`。`TerminateRun` 才终止整个 Run，并在退出前完成同等质量的 Step 收口和 Session flush。Run 级 cancellation 兼容路径不存在，也不得从 root cancellation token 推断第二个 Run 终态。
 
 `DrainEpoch` 是 Run-owned 单调递增计数器，在同一 `run_loop` 生命周期内持续推进。每次成功 drain 后递增；`AwaitingInput` park 不重置 epoch。Engine 和 InputQueue 双向校验 epoch，不匹配返回 typed error。
 

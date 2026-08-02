@@ -152,14 +152,11 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         | sdk::ChatEvent::RunStuckDetected { .. }
         | sdk::ChatEvent::RunTransitioned { .. }
         | sdk::ChatEvent::RunAwaitingUser { .. }
-        | sdk::ChatEvent::RunResumed { .. }
-        | sdk::ChatEvent::RunCancelling { .. } => UiEvent::SystemMessage(String::new()),
+        | sdk::ChatEvent::RunResumed { .. } => UiEvent::SystemMessage(String::new()),
         sdk::ChatEvent::InteractionRequested { request } => {
             UiEvent::InteractionRequested { request }
         }
-        sdk::ChatEvent::RunCancelled { .. } => UiEvent::RunCancelled,
-        sdk::ChatEvent::Cancelled {
-            context,
+        sdk::ChatEvent::Cancelled {            context,
             duration_ms,
         } => UiEvent::Cancelled {
             context: context.into(),

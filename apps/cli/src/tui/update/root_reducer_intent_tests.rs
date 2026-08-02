@@ -2,9 +2,8 @@ use super::*;
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::{
-    ClearCompactRuntime, ConfirmInteraction, ConversationIntent, RunAwaitingUser, RunStarted,
-    SetSpinnerPhase, ShowInteraction, StartChat, StopSpinner, SyncQueuedSubmissions,
-    UpdateInteractionDraft,
+    ClearCompactRuntime, ConfirmInteraction, ConversationIntent, SetSpinnerPhase, ShowInteraction,
+    StartChat, StopSpinner, SyncQueuedSubmissions, UpdateInteractionDraft,
 };
 use crate::tui::model::conversation::interaction::{
     InteractionBody, InteractionDraftAction, InteractionRequest, UiInteractionRequestId, UiRunId,
@@ -206,55 +205,6 @@ fn matching_workspace_metadata_marks_status_without_triggering_metadata_effect()
         .effects
         .iter()
         .any(|effect| matches!(effect, Effect::ResolveWorkspaceMetadata { .. })));
-}
-
-#[test]
-fn agent_run_lifecycle_marks_output_dirty_without_command_effect() {
-    let mut model = TuiModel::default();
-    let run_id = UiRunId::from("run-1");
-
-    let started = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::RunStarted(RunStarted {
-            run_id: run_id.clone(),
-        })),
-    );
-    let awaiting = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::RunAwaitingUser(RunAwaitingUser {
-            run_id,
-        })),
-    );
-
-    for result in [started, awaiting] {
-        assert!(result.dirty.output);
-        assert!(result.dirty.status);
-        assert_eq!(
-            result
-                .effects
-                .iter()
-                .filter(|effect| matches!(effect, Effect::RequestRender))
-                .count(),
-            1
-        );
-        assert_eq!(result.effects.len(), 1);
-    }
-}
-
-#[test]
-fn ignored_agent_run_transition_is_not_dirty_or_rendered() {
-    let mut model = TuiModel::default();
-
-    let result = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::RunAwaitingUser(RunAwaitingUser {
-            run_id: UiRunId::from("unknown-run"),
-        })),
-    );
-
-    assert!(!result.dirty.output);
-    assert!(!result.dirty.status);
-    assert!(result.effects.is_empty());
 }
 
 #[test]

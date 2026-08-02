@@ -666,8 +666,12 @@ async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
         let ids = driver_registry.active_ids();
         let run_id = ids.first().expect("active sub-run must be registered");
         assert_eq!(
-            driver_registry.cancel(run_id),
-            sdk::CancelRunOutcome::Accepted
+            driver_registry.terminate(
+                run_id,
+                sdk::RunTerminationReason::ParentStepCancelled,
+                sdk::ControlDeadline::from_unix_millis(1),
+            ),
+            sdk::TerminateRunOutcome::Accepted
         );
     });
 

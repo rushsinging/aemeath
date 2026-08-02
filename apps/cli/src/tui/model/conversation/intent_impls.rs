@@ -626,74 +626,6 @@ impl ConversationUpdate for ClearCompactRuntime {
     }
 }
 
-impl ConversationUpdate for RunStarted {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        if model.start_agent_run(self.run_id.clone()) {
-            vec![ConversationChange::AgentRunChanged {
-                run_id: self.run_id,
-                phase: super::interaction::AgentRunPhase::Running,
-            }]
-        } else {
-            Vec::new()
-        }
-    }
-}
-
-macro_rules! impl_run_transition {
-    ($intent:ident, $phase:expr) => {
-        impl ConversationUpdate for $intent {
-            fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-                if model.transition_agent_run(&self.run_id, $phase) {
-                    vec![ConversationChange::AgentRunChanged {
-                        run_id: self.run_id,
-                        phase: $phase,
-                    }]
-                } else {
-                    Vec::new()
-                }
-            }
-        }
-    };
-}
-
-impl_run_transition!(
-    RunAwaitingUser,
-    super::interaction::AgentRunPhase::AwaitingUser
-);
-impl_run_transition!(RunResumed, super::interaction::AgentRunPhase::Running);
-impl_run_transition!(RunCancelling, super::interaction::AgentRunPhase::Cancelling);
-impl_run_transition!(RunCancelled, super::interaction::AgentRunPhase::Cancelled);
-impl_run_transition!(RunCompleted, super::interaction::AgentRunPhase::Completed);
-impl_run_transition!(RunFailed, super::interaction::AgentRunPhase::Failed);
-
-impl ConversationUpdate for RunStepStarted {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        if model.start_agent_run_step(&self.run_id, self.step_id.clone(), self.tool_reference) {
-            vec![ConversationChange::AgentRunStepChanged {
-                run_id: self.run_id,
-                step_id: self.step_id,
-                phase: super::interaction::AgentRunStepPhase::Running,
-            }]
-        } else {
-            Vec::new()
-        }
-    }
-}
-
-impl ConversationUpdate for RunStepCompleted {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        if model.complete_agent_run_step(&self.run_id, &self.step_id) {
-            vec![ConversationChange::AgentRunStepChanged {
-                run_id: self.run_id,
-                step_id: self.step_id,
-                phase: super::interaction::AgentRunStepPhase::Completed,
-            }]
-        } else {
-            Vec::new()
-        }
-    }
-}
-
 // ════════════════════════════════════════════════════════════════════
 //  ConversationIntent enum 的 ConversationUpdate 转发
 // ════════════════════════════════════════════════════════════════════
@@ -742,15 +674,6 @@ impl ConversationUpdate for ConversationIntent {
             Self::InteractionCancelAccepted(s) => s.update(model),
             Self::InteractionReplyRejected(s) => s.update(model),
             Self::InteractionCancelRejected(s) => s.update(model),
-            Self::RunStarted(s) => s.update(model),
-            Self::RunAwaitingUser(s) => s.update(model),
-            Self::RunResumed(s) => s.update(model),
-            Self::RunCancelling(s) => s.update(model),
-            Self::RunCancelled(s) => s.update(model),
-            Self::RunCompleted(s) => s.update(model),
-            Self::RunFailed(s) => s.update(model),
-            Self::RunStepStarted(s) => s.update(model),
-            Self::RunStepCompleted(s) => s.update(model),
             Self::CompleteChat(s) => s.update(model),
             Self::RecordUsage(s) => s.update(model),
             Self::UpdateLastInputTokens(s) => s.update(model),

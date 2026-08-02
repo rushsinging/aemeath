@@ -331,48 +331,36 @@ fn test_phase_four_workspace_metadata_git_is_executor_only() {
 }
 
 #[test]
-fn test_phase_five_agent_run_state_is_tui_owned_and_mapper_is_not_wired() {
+fn test_runtime_lifecycle_events_are_observational_only() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
-    let interaction = fs::read_to_string(root.join("model/conversation/interaction.rs"))
-        .expect("read interaction model");
     let intent = fs::read_to_string(root.join("model/conversation/intent.rs"))
         .expect("read conversation intent");
-    let change = fs::read_to_string(root.join("model/conversation/change.rs"))
-        .expect("read conversation change");
-    let mapper = fs::read_to_string(root.join("effect/session/processing/event_mapping.rs"))
-        .expect("read processing mapper");
+    let interaction = fs::read_to_string(root.join("model/conversation/interaction.rs"))
+        .expect("read interaction model");
+    let mapper =
+        fs::read_to_string(root.join("adapter/agent_event.rs")).expect("read agent event mapper");
 
-    let run_intents = intent
-        .split("pub struct RunStarted")
-        .nth(1)
-        .and_then(|source| source.split("// ════════════════════════════════════════════════════════════════════\n//  Runtime intent structs").next())
-        .expect("extract agent run intent declarations");
-    for (name, source) in [
-        ("agent run model", interaction.as_str()),
-        ("agent run intent", run_intents),
-        ("agent run change", change.as_str()),
-    ] {
-        for forbidden in [
-            "sdk::",
-            "oneshot::Sender",
-            "tokio::sync",
-            "AgentClient",
-            ".await",
-            "spawn",
-        ] {
-            assert!(
-                !source.contains(forbidden),
-                "{name} must remain TUI-owned and pure: found {forbidden}"
-            );
-        }
-    }
     assert!(
-        mapper.contains("sdk::ChatEvent::RunStarted { .. }")
-            && mapper.contains("UiEvent::SystemMessage(String::new())"),
-        "#943 must wire Runtime lifecycle DTOs; #944 5A must not modify the SDK mapper"
+        !intent.contains("RunCancelling") && !intent.contains("RunCancelled"),
+        "conversation intent must not retain old Run cancellation lifecycle variants"
+    );
+    assert!(
+        !interaction.contains("pub(crate) enum AgentRunPhase")
+            && !interaction.contains("pub(crate) struct AgentRunState")
+            && !interaction.contains("pub(crate) struct AgentRunStepState"),
+        "conversation model must not retain a second Run lifecycle state source"
+    );
+    assert!(
+        !mapper.contains("ConversationIntent::RunStarted")
+            && !mapper.contains("ConversationIntent::RunAwaitingUser")
+            && !mapper.contains("ConversationIntent::RunResumed")
+            && !mapper.contains("ConversationIntent::RunCancelling")
+            && !mapper.contains("ConversationIntent::RunCancelled")
+            && !mapper.contains("ConversationIntent::RunCompleted")
+            && !mapper.contains("ConversationIntent::RunFailed"),
+        "Run lifecycle observations must not mutate ConversationModel"
     );
 }
-
 #[test]
 fn test_phase_four_interaction_model_is_sender_free() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");

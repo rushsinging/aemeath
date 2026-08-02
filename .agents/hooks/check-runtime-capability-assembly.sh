@@ -25,6 +25,13 @@ ENGINE = root / "agent/features/runtime/src/application/loop_engine/engine.rs"
 RUN_LOOP = root / "agent/features/runtime/src/application/loop_engine/run_loop.rs"
 STUCK = root / "agent/features/runtime/src/application/loop_engine/stuck_guard.rs"
 RUN_DOMAIN = root / "agent/features/runtime/src/domain/agent_run/domain.rs"
+RUN_DOMAIN_EVENT = root / "agent/features/runtime/src/domain/agent_run/event.rs"
+RUN_DOMAIN_STATE = root / "agent/features/runtime/src/domain/agent_run/state.rs"
+RUNTIME_STREAM_EVENT = root / "agent/features/runtime/src/application/loop_engine/chat/events.rs"
+ACTIVE_RUN_REGISTRY = root / "agent/features/runtime/src/application/run/active_registry.rs"
+SDK_RUN = root / "packages/sdk/src/run.rs"
+SDK_CHAT_EVENT = root / "packages/sdk/src/chat_event.rs"
+SDK_WIRE = root / "packages/sdk/src/wire.rs"
 INTERACTION = root / "agent/features/runtime/src/application/interaction/port.rs"
 EMPTY_HOOK = root / "agent/features/runtime/src/application/hook/empty.rs"
 RUNTIME_SOURCE = root / "agent/features/runtime/src"
@@ -633,6 +640,40 @@ for source_path in rust_source_paths():
     production = production_text(source_path)
     if re.search(r'\b(?:dyn\s+Any|TypeId|service_locator|capability_map|service_map)\b', production):
         violations.append(f"20. Runtime production code contains a dynamic capability locator: {source_path}")
+
+# ── 21. Run lifecycle exposes Step cancellation and typed Run termination only ──
+retired_run_lifecycle_symbols = {
+    RUN_DOMAIN_STATE: [
+        r'(?s)enum\s+RunStatus\s*\{[^}]*\bCancelling\b',
+        r'(?s)enum\s+RunStatus\s*\{[^}]*\bCancelled\b',
+        r'\bCancellationFinished\b',
+    ],
+    RUN_DOMAIN: [r'\bRunCancellationRequest\b', r'\brequest_cancellation\b', r'\bfinish_cancellation\b'],
+    RUN_DOMAIN_EVENT: [r'\bCancellationRequested\b', r'\bCancelled\b'],
+    RUNTIME_STREAM_EVENT: [r'\bRunCancelling\b', r'\bRunCancelled\b'],
+    SDK_RUN: [r'\bCancelRunOutcome\b'],
+    SDK_CHAT_EVENT: [r'\bRunCancelling\b', r'\bRunCancelled\b'],
+    SDK_WIRE: [r'\bCancelRunOutcome\b'],
+}
+for source_path, retired_patterns in retired_run_lifecycle_symbols.items():
+    production = production_text(source_path)
+    for retired_pattern in retired_patterns:
+        if re.search(retired_pattern, production):
+            violations.append(
+                f"21. Retired Run cancellation lifecycle symbol matches {retired_pattern}: {source_path}"
+            )
+
+registry_source = production_text(ACTIVE_RUN_REGISTRY)
+for lifecycle_copy in [
+    r'\bcancelling\s*:\s*',
+    r'\bterminal\s*:\s*',
+    r'\bclaim_cancellation\b',
+    r'\bclaim_terminal\b',
+]:
+    if re.search(lifecycle_copy, registry_source):
+        violations.append(
+            f"21. ActiveRunRegistry retains a parallel Run lifecycle owner matching {lifecycle_copy}"
+        )
 
 # ── Report ──
 if violations:

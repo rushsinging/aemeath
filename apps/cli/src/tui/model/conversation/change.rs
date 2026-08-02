@@ -105,15 +105,6 @@ pub enum ConversationChange {
         active_request_id: UiInteractionRequestId,
         received_request_id: UiInteractionRequestId,
     },
-    AgentRunChanged {
-        run_id: super::interaction::UiRunId,
-        phase: super::interaction::AgentRunPhase,
-    },
-    AgentRunStepChanged {
-        run_id: super::interaction::UiRunId,
-        step_id: super::interaction::UiRunStepId,
-        phase: super::interaction::AgentRunStepPhase,
-    },
     OutputDirty,
     StyleBoundaryResetRequired,
     // ── 原 runtime changes（RuntimeChange 合入）──

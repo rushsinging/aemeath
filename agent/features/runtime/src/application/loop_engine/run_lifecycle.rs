@@ -38,28 +38,16 @@ impl StepScopeObserver for ActiveStepScopeObserver<'_> {
     }
 }
 
-pub(crate) struct RunLifecycleCoordinator<'a, O> {
-    active_run: &'a dyn ActiveRunPort,
+pub(crate) struct RunLifecycleCoordinator<O> {
     step_scope: O,
 }
 
-impl<'a, O> RunLifecycleCoordinator<'a, O>
+impl<O> RunLifecycleCoordinator<O>
 where
     O: StepScopeObserver,
 {
-    pub(crate) fn new(active_run: &'a dyn ActiveRunPort, step_scope: O) -> Self {
-        Self {
-            active_run,
-            step_scope,
-        }
-    }
-
-    pub(crate) fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
-        self.active_run.claim_terminal(run_id)
-    }
-
-    pub(crate) fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
-        self.active_run.claim_cancellation(run_id)
+    pub(crate) fn new(_active_run: &dyn ActiveRunPort, step_scope: O) -> Self {
+        Self { step_scope }
     }
 
     pub(crate) fn register_step_scope(

@@ -7,7 +7,7 @@ use schemars::{schema_for, JsonSchema};
 use serde_json::{json, Map, Value};
 
 use crate::{
-    CancelCurrentRunOutcome, CancelRunOutcome, CancelRunStepOutcome, ChatEventContext, ChatMessage,
+    CancelCurrentRunOutcome, CancelRunStepOutcome, ChatEventContext, ChatMessage,
     ConfigChangedEvent, ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView,
     ControlDeadline, ElementSpacingView, HookMessageView, InteractionCancelReason,
     InteractionCommandOutcome, InteractionReply, InteractionRequest, InteractionRequestBody,
@@ -27,7 +27,6 @@ pub fn components_document() -> Value {
     register::<InteractionCommandOutcome>(&mut definitions);
     register::<InteractionCancelReason>(&mut definitions);
     register::<CancelCurrentRunOutcome>(&mut definitions);
-    register::<CancelRunOutcome>(&mut definitions);
     register::<CancelRunStepOutcome>(&mut definitions);
     register::<TerminateRunOutcome>(&mut definitions);
     register::<RunTerminationReason>(&mut definitions);

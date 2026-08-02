@@ -633,8 +633,6 @@ impl RecordingSink {
             RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
             RuntimeStreamEvent::ModelSwitched { .. } => "ModelSwitched".to_string(),
             RuntimeStreamEvent::ModelList { .. } => "ModelList".to_string(),
-            RuntimeStreamEvent::RunCancelled { .. } => "RunCancelled".to_string(),
-            RuntimeStreamEvent::RunCancelling { .. } => "RunCancelling".to_string(),
             RuntimeStreamEvent::ThinkingChanged { .. } => "ThinkingChanged".to_string(),
             RuntimeStreamEvent::ContextEstimated { .. } => "ContextEstimated".to_string(),
             RuntimeStreamEvent::CommandResultText { .. } => "CommandResultText".to_string(),
@@ -2531,8 +2529,12 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
             tokio::task::yield_now().await;
         };
         assert_eq!(
-            driver_registry.cancel(&run_id),
-            sdk::CancelRunOutcome::Accepted
+            driver_registry.terminate(
+                &run_id,
+                sdk::RunTerminationReason::SessionShutdown,
+                sdk::ControlDeadline::from_unix_millis(1),
+            ),
+            sdk::TerminateRunOutcome::Accepted
         );
 
         // 等回合 1 被取消（出现 Cancelled 事件）。
@@ -2717,8 +2719,12 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
             tokio::task::yield_now().await;
         };
         assert_eq!(
-            driver_registry.cancel(&run_id),
-            sdk::CancelRunOutcome::Accepted
+            driver_registry.terminate(
+                &run_id,
+                sdk::RunTerminationReason::SessionShutdown,
+                sdk::ControlDeadline::from_unix_millis(1),
+            ),
+            sdk::TerminateRunOutcome::Accepted
         );
         // 等回合 2 被取消（出现 Cancelled 事件）。
         loop {

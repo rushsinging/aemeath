@@ -90,7 +90,7 @@ enum InteractionCommandOutcome {
 - `ControlDeadline` 是 wire-only 绝对时间；Runtime 在控制边界转换到注入的 monotonic clock，嵌套 Sub **NEVER** 重新分配 5s/10s。
 - TUI 只持 `Arc<dyn AgentClient>` 或 SDK 提供的、绑定 `run_id` / `step_id` 的薄控制 handle；NEVER 持有 Runtime 实例、Run 聚合或 `CancellationToken`。
 - `CancelRunStepOutcome::Accepted` 只确认 Step scope 已即时停止调度；完成由 `RunStepCancelled` / `RunDrainingInput` 异步确认。`TerminateRunOutcome::Accepted` 只确认 Run root scope 已触发；完成由 `RunTerminated` 确认。
-- 迁移期旧 `cancel_run` / `CancelRunOutcome` 只允许为当前 TUI 生产兼容保留；#878 原子切换后由 #879 删除，**NEVER** 作为目标 OHS 的第二套语义。
+- Run 级 `cancel_run` / `CancelRunOutcome` 已退役；SDK OHS 只发布 current-Step cancellation 与 identity-scoped Run termination，**NEVER** 恢复第二套 Run lifecycle 语义。
 - interaction reply / cancel 同样是同步、幂等、out-of-band command；它们只完成 Runtime-owned pending request，**NEVER** 经输入队列排队，也 **NEVER** 由 TUI 持有 channel sender。
 - SDK Published Language 的 `RunStepId`、`AgentId`、`InteractionRequestId`、`InteractionReply`、`InteractionCancelReason`、`InteractionCommandOutcome` 与 `ChatEvent::InteractionRequested` **MUST** 可序列化且不含 channel / lock / Runtime handle。#874 已建立这些强类型 identity、纯值 DTO/outcome 与纯 event mapping；旧 `AskUserBatch.reply_tx` 只作为 #878 生产切换前的兼容路径存在，**NEVER** 进入新 Interaction PL。当前只要求 local adapter；远端帧、重连与 WSS 行为不在 v0.1.0 冻结。
 

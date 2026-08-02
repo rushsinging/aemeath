@@ -475,7 +475,7 @@ Effect 是 Model Change 的副作用反馈分支，与 ViewAssembler 渲染分�
 | Effect | 触发来源 | 执行 |
 |---|---|---|
 | `StartRun { text }` | `ConversationChange::RunStartRequested` | Runtime-owned `AgentClient` start method |
-| `RequestRunCancellation { run_id }` | `ConversationChange::RunCancellationRequested` | Runtime cancel port；accepted 与 terminal 分离 |
+| `CancelCurrentRun` | App busy-state cancel action | `AgentClient::cancel_current_run`；typed outcome 不写入 Conversation Run phase |
 | `SendInteractionReply { request_id, reply }` | `ConversationChange::InteractionReplyRequested` | Runtime-owned `AgentClient::reply_interaction` |
 | `CancelInteraction { request_id }` | `ConversationChange::InteractionCancelRequested` | Runtime-owned `AgentClient::cancel_interaction` |
 | `ResolveWorkspaceMetadata { root, revision }` | `WorkspaceChange::SnapshotApplied { workspace_root, revision }` | 异步解析 branch/kind；结果回填为 `WorkspaceIntent::ApplyMetadata { root, revision, branch, kind }`，只在 `(root, revision)` 与当前投影一致时生效，详见 [02-model.md §8 WorkspaceProjection](02-model.md#8-workspaceprojection) |

@@ -3,38 +3,32 @@ use crate::tui::adapter::tui_runtime_event::{
     TuiInteractionBody, TuiInteractionRequest, TuiRunEvent, TuiRunStepEvent, TuiRuntimeEvent,
     TuiToolApprovalPrompt, TuiWorkspaceSnapshot,
 };
-use crate::tui::model::conversation::intent::{
-    ConversationIntent, RunCancelling, RunStepStarted, ShowInteraction,
-};
+use crate::tui::model::conversation::intent::{ConversationIntent, ShowInteraction};
 use crate::tui::model::conversation::interaction::{
     UiInteractionRequestId, UiRiskLevel, UiRunId, UiRunStepId,
 };
 use crate::tui::model::workspace_provider::WorkspaceIntent;
 
 #[test]
-fn runtime_run_and_step_lifecycle_maps_to_existing_conversation_intents() {
+fn runtime_run_and_step_lifecycle_are_observational_only() {
     let run_id = UiRunId::from("run-1");
-    let mapping = map_runtime_event(&TuiRuntimeEvent::Run {
+    let run_mapping = map_runtime_event(&TuiRuntimeEvent::Run {
         run_id: run_id.clone(),
         parent_run_id: None,
-        event: TuiRunEvent::Cancelling,
+        event: TuiRunEvent::TerminationRequested {
+            reason: crate::tui::adapter::tui_runtime_event::TuiRunTerminationReason::UserExit,
+            deadline_unix_millis: 42,
+        },
     });
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::RunCancelling(RunCancelling { run_id: actual })] if actual == &run_id
-    ));
+    assert!(run_mapping.conversation.is_empty());
 
-    let mapping = map_runtime_event(&TuiRuntimeEvent::RunStep {
-        run_id: run_id.clone(),
+    let step_mapping = map_runtime_event(&TuiRuntimeEvent::RunStep {
+        run_id,
         parent_run_id: None,
         step_id: UiRunStepId::from("step-1"),
-        event: TuiRunStepEvent::Started,
+        event: TuiRunStepEvent::CancellationRequested,
     });
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::RunStepStarted(RunStepStarted { run_id: actual, step_id, .. })]
-            if actual == &run_id && step_id.as_str() == "step-1"
-    ));
+    assert!(step_mapping.conversation.is_empty());
 }
 
 #[test]

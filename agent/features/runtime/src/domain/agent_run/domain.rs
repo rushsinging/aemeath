@@ -5,9 +5,9 @@ use crate::domain::agent_run::ToolCall;
 use super::event::{RunDomainEvent, RunId};
 use super::spec::RunSpec;
 use super::state::{
-    DrainDecision, InteractionContinuation, PendingInteraction, RunCancellationRequest, RunStatus,
-    RunStep, RunStepCancellationRequest, RunStepId, RunStepStatus, RunTerminationRequest,
-    RunTransition, RunTransitionError, RunTransitionReason, StopHookBlockResult,
+    DrainDecision, InteractionContinuation, PendingInteraction, RunStatus, RunStep,
+    RunStepCancellationRequest, RunStepId, RunStepStatus, RunTerminationRequest, RunTransition,
+    RunTransitionError, RunTransitionReason, StopHookBlockResult,
 };
 use super::step::{ModelInvocation, RunToolCall, ToolCallStatus};
 
@@ -264,7 +264,6 @@ impl Run {
             }
             (RunStatus::FinalizingStep, RunTransition::StepCancelled) => RunStatus::DrainingInput,
             (RunStatus::Terminating, RunTransition::TerminationFinished) => RunStatus::Terminated,
-            (RunStatus::Cancelling, RunTransition::CancellationFinished) => RunStatus::Cancelled,
             (from, transition) => {
                 log::warn!(
                     target: crate::LOG_TARGET,
@@ -392,10 +391,7 @@ impl Run {
     fn rejects_controlled_work(&self) -> bool {
         matches!(
             self.status,
-            RunStatus::Cancelling
-                | RunStatus::CancellingStep
-                | RunStatus::FinalizingStep
-                | RunStatus::Terminating
+            RunStatus::CancellingStep | RunStatus::FinalizingStep | RunStatus::Terminating
         ) || self.status.is_terminal()
     }
 
@@ -693,44 +689,6 @@ impl Run {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             reason,
-        });
-        Ok(())
-    }
-
-    pub fn request_cancellation(&mut self) -> RunCancellationRequest {
-        if self.status.is_terminal() {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "run state transition rejected: run_id={} parent_run_id={} from={:?} requested_to={:?} reason={:?}",
-                self.id,
-                self.parent_id_display(),
-                self.status,
-                RunStatus::Cancelling,
-                RunTransitionReason::InterruptRequested,
-            );
-            return RunCancellationRequest::AlreadyTerminal;
-        }
-        if self.status == RunStatus::Cancelling {
-            return RunCancellationRequest::AlreadyCancelling;
-        }
-        self.pending_interaction = None;
-        self.apply_state_transition(
-            RunStatus::Cancelling,
-            RunTransitionReason::InterruptRequested,
-        );
-        self.events.push(RunDomainEvent::CancellationRequested {
-            run_id: self.id.clone(),
-            parent_run_id: self.parent_id.clone(),
-        });
-        RunCancellationRequest::Accepted
-    }
-
-    pub fn finish_cancellation(&mut self) -> Result<(), RunTransitionError> {
-        self.transition(RunTransition::CancellationFinished)?;
-        self.close_active_steps(RunStepStatus::Cancelled);
-        self.events.push(RunDomainEvent::Cancelled {
-            run_id: self.id.clone(),
-            parent_run_id: self.parent_id.clone(),
         });
         Ok(())
     }

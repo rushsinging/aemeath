@@ -60,9 +60,6 @@ impl App {
                     name: "error".to_string(),
                 });
             }
-            UiEvent::RunCancelled => {
-                self.chat.stop_processing();
-            }
             UiEvent::Cancelled { .. } => {
                 crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::Cancelled → spinner_stop");
                 self.spinner_stop();

@@ -193,8 +193,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             run_id,
             parent_run_id,
         } => run_event(run_id, parent_run_id, TuiRunEvent::Resumed),
-        ChatEvent::RunCancelling { run_id } => run_event(run_id, None, TuiRunEvent::Cancelling),
-        ChatEvent::RunCancelled { run_id } => run_event(run_id, None, TuiRunEvent::Cancelled),
         ChatEvent::RunDrainingInput {
             run_id,
             parent_run_id,

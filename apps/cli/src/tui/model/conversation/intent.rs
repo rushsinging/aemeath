@@ -6,7 +6,6 @@ use super::block::{AskUserSlot, HookNoticeContent};
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::interaction::{
     InteractionCommandFailure, InteractionDraftAction, InteractionRequest, UiInteractionRequestId,
-    UiRunId,
 };
 use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
@@ -273,55 +272,6 @@ pub struct CompleteChat {
     pub chat_id: ChatId,
     pub turn_id: ChatTurnId,
 }
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunStarted {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunAwaitingUser {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunResumed {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunCancelling {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunCancelled {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunCompleted {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunFailed {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunStepStarted {
-    pub run_id: UiRunId,
-    pub step_id: super::interaction::UiRunStepId,
-    pub tool_reference: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunStepCompleted {
-    pub run_id: UiRunId,
-    pub step_id: super::interaction::UiRunStepId,
-}
-
 // ════════════════════════════════════════════════════════════════════
 //  Runtime intent structs（原 RuntimeIntent enum 的 14 个 variant，
 //  排除 SetSpinnerPhase / StopSpinner —— 它们的功能已被其他 intent 附带维护）
@@ -458,15 +408,6 @@ pub enum ConversationIntent {
     InteractionCancelAccepted(InteractionCancelAccepted),
     InteractionReplyRejected(InteractionReplyRejected),
     InteractionCancelRejected(InteractionCancelRejected),
-    RunStarted(RunStarted),
-    RunAwaitingUser(RunAwaitingUser),
-    RunResumed(RunResumed),
-    RunCancelling(RunCancelling),
-    RunCancelled(RunCancelled),
-    RunCompleted(RunCompleted),
-    RunFailed(RunFailed),
-    RunStepStarted(RunStepStarted),
-    RunStepCompleted(RunStepCompleted),
     CompleteChat(CompleteChat),
     // ── 原 runtime variants ──
     RecordUsage(RecordUsage),

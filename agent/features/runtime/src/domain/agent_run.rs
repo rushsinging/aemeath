@@ -33,8 +33,6 @@ pub trait ActiveRunPort: Send + Sync {
     fn take_control(&self, _run_id: &RunId) -> Option<RunControl> {
         None
     }
-    fn claim_terminal(&self, run_id: &RunId) -> bool;
-    fn claim_cancellation(&self, run_id: &RunId) -> bool;
     fn clear(&self, run_id: &RunId);
 }
 
@@ -47,9 +45,8 @@ pub use spec::{
 };
 pub use spec::{HookBindingMode, InteractionBindingMode, RunSpec, RunSpecError};
 pub use state::{
-    DrainDecision, InteractionContinuation, RunCancellationRequest, RunStatus,
-    RunStepCancellationRequest, RunStepId, RunTerminationRequest, RunTransition,
-    RunTransitionError, StopHookBlockResult,
+    DrainDecision, InteractionContinuation, RunStatus, RunStepCancellationRequest, RunStepId,
+    RunTerminationRequest, RunTransition, RunTransitionError, StopHookBlockResult,
 };
 #[cfg(test)]
 pub use state::{PendingInteraction, RunStepStatus, RunTransitionReason};

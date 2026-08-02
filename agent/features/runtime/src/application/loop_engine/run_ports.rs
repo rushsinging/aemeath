@@ -39,31 +39,19 @@ pub(crate) enum StepScopeRegistration<'a> {
 }
 
 pub(crate) struct ActiveRunLifecycle<'a> {
-    active_run: &'a dyn ActiveRunPort,
     step_scope: StepScopeRegistration<'a>,
 }
 
 impl<'a> ActiveRunLifecycle<'a> {
     pub(crate) fn new(
-        active_run: &'a dyn ActiveRunPort,
+        _active_run: &'a dyn ActiveRunPort,
         step_scope: StepScopeRegistration<'a>,
     ) -> Self {
-        Self {
-            active_run,
-            step_scope,
-        }
+        Self { step_scope }
     }
 }
 
 impl RunLifecyclePort for ActiveRunLifecycle<'_> {
-    fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
-        self.active_run.claim_terminal(run_id)
-    }
-
-    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
-        self.active_run.claim_cancellation(run_id)
-    }
-
     fn register_step_scope(
         &self,
         run_id: &sdk::RunId,

@@ -864,14 +864,6 @@ impl RunControlPort for RunControlFake {
 
 #[async_trait::async_trait]
 impl RunLifecyclePort for RunLifecycleFake {
-    fn claim_terminal(&self, _run_id: &sdk::RunId) -> bool {
-        true
-    }
-
-    fn claim_cancellation(&self, _run_id: &sdk::RunId) -> bool {
-        true
-    }
-
     fn register_step_scope(
         &self,
         run_id: &sdk::RunId,
@@ -1549,14 +1541,14 @@ async fn cancel_step_during_compaction_finalizes_then_returns_to_drain() {
     assert!(!port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
     assert!(port
         .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
 }
 #[tokio::test]
-async fn engine_cancels_in_flight_compaction_and_emits_terminal_ack() {
+async fn engine_terminates_in_flight_compaction_and_emits_terminal_ack() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
     let mut port = ScriptedScenario {
@@ -1581,17 +1573,17 @@ async fn engine_cancels_in_flight_compaction_and_emits_terminal_ack() {
     canceller.await.unwrap();
 
     assert_eq!(directive, LoopDirective::Terminal);
-    assert_eq!(run.status(), RunStatus::Cancelled);
+    assert_eq!(run.status(), RunStatus::Terminated);
     assert!(port.calls().contains(&"compact"));
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
     assert!(!port.calls().contains(&"model"));
 }
 
 #[tokio::test]
-async fn engine_cancels_in_flight_model_and_emits_terminal_ack() {
+async fn engine_terminates_in_flight_model_and_emits_terminal_ack() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
     let mut port = ScriptedScenario {
@@ -1615,16 +1607,16 @@ async fn engine_cancels_in_flight_model_and_emits_terminal_ack() {
     canceller.await.unwrap();
 
     assert_eq!(directive, LoopDirective::Terminal);
-    assert_eq!(run.status(), RunStatus::Cancelled);
+    assert_eq!(run.status(), RunStatus::Terminated);
     assert_eq!(port.cancelled_steps(), port.frozen_steps());
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::CancellationRequested { .. })));
+        .any(|event| matches!(event, RunDomainEvent::TerminationRequested { .. })));
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
 }
 
 #[tokio::test]
@@ -2571,14 +2563,14 @@ async fn terminate_run_during_compaction_finishes_as_terminated() {
     assert_eq!(run.status(), RunStatus::Terminated);
     assert!(port.calls().contains(&"compact"));
     assert!(!port.calls().contains(&"model"));
-    assert!(!port
-        .events()
-        .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
-    assert!(port
-        .events()
-        .iter()
-        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+    assert_eq!(
+        port.events()
+            .iter()
+            .filter(|event| matches!(event, RunDomainEvent::Terminated { .. }))
+            .count(),
+        1,
+        "Run termination must emit exactly one terminal domain event"
+    );
 }
 
 #[tokio::test]
@@ -2608,7 +2600,7 @@ async fn cancel_step_during_model_finalizes_then_returns_to_drain() {
     assert!(!port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
     assert!(port
         .events()
         .iter()
@@ -2644,7 +2636,7 @@ async fn cancel_step_during_tools_finalizes_then_returns_to_drain() {
     assert!(!port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
     assert!(port
         .events()
         .iter()
@@ -2704,10 +2696,6 @@ async fn terminate_while_awaiting_user_finishes_as_terminated() {
     .unwrap();
     assert_eq!(directive, LoopDirective::Terminal);
     assert_eq!(run.status(), RunStatus::Terminated);
-    assert!(!port
-        .events()
-        .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
     assert!(port
         .events()
         .iter()

@@ -6,6 +6,64 @@ use crate::application::loop_engine::chat::{
 };
 
 #[test]
+fn published_event_chain_exposes_step_cancellation_and_run_termination_only() {
+    let run_event_source = include_str!("../domain/agent_run/event.rs");
+    let runtime_event_source = include_str!("../application/loop_engine/chat/events.rs");
+    let mapper_source = include_str!("sdk_event_mapper.rs");
+    let sdk_run_source = include_str!("../../../../../packages/sdk/src/run.rs");
+    let sdk_event_source = include_str!("../../../../../packages/sdk/src/chat_event.rs");
+    let sdk_wire_source = include_str!("../../../../../packages/sdk/src/wire.rs");
+
+    for (source_name, source, retired_symbols) in [
+        (
+            "RunDomainEvent",
+            run_event_source,
+            &["    Cancelled {\n", "Self::Cancelled { parent_run_id, .. }"][..],
+        ),
+        (
+            "RuntimeStreamEvent",
+            runtime_event_source,
+            &["    RunCancelling {\n", "    RunCancelled {\n"][..],
+        ),
+        (
+            "SDK ChatEvent",
+            sdk_event_source,
+            &["    RunCancelling {\n", "    RunCancelled {\n"][..],
+        ),
+        (
+            "SDK run control",
+            sdk_run_source,
+            &["pub enum CancelRunOutcome"][..],
+        ),
+        (
+            "SDK wire registry",
+            sdk_wire_source,
+            &["CancelRunOutcome"][..],
+        ),
+    ] {
+        for retired_symbol in retired_symbols {
+            assert!(
+                !source.contains(retired_symbol),
+                "{source_name} retains retired Run cancellation projection: {retired_symbol}"
+            );
+        }
+    }
+
+    for retired_mapper_branch in [
+        "RunDomainEvent::Cancelled",
+        "RuntimeStreamEvent::RunCancelling",
+        "RuntimeStreamEvent::RunCancelled",
+        "ChatEvent::RunCancelling",
+        "ChatEvent::RunCancelled",
+    ] {
+        assert!(
+            !mapper_source.contains(retired_mapper_branch),
+            "SDK mapper retains retired Run cancellation projection: {retired_mapper_branch}"
+        );
+    }
+}
+
+#[test]
 fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
     let source_context = RuntimeTurnContext::new(
         sdk::ids::ChatId::new("child-chat"),

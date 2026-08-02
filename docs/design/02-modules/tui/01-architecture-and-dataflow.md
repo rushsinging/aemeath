@@ -165,15 +165,11 @@ enum TuiMsg {
 
 ```rust
 enum ConversationIntent {
-    StartRun { text },
-    ProjectRunStarted { run_id, text },
-    ProjectRunResumed { run_id },
-    ProjectRunCompleting { run_id },
-    ProjectRunFailed { run_id, message },
-    ProjectRunCancelling { run_id },
-    ProjectRunCancelled { run_id },
-    RequestRunCancellation { run_id },
-    ResumeConversation { run_id, run_step_id },  // 显式 Intent；恢复历史会话为 Completed，NEVER 由内部 helper 绕过 reducer
+    SubmitUserMessage { text },
+    AssistantText { chat_id, turn_id, text },
+    ToolCallStart { chat_id, turn_id, tool_id },
+    ToolResult { chat_id, turn_id, tool_id, output },
+    CompleteChat { chat_id, turn_id },
     ShowInteraction { request_id, run_id, body },
     UpdateInteractionDraft { request_id, action },
     ConfirmInteraction { request_id },
@@ -195,7 +191,7 @@ enum WorkspaceIntent { ApplySnapshot(WorkspaceSnapshot), ApplyMetadata(Workspace
 ### 6.3 Change（Model 变更产出）
 
 ```rust
-enum ConversationChange { RunStartRequested, RunCancellationRequested, RunStarted, RunCompleting, RunCancelling, RunCancelled, RunCompleted, ToolCallStarted, MessageAppended, ... }
+enum ConversationChange { OutputDirty, ToolCallChanged, ChatStatusChanged, InteractionChanged, ... }
 enum InputChange { BufferModified, SelectionChanged, Submitted, ... }
 enum ModelChange { OutputDirty, StatusDirty, InputDirty, DialogDirty }
 ```
@@ -315,7 +311,7 @@ Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request i
 5. **异步结果防陈旧覆盖**：Workspace metadata 等 Effect 同时携带资源 identity 与 revision；结果只在 tuple 匹配时 apply。
 6. **派生状态不复制**：spinner phase 与可见性由 Run / RunStep 投影纯函数计算，ViewState 只持视觉交互状态。
 7. **互补投影原子更新**：结构化 Conversation 投影（runs / queued / progress）与 `timeline` 由同一 reducer 事务维护；只约束重叠稳定 ID、相对顺序、关联与终态，**NEVER** 声称二者可完整互相重建。
-8. **Runtime 状态权威**：AgentClient interaction command result 只结束本地交互，不推进 Run；只有 SDK `RunResumed` 才恢复 Running，取消先投影 `RunCancelling`，仅 `RunCancelled` 进入终态。TUI 同时最多投影一个 active interaction；Runtime 对并发 Tool suspension 按稳定 ToolCall 顺序逐个发布，TUI **NEVER** 建第二个 pending registry。
+8. **Runtime 状态权威**：AgentClient interaction command result 只结束本地交互；Runtime Run / RunStep lifecycle DTO 在 Conversation mapper 边界为 observational no-op，TUI **NEVER** 建立第二套 Run lifecycle 或 pending registry。Runtime 对并发 Tool suspension 按稳定 ToolCall 顺序逐个发布。
 
 ## 11. 相关文档
 
