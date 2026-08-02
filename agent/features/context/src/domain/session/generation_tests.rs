@@ -158,7 +158,7 @@ fn clear_removes_every_previous_step_member() {
 
     let changes = SessionChangeSet::between(&before, &after).expect("change set");
 
-    assert!(changes.reused_members().is_empty());
+    assert_eq!(changes.reused_members(), ["session-state.json"]);
     assert_eq!(
         changes.removed_members(),
         [

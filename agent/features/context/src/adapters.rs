@@ -22,7 +22,7 @@ pub use atomic_blob_session::AtomicBlobSessionStore;
 pub use atomic_blob_session_management::AtomicBlobSessionManagement;
 pub use canonical_session::{
     AtomicBlobCanonicalSessionWriter, CanonicalSessionRepository, CanonicalSessionWriter,
-    NoOpCanonicalSessionWriter, ProductionMainContextFactory,
+    NoOpCanonicalSessionWriter, ProductionMainContextFactory, SessionWriteScope,
 };
 pub use dataset_session_management::DatasetSessionManagement;
 pub use dataset_session_reader::{DatasetSessionReader, PreparedDatasetResume};

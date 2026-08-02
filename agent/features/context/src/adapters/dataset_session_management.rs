@@ -169,7 +169,11 @@ impl SessionManagementPort for DatasetSessionManagement {
         after.updated_at = now_iso();
         after.revision += 1;
         self.writer
-            .save_incremental(&before, &after)
+            .save_incremental(
+                &before,
+                &after,
+                crate::adapters::SessionWriteScope::PreserveUnloadedHistory,
+            )
             .await
             .map_err(SessionManagementError::Storage)?;
         Ok(SessionListEntry::from_canonical(&after))

@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use context::adapters::DatasetCanonicalSessionWriter;
 use context::domain::session::{
-    AcceptedInputProjection, CanonicalSession, CommittedRunSlice, CommittedRunStep,
+    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
+    CommittedRunStep, FinalizedOutcomeProjection, RunStepCursor, SessionGenerationCodec,
 };
 use share::message::Message;
 use storage::api::{
@@ -78,7 +79,11 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
         AcceptedInputProjection::new(vec![Message::user("b")], "run-b:step-b:b", 2),
     );
     writer
-        .save_incremental(&before, &after)
+        .save_incremental(
+            &before,
+            &after,
+            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+        )
         .await
         .expect("incremental generation must commit");
 
@@ -113,6 +118,193 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
 }
 
 #[tokio::test]
+async fn active_resume_append_reuses_compact_history_members() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut complete = session_with_steps(
+        "resumed",
+        7,
+        &[
+            ("run-old", "step-old", "old"),
+            ("run-active", "step-active", "active"),
+        ],
+    );
+    complete.compact = Some(ActiveCompactMarker {
+        summary: "summary".to_string(),
+        start_at: Some(RunStepCursor {
+            run_id: "run-active".to_string(),
+            step_id: "step-active".to_string(),
+        }),
+        source_revision: 6,
+    });
+    writer
+        .save_initial(&complete)
+        .await
+        .expect("complete generation must commit");
+
+    let mut active = complete.clone();
+    active.run_slices = active
+        .run_slices
+        .iter()
+        .filter(|slice| slice.run_id == "run-active")
+        .map(|slice| slice.as_ref().clone())
+        .collect();
+    let mut appended = active.clone();
+    appended.revision = 8;
+    appended.run_slices = appended.run_slices.append_accepted_input(
+        "run-next",
+        "step-next",
+        AcceptedInputProjection::new(vec![Message::user("next")], "next", 8),
+    );
+
+    writer
+        .save_incremental(
+            &active,
+            &appended,
+            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+        )
+        .await
+        .expect("active Resume append must commit against complete generation");
+
+    let manifest = dataset
+        .read_manifest(&dataset_key("resumed"))
+        .await
+        .expect("read committed manifest");
+    let names = manifest
+        .members()
+        .iter()
+        .map(SafePathSegment::as_str)
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"step-72756e2d6f6c64-737465702d6f6c64.json"));
+    let manifest_name = "manifest.json"
+        .parse::<SafePathSegment>()
+        .expect("manifest member name");
+    let DatasetReadOutcome::Found(read) = dataset
+        .read_consistent(&dataset_key("resumed"), &[manifest_name])
+        .await
+        .expect("read domain manifest")
+    else {
+        panic!("domain manifest must remain committed");
+    };
+    let domain_manifest = SessionGenerationCodec::decode_manifest(read.members()[0].bytes())
+        .expect("domain manifest");
+    assert_eq!(domain_manifest.revision(), 8);
+    assert_eq!(domain_manifest.steps().len(), 3);
+    assert_eq!(domain_manifest.steps()[0].cursor().step_id, "step-old");
+    assert_eq!(domain_manifest.steps()[2].cursor().step_id, "step-next");
+}
+
+#[tokio::test]
+async fn active_resume_finalize_reuses_compact_history_members() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut complete = session_with_steps(
+        "finalized-resume",
+        7,
+        &[
+            ("run-old", "step-old", "old"),
+            ("run-active", "step-active", "active"),
+        ],
+    );
+    complete.compact = Some(ActiveCompactMarker {
+        summary: "summary".to_string(),
+        start_at: Some(RunStepCursor {
+            run_id: "run-active".to_string(),
+            step_id: "step-active".to_string(),
+        }),
+        source_revision: 6,
+    });
+    writer
+        .save_initial(&complete)
+        .await
+        .expect("complete generation must commit");
+
+    let mut active = complete.clone();
+    active.run_slices = active
+        .run_slices
+        .iter()
+        .filter(|slice| slice.run_id == "run-active")
+        .map(|slice| slice.as_ref().clone())
+        .collect();
+    let mut finalized = active.clone();
+    finalized.revision = 8;
+    finalized.append_finalized_outcome(
+        "run-active",
+        "step-active",
+        FinalizedOutcomeProjection::compatibility(vec![Message::user("done")]),
+    );
+
+    writer
+        .save_incremental(
+            &active,
+            &finalized,
+            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+        )
+        .await
+        .expect("active Resume finalize must preserve complete generation");
+
+    let manifest_name = "manifest.json"
+        .parse::<SafePathSegment>()
+        .expect("manifest member name");
+    let DatasetReadOutcome::Found(read) = dataset
+        .read_consistent(&dataset_key("finalized-resume"), &[manifest_name])
+        .await
+        .expect("read domain manifest")
+    else {
+        panic!("domain manifest must remain committed");
+    };
+    let manifest = SessionGenerationCodec::decode_manifest(read.members()[0].bytes())
+        .expect("domain manifest");
+    assert_eq!(manifest.revision(), 8);
+    assert_eq!(manifest.steps().len(), 2);
+    assert_eq!(manifest.steps()[0].cursor().step_id, "step-old");
+    assert_eq!(manifest.steps()[1].cursor().step_id, "step-active");
+}
+
+#[tokio::test]
+async fn complete_history_replacement_removes_every_step_member() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let before = session_with_steps(
+        "cleared",
+        1,
+        &[("run-a", "step-a", "a"), ("run-b", "step-b", "b")],
+    );
+    writer
+        .save_initial(&before)
+        .await
+        .expect("initial generation must commit");
+    let mut after = before.clone();
+    after.revision = 2;
+    after.run_slices = after.run_slices.cleared();
+
+    writer
+        .save_incremental(
+            &before,
+            &after,
+            context::adapters::SessionWriteScope::ReplaceCompleteHistory,
+        )
+        .await
+        .expect("complete history replacement must commit");
+
+    let manifest = dataset
+        .read_manifest(&dataset_key("cleared"))
+        .await
+        .expect("read committed manifest");
+    assert_eq!(
+        manifest
+            .members()
+            .iter()
+            .map(SafePathSegment::as_str)
+            .collect::<Vec<_>>(),
+        ["manifest.json", "metadata.json", "session-state.json"]
+    );
+}
+
+#[tokio::test]
 async fn save_incremental_with_stale_manifest_preserves_current_generation() {
     let root = tempfile::tempdir().expect("temporary dataset root");
     let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
@@ -127,7 +319,11 @@ async fn save_incremental_with_stale_manifest_preserves_current_generation() {
     committed.revision = 2;
     committed.metadata.title = Some("committed".to_string());
     writer
-        .save_incremental(&before, &committed)
+        .save_incremental(
+            &before,
+            &committed,
+            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+        )
         .await
         .expect("first incremental generation must commit");
 
@@ -135,7 +331,11 @@ async fn save_incremental_with_stale_manifest_preserves_current_generation() {
     stale_candidate.revision = 2;
     stale_candidate.metadata.title = Some("stale".to_string());
     let error = writer
-        .save_incremental(&before, &stale_candidate)
+        .save_incremental(
+            &before,
+            &stale_candidate,
+            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+        )
         .await
         .expect_err("stale Session generation must be rejected");
     assert!(error.to_string().contains("修订号"));

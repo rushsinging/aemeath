@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, RwLock};
 
 use async_trait::async_trait;
-use context::adapters::{CanonicalSessionRepository, CanonicalSessionWriter};
+use context::adapters::{CanonicalSessionRepository, CanonicalSessionWriter, SessionWriteScope};
 use context::domain::session::{
     AcceptedInputProjection, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
     SnapshotState,
@@ -36,6 +36,7 @@ impl CanonicalSessionWriter for RecordingWriter {
         &self,
         _before: &CanonicalSession,
         session: &CanonicalSession,
+        _scope: SessionWriteScope,
     ) -> Result<(), String> {
         if self.fail {
             return Err("disk full".to_string());

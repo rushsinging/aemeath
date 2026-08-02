@@ -584,6 +584,130 @@ impl SessionChangeSet {
         Ok(changes)
     }
 
+    pub fn between_preserving_unloaded_steps(
+        before: &CanonicalSession,
+        after: &CanonicalSession,
+        persisted_manifest: &SessionGenerationManifest,
+    ) -> Result<Self, SessionGenerationWireError> {
+        if before.id != persisted_manifest.session_id
+            || before.revision != persisted_manifest.revision
+        {
+            return Err(SessionGenerationWireError::StaleSessionGeneration {
+                expected_revision: before.revision,
+                actual_revision: persisted_manifest.revision,
+            });
+        }
+        let mut changes = Self::between(before, after)?;
+        let after_steps = collect_steps(after)?;
+        let after_by_identity = after_steps
+            .iter()
+            .map(|member| {
+                (
+                    (
+                        member.cursor.run_id.as_str(),
+                        member.cursor.step_id.as_str(),
+                    ),
+                    member,
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let mut merged_references = persisted_manifest.steps.clone();
+        for reference in &mut merged_references {
+            if let Some(step) = after_by_identity.get(&(
+                reference.cursor.run_id.as_str(),
+                reference.cursor.step_id.as_str(),
+            )) {
+                reference.estimated_lines = estimated_step_lines(step.step());
+                reference.finalize_cause = step
+                    .step()
+                    .outcome
+                    .as_ref()
+                    .map(|outcome| outcome.finalize_cause);
+                reference.duration_ms = step
+                    .step()
+                    .outcome
+                    .as_ref()
+                    .and_then(|outcome| outcome.duration_ms);
+            }
+        }
+        let persisted_identities = merged_references
+            .iter()
+            .map(|reference| {
+                (
+                    reference.cursor.run_id.clone(),
+                    reference.cursor.step_id.clone(),
+                )
+            })
+            .collect::<HashSet<_>>();
+        for step in &after_steps {
+            if persisted_identities
+                .contains(&(step.cursor.run_id.clone(), step.cursor.step_id.clone()))
+            {
+                continue;
+            }
+            merged_references.push(SessionStepReference {
+                cursor: step.cursor.clone(),
+                member_name: SessionGenerationManifest::step_member_name(&step.cursor),
+                estimated_lines: estimated_step_lines(step.step()),
+                finalize_cause: step
+                    .step()
+                    .outcome
+                    .as_ref()
+                    .map(|outcome| outcome.finalize_cause),
+                duration_ms: step
+                    .step()
+                    .outcome
+                    .as_ref()
+                    .and_then(|outcome| outcome.duration_ms),
+            });
+        }
+        let merged_manifest = SessionGenerationManifest {
+            generation_schema_version: CURRENT_SESSION_GENERATION_SCHEMA_VERSION,
+            session_schema_version: CURRENT_SESSION_SCHEMA_VERSION,
+            session_id: after.id.clone(),
+            revision: after.revision,
+            state_member_name: SESSION_STATE_MEMBER_NAME.to_string(),
+            metadata_member_name: SESSION_METADATA_MEMBER_NAME.to_string(),
+            steps: merged_references,
+        };
+        let encoded_manifest = SessionGenerationCodec::encode_manifest(&merged_manifest)?;
+        let manifest_member = changes
+            .changed_members
+            .iter_mut()
+            .find(|member| member.name == MANIFEST_MEMBER_NAME)
+            .ok_or_else(|| {
+                SessionGenerationWireError::InvalidManifest(
+                    "Session change set 缺少 generation manifest".to_string(),
+                )
+            })?;
+        manifest_member.bytes = encoded_manifest;
+
+        let changed_names = changes
+            .changed_members
+            .iter()
+            .map(|member| member.name.as_str())
+            .collect::<HashSet<_>>();
+        let removed_names = changes
+            .removed_members
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        for reference in persisted_manifest.steps() {
+            if !changed_names.contains(reference.member_name())
+                && !removed_names.contains(reference.member_name())
+                && !changes
+                    .reused_members
+                    .iter()
+                    .any(|name| name == reference.member_name())
+            {
+                changes.reused_members.push(reference.member_name.clone());
+            }
+        }
+        changes.reused_members.sort();
+        changes.reused_members.dedup();
+        Ok(changes)
+    }
+
     pub fn between(
         before: &CanonicalSession,
         after: &CanonicalSession,
@@ -619,7 +743,7 @@ impl SessionChangeSet {
         let before_state_bytes = SessionGenerationCodec::encode_state(&before_state)?;
         let after_state_bytes = SessionGenerationCodec::encode_state(&after_state)?;
         if before_state_bytes == after_state_bytes {
-            if before.revision != 0 && !after_steps.is_empty() {
+            if before.revision != 0 {
                 reused_members.push(SESSION_STATE_MEMBER_NAME.to_string());
             }
         } else {
@@ -632,7 +756,7 @@ impl SessionChangeSet {
         let before_metadata_bytes = SessionGenerationCodec::encode_metadata(&before_metadata)?;
         let after_metadata_bytes = SessionGenerationCodec::encode_metadata(&after_metadata)?;
         if before_metadata_bytes == after_metadata_bytes {
-            if before.revision != 0 && !after_steps.is_empty() {
+            if before.revision != 0 {
                 reused_members.push(SESSION_METADATA_MEMBER_NAME.to_string());
             }
         } else {
@@ -756,6 +880,11 @@ pub enum SessionGenerationWireError {
     },
     #[error("Session identity 不一致: before={before}, after={after}")]
     SessionIdentityMismatch { before: String, after: String },
+    #[error("Session 数据集修订号已变更: expected={expected_revision}, actual={actual_revision}")]
+    StaleSessionGeneration {
+        expected_revision: u64,
+        actual_revision: u64,
+    },
     #[error("Session generation 已变更: expected={expected_revision}, actual={actual_revision}")]
     StaleDisplayHistory {
         expected_revision: u64,

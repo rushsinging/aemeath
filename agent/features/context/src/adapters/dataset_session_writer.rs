@@ -21,8 +21,9 @@ impl crate::adapters::CanonicalSessionWriter for DatasetCanonicalSessionWriter {
         &self,
         before: &CanonicalSession,
         after: &CanonicalSession,
+        scope: crate::adapters::SessionWriteScope,
     ) -> Result<(), String> {
-        self.save_incremental(before, after).await
+        self.save_incremental(before, after, scope).await
     }
 }
 
@@ -40,9 +41,8 @@ impl DatasetCanonicalSessionWriter {
         &self,
         before: &CanonicalSession,
         after: &CanonicalSession,
+        scope: crate::adapters::SessionWriteScope,
     ) -> Result<(), String> {
-        let changes =
-            SessionChangeSet::between(before, after).map_err(|error| error.to_string())?;
         let dataset_key =
             session_dataset_key(after.id.as_str()).map_err(|error| error.to_string())?;
         let manifest = self
@@ -53,7 +53,38 @@ impl DatasetCanonicalSessionWriter {
         if manifest.members().is_empty() {
             return self.save_initial(after).await;
         }
-        verify_expected_generation(&manifest, before).map_err(|error| error.to_string())?;
+        let manifest_member_name =
+            SafePathSegment::from_str(SessionGenerationManifest::manifest_member_name())
+                .map_err(|error| error.to_string())?;
+        let persisted_manifest = self
+            .dataset
+            .read_consistent(&dataset_key, std::slice::from_ref(&manifest_member_name))
+            .await
+            .map_err(|error| error.to_string())?;
+        let storage::api::DatasetReadOutcome::Found(persisted_manifest) = persisted_manifest else {
+            return Err("Session generation manifest 不存在".to_string());
+        };
+        let persisted_manifest = SessionGenerationCodec::decode_manifest(
+            persisted_manifest
+                .members()
+                .first()
+                .ok_or_else(|| "Session generation manifest 不存在".to_string())?
+                .bytes(),
+        )
+        .map_err(|error| error.to_string())?;
+        let changes = match scope {
+            crate::adapters::SessionWriteScope::PreserveUnloadedHistory => {
+                SessionChangeSet::between_preserving_unloaded_steps(
+                    before,
+                    after,
+                    &persisted_manifest,
+                )
+            }
+            crate::adapters::SessionWriteScope::ReplaceCompleteHistory => {
+                SessionChangeSet::between(before, after)
+            }
+        }
+        .map_err(|error| error.to_string())?;
         self.commit_with_manifest(&dataset_key, &manifest, changes)
             .await
     }
@@ -87,55 +118,6 @@ impl DatasetCanonicalSessionWriter {
             .map_err(|error| error.to_string())?;
         Ok(())
     }
-}
-
-fn verify_expected_generation(
-    manifest: &storage::api::DatasetManifest,
-    expected: &CanonicalSession,
-) -> Result<(), StorageError> {
-    let manifest_name = SafePathSegment::from_str("manifest.json")?;
-    let Some(manifest_member) = manifest.member_evidence(&manifest_name) else {
-        return Err(StorageError::new(
-            StorageErrorKind::ConcurrentWrite,
-            "Session 当前数据集代缺少领域 manifest",
-        ));
-    };
-    let expected_steps = expected
-        .run_slices
-        .iter()
-        .flat_map(|run_slice| {
-            run_slice.steps.iter().cloned().map(|step| {
-                crate::domain::session::SessionStepMember::new(
-                    crate::domain::session::RunStepCursor {
-                        run_id: run_slice.run_id.clone(),
-                        step_id: step.step_id.clone(),
-                    },
-                    step,
-                )
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| StorageError::new(StorageErrorKind::InvalidKey, error.to_string()))?;
-    let expected_manifest = SessionGenerationManifest::new(
-        expected.id.clone(),
-        expected.revision,
-        expected_steps
-            .iter()
-            .map(|step| step.cursor().clone())
-            .collect(),
-    )
-    .and_then(|manifest| manifest.with_step_metadata(&expected_steps))
-    .and_then(|manifest| SessionGenerationCodec::encode_manifest(&manifest))
-    .map_err(|error| StorageError::new(StorageErrorKind::InvalidKey, error.to_string()))?;
-    if manifest_member.byte_len() != expected_manifest.len() as u64
-        || !manifest_member.matches_bytes(&expected_manifest)
-    {
-        return Err(StorageError::new(
-            StorageErrorKind::ConcurrentWrite,
-            "Session 数据集修订号已变更，增量提交被拒绝",
-        ));
-    }
-    Ok(())
 }
 
 pub(super) fn session_dataset_key(session_id: &str) -> Result<DatasetKey, StorageError> {

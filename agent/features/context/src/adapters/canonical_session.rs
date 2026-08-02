@@ -15,10 +15,20 @@ use crate::domain::{
 };
 use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionWriteScope {
+    PreserveUnloadedHistory,
+    ReplaceCompleteHistory,
+}
+
 #[async_trait]
 pub trait CanonicalSessionWriter: Send + Sync {
-    async fn save(&self, before: &CanonicalSession, after: &CanonicalSession)
-        -> Result<(), String>;
+    async fn save(
+        &self,
+        before: &CanonicalSession,
+        after: &CanonicalSession,
+        scope: SessionWriteScope,
+    ) -> Result<(), String>;
 }
 
 pub struct AtomicBlobCanonicalSessionWriter {
@@ -51,6 +61,7 @@ impl CanonicalSessionWriter for AtomicBlobCanonicalSessionWriter {
         &self,
         _before: &CanonicalSession,
         session: &CanonicalSession,
+        _scope: SessionWriteScope,
     ) -> Result<(), String> {
         use crate::ports::SessionSnapshotStore;
 
@@ -80,6 +91,7 @@ impl CanonicalSessionWriter for NoOpCanonicalSessionWriter {
         &self,
         _before: &CanonicalSession,
         _after: &CanonicalSession,
+        _scope: SessionWriteScope,
     ) -> Result<(), String> {
         Ok(())
     }
@@ -346,7 +358,11 @@ impl SessionRepository for CanonicalSessionRepository {
             ),
         );
         self.writer
-            .save(&current, &candidate)
+            .save(
+                &current,
+                &candidate,
+                SessionWriteScope::PreserveUnloadedHistory,
+            )
             .await
             .map_err(AcceptedInputError::Storage)?;
         let revision = SessionRevision::new(candidate.revision);
@@ -397,7 +413,11 @@ impl SessionRepository for CanonicalSessionRepository {
             .expect("advanced receipt must exist")
             .clone();
         self.writer
-            .save(&current, &candidate)
+            .save(
+                &current,
+                &candidate,
+                SessionWriteScope::PreserveUnloadedHistory,
+            )
             .await
             .map_err(ToolReceiptMutationError::Storage)?;
         self.publish_generation(&current, candidate)
@@ -437,7 +457,11 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
         self.writer
-            .save(&current, &candidate)
+            .save(
+                &current,
+                &candidate,
+                SessionWriteScope::PreserveUnloadedHistory,
+            )
             .await
             .map_err(tools::SkillLoadStateError::Storage)?;
         self.publish_generation(&current, candidate)
@@ -527,7 +551,11 @@ impl SessionRepository for CanonicalSessionRepository {
         });
 
         self.writer
-            .save(&current, &candidate)
+            .save(
+                &current,
+                &candidate,
+                SessionWriteScope::PreserveUnloadedHistory,
+            )
             .await
             .map_err(ContextAppendError::Storage)?;
         let revision = SessionRevision::new(candidate.revision);
@@ -593,7 +621,11 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         self.writer
-            .save(&current, &candidate)
+            .save(
+                &current,
+                &candidate,
+                SessionWriteScope::PreserveUnloadedHistory,
+            )
             .await
             .map_err(ContextPortError::Compact)?;
         self.publish_generation(&current, candidate)
@@ -657,7 +689,11 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         self.writer
-            .save(&current, &candidate)
+            .save(
+                &current,
+                &candidate,
+                SessionWriteScope::PreserveUnloadedHistory,
+            )
             .await
             .map_err(ContextPortError::Compact)?;
         self.publish_generation(&current, candidate)
@@ -690,7 +726,11 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
         self.writer
-            .save(&current, &candidate)
+            .save(
+                &current,
+                &candidate,
+                SessionWriteScope::ReplaceCompleteHistory,
+            )
             .await
             .map_err(ContextPortError::SessionRepository)?;
         self.publish_generation(&current, candidate)
@@ -705,6 +745,7 @@ impl CanonicalSessionWriter for crate::application::SessionPersistenceService {
         &self,
         _before: &CanonicalSession,
         session: &CanonicalSession,
+        _scope: SessionWriteScope,
     ) -> Result<(), String> {
         crate::application::SessionPersistenceService::save(self, session)
             .await

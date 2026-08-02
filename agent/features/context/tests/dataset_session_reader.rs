@@ -115,7 +115,11 @@ async fn dataset_reader_falls_back_to_previous_when_primary_domain_manifest_is_i
 
     let current = session_with_step("recover", 2, "current history");
     writer
-        .save_incremental(&previous, &current)
+        .save_incremental(
+            &previous,
+            &current,
+            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+        )
         .await
         .expect("save current generation");
 
