@@ -30,13 +30,10 @@ impl App {
             | UiEvent::Usage { .. }
             | UiEvent::LiveTps(_)
             | UiEvent::AgentProgress { .. }
-            | UiEvent::HookEvent(_)
-            | UiEvent::HookMessage(_)
             | UiEvent::UserMessagesAdopted { .. }
             | UiEvent::UserMessagesQueued { .. }
             | UiEvent::TurnStarted { .. }
             | UiEvent::MicrocompactDone { .. }
-            | UiEvent::StopHookBlocked { .. }
             | UiEvent::PostToolExecutionSync { .. }
             | UiEvent::CompactRollback { .. }
             | UiEvent::CompactFinished { .. }
@@ -50,9 +47,7 @@ impl App {
             // ── 本地 Effect 回灌 ──
             UiEvent::Error(msg) => {
                 // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，
-                crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::Error → spinner_stop");
                 // 此处不再重复写 output_area（消除双表示）。
-                self.spinner_stop();
                 self.chat.stop_processing();
                 self.chat.clear_processing_handle();
                 return UpdateResult::one(Effect::RunHook {
@@ -64,8 +59,6 @@ impl App {
                 self.chat.stop_processing();
             }
             UiEvent::Cancelled { .. } => {
-                crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::Cancelled → spinner_stop");
-                self.spinner_stop();
                 self.chat.stop_processing();
                 // 不清 processing_handle：cancel_to_idle 只把 loop FSM 带回 Idle，
                 // 常驻 loop 任务本身并未退出（等待下一条输入），提前清空会让后续
@@ -83,10 +76,6 @@ impl App {
                     message: msg,
                     name: "system_message".to_string(),
                 });
-            }
-            UiEvent::ModelStreamWaiting { .. } => {
-                // Transient placeholder 已由 map_agent_event 注入 ConversationModel。
-                self.mark_output_dirty();
             }
             UiEvent::SessionSaved { id } => {
                 self.append_system_notice(format!("[session saved: {id}]"));
@@ -106,7 +95,6 @@ impl App {
                         request: tui_request,
                     }),
                 ));
-                self.spinner_stop();
             }
             UiEvent::CurrentTurnChanged(turn) => {
                 return UpdateResult::one(Effect::SetCurrentTurn { turn });
@@ -185,8 +173,9 @@ impl App {
                 steps,
                 session_id,
                 created_at,
+                compacted,
             } => {
-                self.resume_session_messages(&session_id, steps, created_at.to_string());
+                self.resume_session_messages(&session_id, steps, created_at.to_string(), compacted);
             }
             UiEvent::SessionResumeFailed { kind, id, message } => {
                 use sdk::SessionResumeFailureKind;

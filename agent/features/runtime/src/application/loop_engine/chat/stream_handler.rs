@@ -266,12 +266,12 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
         }
     }
 
-    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
-        self.progress.clone()
-    }
-
     pub fn runtime_tool_id(&self, index: usize, provider_id: Option<&str>) -> sdk::ids::ToolCallId {
         self.tool_identity.runtime_id_for_stream(index, provider_id)
+    }
+
+    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
+        self.progress.clone()
     }
 
     fn begin_streaming_block(&mut self, kind: StreamingBlockKind) {
@@ -432,6 +432,7 @@ mod invocation_reducer_tests {
         InvocationDelta, InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderError,
         ProviderStopReason, RawUsageSnapshot, ReasoningLevel,
     };
+    use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
     struct RecordingSink(Arc<Mutex<Vec<RuntimeStreamEvent>>>);

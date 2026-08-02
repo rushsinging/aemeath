@@ -10,8 +10,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const PLACEHOLDER_ID: &str = "model-stream-placeholder";
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct RetainedOutputViewStats {
     pub did_rebuild: bool,
@@ -85,9 +83,7 @@ impl RetainedOutputView {
                     reused_roots += 1;
                     return Some(Arc::clone(root));
                 }
-                let root = if item_id == PLACEHOLDER_ID {
-                    OutputViewAssembler::assemble_placeholder(conversation)
-                } else if let Some(item) = conversation.resumed_history_item(item_id) {
+                let root = if let Some(item) = conversation.resumed_history_item(item_id) {
                     crate::tui::view_assembler::resumed_history::assemble_resumed_history_item(
                         conversation,
                         item,
@@ -126,7 +122,7 @@ impl RetainedOutputView {
         workspace_root: Option<PathBuf>,
         stats: &mut RetainedOutputViewStats,
     ) {
-        let mut entries = conversation
+        let entries = conversation
             .resumed_history_items()
             .iter()
             .map(|item| {
@@ -149,9 +145,6 @@ impl RetainedOutputView {
                     }),
             )
             .collect::<Vec<_>>();
-        if conversation.model_stream_placeholder.is_some() {
-            entries.push((PLACEHOLDER_ID.to_string(), 1));
-        }
         self.window_index
             .apply_change(OutputWindowIndexChange::Reset { entries });
         self.root_cache.clear();
@@ -209,20 +202,6 @@ impl RetainedOutputView {
                             invalidated_item_ids.insert(item_id.clone());
                             self.window_index
                                 .apply_change(OutputWindowIndexChange::Remove { item_id });
-                        }
-                        OutputViewChange::Placeholder => {
-                            invalidated_item_ids.insert(PLACEHOLDER_ID.to_string());
-                            let change = if conversation.model_stream_placeholder.is_some() {
-                                OutputWindowIndexChange::Append {
-                                    item_id: PLACEHOLDER_ID.to_string(),
-                                    estimated_lines: 1,
-                                }
-                            } else {
-                                OutputWindowIndexChange::Remove {
-                                    item_id: PLACEHOLDER_ID.to_string(),
-                                }
-                            };
-                            self.window_index.apply_change(change);
                         }
                         OutputViewChange::Reset => {
                             self.rebuild_index(

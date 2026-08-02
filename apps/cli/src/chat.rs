@@ -11,8 +11,11 @@ pub(crate) async fn build_client_from_cli_args(
 
 fn initial_tui_resume_backing(
     bootstrap: &composition::app::AgentClientBootstrap,
-) -> Option<&sdk::LocalSessionResumeBacking> {
-    bootstrap.startup_resume.as_ref()
+) -> Option<sdk::SessionResumeView> {
+    bootstrap
+        .startup_resume
+        .as_ref()
+        .map(|resume| resume.materialize())
 }
 
 fn should_emit_cli_frontend_started_log() -> bool {
@@ -70,7 +73,7 @@ pub(crate) async fn run_chat(args: Args) {
             return;
         }
 
-        let startup_resume = initial_tui_resume_backing(&bootstrap).cloned();
+        let startup_resume = initial_tui_resume_backing(&bootstrap);
         let mut app =
             crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
         app.agent_client = Some(bootstrap.client.clone());
@@ -108,9 +111,9 @@ pub(crate) async fn run_chat(args: Args) {
                 "resume_lifecycle boundary=cli_to_tui stage=startup_view_received session_id={} steps={} messages={}",
                 resume.session_id,
                 resume.steps.len(),
-                resume.steps.iter().map(|step| step.messages().count()).sum::<usize>()
+                resume.steps.iter().map(|step| step.messages.len()).sum::<usize>()
             );
-            app.restore_startup_backing(resume);
+            app.restore_startup_session(resume);
         } else {
             crate::tui::log_debug!(
                 "resume_lifecycle boundary=cli_to_tui stage=startup_view_absent session_id={}",

@@ -16,6 +16,7 @@ fn local_resume_backing_clone_reuses_shared_step_messages() {
         steps: vec![step],
         session_id: "session-shared".to_string(),
         created_at: 42,
+        compacted: true,
     };
 
     let cloned = backing.clone();
@@ -25,6 +26,7 @@ fn local_resume_backing_clone_reuses_shared_step_messages() {
         &cloned.steps[0].message_segments[0]
     ));
     assert_eq!(cloned.steps[0].messages().count(), 1);
+    assert!(cloned.compacted);
 }
 
 #[test]

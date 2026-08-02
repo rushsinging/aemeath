@@ -39,6 +39,8 @@ impl RunFactory {
         &self,
         request: RunCreationRequest,
     ) -> Result<RunInstance, RunCreationError> {
+        let run_id = crate::domain::agent_run::RunId::new_v7();
+        let request = request.with_run_id(run_id.clone());
         let (context, session, workspace) =
             self.context_factory.prepare(&request, &self.bindings)?;
         let request = request.with_session(session);
@@ -46,6 +48,7 @@ impl RunFactory {
         let session = request.session().clone();
         let parent_run_id = request.parent().map(|parent| parent.run_id().clone());
         Ok(RunInstance::new(
+            run_id,
             spec,
             parent_run_id,
             session,

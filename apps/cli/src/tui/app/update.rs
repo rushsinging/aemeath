@@ -7,7 +7,6 @@ mod key_scroll;
 mod notice;
 mod reminder;
 mod spawn_context;
-mod spinner;
 mod ui_event;
 
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
@@ -19,7 +18,6 @@ use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::block::AskUserSlot;
 use crate::tui::model::conversation::intent::*;
-use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::output::rendered::RenderedLineAnchor;
 use crate::tui::render::output::tool_display::format_subagent_tool_header;
@@ -67,7 +65,6 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::Cancelled { .. } => "Cancelled",
         UiEvent::TurnStarted { .. } => "TurnStarted",
         UiEvent::MicrocompactDone { .. } => "MicrocompactDone",
-        UiEvent::StopHookBlocked { .. } => "StopHookBlocked",
         UiEvent::PostToolExecutionSync { .. } => "PostToolExecutionSync",
         UiEvent::ApiError { .. } => "ApiError",
         UiEvent::CompactRollback { .. } => "CompactRollback",
@@ -79,12 +76,9 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::LiveTps(_) => "LiveTps",
         UiEvent::ClipboardImage(_) => "ClipboardImage",
         UiEvent::SystemMessage(_) => "SystemMessage",
-        UiEvent::ModelStreamWaiting { .. } => "ModelStreamWaiting",
         UiEvent::SessionSaved { .. } => "SessionSaved",
         UiEvent::ReflectionHistory { .. } => "ReflectionHistory",
         UiEvent::InteractionRequested { .. } => "InteractionRequested",
-        UiEvent::HookEvent(_) => "HookEvent",
-        UiEvent::HookMessage(_) => "HookMessage",
         UiEvent::AgentProgress { .. } => "AgentProgress",
         UiEvent::WorkingDirectoryChanged { .. } => "WorkingDirectoryChanged",
         UiEvent::WorkspaceMetadataResolved(_) => "WorkspaceMetadataResolved",
@@ -262,7 +256,19 @@ impl App {
                     self.view_state.animation.spinner_frame.wrapping_add(1);
                 self.view_state.animation.version =
                     self.view_state.animation.version.wrapping_add(1);
+                let before_silent = self
+                    .view_state
+                    .run_activity
+                    .is_model_silent(std::time::Instant::now());
                 self.view_state.spinner.advance();
+                self.view_state.run_activity.advance_frame();
+                let after_silent = self
+                    .view_state
+                    .run_activity
+                    .is_model_silent(std::time::Instant::now());
+                if before_silent != after_silent || after_silent {
+                    self.mark_output_dirty();
+                }
                 // 临时 status notice 过期检查：到期回退到 graph_phase 派生态。
                 if self
                     .model
@@ -271,17 +277,15 @@ impl App {
                 {
                     self.mark_output_dirty();
                 }
-                // 动画只在 viewport 绘制阶段按当前 frame 解析；不要标脏 output，
-                // 否则每 90ms 都会扫描完整 roots 并重建历史文档。
-                let request_render = self.model.conversation.runtime.spinner.chat_active;
-                crate::tui::log_trace!(                    "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} phase={:?} verb={} dirty_output={}",
+                let request_render = self.view_state.run_activity.is_active();
+                crate::tui::log_trace!(
+                    "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} verb={} dirty_output={}",
                     before_frame,
                     self.view_state.animation.spinner_frame,
                     before_version,
                     self.view_state.animation.version,
                     self.view_state.spinner.frame,
-                    self.model.conversation.runtime.spinner.chat_active,
-                    self.model.conversation.runtime.spinner.phase,
+                    self.view_state.run_activity.is_active(),
                     self.view_state.spinner.verb,
                     self.view_state.dirty.output
                 );
@@ -369,11 +373,9 @@ impl App {
                 self.mark_output_dirty();
             }
             TuiRuntimeEvent::TurnStarted { .. } => {
-                self.spinner_phase(SpinnerPhase::Thinking);
                 self.mark_output_dirty();
             }
             TuiRuntimeEvent::ApiError { error, .. } => {
-                self.spinner_stop();
                 self.append_system_notice(error);
                 self.mark_output_dirty();
             }
@@ -415,6 +417,7 @@ impl App {
                 steps,
                 session_id,
                 created_at,
+                compacted,
             } => {
                 crate::tui::log_debug!(
                     "resume_lifecycle boundary=tui_runtime stage=session_resumed_received session_id={} steps={} messages={}",
@@ -422,7 +425,12 @@ impl App {
                     steps.len(),
                     steps.iter().map(|step| step.messages.len()).sum::<usize>()
                 );
-                self.resume_session_messages(session_id, steps.clone(), created_at.to_string());
+                self.resume_session_messages(
+                    session_id,
+                    steps.clone(),
+                    created_at.to_string(),
+                    *compacted,
+                );
                 crate::tui::log_debug!(
                     "resume_lifecycle boundary=tui_runtime stage=session_resumed_applied session_id={} timeline_items={} chats={} revision={}",
                     session_id,
@@ -437,10 +445,6 @@ impl App {
                 };
             }
             TuiRuntimeEvent::InteractionRequested(ref req) => {
-                // InteractionRequested 走 Runtime 路径，但 spinner_stop / mark_output_dirty
-                // 是 App 级副作用，map_runtime_event 只返回 conversation intent。
-                // 必须在此处理，否则 spinner 不停。
-                self.spinner_stop();
                 self.mark_output_dirty();
                 // 桥接到已有的 ask_user_batch inline block 渲染
                 if let TuiInteractionBody::UserQuestions(questions) = &req.body {
@@ -478,9 +482,7 @@ impl App {
                 }
             }
             TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {
-                // Done/Cancelled 走 Runtime 路径，但 stop_processing 是 App 级副作用；
-                // 不执行会让 is_processing 永远保持 true。
-                self.spinner_stop();
+                // Done/Cancelled 只收敛 App 级 processing；活动展示由 typed Run status 收敛。
                 self.chat.stop_processing();
                 self.mark_output_dirty();
             }
@@ -489,14 +491,60 @@ impl App {
         let mapping = map_runtime_event(&event);
         if let Some(kind) = diagnostic_kind {
             crate::tui::log_trace!(
-                "event_delivery boundary=tui_mapper kind={} outcome=mapped conversation_intents={} diagnostic_intents={} session_intents={}",
-                kind,
-                mapping.conversation.len(),
-                mapping.diagnostic.len(),
-                mapping.session.len()
-            );
+              "event_delivery boundary=tui_mapper kind={} outcome=mapped conversation_intents={} diagnostic_intents={} session_intents={}",
+              kind,
+              mapping.conversation.len(),
+              mapping.diagnostic.len(),
+              mapping.session.len()
+          );
         }
         let model_result = reduce_agent_event(&mut self.model, mapping);
+        self.refresh_live_status_from_model();
+        let valid_model_activity = match &event {
+            TuiRuntimeEvent::Text { text, .. } | TuiRuntimeEvent::Thinking { text, .. } => {
+                !text.is_empty()
+            }
+            TuiRuntimeEvent::ToolCallStart { .. } => true,
+            TuiRuntimeEvent::ToolCallUpdate {
+                arguments_delta,
+                arguments,
+                ..
+            } => {
+                arguments_delta
+                    .as_ref()
+                    .is_some_and(|value| !value.is_empty())
+                    || arguments.is_some()
+            }
+            _ => false,
+        };
+        if valid_model_activity {
+            let active_run_id = self
+                .model
+                .conversation
+                .activity_observations()
+                .activities()
+                .iter()
+                .find(|activity| {
+                    activity.kind == crate::tui::adapter::tui_runtime_event::TuiActivityKind::Run
+                        && matches!(
+                            activity.detail,
+                            crate::tui::adapter::tui_runtime_event::TuiActivityDetail::Run {
+                                purpose:
+                                    crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Main
+                            }
+                        )
+                })
+                .map(|activity| activity.run_id.clone());
+            if let Some(run_id) = active_run_id.as_ref() {
+                if self
+                    .view_state
+                    .run_activity
+                    .observe_main_model_activity(run_id, std::time::Instant::now())
+                {
+                    self.mark_output_dirty();
+                }
+            }
+        }
         if let Some(kind) = diagnostic_kind {
             crate::tui::log_trace!(
                 "event_delivery boundary=tui_reducer kind={} outcome=reduced timeline_items={} queued={} revision={} dirty_output={} effects={}",
@@ -772,8 +820,8 @@ impl App {
         )
     }
 
-    /// 据 Model 业务态（spinner.chat_active + phase / task lines / queued submissions）
-    /// + view_state 动画态（frame/verb）派生实时状态行 ViewModel。
+    /// 据 typed Main Run snapshot、task lines、queued submissions 与纯动画态
+    /// 派生实时状态行 ViewModel。
     pub(crate) fn live_status_view_model(&self) -> crate::tui::view_model::LiveStatusViewModel {
         let queued_texts: Vec<String> = self
             .model
@@ -784,6 +832,7 @@ impl App {
             .collect();
         crate::tui::view_assembler::live_status::LiveStatusAssembler::assemble(
             &self.model.conversation,
+            &self.view_state.run_activity,
             &self.view_state.spinner,
             &queued_texts,
         )
@@ -799,32 +848,18 @@ impl App {
     /// verb/active 检测属 effectful 边界（rng/激活检测），故放在此渲染前的副作用处，
     /// 而非纯 reducer。
     pub(crate) fn refresh_live_status_from_model(&mut self) {
-        // #536: 可见性由 chat_active 驱动。
-        let active = self.model.conversation.runtime.spinner.chat_active;
-        let before_anim = self.view_state.spinner.clone();
-        if active {
-            if self.view_state.spinner.verb.is_empty() {
-                self.view_state.spinner.pick_verb();
-            }
-            self.view_state
-                .spinner
-                .sync_phase(self.model.conversation.runtime.spinner.phase.clone());
-        } else if self.view_state.spinner != crate::tui::view_state::SpinnerAnim::default() {
-            self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
+        let activity_summary =
+            crate::tui::view_assembler::activity_summary::ActivitySummaryAssembler::assemble(
+                self.model.conversation.activity_observations(),
+            );
+        self.view_state
+            .run_activity
+            .sync_activity_summary(activity_summary.as_ref(), std::time::Instant::now());
+        if self.view_state.run_activity.verb.is_empty() && activity_summary.is_some() {
+            self.view_state.spinner.pick_verb();
+            self.view_state.run_activity.verb = self.view_state.spinner.verb.clone();
         }
-        crate::tui::log_trace!(
-            "tui.spinner.refresh active={} phase={:?} before_frame={} after_frame={} before_phase_frame={} after_phase_frame={} before_phase={:?} after_phase={:?} before_verb={} after_verb={}",
-            active,
-            self.model.conversation.runtime.spinner.phase,
-            before_anim.frame,
-            self.view_state.spinner.frame,
-            before_anim.phase_frame,
-            self.view_state.spinner.phase_frame,
-            before_anim.phase,
-            self.view_state.spinner.phase,
-            before_anim.verb,
-            self.view_state.spinner.verb
-        );
+        self.view_state.run_activity.frame = self.view_state.spinner.frame;
     }
     /// 根据当前 document 与 layout/live-status 投影同步 OutputViewState 滚动真相。
     /// 每帧渲染前调用；OutputArea render 直接消费 view_state.output，不再写 widget 镜像。

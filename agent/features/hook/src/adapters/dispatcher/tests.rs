@@ -8,6 +8,8 @@
 
 #![cfg(test)]
 
+use std::sync::{Arc, Mutex};
+
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::invocation::{
@@ -17,7 +19,10 @@ use crate::domain::outcome::{
     HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecutionStatus, HookReason,
 };
 use crate::domain::subscription::{HookFailurePolicy, HookMatcher, HookSubscription};
-use crate::ports::{HookDispatchContext, HookPort};
+use crate::ports::{
+    HookDispatchContext, HookPort, HookSubscriptionExecutionEvent,
+    HookSubscriptionExecutionObserver,
+};
 
 use super::{Dispatcher, ExecutionFault, ScriptStep, Scripted};
 
@@ -38,6 +43,17 @@ fn stop(turns: usize) -> HookInvocation {
 
 fn sub(point: HookPoint, command: &str) -> HookSubscription {
     HookSubscription::new(point, command)
+}
+
+#[derive(Default)]
+struct RecordingSubscriptionObserver {
+    events: Mutex<Vec<HookSubscriptionExecutionEvent>>,
+}
+
+impl HookSubscriptionExecutionObserver for RecordingSubscriptionObserver {
+    fn observe(&self, event: HookSubscriptionExecutionEvent) {
+        self.events.lock().expect("observer lock").push(event);
+    }
 }
 
 #[tokio::test]
@@ -1318,6 +1334,93 @@ async fn display_message_attempt_and_ordinal_after_retries() {
     assert_eq!(stable_msg.execution_ordinal, 4);
     // ordinal 单调递增。
     assert!(flaky_msg.execution_ordinal < stable_msg.execution_ordinal);
+}
+
+#[tokio::test]
+async fn subscription_execution_events_follow_order_and_expose_only_script_file_name() {
+    let subs = vec![
+        sub(
+            HookPoint::PreToolUse,
+            "{AEMEATH_PROJECT_DIR}/.agents/hooks/check-second.sh --secret value",
+        )
+        .with_order(20),
+        sub(
+            HookPoint::PreToolUse,
+            "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/check-first.sh\" --fast",
+        )
+        .with_order(10),
+    ];
+    let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
+    let observer = Arc::new(RecordingSubscriptionObserver::default());
+    let dispatcher = Dispatcher::with_scripted(subs, scripted)
+        .with_subscription_execution_observer(observer.clone());
+
+    dispatcher
+        .dispatch(pre_tool_use("Bash"), &CancellationToken::new())
+        .await;
+
+    assert_eq!(
+        observer.events.lock().expect("observer events").as_slice(),
+        [
+            HookSubscriptionExecutionEvent::Started {
+                point: HookPoint::PreToolUse,
+                script: "check-first.sh".to_string(),
+                attempt: 1,
+            },
+            HookSubscriptionExecutionEvent::Finished {
+                point: HookPoint::PreToolUse,
+                script: "check-first.sh".to_string(),
+                terminal: crate::ports::HookSubscriptionExecutionTerminal::Succeeded,
+            },
+            HookSubscriptionExecutionEvent::Started {
+                point: HookPoint::PreToolUse,
+                script: "check-second.sh".to_string(),
+                attempt: 1,
+            },
+            HookSubscriptionExecutionEvent::Finished {
+                point: HookPoint::PreToolUse,
+                script: "check-second.sh".to_string(),
+                terminal: crate::ports::HookSubscriptionExecutionTerminal::Succeeded,
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn subscription_retry_updates_one_execution_lifecycle_before_success() {
+    let scripted = Scripted::from_steps([
+        ScriptStep::fault(ExecutionFault::Spawn),
+        ScriptStep::ok_exit(0, ""),
+    ]);
+    let observer = Arc::new(RecordingSubscriptionObserver::default());
+    let dispatcher =
+        Dispatcher::with_scripted(vec![sub(HookPoint::Stop, "/hooks/check-stop.sh")], scripted)
+            .with_subscription_execution_observer(observer.clone());
+
+    dispatcher
+        .dispatch(stop(1), &CancellationToken::new())
+        .await;
+
+    assert_eq!(
+        observer.events.lock().expect("observer events").as_slice(),
+        [
+            HookSubscriptionExecutionEvent::Started {
+                point: HookPoint::Stop,
+                script: "check-stop.sh".to_string(),
+                attempt: 1,
+            },
+            HookSubscriptionExecutionEvent::AttemptChanged {
+                point: HookPoint::Stop,
+                script: "check-stop.sh".to_string(),
+                attempt: 2,
+            },
+            HookSubscriptionExecutionEvent::Finished {
+                point: HookPoint::Stop,
+                script: "check-stop.sh".to_string(),
+                terminal: crate::ports::HookSubscriptionExecutionTerminal::Succeeded,
+            },
+        ]
+    );
 }
 
 /// 没有 additionalContext / systemMessage 的成功执行不应产生展示消息。

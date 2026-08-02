@@ -19,55 +19,6 @@ impl RuntimeTurnContext {
 
 pub type EventFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuntimeHookEventStatus {
-    Running,
-    Succeeded,
-    Blocked,
-    Failed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeHookExecutionResult {
-    pub exit_code: Option<i32>,
-    pub stdout: String,
-    pub stderr: String,
-    pub decision: Option<String>,
-    pub reason: Option<String>,
-    pub additional_context: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeHookEvent {
-    pub hook_name: String,
-    pub status: RuntimeHookEventStatus,
-    pub matcher: Option<String>,
-    pub command: Option<String>,
-    pub result: Option<RuntimeHookExecutionResult>,
-}
-
-/// Hook 面向展示层的消息类别。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeHookMessageKind {
-    /// Hook JSON `additional_context`。
-    AdditionalContext,
-    /// Hook JSON `system_message`。
-    SystemMessage,
-}
-
-/// Hook 面向展示层的结构化消息。
-///
-/// 该类型独立于 `SystemMessage`，使消费方能按 HookPoint、来源和 attempt 归因。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeHookMessage {
-    pub point: hook::HookPoint,
-    pub source: String,
-    pub execution_ordinal: u32,
-    pub attempt: u8,
-    pub kind: RuntimeHookMessageKind,
-    pub text: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeToolCallStatus {
     PendingArgs,
@@ -89,6 +40,11 @@ pub struct RuntimeResumedSessionStep {
 
 #[derive(Debug)]
 pub enum RuntimeStreamEvent {
+    ActivityChanged {
+        kind: sdk::ActivityChangeKind,
+        activity: sdk::ActivityView,
+    },
+    ActivitySnapshot(sdk::ActivitySnapshotView),
     Text {
         context: RuntimeTurnContext,
         text: String,
@@ -129,11 +85,6 @@ pub enum RuntimeStreamEvent {
         images: Vec<ImageData>,
     },
     SystemMessage(String),
-    ModelStreamWaiting {
-        context: RuntimeTurnContext,
-        elapsed_secs: u64,
-        phase: String,
-    },
     ModelInvocationRetrying {
         context: RuntimeTurnContext,
         attempt: u32,
@@ -149,9 +100,6 @@ pub enum RuntimeStreamEvent {
         messages: Vec<Message>,
         cleared_count: usize,
     },
-    StopHookBlocked {
-        messages: Vec<Message>,
-    },
     PostToolExecutionSync {
         messages: Vec<Message>,
     },
@@ -164,6 +112,7 @@ pub enum RuntimeStreamEvent {
     },
     CompactFinished {
         messages: Vec<Message>,
+        notice: String,
     },
     TurnStarted {
         messages: Vec<Message>,
@@ -211,9 +160,6 @@ pub enum RuntimeStreamEvent {
     },
     LiveTps(f64),
     TurnChanged(usize),
-    HookEvent(RuntimeHookEvent),
-    /// 结构化 hook 执行消息（typed value）。
-    HookMessage(RuntimeHookMessage),
     AskUserBatch {
         items: Vec<sdk::AskUserQuestionItem>,
         reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,
@@ -272,6 +218,7 @@ pub enum RuntimeStreamEvent {
         steps: Vec<RuntimeResumedSessionStep>,
         session_id: String,
         created_at: u64,
+        compacted: bool,
     },
     /// 会话恢复失败（#636 D2）。区分 not_found / corrupt / io，前端展示对应错误。
     SessionResumeFailed {

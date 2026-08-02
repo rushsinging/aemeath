@@ -89,7 +89,7 @@ Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
 2. **sanitize**：tool 输出/参数截断（`sanitize_tool_output` / `sanitize_tool_arguments_delta` / `sanitize_tool_result_content`）
 3. **progress 格式化**：sub-agent progress 事件 → 可读字符串（`format_agent_progress`）
 4. **hook notice 派生**：Hook 事件 → HookNoticeContent（`hook_event_notice`）
-5. **placeholder 清理**：收到实际内容时清 ModelStreamWaiting 占位（`clear_placeholder_then`）
+5. **模型活动信号**：非空 Text / Thinking、ToolCallStart 与参数内容实际变化的 ToolCallUpdate 产生显式活动 Intent，供 ViewState 重置 Main `InvokingModel` 静默时间；ACL 不创建或清理 placeholder
 6. **空 payload 守卫**：runtime **MAY** 发送空 payload 事件，ACL **MUST** 在此丢弃，**NEVER** 让空内容进入 Model（见 3.6）
 
 ### 3.2 AgentEventMapping 结构
@@ -125,7 +125,8 @@ enum AgentIntent {
 
 | Context | UiEvent 变体 | Intent / 关键规则 |
 |---|---|---|
-| Conversation | `Text` / `Thinking` / `BlockComplete` / `ToolCallStart` / `ToolCallUpdate` / `ToolResult` / `AgentProgress` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `ModelStreamWaiting` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` / `CompactProgress` | 清 placeholder、sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 投影与派生输入；turn-level `Cancelled` **NEVER** 代替 Run 终态 |
+| Conversation | `Text` / `Thinking` / `BlockComplete` / `ToolCallStart` / `ToolCallUpdate` / `ToolResult` / `AgentProgress` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` / `CompactProgress` | sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 数据；四类有效模型活动产生静默计时重置信号；turn-level `Cancelled` **NEVER** 代替 Run 终态 |
+| Conversation | `RunTransitioned { run_id, parent_run_id, status: RunStatusView }` | 第一层穷举转换为 TUI-owned `TuiRunStatus`，第二层产生 `ObserveRunStatus` Intent；禁止字符串降级。Main 由 `parent_run_id == None` 判断，Sub 不驱动主活动展示 |
 | Conversation | `RunStarted` / `RunAwaitingUser` / `RunResumed` / `RunCompleting` / `RunCompleted` / `RunFailed` / `RunCancelling` / `RunCancelled` | 按 `run_id` 投影 Runtime 权威生命周期；`RunCancelling` 进入非终态 Cancelling，只有 `RunCancelled` 进入 Cancelled；Interaction command result Intent 不参与此状态机；Created admission 阶段被拒绝时 `RunFailed` 单阶段直转 Failed，`RunCancelling` 仍先进入非终态 Cancelling（**NEVER** 直接跳到 Cancelled），完整 Created → Failed / Cancelling 映射见 [02-model.md §3.2](02-model.md#32-run-投影与-runstatus-状态机) |
 | Conversation | `InteractionRequested { request_id, run_id, body }` | 穷尽映射四种 body 为 `ShowInteraction { request_id, run_id, body }`；保留 Runtime run/request identity，只携 TUI DTO，**NEVER** 携 sender |
 | Conversation + Diagnostic | `Error` / `ApiError` | Conversation 追加错误块；Diagnostic 记录结构化 notice |
@@ -186,7 +187,27 @@ RuntimeStreamEvent::SkillsUpdated
 
 > 违反后果（#1106）：空 SystemMessage → `timeline` 空 System item → `SystemNotice` block → `render_diagnostic` 产 1 空行，叠加 `document_renderer` 给 depth0 前插的 1 行 = **每条空事件吃掉 2 行**，在输出区堆出大片空白。
 
-## 4. SDK DTO 边界
+### 3.7 Activity ACL 与事实镜像
+
+Activity 是 Runtime 发布的 typed 观测事实，不是 TUI 自有生命周期。第一层 ACL 将 SDK `ActivityView` / `ActivitySnapshotView` 穷举转换为 TUI-owned `TuiActivityObservation` / `TuiActivitySnapshot`；第二层只产生 `ObserveActivityChange` 或 `ReplaceActivitySnapshot` Intent，root reducer 是事实镜像的唯一写入口。
+
+```text
+SDK ActivityChanged / ActivitySnapshot
+  → TUI-owned Activity DTO
+  → AgentEventMapping
+  → root reducer
+  → ConversationModel Activity fact mirror
+  → ActivitySummaryAssembler
+  → LiveStatusViewModel
+```
+
+- Activity 增量按 `run_id + revision` 接纳；重复 revision 幂等。
+- revision gap 保留旧的可信事实并标记镜像待修复，**NEVER** 伪造中间状态或继续展示不可信摘要。
+- Snapshot 只替换同一 Run 的 Activity 集合，成功修复后恢复摘要展示。
+- `audience` 是 Runtime 发布的展示边界；TUI 只向用户显示 User 事实，Operational / Diagnostic detail 不得自动进入主状态行。
+- LiveStatus 只消费 Activity Summary，**NEVER** 再读取旧 Run status、`chat_active`、业务 SpinnerPhase 或 running tool counter。
+- Activity 事实镜像与 timeline 是互补投影；Activity 不写 Session、不拥有 Interaction reply、不驱动 Runtime command。
+
 
 ### 4.1 类型所有权
 
@@ -197,7 +218,9 @@ RuntimeStreamEvent::SkillsUpdated
 | Intent / Change | 对应 TUI Context | reducer、Coordinator 与测试 |
 | `InteractionRequestId` / interaction wire DTO | Runtime-owned SDK contract | processing boundary、event mapping 与 AgentClient effect command；均为纯值、可序列化 |
 
-`ChatEvent` 与 `ContentBlock` 各自只有一个权威定义；SDK 通过 re-export 或同一 schema 生成发布类型。`event_mapping.rs` 对 `ChatEvent` 做封闭枚举穷尽匹配，禁止 JSON round-trip、字符串类型擦除或两份手写 wire schema。
+`ChatEvent` 与 `ContentBlock` 各自只有一个权威定义；SDK 通过 re-export 或同一 schema 生成发布类型。`RunTransitioned.status` 使用封闭枚举 `RunStatusView`，Runtime adapter 与 TUI `event_mapping.rs` 都必须穷举匹配；禁止 JSON round-trip、`Debug`/字符串类型擦除或两份手写 wire schema。
+
+Runtime **NEVER** 发布 `ModelStreamWaiting` 或其他 UI 占位 heartbeat。Main Run 的 10 秒 `InvokingModel` 静默占位只由 TUI ViewState 的可注入单调时钟和既有 Tick 派生，不进入 SDK Published Language、Model timeline、history 或持久化。
 
 ### 4.2 TUI 自有 DTO 完全隔离
 

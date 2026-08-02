@@ -26,8 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::context::coordination::ContextCoordinator;
 use crate::application::loop_engine::chat::{
-    should_emit_model_stream_waiting, ChatEventSink, ChatEventSinkHandle, InvocationEventReducer,
-    InvocationResponse, RuntimeStreamEvent, RuntimeTurnContext,
+    ChatEventSinkHandle, InvocationEventReducer, InvocationResponse, RuntimeTurnContext,
 };
 use crate::application::loop_engine::llm_strategy::{
     build_step_token_usage, extract_invocation_context,
@@ -52,14 +51,6 @@ fn build_task_reminder_for_invocation(runtime_context: &RuntimeContext) -> Optio
         runtime_context.task().as_ref(),
         TaskListConfig::default().max_lines,
     )
-}
-
-struct AbortTaskOnDrop(tokio::task::JoinHandle<()>);
-
-impl Drop for AbortTaskOnDrop {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,7 +258,6 @@ async fn invoke_model_impl(
         let tools = window.tool_schemas.clone();
         let stream_cancel = cancel.clone();
         let committed_delta = observer.committed_delta();
-        let progress_handle = reducer.progress_handle();
         let invocation = async {
             let mut request = InvocationRequest::new(
                 model,
@@ -287,36 +277,8 @@ async fn invoke_model_impl(
                 })
                 .await
         };
-        let waiting_event_context = observer.waiting_event_context();
-        let waiting_started_at = tokio::time::Instant::now();
-        let waiting_task = waiting_event_context.map(|(sink, context)| {
-            AbortTaskOnDrop(logging::spawn_instrumented(
-                request_context.clone(),
-                async move {
-                    let mut next = waiting_started_at + Duration::from_secs(10);
-                    let mut last_version = None;
-                    loop {
-                        tokio::time::sleep_until(next).await;
-                        let snapshot = progress_handle
-                            .lock()
-                            .unwrap_or_else(|poison| poison.into_inner())
-                            .snapshot();
-                        if should_emit_model_stream_waiting(last_version, &snapshot) {
-                            sink.try_send_event(RuntimeStreamEvent::ModelStreamWaiting {
-                                context: context.clone(),
-                                elapsed_secs: waiting_started_at.elapsed().as_secs(),
-                                phase: snapshot.phase.to_string(),
-                            });
-                        }
-                        last_version = Some(snapshot.visible_progress_version);
-                        next += Duration::from_secs(10);
-                    }
-                },
-            ))
-        });
         let result =
             logging::instrument(request_context, observer.pump_while_invoking(invocation)).await;
-        drop(waiting_task);
         match result {
             Ok((response, _)) => break response,
             Err((error, _)) if error.is_cancelled() || cancel.is_cancelled() => {

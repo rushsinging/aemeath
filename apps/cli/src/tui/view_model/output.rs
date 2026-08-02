@@ -69,10 +69,8 @@ pub enum OutputBlockKind {
     UserMessage(TextBlockView),
     AssistantMessage(TextBlockView),
     ThinkingMessage(TextBlockView),
-    ModelStreamPlaceholder(ModelStreamPlaceholderBlockView),
     ToolCall(ToolCallBlockView),
     ToolResult(ToolResultBlockView),
-    HookNotice(HookNoticeBlockView),
     DiagnosticNotice(TextBlockView),
     SystemNotice(TextBlockView),
     AskUserBatch(AskUserBatchBlockView),
@@ -116,30 +114,6 @@ pub enum AskUserPhaseView {
 pub struct TextBlockView {
     pub key: String,
     pub text: String,
-    pub style: SemanticStyle,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ModelStreamPlaceholderBlockView {
-    pub key: String,
-    pub elapsed_secs: u64,
-    pub phase: String,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub enum HookNoticeSemanticKind {
-    Blocked,
-    Failed,
-    Info,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct HookNoticeBlockView {
-    pub key: String,
-    pub kind: HookNoticeSemanticKind,
-    pub title: String,
-    pub body: String,
-    pub details: Option<String>,
     pub style: SemanticStyle,
 }
 

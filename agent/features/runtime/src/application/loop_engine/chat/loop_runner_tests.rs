@@ -558,7 +558,7 @@ fn main_logging_path_uses_scopes_and_no_legacy_setters() {
     assert!(runner_source.contains("session_id: logging::FieldPatch::Set"));
     assert!(runner_source.contains("chat_id: logging::FieldPatch::Set"));
     assert!(runner_source.contains("turn: logging::FieldPatch::Set(turn_count)"));
-    assert!(invocation_source.contains("logging::spawn_instrumented("));
+    assert!(invocation_source.contains("logging::instrument(request_context"));
     for source in [chat_source, runner_source, port_source, invocation_source] {
         assert!(!source.contains("logging::set_current_"));
         assert!(!source.contains("logging::set_session_id"));
@@ -639,11 +639,20 @@ impl ChatEventSink for RecordingSink {
 impl RecordingSink {
     fn record(&self, event: RuntimeStreamEvent) {
         let name = match &event {
+            RuntimeStreamEvent::ActivityChanged { kind, activity } => {
+                if activity.kind == sdk::ActivityKindView::HookDispatch {
+                    format!("HookActivityChanged:{kind:?}:{}", activity.id)
+                } else {
+                    format!("ActivityChanged:{kind:?}:{}", activity.id)
+                }
+            }
+            RuntimeStreamEvent::ActivitySnapshot(snapshot) => {
+                format!("ActivitySnapshot:{}", snapshot.revision)
+            }
             RuntimeStreamEvent::TurnStarted { messages }
             | RuntimeStreamEvent::MicrocompactDone { messages, .. }
-            | RuntimeStreamEvent::StopHookBlocked { messages }
             | RuntimeStreamEvent::PostToolExecutionSync { messages }
-            | RuntimeStreamEvent::CompactFinished { messages } => {
+            | RuntimeStreamEvent::CompactFinished { messages, .. } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
                 let tag = match &event {
                     RuntimeStreamEvent::TurnStarted { .. } => {
@@ -651,7 +660,6 @@ impl RecordingSink {
                         "TurnStarted"
                     }
                     RuntimeStreamEvent::MicrocompactDone { .. } => "MicrocompactDone",
-                    RuntimeStreamEvent::StopHookBlocked { .. } => "StopHookBlocked",
                     RuntimeStreamEvent::PostToolExecutionSync { .. } => "PostToolExecutionSync",
                     RuntimeStreamEvent::CompactFinished { .. } => "CompactFinished",
                     _ => "Sync",
@@ -686,15 +694,6 @@ impl RecordingSink {
             RuntimeStreamEvent::DoneWithDuration { duration, .. } => {
                 self.done_durations.lock().unwrap().push(*duration);
                 "DoneWithDuration".to_string()
-            }
-            RuntimeStreamEvent::HookEvent(event) => {
-                format!("HookEvent:{}:{:?}", event.hook_name, event.status)
-            }
-            RuntimeStreamEvent::HookMessage(msg) => {
-                format!(
-                    "HookMessage:{:?}:{}:{}",
-                    msg.point, msg.execution_ordinal, msg.attempt
-                )
             }
             RuntimeStreamEvent::TurnChanged(turn) => format!("TurnChanged:{turn}"),
             RuntimeStreamEvent::Usage { .. } => "Usage".to_string(),
@@ -1195,13 +1194,14 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
     let feedback_sync = events
         .iter()
         .position(|event| {
-            event.starts_with("StopHookBlocked:") && event.contains("Stop hook prevented stopping")
+            event.starts_with("PostToolExecutionSync:")
+                && event.contains("Stop hook prevented stopping")
         })
-        .expect("blocked Stop hook feedback should be synced into messages");
-    let hook_notice = events
+        .expect("blocked Stop hook feedback should be synced through ordinary message flow");
+    let hook_activity = events
         .iter()
-        .position(|event| event == "HookEvent:Stop:Blocked")
-        .expect("blocked Stop hook should emit typed hook event");
+        .position(|event| event.starts_with("HookActivityChanged:Finished:"))
+        .expect("blocked Stop hook should finish its activity");
     let second_text = events
         .iter()
         .position(|event| event == "Text:after hook feedback")
@@ -1211,7 +1211,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         .position(|event| event == "DoneWithDuration")
         .expect("loop should finish after Stop hook succeeds");
 
-    assert!(hook_notice < feedback_sync);
+    assert!(hook_activity < feedback_sync);
     assert!(feedback_sync < second_text);
     assert!(second_text < done);
     let requests = provider.requests();
@@ -1273,7 +1273,7 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
             if driver_sink
                 .events()
                 .iter()
-                .any(|event| event == "HookEvent:Stop:Running")
+                .any(|event| event.starts_with("HookActivityChanged:Started:"))
             {
                 break;
             }
@@ -1570,7 +1570,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
     assert!(sink
         .events()
         .iter()
-        .any(|event| event == "HookEvent:Stop:Succeeded"));
+        .any(|event| event.starts_with("HookActivityChanged:Finished:")));
     let output = std::fs::read_to_string(marker).unwrap();
     let parts: Vec<&str> = output.split('|').collect();
     assert_eq!(parts.len(), 3);
@@ -1784,9 +1784,11 @@ async fn test_continue_false_json_treated_as_block() {
     let _ = std::fs::remove_file(&flag_path);
 
     let events = sink.events();
-    // continue:false 应触发 HookEvent:Stop:Blocked
+    // continue:false 应产生普通反馈同步并终结 Hook Activity。
     assert!(
-        events.iter().any(|e| e == "HookEvent:Stop:Blocked"),
+        events.iter().any(|event| {
+            event.starts_with("PostToolExecutionSync:") && event.contains("must keep working")
+        }),
         "continue:false JSON should be recognized as block: {:?}",
         events
     );
@@ -1878,7 +1880,10 @@ async fn test_stall_triggers_stop_hook_check() {
     // soft text repetition but does not expose it as a domain/UI event; importantly, it still
     // preserves stop-hook feedback in this same Run and eventually reaches one terminal event.
     assert!(
-        events.iter().any(|e| e == "HookEvent:Stop:Blocked"),
+        events.iter().any(|event| {
+            event.starts_with("PostToolExecutionSync:")
+                && event.contains("Stop hook prevented stopping")
+        }),
         "stop hook should be checked while the shared Run continues: {:?}",
         events
     );
@@ -4106,6 +4111,60 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
     assert!(
         sink.events().iter().any(|e| e == "DoneWithDuration"),
         "Run must terminate with DoneWithDuration"
+    );
+}
+
+/// 手动 Compact 必须从 idle gate 进入真实 session loop，并返回可见结果。
+/// 仅测试 `apply_gate` 无法覆盖 `PendingCommand` 的执行分支；此场景会
+/// 发现命令被接收但没有执行或没有结果事件的断链。
+#[tokio::test]
+async fn idle_compact_command_reaches_context_and_emits_result() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx.send(sdk::ChatInputEvent::Compact).unwrap();
+
+    let shell = test_shell();
+    shell.set_test_session_id("test-idle-compact-command");
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+
+    let run = tokio::spawn(process_chat_loop(ctx));
+    wait_for_retry_test_condition("manual compact result", || {
+        sink.events()
+            .iter()
+            .any(|event| event == "SystemMessage:Not enough messages to compact.")
+    })
+    .await;
+
+    drop(input_tx);
+    run.await.unwrap();
+    assert!(
+        sink.events()
+            .iter()
+            .any(|event| event.starts_with("ActivityChanged:Started:")),
+        "manual compact must publish a Runtime-owned Activity"
+    );
+    assert_eq!(
+        sink.events()
+            .iter()
+            .filter(|event| event.starts_with("ActivityChanged:Finished:"))
+            .count(),
+        1,
+        "manual compact Activity must publish exactly one terminal event"
+    );
+    assert_eq!(
+        sink.events()
+            .iter()
+            .filter(|event| event.as_str() == "SystemMessage:Not enough messages to compact.")
+            .count(),
+        1,
+        "manual compact must emit exactly one visible result"
+    );
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|event| event.as_str() == "CommandResultText"),
+        "跳过 compact 不得伪报成功"
     );
 }
 

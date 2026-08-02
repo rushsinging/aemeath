@@ -1,10 +1,8 @@
 use super::RetainedOutputView;
-use crate::tui::app::event::{ModelStreamWaitingView, UiTurnContext};
 use crate::tui::model::conversation::block::AskUserSlot;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
 use crate::tui::model::conversation::intent::{
     AppendUserMessage, AssistantText, DismissAskUserBatch, ShowAskUserBatch,
-    UpsertModelStreamPlaceholder,
 };
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::view_model::OutputRenderWindow;
@@ -156,7 +154,7 @@ fn streaming_update_replaces_only_the_changed_root() {
 }
 
 #[test]
-fn reset_and_placeholder_changes_match_full_assembly() {
+fn reset_rebuilds_from_the_new_conversation_window() {
     let mut model = ConversationModel::default();
     model.apply(AppendUserMessage {
         text: "before-reset".to_string(),
@@ -168,19 +166,9 @@ fn reset_and_placeholder_changes_match_full_assembly() {
     model.apply(AppendUserMessage {
         text: "after-reset".to_string(),
     });
-    model.apply(UpsertModelStreamPlaceholder {
-        placeholder: ModelStreamWaitingView {
-            context: UiTurnContext {
-                chat_id: ChatId::new("chat-1"),
-                turn_id: ChatTurnId::new("turn-1"),
-            },
-            elapsed_secs: 3,
-            phase: "waiting".to_string(),
-        },
-    });
     let update = materialize_all(&mut view, &model, None);
     assert!(update.stats.did_rebuild);
-    assert_eq!(root_ids(&view), vec!["user-1", "model-stream-placeholder"]);
+    assert_eq!(root_ids(&view), vec!["user-1"]);
     assert_eq!(update.view_model.roots, view.roots());
 }
 

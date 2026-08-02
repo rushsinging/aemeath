@@ -44,22 +44,11 @@ impl BlockComponent for OutputBlockKind {
             OutputBlockKind::ThinkingMessage(text) => {
                 blocks::thinking::render_thinking(block_id, text, ctx)
             }
-            OutputBlockKind::ModelStreamPlaceholder(placeholder) => {
-                blocks::thinking_placeholder::render_model_stream_placeholder(
-                    block_id,
-                    placeholder,
-                    ctx,
-                    0,
-                )
-            }
             OutputBlockKind::UserMessage(text) => {
                 blocks::user_message::render_user_message(block_id, text, ctx)
             }
             OutputBlockKind::AskUserBatch(ask) => {
                 blocks::ask_user::render_ask_user_batch(block_id, ask, ctx)
-            }
-            OutputBlockKind::HookNotice(notice) => {
-                blocks::diagnostic::render_hook_notice(block_id, notice, ctx)
             }
             OutputBlockKind::SystemNotice(text) | OutputBlockKind::DiagnosticNotice(text) => {
                 blocks::diagnostic::render_diagnostic(block_id, text, ctx)

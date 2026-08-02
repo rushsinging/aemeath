@@ -1,5 +1,6 @@
 use tokio_util::sync::CancellationToken;
 
+use crate::application::activity::{ActivityCoordinator, ActivityError, ActivityTerminal};
 use crate::application::hook::stop_coordination::{StopHookObserver, StopHookOutcome};
 use crate::application::loop_engine::{
     CompactionPort, EventSinkPort, InputPort, InteractionMailboxPort, InternalContinuationKind,
@@ -8,6 +9,43 @@ use crate::application::loop_engine::{
 };
 use crate::application::run::execution_state::RunExecutionState;
 use crate::domain::agent_run::RunDomainEvent;
+
+struct StopHookActivityObserver<'a> {
+    inner: &'a mut dyn StopHookObserver,
+    activities: &'a ActivityCoordinator,
+    run_step_id: &'a sdk::RunStepId,
+}
+
+#[async_trait::async_trait]
+impl StopHookObserver for StopHookActivityObserver<'_> {
+    fn stop_hook_execution_context(
+        &self,
+    ) -> Option<crate::application::hook::stop_coordination::StopHookExecutionContext> {
+        self.inner.stop_hook_execution_context().map(|context| {
+            crate::application::loop_engine::chat::hook_ui::subscription_activity_observer(
+                self.activities,
+                self.run_step_id,
+            )
+            .map_or(context.clone(), |observer| {
+                context.with_subscription_execution_observer(observer)
+            })
+        })
+    }
+
+    fn install_stop_hook_feedback(&mut self, message: share::message::Message) {
+        self.inner.install_stop_hook_feedback(message);
+    }
+
+    async fn observe_stop_hook_outcome(
+        &mut self,
+        execution: &RunExecutionState,
+        outcome: &StopHookOutcome,
+    ) -> Result<(), LoopEngineError> {
+        self.inner
+            .observe_stop_hook_outcome(execution, outcome)
+            .await
+    }
+}
 
 /// 单次 Run 的 Loop Engine 调用上下文。
 ///
@@ -26,6 +64,8 @@ pub struct RunLoop<'a> {
     tools: &'a mut dyn ToolOrchestrationPort,
     stuck: &'a mut dyn StuckHandlingPort,
     plan_approval: &'a dyn PlanApprovalPort,
+    activities: Option<std::sync::Arc<ActivityCoordinator>>,
+    model_name: Option<String>,
 }
 
 impl<'a> RunLoop<'a> {
@@ -57,7 +97,166 @@ impl<'a> RunLoop<'a> {
             tools,
             stuck,
             plan_approval,
+            activities: None,
+            model_name: None,
         }
+    }
+
+    pub(crate) fn bind_activity_context(
+        &mut self,
+        activities: std::sync::Arc<ActivityCoordinator>,
+        model_name: String,
+    ) {
+        self.activities = Some(activities);
+        self.model_name = Some(model_name);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn activities_are_unbound(&self) -> bool {
+        self.activities.is_none()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bind_test_activity_context(&mut self) {
+        self.model_name = Some("test-model".to_string());
+    }
+
+    #[cfg(test)]
+    pub(crate) fn clear_test_activities(&mut self) {
+        self.activities = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ensure_test_activities(&mut self, run_id: &sdk::RunId) {
+        let needs_coordinator = self
+            .activities
+            .as_ref()
+            .is_none_or(|activities| activities.run_id() != run_id);
+        if needs_coordinator {
+            self.activities = Some(std::sync::Arc::new(
+                ActivityCoordinator::production_without_publisher(run_id.clone()),
+            ));
+        }
+    }
+
+    pub(super) fn model_name(&self) -> Result<&str, ActivityError> {
+        self.model_name
+            .as_deref()
+            .ok_or(ActivityError::CoordinatorNotBound)
+    }
+
+    fn activities(&self) -> Result<&ActivityCoordinator, ActivityError> {
+        self.activities
+            .as_deref()
+            .ok_or(ActivityError::CoordinatorNotBound)
+    }
+
+    pub(super) fn activity_parent_id(&self) -> Result<sdk::ActivityId, ActivityError> {
+        let activities = self.activities()?;
+        activities.ensure_run_observation_started()?;
+        activities
+            .live_run_phase_id()
+            .or_else(|| activities.live_run_root_id())
+            .ok_or_else(|| ActivityError::UnknownActivity(sdk::ActivityId::new("run-activity")))
+    }
+
+    pub(super) fn start_model_activity(
+        &self,
+        run_step_id: sdk::RunStepId,
+        parent_activity_id: sdk::ActivityId,
+        invocation_id: sdk::ModelInvocationId,
+        model: String,
+        attempt: u32,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?.start_model_invocation(
+            run_step_id,
+            parent_activity_id,
+            invocation_id,
+            model,
+            attempt,
+        )
+    }
+
+    pub(super) fn update_model_activity(
+        &self,
+        activity_id: sdk::ActivityId,
+        model: String,
+        attempt: u32,
+        stream: sdk::ModelStreamStateView,
+    ) -> Result<(), ActivityError> {
+        self.activities()?
+            .update_model_invocation(activity_id, model, attempt, stream)
+    }
+
+    pub(super) fn finish_activity(
+        &self,
+        activity_id: sdk::ActivityId,
+        terminal: ActivityTerminal,
+    ) -> Result<(), ActivityError> {
+        self.activities()?.finish(activity_id, terminal)
+    }
+
+    pub(super) fn start_tool_activity(
+        &self,
+        run_step_id: sdk::RunStepId,
+        parent_activity_id: sdk::ActivityId,
+        call: &crate::application::tool::agent::ToolCall,
+        parallel_count: u16,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?
+            .start_tool_call(run_step_id, parent_activity_id, call, parallel_count)
+    }
+
+    pub(super) fn finish_tool_activity_by_source(
+        &self,
+        call_id: &sdk::ToolCallId,
+        terminal: ActivityTerminal,
+    ) -> Result<(), ActivityError> {
+        self.activities()?
+            .finish_tool_call_by_source(call_id, terminal)
+    }
+
+    pub(super) fn start_compaction_activity(
+        &self,
+        run_step_id: sdk::RunStepId,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?.start_compaction(
+            run_step_id,
+            self.activity_parent_id()?,
+            sdk::CompactStageView::Preparing,
+        )
+    }
+
+    pub(super) fn update_compaction_activity(
+        &self,
+        activity_id: sdk::ActivityId,
+        stage: sdk::CompactStageView,
+    ) -> Result<(), ActivityError> {
+        self.activities()?
+            .update_compaction(activity_id, stage, None, None)
+    }
+
+    pub(super) fn start_interaction_activity(
+        &self,
+        run_step_id: sdk::RunStepId,
+        request_id: sdk::InteractionRequestId,
+        kind: sdk::InteractionKindView,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?.start_interaction(
+            run_step_id,
+            self.activity_parent_id()?,
+            request_id,
+            kind,
+        )
+    }
+
+    pub(super) fn finish_interaction_activity(
+        &self,
+        request_id: &sdk::InteractionRequestId,
+        terminal: ActivityTerminal,
+    ) -> Result<(), ActivityError> {
+        self.activities()?
+            .finish_interaction_by_source(request_id, terminal)
     }
 
     pub(super) fn input_mut(&mut self) -> &mut dyn InputPort {
@@ -89,6 +288,11 @@ impl<'a> RunLoop<'a> {
         execution: &mut RunExecutionState,
         events: Vec<RunDomainEvent>,
     ) -> Result<(), LoopEngineError> {
+        if let Some(activities) = self.activities.as_ref() {
+            activities
+                .observe_run_events(&events)
+                .map_err(|error| LoopEngineError::Adapter(format!("Activity 观测失败: {error}")))?;
+        }
         self.events.emit(execution, events).await
     }
 
@@ -158,11 +362,17 @@ impl<'a> RunLoop<'a> {
     pub(super) async fn coordinate_stop_hook(
         &mut self,
         execution: &mut RunExecutionState,
+        run_step_id: &sdk::RunStepId,
         turns: usize,
         cancel: &CancellationToken,
     ) -> Result<StopHookOutcome, LoopEngineError> {
+        let activities = self.activities()?.clone();
         crate::application::hook::stop_coordination::coordinate_stop_hook(
-            self.stop_hook,
+            &mut StopHookActivityObserver {
+                inner: self.stop_hook,
+                activities: &activities,
+                run_step_id,
+            },
             execution,
             turns,
             cancel,

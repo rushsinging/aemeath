@@ -3,8 +3,8 @@ use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
 use crate::tui::view_model::output::{
-    BlockNode, ModelStreamPlaceholderBlockView, OutputBlockKind, OutputViewModel, TextBlockView,
-    ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
+    BlockNode, OutputBlockKind, OutputViewModel, TextBlockView, ToolCallBlockView,
+    ToolResultBlockView, ToolSemanticStatus,
 };
 use crate::tui::view_model::style::SemanticStyle;
 
@@ -45,37 +45,6 @@ fn node(id: &str, text: &str, children: Vec<BlockNode>) -> BlockNode {
 
 fn vm_with_roots(roots: Vec<BlockNode>) -> OutputViewModel {
     OutputViewModel::from_roots(roots, 1, true)
-}
-
-fn placeholder_node() -> BlockNode {
-    let kind = OutputBlockKind::ModelStreamPlaceholder(ModelStreamPlaceholderBlockView {
-        key: "model-stream-placeholder".into(),
-        elapsed_secs: 10,
-        phase: "waiting_first_model_delta".into(),
-    });
-    BlockNode {
-        block_id: "model-stream-placeholder".into(),
-        block_version: kind.cache_version(),
-        kind,
-        children: Vec::new(),
-    }
-}
-
-#[test]
-fn model_stream_placeholder_document_is_static_across_animation_frames() {
-    let vm = vm_with_roots(vec![placeholder_node()]);
-    let mut renderer = OutputDocumentRenderer::default();
-
-    let doc0 =
-        renderer.render_tree_with_animation_frame(&vm, 80, 0, MarkdownSpacingPolicy::normal());
-    let render_count = renderer.render_count();
-    let gutted_render_count = renderer.gutted_render_count();
-    let doc1 =
-        renderer.render_tree_with_animation_frame(&vm, 80, 4, MarkdownSpacingPolicy::normal());
-
-    assert_eq!(doc0, doc1, "动画帧不得固化进历史文档");
-    assert_eq!(renderer.render_count(), render_count);
-    assert_eq!(renderer.gutted_render_count(), gutted_render_count);
 }
 
 #[test]

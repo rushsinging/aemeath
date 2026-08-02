@@ -44,10 +44,11 @@ fn animate_visible_line(line: &RenderedLine, frame: u64) -> Option<RenderedLine>
         }
         LineAnimation::ThinkingDots => {
             let mut animated = line.clone();
-            let dots =
-                crate::tui::render::output::blocks::thinking_placeholder::animated_thinking_dots(
-                    frame,
-                );
+            let dots = match frame % 3 {
+                0 => ".",
+                1 => "..",
+                _ => "...",
+            };
             let header = format!("Thinking{dots}");
             let span = animated.spans.first_mut()?;
             span.content = header.clone().into();

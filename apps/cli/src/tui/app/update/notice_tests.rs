@@ -287,7 +287,6 @@ fn test_spinner_tick_idle_does_not_mark_output_dirty() {
     use crate::tui::effect::session::processing::SpawnContextRefs;
     use crate::tui::update::msg::TuiMsg;
     let mut app = make_app();
-    app.model.conversation.runtime.spinner.phase = None; // idle / 已完成
     app.view_state.dirty.clear_output();
     let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(8);
     let spawn_refs = SpawnContextRefs { agent_client: None };
@@ -304,9 +303,19 @@ fn test_spinner_tick_active_requests_redraw_without_marking_output_dirty() {
     use crate::tui::effect::session::processing::SpawnContextRefs;
     use crate::tui::update::msg::TuiMsg;
     let mut app = make_app();
-    app.model.conversation.runtime.spinner.chat_active = true;
-    app.model.conversation.runtime.spinner.phase =
-        Some(crate::tui::model::conversation::spinner::SpinnerPhase::Thinking);
+    let run_id = crate::tui::model::conversation::interaction::UiRunId::from("main-1");
+    app.model
+        .conversation
+        .activity_observations_mut()
+        .replace_for_test(run_id.clone(), 2, Vec::new());
+    app.view_state.run_activity.sync_main_run(
+        Some(&run_id),
+        true,
+        1,
+        0,
+        0,
+        std::time::Instant::now(),
+    );
     app.view_state.dirty.clear_output();
     let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(8);
     let spawn_refs = SpawnContextRefs { agent_client: None };

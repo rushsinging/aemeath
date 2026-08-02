@@ -12,6 +12,208 @@ use super::runtime_view::{TuiChatMessage, TuiToolResultImage};
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
 use crate::tui::view_model::markdown_spacing::MarkdownSpacingPolicy;
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct UiActivityId(String);
+
+impl From<&str> for UiActivityId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl UiActivityId {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivityChangeKind {
+    Started,
+    Updated,
+    Finished,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivitySource {
+    Run,
+    RunStep(UiRunStepId),
+    ModelInvocation(String),
+    ToolCall(String),
+    HookDispatch(UiActivityId),
+    Compaction(UiActivityId),
+    Interaction(String),
+    ChildRun(UiRunId),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiRunPhaseKind {
+    DrainingInput,
+    PreparingContext,
+    ApplyingResponse,
+    AwaitingToolApproval,
+    ExecutingTools,
+    FinalizingStep,
+    CancellingStep,
+    Terminating,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivityKind {
+    Run,
+    RunPhase(TuiRunPhaseKind),
+    ModelInvocation,
+    ToolCall,
+    HookDispatch,
+    Compaction,
+    Interaction,
+    ChildRun,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivityState {
+    Running,
+    Waiting,
+    Succeeded,
+    Failed,
+    Cancelled,
+    Terminated,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivityAudience {
+    User,
+    Operational,
+    Diagnostic,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiRunPurpose {
+    Main,
+    Derived,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiModelStreamState {
+    Invoking,
+    WaitingForFirstToken,
+    Streaming,
+    Retrying,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiHookPoint {
+    PreToolUse,
+    UserPromptSubmit,
+    PreCompact,
+    PermissionRequest,
+    Elicitation,
+    UserPromptExpansion,
+    Stop,
+    PostToolUse,
+    PostToolUseFailure,
+    PostCompact,
+    PostToolBatch,
+    ElicitationResult,
+    SessionStart,
+    SessionEnd,
+    SubRunStart,
+    SubRunStop,
+    TaskCreated,
+    TaskCompleted,
+    Notification,
+    InstructionsLoaded,
+    StopFailure,
+    PermissionDenied,
+    ConfigChange,
+    CwdChanged,
+    FileChanged,
+    TeammateIdle,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiCompactStage {
+    Preparing,
+    Summarizing,
+    Finalizing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiInteractionKind {
+    ToolApproval,
+    UserQuestion,
+    PlanApproval,
+    StuckDiagnostic,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum TuiActivityDetail {
+    Run {
+        purpose: TuiRunPurpose,
+    },
+    Phase {
+        phase: TuiRunPhaseKind,
+    },
+    Model {
+        model: String,
+        attempt: u32,
+        stream: TuiModelStreamState,
+    },
+    Tool {
+        name: String,
+        summary: Option<String>,
+        parallel_count: u16,
+    },
+    Hook {
+        point: TuiHookPoint,
+        script: String,
+        attempt: u8,
+    },
+    Compact {
+        stage: TuiCompactStage,
+        current: Option<u32>,
+        total: Option<u32>,
+    },
+    Interaction {
+        kind: TuiInteractionKind,
+    },
+    ChildRun {
+        role: String,
+        model: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TuiActivityTiming {
+    pub(crate) total_elapsed_ms: u64,
+    pub(crate) active_elapsed_ms: u64,
+    pub(crate) state_elapsed_ms: u64,
+    pub(crate) started_at_unix_ms: Option<u64>,
+    pub(crate) finished_at_unix_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiActivityObservation {
+    pub(crate) id: UiActivityId,
+    pub(crate) run_id: UiRunId,
+    pub(crate) run_step_id: Option<UiRunStepId>,
+    pub(crate) parent_activity_id: Option<UiActivityId>,
+    pub(crate) source: TuiActivitySource,
+    pub(crate) kind: TuiActivityKind,
+    pub(crate) state: TuiActivityState,
+    pub(crate) detail: TuiActivityDetail,
+    pub(crate) audience: TuiActivityAudience,
+    pub(crate) revision: u64,
+    pub(crate) timing: TuiActivityTiming,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiActivitySnapshot {
+    pub(crate) run_id: UiRunId,
+    pub(crate) revision: u64,
+    pub(crate) activities: Vec<TuiActivityObservation>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiTurnContext {
     pub(crate) chat_id: String,
@@ -64,9 +266,6 @@ pub(crate) enum TuiRunEvent {
     },
     Terminated {
         reason: TuiRunTerminationReason,
-    },
-    Transitioned {
-        status: String,
     },
 }
 
@@ -252,49 +451,6 @@ pub(crate) struct TuiConfigView {
     pub(crate) logging_level: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum TuiHookStatus {
-    Running,
-    Succeeded,
-    Blocked,
-    Failed,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiHookResult {
-    pub(crate) exit_code: Option<i32>,
-    pub(crate) stdout: String,
-    pub(crate) stderr: String,
-    pub(crate) decision: Option<String>,
-    pub(crate) reason: Option<String>,
-    pub(crate) additional_context: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiHookEvent {
-    pub(crate) hook_name: String,
-    pub(crate) status: TuiHookStatus,
-    pub(crate) matcher: Option<String>,
-    pub(crate) command: Option<String>,
-    pub(crate) result: Option<TuiHookResult>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum TuiHookMessageKind {
-    AdditionalContext,
-    SystemMessage,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiHookMessage {
-    pub(crate) point: String,
-    pub(crate) source: String,
-    pub(crate) execution_ordinal: u32,
-    pub(crate) attempt: u8,
-    pub(crate) kind: TuiHookMessageKind,
-    pub(crate) text: String,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum TuiAgentProgressKind {
     Started { role: Option<String>, model: String },
@@ -336,6 +492,12 @@ pub(crate) struct TuiSkillSlashRoute {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum TuiRuntimeEvent {
+    Noop,
+    ActivityChanged {
+        kind: TuiActivityChangeKind,
+        activity: TuiActivityObservation,
+    },
+    ActivitySnapshot(TuiActivitySnapshot),
     SkillsUpdated {
         revision: String,
         skills: Vec<TuiSkillView>,
@@ -381,11 +543,6 @@ pub(crate) enum TuiRuntimeEvent {
         images: Vec<TuiToolResultImage>,
     },
     SystemMessage(String),
-    ModelStreamWaiting {
-        context: TuiTurnContext,
-        elapsed_secs: u64,
-        phase: String,
-    },
     ModelInvocationRetrying {
         context: TuiTurnContext,
         attempt: u32,
@@ -405,9 +562,6 @@ pub(crate) enum TuiRuntimeEvent {
         messages: Vec<TuiChatMessage>,
         cleared_count: usize,
     },
-    StopHookBlocked {
-        messages: Vec<TuiChatMessage>,
-    },
     PostToolExecutionSync {
         messages: Vec<TuiChatMessage>,
     },
@@ -420,6 +574,7 @@ pub(crate) enum TuiRuntimeEvent {
     },
     CompactFinished {
         messages: Vec<TuiChatMessage>,
+        notice: String,
     },
     UserMessagesAdopted {
         items: Vec<TuiChatMessage>,
@@ -444,8 +599,6 @@ pub(crate) enum TuiRuntimeEvent {
         event: TuiRunStepEvent,
     },
     InteractionRequested(TuiInteractionRequest),
-    HookEvent(TuiHookEvent),
-    HookMessage(TuiHookMessage),
     AgentProgress {
         source_context: TuiTurnContext,
         attachment_context: TuiTurnContext,
@@ -496,6 +649,7 @@ pub(crate) enum TuiRuntimeEvent {
         steps: Vec<super::runtime_view::TuiResumedSessionStep>,
         session_id: String,
         created_at: u64,
+        compacted: bool,
     },
     SessionResumeFailed {
         kind: TuiSessionResumeFailureKind,

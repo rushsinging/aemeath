@@ -146,6 +146,7 @@ impl StreamingToolExecutor {
                 &spawn_inner.agent,
                 &spawn_inner.runtime_context.event_sink(),
                 spawn_inner.runtime_context.hooks_ref(),
+                spawn_inner.runtime_context.activities().as_ref(),
                 &spawn_inner.cancel,
                 &spawn_inner.language,
                 &spawn_inner.workspace_root,

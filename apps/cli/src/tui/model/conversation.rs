@@ -1,3 +1,7 @@
+pub mod activity_observation;
+#[cfg(test)]
+#[path = "conversation/activity_observation_tests.rs"]
+mod activity_observation_tests;
 pub mod agent_progress;
 #[cfg(test)]
 #[path = "conversation/agent_run_state_tests.rs"]
@@ -33,9 +37,7 @@ pub(crate) mod resumed_history;
 #[path = "conversation/retained_state_tests.rs"]
 mod retained_state_tests;
 pub mod runtime_state;
-pub mod spinner;
 pub mod status_notice;
-pub mod stop_hook_notice;
 pub mod stream;
 pub mod streaming_preview;
 pub mod system_reminder;

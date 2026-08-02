@@ -1,6 +1,6 @@
-use crate::tui::model::conversation::block::HookNoticeKind;
 #[cfg(test)]
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+#[cfg(test)]
 use crate::tui::model::conversation::model::ConversationModel;
 #[cfg(test)]
 use crate::tui::model::conversation::tool_call::ToolCall;
@@ -9,8 +9,7 @@ use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::view_model::OutputViewModel;
 use crate::tui::view_model::{
     allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
-    HookNoticeBlockView, HookNoticeSemanticKind, ModelStreamPlaceholderBlockView, OutputBlockKind,
-    SemanticStyle, TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
+    OutputBlockKind, SemanticStyle, TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
 };
 #[cfg(test)]
 use std::collections::HashMap;
@@ -176,28 +175,6 @@ impl OutputViewAssembler {
                     style: SemanticStyle::Muted,
                 }),
             )),
-            OutputTimelineItem::HookNotice { id, content } => {
-                let (kind, style) = match content.kind {
-                    HookNoticeKind::Blocked => {
-                        (HookNoticeSemanticKind::Blocked, SemanticStyle::Error)
-                    }
-                    HookNoticeKind::Failed => {
-                        (HookNoticeSemanticKind::Failed, SemanticStyle::Error)
-                    }
-                    HookNoticeKind::Info => (HookNoticeSemanticKind::Info, SemanticStyle::Muted),
-                };
-                Some(leaf(
-                    id.clone(),
-                    OutputBlockKind::HookNotice(HookNoticeBlockView {
-                        key: id.clone(),
-                        kind,
-                        title: content.title.clone(),
-                        body: content.body.clone(),
-                        details: content.details.clone(),
-                        style,
-                    }),
-                ))
-            }
             OutputTimelineItem::Error { id, text } => Some(leaf(
                 id.clone(),
                 OutputBlockKind::DiagnosticNotice(TextBlockView {
@@ -291,18 +268,6 @@ impl OutputViewAssembler {
                 ))
             }
         }
-    }
-
-    pub(super) fn assemble_placeholder(conversation: &ConversationModel) -> Option<BlockNode> {
-        let placeholder = conversation.model_stream_placeholder.as_ref()?;
-        Some(leaf(
-            "model-stream-placeholder".to_string(),
-            OutputBlockKind::ModelStreamPlaceholder(ModelStreamPlaceholderBlockView {
-                key: "model-stream-placeholder".to_string(),
-                elapsed_secs: placeholder.elapsed_secs,
-                phase: placeholder.phase.clone(),
-            }),
-        ))
     }
 }
 

@@ -4,9 +4,7 @@ pub(crate) mod events;
 #[cfg(test)]
 mod events_tests;
 pub(crate) mod finalize;
-mod hook_ui;
-#[cfg(test)]
-mod hook_ui_tests;
+pub(crate) mod hook_ui;
 mod idle_commands;
 mod idle_lifecycle;
 mod input_gate;
@@ -38,9 +36,8 @@ pub(crate) mod task_snapshot;
 pub(crate) mod tools;
 
 pub use events::{
-    ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeHookEvent, RuntimeHookEventStatus,
-    RuntimeHookExecutionResult, RuntimeHookMessage, RuntimeHookMessageKind,
-    RuntimeResumedSessionStep, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeResumedSessionStep, RuntimeStreamEvent,
+    RuntimeToolCallStatus, RuntimeTurnContext,
 };
 pub use input_gate::{
     apply_gate, GateKind, InputEventDrainPort, InputEventFuture, InputEventOptFuture,
@@ -49,6 +46,4 @@ pub use input_gate::{
 pub use input_log::logged_input_messages;
 pub use loop_context::ChatLoopContext;
 pub use loop_runner::process_chat_loop;
-pub(crate) use stream_handler::{
-    should_emit_model_stream_waiting, InvocationEventReducer, InvocationResponse,
-};
+pub(crate) use stream_handler::{InvocationEventReducer, InvocationResponse};

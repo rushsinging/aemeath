@@ -111,6 +111,40 @@ impl ChatEventSink for TestSink {
 }
 
 #[tokio::test]
+async fn compact_input_becomes_idle_command_and_is_buffered_while_busy() {
+    let idle_buffer = PendingInputBuffer::default();
+    idle_buffer.push(ChatInputEvent::Compact);
+    let idle_outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &idle_buffer,
+        &TestSink::default(),
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert!(matches!(
+        idle_outcome.pending_command,
+        Some(PendingCommand::Compact)
+    ));
+    assert!(idle_buffer.is_empty());
+
+    let busy_buffer = PendingInputBuffer::default();
+    busy_buffer.push(ChatInputEvent::Compact);
+    let busy_outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &busy_buffer,
+        &TestSink::default(),
+        &task::TaskStore::new(),
+        false,
+    )
+    .await;
+
+    assert!(busy_outcome.pending_command.is_none());
+    assert!(!busy_buffer.is_empty());
+}
+
+#[tokio::test]
 async fn test_run_loop_gate_before_finish_continues_on_user_message() {
     let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message("继续", Vec::new())]);

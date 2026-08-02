@@ -130,9 +130,6 @@ impl OutputWindowIndex {
             | OutputTimelineItem::Error { text, .. } => {
                 text.lines().count().max(1).saturating_add(1)
             }
-            OutputTimelineItem::HookNotice { content, .. } => {
-                2usize.saturating_add(content.body.lines().count())
-            }
             OutputTimelineItem::AskUserBatch { slots, .. } => slots.len().max(1).saturating_add(1),
             OutputTimelineItem::OrphanToolResult { output, .. } => {
                 output.lines().count().max(1).saturating_add(1)
