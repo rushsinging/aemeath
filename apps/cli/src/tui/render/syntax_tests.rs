@@ -29,6 +29,58 @@ fn test_language_by_fence_info_keeps_extension_path() {
 }
 
 #[test]
+fn test_language_by_fence_info_resolves_typescript() {
+    let ts = language_by_fence_info("ts").expect("ts fence should resolve");
+    assert_eq!(ts.name, "TypeScript");
+    let by_name = language_by_fence_info("typescript").expect("typescript fence should resolve");
+    assert_eq!(by_name.name, "TypeScript");
+}
+
+#[test]
+fn test_language_by_fence_info_resolves_tsx() {
+    let tsx = language_by_fence_info("tsx").expect("tsx fence should resolve");
+    assert_eq!(tsx.name, "TypeScriptReact");
+}
+
+#[test]
+fn test_language_by_fence_info_maps_ts_module_variants_to_typescript() {
+    for info in ["mts", "cts"] {
+        let syntax =
+            language_by_fence_info(info).unwrap_or_else(|| panic!("{info} fence should resolve"));
+        assert_eq!(syntax.name, "TypeScript", "{info} 应映射到 TypeScript");
+    }
+}
+
+#[test]
+fn test_highlight_line_with_typescript() {
+    let syntax = language_by_fence_info("ts").expect("ts fence should resolve");
+    let spans = highlight_line("import { readFile } from \"fs\";", Some(&syntax))
+        .expect("TypeScript 行应可高亮");
+    assert!(!spans.is_empty());
+    let text: String = spans.iter().map(|span| span.text.as_str()).collect();
+    assert!(text.contains("import"));
+    let colors: std::collections::HashSet<_> = spans.iter().map(|span| span.color).collect();
+    assert!(
+        colors.len() > 1,
+        "TypeScript 行应产生多色高亮，实际颜色数 {}",
+        colors.len()
+    );
+}
+
+#[test]
+fn test_highlight_line_with_tsx() {
+    let syntax = language_by_fence_info("tsx").expect("tsx fence should resolve");
+    let spans = highlight_line("const el = <div className=\"app\" />;", Some(&syntax))
+        .expect("TSX 行应可高亮");
+    let colors: std::collections::HashSet<_> = spans.iter().map(|span| span.color).collect();
+    assert!(
+        colors.len() > 1,
+        "TSX 行应产生多色高亮，实际颜色数 {}",
+        colors.len()
+    );
+}
+
+#[test]
 fn test_highlight_line_uses_catppuccin_macchiato_keyword_color() {
     let syntax = language_by_extension("rs").unwrap();
     let spans = highlight_line("if true {", Some(&syntax)).unwrap();

@@ -669,7 +669,7 @@ impl App {
         // 文档构建（含各 block 的字符串处理）放在 draw 之外，draw 循环的 catch_unwind
         // 只保护「把已构建文档画进 buffer」，无法兜住这里的 panic。对称地在构建侧兜底：
         // 一旦构建 panic（已落 panic.log），保留旧文档并提示用户，避免崩溃与糊屏。
-        let requested_window = crate::tui::render::output::document_renderer::OutputRenderWindow {
+        let requested_window = crate::tui::view_model::output::OutputRenderWindow {
             line_limit: self.view_state.output.render_line_limit(),
             tail_offset: self.view_state.output.history_window_tail_offset,
         };

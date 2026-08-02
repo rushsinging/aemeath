@@ -59,14 +59,14 @@ impl OutputViewAssembler {
         if activity.is_model_silent(now) {
             if let Some(block_id) = activity.silence_block_id() {
                 let dots = ".".repeat((activity.frame % 3 + 1) as usize);
-                output.roots.push(leaf(
+                output.roots.push(std::sync::Arc::new(leaf(
                     block_id.clone(),
                     OutputBlockKind::ThinkingMessage(TextBlockView {
                         key: block_id,
                         text: format!("Thinking{dots}"),
                         style: SemanticStyle::Muted,
                     }),
-                ));
+                )));
             }
         }
         output
@@ -308,9 +308,11 @@ impl OutputViewAssembler {
             started.elapsed(),
         );
         OutputViewModel {
-            roots,
+            roots: roots.into_iter().map(std::sync::Arc::new).collect(),
             version,
             follow_tail_hint: true,
+            source_total_lines: None,
+            folded_earlier_lines: 0,
         }
     }
 }

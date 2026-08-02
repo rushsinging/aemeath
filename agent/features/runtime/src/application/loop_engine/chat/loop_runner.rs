@@ -296,12 +296,12 @@ where
                                         .display_steps
                                         .into_iter()
                                         .map(|step| super::RuntimeResumedSessionStep {
-                                            run_id: step.run_id,
-                                            step_id: step.step_id,
-                                            messages: step.messages,
-                                            finalize_cause: step.finalize_cause,
-                                            duration_ms: step.duration_ms,
-                                        })
+                                        run_id: step.run_id,
+                                        step_id: step.step_id,
+                                        message_segments: step.message_segments,
+                                        finalize_cause: step.finalize_cause,
+                                        duration_ms: step.duration_ms,
+                                    })
                                         .collect(),
                                     session_id: resume_view.session_id,
                                     created_at: chrono::DateTime::parse_from_rfc3339(

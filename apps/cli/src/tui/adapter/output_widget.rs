@@ -31,11 +31,7 @@ mod tests {
         let roots: Vec<BlockNode> = (0..lines)
             .map(|i| leaf(&format!("b-{i}"), &format!("line {i}")))
             .collect();
-        OutputViewModel {
-            roots,
-            version: 1,
-            follow_tail_hint: true,
-        }
+        OutputViewModel::from_roots(roots, 1, true)
     }
 
     #[test]
@@ -46,16 +42,16 @@ mod tests {
             text: "整理一轮，不改代码。".into(),
             style: SemanticStyle::Normal,
         });
-        let view_model = OutputViewModel {
-            roots: vec![BlockNode {
+        let view_model = OutputViewModel::from_roots(
+            vec![BlockNode {
                 block_id: "a".into(),
                 block_version: kind.cache_version(),
                 kind,
                 children: Vec::new(),
             }],
-            version: 1,
-            follow_tail_hint: true,
-        };
+            1,
+            true,
+        );
 
         let document = renderer.render_model_document(
             &view_model,

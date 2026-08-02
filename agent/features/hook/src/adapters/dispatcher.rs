@@ -80,11 +80,13 @@ impl Dispatcher {
     /// 任一 subscription 配置非法（如 Stop 配 failure_policy、非前置闸门配 Block）
     /// 即返回全部错误——与设计 §4「非法组合在 Config 校验阶段拒绝，而非运行时
     /// 静默忽略」一致。**NEVER** 静默丢弃非法 subscription。
-    pub fn try_new(
-        subscriptions: Vec<HookSubscription>,
-        env: HashMap<String, String>,
-    ) -> Result<Self, Vec<SubscriptionError>> {
-        Self::build(subscriptions, Box::new(ProcessDriverExecutor::new(env)))
+    pub fn try_new(subscriptions: Vec<HookSubscription>) -> Result<Self, Vec<SubscriptionError>> {
+        Self::build(
+            subscriptions,
+            Box::new(ProcessDriverExecutor::new(
+                crate::adapters::environment::capture_basic_environment(),
+            )),
+        )
     }
 
     /// 共用装配：严格校验全部 subscription 后装配执行器。
@@ -187,8 +189,7 @@ impl HookPort for Dispatcher {
         for sub in matching {
             let current_input =
                 serde_json::to_value(&current_invocation).unwrap_or(serde_json::json!({}));
-            let invocation_env =
-                invocation_environment(&current_invocation, context.cwd(), context.env());
+            let invocation_env = invocation_environment(&current_invocation, context.cwd());
             let outcome = self
                 .execute_subscription(
                     sub,
@@ -299,7 +300,6 @@ impl HookPort for Dispatcher {
                                     &current_invocation,
                                     error,
                                     context.cwd(),
-                                    context.env(),
                                     cancellation,
                                 )
                                 .await;
@@ -382,9 +382,8 @@ fn hook_script_file_name(command: &str) -> String {
 fn invocation_environment(
     invocation: &HookInvocation,
     cwd: &std::path::Path,
-    base: &HashMap<String, String>,
 ) -> HashMap<String, String> {
-    let mut env = base.clone();
+    let mut env = HashMap::new();
     env.insert(
         "AEMEATH_HOOK_EVENT".to_string(),
         serde_json::to_string(&invocation.point()).unwrap_or_default(),
@@ -648,7 +647,6 @@ impl Dispatcher {
         stop_invocation: &HookInvocation,
         error: String,
         cwd: &std::path::Path,
-        env: &HashMap<String, String>,
         cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         let turns = match stop_invocation {
@@ -670,7 +668,7 @@ impl Dispatcher {
         matching.sort_by_key(|s| s.order);
 
         let current_input = serde_json::to_value(&invocation).unwrap_or(serde_json::json!({}));
-        let invocation_env = invocation_environment(&invocation, cwd, env);
+        let invocation_env = invocation_environment(&invocation, cwd);
         let mut all_executions: Vec<HookExecution> = Vec::new();
         for sub in matching {
             match self

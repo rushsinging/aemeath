@@ -33,6 +33,7 @@ use crate::chat_view::{AgentProgressEventView, WorkspaceContextView};
 use crate::ChatMessage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[cfg(test)]
 mod run_status_view_tests {
@@ -96,6 +97,155 @@ pub enum ResumedStepFinalizeCause {
     Completed,
     UserCancelledStep,
     RunTerminated,
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalResumedSessionStep {
+    pub run_id: String,
+    pub step_id: String,
+    pub message_segments: Vec<Arc<[share::message::Message]>>,
+    pub finalize_cause: Option<ResumedStepFinalizeCause>,
+    pub duration_ms: Option<u64>,
+}
+
+impl LocalResumedSessionStep {
+    pub fn from_wire(step: ResumedSessionStep) -> Self {
+        let messages = step
+            .messages
+            .into_iter()
+            .map(sdk_message_to_local)
+            .collect::<Vec<_>>();
+        Self {
+            run_id: step.run_id,
+            step_id: step.step_id,
+            message_segments: vec![messages.into()],
+            finalize_cause: step.finalize_cause,
+            duration_ms: step.duration_ms,
+        }
+    }
+
+    pub fn messages(&self) -> impl Iterator<Item = &share::message::Message> {
+        self.message_segments
+            .iter()
+            .flat_map(|segment| segment.iter())
+    }
+
+    pub fn materialize(&self) -> ResumedSessionStep {
+        ResumedSessionStep {
+            run_id: self.run_id.clone(),
+            step_id: self.step_id.clone(),
+            messages: self.messages().map(local_message_to_sdk).collect(),
+            finalize_cause: self.finalize_cause,
+            duration_ms: self.duration_ms,
+        }
+    }
+}
+
+fn sdk_message_to_local(message: ChatMessage) -> share::message::Message {
+    share::message::Message {
+        role: if message.role == "assistant" {
+            share::message::Role::Assistant
+        } else {
+            share::message::Role::User
+        },
+        content: serde_json::from_value(serde_json::to_value(message.content).unwrap_or_default())
+            .unwrap_or_default(),
+        metadata: message
+            .metadata
+            .map(|metadata| share::message::MessageMetadata {
+                source: match metadata.source {
+                    crate::ChatMessageSource::User => share::message::MessageSource::User,
+                    crate::ChatMessageSource::SystemGenerated => {
+                        share::message::MessageSource::SystemGenerated
+                    }
+                    crate::ChatMessageSource::StopHook => share::message::MessageSource::StopHook,
+                },
+                stop_hook: metadata
+                    .stop_hook
+                    .map(|payload| share::message::StopHookFeedback {
+                        summary: payload.summary,
+                        command: payload.command,
+                        exit_code: payload.exit_code,
+                        reason: payload.reason,
+                        stdout_preview: payload.stdout_preview,
+                        stderr_preview: payload.stderr_preview,
+                        stdout_truncated: payload.stdout_truncated,
+                        stderr_truncated: payload.stderr_truncated,
+                        output_file: payload.output_file,
+                    }),
+            }),
+    }
+}
+
+fn local_message_to_sdk(message: &share::message::Message) -> ChatMessage {
+    ChatMessage {
+        role: match message.role {
+            share::message::Role::User => "user".to_string(),
+            share::message::Role::Assistant => "assistant".to_string(),
+        },
+        content: serde_json::from_value(serde_json::to_value(&message.content).unwrap_or_default())
+            .unwrap_or_default(),
+        metadata: message
+            .metadata
+            .as_ref()
+            .map(|metadata| crate::ChatMessageMetadata {
+                source: match metadata.source {
+                    share::message::MessageSource::User => crate::ChatMessageSource::User,
+                    share::message::MessageSource::SystemGenerated => {
+                        crate::ChatMessageSource::SystemGenerated
+                    }
+                    share::message::MessageSource::StopHook => crate::ChatMessageSource::StopHook,
+                },
+                stop_hook: metadata
+                    .stop_hook
+                    .as_ref()
+                    .map(|payload| crate::StopHookFeedbackView {
+                        summary: payload.summary.clone(),
+                        command: payload.command.clone(),
+                        exit_code: payload.exit_code,
+                        reason: payload.reason.clone(),
+                        stdout_preview: payload.stdout_preview.clone(),
+                        stderr_preview: payload.stderr_preview.clone(),
+                        stdout_truncated: payload.stdout_truncated,
+                        stderr_truncated: payload.stderr_truncated,
+                        output_file: payload.output_file.clone(),
+                    }),
+            }),
+        input_id: None,
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalSessionResumeBacking {
+    pub steps: Vec<LocalResumedSessionStep>,
+    pub session_id: String,
+    pub created_at: u64,
+}
+
+impl LocalSessionResumeBacking {
+    pub fn from_wire(view: SessionResumeView) -> Self {
+        Self {
+            steps: view
+                .steps
+                .into_iter()
+                .map(LocalResumedSessionStep::from_wire)
+                .collect(),
+            session_id: view.session_id,
+            created_at: view.created_at,
+        }
+    }
+
+    pub fn materialize(&self) -> SessionResumeView {
+        SessionResumeView {
+            steps: self
+                .steps
+                .iter()
+                .map(LocalResumedSessionStep::materialize)
+                .collect(),
+            session_id: self.session_id.clone(),
+            created_at: self.created_at,
+        }
+    }
 }
 
 /// 会话恢复时由 Context 发布的完整用户可见 RunStep 历史投影。

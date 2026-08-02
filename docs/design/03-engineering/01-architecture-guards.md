@@ -57,6 +57,7 @@
 | 11 | `check-tui-effect-boundary.sh` | TUI 架构 | model/update 不直接执行 Effect |
 | 12 | `check-tui-model-view-boundaries.sh` | TUI 架构 | model/render/view 边界 + 物理遗留 |
 | 13 | `check-tui-output-legacy-guards.sh` | TUI 遗留 | TUI M2 后选区/工具状态旁路守卫 |
+| 13a | `check-tui-retained-output-view.sh` | TUI 性能架构 | 生产输出刷新只经统一窗口物化入口；保留视图不得拥有完整历史节点，渲染器不得扫描完整语义历史；变更日志保持有界 |
 | 14 | `check-tui-block-nesting.sh` | TUI 组件 | gutter 仅由 document_renderer 注入 |
 | 15a | `check-render-pure.sh` | TUI 渲染 | render 禁止直读 conversation/runtime domain model，测试与登记 display bridge 除外 |
 | 15 | `check-render-isolation.sh` | TUI 渲染 | render/output 纯函数边界 |
@@ -71,21 +72,19 @@
 | 19c | `check-composition-construction-ownership.sh` | Composition 跨 BC 验收 | 汇总验证 Session、Config Store、Runtime Tool 与 Hook 四个 leaf ownership Guard 已注册、编排、active policy 且三侧代表性 concrete constructor 不回流；不替代 leaf Guard，也不拥有 MCP lifecycle |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
 | 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()`、同步 `cancel_run(run_id)`、Runtime-owned `reply_interaction` / `cancel_interaction` 与 Config control-plane；禁止恢复 `ChatInputEvent::Cancel` |
-| 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
+| 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns`；测试 fixture 必须位于显式 `tests/` 目录，生产 Session 边界扫描仅排除该目录与 `*_tests.rs` |
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
 | 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution、Skill Catalog/Load ports、Tool Result materializer 与 ActiveRunRegistry，并把 Execution 注入 `application/run/context_factory.rs` 的 `RuntimeContextFactory`；factory 通过 `RuntimeServices` 单一持有静态能力，Runtime bootstrap 只持 injected factory，不得重复保存 Execution，也禁止恢复已退役的 Tool context binding、Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
 | 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher 并注入 `RuntimeContextFactory`；Runtime bootstrap 只携带 injected factory，Main/Sub 只消费其中的 HookPort，禁止恢复 HookRunner / dispatcher factory |
-| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 RuntimeContext 唯一生产构造入口；RunKind 不驱动控制流；退役符号不存在；stop hook、Interaction、Hook、Reasoning 与 Main/Sub 统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名 |
-| 23f | `check-runtime-activity-observation.sh` | Runtime Activity 观测 | `ActivityObservation` 只能由 `ActivityCoordinator` 构造；TUI Activity 事实镜像只能经 root reducer 变更；LiveStatus 禁止依赖旧 Run status；旧活动字段保持零生产引用；Runtime/TUI 日志必须包含 identity、类型、状态、revision 与 timing，且禁止原始参数、stdout、response payload |
+| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；`RuntimeContextAssemblyToken::new` 只允许该生产算法使用，禁止 test-only Context creator；`RuntimeContextFactory::prepare` 与 `RunInstance::new` 的调用点扫描覆盖生产和测试 Rust 源码并先屏蔽字符串字面量，分别只允许 `RunFactory`；`RunCreationRequest`、`SessionSnapshot`、`ParentRunFacts` 保持纯值；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；RunKind 不驱动控制流；退役符号不存在；stop hook、Interaction、Hook、Reasoning 与 Main/Sub 统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名 |
+| 23f | `check-runtime-activity-observation.sh` | Runtime Activity 观测 | `ActivityObservation` 只能由 `ActivityCoordinator` 构造；TUI Activity 事实镜像只能经 root reducer 变更；LiveStatus 禁止依赖旧 Run status；Hook 展示只能走逐 subscription Activity 链；旧活动字段保持零生产引用；Runtime/TUI 日志必须包含 identity、类型、状态、revision 与 timing，且禁止原始参数、stdout、response payload |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
-
-`check-runtime-activity-observation.sh` 固化统一 Activity 观测链：Runtime 生产代码仅 `ActivityCoordinator` 可构造完整 `ActivityObservation`，领域模型文件只定义事实类型；TUI 事实镜像只允许 root reducer 触发变更；LiveStatus 只从 Activity 摘要派生，不得恢复 Run status 驱动。该 Guard 同时要求 Runtime 发布侧与 TUI 接收侧记录 `run_id`、`activity_id`（增量）、source/kind/state、revision 与三类 elapsed timing，并拒绝 `raw_args`、`stdout`、`response` payload。Guard 为零迁移例外的 Target policy，注册于 `policy.runtime.activity-observation`。
 
 `check-runtime-capability-assembly.sh` 同时承担 Runtime 命名边界：生产源码中的类型、trait、模块、函数、方法与变量不得使用 `Projection` / `projection` 宽泛命名。真正的单向值转换必须使用目标或用途明确的 mapper/view/record 名称；职责混合必须通过类型拆分解决，不能用命名白名单放行。该规则不扫描测试文件，测试中的退役符号断言可继续存在。
 
@@ -450,6 +449,14 @@
   - `apps/cli/src/tui/output_area` + `apps/cli/src/tui/render` 不得在非 `if matches!(line.style, LineStyle::ToolCallRunning)` 上下文中调 `cell.set_char('●')`（防覆盖已完成 tool 的状态图标）。
 - **白名单**：cell 写入的 `if matches!(line.style, LineStyle::ToolCallRunning)` 守卫条件本身。
 
+### 13a. check-tui-retained-output-view.sh
+
+- **功能**：锁定统一输出窗口物化生产路径，防止长会话输出刷新重新回退到完整历史节点常驻、完整历史装配或渲染前全量语义扫描。
+- **正向约束**：`app/update.rs` 必须调用 `RetainedOutputView::materialize_window`；`RetainedOutputView` 只拥有轻量 `OutputWindowIndex` 与同步状态；模型侧 journal 必须具有固定容量并在超限时移除最旧 entry。
+- **禁用规则**：生产输出刷新调用 `assemble_from_conversation`；`RetainedOutputView` 持有完整 `OutputViewModel` 或 `Vec<Arc<BlockNode>>`；保留视图调用 `assemble_shared_roots` 或维护重复完整历史 ID；renderer 构造 `semantic_root_ids` / `root_layout_states` 扫描完整语义历史；恢复 `OutputViewCache`、`OutputProjection` 或 `output_projection` 命名；移除 journal 的容量常量或淘汰逻辑。
+- **测试**：`check-tui-retained-output-view-tests.sh` 在隔离 fixture 中验证合法窗口入口，并分别注入完整历史 owner、完整 roots 装配、renderer 全量语义扫描、生产完整装配、旧 cache 与无界 journal 等违规。
+- **白名单**：守卫 fixture 中的禁止模式字符串；无生产路径例外。
+
 ## 14. check-tui-block-nesting.sh
 
 - **功能**：gutter 归属不变量（Task 4.2）——gutter（marker/indent）**只由**渲染器 `document_renderer.rs` 经 `apply_gutter` 注入；block 组件的 `render_self` 绝不自写 gutter/marker/indent。
@@ -583,7 +590,7 @@
 
 - **功能**：验证 Runtime 内只有一个共享 Loop Engine 实现，禁止在 `agent/shared/` 或其他 feature crate 中出现平行 run-loop 实现。
 - **守护**：确保 Loop Engine 的单一真相——所有 Main / Sub Run 共用同一驱动骨架（[03-loop-and-state-machine.md](../02-modules/runtime/03-loop-and-state-machine.md)）。
-- **检查方式**：确认 Runtime 的 Main/Sub 入口调用唯一 `loop_engine::run_loop`，禁止旧 FSM；唯一入口检测兼容普通函数、带 visibility scope 的函数以及泛型 `run_loop<P>` 形状，避免把合法的窄阶段泛型重构误判为入口消失；并扫描 `agent/features/runtime/src`、`agent/features/tools/src/adapters/agent_tool.rs` 与 `agent/features/tools/src/domain/types/agent.rs`，禁止恢复 Session token 槽或 `max_turns`。
+- **检查方式**：确认 Runtime 的 Main/Derived 入口调用唯一 `loop_engine::run_loop`，禁止旧 FSM；唯一入口检测兼容普通函数、带 visibility scope 的函数以及泛型 `run_loop<P>` 形状，避免把合法的窄阶段泛型重构误判为入口消失；并扫描 `agent/features/runtime/src`、`agent/features/tools/src/adapters/agent_tool.rs` 与 `agent/features/tools/src/domain/types/agent.rs`，禁止恢复 Session token 槽或 `max_turns`。测试 fixture 只有位于显式 `tests/` 目录或 `*_tests.rs` 文件时才从生产 Session 边界扫描中排除，避免普通生产目录中的测试辅助模块伪装成合法装配入口。
 - **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
 
 - **#872 Context 边界 / #1397 公共 owner**：扫描整个 `agent/features/runtime/src` 的生产源码，禁止引用 `context::session::*`、`ChatChain` / `ChatSegment`、`current_chain` / `frozen_chats` / `active_summary`、`SessionProjectionParticipant`、`projection_start_index`、`save_chain` 或 legacy compact helper；测试路径由已登记的 `scope.runtime.shared-loop-tests` 排除。独立 Run 与派生 Run 均委托 `application/loop_engine/step_persistence.rs` 的无角色 owner 接入唯一 `append_finalized`，Main/Sub adapter 禁止各自保留 finalized append 算法。Interaction completion 必须由 `application/interaction/coordinator.rs` 的 `InteractionCompletionContext` 与 `complete_tool_interaction` 统一拥有；禁止恢复 `InteractionCompletionPort` 或 Main/Sub 五组角色 completion 方法。消息归属必须使用显式 Step ownership，idle compact/reset 经 ContextPort，resume 与 session commands 经 Context crate-root Published Language。

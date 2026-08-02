@@ -9,10 +9,13 @@ pub(crate) async fn build_client_from_cli_args(
     composition::app::build_agent_client(args).await
 }
 
-fn initial_tui_resume_view(
+fn initial_tui_resume_backing(
     bootstrap: &composition::app::AgentClientBootstrap,
-) -> Option<&sdk::SessionResumeView> {
-    bootstrap.startup_resume.as_ref()
+) -> Option<sdk::SessionResumeView> {
+    bootstrap
+        .startup_resume
+        .as_ref()
+        .map(|resume| resume.materialize())
 }
 
 fn should_emit_cli_frontend_started_log() -> bool {
@@ -70,7 +73,7 @@ pub(crate) async fn run_chat(args: Args) {
             return;
         }
 
-        let startup_resume = initial_tui_resume_view(&bootstrap).cloned();
+        let startup_resume = initial_tui_resume_backing(&bootstrap);
         let mut app =
             crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
         app.agent_client = Some(bootstrap.client.clone());

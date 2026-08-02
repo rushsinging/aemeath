@@ -105,12 +105,18 @@ impl OutputTimelineItem {
             | OutputTimelineItem::AgentProgress { id, .. }
             | OutputTimelineItem::OrphanToolResult { id, .. }
             | OutputTimelineItem::AskUserBatch { id, .. } => Cow::Borrowed(id),
-            OutputTimelineItem::ToolCall { reference } => {
-                Cow::Owned(format!("tool-call-{}", reference.tool_call_id.as_ref()))
-            }
-            OutputTimelineItem::ToolResult { reference } => {
-                Cow::Owned(format!("tool-result-{}", reference.tool_call_id.as_ref()))
-            }
+            OutputTimelineItem::ToolCall { reference } => Cow::Owned(format!(
+                "tool-call-{}/{}/{}",
+                reference.context.chat_id.as_ref(),
+                reference.context.turn_id.as_ref(),
+                reference.tool_call_id.as_ref()
+            )),
+            OutputTimelineItem::ToolResult { reference } => Cow::Owned(format!(
+                "tool-result-{}/{}/{}",
+                reference.context.chat_id.as_ref(),
+                reference.context.turn_id.as_ref(),
+                reference.tool_call_id.as_ref()
+            )),
         }
     }
 

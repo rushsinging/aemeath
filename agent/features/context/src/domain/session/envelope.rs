@@ -196,24 +196,19 @@ impl CommittedRunSlice {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RestoreStepProjection {
+pub(crate) struct RestoreStepSource {
     pub cursor: RunStepCursor,
-    pub messages: Vec<Message>,
+    pub message_segments: Vec<Arc<[Message]>>,
     pub tool_receipts: Vec<ToolCallReceipt>,
     pub finalize_cause: Option<FinalizeCause>,
     pub duration_ms: Option<u64>,
 }
 
-fn step_messages(step: &CommittedRunStep) -> Vec<Message> {
+fn step_message_segments(step: &CommittedRunStep) -> Vec<Arc<[Message]>> {
     step.accepted_input
         .iter()
-        .flat_map(|input| input.messages.iter())
-        .chain(
-            step.outcome
-                .iter()
-                .flat_map(|outcome| outcome.messages.iter()),
-        )
-        .cloned()
+        .map(|input| input.messages.as_arc())
+        .chain(step.outcome.iter().map(|outcome| outcome.messages.as_arc()))
         .collect()
 }
 
@@ -471,16 +466,16 @@ impl CanonicalSession {
         }
     }
 
-    pub(crate) fn all_restore_steps(&self) -> Vec<RestoreStepProjection> {
+    pub(crate) fn all_restore_steps(&self) -> Vec<RestoreStepSource> {
         self.run_slices
             .iter()
             .flat_map(|slice| {
-                slice.steps.iter().map(|step| RestoreStepProjection {
+                slice.steps.iter().map(|step| RestoreStepSource {
                     cursor: RunStepCursor {
                         run_id: slice.run_id.clone(),
                         step_id: step.step_id.clone(),
                     },
-                    messages: step_messages(step),
+                    message_segments: step_message_segments(step),
                     tool_receipts: step.tool_receipts.clone(),
                     finalize_cause: step.outcome.as_ref().map(|outcome| outcome.finalize_cause),
                     duration_ms: step
@@ -492,7 +487,7 @@ impl CanonicalSession {
             .collect()
     }
 
-    pub(crate) fn restore_steps_from_marker(&self) -> Vec<RestoreStepProjection> {
+    pub(crate) fn restore_steps_from_marker(&self) -> Vec<RestoreStepSource> {
         let start_at = self
             .compact
             .as_ref()
@@ -509,12 +504,12 @@ impl CanonicalSession {
                     visible = true;
                 }
                 if visible {
-                    steps.push(RestoreStepProjection {
+                    steps.push(RestoreStepSource {
                         cursor: RunStepCursor {
                             run_id: slice.run_id.clone(),
                             step_id: step.step_id.clone(),
                         },
-                        messages: step_messages(step),
+                        message_segments: step_message_segments(step),
                         tool_receipts: step.tool_receipts.clone(),
                         finalize_cause: step.outcome.as_ref().map(|outcome| outcome.finalize_cause),
                         duration_ms: step
@@ -531,14 +526,30 @@ impl CanonicalSession {
     pub fn all_persisted_steps(&self) -> Vec<(RunStepCursor, Vec<Message>)> {
         self.all_restore_steps()
             .into_iter()
-            .map(|step| (step.cursor, step.messages))
+            .map(|step| {
+                (
+                    step.cursor,
+                    step.message_segments
+                        .iter()
+                        .flat_map(|segment| segment.iter().cloned())
+                        .collect(),
+                )
+            })
             .collect()
     }
 
     pub fn flattened_steps_from_marker(&self) -> Vec<(RunStepCursor, Vec<Message>)> {
         self.restore_steps_from_marker()
             .into_iter()
-            .map(|step| (step.cursor, step.messages))
+            .map(|step| {
+                (
+                    step.cursor,
+                    step.message_segments
+                        .iter()
+                        .flat_map(|segment| segment.iter().cloned())
+                        .collect(),
+                )
+            })
             .collect()
     }
 

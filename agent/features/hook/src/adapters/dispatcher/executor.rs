@@ -94,8 +94,8 @@ pub(crate) trait Executor: Send + Sync {
 
 /// 生产用 `Executor`：适配 `ProcessDriver` 的受管子进程执行。
 ///
-/// 由 [`crate::adapters::dispatcher::Dispatcher::try_new`] 在 workspace_root +
-/// 白名单 env 下内部装配，**NEVER** 对外暴露。
+/// 由 [`crate::adapters::dispatcher::Dispatcher::try_new`] 在固定基础环境白名单下
+/// 内部装配，**NEVER** 对外暴露。
 #[derive(Debug, Default)]
 pub(crate) struct ProcessDriverExecutor {
     driver: ProcessDriver,
@@ -141,8 +141,8 @@ impl Executor for ProcessDriverExecutor {
         };
         match self.driver.execute(request, cancellation).await {
             Ok(output) => {
-                // 当前 HookExecution PL 尚未发布截断字段；在 #1216 扩展环境/输出
-                // 契约前，ProcessDriver 仍负责 drain 与截断，Dispatcher 只消费正文。
+                // HookExecution PL 当前不发布截断字段；ProcessDriver 仍负责 drain 与截断，
+                // Dispatcher 只消费正文。
                 let _output_was_truncated = output.stdout_truncated || output.stderr_truncated;
                 Ok(RawExecution {
                     exit_code: output.exit_code,

@@ -1,12 +1,45 @@
 use super::conversation::tool_result_payload::ToolResultPayload;
 use super::style::SemanticStyle;
 use std::hash::Hash;
+use std::sync::Arc;
+
+/// 输出历史窗口请求。窗口从最新端按完整 root group 选择。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OutputRenderWindow {
+    pub line_limit: usize,
+    pub tail_offset: usize,
+}
+
+impl OutputRenderWindow {
+    /// 不限制 root 选择，供不需要历史窗口的调用方使用。
+    pub(crate) const fn all() -> Self {
+        Self {
+            line_limit: usize::MAX,
+            tail_offset: 0,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputViewModel {
-    pub roots: Vec<BlockNode>,
+    pub roots: Vec<Arc<BlockNode>>,
     pub version: u64,
     pub follow_tail_hint: bool,
+    pub source_total_lines: Option<usize>,
+    pub folded_earlier_lines: usize,
+}
+
+impl OutputViewModel {
+    #[cfg(test)]
+    pub fn from_roots(roots: Vec<BlockNode>, version: u64, follow_tail_hint: bool) -> Self {
+        Self {
+            roots: roots.into_iter().map(Arc::new).collect(),
+            version,
+            follow_tail_hint,
+            source_total_lines: None,
+            folded_earlier_lines: 0,
+        }
+    }
 }
 
 impl Default for OutputViewModel {
@@ -15,6 +48,8 @@ impl Default for OutputViewModel {
             roots: Vec::new(),
             version: 0,
             follow_tail_hint: true,
+            source_total_lines: None,
+            folded_earlier_lines: 0,
         }
     }
 }

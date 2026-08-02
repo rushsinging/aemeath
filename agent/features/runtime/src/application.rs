@@ -4,6 +4,7 @@
 /// 协议转换和运行时桥接已移入 `adapters/`。
 pub(crate) mod activity;
 pub(crate) mod client;
+pub(crate) mod compact_generator;
 pub(crate) mod context;
 pub(crate) mod hook;
 pub(crate) mod interaction;

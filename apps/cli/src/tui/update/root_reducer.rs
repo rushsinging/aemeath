@@ -200,7 +200,7 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::BlockCompleted { .. }
             | ConversationChange::AskUserShown { .. }
             | ConversationChange::AskUserUpdated { .. }
-            | ConversationChange::AskUserDismissed
+            | ConversationChange::AskUserDismissed { .. }
             | ConversationChange::InteractionShown { .. }
             | ConversationChange::InteractionUpdated { .. }
             | ConversationChange::InteractionReplyRequested { .. }

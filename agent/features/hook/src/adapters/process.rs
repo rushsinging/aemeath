@@ -86,6 +86,7 @@ impl ProcessDriver {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
+            .env_clear()
             .envs(&request.env)
             // 仅作为 runtime/task 被强制丢弃时的直接 child 兜底；正常路径必须按进程组回收。
             .kill_on_drop(true);

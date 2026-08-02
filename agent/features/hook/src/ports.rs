@@ -3,7 +3,6 @@
 //! 对应设计：`docs/design/02-modules/hook/README.md` §2。
 //! 一个类型化端口——Sub Run 使用 `BoundaryOnly`（仅 start/stop），过滤由 point metadata 完成。
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
@@ -40,14 +39,13 @@ pub trait HookSubscriptionExecutionObserver: Send + Sync {
     fn observe(&self, event: HookSubscriptionExecutionEvent);
 }
 
-/// Hook 一次 dispatch 的运行时环境。
+/// Hook 一次 dispatch 的工作区上下文。
 ///
-/// Runtime 每次调用从当前 Workspace 读取 cwd；Hook adapter 根据 invocation 派生
-/// 兼容环境变量。环境清空及白名单策略由 #1216 收口。
+/// Runtime 每次调用只提供当前 Workspace 的 cwd；Hook adapter 根据当前 invocation
+/// 生成兼容环境变量并执行环境隔离。生命周期 observer 只报告 typed subscription 事实。
 #[derive(Clone)]
 pub struct HookDispatchContext {
     cwd: PathBuf,
-    env: HashMap<String, String>,
     subscription_execution_observer: Option<std::sync::Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
@@ -55,14 +53,8 @@ impl HookDispatchContext {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         Self {
             cwd: cwd.into(),
-            env: HashMap::new(),
             subscription_execution_observer: None,
         }
-    }
-
-    pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
-        self.env = env;
-        self
     }
 
     pub fn with_subscription_execution_observer(
@@ -81,10 +73,6 @@ impl HookDispatchContext {
 
     pub fn cwd(&self) -> &Path {
         &self.cwd
-    }
-
-    pub fn env(&self) -> &HashMap<String, String> {
-        &self.env
     }
 }
 

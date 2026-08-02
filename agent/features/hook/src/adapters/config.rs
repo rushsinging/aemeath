@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use share::config::hooks::{HookEvent, HooksConfig};
 
 use crate::adapters::dispatcher::Dispatcher;
@@ -35,10 +33,7 @@ pub fn subscriptions_from_config(config: &HooksConfig) -> Vec<HookSubscription> 
 }
 
 /// 构造 Hook BC 唯一的生产 Dispatcher。
-pub fn build_dispatcher(
-    config: &HooksConfig,
-    env: HashMap<String, String>,
-) -> Result<Dispatcher, Vec<SubscriptionError>> {
+pub fn build_dispatcher(config: &HooksConfig) -> Result<Dispatcher, Vec<SubscriptionError>> {
     let subscriptions = subscriptions_from_config(config);
     log::debug!(
         target: crate::LOG_TARGET,
@@ -46,7 +41,7 @@ pub fn build_dispatcher(
         config.events.len(),
         subscriptions.len(),
     );
-    Dispatcher::try_new(subscriptions, env)
+    Dispatcher::try_new(subscriptions)
 }
 
 fn hook_point_from_event(event: HookEvent) -> HookPoint {

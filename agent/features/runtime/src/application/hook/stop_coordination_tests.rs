@@ -21,9 +21,7 @@ fn continue_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(
-        hook::build_dispatcher(&HooksConfig { events }, std::collections::HashMap::new()).unwrap(),
-    )
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
 }
 
 /// Helper: build a dispatcher that always blocks (exit code 2).
@@ -37,9 +35,7 @@ fn always_blocking_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(
-        hook::build_dispatcher(&HooksConfig { events }, std::collections::HashMap::new()).unwrap(),
-    )
+    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
 }
 
 #[tokio::test]

@@ -1,6 +1,6 @@
 //! output.rs 辅助函数单元测试 + 非嵌入/orphan 集成测试。
 
-use super::OutputViewAssembler;
+use super::assemble_output_view;
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::model::ConversationModel;
@@ -31,11 +31,11 @@ fn tool_status_view(status: ToolCallStatus) -> crate::tui::view_model::ToolCallB
         status,
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
+    let vm = assemble_output_view(&conversation, None);
     vm.roots
-        .into_iter()
-        .find_map(|block| match block.kind {
-            OutputBlockKind::ToolCall(tool) => Some(tool),
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool.clone()),
             _ => None,
         })
         .expect("tool block")
@@ -78,7 +78,7 @@ fn test_orphan_read_result_shows_summary_not_full_content() {
         image_count: 0,
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
+    let vm = assemble_output_view(&conversation, None);
     let orphan = vm
         .roots
         .iter()
@@ -141,7 +141,7 @@ fn test_non_embedded_tool_result_uses_summary() {
         is_error: false,
         image_count: 0,
     });
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
+    let vm = assemble_output_view(&conversation, None);
     let diagnostics = vm
         .roots
         .iter()
@@ -177,7 +177,7 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
         image_count: 0,
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
+    let vm = assemble_output_view(&conversation, None);
     let orphan = vm
         .roots
         .iter()
@@ -265,7 +265,7 @@ fn test_timeline_tool_result_with_unknown_id_is_silently_skipped() {
         ToolCallId::new("call-missing"),
     );
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
+    let vm = assemble_output_view(&conversation, None);
     assert!(
         vm.roots.is_empty(),
         "未知 tool_call_id 的 ToolResult 不应产出任何块，实际: {:?}",
@@ -426,7 +426,7 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
         image_count: 2,
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conv, 1, None);
+    let vm = assemble_output_view(&conv, None);
 
     // 应产出一个 root-level DiagnosticNotice（非嵌入路径）。
     let notice = vm
