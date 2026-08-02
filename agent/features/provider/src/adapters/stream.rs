@@ -82,6 +82,24 @@ pub(crate) trait InvocationSink: Send {
             partial_json: partial_args.to_string(),
         });
     }
+
+    /// #1494：tool call 参数完整（已验证 JSON）→ 立即发出，runtime 据此边流边执行。
+    fn emit_tool_call_completed(
+        &mut self,
+        index: usize,
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+    ) {
+        self.on_delta(InvocationDelta::ToolCallCompleted {
+            index,
+            call: ProviderToolCall {
+                id: ProviderToolCallId(id),
+                name,
+                arguments,
+            },
+        });
+    }
 }
 
 const INVOCATION_STREAM_CAPACITY: usize = 1;
@@ -597,6 +615,14 @@ pub async fn parse_stream(
                             }
                         }
                     };
+                    // #1494：ContentBlockStop = Anthropic 协议级"参数完整"信号——
+                    // 解析成功后立即发出 ToolCallCompleted，runtime 据此边流边执行。
+                    handler.emit_tool_call_completed(
+                        tool_index.saturating_sub(1),
+                        current_tool_id.clone(),
+                        current_tool_name.clone(),
+                        input.clone(),
+                    );
                     content_blocks.push(ContentBlock::ToolUse {
                         id: std::mem::take(&mut current_tool_id),
                         name: std::mem::take(&mut current_tool_name),
