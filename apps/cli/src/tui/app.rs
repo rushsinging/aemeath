@@ -41,13 +41,19 @@ use event::StatusContextUpdate;
 pub use event::UiEvent;
 
 /// `refresh_output_document_from_model` 的 assemble 产物 memo。
-pub(crate) struct OutputViewCache {
+pub(crate) struct OutputDocumentMemo {
     pub(crate) revision: u64,
     pub(crate) activity_frame: u64,
     pub(crate) model_silent: bool,
     /// memo key 第二维：workspace_root 变化时强制重 assemble，使工具标题路径立即刷新。
     pub(crate) workspace_root: Option<String>,
     pub(crate) view_model: crate::tui::view_model::OutputViewModel,
+}
+
+impl OutputDocumentMemo {
+    pub(crate) fn materialize_window(&self) -> &crate::tui::view_model::OutputViewModel {
+        &self.view_model
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -117,7 +123,7 @@ pub struct App {
     pub(crate) output_document_renderer: OutputDocumentRenderer,
     /// memo：缓存上次 assemble 的 (revision, view_model)。revision 不变即复用，
     /// 跳过 `assemble_from_conversation` 的全量遍历+clone（大会话伪卡死根治）。
-    pub(crate) output_view_cache: Option<OutputViewCache>,
+    pub(crate) output_document_memo: Option<OutputDocumentMemo>,
     frame_diagnostics: FrameDiagnostics,
     process_memory: ProcessMemoryBaseline,
     started_at: Instant,
@@ -228,7 +234,7 @@ impl App {
             input_area: InputArea::new(),
             status_bar,
             output_document_renderer: OutputDocumentRenderer::default(),
-            output_view_cache: None,
+            output_document_memo: None,
             frame_diagnostics: FrameDiagnostics::new(SLOW_FRAME_THRESHOLD, SLOW_FRAME_LOG_COOLDOWN),
             process_memory: ProcessMemoryBaseline::new(RSS_SAMPLE_INTERVAL),
             started_at: Instant::now(),
@@ -426,7 +432,7 @@ impl App {
             revision: self.model.conversation.revision(),
             timeline_items: self.model.conversation.timeline.items().len(),
             output_roots: self
-                .output_view_cache
+                .output_document_memo
                 .as_ref()
                 .map_or(0, |cache| cache.view_model.roots.len()),
             document_lines: self.output_area.document().total_lines(),

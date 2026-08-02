@@ -537,7 +537,7 @@ impl App {
                     .observe_main_model_activity(run_id, std::time::Instant::now())
                 {
                     self.mark_output_dirty();
-                    self.output_view_cache = None;
+                    self.output_document_memo = None;
                 }
             }
         }
@@ -627,7 +627,7 @@ impl App {
             .run_activity
             .is_model_silent(std::time::Instant::now());
         let need_rebuild = self
-            .output_view_cache
+            .output_document_memo
             .as_ref()
             .map(|cache| {
                 cache.revision != revision
@@ -646,7 +646,7 @@ impl App {
                 revision,
                 workspace_root,
             );
-            self.output_view_cache = Some(OutputViewCache {
+            self.output_document_memo = Some(OutputDocumentMemo {
                 revision,
                 activity_frame,
                 model_silent,
@@ -656,9 +656,10 @@ impl App {
         }
         // take 出 owned view_model，render 期间释放对 cache 的不可变借用，render 后放回。
         let cache = self
-            .output_view_cache
+            .output_document_memo
             .take()
             .expect("memo cache filled above");
+        let _ = cache.materialize_window();
         let view_model = cache.view_model;
         let cached_revision = cache.revision;
         let cached_activity_frame = cache.activity_frame;
@@ -716,7 +717,7 @@ impl App {
             )
         }));
         // 无论渲染成败都把 view_model 放回 cache，保留 memo。
-        self.output_view_cache = Some(OutputViewCache {
+        self.output_document_memo = Some(OutputDocumentMemo {
             revision: cached_revision,
             activity_frame: cached_activity_frame,
             model_silent: cached_model_silent,
@@ -904,4 +905,4 @@ impl App {
 
 /// Type alias so update.rs can use `App` without circular path
 use super::App;
-use super::OutputViewCache;
+use super::OutputDocumentMemo;
