@@ -749,8 +749,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 ))
             }
         }
-        TuiRuntimeEvent::SessionResumed { .. }
-        | TuiRuntimeEvent::DisplayHistoryWindowLoaded { .. } => AgentEventMapping::default(),
+        TuiRuntimeEvent::SessionResumed { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::SessionResumeFailed { message, .. } => {
             conversation(ConversationIntent::AppendError(AppendError {
                 text: message.clone(),

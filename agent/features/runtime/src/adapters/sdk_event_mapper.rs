@@ -196,47 +196,6 @@ pub(crate) fn map_display_history_index(
     }
 }
 
-pub(crate) fn map_display_history_window(
-    window: context::api::DisplayHistoryStepWindow,
-) -> sdk::DisplayHistoryWindow {
-    sdk::DisplayHistoryWindow {
-        session_id: window.session_id().to_string(),
-        generation_revision: window.generation_revision(),
-        steps: window
-            .steps()
-            .iter()
-            .map(|member| {
-                let step = member.step();
-                sdk::ResumedSessionStep {
-                    run_id: member.cursor().run_id.clone(),
-                    step_id: member.cursor().step_id.clone(),
-                    messages: step
-                        .accepted_input
-                        .iter()
-                        .flat_map(|input| input.messages.iter())
-                        .chain(
-                            step.outcome
-                                .iter()
-                                .flat_map(|outcome| outcome.messages.iter()),
-                        )
-                        .cloned()
-                        .map(crate::application::client::message_to_sdk)
-                        .collect(),
-                    finalize_cause: step.outcome.as_ref().map(|outcome| {
-                        crate::application::client::map_finalize_cause_to_sdk(
-                            outcome.finalize_cause,
-                        )
-                    }),
-                    duration_ms: step
-                        .outcome
-                        .as_ref()
-                        .and_then(|outcome| outcome.duration_ms),
-                }
-            })
-            .collect(),
-    }
-}
-
 pub(crate) fn map_stream_event(
     event: crate::application::loop_engine::chat::RuntimeStreamEvent,
 ) -> ChatEvent {
@@ -598,11 +557,6 @@ pub(crate) fn map_stream_event(
             display_history: display_history.map(map_display_history_index),
             session_id,
             created_at,
-        },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::DisplayHistoryWindowLoaded {
-            window,
-        } => ChatEvent::DisplayHistoryWindowLoaded {
-            window: map_display_history_window(window),
         },
         crate::application::loop_engine::chat::RuntimeStreamEvent::SessionResumeFailed {
             kind,

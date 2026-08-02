@@ -10,9 +10,11 @@ use share::config::domain::snapshot::ConfigSnapshot;
 use std::path::Path;
 
 pub type AgentClientHandle = Arc<dyn AgentClient>;
+pub type DisplayHistoryQueryHandle = Arc<dyn sdk::DisplayHistoryQuery>;
 
 pub struct AgentClientBootstrap {
     pub client: AgentClientHandle,
+    pub display_history_query: DisplayHistoryQueryHandle,
     pub session_id: String,
     pub startup_resume: Option<sdk::LocalSessionResumeBacking>,
     pub cwd: PathBuf,
@@ -299,11 +301,13 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
     let thinking = launch.binding.requested_reasoning != provider::ReasoningLevel::Off;
+    let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.clone());
     let client = agent_client_from_runtime(runtime_client);
     let cwd = launch.workspace_root.clone();
 
     Ok(AgentClientBootstrap {
         client,
+        display_history_query,
         session_id: launch.session_id,
         startup_resume: launch.startup_resume,
         cwd,

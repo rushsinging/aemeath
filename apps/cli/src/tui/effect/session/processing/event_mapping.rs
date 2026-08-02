@@ -267,11 +267,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             display_history,
             session_id,            created_at,
         },
-        sdk::ChatEvent::DisplayHistoryWindowLoaded { window } => {
-            UiEvent::DisplayHistoryWindowLoaded { window }
-        }
-        sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
-            UiEvent::SessionResumeFailed { kind, id, message }
+        sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {            UiEvent::SessionResumeFailed { kind, id, message }
         }
         sdk::ChatEvent::ReflectionHistory { records } => UiEvent::ReflectionHistory { records },
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),

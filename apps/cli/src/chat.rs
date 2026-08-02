@@ -74,8 +74,8 @@ pub(crate) async fn run_chat(args: Args) {
         let mut app =
             crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
         app.agent_client = Some(bootstrap.client.clone());
-        app.user_agent = bootstrap.user_agent;
-        app.config_view = bootstrap.config_view.clone();
+        app.display_history_query = Some(bootstrap.display_history_query.clone());
+        app.user_agent = bootstrap.user_agent;        app.config_view = bootstrap.config_view.clone();
         app.apply_agent_intent(
             crate::tui::update::intent::AgentIntent::UiPreferences(
                 crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(

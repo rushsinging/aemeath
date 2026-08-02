@@ -35,7 +35,6 @@ pub(crate) struct ConversationRetainedStateSnapshot {
 pub struct ConversationModel {
     // ── 对话内容 ──
     pub chats: Vec<Chat>,
-    pub(crate) resumed_history: super::resumed_history::ResumedHistoryBacking,
     pub active_chat_id: Option<ChatId>,
     pub timeline: OutputTimelineModel,
     pub queued_submissions: Vec<QueuedSubmission>,
@@ -62,7 +61,6 @@ impl Default for ConversationModel {
     fn default() -> Self {
         Self {
             chats: Vec::new(),
-            resumed_history: super::resumed_history::ResumedHistoryBacking::default(),
             active_chat_id: None,
             timeline: OutputTimelineModel::default(),
             queued_submissions: Vec::new(),
@@ -84,56 +82,6 @@ impl Default for ConversationModel {
 }
 
 impl ConversationModel {
-    pub(crate) fn resumed_history_steps(&self) -> usize {
-        self.resumed_history.steps().len()
-    }
-
-    pub(crate) fn resumed_history_step(
-        &self,
-        index: usize,
-    ) -> Option<&super::resumed_history::ResumedHistoryStep> {
-        self.resumed_history.step(index)
-    }
-
-    pub(crate) fn resumed_history_items(&self) -> &[super::resumed_history::ResumedHistoryItem] {
-        self.resumed_history.items()
-    }
-
-    pub(crate) fn resumed_history_item(
-        &self,
-        id: &str,
-    ) -> Option<&super::resumed_history::ResumedHistoryItem> {
-        self.resumed_history.item(id)
-    }
-
-    pub(crate) fn display_history_window_request(
-        &self,
-        item_ids: &[String],
-    ) -> Option<sdk::DisplayHistoryWindowRequest> {
-        self.resumed_history.history_window_request(item_ids)
-    }
-
-    pub(crate) fn replace_resumed_history(
-        &mut self,
-        backing: super::resumed_history::ResumedHistoryBacking,
-    ) {
-        self.reset();
-        self.resumed_history = backing;
-        self.revision = self.revision.wrapping_add(1);
-    }
-
-    pub(crate) fn apply_display_history_window(
-        &mut self,
-        window: crate::tui::adapter::runtime_view::TuiDisplayHistoryWindow,
-    ) -> bool {
-        if !self.resumed_history.apply_window(window) {
-            return false;
-        }
-        self.revision = self.revision.wrapping_add(1);
-        self.output_view_journal.publish(OutputViewChange::Reset);
-        true
-    }
-
     /// 清空整段对话，回到初始空状态。用于 `/clear` 等需要重置单一真相源的场景。
     pub fn reset(&mut self) {
         let mut journal = std::mem::take(&mut self.output_view_journal);

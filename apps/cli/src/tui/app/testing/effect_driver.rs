@@ -45,7 +45,10 @@ impl ScriptedEffectDriver {
         for effect in outcome.effects {
             if matches!(
                 effect,
-                Effect::None | Effect::RequestRender | Effect::RunHook { .. }
+                Effect::None
+                    | Effect::RequestRender
+                    | Effect::RunHook { .. }
+                    | Effect::LoadDisplayHistoryWindow { .. }
             ) {
                 self.effects.push(effect);
                 continue;

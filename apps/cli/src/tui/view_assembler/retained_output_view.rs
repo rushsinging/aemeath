@@ -2,6 +2,7 @@ use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::output_view_change::{
     OutputViewChange, OutputViewChanges, OutputViewCursor,
 };
+use crate::tui::model::display_history::DisplayHistoryModel;
 use crate::tui::view_assembler::output::OutputViewAssembler;
 use crate::tui::view_assembler::output_tool_lookup::ConversationToolLookup;
 use crate::tui::view_assembler::output_window_index::{OutputWindowIndex, OutputWindowIndexChange};
@@ -34,6 +35,7 @@ pub(crate) struct RetainedOutputView {
     workspace_root: Option<PathBuf>,
     window_index: OutputWindowIndex,
     current_window: crate::tui::view_model::OutputViewModel,
+    display_history_invalidated: bool,
     root_cache: HashMap<String, Arc<BlockNode>>,
 }
 
@@ -52,18 +54,31 @@ impl RetainedOutputView {
         &self.current_window
     }
 
+    pub(crate) fn invalidate_display_history(&mut self) {
+        self.display_history_invalidated = true;
+    }
+
     pub(crate) fn materialize_window(
         &mut self,
         conversation: &ConversationModel,
+        display_history: &DisplayHistoryModel,
         workspace_root: Option<&Path>,
         request: OutputRenderWindow,
     ) -> MaterializedOutputWindow {
         let requested_workspace = workspace_root.map(Path::to_path_buf);
         let mut stats = RetainedOutputViewStats::default();
-        if self.cursor.is_none() || self.workspace_root != requested_workspace {
-            self.rebuild_index(conversation, requested_workspace, &mut stats);
+        if self.cursor.is_none()
+            || self.workspace_root != requested_workspace
+            || self.display_history_invalidated
+        {
+            self.rebuild_index(
+                conversation,
+                display_history,
+                requested_workspace,
+                &mut stats,
+            );
         } else {
-            self.apply_pending_changes(conversation, workspace_root, &mut stats);
+            self.apply_pending_changes(conversation, display_history, workspace_root, &mut stats);
         }
 
         let selection = self.window_index.select_window(request);
@@ -74,8 +89,7 @@ impl RetainedOutputView {
             .map(str::to_string)
             .collect::<Vec<_>>();
         let visible_item_ids = requested_item_ids.iter().cloned().collect::<HashSet<_>>();
-        let missing_history_request =
-            conversation.display_history_window_request(&requested_item_ids);
+        let missing_history_request = display_history.window_request(&requested_item_ids);
         self.root_cache
             .retain(|item_id, _| visible_item_ids.contains(item_id));
         let lookup = ConversationToolLookup::new(conversation);
@@ -91,9 +105,9 @@ impl RetainedOutputView {
                 }
                 let root = if item_id == PLACEHOLDER_ID {
                     OutputViewAssembler::assemble_placeholder(conversation)
-                } else if let Some(item) = conversation.resumed_history_item(item_id) {
+                } else if let Some(item) = display_history.item(item_id) {
                     crate::tui::view_assembler::resumed_history::assemble_resumed_history_item(
-                        conversation,
+                        display_history,
                         item,
                     )
                 } else {
@@ -128,11 +142,12 @@ impl RetainedOutputView {
     fn rebuild_index(
         &mut self,
         conversation: &ConversationModel,
+        display_history: &DisplayHistoryModel,
         workspace_root: Option<PathBuf>,
         stats: &mut RetainedOutputViewStats,
     ) {
-        let mut entries = conversation
-            .resumed_history_items()
+        let mut entries = display_history
+            .items()
             .iter()
             .map(|item| {
                 (
@@ -162,6 +177,7 @@ impl RetainedOutputView {
         self.root_cache.clear();
         self.cursor = Some(conversation.output_view_cursor());
         self.workspace_root = workspace_root;
+        self.display_history_invalidated = false;
         stats.did_rebuild = true;
         stats.rebuilt_roots = self.window_index.len();
     }
@@ -169,13 +185,19 @@ impl RetainedOutputView {
     fn apply_pending_changes(
         &mut self,
         conversation: &ConversationModel,
+        display_history: &DisplayHistoryModel,
         workspace_root: Option<&Path>,
         stats: &mut RetainedOutputViewStats,
     ) {
         let cursor = self.cursor.expect("cursor checked above");
         match conversation.output_view_changes_since(cursor) {
             OutputViewChanges::RebuildRequired { next_cursor: _ } => {
-                self.rebuild_index(conversation, workspace_root.map(Path::to_path_buf), stats);
+                self.rebuild_index(
+                    conversation,
+                    display_history,
+                    workspace_root.map(Path::to_path_buf),
+                    stats,
+                );
             }
             OutputViewChanges::Delta {
                 next_cursor,
@@ -232,6 +254,7 @@ impl RetainedOutputView {
                         OutputViewChange::Reset => {
                             self.rebuild_index(
                                 conversation,
+                                display_history,
                                 workspace_root.map(Path::to_path_buf),
                                 stats,
                             );

@@ -48,7 +48,7 @@ pub use chat::{
     ResumedStepFinalizeCause, SkillRequest, ToolCallStatusView, ToolResultImage,
     WorkspaceContextView, WorkspaceStackEntryView,
 };
-pub use client::{AgentClient, RunControlClient};
+pub use client::{AgentClient, DisplayHistoryQuery, RunControlClient};
 pub use commands::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,

@@ -1,5 +1,8 @@
-use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
+use crate::tui::adapter::runtime_view::{
+    TuiChatMessage, TuiDisplayHistoryIndex, TuiDisplayHistoryStepReference, TuiResumedSessionStep,
+};
 use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiToolCallStatus, TuiTurnContext};
+use crate::tui::effect::effect::Effect;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::super::testing::{input, TuiScenarioHarness};
@@ -124,6 +127,41 @@ fn assert_tool_groups_are_complete(harness: &TuiScenarioHarness) {
         }
         start += count;
     }
+}
+
+#[test]
+fn resumed_history_initial_window_loads_through_display_query_effect() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: Some(TuiDisplayHistoryIndex {
+            session_id: "resume-query".into(),
+            generation_revision: 42,
+            steps: vec![TuiDisplayHistoryStepReference {
+                run_id: "resume-query-run".into(),
+                step_id: "resume-query-step".into(),
+                member_name: "steps/0001.json".into(),
+                estimated_lines: 12,
+                finalize_cause: None,
+                duration_ms: None,
+            }],
+        }),
+        steps: Vec::new(),
+        session_id: "resume-query".into(),
+        created_at: 0,
+    });
+    harness.render();
+
+    assert!(harness.effects().iter().any(|effect| matches!(
+        effect,
+        Effect::LoadDisplayHistoryWindow { request }
+            if request.session_id == "resume-query"
+                && request.generation_revision == 42
+                && request.member_names == ["steps/0001.json"]
+    )));
+    assert!(!harness
+        .effects()
+        .iter()
+        .any(|effect| matches!(effect, Effect::SendChatInputEvent { .. })));
 }
 
 #[test]

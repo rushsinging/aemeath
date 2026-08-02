@@ -20,7 +20,8 @@ impl App {
             id: session_id.clone(),
         }));
         self.handle_input_intent(InputIntent::Clear);
-        self.model.conversation.replace_resumed_history(backing);
+        self.model.conversation.reset();
+        self.model.display_history.replace(backing);
         self.apply_agent_intent(AgentIntent::Input(InputIntent::ReplaceHistory(
             input_history,
         )));
@@ -71,7 +72,8 @@ impl App {
         }));
         self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
         if let Some(index) = display_history {
-            self.model.conversation.replace_resumed_history(
+            self.model.conversation.reset();
+            self.model.display_history.replace(
                 crate::tui::model::conversation::resumed_history::ResumedHistoryBacking::from_tui_index(
                     index,
                 ),
@@ -162,12 +164,12 @@ mod tests {
         });
 
         assert_eq!(app.model.conversation.chats.len(), 0);
-        assert_eq!(app.model.conversation.resumed_history_steps(), 1);
+        assert_eq!(app.model.display_history.steps().len(), 1);
         assert!(std::sync::Arc::ptr_eq(
             &shared_messages,
             &app.model
-                .conversation
-                .resumed_history_step(0)
+                .display_history
+                .step(0)
                 .expect("history step")
                 .message_segments[0]
         ));
@@ -194,7 +196,7 @@ mod tests {
 
         assert_eq!(app.session.session_id(), "session-resumed");
         assert_eq!(app.model.conversation.timeline.items().len(), 1);
-        assert_eq!(app.model.conversation.resumed_history_steps(), 1);
+        assert_eq!(app.model.display_history.steps().len(), 1);
         assert!(app.model.conversation.revision() > 0);
     }
 

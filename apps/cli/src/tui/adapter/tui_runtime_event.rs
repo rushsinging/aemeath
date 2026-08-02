@@ -498,9 +498,6 @@ pub(crate) enum TuiRuntimeEvent {
         session_id: String,
         created_at: u64,
     },
-    DisplayHistoryWindowLoaded {
-        window: super::runtime_view::TuiDisplayHistoryWindow,
-    },
     SessionResumeFailed {
         kind: TuiSessionResumeFailureKind,
         id: String,

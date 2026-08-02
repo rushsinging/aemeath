@@ -240,6 +240,10 @@ pub enum AppEvent {
     DisplayHistoryWindowLoaded {
         window: sdk::DisplayHistoryWindow,
     },
+    DisplayHistoryWindowLoadFailed {
+        request: sdk::DisplayHistoryWindowRequest,
+        message: String,
+    },
     /// 会话恢复失败（#636 D2）。TUI 显示错误并退回空 session。
     SessionResumeFailed {
         kind: sdk::SessionResumeFailureKind,

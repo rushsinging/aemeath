@@ -620,11 +620,7 @@ pub enum ChatEvent {
         session_id: String,
         created_at: u64,
     },
-    DisplayHistoryWindowLoaded {
-        window: DisplayHistoryWindow,
-    },
-    /// 会话恢复失败（#636 D2）。`kind` 区分 not_found / corrupt / io，
-    /// TUI 据此显示对应错误并恢复到空 session。
+    /// 会话恢复失败（#636 D2）。`kind` 区分 not_found / corrupt / io，    /// TUI 据此显示对应错误并恢复到空 session。
     SessionResumeFailed {
         kind: SessionResumeFailureKind,
         id: String,

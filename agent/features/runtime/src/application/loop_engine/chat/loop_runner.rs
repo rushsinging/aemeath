@@ -339,35 +339,7 @@ where
                     }
                     continue;
                 }
-                PendingCommand::LoadDisplayHistoryWindow(request) => {
-                    let project = shell.workspace.read().project_identity();
-                    match shell
-                        .session_management
-                        .load_display_history_steps(
-                            &request.session_id,
-                            &project,
-                            request.generation_revision,
-                            &request.member_names,
-                        )
-                        .await
-                    {
-                        Ok(window) => {
-                            sink.send_event(RuntimeStreamEvent::DisplayHistoryWindowLoaded {
-                                window,
-                            })
-                            .await;
-                        }
-                        Err(error) => {
-                            log::warn!(
-                                target: crate::LOG_TARGET,
-                                "display history window loading failed: {error}"
-                            );
-                        }
-                    }
-                    continue;
-                }
-                PendingCommand::QueryReflectionHistory { limit } => {
-                    match session_queries.list_reflection_history(limit).await {
+                PendingCommand::QueryReflectionHistory { limit } => {                    match session_queries.list_reflection_history(limit).await {
                         Ok(records) => {
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::ReflectionHistory { records })

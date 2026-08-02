@@ -406,11 +406,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             session_id,
             created_at,
         },
-        ChatEvent::DisplayHistoryWindowLoaded { window } => {
-            TuiRuntimeEvent::DisplayHistoryWindowLoaded {
-                window: tui_display_history_window(window),
-            }
-        }
         ChatEvent::SessionResumeFailed { kind, id, message } => {
             TuiRuntimeEvent::SessionResumeFailed {
                 kind: session_failure(kind),

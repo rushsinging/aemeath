@@ -101,6 +101,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::CommandResultText { .. } => "CommandResultText",
         UiEvent::SessionResumed { .. } => "SessionResumed",
         UiEvent::DisplayHistoryWindowLoaded { .. } => "DisplayHistoryWindowLoaded",
+        UiEvent::DisplayHistoryWindowLoadFailed { .. } => "DisplayHistoryWindowLoadFailed",
         UiEvent::SessionResumeFailed { .. } => "SessionResumeFailed",
     }
 }
@@ -443,16 +444,6 @@ impl App {
                     pending_slash: None,
                 };
             }
-            TuiRuntimeEvent::DisplayHistoryWindowLoaded { window } => {
-                if self
-                    .model
-                    .conversation
-                    .apply_display_history_window(window.clone())
-                {
-                    self.mark_output_dirty();
-                }
-                return UpdateResult::none();
-            }
             TuiRuntimeEvent::InteractionRequested(ref req) => {
                 // InteractionRequested 走 Runtime 路径，但 spinner_stop / mark_output_dirty
                 // 是 App 级副作用，map_runtime_event 只返回 conversation intent。
@@ -584,7 +575,7 @@ impl App {
             .max(1)
     }
 
-    pub(crate) fn refresh_output_document_from_model(&mut self) {
+    pub(crate) fn refresh_output_document_from_model(&mut self) -> Option<Effect> {
         let before_lines = self.output_area.document().total_lines();
         let revision = self.model.conversation.revision();
         let current_workspace_root: Option<String> = self
@@ -606,6 +597,7 @@ impl App {
         };
         let materialized = cache.retained.materialize_window(
             &self.model.conversation,
+            &self.model.display_history,
             workspace_root,
             requested_window,
         );
@@ -618,7 +610,7 @@ impl App {
             );
             if cache.loading_history_window.as_ref() != Some(&request_key) {
                 cache.loading_history_window = Some(request_key);
-                self.send_chat_input_event(sdk::ChatInputEvent::LoadDisplayHistoryWindow(request));
+                return Some(Effect::LoadDisplayHistoryWindow { request });
             }
         } else {
             cache.loading_history_window = None;
@@ -733,7 +725,7 @@ impl App {
                         "渲染失败，已记录 panic.log",
                     ))),
                 ));
-                return;
+                return None;
             }
         };
         crate::tui::log_trace!(
@@ -761,16 +753,21 @@ impl App {
             need_rebuild
         );
         self.output_area.replace_document(document);
+        None
     }
 
-    pub(crate) fn flush_dirty_view_models(&mut self) {
+    pub(crate) fn flush_dirty_view_models(&mut self) -> Vec<Effect> {
+        let mut effects = Vec::new();
         if self.view_state.dirty.output {
-            self.refresh_output_document_from_model();
+            if let Some(effect) = self.refresh_output_document_from_model() {
+                effects.push(effect);
+            }
             self.view_state.dirty.clear_output();
         }
         if self.view_state.dirty.status {
             self.view_state.dirty.clear_status();
         }
+        effects
     }
     pub(crate) fn apply_agent_intent(
         &mut self,

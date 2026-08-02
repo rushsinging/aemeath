@@ -19,6 +19,33 @@ fn test_app() -> App {
 }
 
 #[test]
+fn display_history_window_failure_clears_inflight_request_for_retry() {
+    let mut app = test_app();
+    let request = sdk::DisplayHistoryWindowRequest {
+        session_id: "retry-session".to_string(),
+        generation_revision: 9,
+        member_names: vec!["steps/0009.json".to_string()],
+    };
+    app.output_view.loading_history_window = Some((
+        request.session_id.clone(),
+        request.generation_revision,
+        request.member_names.clone(),
+    ));
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+
+    app.update_ui(
+        UiEvent::DisplayHistoryWindowLoadFailed {
+            request,
+            message: "读取失败".to_string(),
+        },
+        &ui_tx,
+        &make_spawn_refs(),
+    );
+
+    assert!(app.output_view.loading_history_window.is_none());
+}
+
+#[test]
 fn skills_updated_atomically_rebuilds_qualified_route_and_completion_catalog() {
     let mut app = test_app();
     let (ui_tx, _ui_rx) = mpsc::channel(1);

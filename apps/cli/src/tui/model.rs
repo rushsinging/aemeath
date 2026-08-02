@@ -3,6 +3,7 @@
 pub mod change;
 pub mod conversation;
 pub mod diagnostic;
+pub(crate) mod display_history;
 pub mod input;
 pub mod output_timeline;
 pub mod root;

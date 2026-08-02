@@ -136,6 +136,7 @@ pub struct App {
     pub command_router: Option<Arc<dyn sdk::CommandRouterPort>>,
     pub(crate) skill_completion_catalog: SkillCompletionCatalog,
     pub agent_client: Option<Arc<dyn sdk::AgentClient>>,
+    pub(crate) display_history_query: Option<Arc<dyn sdk::DisplayHistoryQuery>>,
     /// Session 初始化时固定的 HTTP User-Agent。
     pub user_agent: String,
     /// 缓存的配置视图（由 runtime 推送，TUI 只读）
@@ -251,6 +252,7 @@ impl App {
             skill_completion_catalog: SkillCompletionCatalog::default(),
             config_view: sdk::ConfigView::default(),
             agent_client: None,
+            display_history_query: None,
             user_agent: composition::update::default_user_agent(),
         }
     }

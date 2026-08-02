@@ -341,7 +341,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
          | sdk::ChatEvent::SessionList { .. }
          | sdk::ChatEvent::ProjectInfo { .. }
          | sdk::ChatEvent::CostUpdate { .. }
-         | sdk::ChatEvent::DisplayHistoryWindowLoaded { .. }
          | sdk::ChatEvent::SessionResumeFailed { .. } => {}    }
 }
 
