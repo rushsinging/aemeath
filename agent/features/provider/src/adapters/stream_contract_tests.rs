@@ -267,3 +267,103 @@ async fn dropping_consumer_cancels_the_invocation_local_producer() {
         .await
         .expect("dropping receiver must cancel the producer instead of buffering indefinitely");
 }
+
+/// #1494：OpenAI 兼容流——index 切换时对上一个完整 index 发出 ToolCallCompleted，
+/// 流结束兜底补发最后一个；不重复发出。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn openai_compat_stream_emits_tool_call_completed_on_index_switch_and_stream_end() {
+    let body = concat!(
+        // index=0 参数分两段累积
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_0\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"/tmp\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"/a.txt\\\"}\"}}]}}]}\n\n",
+        // index=1 出现 → index=0 参数已完整，应在此处发出 ToolCallCompleted
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_1\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"text\\\":\\\"hi\\\"}\"}}]}}]}\n\n",
+        // 流结束（finish_reason=tool_calls + [DONE]）→ index=1 兜底发出
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let response = response_from_fixture(body, "text/event-stream").await;
+    let mut stream = invocation_stream_from_decoder(
+        response,
+        ReasoningLevel::Off,
+        CancellationToken::new(),
+        InvocationDecoder::OpenAiChat,
+    );
+
+    let mut completed: Vec<(usize, String)> = Vec::new();
+    let mut completed_positions: Vec<usize> = Vec::new();
+    let mut started: Vec<usize> = Vec::new();
+    let mut event_index = 0;
+    while let Some(event) = stream.next().await {
+        match event {
+            InvocationEvent::Delta(crate::InvocationDelta::ToolCallStarted {
+                index, name, ..
+            }) => {
+                started.push(index);
+                let _ = name;
+            }
+            InvocationEvent::Delta(crate::InvocationDelta::ToolCallCompleted { index, call }) => {
+                completed.push((index, call.name));
+                completed_positions.push(event_index);
+            }
+            InvocationEvent::Completed(_) => {}
+            InvocationEvent::Failed(error) => panic!("fixture failed: {error:?}"),
+            InvocationEvent::Delta(_) => {}
+        }
+        event_index += 1;
+    }
+
+    // 两个 tool call 都发出且不重复。
+    assert_eq!(
+        completed,
+        vec![(0, "read_file".to_string()), (1, "write_file".to_string())],
+        "ToolCallCompleted must be emitted once per tool call, in index order"
+    );
+    assert_eq!(started, vec![0, 1], "ToolCallStarted order preserved");
+    // index=0 的 completed 出现在 index=1 的 started 之后（切换时发出）、流结束前。
+    let completed_0 = completed_positions[0];
+    let started_1 = started.iter().position(|i| *i == 1).unwrap();
+    assert!(
+        completed_0 > started_1,
+        "index=0 ToolCallCompleted must be emitted when index=1 first appears (before stream end), got completed@{completed_0} started_1@{started_1}"
+    );
+}
+
+/// #1494：Anthropic 流——ContentBlockStop 即发出 ToolCallCompleted（协议级完整信号）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn anthropic_stream_emits_tool_call_completed_on_content_block_stop() {
+    let body = concat!(
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"read_file\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"/tmp\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"/a.txt\\\"}\"}}\n\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    );
+    let response = response_from_fixture(body, "text/event-stream").await;
+    let mut stream = invocation_stream_from_decoder(
+        response,
+        ReasoningLevel::Off,
+        CancellationToken::new(),
+        InvocationDecoder::Anthropic,
+    );
+
+    let mut completed: Vec<(usize, String, serde_json::Value)> = Vec::new();
+    while let Some(event) = stream.next().await {
+        match event {
+            InvocationEvent::Delta(crate::InvocationDelta::ToolCallCompleted { index, call }) => {
+                completed.push((index, call.name, call.arguments));
+            }
+            InvocationEvent::Failed(error) => panic!("fixture failed: {error:?}"),
+            _ => {}
+        }
+    }
+
+    assert_eq!(completed.len(), 1, "exactly one ToolCallCompleted");
+    assert_eq!(completed[0].0, 0);
+    assert_eq!(completed[0].1, "read_file");
+    assert_eq!(
+        completed[0].2,
+        serde_json::json!({"path": "/tmp/a.txt"}),
+        "arguments must be the validated JSON"
+    );
+}

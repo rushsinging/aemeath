@@ -199,6 +199,7 @@ use crate::application::model::test_support::{
 };
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use hook::HookPort;
 use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
 use provider::ReasoningLevel;
@@ -277,6 +278,106 @@ fn test_shell() -> crate::application::client::SessionRuntime {
 
 fn test_shell_with_hooks(
     hooks: Arc<dyn hook::HookPort>,
+) -> crate::application::client::SessionRuntime {
+    test_shell_with_task_store(hooks, Arc::new(task::TaskStore::new()))
+}
+
+fn test_shell_with_catalog(
+    hooks: Arc<dyn hook::HookPort>,
+    factory: ::tools::composition::TestCatalogExecution,
+) -> crate::application::client::SessionRuntime {
+    let wiring = test_wiring();
+    let binding = crate::application::model::test_support::test_binding(vec!["dummy"]);
+    let cwd = std::env::current_dir().unwrap();
+    let workspace = project::wire_production_workspace(cwd.clone())
+        .expect("workspace 初始化成功")
+        .into_views();
+
+    crate::application::client::SessionRuntime {
+        session_state: Arc::new(std::sync::RwLock::new(
+            crate::application::run::creation::SessionState::new(
+                "test-session",
+                cwd,
+                format!("{}/{}", binding.model.provider, binding.model.model),
+                share::config::domain::snapshot::ConfigSnapshot::new(
+                    share::config::Config::default(),
+                ),
+            ),
+        )),
+        workspace,
+        wiring,
+        config_query: Arc::new(config::ConfigAppService::new(None)),
+        config_writer: Arc::new(config::ConfigAppService::new(None)),
+        session_management: Arc::new(context::test_support::UnavailableSessionManagement),
+        provider_factory: crate::application::model::test_support::constant_factory(
+            binding.clone(),
+        ),
+        model_state: crate::application::client::SessionModelState::new(
+            ResolvedModel {
+                source_key: "test".to_string(),
+                source_config: Default::default(),
+                driver: "openai".to_string(),
+                model: Default::default(),
+            },
+            binding,
+        ),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        skill_catalog: ::tools::composition::wire_skills().catalog(),
+        initial_skill_snapshot: ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new()),
+        memory_config: share::config::MemoryConfig::default(),
+        context_size: 200_000,
+        language: "en".to_string(),
+        allow_all: true,
+        verbose: false,
+        resume: None,
+        startup_resume: None,
+        agent_runner: Arc::new(NoopAgentRunner),
+        parent_context_source: crate::application::run::context::ParentRunContextSource::new(),
+        tool_result_materializer:
+            crate::application::tool::test_support::test_tool_result_materializer(),
+        active_run: Arc::new(
+            crate::application::run::active_registry::ActiveRunRegistry::default(),
+        ),
+        interaction_bridge: Arc::new(
+            crate::application::interaction::port::InteractionBridge::new(),
+        ),
+        session_ingress: Arc::new(crate::application::session::ingress::SessionIngress::new(
+            Arc::new(crate::application::interaction::port::InteractionBridge::new()),
+        )),
+        event_sink_factory: Arc::new(|tx| {
+            crate::application::loop_engine::chat::ChatEventSinkHandle::new(
+                crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
+            )
+        }),
+        input_port_factory: Arc::new(|ingress| {
+            crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(ingress)
+        }),
+        session_reminders: Arc::new(std::sync::RwLock::new(
+            share::memory::SessionReminders::default(),
+        )),
+        runtime_context_factory: Arc::new(
+            crate::application::run::context_factory::RuntimeContextFactory::new(
+                factory.catalog_port(),
+                factory.execution(),
+                Arc::new(policy::AllowAllPolicy),
+                test_reflection_history_store(),
+                Arc::new(task::TaskStore::new()),
+                hooks,
+            ),
+        ),
+    }
+}
+
+/// #1492：预置 Task 状态的行为测试用——允许注入外部 `TaskStore`。
+fn test_shell_with_task_store(
+    hooks: Arc<dyn hook::HookPort>,
+    task_store: Arc<task::TaskStore>,
 ) -> crate::application::client::SessionRuntime {
     let wiring = test_wiring();
     let binding = crate::application::model::test_support::test_binding(vec!["dummy"]);
@@ -360,7 +461,7 @@ fn test_shell_with_hooks(
                 factory.execution(),
                 Arc::new(policy::AllowAllPolicy),
                 test_reflection_history_store(),
-                Arc::new(task::TaskStore::new()),
+                task_store,
                 hooks,
             ),
         ),
@@ -4005,5 +4106,559 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
     assert!(
         sink.events().iter().any(|e| e == "DoneWithDuration"),
         "Run must terminate with DoneWithDuration"
+    );
+}
+
+// ─── #1492 task reminder injection ─────────────────────────────────────
+
+/// #1492：run 首步注入 Task 进度 reminder（invocation-only，只给 LLM）：
+///  - 首请求 messages 含 `<system-reminder>`（计数 + 任务列表）
+///  - 同 run 第二次请求（tool 往返后）不再注入
+///  - TUI 同步快照（TurnStarted / PostToolExecutionSync）不含注入内容
+#[tokio::test]
+async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
+    let after_first = Arc::new(tokio::sync::Notify::new());
+    let after_second = Arc::new(tokio::sync::Notify::new());
+
+    let provider = Arc::new(ToolThenTextProvider::new(
+        after_first.clone(),
+        after_second.clone(),
+    ));
+    let recorded = provider.recorded_messages.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    let factory = ::tools::composition::TestCatalogExecutionFactory::new();
+    factory.register(NoopMarkerTool);
+    let tool_ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        Default::default(),
+    );
+    let wired = factory.build(tool_ctx);
+    let _catalog_port = wired.catalog_port();
+    let _execution = wired.execution();
+
+    // 预置一个 active batch + 一个 in_progress 任务。
+    use task::TaskAccess as _;
+    let task_store = Arc::new(task::TaskStore::new());
+    task_store
+        .create_batch(
+            task::BatchCreateSpec::try_new("batch".to_string()).unwrap(),
+            1,
+        )
+        .unwrap();
+    let task = task_store
+        .create_task(
+            task::TaskCreateSpec::try_new(
+                "修复 compact 收敛".to_string(),
+                String::new(),
+                None,
+                task::TaskPriority::Normal,
+            )
+            .unwrap(),
+            2,
+        )
+        .unwrap()
+        .value;
+    task_store
+        .transition(task.id(), task::TaskStatus::InProgress, 3)
+        .unwrap();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "run with tasks",
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let shell = test_shell_with_task_store(test_hook_port(), task_store.clone());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+    );
+    shell.set_test_session_id("test-task-reminder-injection");
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+
+    let driver_sink = sink.clone();
+    let driver_after_first = after_first.clone();
+    let driver_after_second = after_second.clone();
+    let driver = tokio::spawn(async move {
+        driver_after_first.notified().await;
+        driver_after_second.notified().await;
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop completes after tool round + final text");
+    driver.await.expect("driver joins cleanly");
+
+    let recorded = recorded.lock().unwrap().clone();
+    assert_eq!(
+        recorded.len(),
+        2,
+        "expected exactly two model invocations (tool call + final text)"
+    );
+
+    let reminder_text = "<system-reminder>当前任务进度：";
+    // 首请求注入；同 run 第二次请求不重复。
+    assert!(
+        recorded[0]
+            .iter()
+            .any(|m| m.text_content().contains(reminder_text)),
+        "first invocation must carry the task reminder, got: {:?}",
+        recorded[0]
+            .iter()
+            .map(Message::text_content)
+            .collect::<Vec<_>>()
+    );
+    let first_reminder = recorded[0]
+        .iter()
+        .find(|m| m.text_content().contains(reminder_text))
+        .unwrap();
+    // 任务处于 in_progress，completed 计数为 0。
+    assert!(first_reminder.text_content().contains("━━ Tasks: 0/1 ━━"));
+    assert!(first_reminder
+        .text_content()
+        .contains("■ #1 修复 compact 收敛"));
+    assert!(
+        !recorded[1]
+            .iter()
+            .any(|m| m.text_content().contains(reminder_text)),
+        "second invocation (tool round continuation) must NOT re-inject the reminder"
+    );
+
+    // TUI 同步快照不含注入内容。
+    let synced = sink.synced_messages();
+    assert!(
+        synced
+            .iter()
+            .flatten()
+            .all(|m| !m.text_content().contains(reminder_text)),
+        "TUI JSON (synced messages) must not contain the injected reminder"
+    );
+}
+
+/// #1492：/clear（ChatInputEvent::Reset）在 idle 时清理权威 Task 状态。
+#[tokio::test]
+async fn clear_resets_authoritative_task_state() {
+    let provider = Arc::new(TextOnlyProvider::new(Arc::new(tokio::sync::Notify::new())));
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    use task::TaskAccess as _;
+    let task_store = Arc::new(task::TaskStore::new());
+    task_store
+        .create_batch(
+            task::BatchCreateSpec::try_new("batch".to_string()).unwrap(),
+            1,
+        )
+        .unwrap();
+    task_store
+        .create_task(
+            task::TaskCreateSpec::try_new(
+                "遗留任务".to_string(),
+                String::new(),
+                None,
+                task::TaskPriority::Normal,
+            )
+            .unwrap(),
+            2,
+        )
+        .unwrap();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+    input_tx.send(sdk::ChatInputEvent::Reset).unwrap();
+
+    let shell = test_shell_with_task_store(test_hook_port(), task_store.clone());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+    );
+    shell.set_test_session_id("test-clear-resets-tasks");
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+
+    let run = tokio::spawn(process_chat_loop(ctx));
+    wait_for_retry_test_condition("SessionReset observed", || {
+        sink.events().iter().any(|event| event == "SessionReset")
+    })
+    .await;
+    drop(input_tx);
+    run.await.unwrap();
+
+    assert!(
+        task_store.list().is_empty(),
+        "/clear must clear the authoritative task aggregate"
+    );
+}
+
+// ─── #1494 streaming tool execution ───────────────────────────────────
+
+/// 流中发 ToolCallCompleted delta 的 provider：第一次调用在工具 delta 后
+/// 延迟（800ms）才发 Completed——旁路执行应发生在这段延迟内（先于流结束）；
+/// 第二次调用返回文本（工具结果 continuation 后）。
+struct StreamingToolDeltaProvider {
+    call_count: Arc<Mutex<usize>>,
+    recorded_messages: Arc<Mutex<Vec<Vec<Message>>>>,
+    after_tool_completed: Arc<tokio::sync::Notify>,
+}
+
+impl StreamingToolDeltaProvider {
+    fn new(after_tool_completed: Arc<tokio::sync::Notify>) -> Self {
+        Self {
+            call_count: Arc::new(Mutex::new(0)),
+            recorded_messages: Arc::new(Mutex::new(Vec::new())),
+            after_tool_completed,
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for StreamingToolDeltaProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        let call_num = {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            *count
+        };
+        self.recorded_messages
+            .lock()
+            .unwrap()
+            .push(messages.to_vec());
+        if call_num == 1 {
+            self.after_tool_completed.notify_one();
+            let tool_call = ProviderToolCall {
+                id: ProviderToolCallId("toolu_stream_001".to_string()),
+                name: "NoopMarker".to_string(),
+                arguments: serde_json::json!({"marker": "noop-marker-result"}),
+            };
+            let deltas = vec![
+                InvocationEvent::Delta(InvocationDelta::ToolCallStarted {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_stream_001".to_string())),
+                    name: "NoopMarker".to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolArgumentsDelta {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_stream_001".to_string())),
+                    partial_json: r#"{"marker":"noop-marker-result"}"#.to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolCallCompleted {
+                    index: 0,
+                    call: tool_call.clone(),
+                }),
+            ];
+            let stream = futures::stream::iter(deltas).chain(futures::stream::once(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                InvocationEvent::Completed(ProviderCompletion {
+                    output: vec![ProviderContentBlock::ToolCall(tool_call)],
+                    stop_reason: ProviderStopReason::ToolUse,
+                    usage: Some(RawUsageSnapshot {
+                        input_tokens: Some(10),
+                        output_tokens: Some(5),
+                        ..RawUsageSnapshot::default()
+                    }),
+                    effective_reasoning: ReasoningLevel::Off,
+                })
+            }));
+            Ok(Box::pin(stream))
+        } else {
+            Ok(Box::pin(futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::Text("done after tool".to_string())),
+                InvocationEvent::Completed(ProviderCompletion {
+                    output: vec![ProviderContentBlock::Text("done after tool".to_string())],
+                    stop_reason: ProviderStopReason::EndTurn,
+                    usage: Some(RawUsageSnapshot {
+                        input_tokens: Some(20),
+                        output_tokens: Some(3),
+                        ..RawUsageSnapshot::default()
+                    }),
+                    effective_reasoning: ReasoningLevel::Off,
+                }),
+            ])))
+        }
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+/// 检查消息 content 中是否含指定文本的 ToolResult block（materialize 输出为 ToolResult）。
+fn message_contains_tool_result_text(message: &Message, needle: &str) -> bool {
+    message.content.iter().any(|block| match block {
+        share::message::ContentBlock::ToolResult { content, text, .. } => {
+            text.as_deref().is_some_and(|t| t.contains(needle))
+                || content.to_string().contains(needle)
+        }
+        _ => false,
+    })
+}
+
+/// #1494：流中 ToolCallCompleted（参数完整）→ 旁路立即执行工具，不等流完整返回。
+#[tokio::test]
+async fn streaming_tool_call_executes_before_stream_completes() {
+    let after_tool_completed = Arc::new(tokio::sync::Notify::new());
+    let provider = Arc::new(StreamingToolDeltaProvider::new(
+        after_tool_completed.clone(),
+    ));
+    let recorded = provider.recorded_messages.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    let factory = ::tools::composition::TestCatalogExecutionFactory::new();
+    factory.register(NoopMarkerTool);
+    let tool_ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        Default::default(),
+    );
+    let wired = factory.build(tool_ctx);
+    let _catalog = wired.catalog();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "run streaming tool",
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let shell = test_shell_with_catalog(test_hook_port(), wired);
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+    );
+    shell.set_test_session_id("test-streaming-tool-execution");
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+
+    let driver_sink = sink.clone();
+    let driver_after_tool = after_tool_completed.clone();
+    let driver = tokio::spawn(async move {
+        driver_after_tool.notified().await;
+        // 等工具执行完成事件（ToolResult）出现——此时流还在 800ms 延迟中。
+        loop {
+            if driver_sink.events().iter().any(|e| e == "ToolResult") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop completes after streaming tool + continuation");
+    driver.await.expect("driver joins cleanly");
+
+    let events = sink.events();
+    let tool_result_index = events
+        .iter()
+        .position(|e| e == "ToolResult")
+        .expect("streaming tool must execute and emit ToolResult");
+    let done_index = events
+        .iter()
+        .position(|e| e == "DoneWithDuration")
+        .expect("run must terminate");
+    assert!(
+        tool_result_index < done_index,
+        "streaming tool execution must complete BEFORE the stream ends (execution is not deferred): tool_result={tool_result_index} done={done_index}"
+    );
+
+    // 流结束后汇总：首帧 TurnStarted 快照在工具执行前发出（不含结果）；
+    // 工具结果经旁路汇总 append 后，由 continuation 的 TurnStarted 同步（最后一条快照含）。
+    let synced = sink.synced_messages();
+    assert!(
+        synced.last().is_some_and(|snapshot| snapshot
+            .iter()
+            .any(|m| message_contains_tool_result_text(m, "noop-marker-result"))),
+        "tool result must be materialized into message history (visible in the final sync), got {} snapshots",
+        synced.len()
+    );
+    let recorded = recorded.lock().unwrap().clone();
+    assert_eq!(
+        recorded.len(),
+        2,
+        "expected two invocations (tool call + continuation)"
+    );
+    assert!(
+        recorded[1]
+            .iter()
+            .any(|m| message_contains_tool_result_text(m, "noop-marker-result")),
+        "continuation request must carry the tool result"
+    );
+}
+
+/// 流中 ToolCallCompleted 后流失败（retry）→ 旁路缓冲丢弃，重试请求不带已执行结果。
+struct StreamingToolRetryProvider {
+    call_count: Arc<Mutex<usize>>,
+    recorded_messages: Arc<Mutex<Vec<Vec<Message>>>>,
+}
+
+impl StreamingToolRetryProvider {
+    fn new() -> Self {
+        Self {
+            call_count: Arc::new(Mutex::new(0)),
+            recorded_messages: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for StreamingToolRetryProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        let call_num = {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            *count
+        };
+        self.recorded_messages
+            .lock()
+            .unwrap()
+            .push(messages.to_vec());
+        if call_num == 1 {
+            // 先发完整的 ToolCallCompleted delta（旁路执行已触发），随后流失败。
+            let tool_call = ProviderToolCall {
+                id: ProviderToolCallId("toolu_retry_001".to_string()),
+                name: "NoopMarker".to_string(),
+                arguments: serde_json::json!({"marker": "retry-drop"}),
+            };
+            let stream = futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::ToolCallStarted {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_retry_001".to_string())),
+                    name: "NoopMarker".to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolArgumentsDelta {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_retry_001".to_string())),
+                    partial_json: r#"{"marker":"retry-drop"}"#.to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolCallCompleted {
+                    index: 0,
+                    call: tool_call,
+                }),
+                InvocationEvent::Failed(ProviderError::retryable(
+                    ProviderErrorKind::Protocol,
+                    "stream broke after tool call",
+                )),
+            ]);
+            Ok(Box::pin(stream))
+        } else {
+            // 重试：纯文本成功。
+            Ok(Box::pin(futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::Text("retry succeeded".to_string())),
+                InvocationEvent::Completed(ProviderCompletion {
+                    output: vec![ProviderContentBlock::Text("retry succeeded".to_string())],
+                    stop_reason: ProviderStopReason::EndTurn,
+                    usage: Some(RawUsageSnapshot {
+                        input_tokens: Some(10),
+                        output_tokens: Some(3),
+                        ..RawUsageSnapshot::default()
+                    }),
+                    effective_reasoning: ReasoningLevel::Off,
+                }),
+            ])))
+        }
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+/// #1494：流失败 retry 时旁路结果丢弃——重试请求**不含**已执行工具结果。
+#[tokio::test(start_paused = true)]
+async fn streaming_tool_results_dropped_on_retry() {
+    let provider = Arc::new(StreamingToolRetryProvider::new());
+    let recorded = provider.recorded_messages.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    let factory = ::tools::composition::TestCatalogExecutionFactory::new();
+    factory.register(NoopMarkerTool);
+    let tool_ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        Default::default(),
+    );
+    let wired = factory.build(tool_ctx);
+    let _catalog = wired.catalog();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "retry drops tool",
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let shell = test_shell_with_catalog(test_hook_port(), wired);
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+    );
+    shell.set_test_session_id("test-streaming-tool-retry-drop");
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+
+    let run = tokio::spawn(process_chat_loop(ctx));
+    advance_until_retry_condition(
+        "retry succeeded",
+        std::time::Duration::from_secs(15),
+        || *provider.call_count.lock().unwrap() >= 2,
+    )
+    .await;
+    wait_for_retry_test_condition("Main turn completed", || {
+        sink.events()
+            .iter()
+            .any(|event| event == "DoneWithDuration")
+    })
+    .await;
+    drop(input_tx);
+    run.await.unwrap();
+
+    let recorded = recorded.lock().unwrap().clone();
+    assert_eq!(recorded.len(), 2, "expected retry (2 invocations)");
+    assert!(
+        recorded[1]
+            .iter()
+            .all(|m| !m.text_content().contains("retry-drop")),
+        "retry request must NOT carry the dropped streaming tool result, got: {:?}",
+        recorded[1]
+            .iter()
+            .map(Message::text_content)
+            .collect::<Vec<_>>()
     );
 }
