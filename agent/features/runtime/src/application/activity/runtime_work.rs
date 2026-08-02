@@ -10,6 +10,7 @@ impl ActivityCoordinator {
         run_step_id: RunStepId,
         parent_activity_id: ActivityId,
         point: sdk::HookPointView,
+        script: String,
         attempt: u8,
     ) -> Result<ActivityId, ActivityError> {
         self.start(StartActivity {
@@ -17,8 +18,29 @@ impl ActivityCoordinator {
             parent_activity_id: Some(parent_activity_id),
             source: ActivitySource::HookDispatch(ActivityId::new_v7()),
             kind: ActivityKind::HookDispatch,
-            detail: ActivityDetail::Hook { point, attempt },
-            audience: ActivityAudienceView::Diagnostic,
+            detail: ActivityDetail::Hook {
+                point,
+                script,
+                attempt,
+            },
+            audience: ActivityAudienceView::Operational,
+        })
+    }
+
+    pub(crate) fn update_hook_dispatch(
+        &self,
+        activity_id: ActivityId,
+        point: sdk::HookPointView,
+        script: String,
+        attempt: u8,
+    ) -> Result<(), ActivityError> {
+        self.update(UpdateActivity {
+            activity_id,
+            detail: Some(ActivityDetail::Hook {
+                point,
+                script,
+                attempt,
+            }),
         })
     }
 

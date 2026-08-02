@@ -69,6 +69,23 @@ fn start_tool() -> StartActivity {
 }
 
 #[test]
+fn live_hook_parent_starts_and_returns_run_root_when_no_phase_exists() {
+    let (coordinator, _) = coordinator();
+
+    let parent_id = coordinator
+        .live_hook_parent_id()
+        .expect("hook parent from run root");
+    let parent = coordinator
+        .snapshot()
+        .find(&parent_id)
+        .expect("run root activity")
+        .clone();
+
+    assert_eq!(parent.kind, sdk::ActivityKindView::Run);
+    assert_eq!(parent.state, sdk::ActivityStateView::Running);
+}
+
+#[test]
 fn start_assigns_identity_and_revision_one() {
     let (coordinator, _) = coordinator();
     let activity_id = coordinator.start(start_tool()).expect("start activity");

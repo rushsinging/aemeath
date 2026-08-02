@@ -1,7 +1,5 @@
 use super::sdk_event_mapper::map_stream_event;
-use crate::application::loop_engine::chat::events::RuntimeHookExecutionResult;
 use crate::application::loop_engine::chat::{
-    RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookMessage, RuntimeHookMessageKind,
     RuntimeResumedSessionStep, RuntimeStreamEvent, RuntimeTurnContext,
 };
 
@@ -178,85 +176,6 @@ fn tool_call_projection_preserves_canonical_name() {
 
     match map_stream_event(event) {
         sdk::ChatEvent::ToolCallStart { name, .. } => assert_eq!(name, "Grep"),
-        other => panic!("unexpected event: {other:?}"),
-    }
-}
-
-#[test]
-fn hook_event_mapping_preserves_authoritative_status_and_final_diagnostics() {
-    let event = RuntimeStreamEvent::HookEvent(RuntimeHookEvent {
-        hook_name: "Stop".to_string(),
-        status: RuntimeHookEventStatus::Succeeded,
-        matcher: Some("*".to_string()),
-        command: Some("check-agent-stop.sh".to_string()),
-        result: Some(RuntimeHookExecutionResult {
-            exit_code: Some(0),
-            stdout: "ok".to_string(),
-            stderr: String::new(),
-            decision: Some("continue".to_string()),
-            reason: None,
-            additional_context: None,
-        }),
-    });
-
-    match map_stream_event(event) {
-        sdk::ChatEvent::HookEvent(view) => {
-            assert_eq!(view.status, sdk::HookEventStatus::Succeeded);
-            assert_eq!(view.matcher.as_deref(), Some("*"));
-            assert_eq!(view.command.as_deref(), Some("check-agent-stop.sh"));
-            let result = view.result.expect("hook result");
-            assert_eq!(result.exit_code, Some(0));
-            assert_eq!(result.stdout, "ok");
-            assert!(result.stderr.is_empty());
-            assert_eq!(result.decision.as_deref(), Some("continue"));
-            assert!(result.reason.is_none());
-        }
-        other => panic!("unexpected event: {other:?}"),
-    }
-}
-
-#[test]
-fn hook_message_mapping_preserves_additional_context_attribution() {
-    let event = RuntimeStreamEvent::HookMessage(RuntimeHookMessage {
-        point: hook::HookPoint::PreToolUse,
-        source: "Bash".to_string(),
-        execution_ordinal: 0,
-        attempt: 1,
-        kind: RuntimeHookMessageKind::AdditionalContext,
-        text: "extra context".to_string(),
-    });
-
-    match map_stream_event(event) {
-        sdk::ChatEvent::HookMessage(view) => {
-            assert_eq!(view.point, "PreToolUse");
-            assert_eq!(view.source, "Bash");
-            assert_eq!(view.execution_ordinal, 0);
-            assert_eq!(view.attempt, 1);
-            assert_eq!(view.kind, sdk::HookMessageKindView::AdditionalContext);
-            assert_eq!(view.text, "extra context");
-        }
-        other => panic!("unexpected event: {other:?}"),
-    }
-}
-
-#[test]
-fn hook_message_mapping_preserves_system_message_attempt() {
-    let event = RuntimeStreamEvent::HookMessage(RuntimeHookMessage {
-        point: hook::HookPoint::PostToolUse,
-        source: "Bash".to_string(),
-        execution_ordinal: 2,
-        attempt: 3,
-        kind: RuntimeHookMessageKind::SystemMessage,
-        text: "warning".to_string(),
-    });
-
-    match map_stream_event(event) {
-        sdk::ChatEvent::HookMessage(view) => {
-            assert_eq!(view.kind, sdk::HookMessageKindView::SystemMessage);
-            assert_eq!(view.execution_ordinal, 2);
-            assert_eq!(view.attempt, 3);
-            assert_eq!(view.text, "warning");
-        }
         other => panic!("unexpected event: {other:?}"),
     }
 }

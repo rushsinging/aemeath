@@ -1,202 +1,110 @@
-//! Hook dispatch helper — typed Runtime value mapping.
+//! Hook dispatch helper — execute once and report through Activity observation.
 
+use crate::application::activity::{ActivityCoordinator, ActivityTerminal};
 use crate::application::hook::outcome_mapper::{
-    map_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookDisplayMessageKind,
-    RuntimeHookExecution, RuntimeHookExecutionStatus, RuntimeHookReason,
+    map_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch,
 };
-use crate::application::loop_engine::chat::{
-    ChatEventSink, RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookExecutionResult,
-    RuntimeHookMessage, RuntimeHookMessageKind, RuntimeStreamEvent,
+use hook::{
+    HookDispatchContext, HookInvocation, HookPoint, HookPort, HookSubscriptionExecutionEvent,
+    HookSubscriptionExecutionObserver, HookSubscriptionExecutionTerminal,
 };
-use hook::{HookDispatchContext, HookInvocation, HookPort};
+use parking_lot::Mutex;
 use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-/// 执行一次 hook dispatch 并投影为 Runtime 可消费的纯值。
-///
-/// 当前工作区根必须按 invocation 显式传入，确保 worktree 切换不会复用旧 cwd。
-pub(crate) async fn dispatch_hook<S: ChatEventSink>(
+struct HookActivityObserver {
+    activities: Arc<ActivityCoordinator>,
+    run_step_id: sdk::RunStepId,
+    parent_activity_id: sdk::ActivityId,
+    live_activity_id: Mutex<Option<sdk::ActivityId>>,
+}
+
+impl HookSubscriptionExecutionObserver for HookActivityObserver {
+    fn observe(&self, event: HookSubscriptionExecutionEvent) {
+        match event {
+            HookSubscriptionExecutionEvent::Started {
+                point,
+                script,
+                attempt,
+            } => {
+                let activity_id = self
+                    .activities
+                    .start_hook_dispatch(
+                        self.run_step_id.clone(),
+                        self.parent_activity_id.clone(),
+                        hook_point_view(point),
+                        script,
+                        attempt,
+                    )
+                    .ok();
+                *self.live_activity_id.lock() = activity_id;
+            }
+            HookSubscriptionExecutionEvent::AttemptChanged {
+                point,
+                script,
+                attempt,
+            } => {
+                if let Some(activity_id) = self.live_activity_id.lock().clone() {
+                    let _ = self.activities.update_hook_dispatch(
+                        activity_id,
+                        hook_point_view(point),
+                        script,
+                        attempt,
+                    );
+                }
+            }
+            HookSubscriptionExecutionEvent::Finished { terminal, .. } => {
+                if let Some(activity_id) = self.live_activity_id.lock().take() {
+                    let terminal = match terminal {
+                        HookSubscriptionExecutionTerminal::Succeeded => ActivityTerminal::Succeeded,
+                        HookSubscriptionExecutionTerminal::Failed => ActivityTerminal::Failed,
+                        HookSubscriptionExecutionTerminal::Cancelled => ActivityTerminal::Cancelled,
+                    };
+                    let _ = self.activities.finish(activity_id, terminal);
+                }
+            }
+        }
+    }
+}
+
+fn hook_point_view(point: HookPoint) -> sdk::HookPointView {
+    crate::application::hook::stop_coordination::hook_point_view(point)
+}
+
+pub(crate) fn subscription_activity_observer(
+    activities: &ActivityCoordinator,
+    run_step_id: &sdk::RunStepId,
+) -> Option<Arc<dyn HookSubscriptionExecutionObserver>> {
+    activities
+        .live_hook_parent_id()
+        .ok()
+        .map(|parent_activity_id| {
+            Arc::new(HookActivityObserver {
+                activities: Arc::new(activities.clone()),
+                run_step_id: run_step_id.clone(),
+                parent_activity_id,
+                live_activity_id: Mutex::new(None),
+            }) as Arc<dyn HookSubscriptionExecutionObserver>
+        })
+}
+
+/// 执行一次 Hook dispatch。生命周期展示只通过 ActivityCoordinator 发布。
+pub(crate) async fn dispatch_hook(
     hook_port: &Arc<dyn HookPort>,
-    sink: &S,
+    activities: &ActivityCoordinator,
+    run_step_id: &sdk::RunStepId,
     invocation: HookInvocation,
     workspace_root: &Path,
     cancel: &CancellationToken,
 ) -> RuntimeHookDispatch {
-    let point = invocation.point();
-    let _ = sink
-        .send_event(RuntimeStreamEvent::HookEvent(RuntimeHookEvent {
-            hook_name: format!("{point:?}"),
-            status: RuntimeHookEventStatus::Running,
-            matcher: None,
-            command: None,
-            result: None,
-        }))
-        .await;
-    let outcome = hook_port
-        .dispatch_at(invocation, HookDispatchContext::new(workspace_root), cancel)
-        .await;
-    let dispatch = map_hook_outcome(&outcome);
-    let (status, matcher, command, result) = hook_event_completion(&dispatch);
-    let _ = sink
-        .send_event(RuntimeStreamEvent::HookEvent(RuntimeHookEvent {
-            hook_name: format!("{point:?}"),
-            status,
-            matcher,
-            command,
-            result,
-        }))
-        .await;
-
-    for message in &dispatch.messages {
-        let kind = match message.kind {
-            RuntimeHookDisplayMessageKind::AdditionalContext => {
-                RuntimeHookMessageKind::AdditionalContext
-            }
-            RuntimeHookDisplayMessageKind::SystemMessage => RuntimeHookMessageKind::SystemMessage,
-        };
-        let _ = sink
-            .send_event(RuntimeStreamEvent::HookMessage(RuntimeHookMessage {
-                point: message.point,
-                source: message.source.clone(),
-                execution_ordinal: message.execution_ordinal,
-                attempt: message.attempt,
-                kind,
-                text: message.text.clone(),
-            }))
-            .await;
+    let subscription_execution_observer = subscription_activity_observer(activities, run_step_id);
+    let mut context = HookDispatchContext::new(workspace_root);
+    if let Some(observer) = subscription_execution_observer {
+        context = context.with_subscription_execution_observer(observer);
     }
-
-    dispatch
-}
-
-pub(crate) async fn project_hook_dispatch<S: ChatEventSink>(
-    sink: &S,
-    point: hook::HookPoint,
-    dispatch: &RuntimeHookDispatch,
-) {
-    let (status, matcher, command, result) = hook_event_completion(dispatch);
-    let _ = sink
-        .send_event(RuntimeStreamEvent::HookEvent(RuntimeHookEvent {
-            hook_name: format!("{point:?}"),
-            status,
-            matcher,
-            command,
-            result,
-        }))
-        .await;
-
-    for message in &dispatch.messages {
-        let kind = match message.kind {
-            RuntimeHookDisplayMessageKind::AdditionalContext => {
-                RuntimeHookMessageKind::AdditionalContext
-            }
-            RuntimeHookDisplayMessageKind::SystemMessage => RuntimeHookMessageKind::SystemMessage,
-        };
-        let _ = sink
-            .send_event(RuntimeStreamEvent::HookMessage(RuntimeHookMessage {
-                point: message.point,
-                source: message.source.clone(),
-                execution_ordinal: message.execution_ordinal,
-                attempt: message.attempt,
-                kind,
-                text: message.text.clone(),
-            }))
-            .await;
-    }
-}
-
-fn hook_event_completion(
-    dispatch: &RuntimeHookDispatch,
-) -> (
-    RuntimeHookEventStatus,
-    Option<String>,
-    Option<String>,
-    Option<RuntimeHookExecutionResult>,
-) {
-    let matcher = dispatch
-        .messages
-        .first()
-        .map(|message| message.source.clone());
-    match &dispatch.directive {
-        RuntimeHookDirective::Block { reason } => {
-            let command = dispatch
-                .block_detail
-                .as_ref()
-                .map(|detail| detail.command.clone());
-            let execution = dispatch
-                .block_detail
-                .as_ref()
-                .map(|detail| &detail.execution)
-                .or_else(|| dispatch.executions.last());
-            (
-                RuntimeHookEventStatus::Blocked,
-                matcher,
-                command,
-                execution.map(|execution| hook_execution_result(execution, "block", Some(reason))),
-            )
-        }
-        directive => {
-            let execution = dispatch.executions.last();
-            let status = match execution.map(|execution| &execution.status) {
-                Some(RuntimeHookExecutionStatus::ExecutionFailed { .. }) => {
-                    RuntimeHookEventStatus::Failed
-                }
-                _ => RuntimeHookEventStatus::Succeeded,
-            };
-            let decision = match directive {
-                RuntimeHookDirective::Continue => "continue",
-                RuntimeHookDirective::Context { .. } => "continue_with_context",
-                RuntimeHookDirective::UpdatedInput { .. } => "continue_with_updated_input",
-                RuntimeHookDirective::ContextAndInput { .. } => "continue_with_context_and_input",
-                RuntimeHookDirective::Block { .. } => unreachable!("block handled above"),
-            };
-            (
-                status,
-                matcher,
-                None,
-                execution.map(|execution| hook_execution_result(execution, decision, None)),
-            )
-        }
-    }
-}
-
-fn hook_execution_result(
-    execution: &RuntimeHookExecution,
-    decision: &str,
-    block_reason: Option<&RuntimeHookReason>,
-) -> RuntimeHookExecutionResult {
-    RuntimeHookExecutionResult {
-        exit_code: execution.exit_code,
-        stdout: execution.stdout.clone(),
-        stderr: execution.stderr.clone(),
-        decision: Some(decision.to_string()),
-        reason: block_reason
-            .map(format_hook_reason)
-            .or_else(|| match &execution.status {
-                RuntimeHookExecutionStatus::ExecutionFailed { error } => Some(error.clone()),
-                RuntimeHookExecutionStatus::Success | RuntimeHookExecutionStatus::Blocked => None,
-            }),
-        additional_context: None,
-    }
-}
-
-fn format_hook_reason(reason: &RuntimeHookReason) -> String {
-    match reason {
-        RuntimeHookReason::ExitCode { code, stderr } => {
-            if stderr.trim().is_empty() {
-                format!("exit code {code}")
-            } else {
-                stderr.clone()
-            }
-        }
-        RuntimeHookReason::JsonBlock { reason } => reason.clone(),
-        RuntimeHookReason::JsonContinueFalse { stop_reason } => stop_reason
-            .clone()
-            .unwrap_or_else(|| "hook returned continue:false".to_string()),
-        RuntimeHookReason::StopHookExecutionFailed { error }
-        | RuntimeHookReason::PolicyBlock { error } => error.clone(),
-    }
+    let outcome = hook_port.dispatch_at(invocation, context, cancel).await;
+    map_hook_outcome(&outcome)
 }
 
 pub(crate) fn dispatch_is_blocking(dispatch: &RuntimeHookDispatch) -> bool {

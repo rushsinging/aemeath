@@ -375,20 +375,20 @@ git commit -m "feat(runtime): #742 统一模型与工具 Activity"
 
 - [ ] **Step 1: 编写每个 owner 的失败测试**
 
-覆盖 Hook attempt/blocked/failure、Compact stage/progress、Interaction waiting/resume/cancel、FinalizingStep、CancellingStep、Terminating；验证等待时 `active_elapsed_ms` 暂停、`total_elapsed_ms` 继续。
+覆盖每条匹配 Hook subscription 按稳定 `order` 独立发布 Activity、单 subscription 重试只更新同一 Activity 的 attempt、blocked/failure/cancel 终态；脚本事实只保留可安全展示的文件名，不发布命令路径、参数、stdout 或 stderr。另覆盖 Compact stage/progress、Interaction waiting/resume/cancel、FinalizingStep、CancellingStep、Terminating；验证等待时 `active_elapsed_ms` 暂停、`total_elapsed_ms` 继续。
 
 - [ ] **Step 2: 运行定向测试确认失败**
 
-Run: `cargo test -p runtime hook_activity -- --nocapture && cargo test -p runtime compact_activity -- --nocapture && cargo test -p runtime interaction_activity -- --nocapture`  
+Run: `cargo test -p hook subscription_activity -- --nocapture && cargo test -p runtime hook_activity -- --nocapture && cargo test -p runtime compact_activity -- --nocapture && cargo test -p runtime interaction_activity -- --nocapture`
 Expected: FAIL。
 
-- [ ] **Step 3: 在各 Runtime application owner 接线**
+- [ ] **Step 3: 在 Hook BC 与 Runtime application owner 接线**
 
-Hook/Context 只返回 typed outcome/progress；Runtime owner 调 Coordinator。Interaction request 创建 Waiting activity，匹配 reply 后 resume，取消/Run control 按 typed cause 终结。Finalizer/control 使用 Run phase Activity，不创建内部子动作噪声。
+Hook BC 定义窄的 subscription execution observer：每条匹配 subscription 执行前发 start，重试前发 attempt update，成功、失败、阻断或取消时发唯一 terminal；observer payload 只含 point、稳定顺序、attempt 与由 Hook BC 从展开命令中提取的脚本文件名。Runtime adapter 消费该生命周期并调用 `ActivityCoordinator`，每条脚本对应一个 `HookDispatch Activity`；不得让 Hook crate 依赖 Runtime，也不得让 TUI 解析原始命令。Compact/Interaction 继续只返回 typed outcome/progress；Finalizer/control 使用 Run phase Activity，不创建内部子动作噪声。
 
 - [ ] **Step 4: 运行 owner 与 Loop 测试**
 
-Run: `cargo test -p runtime hook_activity -- --nocapture && cargo test -p runtime compact_activity -- --nocapture && cargo test -p runtime interaction_activity -- --nocapture && cargo test -p runtime loop_engine -- --nocapture`  
+Run: `cargo test -p hook subscription_activity -- --nocapture && cargo test -p runtime hook_activity -- --nocapture && cargo test -p runtime compact_activity -- --nocapture && cargo test -p runtime interaction_activity -- --nocapture && cargo test -p runtime loop_engine -- --nocapture`
 Expected: PASS。
 
 - [ ] **Step 5: 提交剩余 Activity 覆盖**
@@ -411,7 +411,7 @@ git commit -m "feat(runtime): #742 覆盖完整运行 Activity"
 
 - [ ] **Step 1: 编写失败的 Runtime→SDK 相邻契约测试**
 
-构造每个 Runtime Activity kind/state/detail，断言 `ActivityView` 字段无损；snapshot 保持 run/revision/稳定排序；安全字段中不存在完整 tool args、Hook stdout/stderr 或 provider raw response。
+构造每个 Runtime Activity kind/state/detail，断言 `ActivityView` 字段无损；Hook detail 必须保留完整 typed HookPoint 与安全脚本文件名，并禁止完整命令、路径、参数、stdout/stderr 越过 SDK 边界；snapshot 保持 run/revision/稳定排序；其他 Activity 安全字段中不存在完整 tool args 或 provider raw response。
 
 - [ ] **Step 2: 运行 adapter 测试确认失败**
 
@@ -530,7 +530,7 @@ git commit -m "feat(tui): #742 镜像 Runtime Activity 事实"
 
 - [ ] **Step 1: 编写摘要策略失败测试**
 
-使用固定 `now`，覆盖：Main root 总计时、phase 计时、User audience leaf；Sub 不覆盖 Main；三个并行 Tool 聚合成 `Running 3 tools`；500ms 前不显示 leaf；显示后 750ms 内不轮播；Hook/retry/Diagnostic 不进入默认摘要；Interaction waiting 暂停 active elapsed；stale snapshot 隐藏状态行。
+使用固定 `now`，覆盖：Main root 总计时、phase 计时、User audience leaf；Sub 不覆盖 Main；三个并行 Tool 聚合成 `Running 3 tools`；500ms 前不显示 leaf；显示后 750ms 内不轮播；Diagnostic 不进入默认摘要；Operational Hook 仅显示当前逐 subscription Activity，HookPoint 使用完整稳定名称，脚本仅显示文件名，running/waiting 显示 `<HookPoint> · <script>`，失败显示 `<HookPoint> failed · <script>`，快速成功不污染状态；长文案截断预算延长且始终优先保留完整 HookPoint；Interaction waiting 暂停 active elapsed；stale snapshot 隐藏状态行。
 
 - [ ] **Step 2: 运行 assembler 测试确认失败**
 

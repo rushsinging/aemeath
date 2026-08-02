@@ -1377,27 +1377,13 @@ async fn execute_step(
             // A blocking stop hook with repeated output should continue
             // (feedback may change the model's behavior); text stall
             // detection runs only when the stop hook allows proceeding.
-            let hook_activity_id = port.start_hook_activity(
-                step_id.clone(),
-                crate::application::hook::stop_coordination::hook_point_view(hook::HookPoint::Stop),
-                1,
-            )?;
             let stop_outcome = match port
-                .coordinate_stop_hook(execution, run.steps().len(), &step_cancel)
+                .coordinate_stop_hook(execution, &step_id, run.steps().len(), &step_cancel)
                 .await
             {
                 Ok(outcome) => outcome,
-                Err(error) => {
-                    port.finish_activity(hook_activity_id, ActivityTerminal::Failed)?;
-                    return Err(error);
-                }
+                Err(error) => return Err(error),
             };
-            let hook_terminal = if matches!(stop_outcome.decision, StopHookDecision::Block(_)) {
-                ActivityTerminal::Failed
-            } else {
-                ActivityTerminal::Succeeded
-            };
-            port.finish_activity(hook_activity_id, hook_terminal)?;
             match stop_outcome.decision {
                 StopHookDecision::Proceed => {
                     // Normal completion — fall through to text stall check.

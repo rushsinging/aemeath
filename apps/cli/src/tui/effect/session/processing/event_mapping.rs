@@ -99,9 +99,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             messages: messages.into_iter().map(chat_message).collect(),
             cleared_count,
         },
-        sdk::ChatEvent::StopHookBlocked { messages } => UiEvent::StopHookBlocked {
-            messages: messages.into_iter().map(chat_message).collect(),
-        },
         sdk::ChatEvent::PostToolExecutionSync { messages } => UiEvent::PostToolExecutionSync {
             messages: messages.into_iter().map(chat_message).collect(),
         },
@@ -163,8 +160,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::CurrentTurnChanged(turn) | sdk::ChatEvent::TurnChanged(turn) => {
             UiEvent::CurrentTurnChanged(turn)
         }
-        sdk::ChatEvent::HookEvent(event) => UiEvent::HookEvent(event),
-        sdk::ChatEvent::HookMessage(message) => UiEvent::HookMessage(message),
         // #944 5B: AskUserBatch legacy bridge removed.
         sdk::ChatEvent::AskUserBatch { .. } => {
             UiEvent::SystemMessage("AskUserBatch retired".to_string())

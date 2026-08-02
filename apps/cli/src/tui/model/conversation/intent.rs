@@ -2,7 +2,7 @@
 //!
 //! struct 的 `impl ConversationUpdate` 逻辑在 `intent_impls.rs`。
 
-use super::block::{AskUserSlot, HookNoticeContent};
+use super::block::AskUserSlot;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::interaction::{
     InteractionCommandFailure, InteractionDraftAction, InteractionRequest, UiInteractionRequestId,
@@ -103,11 +103,6 @@ pub struct TerminalNotice {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppendSystemMessage {
     pub text: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppendHookNotice {
-    pub content: HookNoticeContent,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -420,7 +415,6 @@ pub enum ConversationIntent {
     ToolResult(ToolResult),
     TerminalNotice(TerminalNotice),
     AppendSystemMessage(AppendSystemMessage),
-    AppendHookNotice(AppendHookNotice),
     AppendError(AppendError),
     QueueSubmission(QueueSubmission),
     ClearQueuedSubmissionById(ClearQueuedSubmissionById),

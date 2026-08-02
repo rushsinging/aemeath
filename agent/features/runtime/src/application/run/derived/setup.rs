@@ -8,7 +8,6 @@ use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::application::tool::agent::Agent;
 use crate::domain::agent_run::RunSpec;
 use async_trait::async_trait;
-use hook::HookDispatchContext;
 use std::sync::Arc;
 use std::time::Duration;
 use tools::{AgentProgressKind, AgentProgressSourceContext};
@@ -313,19 +312,24 @@ impl AgentRunner for CliAgentRunner {
                 .views()
                 .read()
                 .current_workspace_root();
-            let hook_outcome = hook_port
-                .dispatch_at(
-                    hook::HookInvocation::SubRunStart(hook::SubRunInput {
-                        prompt: prompt.to_string(),
-                        system: system.clone(),
-                        model_spec: Some(model_display.clone()),
-                    }),
-                    HookDispatchContext::new(&workspace_root),
-                    &tokio_util::sync::CancellationToken::new(),
-                )
-                .await;
-            for msg in &hook_outcome.messages {
-                if let hook::HookDisplayMessageKind::SystemMessage = msg.kind {
+            let hook_dispatch = crate::application::loop_engine::chat::hook_ui::dispatch_hook(
+                &hook_port,
+                derived.instance.context().activities(),
+                &sdk::RunStepId::new(format!(
+                    "{}:sub-run-start",
+                    derived.instance.run().id().as_ref()
+                )),
+                hook::HookInvocation::SubRunStart(hook::SubRunInput {
+                    prompt: prompt.to_string(),
+                    system: system.clone(),
+                    model_spec: Some(model_display.clone()),
+                }),
+                &workspace_root,
+                &tokio_util::sync::CancellationToken::new(),
+            )
+            .await;
+            for msg in &hook_dispatch.messages {
+                if let crate::application::hook::outcome_mapper::RuntimeHookDisplayMessageKind::SystemMessage = msg.kind {
                     if let Some(ref sink) = progress_sink {
                         sink.emit(super::progress::build_progress_event(
                             source_context.clone(),

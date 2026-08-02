@@ -1,97 +1,53 @@
-use crate::tui::adapter::agent_event::{map_agent_event, map_runtime_event};
-use crate::tui::adapter::runtime_view::{
-    TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiStopHookFeedback,
-};
+use crate::tui::adapter::agent_event::map_runtime_event;
 use crate::tui::adapter::tui_runtime_event::{
-    TuiHookEvent, TuiHookResult, TuiHookStatus, TuiRuntimeEvent,
+    TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
+    TuiActivityObservation, TuiActivitySource, TuiActivityState, TuiActivityTiming, TuiHookPoint,
+    TuiRuntimeEvent, UiActivityId,
 };
-use crate::tui::app::event::UiEvent;
 use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::interaction::{UiRunId, UiRunStepId};
 use crate::tui::model::root::TuiModel;
 use crate::tui::update::root_reducer::reduce_agent_event;
 
 #[test]
-fn stop_hook_feedback_scenario_projects_one_structured_notice() {
-    let messages = vec![
-        TuiChatMessage::user_text("finish work"),
-        TuiChatMessage {
-            role: "user".to_string(),
-            content: vec![TuiContentBlock::text(
-                "<system-reminder>Stop hook prevented stopping.</system-reminder>",
-            )],
-            input_id: None,
-            source: TuiMessageSource::StopHook,
-            stop_hook: Some(TuiStopHookFeedback {
-                summary: "Stop hook prevented stopping.".to_string(),
-                command: ".agents/hooks/check-agent-stop.sh".to_string(),
-                exit_code: Some(2),
-                reason: "temporary failure".to_string(),
-                stdout_preview: "first failure".to_string(),
-                stderr_preview: "BLOCKED".to_string(),
-                stdout_truncated: false,
-                stderr_truncated: false,
-                output_file: None,
-            }),
+fn hook_activity_scenario_reaches_tui_model_through_unique_activity_path() {
+    let run_id = UiRunId::from("run-hook");
+    let activity = TuiActivityObservation {
+        id: UiActivityId::from("hook-activity"),
+        run_id: run_id.clone(),
+        run_step_id: Some(UiRunStepId::from("step-hook")),
+        parent_activity_id: Some(UiActivityId::from("phase-activity")),
+        source: TuiActivitySource::HookDispatch(UiActivityId::from("hook-source")),
+        kind: TuiActivityKind::HookDispatch,
+        state: TuiActivityState::Running,
+        detail: TuiActivityDetail::Hook {
+            point: TuiHookPoint::PreToolUse,
+            script: "check-policy.sh".to_string(),
+            attempt: 1,
         },
-    ];
+        audience: TuiActivityAudience::Operational,
+        revision: 1,
+        timing: TuiActivityTiming::default(),
+    };
 
-    let mapping = map_agent_event(&UiEvent::StopHookBlocked { messages });
-
+    let mapping = map_runtime_event(&TuiRuntimeEvent::ActivityChanged {
+        kind: TuiActivityChangeKind::Started,
+        activity,
+    });
     assert!(matches!(
         mapping.conversation.as_slice(),
-        [ConversationIntent::AppendHookNotice(notice)]
-            if notice.content.body == "Stop hook prevented stopping."
-                && notice.content.details.as_deref().is_some_and(|details|
-                    details.contains("Command: .agents/hooks/check-agent-stop.sh")
-                        && details.contains("Exit code: 2")
-                )
+        [ConversationIntent::ObserveActivityChange(_)]
     ));
-}
 
-#[test]
-fn stop_hook_retry_success_does_not_write_activity_state_or_failure_notice() {
     let mut model = TuiModel::default();
-
-    let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
-        hook_name: "Stop".to_string(),
-        status: TuiHookStatus::Succeeded,
-        matcher: Some("*".to_string()),
-        command: Some("check-agent-stop.sh".to_string()),
-        result: Some(TuiHookResult {
-            exit_code: Some(0),
-            stdout: String::new(),
-            stderr: String::new(),
-            decision: Some("continue".to_string()),
-            reason: None,
-            additional_context: None,
-        }),
-    }));
-
-    assert!(mapping.conversation.is_empty());
-    let result = reduce_agent_event(&mut model, mapping);
-    assert!(!result.dirty.output);
-    assert!(!result.dirty.status);
-    assert!(model
+    reduce_agent_event(&mut model, mapping);
+    let stored = model
         .conversation
-        .timeline
-        .items()
+        .activity_observations()
+        .activities()
         .iter()
-        .all(|block| !format!("{block:?}").contains("Hook failed: Stop")));
-}
-
-#[test]
-fn stop_hook_running_event_does_not_write_activity_state() {
-    let mut model = TuiModel::default();
-    let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
-        hook_name: "Stop".to_string(),
-        status: TuiHookStatus::Running,
-        matcher: None,
-        command: None,
-        result: None,
-    }));
-
-    assert!(mapping.conversation.is_empty());
-    let result = reduce_agent_event(&mut model, mapping);
-    assert!(!result.dirty.output);
-    assert!(!result.dirty.status);
+        .find(|activity| activity.run_id == run_id)
+        .expect("hook activity stored");
+    assert_eq!(stored.kind, TuiActivityKind::HookDispatch);
+    assert_eq!(stored.audience, TuiActivityAudience::Operational);
 }

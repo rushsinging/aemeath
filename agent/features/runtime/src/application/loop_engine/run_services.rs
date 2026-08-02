@@ -425,10 +425,6 @@ where
         Some(self.context.clone())
     }
 
-    async fn begin_stop_hook_status(&mut self) -> Result<(), LoopEngineError> {
-        self.observer.begin_stop_hook_status().await
-    }
-
     fn install_stop_hook_feedback(&mut self, message: Message) {
         self.observer.install_stop_hook_feedback(message);
     }

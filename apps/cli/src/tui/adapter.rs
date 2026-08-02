@@ -1,6 +1,5 @@
 pub mod agent_event;
 pub mod event_mapping;
-pub mod hook_notice;
 #[cfg(test)]
 pub mod input_widget;
 #[cfg(test)]

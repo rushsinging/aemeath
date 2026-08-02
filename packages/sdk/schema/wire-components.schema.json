@@ -120,11 +120,15 @@
             },
             "point": {
               "$ref": "#/$defs/HookPointView"
+            },
+            "script": {
+              "type": "string"
             }
           },
           "required": [
             "detail_type",
             "point",
+            "script",
             "attempt"
           ],
           "type": "object"
@@ -1089,52 +1093,6 @@
           ]
         }
       },
-      "type": "object"
-    },
-    "HookMessageKindView": {
-      "description": "Hook 面向展示层的消息类别。",
-      "enum": [
-        "additional_context",
-        "system_message"
-      ],
-      "type": "string"
-    },
-    "HookMessageView": {
-      "description": "Hook 面向展示层的结构化消息。",
-      "properties": {
-        "attempt": {
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "execution_ordinal": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "kind": {
-          "$ref": "#/$defs/HookMessageKindView"
-        },
-        "point": {
-          "type": "string"
-        },
-        "source": {
-          "type": "string"
-        },
-        "text": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "point",
-        "source",
-        "execution_ordinal",
-        "attempt",
-        "kind",
-        "text"
-      ],
-      "title": "HookMessageView",
       "type": "object"
     },
     "HookPointView": {

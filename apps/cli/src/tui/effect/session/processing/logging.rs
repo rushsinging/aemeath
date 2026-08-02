@@ -114,7 +114,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         ),
         sdk::ChatEvent::TurnStarted { messages }
         | sdk::ChatEvent::MicrocompactDone { messages, .. }
-        | sdk::ChatEvent::StopHookBlocked { messages }
         | sdk::ChatEvent::PostToolExecutionSync { messages }
         | sdk::ChatEvent::CompactRollback { messages }
         | sdk::ChatEvent::CompactFinished { messages } => {
@@ -201,21 +200,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::CurrentTurnChanged(turn) => {
             crate::tui::log_trace!("{} current_turn_changed turn={}", stage, turn)
         }
-        sdk::ChatEvent::HookEvent(event) => crate::tui::log_trace!(
-            "{} hook_event name={} status={:?}",
-            stage,
-            event.hook_name,
-            event.status
-        ),
-        sdk::ChatEvent::HookMessage(message) => crate::tui::log_trace!(
-            "{} hook_message point={} source={} ordinal={} attempt={} kind={:?}",
-            stage,
-            message.point,
-            message.source,
-            message.execution_ordinal,
-            message.attempt,
-            message.kind
-        ),
         sdk::ChatEvent::AskUserBatch { items, .. } => {
             crate::tui::log_trace!("{} ask_user_batch count={}", stage, items.len())
         }

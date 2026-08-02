@@ -110,7 +110,13 @@ fn hook_compaction_and_interaction_activities_preserve_typed_detail_and_lifecycl
     let parent_id = root_and_phase(&coordinator, &step_id);
 
     let hook_id = coordinator
-        .start_hook_dispatch(step_id.clone(), parent_id.clone(), HookPointView::Stop, 1)
+        .start_hook_dispatch(
+            step_id.clone(),
+            parent_id.clone(),
+            HookPointView::Stop,
+            "check-stop.sh".to_string(),
+            1,
+        )
         .expect("start hook");
     coordinator
         .finish(hook_id.clone(), super::ActivityTerminal::Failed)
@@ -168,6 +174,7 @@ fn hook_compaction_and_interaction_activities_preserve_typed_detail_and_lifecycl
         hook.detail,
         ActivityDetailView::Hook {
             point: HookPointView::Stop,
+            script: "check-stop.sh".to_string(),
             attempt: 1,
         }
     );

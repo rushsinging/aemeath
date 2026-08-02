@@ -30,13 +30,10 @@ impl App {
             | UiEvent::Usage { .. }
             | UiEvent::LiveTps(_)
             | UiEvent::AgentProgress { .. }
-            | UiEvent::HookEvent(_)
-            | UiEvent::HookMessage(_)
             | UiEvent::UserMessagesAdopted { .. }
             | UiEvent::UserMessagesQueued { .. }
             | UiEvent::TurnStarted { .. }
             | UiEvent::MicrocompactDone { .. }
-            | UiEvent::StopHookBlocked { .. }
             | UiEvent::PostToolExecutionSync { .. }
             | UiEvent::CompactRollback { .. }
             | UiEvent::CompactFinished { .. }

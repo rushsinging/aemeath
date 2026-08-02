@@ -145,9 +145,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             messages: messages.into_iter().map(chat_message).collect(),
             cleared_count,
         },
-        ChatEvent::StopHookBlocked { messages } => TuiRuntimeEvent::StopHookBlocked {
-            messages: messages.into_iter().map(chat_message).collect(),
-        },
         ChatEvent::PostToolExecutionSync { messages } => TuiRuntimeEvent::PostToolExecutionSync {
             messages: messages.into_iter().map(chat_message).collect(),
         },
@@ -292,8 +289,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::TurnChanged(turn) | ChatEvent::CurrentTurnChanged(turn) => {
             TuiRuntimeEvent::TurnChanged(turn)
         }
-        ChatEvent::HookEvent(event) => TuiRuntimeEvent::HookEvent(hook_event(event)),
-        ChatEvent::HookMessage(message) => TuiRuntimeEvent::HookMessage(hook_message(message)),
         // #944 5B: AskUserBatch legacy bridge removed.
         ChatEvent::AskUserBatch { .. } => return SdkEventMapping::Nop,
         ChatEvent::AgentProgress {
@@ -618,8 +613,13 @@ fn activity_detail(value: sdk::ActivityDetailView) -> TuiActivityDetail {
             summary,
             parallel_count,
         },
-        sdk::ActivityDetailView::Hook { point, attempt } => TuiActivityDetail::Hook {
+        sdk::ActivityDetailView::Hook {
+            point,
+            script,
+            attempt,
+        } => TuiActivityDetail::Hook {
             point: hook_point(point),
+            script,
             attempt,
         },
         sdk::ActivityDetailView::Compact {
@@ -842,40 +842,6 @@ fn content_block(value: sdk::ContentBlock) -> TuiContentBlock {
     }
 }
 
-fn hook_event(value: sdk::HookEventView) -> TuiHookEvent {
-    TuiHookEvent {
-        hook_name: value.hook_name,
-        status: match value.status {
-            sdk::HookEventStatus::Running => TuiHookStatus::Running,
-            sdk::HookEventStatus::Succeeded => TuiHookStatus::Succeeded,
-            sdk::HookEventStatus::Blocked => TuiHookStatus::Blocked,
-            sdk::HookEventStatus::Failed => TuiHookStatus::Failed,
-        },
-        matcher: value.matcher,
-        command: value.command,
-        result: value.result.map(|result| TuiHookResult {
-            exit_code: result.exit_code,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            decision: result.decision,
-            reason: result.reason,
-            additional_context: result.additional_context,
-        }),
-    }
-}
-fn hook_message(value: sdk::HookMessageView) -> TuiHookMessage {
-    TuiHookMessage {
-        point: value.point,
-        source: value.source,
-        execution_ordinal: value.execution_ordinal,
-        attempt: value.attempt,
-        kind: match value.kind {
-            sdk::HookMessageKindView::AdditionalContext => TuiHookMessageKind::AdditionalContext,
-            sdk::HookMessageKindView::SystemMessage => TuiHookMessageKind::SystemMessage,
-        },
-        text: value.text,
-    }
-}
 fn agent_progress(value: sdk::AgentProgressEventView) -> TuiAgentProgress {
     TuiAgentProgress {
         sequence: value.sequence,

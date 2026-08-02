@@ -98,6 +98,7 @@ pub(crate) enum ActivityDetail {
     },
     Hook {
         point: sdk::HookPointView,
+        script: String,
         attempt: u8,
     },
     Compact {
@@ -141,8 +142,13 @@ impl ActivityDetail {
                 summary: summary.clone(),
                 parallel_count: *parallel_count,
             },
-            Self::Hook { point, attempt } => ActivityDetailView::Hook {
+            Self::Hook {
+                point,
+                script,
+                attempt,
+            } => ActivityDetailView::Hook {
                 point: *point,
+                script: script.clone(),
                 attempt: *attempt,
             },
             Self::Compact {

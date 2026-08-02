@@ -71,6 +71,48 @@ for path in tui.rglob("*.rs"):
         if symbol in source:
             violations.append(f"legacy Activity display symbol {symbol}: {path}")
 
+hook_parallel_symbols = (
+    "RuntimeStreamEvent::HookEvent",
+    "RuntimeStreamEvent::HookMessage",
+    "RuntimeStreamEvent::StopHookBlocked",
+    "ChatEvent::HookEvent",
+    "ChatEvent::HookMessage",
+    "ChatEvent::StopHookBlocked",
+    "TuiRuntimeEvent::HookEvent",
+    "TuiRuntimeEvent::HookMessage",
+    "TuiRuntimeEvent::StopHookBlocked",
+    "UiEvent::HookEvent",
+    "UiEvent::HookMessage",
+    "UiEvent::StopHookBlocked",
+    "AppendHookNotice",
+    "HookNotice",
+)
+for path in (runtime, root / "packages/sdk/src", tui):
+    for source_path in path.rglob("*.rs"):
+        if is_test(source_path) or "scenario_tests" in source_path.parts:
+            continue
+        source = production_text(source_path)
+        for symbol in hook_parallel_symbols:
+            if symbol in source:
+                violations.append(
+                    f"Hook display must use the unique Activity observation path, found {symbol}: {source_path}"
+                )
+
+allowed_direct_hook_dispatches = {
+    runtime / "application/loop_engine/chat/hook_ui.rs",
+    runtime / "application/hook/stop_coordination.rs",
+    runtime / "application/hook/empty.rs",
+    runtime / "application/prompt/build/prompt_build.rs",
+    runtime / "application/prompt/instructions_hook.rs",
+}
+for source_path in runtime.rglob("*.rs"):
+    if is_test(source_path) or source_path in allowed_direct_hook_dispatches:
+        continue
+    if ".dispatch_at(" in production_text(source_path):
+        violations.append(
+            f"Run Hook dispatch must publish an Activity lifecycle through the designated boundary: {source_path}"
+        )
+
 for path in (coordinator, tui / "effect/session/processing/logging.rs"):
     source = production_text(path)
     for field in (

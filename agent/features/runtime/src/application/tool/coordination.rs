@@ -100,6 +100,7 @@ pub(crate) trait ToolRoundObserver: Send {
     }
     async fn round_finished(
         &mut self,
+        _step_id: &sdk::RunStepId,
         _call_count: usize,
         _turn: usize,
         _cancel: &CancellationToken,
@@ -151,6 +152,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
         agent,
         &sink,
         context.runtime_context.hooks_ref(),
+        context.runtime_context.activities().as_ref(),
         cancel,
         context.language,
         &context.workspace_root,
@@ -236,6 +238,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
     }
     observer
         .round_finished(
+            step_id,
             raw_calls.len(),
             execution.turn_count(),
             &agent.runtime_cancellation,

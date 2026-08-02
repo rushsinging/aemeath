@@ -10,8 +10,8 @@ use crate::{
     ActivityChangeKind, ActivityId, ActivitySnapshotView, ActivityView, CancelCurrentRunOutcome,
     CancelRunOutcome, CancelRunStepOutcome, ChatEventContext, ChatMessage, ConfigChangedEvent,
     ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, ControlDeadline,
-    ElementSpacingView, HookMessageView, InteractionCancelReason, InteractionCommandOutcome,
-    InteractionReply, InteractionRequest, InteractionRequestBody, MarkdownSpacingModeView,
+    ElementSpacingView, InteractionCancelReason, InteractionCommandOutcome, InteractionReply,
+    InteractionRequest, InteractionRequestBody, MarkdownSpacingModeView,
     MarkdownSpacingOverridesView, ModelSummary, ProjectContext, ReflectionHistoryView,
     RunTerminationReason, SessionResumeFailureKind, SessionSnapshot, SessionSummary,
     TerminateRunOutcome, WorkspaceContextView,
@@ -53,7 +53,6 @@ pub fn components_document() -> Value {
     register::<SessionSnapshot>(&mut definitions);
     register::<ChatMessage>(&mut definitions);
     register::<WorkspaceContextView>(&mut definitions);
-    register::<HookMessageView>(&mut definitions);
     register::<SessionResumeFailureKind>(&mut definitions);
 
     json!({

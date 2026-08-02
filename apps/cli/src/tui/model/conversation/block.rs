@@ -1,20 +1,5 @@
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub enum HookNoticeKind {
-    Blocked,
-    Failed,
-    Info,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct HookNoticeContent {
-    pub kind: HookNoticeKind,
-    pub title: String,
-    pub body: String,
-    pub details: Option<String>,
-}
-
 /// AskUserQuestion 批量交互中的单个问题槽位。
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AskUserSlot {
@@ -77,10 +62,6 @@ pub enum ConversationBlock {
         id: String,
         text: String,
     },
-    HookNotice {
-        id: String,
-        content: HookNoticeContent,
-    },
     Error {
         id: String,
         text: String,
@@ -138,7 +119,6 @@ impl ConversationBlock {
             | ConversationBlock::AssistantText { id, .. }
             | ConversationBlock::Thinking { id, .. }
             | ConversationBlock::System { id, .. }
-            | ConversationBlock::HookNotice { id, .. }
             | ConversationBlock::Error { id, .. }
             | ConversationBlock::QueuedUserMessage { id, .. }
             | ConversationBlock::AgentProgress { id, .. }

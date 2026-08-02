@@ -145,6 +145,7 @@ fn activity_pipeline_renders_one_low_noise_main_summary_until_terminal() {
             state: TuiActivityState::Running,
             detail: TuiActivityDetail::Hook {
                 point: TuiHookPoint::Stop,
+                script: "check-agent-stop.sh".to_string(),
                 attempt: 9,
             },
             audience: TuiActivityAudience::Operational,

@@ -165,24 +165,6 @@ mod tests {
     }
 
     #[test]
-    fn sdk_event_to_tui_runtime_event_preserves_hook_message() {
-        let event = sdk_event_to_tui_event(sdk::ChatEvent::HookMessage(sdk::HookMessageView {
-            point: "PreToolUse".to_string(),
-            source: "matcher:Bash".to_string(),
-            execution_ordinal: 2,
-            attempt: 3,
-            kind: sdk::HookMessageKindView::AdditionalContext,
-            text: "Use formatter".to_string(),
-        }));
-
-        assert!(matches!(
-            event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::HookMessage(message))
-                if message.point == "PreToolUse" && message.text == "Use formatter"
-        ));
-    }
-
-    #[test]
     fn sdk_event_to_tui_runtime_event_maps_compact_finished() {
         let event = sdk_event_to_tui_event(sdk::ChatEvent::CompactFinished {
             messages: vec![sdk::ChatMessage::user_text("hello")],

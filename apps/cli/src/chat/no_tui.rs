@@ -182,7 +182,6 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::ModelInvocationRetrying { .. }
         | sdk::ChatEvent::TurnStarted { .. }
         | sdk::ChatEvent::MicrocompactDone { .. }
-        | sdk::ChatEvent::StopHookBlocked { .. }
         | sdk::ChatEvent::PostToolExecutionSync { .. }
         | sdk::ChatEvent::CompactRollback { .. }
         | sdk::ChatEvent::CompactFinished { .. }
@@ -210,8 +209,6 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::LiveTps(_)
         | sdk::ChatEvent::TurnChanged(_)
         | sdk::ChatEvent::CurrentTurnChanged(_)
-        | sdk::ChatEvent::HookEvent(_)
-        | sdk::ChatEvent::HookMessage(_)
         | sdk::ChatEvent::WorkingDirectoryChanged { .. }
         | sdk::ChatEvent::ConfigChanged { .. }
         | sdk::ChatEvent::ConfigReloaded { .. }

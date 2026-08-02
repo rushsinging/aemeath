@@ -165,6 +165,7 @@ pub(crate) enum TuiActivityDetail {
     },
     Hook {
         point: TuiHookPoint,
+        script: String,
         attempt: u8,
     },
     Compact {
@@ -449,49 +450,6 @@ pub(crate) struct TuiConfigView {
     pub(crate) logging_level: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum TuiHookStatus {
-    Running,
-    Succeeded,
-    Blocked,
-    Failed,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiHookResult {
-    pub(crate) exit_code: Option<i32>,
-    pub(crate) stdout: String,
-    pub(crate) stderr: String,
-    pub(crate) decision: Option<String>,
-    pub(crate) reason: Option<String>,
-    pub(crate) additional_context: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiHookEvent {
-    pub(crate) hook_name: String,
-    pub(crate) status: TuiHookStatus,
-    pub(crate) matcher: Option<String>,
-    pub(crate) command: Option<String>,
-    pub(crate) result: Option<TuiHookResult>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum TuiHookMessageKind {
-    AdditionalContext,
-    SystemMessage,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiHookMessage {
-    pub(crate) point: String,
-    pub(crate) source: String,
-    pub(crate) execution_ordinal: u32,
-    pub(crate) attempt: u8,
-    pub(crate) kind: TuiHookMessageKind,
-    pub(crate) text: String,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum TuiAgentProgressKind {
     Started { role: Option<String>, model: String },
@@ -603,9 +561,6 @@ pub(crate) enum TuiRuntimeEvent {
         messages: Vec<TuiChatMessage>,
         cleared_count: usize,
     },
-    StopHookBlocked {
-        messages: Vec<TuiChatMessage>,
-    },
     PostToolExecutionSync {
         messages: Vec<TuiChatMessage>,
     },
@@ -642,8 +597,6 @@ pub(crate) enum TuiRuntimeEvent {
         event: TuiRunStepEvent,
     },
     InteractionRequested(TuiInteractionRequest),
-    HookEvent(TuiHookEvent),
-    HookMessage(TuiHookMessage),
     AgentProgress {
         source_context: TuiTurnContext,
         attachment_context: TuiTurnContext,

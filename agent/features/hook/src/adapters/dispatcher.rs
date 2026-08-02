@@ -25,6 +25,7 @@ mod helpers;
 mod tests;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -37,7 +38,10 @@ use crate::domain::outcome::{
 use crate::domain::protocol::classify_output;
 use crate::domain::subscription::{HookCommand, HookSubscription, SubscriptionError};
 
-use crate::ports::{CancellationSignal, HookDispatchContext, HookPort};
+use crate::ports::{
+    CancellationSignal, HookDispatchContext, HookPort, HookSubscriptionExecutionEvent,
+    HookSubscriptionExecutionObserver, HookSubscriptionExecutionTerminal,
+};
 
 pub(crate) use executor::{ExecutionFault, Executor, ProcessDriverExecutor};
 #[cfg(test)]
@@ -66,6 +70,7 @@ pub const MAX_ATTEMPTS: u8 = 3;
 pub struct Dispatcher {
     subscriptions: Vec<HookSubscription>,
     executor: Box<dyn Executor>,
+    subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
 impl Dispatcher {
@@ -99,7 +104,16 @@ impl Dispatcher {
         Ok(Self {
             subscriptions,
             executor,
+            subscription_execution_observer: None,
         })
+    }
+
+    pub fn with_subscription_execution_observer(
+        mut self,
+        observer: Arc<dyn HookSubscriptionExecutionObserver>,
+    ) -> Self {
+        self.subscription_execution_observer = Some(observer);
+        self
     }
 
     /// 测试专用：注入脚本化执行器，subscription 必须全部合法（否则 panic）。
@@ -147,6 +161,9 @@ impl HookPort for Dispatcher {
         cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         let point = invocation.point();
+        let subscription_execution_observer = context
+            .subscription_execution_observer()
+            .or(self.subscription_execution_observer.as_ref());
 
         // matcher 过滤 + order + 声明顺序（sort_by_key 稳定，同 order 按声明顺序）。
         let mut matching: Vec<&HookSubscription> = self
@@ -178,6 +195,7 @@ impl HookPort for Dispatcher {
                     &current_input,
                     context.cwd(),
                     &invocation_env,
+                    subscription_execution_observer,
                     cancellation,
                 )
                 .await;
@@ -340,6 +358,27 @@ impl HookPort for Dispatcher {
     }
 }
 
+fn hook_script_file_name(command: &str) -> String {
+    let executable = command
+        .trim_start()
+        .strip_prefix('"')
+        .and_then(|quoted| quoted.split_once('"').map(|(value, _)| value))
+        .or_else(|| {
+            command
+                .trim_start()
+                .strip_prefix('\'')
+                .and_then(|quoted| quoted.split_once('\'').map(|(value, _)| value))
+        })
+        .or_else(|| command.split_whitespace().next())
+        .unwrap_or("hook");
+    std::path::Path::new(executable)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("hook")
+        .to_string()
+}
+
 fn invocation_environment(
     invocation: &HookInvocation,
     cwd: &std::path::Path,
@@ -426,6 +465,7 @@ impl Dispatcher {
         current_input: &serde_json::Value,
         cwd: &std::path::Path,
         env: &HashMap<String, String>,
+        subscription_execution_observer: Option<&Arc<dyn HookSubscriptionExecutionObserver>>,
         cancellation: &dyn CancellationSignal,
     ) -> AttemptOutcome {
         let mut attempts: u8 = 0;
@@ -437,8 +477,27 @@ impl Dispatcher {
                 .replace("{AEMEATH_PROJECT_DIR}", &cwd_text)
                 .replace("{CLAUDE_PROJECT_DIR}", &cwd_text),
         );
+        let script = hook_script_file_name(&command.command);
+        Self::observe_subscription_execution(
+            subscription_execution_observer,
+            HookSubscriptionExecutionEvent::Started {
+                point: sub.point,
+                script: script.clone(),
+                attempt: 1,
+            },
+        );
         loop {
             attempts += 1;
+            if attempts > 1 {
+                Self::observe_subscription_execution(
+                    subscription_execution_observer,
+                    HookSubscriptionExecutionEvent::AttemptChanged {
+                        point: sub.point,
+                        script: script.clone(),
+                        attempt: attempts,
+                    },
+                );
+            }
             let start = Instant::now();
             let result = self
                 .executor
@@ -454,6 +513,15 @@ impl Dispatcher {
                                 HookDirective::Block { .. } => HookExecutionStatus::Blocked,
                                 _ => HookExecutionStatus::Success,
                             };
+                            let terminal = match status {
+                                HookExecutionStatus::Success => {
+                                    HookSubscriptionExecutionTerminal::Succeeded
+                                }
+                                HookExecutionStatus::Blocked
+                                | HookExecutionStatus::ExecutionFailed { .. } => {
+                                    HookSubscriptionExecutionTerminal::Failed
+                                }
+                            };
                             let execution = HookExecution {
                                 status,
                                 attempts,
@@ -465,6 +533,14 @@ impl Dispatcher {
                             // 成功也必须保留 prior executions（此前失败的 attempt 明细），
                             // 使 HookOutcome.executions 完整反映全部重试轨迹。
                             executions.push(execution);
+                            Self::observe_subscription_execution(
+                                subscription_execution_observer,
+                                HookSubscriptionExecutionEvent::Finished {
+                                    point: sub.point,
+                                    script,
+                                    terminal,
+                                },
+                            );
                             return AttemptOutcome::Success {
                                 executions,
                                 directive,
@@ -485,6 +561,14 @@ impl Dispatcher {
                             };
                             executions.push(execution);
                             if attempts >= MAX_ATTEMPTS {
+                                Self::observe_subscription_execution(
+                                    subscription_execution_observer,
+                                    HookSubscriptionExecutionEvent::Finished {
+                                        point: sub.point,
+                                        script,
+                                        terminal: HookSubscriptionExecutionTerminal::Failed,
+                                    },
+                                );
                                 return AttemptOutcome::Exhausted { executions };
                             }
                         }
@@ -502,6 +586,14 @@ impl Dispatcher {
                         duration,
                     };
                     executions.push(execution);
+                    Self::observe_subscription_execution(
+                        subscription_execution_observer,
+                        HookSubscriptionExecutionEvent::Finished {
+                            point: sub.point,
+                            script,
+                            terminal: HookSubscriptionExecutionTerminal::Cancelled,
+                        },
+                    );
                     return AttemptOutcome::Cancelled { executions };
                 }
                 Err(fault) => {
@@ -517,10 +609,27 @@ impl Dispatcher {
                     };
                     executions.push(execution);
                     if attempts >= MAX_ATTEMPTS {
+                        Self::observe_subscription_execution(
+                            subscription_execution_observer,
+                            HookSubscriptionExecutionEvent::Finished {
+                                point: sub.point,
+                                script,
+                                terminal: HookSubscriptionExecutionTerminal::Failed,
+                            },
+                        );
                         return AttemptOutcome::Exhausted { executions };
                     }
                 }
             }
+        }
+    }
+
+    fn observe_subscription_execution(
+        observer: Option<&Arc<dyn HookSubscriptionExecutionObserver>>,
+        event: HookSubscriptionExecutionEvent,
+    ) {
+        if let Some(observer) = observer {
+            observer.observe(event);
         }
     }
 
@@ -565,7 +674,14 @@ impl Dispatcher {
         let mut all_executions: Vec<HookExecution> = Vec::new();
         for sub in matching {
             match self
-                .execute_subscription(sub, &current_input, cwd, &invocation_env, cancellation)
+                .execute_subscription(
+                    sub,
+                    &current_input,
+                    cwd,
+                    &invocation_env,
+                    None,
+                    cancellation,
+                )
                 .await
             {
                 AttemptOutcome::Success { executions, .. } => {

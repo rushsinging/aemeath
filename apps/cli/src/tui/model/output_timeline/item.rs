@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 
-use crate::tui::model::conversation::block::HookNoticeContent;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -56,10 +55,6 @@ pub enum OutputTimelineItem {
         id: String,
         text: String,
     },
-    HookNotice {
-        id: String,
-        content: HookNoticeContent,
-    },
     Error {
         id: String,
         text: String,
@@ -105,7 +100,6 @@ impl OutputTimelineItem {
             | OutputTimelineItem::AssistantText { id, .. }
             | OutputTimelineItem::Thinking { id, .. }
             | OutputTimelineItem::System { id, .. }
-            | OutputTimelineItem::HookNotice { id, .. }
             | OutputTimelineItem::Error { id, .. }
             | OutputTimelineItem::QueuedUserMessage { id, .. }
             | OutputTimelineItem::AgentProgress { id, .. }

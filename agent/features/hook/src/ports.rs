@@ -8,16 +8,47 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
-use crate::domain::{HookInvocation, HookOutcome};
+use crate::domain::{HookInvocation, HookOutcome, HookPoint};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HookSubscriptionExecutionTerminal {
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HookSubscriptionExecutionEvent {
+    Started {
+        point: HookPoint,
+        script: String,
+        attempt: u8,
+    },
+    AttemptChanged {
+        point: HookPoint,
+        script: String,
+        attempt: u8,
+    },
+    Finished {
+        point: HookPoint,
+        script: String,
+        terminal: HookSubscriptionExecutionTerminal,
+    },
+}
+
+pub trait HookSubscriptionExecutionObserver: Send + Sync {
+    fn observe(&self, event: HookSubscriptionExecutionEvent);
+}
 
 /// Hook 一次 dispatch 的运行时环境。
 ///
 /// Runtime 每次调用从当前 Workspace 读取 cwd；Hook adapter 根据 invocation 派生
 /// 兼容环境变量。环境清空及白名单策略由 #1216 收口。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HookDispatchContext {
     cwd: PathBuf,
     env: HashMap<String, String>,
+    subscription_execution_observer: Option<std::sync::Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
 impl HookDispatchContext {
@@ -25,12 +56,27 @@ impl HookDispatchContext {
         Self {
             cwd: cwd.into(),
             env: HashMap::new(),
+            subscription_execution_observer: None,
         }
     }
 
     pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
         self.env = env;
         self
+    }
+
+    pub fn with_subscription_execution_observer(
+        mut self,
+        observer: std::sync::Arc<dyn HookSubscriptionExecutionObserver>,
+    ) -> Self {
+        self.subscription_execution_observer = Some(observer);
+        self
+    }
+
+    pub fn subscription_execution_observer(
+        &self,
+    ) -> Option<&std::sync::Arc<dyn HookSubscriptionExecutionObserver>> {
+        self.subscription_execution_observer.as_ref()
     }
 
     pub fn cwd(&self) -> &Path {

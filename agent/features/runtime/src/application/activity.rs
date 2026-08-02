@@ -23,4 +23,6 @@ pub(crate) use coordinator::{
     ActivityChangePublisher, ActivityCoordinator, ActivityError, ActivityTerminal, StartActivity,
     UpdateActivity,
 };
+#[cfg(test)]
+pub(crate) use coordinator::{SystemActivityClock, UuidV7ActivityIdSource};
 pub(crate) use model::{ActivityDetail, ActivityKind, ActivitySource};

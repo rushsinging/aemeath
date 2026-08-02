@@ -1,9 +1,8 @@
-use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock};
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum HistoryDisplayMessage {
     User { text: String },
-    StopHookNotice { body: String },
     ToolResults,
     Assistant { blocks: Vec<HistoryAssistantBlock> },
 }
@@ -45,16 +44,6 @@ impl std::fmt::Display for HistoryDisplayParseError {
 
 impl HistoryDisplayMessage {
     pub(crate) fn parse(msg: &TuiChatMessage) -> Result<Self, HistoryDisplayParseError> {
-        let body = msg.text_content();
-        if msg.source == TuiMessageSource::StopHook
-            || (msg.source == TuiMessageSource::SystemGenerated
-                && is_legacy_stop_hook_feedback(&body))
-        {
-            if body.trim().is_empty() {
-                return Err(HistoryDisplayParseError::EmptyUserText);
-            }
-            return Ok(HistoryDisplayMessage::StopHookNotice { body });
-        }
         let blocks = msg.content.as_slice();
         match msg.role.as_str() {
             "user" => parse_history_user(blocks),
@@ -62,12 +51,6 @@ impl HistoryDisplayMessage {
             role => Err(HistoryDisplayParseError::UnsupportedRole(role.to_string())),
         }
     }
-}
-
-fn is_legacy_stop_hook_feedback(text: &str) -> bool {
-    let body =
-        crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope(text);
-    body.contains("Stop hook prevented stopping") || body.contains("Stop hook 阻止了停止")
 }
 
 fn parse_history_user(
@@ -290,6 +273,7 @@ pub(crate) fn tool_result_image_count(content: &serde_json::Value) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::adapter::runtime_view::TuiMessageSource;
 
     fn msg(role: &str, content: Vec<TuiContentBlock>) -> TuiChatMessage {
         TuiChatMessage {
@@ -342,7 +326,7 @@ mod tests {
     // ── parse: user 分支 ──
 
     #[test]
-    fn test_parse_stop_hook_message_as_notice() {
+    fn test_parse_stop_hook_message_as_user_history() {
         let mut message = msg(
             "user",
             vec![text_block("<system-reminder>blocked</system-reminder>")],
@@ -351,26 +335,10 @@ mod tests {
 
         assert_eq!(
             HistoryDisplayMessage::parse(&message),
-            Ok(HistoryDisplayMessage::StopHookNotice {
-                body: "<system-reminder>blocked</system-reminder>".to_string(),
+            Ok(HistoryDisplayMessage::User {
+                text: "<system-reminder>blocked</system-reminder>".to_string(),
             })
         );
-    }
-
-    #[test]
-    fn test_parse_legacy_system_generated_stop_hook_message_as_notice() {
-        let mut message = msg(
-            "user",
-            vec![text_block(
-                "<system-reminder>Stop hook prevented stopping. Retry.</system-reminder>",
-            )],
-        );
-        message.source = TuiMessageSource::SystemGenerated;
-
-        assert!(matches!(
-            HistoryDisplayMessage::parse(&message),
-            Ok(HistoryDisplayMessage::StopHookNotice { .. })
-        ));
     }
 
     #[test]

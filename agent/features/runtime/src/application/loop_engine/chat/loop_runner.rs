@@ -744,8 +744,7 @@ where
                             runtime_context: runtime_context.clone(),
                             workspace_root: tool_workspace_root,
                         },
-                    );
-                let control = crate::application::loop_engine::run_ports::ActiveRunControl::new(
+                    );                let control = crate::application::loop_engine::run_ports::ActiveRunControl::new(
                     active_run.as_ref(),
                     &run_id,
                 );

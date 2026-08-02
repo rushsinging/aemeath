@@ -1,14 +1,10 @@
 //! Runtime-owned mappers to the SDK Published Language.
 
 use crate::application::loop_engine::chat::RuntimeTurnContext;
-use crate::application::loop_engine::chat::{
-    RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookMessage, RuntimeHookMessageKind,
-};
 use crate::domain::agent_run::RunDomainEvent;
 use sdk::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
-    ChatEventContext, HookEventStatus, HookEventView, HookExecutionResultView, HookMessageKindView,
-    HookMessageView, RunStatusView, ToolCallStatusView, ToolResultImage,
+    ChatEventContext, RunStatusView, ToolCallStatusView, ToolResultImage,
 };
 
 pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
@@ -331,14 +327,6 @@ pub(crate) fn map_stream_event(
                 .collect(),
             cleared_count,
         },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::StopHookBlocked { messages } => {
-            ChatEvent::StopHookBlocked {
-                messages: messages
-                    .into_iter()
-                    .map(crate::application::client::message_to_sdk)
-                    .collect(),
-            }
-        }
         crate::application::loop_engine::chat::RuntimeStreamEvent::PostToolExecutionSync {
             messages,
         } => ChatEvent::PostToolExecutionSync {
@@ -442,12 +430,6 @@ pub(crate) fn map_stream_event(
         }
         crate::application::loop_engine::chat::RuntimeStreamEvent::TurnChanged(turn) => {
             ChatEvent::CurrentTurnChanged(turn)
-        }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::HookEvent(event) => {
-            ChatEvent::HookEvent(project_hook_event(event))
-        }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::HookMessage(message) => {
-            ChatEvent::HookMessage(project_hook_message(message))
         }
         crate::application::loop_engine::chat::RuntimeStreamEvent::AskUserBatch {
             items,
@@ -586,50 +568,6 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::CostUpdate { cost } => {
             ChatEvent::CostUpdate { cost }
         }
-    }
-}
-
-pub(crate) fn project_hook_event(event: RuntimeHookEvent) -> HookEventView {
-    HookEventView {
-        hook_name: event.hook_name,
-        status: hook_event_status_to_sdk(event.status),
-        matcher: event.matcher,
-        command: event.command,
-        result: event.result.map(|result| HookExecutionResultView {
-            exit_code: result.exit_code,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            decision: result.decision,
-            reason: result.reason,
-            additional_context: result.additional_context,
-        }),
-    }
-}
-
-pub(crate) fn project_hook_message(message: RuntimeHookMessage) -> HookMessageView {
-    HookMessageView {
-        point: format!("{:?}", message.point),
-        source: message.source,
-        execution_ordinal: message.execution_ordinal,
-        attempt: message.attempt,
-        kind: project_hook_message_kind(message.kind),
-        text: message.text,
-    }
-}
-
-fn project_hook_message_kind(kind: RuntimeHookMessageKind) -> HookMessageKindView {
-    match kind {
-        RuntimeHookMessageKind::AdditionalContext => HookMessageKindView::AdditionalContext,
-        RuntimeHookMessageKind::SystemMessage => HookMessageKindView::SystemMessage,
-    }
-}
-
-fn hook_event_status_to_sdk(status: RuntimeHookEventStatus) -> HookEventStatus {
-    match status {
-        RuntimeHookEventStatus::Running => HookEventStatus::Running,
-        RuntimeHookEventStatus::Succeeded => HookEventStatus::Succeeded,
-        RuntimeHookEventStatus::Blocked => HookEventStatus::Blocked,
-        RuntimeHookEventStatus::Failed => HookEventStatus::Failed,
     }
 }
 

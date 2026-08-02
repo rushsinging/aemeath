@@ -1,12 +1,11 @@
-use crate::tui::model::conversation::block::HookNoticeKind;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCall;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::view_model::{
     allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
-    HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind, OutputViewModel, SemanticStyle,
-    TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
+    OutputBlockKind, OutputViewModel, SemanticStyle, TextBlockView, ToolResultBlockView,
+    MAX_BLOCK_DEPTH,
 };
 use crate::tui::view_state::RunActivityState;
 use std::collections::HashMap;
@@ -195,30 +194,6 @@ impl OutputViewAssembler {
                             key: id.clone(),
                             text: text.clone(),
                             style: SemanticStyle::Muted,
-                        }),
-                    ));
-                }
-                OutputTimelineItem::HookNotice { id, content } => {
-                    let (kind, style) = match content.kind {
-                        HookNoticeKind::Blocked => {
-                            (HookNoticeSemanticKind::Blocked, SemanticStyle::Error)
-                        }
-                        HookNoticeKind::Failed => {
-                            (HookNoticeSemanticKind::Failed, SemanticStyle::Error)
-                        }
-                        HookNoticeKind::Info => {
-                            (HookNoticeSemanticKind::Info, SemanticStyle::Muted)
-                        }
-                    };
-                    roots.push(leaf(
-                        id.clone(),
-                        OutputBlockKind::HookNotice(HookNoticeBlockView {
-                            key: id.clone(),
-                            kind,
-                            title: content.title.clone(),
-                            body: content.body.clone(),
-                            details: content.details.clone(),
-                            style,
                         }),
                     ));
                 }

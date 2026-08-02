@@ -19,7 +19,7 @@ pub(crate) trait ActivityIdSource: Send + Sync {
     fn next_activity_id(&self) -> ActivityId;
 }
 
-struct UuidV7ActivityIdSource;
+pub(crate) struct UuidV7ActivityIdSource;
 
 impl ActivityIdSource for UuidV7ActivityIdSource {
     fn next_activity_id(&self) -> ActivityId {
@@ -27,7 +27,7 @@ impl ActivityIdSource for UuidV7ActivityIdSource {
     }
 }
 
-struct SystemActivityClock;
+pub(crate) struct SystemActivityClock;
 
 impl ActivityClock for SystemActivityClock {
     fn now_monotonic_ms(&self) -> u64 {
@@ -172,13 +172,14 @@ impl ActivityChangePublisher for NoopActivityChangePublisher {
     fn publish_snapshot(&self, _snapshot: ActivitySnapshotView) {}
 }
 
+#[derive(Clone)]
 pub(crate) struct ActivityCoordinator {
     run_id: RunId,
     clock: Arc<dyn ActivityClock>,
     ids: Arc<dyn ActivityIdSource>,
     publisher: Arc<dyn ActivityChangePublisher>,
-    registry: parking_lot::Mutex<ActivityRegistry>,
-    revision: parking_lot::Mutex<u64>,
+    registry: Arc<parking_lot::Mutex<ActivityRegistry>>,
+    revision: Arc<parking_lot::Mutex<u64>>,
 }
 
 impl ActivityCoordinator {
@@ -202,8 +203,8 @@ impl ActivityCoordinator {
             clock,
             ids,
             publisher,
-            registry: parking_lot::Mutex::new(ActivityRegistry::default()),
-            revision: parking_lot::Mutex::new(0),
+            registry: Arc::new(parking_lot::Mutex::new(ActivityRegistry::default())),
+            revision: Arc::new(parking_lot::Mutex::new(0)),
         }
     }
 
@@ -296,6 +297,13 @@ impl ActivityCoordinator {
                 !activity.state.is_terminal() && matches!(activity.kind, ActivityKind::RunPhase(_))
             })
             .map(|activity| activity.id.clone())
+    }
+
+    pub(crate) fn live_hook_parent_id(&self) -> Result<ActivityId, ActivityError> {
+        self.ensure_run_observation_started()?;
+        self.live_run_phase_id()
+            .or_else(|| self.live_run_root_id())
+            .ok_or_else(|| ActivityError::UnknownActivity(ActivityId::new("run-activity")))
     }
 
     pub(crate) fn start(&self, command: StartActivity) -> Result<ActivityId, ActivityError> {

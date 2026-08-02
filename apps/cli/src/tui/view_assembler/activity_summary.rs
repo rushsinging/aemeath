@@ -92,11 +92,17 @@ fn is_live_phase(activity: &TuiActivityObservation) -> bool {
 }
 
 fn is_visible_leaf(activity: &TuiActivityObservation) -> bool {
-    activity.audience == TuiActivityAudience::User
-        && matches!(
+    let audience_visible = activity.audience == TuiActivityAudience::User
+        || (activity.kind == TuiActivityKind::HookDispatch
+            && activity.audience == TuiActivityAudience::Operational);
+    let terminal_hook_failure = activity.kind == TuiActivityKind::HookDispatch
+        && activity.audience == TuiActivityAudience::Operational
+        && activity.state == TuiActivityState::Failed;
+    audience_visible
+        && (matches!(
             activity.state,
             TuiActivityState::Running | TuiActivityState::Waiting
-        )
+        ) || terminal_hook_failure)
         && !matches!(
             activity.kind,
             TuiActivityKind::Run | TuiActivityKind::RunPhase(_)
@@ -117,13 +123,52 @@ fn phase_label(activity: &TuiActivityObservation) -> Option<String> {
         },
         TuiActivityDetail::Model { .. } => "Thinking…",
         TuiActivityDetail::Tool { .. } => "Calling tools…",
-        TuiActivityDetail::Hook { .. } => "Running hooks…",
+        TuiActivityDetail::Hook { point, script, .. } => {
+            let point = hook_point_label(*point);
+            return Some(if activity.state == TuiActivityState::Failed {
+                format!("{point} failed · {script}")
+            } else {
+                format!("{point} · {script}")
+            });
+        }
         TuiActivityDetail::Compact { .. } => "Compacting…",
         TuiActivityDetail::Interaction { .. } => "Waiting for input…",
         TuiActivityDetail::ChildRun { .. } => "Running agent…",
         TuiActivityDetail::Run { .. } => return None,
     };
     Some(label.to_string())
+}
+
+fn hook_point_label(point: crate::tui::adapter::tui_runtime_event::TuiHookPoint) -> &'static str {
+    use crate::tui::adapter::tui_runtime_event::TuiHookPoint;
+    match point {
+        TuiHookPoint::PreToolUse => "PreToolUse",
+        TuiHookPoint::UserPromptSubmit => "UserPromptSubmit",
+        TuiHookPoint::PreCompact => "PreCompact",
+        TuiHookPoint::PermissionRequest => "PermissionRequest",
+        TuiHookPoint::Elicitation => "Elicitation",
+        TuiHookPoint::UserPromptExpansion => "UserPromptExpansion",
+        TuiHookPoint::Stop => "Stop",
+        TuiHookPoint::PostToolUse => "PostToolUse",
+        TuiHookPoint::PostToolUseFailure => "PostToolUseFailure",
+        TuiHookPoint::PostCompact => "PostCompact",
+        TuiHookPoint::PostToolBatch => "PostToolBatch",
+        TuiHookPoint::ElicitationResult => "ElicitationResult",
+        TuiHookPoint::SessionStart => "SessionStart",
+        TuiHookPoint::SessionEnd => "SessionEnd",
+        TuiHookPoint::SubRunStart => "SubRunStart",
+        TuiHookPoint::SubRunStop => "SubRunStop",
+        TuiHookPoint::TaskCreated => "TaskCreated",
+        TuiHookPoint::TaskCompleted => "TaskCompleted",
+        TuiHookPoint::Notification => "Notification",
+        TuiHookPoint::InstructionsLoaded => "InstructionsLoaded",
+        TuiHookPoint::StopFailure => "StopFailure",
+        TuiHookPoint::PermissionDenied => "PermissionDenied",
+        TuiHookPoint::ConfigChange => "ConfigChange",
+        TuiHookPoint::CwdChanged => "CwdChanged",
+        TuiHookPoint::FileChanged => "FileChanged",
+        TuiHookPoint::TeammateIdle => "TeammateIdle",
+    }
 }
 
 fn stable_detail(activity: Option<&TuiActivityObservation>) -> Option<String> {

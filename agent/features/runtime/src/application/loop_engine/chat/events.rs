@@ -19,55 +19,6 @@ impl RuntimeTurnContext {
 
 pub type EventFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuntimeHookEventStatus {
-    Running,
-    Succeeded,
-    Blocked,
-    Failed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeHookExecutionResult {
-    pub exit_code: Option<i32>,
-    pub stdout: String,
-    pub stderr: String,
-    pub decision: Option<String>,
-    pub reason: Option<String>,
-    pub additional_context: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeHookEvent {
-    pub hook_name: String,
-    pub status: RuntimeHookEventStatus,
-    pub matcher: Option<String>,
-    pub command: Option<String>,
-    pub result: Option<RuntimeHookExecutionResult>,
-}
-
-/// Hook 面向展示层的消息类别。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeHookMessageKind {
-    /// Hook JSON `additional_context`。
-    AdditionalContext,
-    /// Hook JSON `system_message`。
-    SystemMessage,
-}
-
-/// Hook 面向展示层的结构化消息。
-///
-/// 该类型独立于 `SystemMessage`，使消费方能按 HookPoint、来源和 attempt 归因。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeHookMessage {
-    pub point: hook::HookPoint,
-    pub source: String,
-    pub execution_ordinal: u32,
-    pub attempt: u8,
-    pub kind: RuntimeHookMessageKind,
-    pub text: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeToolCallStatus {
     PendingArgs,
@@ -149,9 +100,6 @@ pub enum RuntimeStreamEvent {
         messages: Vec<Message>,
         cleared_count: usize,
     },
-    StopHookBlocked {
-        messages: Vec<Message>,
-    },
     PostToolExecutionSync {
         messages: Vec<Message>,
     },
@@ -211,9 +159,6 @@ pub enum RuntimeStreamEvent {
     },
     LiveTps(f64),
     TurnChanged(usize),
-    HookEvent(RuntimeHookEvent),
-    /// 结构化 hook 执行消息（typed value）。
-    HookMessage(RuntimeHookMessage),
     AskUserBatch {
         items: Vec<sdk::AskUserQuestionItem>,
         reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,

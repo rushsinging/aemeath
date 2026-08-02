@@ -10,6 +10,43 @@ use crate::application::loop_engine::{
 use crate::application::run::execution_state::RunExecutionState;
 use crate::domain::agent_run::RunDomainEvent;
 
+struct StopHookActivityObserver<'a> {
+    inner: &'a mut dyn StopHookObserver,
+    activities: &'a ActivityCoordinator,
+    run_step_id: &'a sdk::RunStepId,
+}
+
+#[async_trait::async_trait]
+impl StopHookObserver for StopHookActivityObserver<'_> {
+    fn stop_hook_execution_context(
+        &self,
+    ) -> Option<crate::application::hook::stop_coordination::StopHookExecutionContext> {
+        self.inner.stop_hook_execution_context().map(|context| {
+            crate::application::loop_engine::chat::hook_ui::subscription_activity_observer(
+                self.activities,
+                self.run_step_id,
+            )
+            .map_or(context.clone(), |observer| {
+                context.with_subscription_execution_observer(observer)
+            })
+        })
+    }
+
+    fn install_stop_hook_feedback(&mut self, message: share::message::Message) {
+        self.inner.install_stop_hook_feedback(message);
+    }
+
+    async fn observe_stop_hook_outcome(
+        &mut self,
+        execution: &RunExecutionState,
+        outcome: &StopHookOutcome,
+    ) -> Result<(), LoopEngineError> {
+        self.inner
+            .observe_stop_hook_outcome(execution, outcome)
+            .await
+    }
+}
+
 /// 单次 Run 的 Loop Engine 调用上下文。
 ///
 /// 该类型只负责调用顺序，不实现任何 Port，也不隐藏来源差异。每项依赖均以
@@ -222,20 +259,6 @@ impl<'a> RunLoop<'a> {
             .finish_interaction_by_source(request_id, terminal)
     }
 
-    pub(super) fn start_hook_activity(
-        &self,
-        run_step_id: sdk::RunStepId,
-        point: sdk::HookPointView,
-        attempt: u8,
-    ) -> Result<sdk::ActivityId, ActivityError> {
-        self.activities()?.start_hook_dispatch(
-            run_step_id,
-            self.activity_parent_id()?,
-            point,
-            attempt,
-        )
-    }
-
     pub(super) fn input_mut(&mut self) -> &mut dyn InputPort {
         self.input
     }
@@ -339,11 +362,17 @@ impl<'a> RunLoop<'a> {
     pub(super) async fn coordinate_stop_hook(
         &mut self,
         execution: &mut RunExecutionState,
+        run_step_id: &sdk::RunStepId,
         turns: usize,
         cancel: &CancellationToken,
     ) -> Result<StopHookOutcome, LoopEngineError> {
+        let activities = self.activities()?.clone();
         crate::application::hook::stop_coordination::coordinate_stop_hook(
-            self.stop_hook,
+            &mut StopHookActivityObserver {
+                inner: self.stop_hook,
+                activities: &activities,
+                run_step_id,
+            },
             execution,
             turns,
             cancel,

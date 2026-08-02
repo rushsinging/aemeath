@@ -92,6 +92,7 @@ fn activity_published_language_serializes_every_closed_variant() {
         .unwrap(),
         serde_json::to_value(ActivityDetailView::Hook {
             point: HookPointView::PreToolUse,
+            script: "check-policy.sh".to_string(),
             attempt: 1,
         })
         .unwrap(),

@@ -1,9 +1,8 @@
 use super::{sdk_event_to_tui_event, SdkEventMapping};
 use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
-    TuiActivitySource, TuiActivityState, TuiCompactStage, TuiHookPoint, TuiHookStatus,
-    TuiInteractionKind, TuiModelStreamState, TuiRunEvent, TuiRunPhaseKind, TuiRunPurpose,
-    TuiRuntimeEvent,
+    TuiActivitySource, TuiActivityState, TuiCompactStage, TuiHookPoint, TuiInteractionKind,
+    TuiModelStreamState, TuiRunEvent, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
 };
 
 #[test]
@@ -137,6 +136,7 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
             sdk::ActivityStateView::Cancelled,
             sdk::ActivityDetailView::Hook {
                 point: sdk::HookPointView::StopFailure,
+                script: "check-stop-failure.sh".to_string(),
                 attempt: 4,
             },
             sdk::ActivityAudienceView::Diagnostic,
@@ -198,7 +198,7 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
                 && matches!(snapshot.activities[2].source, TuiActivitySource::ToolCall(ref id) if id == &expected_tool_call_id)
                 && matches!(snapshot.activities[2].detail, TuiActivityDetail::Tool { ref name, parallel_count: 3, .. } if name == "Bash")
                 && matches!(snapshot.activities[3].source, TuiActivitySource::HookDispatch(ref id) if id.as_str() == expected_hook_dispatch_id)
-                && matches!(snapshot.activities[3].detail, TuiActivityDetail::Hook { point: TuiHookPoint::StopFailure, attempt: 4 })
+                && matches!(snapshot.activities[3].detail, TuiActivityDetail::Hook { point: TuiHookPoint::StopFailure, ref script, attempt: 4 } if script == "check-stop-failure.sh")
                 && matches!(snapshot.activities[4].source, TuiActivitySource::Interaction(ref id) if id == &expected_interaction_id)
                 && matches!(snapshot.activities[4].detail, TuiActivityDetail::Interaction { kind: TuiInteractionKind::PlanApproval })
                 && matches!(snapshot.activities[5].source, TuiActivitySource::ChildRun(ref id) if id.as_str() == expected_child_run_id)
@@ -409,38 +409,6 @@ fn run_cancelling_keeps_identity_instead_of_becoming_empty_message() {
             parent_run_id: None,
             event: TuiRunEvent::Cancelling,
         }) if actual.as_str() == run_id.as_str()
-    ));
-}
-
-#[test]
-fn hook_event_preserves_authoritative_status_and_final_diagnostics() {
-    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::HookEvent(sdk::HookEventView {
-        hook_name: "Stop".to_string(),
-        status: sdk::HookEventStatus::Succeeded,
-        matcher: Some("*".to_string()),
-        command: Some("check-agent-stop.sh".to_string()),
-        result: Some(sdk::HookExecutionResultView {
-            exit_code: Some(0),
-            stdout: "ok".to_string(),
-            stderr: String::new(),
-            decision: Some("continue".to_string()),
-            reason: None,
-            additional_context: None,
-        }),
-    }));
-
-    assert!(matches!(
-        mapped,
-        SdkEventMapping::Runtime(TuiRuntimeEvent::HookEvent(event))
-            if event.status == TuiHookStatus::Succeeded
-                && event.matcher.as_deref() == Some("*")
-                && event.command.as_deref() == Some("check-agent-stop.sh")
-                && event.result.as_ref().is_some_and(|result|
-                    result.exit_code == Some(0)
-                        && result.stdout == "ok"
-                        && result.stderr.is_empty()
-                        && result.decision.as_deref() == Some("continue")
-                        && result.reason.is_none())
     ));
 }
 

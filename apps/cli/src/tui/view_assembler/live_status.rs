@@ -309,6 +309,7 @@ mod tests {
             TuiActivityKind::HookDispatch,
             TuiActivityDetail::Hook {
                 point: crate::tui::adapter::tui_runtime_event::TuiHookPoint::Stop,
+                script: "check-stop.sh".to_string(),
                 attempt: 1,
             },
             TuiActivityTiming {

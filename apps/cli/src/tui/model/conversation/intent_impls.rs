@@ -7,7 +7,6 @@ use super::intent::*;
 use super::model::ConversationModel;
 use super::processing_job::{ProcessingJob, ProcessingStatus};
 use super::runtime_state::RuntimeState;
-use super::stop_hook_notice::stop_hook_notice_content;
 use super::task_status::TaskStatusSnapshot;
 use super::tool_observe::ToolCallUpdateObservation;
 use super::update::ConversationUpdate;
@@ -47,11 +46,6 @@ impl ConversationUpdate for ResumeConversation {
                 match HistoryDisplayMessage::parse(msg) {
                     Ok(HistoryDisplayMessage::User { text }) => {
                         all_changes.extend(model.apply(AppendUserMessage { text }));
-                    }
-                    Ok(HistoryDisplayMessage::StopHookNotice { .. }) => {
-                        all_changes.extend(model.apply(AppendHookNotice {
-                            content: stop_hook_notice_content(msg),
-                        }));
                     }
                     Ok(HistoryDisplayMessage::ToolResults) => {}
                     Ok(HistoryDisplayMessage::Assistant { blocks }) => {
@@ -272,12 +266,6 @@ impl ConversationUpdate for TerminalNotice {
 impl ConversationUpdate for AppendSystemMessage {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.append_system_message(self.text)
-    }
-}
-
-impl ConversationUpdate for AppendHookNotice {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.append_hook_notice(self.content)
     }
 }
 
@@ -697,7 +685,6 @@ impl ConversationUpdate for ConversationIntent {
             Self::ToolResult(s) => s.update(model),
             Self::TerminalNotice(s) => s.update(model),
             Self::AppendSystemMessage(s) => s.update(model),
-            Self::AppendHookNotice(s) => s.update(model),
             Self::AppendError(s) => s.update(model),
             Self::QueueSubmission(s) => s.update(model),
             Self::ClearQueuedSubmissionById(s) => s.update(model),
@@ -758,10 +745,7 @@ impl ConversationUpdate for ConversationIntent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::adapter::runtime_view::{
-        TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiStopHookFeedback,
-    };
-    use crate::tui::model::conversation::block::HookNoticeKind;
+    use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
     use crate::tui::model::conversation::tool_call::ToolCallStatus;
     use crate::tui::model::output_timeline::OutputTimelineItem;
 
@@ -1004,57 +988,7 @@ mod tests {
         );
     }
     #[test]
-    fn resume_projects_stop_hook_feedback_as_hook_notice() {
-        let mut model = ConversationModel::default();
-        let message = TuiChatMessage {
-            role: "user".to_string(),
-            content: vec![TuiContentBlock::text(
-                "<system-reminder>blocked by hook</system-reminder>",
-            )],
-            input_id: None,
-            source: TuiMessageSource::StopHook,
-            stop_hook: Some(TuiStopHookFeedback {
-                summary: "blocked by hook".to_string(),
-                command: "check-agent-stop.sh".to_string(),
-                exit_code: Some(2),
-                reason: "exit code 2".to_string(),
-                stdout_preview: String::new(),
-                stderr_preview: "blocked".to_string(),
-                stdout_truncated: false,
-                stderr_truncated: false,
-                output_file: None,
-            }),
-        };
-
-        ResumeConversation {
-            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
-                run_id: "history-run".into(),
-                step_id: "history-step".into(),
-                messages: vec![message],
-                finalize_cause: None,
-                duration_ms: None,
-            }],
-        }
-        .update(&mut model);
-
-        assert!(matches!(
-            model.timeline.items().last(),
-            Some(OutputTimelineItem::HookNotice { content, .. })
-                if content.kind == HookNoticeKind::Blocked
-                    && content.title == "Hook blocked: Stop"
-                    && content.body == "blocked by hook"
-                    && content.details.as_deref().is_some_and(|details|
-                        details.contains("Command: check-agent-stop.sh")
-                            && details.contains("Exit code: 2")
-                    )
-        ));
-        assert!(model.timeline.items().iter().all(|item| {
-            !matches!(item, OutputTimelineItem::UserMessage { text, .. } if text == "<system-reminder>blocked by hook</system-reminder>")
-        }));
-    }
-
-    #[test]
-    fn resume_interleaves_stop_hook_notice_without_user_message_projection() {
+    fn resume_interleaves_stop_hook_feedback_as_ordinary_user_history() {
         let user = TuiChatMessage::user_text("user question");
         let stop_hook = TuiChatMessage {
             role: "user".to_string(),
@@ -1081,11 +1015,8 @@ mod tests {
 
         assert!(matches!(
             model.timeline.items().get(1),
-            Some(OutputTimelineItem::HookNotice { content, .. })
-                if content.kind == HookNoticeKind::Blocked && content.body == "blocked by hook"
+            Some(OutputTimelineItem::UserMessage { text, .. })
+                if text.contains("blocked by hook")
         ));
-        assert!(model.timeline.items().iter().all(|item| {
-            !matches!(item, OutputTimelineItem::UserMessage { text, .. } if text.contains("blocked by hook"))
-        }));
     }
 }

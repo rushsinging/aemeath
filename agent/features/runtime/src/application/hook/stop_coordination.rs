@@ -1,7 +1,7 @@
 //! Stop Hook coordination —— 共享 Loop 触发的 typed decision。
 //!
-//! #1248 Task 6: 将 Stop Hook outcome 从 adapter 预解释 (ModelStep::StopHookBlocked)
-//! 迁入共享 Loop 与 Run 状态机。Coordinator 只消费 HookPort / Hook PL，返回
+//! Stop Hook outcome 已从 adapter 的专用阻断投影迁入共享 Loop 与 Run 状态机。
+//! Coordinator 只消费 HookPort / Hook PL，返回
 //! Runtime-owned typed decision；保留 block detail/messages，禁止用 reason 字符串
 //! 区分主动 Block 与 ExecutionFailed。Hook 内部三次 retry 仍归 Hook BC。
 //!
@@ -15,12 +15,15 @@
 //!   使用同一语言、预览截断和长输出落盘规则。
 
 use crate::application::hook::outcome_mapper::{
-    map_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookReason,
+    map_hook_outcome, RuntimeHookDirective, RuntimeHookReason,
 };
 use crate::application::loop_engine::LoopEngineError;
 use crate::application::run::execution_state::RunExecutionState;
 use async_trait::async_trait;
-use hook::{HookDispatchContext, HookInvocation, HookPoint, HookPort, StopInput};
+use hook::{
+    HookDispatchContext, HookInvocation, HookPoint, HookPort, HookSubscriptionExecutionObserver,
+    StopInput,
+};
 use share::message::{Message, StopHookFeedback};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -72,6 +75,7 @@ pub struct StopHookExecutionContext {
     workspace_root: PathBuf,
     session_id: String,
     language: String,
+    subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
 impl StopHookExecutionContext {
@@ -86,7 +90,16 @@ impl StopHookExecutionContext {
             workspace_root,
             session_id,
             language,
+            subscription_execution_observer: None,
         }
+    }
+
+    pub fn with_subscription_execution_observer(
+        mut self,
+        observer: Arc<dyn HookSubscriptionExecutionObserver>,
+    ) -> Self {
+        self.subscription_execution_observer = Some(observer);
+        self
     }
 }
 
@@ -95,10 +108,6 @@ impl StopHookExecutionContext {
 pub trait StopHookObserver: Send {
     fn stop_hook_execution_context(&self) -> Option<StopHookExecutionContext> {
         None
-    }
-
-    async fn begin_stop_hook_status(&mut self) -> Result<(), LoopEngineError> {
-        Ok(())
     }
 
     fn install_stop_hook_feedback(&mut self, _message: Message) {}
@@ -126,16 +135,8 @@ pub async fn coordinate_stop_hook<O>(
 where
     O: StopHookObserver + ?Sized,
 {
-    observer.begin_stop_hook_status().await?;
     let Some(context) = observer.stop_hook_execution_context() else {
         return Ok(StopHookOutcome {
-            point: HookPoint::Stop,
-            dispatch: RuntimeHookDispatch {
-                directive: RuntimeHookDirective::Continue,
-                executions: Vec::new(),
-                messages: Vec::new(),
-                block_detail: None,
-            },
             decision: StopHookDecision::Proceed,
             feedback_message: None,
         });
@@ -147,6 +148,7 @@ where
             workspace_root: context.workspace_root,
             session_id: context.session_id,
             language: context.language,
+            subscription_execution_observer: context.subscription_execution_observer,
         },
         cancellation,
     )
@@ -163,18 +165,16 @@ where
     Ok(outcome)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StopHookContext {
     pub turns: usize,
     pub workspace_root: PathBuf,
     pub session_id: String,
     pub language: String,
+    pub subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct StopHookOutcome {
-    pub point: HookPoint,
-    pub dispatch: RuntimeHookDispatch,
     pub decision: StopHookDecision,
     pub feedback_message: Option<Message>,
 }
@@ -218,13 +218,13 @@ pub async fn orchestrate_stop_hook(
     let invocation = HookInvocation::Stop(StopInput {
         turns: context.turns,
     });
-    let point = invocation.point();
+    let mut hook_dispatch_context = HookDispatchContext::new(&context.workspace_root);
+    if let Some(observer) = context.subscription_execution_observer {
+        hook_dispatch_context =
+            hook_dispatch_context.with_subscription_execution_observer(observer);
+    }
     let hook_outcome = hook_port
-        .dispatch_at(
-            invocation,
-            HookDispatchContext::new(&context.workspace_root),
-            cancellation,
-        )
+        .dispatch_at(invocation, hook_dispatch_context, cancellation)
         .await;
     let dispatch = map_hook_outcome(&hook_outcome);
 
@@ -262,8 +262,6 @@ pub async fn orchestrate_stop_hook(
     };
 
     StopHookOutcome {
-        point,
-        dispatch,
         decision,
         feedback_message,
     }

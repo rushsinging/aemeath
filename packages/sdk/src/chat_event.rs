@@ -29,9 +29,7 @@ mod skills_updated_tests {
 use crate::activity::{ActivityChangeKind, ActivitySnapshotView, ActivityView};
 use crate::chat::AskUserQuestionItem;
 use crate::chat_result::{ChatResult, ToolResultImage};
-use crate::chat_view::{
-    AgentProgressEventView, HookEventView, HookMessageView, WorkspaceContextView,
-};
+use crate::chat_view::{AgentProgressEventView, WorkspaceContextView};
 use crate::ChatMessage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -313,11 +311,7 @@ pub enum ChatEvent {
         messages: Vec<ChatMessage>,
         cleared_count: usize,
     },
-    /// Stop hook 阻止了 turn 结束，追加 system-reminder 后继续。TUI 只同步消息。
-    StopHookBlocked {
-        messages: Vec<ChatMessage>,
-    },
-    /// Tool 执行完成后的消息同步（AwaitUser gate）。TUI 只同步消息。
+    /// Tool 执行完成或 Runtime 注入内部反馈后的消息同步。
     PostToolExecutionSync {
         messages: Vec<ChatMessage>,
     },
@@ -452,10 +446,6 @@ pub enum ChatEvent {
     TurnChanged(usize),
     /// 记录当前 turn 变化的端口事件。
     CurrentTurnChanged(usize),
-    /// Hook 事件。
-    HookEvent(HookEventView),
-    /// 结构化 hook 执行消息（typed projection）。
-    HookMessage(HookMessageView),
     /// Runtime-owned pure-value interaction request. Production waiter cutover is tracked by #878.
     InteractionRequested {
         request: crate::InteractionRequest,

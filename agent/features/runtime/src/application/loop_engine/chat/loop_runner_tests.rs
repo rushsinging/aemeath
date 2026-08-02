@@ -536,14 +536,17 @@ impl RecordingSink {
     fn record(&self, event: RuntimeStreamEvent) {
         let name = match &event {
             RuntimeStreamEvent::ActivityChanged { kind, activity } => {
-                format!("ActivityChanged:{kind:?}:{}", activity.id)
+                if activity.kind == sdk::ActivityKindView::HookDispatch {
+                    format!("HookActivityChanged:{kind:?}:{}", activity.id)
+                } else {
+                    format!("ActivityChanged:{kind:?}:{}", activity.id)
+                }
             }
             RuntimeStreamEvent::ActivitySnapshot(snapshot) => {
                 format!("ActivitySnapshot:{}", snapshot.revision)
             }
             RuntimeStreamEvent::TurnStarted { messages }
             | RuntimeStreamEvent::MicrocompactDone { messages, .. }
-            | RuntimeStreamEvent::StopHookBlocked { messages }
             | RuntimeStreamEvent::PostToolExecutionSync { messages }
             | RuntimeStreamEvent::CompactFinished { messages } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
@@ -553,7 +556,6 @@ impl RecordingSink {
                         "TurnStarted"
                     }
                     RuntimeStreamEvent::MicrocompactDone { .. } => "MicrocompactDone",
-                    RuntimeStreamEvent::StopHookBlocked { .. } => "StopHookBlocked",
                     RuntimeStreamEvent::PostToolExecutionSync { .. } => "PostToolExecutionSync",
                     RuntimeStreamEvent::CompactFinished { .. } => "CompactFinished",
                     _ => "Sync",
@@ -588,15 +590,6 @@ impl RecordingSink {
             RuntimeStreamEvent::DoneWithDuration { duration, .. } => {
                 self.done_durations.lock().unwrap().push(*duration);
                 "DoneWithDuration".to_string()
-            }
-            RuntimeStreamEvent::HookEvent(event) => {
-                format!("HookEvent:{}:{:?}", event.hook_name, event.status)
-            }
-            RuntimeStreamEvent::HookMessage(msg) => {
-                format!(
-                    "HookMessage:{:?}:{}:{}",
-                    msg.point, msg.execution_ordinal, msg.attempt
-                )
             }
             RuntimeStreamEvent::TurnChanged(turn) => format!("TurnChanged:{turn}"),
             RuntimeStreamEvent::Usage { .. } => "Usage".to_string(),
@@ -1102,13 +1095,14 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
     let feedback_sync = events
         .iter()
         .position(|event| {
-            event.starts_with("StopHookBlocked:") && event.contains("Stop hook prevented stopping")
+            event.starts_with("PostToolExecutionSync:")
+                && event.contains("Stop hook prevented stopping")
         })
-        .expect("blocked Stop hook feedback should be synced into messages");
-    let hook_notice = events
+        .expect("blocked Stop hook feedback should be synced through ordinary message flow");
+    let hook_activity = events
         .iter()
-        .position(|event| event == "HookEvent:Stop:Blocked")
-        .expect("blocked Stop hook should emit typed hook event");
+        .position(|event| event.starts_with("HookActivityChanged:Finished:"))
+        .expect("blocked Stop hook should finish its activity");
     let second_text = events
         .iter()
         .position(|event| event == "Text:after hook feedback")
@@ -1118,7 +1112,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         .position(|event| event == "DoneWithDuration")
         .expect("loop should finish after Stop hook succeeds");
 
-    assert!(hook_notice < feedback_sync);
+    assert!(hook_activity < feedback_sync);
     assert!(feedback_sync < second_text);
     assert!(second_text < done);
     let requests = provider.requests();
@@ -1180,7 +1174,7 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
             if driver_sink
                 .events()
                 .iter()
-                .any(|event| event == "HookEvent:Stop:Running")
+                .any(|event| event.starts_with("HookActivityChanged:Started:"))
             {
                 break;
             }
@@ -1488,7 +1482,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
     assert!(sink
         .events()
         .iter()
-        .any(|event| event == "HookEvent:Stop:Succeeded"));
+        .any(|event| event.starts_with("HookActivityChanged:Finished:")));
     let output = std::fs::read_to_string(marker).unwrap();
     let parts: Vec<&str> = output.split('|').collect();
     assert_eq!(parts.len(), 3);
@@ -1709,9 +1703,11 @@ async fn test_continue_false_json_treated_as_block() {
     let _ = std::fs::remove_file(&flag_path);
 
     let events = sink.events();
-    // continue:false 应触发 HookEvent:Stop:Blocked
+    // continue:false 应产生普通反馈同步并终结 Hook Activity。
     assert!(
-        events.iter().any(|e| e == "HookEvent:Stop:Blocked"),
+        events.iter().any(|event| {
+            event.starts_with("PostToolExecutionSync:") && event.contains("must keep working")
+        }),
         "continue:false JSON should be recognized as block: {:?}",
         events
     );
@@ -1808,7 +1804,10 @@ async fn test_stall_triggers_stop_hook_check() {
     // soft text repetition but does not expose it as a domain/UI event; importantly, it still
     // preserves stop-hook feedback in this same Run and eventually reaches one terminal event.
     assert!(
-        events.iter().any(|e| e == "HookEvent:Stop:Blocked"),
+        events.iter().any(|event| {
+            event.starts_with("PostToolExecutionSync:")
+                && event.contains("Stop hook prevented stopping")
+        }),
         "stop hook should be checked while the shared Run continues: {:?}",
         events
     );

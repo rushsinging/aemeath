@@ -255,6 +255,7 @@ pub enum ActivityDetailView {
     },
     Hook {
         point: HookPointView,
+        script: String,
         attempt: u8,
     },
     Compact {

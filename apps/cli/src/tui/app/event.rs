@@ -103,11 +103,7 @@ pub enum AppEvent {
         messages: Vec<TuiChatMessage>,
         cleared_count: usize,
     },
-    /// Stop hook 阻止 turn 结束，TUI 只同步消息。
-    StopHookBlocked {
-        messages: Vec<TuiChatMessage>,
-    },
-    /// Tool 执行完成后同步，TUI 只同步消息。
+    /// Tool 执行或 Runtime 内部反馈注入后同步，TUI 只同步消息。
     PostToolExecutionSync {
         messages: Vec<TuiChatMessage>,
     },
@@ -168,10 +164,6 @@ pub enum AppEvent {
         tool_id: sdk::ids::ToolCallId,
         event: sdk::AgentProgressEventView,
     },
-    /// Unified lifecycle hook event.
-    HookEvent(sdk::HookEventView),
-    /// Hook-produced context or system message for structured conversation display.
-    HookMessage(sdk::HookMessageView),
     /// 当前 turn 变化，需要由 CLI 边界记录到 runtime bootstrap。
     CurrentTurnChanged(usize),
     /// Current tool path base/working root changed.

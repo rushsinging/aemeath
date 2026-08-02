@@ -1,11 +1,9 @@
-use crate::tui::adapter::runtime_view::TuiMessageSource;
 use crate::tui::adapter::tui_runtime_event::{
-    TuiAgentProgressKind, TuiHookStatus, TuiRuntimeEvent, TuiToolCallStatus,
+    TuiAgentProgressKind, TuiRuntimeEvent, TuiToolCallStatus,
 };
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::*;
-use crate::tui::model::conversation::stop_hook_notice::stop_hook_notice_content;
 use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
@@ -311,30 +309,10 @@ where
         | UiEvent::CompactFinished { messages } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
-        UiEvent::StopHookBlocked { messages } => {
-            let mut mapping = session(SessionIntent::MessagesSynced {
-                message_count: messages.len(),
-            });
-            if let Some(message) = messages
-                .iter()
-                .rev()
-                .find(|message| message.source == TuiMessageSource::StopHook)
-            {
-                mapping
-                    .conversation
-                    .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                        content: stop_hook_notice_content(message),
-                    }));
-            }
-            mapping
-        }
         UiEvent::ApiError { messages, .. } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
 
-        // ── HookEvent → notice via conversation ──
-        UiEvent::HookEvent(_) => AgentEventMapping::default(),
-        UiEvent::HookMessage(_) => AgentEventMapping::default(),
         UiEvent::WorkingDirectoryChanged(update) => map_status_context(update),
         UiEvent::WorkspaceMetadataResolved(metadata) => AgentEventMapping {
             workspace: vec![WorkspaceIntent::ApplyMetadata {
@@ -510,23 +488,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         | TuiRuntimeEvent::CompactFinished { messages } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
-        TuiRuntimeEvent::StopHookBlocked { messages } => {
-            let mut mapping = session(SessionIntent::MessagesSynced {
-                message_count: messages.len(),
-            });
-            if let Some(message) = messages
-                .iter()
-                .rev()
-                .find(|message| message.source == TuiMessageSource::StopHook)
-            {
-                mapping
-                    .conversation
-                    .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                        content: stop_hook_notice_content(message),
-                    }));
-            }
-            mapping
-        }
         TuiRuntimeEvent::ApiError { messages, error } => {
             let mut mapping = session(SessionIntent::MessagesSynced {
                 message_count: messages.len(),
@@ -612,33 +573,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             },
         )),
         TuiRuntimeEvent::TurnChanged(_) => AgentEventMapping::default(),
-        TuiRuntimeEvent::HookEvent(event) => {
-            let suppress_notice =
-                event.hook_name == "Stop" && event.status == TuiHookStatus::Blocked;
-            if suppress_notice {
-                AgentEventMapping::default()
-            } else if let Some(notice) = crate::tui::adapter::hook_notice::hook_event_notice(event)
-            {
-                conversation(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                    content: notice,
-                }))
-            } else {
-                AgentEventMapping::default()
-            }
-        }
-        TuiRuntimeEvent::HookMessage(message) => {
-            if message.point == "Stop" {
-                AgentEventMapping::default()
-            } else if let Some(notice) =
-                crate::tui::adapter::hook_notice::hook_message_notice(message)
-            {
-                conversation(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                    content: notice,
-                }))
-            } else {
-                AgentEventMapping::default()
-            }
-        }
         TuiRuntimeEvent::AgentProgress {
             attachment_context,
             tool_id,
