@@ -110,7 +110,7 @@ fn activity_snapshot_carries_complete_views_at_one_run_revision() {
 
 - [ ] **Step 2: 运行 SDK 测试并确认因类型缺失失败**
 
-Run: `cargo test -p sdk activity -- --nocapture`  
+Run: `cargo test -p sdk activity -- --nocapture`
 Expected: FAIL，错误指向 `ActivityView` / `ActivitySnapshotView` 未定义。
 
 - [ ] **Step 3: 实现 SDK Activity PL**
@@ -148,7 +148,7 @@ ActivitySnapshot(ActivitySnapshotView),
 
 - [ ] **Step 4: 运行 SDK Activity 与 wire 测试**
 
-Run: `cargo test -p sdk activity -- --nocapture && cargo test -p sdk wire -- --nocapture`  
+Run: `cargo test -p sdk activity -- --nocapture && cargo test -p sdk wire -- --nocapture`
 Expected: PASS。
 
 - [ ] **Step 5: 提交 SDK PL**
@@ -203,7 +203,7 @@ fn close_run_never_converts_live_activity_to_success() {
 
 - [ ] **Step 2: 运行测试并确认失败**
 
-Run: `cargo test -p runtime activity::coordinator -- --nocapture`  
+Run: `cargo test -p runtime activity::coordinator -- --nocapture`
 Expected: FAIL，Activity application 模块尚不存在。
 
 - [ ] **Step 3: 实现 model 与 Coordinator**
@@ -224,7 +224,7 @@ pub(crate) struct ActivityCoordinator {
 
 - [ ] **Step 4: 运行 Coordinator 测试**
 
-Run: `cargo test -p runtime activity::coordinator -- --nocapture`  
+Run: `cargo test -p runtime activity::coordinator -- --nocapture`
 Expected: PASS。
 
 - [ ] **Step 5: 提交 Activity 内核**
@@ -264,7 +264,7 @@ async fn child_activity_coordinator_uses_child_run_identity() {
 
 - [ ] **Step 2: 运行失败测试**
 
-Run: `cargo test -p runtime context_factory activity -- --nocapture && cargo test -p composition runtime activity -- --nocapture`  
+Run: `cargo test -p runtime context_factory activity -- --nocapture && cargo test -p composition runtime activity -- --nocapture`
 Expected: FAIL，`RuntimeContext::activities()` 不存在。
 
 - [ ] **Step 3: 只在 factory 创建 Coordinator**
@@ -273,7 +273,7 @@ Expected: FAIL，`RuntimeContext::activities()` 不存在。
 
 - [ ] **Step 4: 运行 Runtime/Composition 装配测试**
 
-Run: `cargo test -p runtime context_factory -- --nocapture && cargo test -p composition runtime -- --nocapture`  
+Run: `cargo test -p runtime context_factory -- --nocapture && cargo test -p composition runtime -- --nocapture`
 Expected: PASS。
 
 - [ ] **Step 5: 提交装配**
@@ -299,7 +299,7 @@ git commit -m "refactor(runtime): #742 按 Run 装配 ActivityCoordinator"
 
 - [ ] **Step 2: 运行失败测试**
 
-Run: `cargo test -p runtime run_activity -- --nocapture`  
+Run: `cargo test -p runtime run_activity -- --nocapture`
 Expected: FAIL，RunDomainEvent 尚未进入 ActivityCoordinator。
 
 - [ ] **Step 3: 实现 `observe_run_events` 与 Engine 原子顺序**
@@ -316,7 +316,7 @@ event_sink.emit_domain(events).await?;
 
 - [ ] **Step 4: 运行 Run domain/application 测试**
 
-Run: `cargo test -p runtime agent_run -- --nocapture && cargo test -p runtime run_activity -- --nocapture`  
+Run: `cargo test -p runtime agent_run -- --nocapture && cargo test -p runtime run_activity -- --nocapture`
 Expected: PASS。
 
 - [ ] **Step 5: 提交 Run Activity 链**
@@ -343,7 +343,7 @@ git commit -m "feat(runtime): #742 原子观察 Run Activity"
 
 - [ ] **Step 2: 运行定向测试确认失败**
 
-Run: `cargo test -p runtime model_activity -- --nocapture && cargo test -p runtime tool_activity -- --nocapture`  
+Run: `cargo test -p runtime model_activity -- --nocapture && cargo test -p runtime tool_activity -- --nocapture`
 Expected: FAIL，调用点尚未创建 Activity。
 
 - [ ] **Step 3: 在 application coordinator 调用点接线**
@@ -352,7 +352,7 @@ Model coordinator 在 invoke 前 start，在 retry 更新 attempt/waiting，在�
 
 - [ ] **Step 4: 运行 Model/Tool/Agent 测试**
 
-Run: `cargo test -p runtime model_activity -- --nocapture && cargo test -p runtime tool_activity -- --nocapture && cargo test -p runtime agent_calls -- --nocapture`  
+Run: `cargo test -p runtime model_activity -- --nocapture && cargo test -p runtime tool_activity -- --nocapture && cargo test -p runtime agent_calls -- --nocapture`
 Expected: PASS。
 
 - [ ] **Step 5: 提交主要 leaf Activity**
@@ -415,7 +415,7 @@ git commit -m "feat(runtime): #742 覆盖完整运行 Activity"
 
 - [ ] **Step 2: 运行 adapter 测试确认失败**
 
-Run: `cargo test -p runtime sdk_event_mapper activity -- --nocapture`  
+Run: `cargo test -p runtime sdk_event_mapper activity -- --nocapture`
 Expected: FAIL，Runtime stream/sink 尚未支持 Activity。
 
 - [ ] **Step 3: 实现唯一 SDK mapper 与 sink 发布**
@@ -424,7 +424,7 @@ Expected: FAIL，Runtime stream/sink 尚未支持 Activity。
 
 - [ ] **Step 4: 运行 Runtime adapter 和 SDK contract**
 
-Run: `cargo test -p runtime sdk_event_mapper -- --nocapture && cargo test -p sdk activity -- --nocapture`  
+Run: `cargo test -p runtime sdk_event_mapper -- --nocapture && cargo test -p sdk activity -- --nocapture`
 Expected: PASS。
 
 - [ ] **Step 5: 提交 SDK 发布链**
@@ -452,7 +452,7 @@ git commit -m "feat(runtime): #742 发布 Activity 增量与快照"
 
 - [ ] **Step 2: 运行 TUI adapter 测试确认失败**
 
-Run: `cargo test -p cli tui::adapter::event_mapping activity -- --nocapture && cargo test -p cli tui::adapter::agent_event activity -- --nocapture`  
+Run: `cargo test -p cli tui::adapter::event_mapping activity -- --nocapture && cargo test -p cli tui::adapter::agent_event activity -- --nocapture`
 Expected: FAIL。
 
 - [ ] **Step 3: 实现 TUI-owned DTO 与两层转换**
@@ -468,7 +468,7 @@ logging 只记录 identity/kind/state/revision/duration，不记录 detail 中�
 
 - [ ] **Step 4: 运行 adapter/ACL 测试**
 
-Run: `cargo test -p cli tui::adapter -- --nocapture`  
+Run: `cargo test -p cli tui::adapter -- --nocapture`
 Expected: PASS。
 
 - [ ] **Step 5: 提交 TUI ACL**
@@ -496,7 +496,7 @@ git commit -m "feat(tui): #742 接入 typed Activity ACL"
 
 - [ ] **Step 2: 运行 Model 测试确认失败**
 
-Run: `cargo test -p cli tui::model::conversation::activity -- --nocapture`  
+Run: `cargo test -p cli tui::model::conversation::activity -- --nocapture`
 Expected: FAIL。
 
 - [ ] **Step 3: 实现 ActivityObservationModel**
@@ -505,7 +505,7 @@ Expected: FAIL。
 
 - [ ] **Step 4: 运行 Model/reducer 测试**
 
-Run: `cargo test -p cli tui::model::conversation -- --nocapture && cargo test -p cli tui::update::root_reducer -- --nocapture`  
+Run: `cargo test -p cli tui::model::conversation -- --nocapture && cargo test -p cli tui::update::root_reducer -- --nocapture`
 Expected: PASS。
 
 - [ ] **Step 5: 提交 TUI Model**
@@ -534,7 +534,7 @@ git commit -m "feat(tui): #742 镜像 Runtime Activity 事实"
 
 - [ ] **Step 2: 运行 assembler 测试确认失败**
 
-Run: `cargo test -p cli activity_summary -- --nocapture`  
+Run: `cargo test -p cli activity_summary -- --nocapture`
 Expected: FAIL。
 
 - [ ] **Step 3: 实现纯摘要选择并切换 LiveStatus**
@@ -543,7 +543,7 @@ Expected: FAIL。
 
 - [ ] **Step 4: 运行 ViewAssembler/ViewState 测试**
 
-Run: `cargo test -p cli activity_summary -- --nocapture && cargo test -p cli live_status -- --nocapture && cargo test -p cli run_activity -- --nocapture`  
+Run: `cargo test -p cli activity_summary -- --nocapture && cargo test -p cli live_status -- --nocapture && cargo test -p cli run_activity -- --nocapture`
 Expected: PASS。
 
 - [ ] **Step 5: 提交低噪声展示**
@@ -573,7 +573,7 @@ git commit -m "feat(tui): #742 以 Activity 派生低噪声状态"
 
 - [ ] **Step 2: 运行架构测试确认旧路径仍被捕获**
 
-Run: `cargo test -p cli tui::architecture_tests -- --nocapture`  
+Run: `cargo test -p cli tui::architecture_tests -- --nocapture`
 Expected: FAIL，并列出当前待删路径。
 
 - [ ] **Step 3: 物理删除旧链路**
@@ -618,7 +618,7 @@ git commit -m "refactor(runtime,tui): #742 退役旧活动展示协议"
 
 - [ ] **Step 2: 运行场景测试确认失败**
 
-Run: `cargo test -p cli tui::app::scenario_tests::chat activity -- --nocapture`  
+Run: `cargo test -p cli tui::app::scenario_tests::chat activity -- --nocapture`
 Expected: FAIL，直到全链闭合。
 
 - [ ] **Step 3: 完成场景所需最小接线并扩 Guard**
@@ -711,7 +711,7 @@ git commit -m "docs(design): #742 同步 Runtime Activity 架构"
 
 - [ ] **Step 1: 运行格式化检查**
 
-Run: `cargo fmt --all -- --check`  
+Run: `cargo fmt --all -- --check`
 Expected: PASS。若失败，运行 `cargo fmt --all`，仅提交 rustfmt 结果。
 
 - [ ] **Step 2: 运行分层 crate 测试**

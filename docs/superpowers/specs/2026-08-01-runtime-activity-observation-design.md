@@ -1,7 +1,7 @@
 # Runtime Activity 统一观测设计
 
-> 状态：Approved Direction / Pending Written Review  
-> 日期：2026-08-01  
+> 状态：Approved Direction / Pending Written Review
+> 日期：2026-08-01
 > 适用范围：Agent Runtime、SDK Published Language、CLI/TUI ACL 与活动展示
 
 ## 1. 目标
