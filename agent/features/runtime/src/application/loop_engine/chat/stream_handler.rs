@@ -5,7 +5,7 @@ use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use crate::ports::RawUsageSnapshot;
 use provider::{InvocationDelta, InvocationEvent, ProviderStopReason};
 use share::message::{ContentBlock, Message, Role};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Runtime-facing aggregated invocation result.
 ///
@@ -25,43 +25,6 @@ pub struct InvocationResponse {
 enum StreamingBlockKind {
     Text,
     Thinking,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StreamProgressSnapshot {
-    pub first_visible_event_seen: bool,
-    pub visible_progress_version: u64,
-    pub phase: &'static str,
-}
-
-#[derive(Debug, Default)]
-pub struct StreamProgressState {
-    first_visible_event_seen: bool,
-    visible_progress_version: u64,
-    active_streaming_block: Option<StreamingBlockKind>,
-}
-
-impl StreamProgressState {
-    pub fn snapshot(&self) -> StreamProgressSnapshot {
-        StreamProgressSnapshot {
-            first_visible_event_seen: self.first_visible_event_seen,
-            visible_progress_version: self.visible_progress_version,
-            phase: match self.active_streaming_block {
-                Some(StreamingBlockKind::Text) => "writing",
-                Some(StreamingBlockKind::Thinking) => "thinking",
-                None if self.first_visible_event_seen => "waiting_model_output",
-                None => "waiting_model_response",
-            },
-        }
-    }
-}
-
-pub fn should_emit_model_stream_waiting(
-    previous_visible_progress_version: Option<u64>,
-    snapshot: &StreamProgressSnapshot,
-) -> bool {
-    previous_visible_progress_version
-        .is_none_or(|previous| previous == snapshot.visible_progress_version)
 }
 
 pub struct InvocationEventReducer<S: ChatEventSink> {
@@ -112,10 +75,6 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
     ) -> Self {
         self.handler.streaming_tool = Some(streaming_tool);
         self
-    }
-
-    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
-        self.handler.progress_handle()
     }
 
     pub fn apply(
@@ -233,7 +192,9 @@ struct RuntimeEventProjector<S: ChatEventSink> {
     pub last_tps_update: std::time::Instant,
     pub tool_identity: ToolIdentityRegistry,
     pub context: RuntimeTurnContext,
-    progress: Arc<Mutex<StreamProgressState>>,
+    first_visible_event_seen: bool,
+    visible_progress_version: u64,
+    active_streaming_block: Option<StreamingBlockKind>,
     /// #1494：边流边执行句柄；`Some` 时流中 `ToolCallCompleted` 立即触发执行。
     streaming_tool: Option<
         Arc<dyn crate::application::loop_engine::chat::streaming_tool::StreamingToolSubmitPort>,
@@ -261,7 +222,9 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
             last_tps_update: std::time::Instant::now(),
             tool_identity,
             context,
-            progress: Arc::new(Mutex::new(StreamProgressState::default())),
+            first_visible_event_seen: false,
+            visible_progress_version: 0,
+            active_streaming_block: None,
             streaming_tool: None,
         }
     }
@@ -270,19 +233,11 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
         self.tool_identity.runtime_id_for_stream(index, provider_id)
     }
 
-    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
-        self.progress.clone()
-    }
-
     fn begin_streaming_block(&mut self, kind: StreamingBlockKind) {
-        let should_complete = {
-            let mut progress = self.progress.lock().unwrap();
-            let should_complete = progress
-                .active_streaming_block
-                .is_some_and(|active| active != kind);
-            progress.active_streaming_block = Some(kind);
-            should_complete
-        };
+        let should_complete = self
+            .active_streaming_block
+            .is_some_and(|active| active != kind);
+        self.active_streaming_block = Some(kind);
         if should_complete {
             self.sink.try_send_event(RuntimeStreamEvent::BlockComplete {
                 context: self.context.clone(),
@@ -292,13 +247,9 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
     }
 
     fn mark_visible_event(&mut self, kind: &str, detail: impl FnOnce() -> String) {
-        let first = {
-            let mut progress = self.progress.lock().unwrap();
-            let first = !progress.first_visible_event_seen;
-            progress.first_visible_event_seen = true;
-            progress.visible_progress_version = progress.visible_progress_version.wrapping_add(1);
-            first
-        };
+        let first = !self.first_visible_event_seen;
+        self.first_visible_event_seen = true;
+        self.visible_progress_version = self.visible_progress_version.wrapping_add(1);
         if first {
             log::debug!(target: crate::LOG_TARGET,
                 "model stream first visible event: kind={} {} turn_id={}",
@@ -310,10 +261,7 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
     }
 
     pub fn complete_active_streaming_block(&mut self) {
-        let had_active = {
-            let mut progress = self.progress.lock().unwrap();
-            progress.active_streaming_block.take().is_some()
-        };
+        let had_active = self.active_streaming_block.take().is_some();
         if had_active {
             self.sink.try_send_event(RuntimeStreamEvent::BlockComplete {
                 context: self.context.clone(),
