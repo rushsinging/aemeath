@@ -754,6 +754,35 @@ where
                     task_access: runtime_context.task(),
                     model: runtime_context.provider_ref().model.model.clone(),
                 };
+                let tool_agent = main_run_port::make_agent(
+                    &runtime_context,
+                    agent_runner.clone(),
+                    &language,
+                    &workspace,
+                    &cancel,
+                    read_files.clone(),
+                    session_reminders.clone(),
+                    max_tool_concurrency,
+                    agent_semaphore.clone(),
+                    &session_id,
+                    &run_id,
+                    tool_result_materializer.clone(),
+                );
+
+                let tool_workspace_root = workspace.read().current_workspace_root();
+                // #1494：边流边执行句柄——流中 ToolCallCompleted 即旁路执行工具。
+                // 与工具轮次共享 policy/hook/并发编排；结果缓冲由 engine Tools 阶段统一汇总。
+                let streaming_tool =
+                    Arc::new(crate::application::loop_engine::chat::streaming_tool::StreamingToolExecutor::new(
+                        Arc::new(runtime_context.clone()),
+                        tool_agent.clone(),
+                        turn_context.clone(),
+                        run_id.clone(),
+                        language.clone(),
+                        tool_workspace_root.clone(),
+                        cancel.clone(),
+                        max_tool_concurrency,
+                    ));
                 let model_observer = main_run_port::ChatModelObserver {
                     runtime_context: runtime_context.clone(),
                     input: input_source.clone(),
@@ -763,6 +792,7 @@ where
                     language: language.clone(),
                     turn_context: turn_context.clone(),
                     tool_identity: tool_identity.clone(),
+                    streaming_tool: Some(streaming_tool),
                 };
                 let mut model =
                     crate::application::loop_engine::run_services::RuntimeModelInvocation::new(
@@ -779,20 +809,6 @@ where
                             language: language.clone(),
                         },
                     );
-                let tool_agent = main_run_port::make_agent(
-                    &runtime_context,
-                    agent_runner.clone(),
-                    &language,
-                    &workspace,
-                    &cancel,
-                    read_files.clone(),
-                    session_reminders.clone(),
-                    max_tool_concurrency,
-                    agent_semaphore.clone(),
-                    &session_id,
-                    &run_id,
-                    tool_result_materializer.clone(),
-                );
                 let mut interaction =
                     crate::application::loop_engine::run_services::RuntimeInteraction::new(
                         crate::application::loop_engine::run_services::ChatInteractionPublisher {

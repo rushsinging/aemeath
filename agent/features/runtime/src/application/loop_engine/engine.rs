@@ -490,8 +490,17 @@ pub trait ModelInvocationPort: Send {
     async fn invoke_model(
         &mut self,
         execution: &mut RunExecutionState,
+        step_id: &sdk::RunStepId,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError>;
+
+    /// #1494：取走边流边执行的旁路结果（流中 ToolCallCompleted 已执行完的轮次）。
+    /// 非空时 engine 的 Tools 阶段跳过 `execute_tools`，直接汇总缓冲结果。
+    async fn take_streaming_tool_results(
+        &mut self,
+    ) -> Vec<crate::application::loop_engine::chat::streaming_tool::StreamingToolRoundResult> {
+        Vec::new()
+    }
 }
 
 #[async_trait]
@@ -502,6 +511,17 @@ pub trait ToolOrchestrationPort: Send {
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
         calls: &[(ToolCall, ToolGuardDecision)],
+        cancel: &CancellationToken,
+    ) -> Result<crate::application::tool::coordination::ToolRoundOutcome, LoopEngineError>;
+
+    /// #1494：汇总边流边执行的旁路结果（不再执行工具，只 materialize + 状态登记）。
+    async fn finalize_streaming_tool_results(
+        &mut self,
+        execution: &mut RunExecutionState,
+        step_id: &sdk::RunStepId,
+        rounds: Vec<
+            crate::application::loop_engine::chat::streaming_tool::StreamingToolRoundResult,
+        >,
         cancel: &CancellationToken,
     ) -> Result<crate::application::tool::coordination::ToolRoundOutcome, LoopEngineError>;
 }
@@ -725,13 +745,14 @@ enum ModelInvocationOutcome {
 async fn run_model_invocation_phase<P>(
     run: &Run,
     execution: &mut RunExecutionState,
+    step_id: &sdk::RunStepId,
     cancel: &CancellationToken,
     model: &mut P,
 ) -> ModelInvocationOutcome
 where
     P: ModelInvocationPort + ?Sized,
 {
-    match await_interruptible(run, cancel, model.invoke_model(execution, cancel)).await {
+    match await_interruptible(run, cancel, model.invoke_model(execution, step_id, cancel)).await {
         Interrupt::Completed(Ok((step, usage))) => ModelInvocationOutcome::Invoked(step, usage),
         Interrupt::Completed(Err(LoopEngineError::NeedsCompaction(error))) => {
             ModelInvocationOutcome::NeedsCompaction(error)
@@ -1227,7 +1248,9 @@ async fn execute_step(
     )?;
     let mut compacted_after_context_too_long = false;
     let (model_step, token_usage) = loop {
-        match run_model_invocation_phase(run, execution, &step_cancel, port.model_mut()).await {
+        match run_model_invocation_phase(run, execution, &step_id, &step_cancel, port.model_mut())
+            .await
+        {
             ModelInvocationOutcome::Invoked(step, usage) => {
                 port.update_model_activity(
                     model_activity_id.clone(),
@@ -1565,42 +1588,84 @@ async fn execute_step(
             }
             log::debug!(
                 target: crate::LOG_TARGET,
-                "[run_loop] execute_tools count={} run_id={}",
+                "[run_loop] tool round path=standard count={} run_id={}",
                 guarded_calls.len(),
                 short(run.id()),
             );
-            let tool_outcome = match run_tool_round_phase(
-                run,
-                execution,
-                run.id(),
-                &step_id,
-                &guarded_calls,
-                &step_cancel,
-                port.tools_mut(),
-            )
-            .await
-            {
-                ToolRoundPhaseOutcome::Completed(outcome) => outcome,
-                ToolRoundPhaseOutcome::Cancelled => {
-                    for activity_id in tool_activity_ids.values() {
-                        port.finish_activity(activity_id.clone(), ActivityTerminal::Cancelled)?;
+            // #1494：边流边执行——流中 ToolCallCompleted 已旁路执行（结果缓冲非空）时，
+            // 跳过 execute_tools 重复执行，直接汇总缓冲结果；缓冲为空（非流式 / 未装配）
+            // 时走现状工具轮次。
+            let streaming_rounds = port.model_mut().take_streaming_tool_results().await;
+            let tool_outcome = if streaming_rounds.is_empty() {
+                match run_tool_round_phase(
+                    run,
+                    execution,
+                    run.id(),
+                    &step_id,
+                    &guarded_calls,
+                    &step_cancel,
+                    port.tools_mut(),
+                )
+                .await
+                {
+                    ToolRoundPhaseOutcome::Completed(outcome) => outcome,
+                    ToolRoundPhaseOutcome::Cancelled => {
+                        for activity_id in tool_activity_ids.values() {
+                            port.finish_activity(activity_id.clone(), ActivityTerminal::Cancelled)?;
+                        }
+                        handle_step_control(run, execution, port).await?;
+                        return Ok(());
                     }
-                    handle_step_control(run, execution, port).await?;
-                    return Ok(());
+                    ToolRoundPhaseOutcome::Failed(error) => {
+                        for activity_id in tool_activity_ids.values() {
+                            port.finish_activity(activity_id.clone(), ActivityTerminal::Failed)?;
+                        }
+                        fail_run(run, execution, port, error.to_string()).await?;
+                        return Ok(());
+                    }
+                    ToolRoundPhaseOutcome::TimedOut => {
+                        for activity_id in tool_activity_ids.values() {
+                            port.finish_activity(
+                                activity_id.clone(),
+                                ActivityTerminal::Terminated,
+                            )?;
+                        }
+                        timeout_run(run, execution, port).await?;
+                        return Ok(());
+                    }
                 }
-                ToolRoundPhaseOutcome::Failed(error) => {
-                    for activity_id in tool_activity_ids.values() {
-                        port.finish_activity(activity_id.clone(), ActivityTerminal::Failed)?;
+            } else {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "[run_loop] tool round path=streaming rounds={} run_id={} (bypassed execute_tools)",
+                    streaming_rounds.len(),
+                    short(run.id()),
+                );
+                match port
+                    .tools_mut()
+                    .finalize_streaming_tool_results(
+                        execution,
+                        &step_id,
+                        streaming_rounds,
+                        &step_cancel,
+                    )
+                    .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(LoopEngineError::Cancelled) => {
+                        for activity_id in tool_activity_ids.values() {
+                            port.finish_activity(activity_id.clone(), ActivityTerminal::Cancelled)?;
+                        }
+                        handle_step_control(run, execution, port).await?;
+                        return Ok(());
                     }
-                    fail_run(run, execution, port, error.to_string()).await?;
-                    return Ok(());
-                }
-                ToolRoundPhaseOutcome::TimedOut => {
-                    for activity_id in tool_activity_ids.values() {
-                        port.finish_activity(activity_id.clone(), ActivityTerminal::Terminated)?;
+                    Err(error) => {
+                        for activity_id in tool_activity_ids.values() {
+                            port.finish_activity(activity_id.clone(), ActivityTerminal::Failed)?;
+                        }
+                        fail_run(run, execution, port, error.to_string()).await?;
+                        return Ok(());
                     }
-                    timeout_run(run, execution, port).await?;
-                    return Ok(());
                 }
             };
             if handle_interrupt(run, execution, cancel, port).await? {

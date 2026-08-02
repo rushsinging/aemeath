@@ -338,6 +338,7 @@ where
     async fn invoke_model(
         &mut self,
         execution: &mut RunExecutionState,
+        step_id: &sdk::RunStepId,
         cancel: &CancellationToken,
     ) -> Result<
         (
@@ -359,10 +360,20 @@ where
             crate::application::model::invocation::orchestrate_model_invocation(
                 &mut self.observer,
                 execution,
+                step_id,
                 cancel,
             ),
         )
         .await
+    }
+
+    async fn take_streaming_tool_results(
+        &mut self,
+    ) -> Vec<crate::application::loop_engine::chat::streaming_tool::StreamingToolRoundResult> {
+        match self.observer.streaming_tool() {
+            Some(executor) => executor.take_results().await,
+            None => Vec::new(),
+        }
     }
 }
 
@@ -401,6 +412,20 @@ where
     ) -> Result<crate::application::tool::coordination::ToolRoundOutcome, LoopEngineError> {
         self.coordinator
             .execute(execution, run_id, step_id, calls, cancel)
+            .await
+    }
+
+    async fn finalize_streaming_tool_results(
+        &mut self,
+        execution: &mut RunExecutionState,
+        step_id: &sdk::RunStepId,
+        rounds: Vec<
+            crate::application::loop_engine::chat::streaming_tool::StreamingToolRoundResult,
+        >,
+        cancel: &CancellationToken,
+    ) -> Result<crate::application::tool::coordination::ToolRoundOutcome, LoopEngineError> {
+        self.coordinator
+            .finalize_streaming(execution, step_id, rounds, cancel)
             .await
     }
 }

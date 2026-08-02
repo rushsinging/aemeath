@@ -359,6 +359,9 @@ where
     pub language: String,
     pub turn_context: RuntimeTurnContext,
     pub tool_identity: crate::application::tool::coordination::identity::ToolIdentityRegistry,
+    /// #1494：边流边执行句柄（流中 ToolCallCompleted → 立即执行，结果缓冲）。
+    pub streaming_tool:
+        Option<Arc<crate::application::loop_engine::chat::streaming_tool::StreamingToolExecutor>>,
 }
 
 impl<I> ChatModelObserver<I>
@@ -419,11 +422,22 @@ where
     fn build_reducer(
         &self,
     ) -> InvocationEventReducer<crate::application::loop_engine::chat::ChatEventSinkHandle> {
-        InvocationEventReducer::with_tool_identity(
+        let reducer = InvocationEventReducer::with_tool_identity(
             self.runtime_context.event_sink(),
             self.tool_identity.clone(),
             self.turn_context.clone(),
-        )
+        );
+        match &self.streaming_tool {
+            Some(executor) => reducer.with_streaming_tool(executor.clone()),
+            None => reducer,
+        }
+    }
+
+    fn streaming_tool(
+        &self,
+    ) -> Option<&Arc<crate::application::loop_engine::chat::streaming_tool::StreamingToolExecutor>>
+    {
+        self.streaming_tool.as_ref()
     }
 
     fn extract_tool_calls(

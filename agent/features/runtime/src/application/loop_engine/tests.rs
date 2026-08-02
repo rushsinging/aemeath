@@ -1036,6 +1036,7 @@ impl ModelInvocationPort for ModelInvocationFake {
     async fn invoke_model(
         &mut self,
         _execution: &mut crate::application::run::execution_state::RunExecutionState,
+        _step_id: &sdk::RunStepId,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
         let (registered_step, cancel_model, block_forever, cancelled_during_model, error) = {
@@ -1086,6 +1087,52 @@ impl crate::application::hook::stop_coordination::StopHookObserver for StopHookF
 
 #[async_trait::async_trait]
 impl ToolOrchestrationPort for ToolOrchestrationFake {
+    async fn finalize_streaming_tool_results(
+        &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
+        _step_id: &sdk::RunStepId,
+        rounds: Vec<
+            crate::application::loop_engine::chat::streaming_tool::StreamingToolRoundResult,
+        >,
+        _cancel: &CancellationToken,
+    ) -> Result<crate::application::tool::coordination::ToolRoundOutcome, LoopEngineError> {
+        let mut results = Vec::new();
+        let mut suspensions = Vec::new();
+        let mut approvals = Vec::new();
+        let mut fuse_bypassed = Vec::new();
+        for round in rounds {
+            results.extend(round.results);
+            suspensions.extend(round.suspensions);
+            approvals.extend(round.approvals);
+            fuse_bypassed.extend(round.fuse_bypassed);
+        }
+        if !suspensions.is_empty() {
+            return Ok(crate::application::tool::coordination::ToolRoundOutcome {
+                step: ToolStep::InteractionSuspended {
+                    suspended: suspensions,
+                    completed_results: Vec::new(),
+                    fuse_bypassed,
+                },
+                continuation: crate::application::tool::coordination::ToolRoundContinuation::None,
+            });
+        }
+        if !approvals.is_empty() {
+            return Ok(crate::application::tool::coordination::ToolRoundOutcome {
+                step: ToolStep::AwaitingToolApproval {
+                    calls_needing_approval: approvals,
+                    completed_results: Vec::new(),
+                    fuse_bypassed,
+                },
+                continuation: crate::application::tool::coordination::ToolRoundContinuation::None,
+            });
+        }
+        Ok(crate::application::tool::coordination::ToolRoundOutcome {
+            step: ToolStep::Continue,
+            continuation:
+                crate::application::tool::coordination::ToolRoundContinuation::ToolResults,
+        })
+    }
+
     async fn execute_tools(
         &mut self,
         _execution: &mut crate::application::run::execution_state::RunExecutionState,
